@@ -64,7 +64,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("hypothesescontract", [16, 64, 256], false), ("hypothesesloop", [16, 64, 256], false),
     ("hypotheseslookup", [16, 64, 256], false), ("hypothesesdirect", [16, 256], false),
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
-    ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false)
+    ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
+    ("tablecalls", [16, 64, 256], true)
 };
 if (selectedWorkloads is not null)
 {
@@ -121,9 +122,12 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
 // The homes body gives each of as many reference parameters a home and loads each argument once,
 // which reads its home. The allocation body allocates an array of two class references per cycle and
-// pops it, so each `newarr` resolves its element shape and reads one allocation fact.
+// pops it, so each `newarr` resolves its element shape and reads one allocation fact. The calls body
+// passes its argument through one call per cycle to a callee that returns it, so each call reads its
+// target from the body's link table; the tablecalls body writes that table out, as a template does.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
+    "calls" or "tablecalls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".stind .i8", ".ldarg 0", ".ldind .i8", ".pop"],
         [".ldarg 0", ".ldind .i8", ".ret"]),
     "reference" or "table" => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"]),
@@ -197,6 +201,9 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "homes" => $" declared := {signature}, parameterHomes := [{homes}],",
         _ => ""
     };
+    var linksField = workload == "tablecalls"
+        ? " links := [" + string.Join(", ", Enumerable.Range(1, cycles).Select(pc => $"({pc}, .direct 1)")) + "],"
+        : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -220,7 +227,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         """ : $$"""
         /-- A synthetic body in the emitter's explicit instruction-list shape. -/
         def body : CIL.Method := {
-          locals := [], returnsValue := true,{{declaredField}}
+          locals := [], returnsValue := true,{{declaredField}}{{linksField}}
           code := [{{string.Join(",\n    ", operations)}}] }
         cil_instruction_equations body
         """;
@@ -231,7 +238,11 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
         {{bodyDefinition}}
-        """ + "\n" + (workload is "arguments" or "homes" ? $$"""
+        """ + "\n" + (workload is "calls" or "tablecalls" ? """
+        /-- The callee every call of the calls body enters; it returns its argument. -/
+        def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
+        cil_instruction_equations callee
+        """ + "\n" : "") + (workload is "arguments" or "homes" ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{signature}} := rfl
         cil_resolution_facts body
@@ -440,6 +451,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   { activation := activation, locals := [{{homeSlots}}], owned := [] } [] memory =
                   .ok (memory, [.reference target]) := by
               cil_checked_steps [formed]
+            """,
+        "calls" or "tablecalls" => $$"""
+            /-- Each call enters the callee, which returns its argument, so the value passes through. -/
+            theorem checked (memory : Memory) (left : CIL.W64) :
+                invoke [body, callee] {{operations.Length + 3}} 0 [.scalar (.i64 left)] memory =
+                  .ok (memory, [.scalar (.i64 left)]) := by
+              cil_checked_steps
             """,
         "locals" => $$"""
             /-- Every cycle replaces all eight reference locals of a literal frame. -/

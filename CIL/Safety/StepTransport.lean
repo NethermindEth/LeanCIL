@@ -24,6 +24,15 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   declared : target.declared = source.declared
   /-- Both bodies resolve types and layouts in the same environment. -/
   environment : target.environment = source.environment
+  /-- Both bodies enter the same methods, since each call reads its target from this table. -/
+  links : target.links = source.links
+
+/-- Related bodies give every call site the same link. -/
+theorem StepMetadata.linkAt {source target : CIL.Method} (metadata : StepMetadata source target)
+    (pc : Nat) : target.linkAt pc = source.linkAt pc := by
+  unfold CIL.Method.linkAt
+  rw [metadata.links]
+#print axioms StepMetadata.linkAt
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=

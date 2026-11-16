@@ -121,6 +121,10 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+/-- How a call-family instruction faults when its method's link table gives its pc no target, or
+    a target of another kind than the instruction enters. -/
+def unlinkedCall : ExecutionFault := .unsupported "Call site has no program target"
+
 /-- The catalog body an indirect call through `pointer` enters: the entry for the pointer's
     target, when the pointer has the call site's signature; `none` for any other pointer. A
     step proof rewrites this with a fact the kernel checks, so the elaborator never compares the
@@ -169,9 +173,10 @@ def methodTableElement (table : CIL.MethodTable) (index : CIL.Value) (memory : M
     checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
   | none => return ⟨table.signature, some target⟩
 
-/-- Managed dispatch checks stable pointer identity and signature before selecting a body.
-    Tail calls use the same retirement action as direct tail calls. -/
-def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
+/-- Managed dispatch checks stable pointer identity and signature before selecting a body from
+    the catalog `link`, the call site's entry in its method's link table. Tail calls use the same
+    retirement action as direct tail calls. -/
+def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   match operation, stack with
   | .tableLength, .object .null :: _
@@ -185,7 +190,8 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     if table.signature != signature then .error .invalidState else pure ()
     let pointer ← methodTableElement table index memory
     return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
-  | .call signature catalog tail, .methodPointer pointer :: values =>
+  | .call signature _ tail, .methodPointer pointer :: values =>
+    let some (.indirect catalog) := link | .error unlinkedCall
     let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
     if (if tail then values.length != count else values.length < count) then
@@ -496,7 +502,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
   match op, stack with
-  | .managed operation, _ => managedStep operation pc frame stack m
+  | .managed operation, _ => managedStep operation (body.linkAt pc) pc frame stack m
   | .add, .scalar _ :: .reference _ :: _
   | .add, .reference _ :: .scalar _ :: _
   | .add, .scalar _ :: .readOnlyReference _ :: _
@@ -590,14 +596,18 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value :: rest := values | .error .invalidState
     let (slot, memory) ← storeLocal memory slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
-  | .tailCall callee argc, _ =>
+  -- Each call reads the method it enters from the link table at its pc, not from its operand.
+  | .tailCall _ argc, _ =>
+    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
     if stack.length != argc then .error .invalidState else
       return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
-  | .call callee argc, _ =>
+  | .call _ argc, _ =>
+    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
       return .call callee arguments (stack.drop argc) m
-  | .callInstance callee argc, _ =>
+  | .callInstance _ argc, _ =>
+    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
       -- The receiver is the deepest argument; anything but an object reference is ill-typed.
@@ -605,7 +615,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
-  | .callVirtual targets argc, _ =>
+  | .callVirtual _ argc, _ =>
+    let some (.virtual targets) := body.linkAt pc | .error unlinkedCall
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
       match arguments with
@@ -613,7 +624,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
-  | .newAggregate callee argc size, _ =>
+  | .newAggregate _ argc size, _ =>
+    let some (.aggregate callee _) := body.linkAt pc | .error unlinkedCall
     if size = 0 || stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
       let (temporary, memory) ← allocateHome m frame.activation size
@@ -622,7 +634,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       let frame := { frame with owned := temporary.allocation :: frame.owned }
       return .construct callee (.reference (.address temporary) :: arguments)
         (stack.drop argc) frame temporary (.aggregate size) memory
-  | .newObject constructor argc owner bases size, _ =>
+  | .newObject _ argc owner bases size, _ =>
+    let some (.object constructor _ _) := body.linkAt pc | .error unlinkedCall
     if stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
       let (object, memory) ← allocateObject m ⟨owner, bases⟩ size

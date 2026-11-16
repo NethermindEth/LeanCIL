@@ -88,9 +88,10 @@ inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
 
 /-- Managed dispatch observes only stable identities and equivalent checked arguments. -/
 theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
-    (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame) (stack : List Value) :
-    ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
-      (managedStep operation pc frame stack n) := by
+    (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
+    (stack : List Value) :
+    ResultEquivalent FrameActionEquivalent (managedStep operation link pc frame stack m)
+      (managedStep operation link pc frame stack n) := by
   unfold CIL.Safety.managedStep CIL.Safety.methodTableLength CIL.Safety.methodTableElement
   split <;> try simp only [same.checkedValues, same.loadNativeTable]
   all_goals repeat' first
@@ -282,7 +283,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
     same.objectAboveNull, same.virtualTarget, same.objectTest]
   all_goals repeat' first
-    | exact same.managedStep _ _ _ _
+    | exact same.managedStep _ _ _ _ _
     | unfold returnFrom
     | unfold localAllocation
     | simp only [same.checkedValues]

@@ -164,8 +164,8 @@ theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : Alloca
       binding.2.allocation < mapping.sourceLimit)
     (sourceBody targetBody : CIL.Method) (callee argc : Nat) (owner : CIL.Extraction.TypeExpr)
     (bases : List CIL.Extraction.TypeExpr)
-    (size pc : Nat) (arguments stack : List Value)
-    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (size pc : Nat) (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
+    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
       (step sourceBody (.newObject callee argc owner bases size) pc arguments sourceFrame stack
         source)) :
@@ -175,12 +175,19 @@ theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : Alloca
           source)
         (step targetBody (.newObject callee argc owner bases size) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map,
+  simp only [step, mapping.unspecifiedOperands, List.length_map, linked,
     ← List.map_take, ← List.map_drop, ← List.map_reverse] at observable ⊢
   by_cases guard :
       unspecifiedOperands (observerCount (.newObject callee argc owner bases size)) stack = true
   · simp only [guard, ite_true, SuccessOrThrow] at observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    -- The constructor is the link's; both bodies read the same one.
+    generalize sourceBody.linkAt pc = link at observable ⊢
+    rcases link with _ | link
+    · exact ⟨mapping, .refl mapping, .error _⟩
+    cases link <;> try exact ⟨mapping, .refl mapping, .error _⟩
+    rename_i callee linkedBases linkedSize
+    try dsimp only at observable ⊢
     by_cases short : stack.length < argc
     · simp only [short, ite_true]
       exact ⟨mapping, .refl mapping, .error _⟩

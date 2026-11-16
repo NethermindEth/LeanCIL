@@ -200,7 +200,7 @@ theorem native_add_rejected :
 
 /-- A native array element load validates the same backing storage as pointer loading. -/
 theorem native_array_load :
-    managedStep (.tableElement signature) 0 frame
+    managedStep (.tableElement signature) none 0 frame
       [.scalar (.i32 1), .methodTable opaqueTable] memory =
         .ok (.next 1 [.methodPointer ⟨signature, some second⟩] frame memory) := rfl
 #print axioms native_array_load

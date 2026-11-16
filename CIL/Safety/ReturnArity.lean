@@ -18,9 +18,9 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
   cases source <;> simp [Except.bind]
 
 /-- Managed dispatch produces a next step or child invocation, never a method return. -/
-private theorem managedStep_not_returned (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
-    (stack : List Value) (memory final : Memory) (values : List Value) :
-    managedStep operation pc frame stack memory ≠ .ok (.returned values final) := by
+private theorem managedStep_not_returned (operation : CIL.ManagedOp) (link : Option CIL.Link)
+    (pc : Nat) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value) :
+    managedStep operation link pc frame stack memory ≠ .ok (.returned values final) := by
   intro executed
   unfold managedStep methodTableLength methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
@@ -41,7 +41,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
   repeat' first
     | unfold returnFrom at executed
     | unfold localAllocation at executed
-    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ executed)
+    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ _ executed)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
           reduceCtorEq, and_false, exists_false] at executed
@@ -123,15 +123,16 @@ theorem invoke_return_known {program : CIL.Program} {fuel method : Nat}
 #print axioms invoke_return_known
 
 /-- A successful ordinary call exposes only fully specified arguments. -/
-theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
+theorem step_call_known {body : CIL.Method} {target callee argc pc : Nat}
     {args stack arguments rest : List Value} {frame : Frame} {memory final : Memory}
-    (executed : step body (.call callee argc) pc args frame stack memory =
+    (executed : step body (.call target argc) pc args frame stack memory =
       .ok (.call callee arguments rest final)) :
     arguments.any Value.hasUnspecified = false := by
   simp only [step] at executed
   split at executed
   · cases executed
   · rename_i known
+    split at executed <;> try (cases executed; done)
     split at executed
     · cases executed
     · cases checked : (stack.take argc).reverse.mapM (checkedValue memory) with

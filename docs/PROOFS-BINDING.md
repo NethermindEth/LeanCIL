@@ -173,8 +173,8 @@ contracts](PROOFS-BUFFERS.md) describes its memory preconditions.
 ## Move a run that starts inside a region
 
 Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.RegionRun` removes the
-rest first. `RegionClosed program region` says fallthroughs, targets and callee entries of region
-instructions stay in the region; `regionClosedCheck` decides it for a region listed as `(method,
+rest first. `RegionClosed program region` says fallthroughs and targets of region instructions,
+and the callee entries of every link-table entry at a region pc, stay in the region; `regionClosedCheck` decides it for a region listed as `(method,
 lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has the same methods and
 metadata, link table included, and the same instruction at every region pc; `AgreesOn.set` and
 `code_agrees_of_drop` build it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
@@ -263,13 +263,19 @@ that `withCode` resets the sites and what entries to supply after it. `cil_embed
 text when the static descriptor lists differ or a moved pc resolves another descriptor. The
 `declared` and `environment` lines name no remedy: take both from the extraction's method.
 
-A proof that steps through a call reads the link at the call's pc. For an extracted method the
-generated fact `methodN_linkPC` gives the link of each call site in logarithmic time, and the
-`cil_code` simp set unfolds its named link to the constructor. For a pc without a call the table is
-read by its listed keys, which costs the number of calls and never gets stuck
-(`Method.linkAt_of_unlisted`). A template or a literal body keeps the table its code implies, and
-`Method.linkAt_of_instruction` reads the link from the instruction equation of its pc in one step,
-whatever the callee of a template is; evaluating `linkAt` instead rebuilds that table.
+A proof that steps through a call reads the link at the call's pc. `cil_instruction_equations`
+states that read as `body_link{pc} : body.linkAt pc = some link` for each call site, so no proof
+walks the table. For a body that keeps the table its code implies, the fact comes from the
+instruction equation of its pc through `Method.linkAt_of_instruction`, whatever the callee of a
+template is. For an explicit table, as an extraction or a template writes, the command checks once
+that the keys ascend (`body_links_ascend`) and proves each fact from the table's entry
+(`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
+`cil_code` simp set unfolds an extracted method's named link `methodNLinkPC` to its constructor.
+For a pc without a call the table is read by its listed keys, which costs the number of calls and
+never gets stuck (`Method.linkAt_of_unlisted`). A template whose table a feature flag decides
+gets no link facts. The stepping tactics read a call's link from these facts; without one they
+evaluate the table of a literal body or of a named body that unfolds, which costs the table's
+length per call, and only an opaque body needs the link as a supplied fact.
 
 `cil_body` runs `rfl`, so the proof is the same kernel-checked `Eq.refl`. When `rfl` fails, it
 evaluates both closed sides and reports, for each differing `Method` field, the first differing
@@ -314,8 +320,9 @@ theorem decrement_holds : decrementContract.Holds Extracted.program decrement :=
 
 `bind_method` defines `countCalls` (the index), `countBody` (the extracted body) and the `rfl`
 theorems `countCalls.signature` and `countCalls.found` (`@[cil_code]`). `bind_callee` also requires
-the parent to call that method and adds `decrement.call`, the instruction at its call site
-(`from countBody [k]` selects one of several); expected bodies take the index as a parameter, so
+the parent to call that method, by the link of the call site, and adds `decrement.call`, the
+instruction at its call site, and `decrement.link`, its link (`from countBody [k]` selects one of
+several); expected bodies take the index as a parameter, so
 `.call decrement 1` survives renumbering. A statement about the callee alone runs it by that index,
 as in `invoke Extracted.program 8 decrement [.scalar (.i32 x)] memory`, which returns
 `.ok (memory, [.scalar (.i32 (x - 1))])`. [CountCalls](../Examples/Proofs/CountCalls.lean) proves
@@ -358,7 +365,7 @@ theorem body : (rootBody.code.drop reduce).take 4 = [.ldloc 0, .ldc_i4 3, .sub, 
 
 A loop head is the target of a branch at the same or a later pc. `bind_loop` defines `reduce` and
 `reduce.latch`, the last pc branching back to it, and `reduce.backEdge` checks both. `bind_call`
-names a `.call` to a bound method and adds `after.call`. The `[k]` is needed only when there are
+names a `.call` to a bound method, by its link, and adds `after.call` and `after.link`. The `[k]` is needed only when there are
 several; without it every candidate is listed:
 
 ```text
@@ -655,8 +662,10 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
 
 A body whose code length depends on a parameter, such as an `if` around a whole block, is rejected
 with the first pc that is not determined. Only the kernel checks the equations. The command also
-declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{start}_placed`, and
-proves each equation from the suffix that starts its block, so the equations cost time linear in
+states `body_link{pc} : body.linkAt pc = some link` for each call site, `.direct callee` for
+`.call callee argc` above, when the body's table is the one its code implies or an explicit table
+whose cells and keys are literals. It declares `body_suffix{start}`, the code from every 16th pc
+on, and `body_suffix{start}_placed`, and proves each equation from the suffix that starts its block, so the equations cost time linear in
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
 

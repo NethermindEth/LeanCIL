@@ -24,6 +24,7 @@ theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Inpu
     (left right output : Reference)
     (found : program[method]? = some body)
     (placed : CodeAt body start (loadCallStoreCode callee))
+    (linked : body.linkAt (start + 5) = some (.direct callee))
     (plainArguments : ∀ index, index < 3 → body.argumentAccess index = .value none)
     (call : ValidCall memory [⟨left, 8⟩, ⟨right, 8⟩] [⟨output, 8⟩])
     (encoded : contract.args input =
@@ -45,7 +46,7 @@ theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Inpu
   have rightAccess := plainArguments 1 (by decide)
   cil_contract_steps [found, placed, outputAccess, leftAccess, rightAccess]
   apply run_call_of_contract holds input found
-    (by cil_lookup [placed]) (by cil_checked_step []) encoded.symm permitted
+    (by cil_lookup [placed]) (by cil_checked_step [linked]) encoded.symm permitted
   intro middle value result
   have writable : access middle output 8 1 true = .ok () :=
     (result.framed.access_write output

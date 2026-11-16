@@ -34,6 +34,15 @@ open Lean Elab Tactic Conv in
 elab "cil_reduce_fuel" : conv => do
   changeLhs (← Meta.reduce (← getLhs))
 
+open Lean Elab Tactic Conv in
+/-- Replaces the focused closed natural number by its literal. A call's continuation resumes at
+    `pc + 1`; without it the pc grows by one addition per call, and so does every lookup. -/
+elab "cil_literal_nat" : conv => do
+  let lhs ← instantiateMVars (← getLhs)
+  if lhs.hasFVar || lhs.hasMVar then return
+  let some value ← (Meta.evalNat lhs).run | return
+  changeLhs (mkNatLit value)
+
 open Lean Elab Tactic in
 /-- Runs `tactic` so that a failed candidate proof fails and can backtrack, rather than be
     recovered as an admitted term. Only the candidate's own errors count, so an earlier failed
@@ -1055,6 +1064,41 @@ private partial def exposeStackSpine (stack : Expr) : MetaM Expr := withIncRecDe
   return mkApp withHead (← exposeStackSpine tail)
 
 open Lean Elab Tactic Meta in
+/-- A proof of `body.linkAt pc = link`, the link a call-family step reads, with `link` a
+    constructor: a literal body's by evaluation, a named body's by its `@[cil_code]` fact and link
+    definition, and a named body without one by evaluating its table. Nothing when none decides
+    it, so a caller's fact must. -/
+def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
+  let read := mkApp2 (mkConst ``CIL.Method.linkAt) body pc
+  let byEvaluation (link : Expr) : TacticM Expr := do
+    mkExpectedTypeHint (← mkEqRefl read) (← mkEq read link)
+  if let some link ← literalLink? read then return some (← byEvaluation link)
+  if (← instantiateMVars body).isAppOf ``CIL.Method.mk then return none
+  let normalize ← `(tactic| simp only [cil_code])
+  let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
+  let (result, _) ← simp read ctx simprocs
+  let link ← whnfR result.expr
+  if link.isAppOfArity ``Option.some 2 || link.isAppOfArity ``Option.none 1 then
+    -- A fact proved by `rfl` rewrites without a proof term; the hint restores the read it states.
+    return some (← mkExpectedTypeHint (← result.getProof) (← mkEq read result.expr))
+  -- Facts cover every extracted call site, so only a hand-written table is evaluated here.
+  let link ← withDefault <| whnf read
+  match_expr link with
+  | Option.none _ => return some (← byEvaluation link)
+  | Option.some _ value =>
+    let value ← withDefault <| whnf value
+    unless value.getAppFn.isConst do return none
+    return some (← byEvaluation (mkApp2 (mkConst ``Option.some [Level.zero])
+      (mkConst ``CIL.Link) value))
+  | _ => return none
+
+/-- Opcodes whose step reads the body's link at the step's pc. -/
+def linkedOpcodes : List Lean.Name :=
+  [``CIL.Instruction.call, ``CIL.Instruction.tailCall, ``CIL.Instruction.callInstance,
+    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newAggregate, ``CIL.Instruction.newObject,
+    ``CIL.Instruction.managed]
+
+open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     let initial := (← instantiateMVars (← getMainTarget)).consumeMData
@@ -1205,6 +1249,19 @@ elab_rules : tactic
             done)))
           return
         catch _ => saved.restore
+    -- A call-family step's arm matches on its link; the read's fact lets that match reduce. It
+    -- enters as a hypothesis, so the run's record, whose simp contexts are keyed by fact text and
+    -- would hand a later pc this pc's fact, is not consulted for this step.
+    let stepFacts ← if linkedOpcodes.contains operation then
+        match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
+            (← entryAt "cil_checked_step_normalized" args 2)) with
+        | some proof =>
+          let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
+            (← inferType proof) proof).intro1P
+          replaceMainGoal [goal]
+          pure (facts.getElems.push (← goal.withContext (Term.exprToSyntax (mkFVar link))))
+        | none => pure facts.getElems
+      else pure facts.getElems
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
       else if operation == ``CIL.Instruction.memory then
@@ -1225,7 +1282,7 @@ elab_rules : tactic
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else
-        `(tactic| cil_checked_step_equations [$facts:term,*])
+        `(tactic| cil_checked_step_equations [$[$stepFacts:term],*])
     evalTactic strategy
 
 /-- One checked `step` goal: normalises `facts`, then runs `cil_checked_step_normalized`. -/
@@ -1523,6 +1580,7 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | cil_checked_child [$[$facts:term],*]
                 | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_
+    try (conv => lhs; arg 4; cil_literal_nat)
     cil_stack_cleanup))
 
 open Lean Elab Tactic Meta in
@@ -1747,10 +1805,9 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
   -- An object construction runs its constructor as a call before continuing in the caller.
   let constructs := operation == ``CIL.Instruction.newObject
-  -- These fault before their callee runs: a short heap budget, a null receiver, or a receiver
-  -- whose class a dispatch table omits.
-  let faultsFirst := constructs || operation == ``CIL.Instruction.callInstance ||
-    operation == ``CIL.Instruction.callVirtual
+  -- These fault before their callee runs: a call site the link table omits, a short heap
+  -- budget, a null receiver, or a receiver whose class a dispatch table omits.
+  let faultsFirst := constructs || callsCallee operation
   evalTactic (← if operation == ``CIL.Instruction.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
     else if callsCallee operation || constructs then

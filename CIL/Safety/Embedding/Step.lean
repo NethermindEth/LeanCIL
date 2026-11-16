@@ -242,6 +242,16 @@ macro "plain_cases" : tactic => `(tactic| (
   (try rw [context.returnsValue])))
 
 set_option hygiene false in
+/-- Reads the call site's link in both steps through the context and splits on it: a link of
+    another kind faults alike in both, and the matching one is substituted in the goal. -/
+macro "link_cases" : tactic => `(tactic| (
+  rw [context.link]
+  split at h
+  rotate_left
+  · first | cases h | (simp [unlinkedCall] at h)
+  try simp only [‹expected.linkAt pc = _›]))
+
+set_option hygiene false in
 /-- Splits an optional lookup shared by both steps. -/
 macro "lookup_lockstep" : tactic => `(tactic| (
   split at h
@@ -339,6 +349,7 @@ theorem step_relabel_initializeSpanLocal (index : Nat) (constructor : SpanConstr
 
 theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -348,6 +359,7 @@ theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) 
 theorem step_relabel_callInstance (callee argc : Nat) :
     StepRelabel (.callInstance callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -362,6 +374,7 @@ theorem step_relabel_callInstance (callee argc : Nat) :
 theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
     StepRelabel (.callVirtual targets argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -379,6 +392,7 @@ theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat
 /-- A tail transfer has no continuation pc to relocate. -/
 theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
   plain_cases
+  link_cases
   by_cases short : (stack.length != argc) = true
   · simp [short] at h
   · simp only [short] at h ⊢
@@ -389,6 +403,7 @@ theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall calle
 theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRelabel (.newAggregate callee argc size) := by
   plain_cases
+  link_cases
   by_cases short : (size = 0 || stack.length < argc) = true
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
@@ -398,6 +413,7 @@ theorem step_relabel_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
     (bases : List Extraction.TypeExpr) (size : Nat) :
     StepRelabel (.newObject callee argc owner bases size) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -661,13 +677,14 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case managed operation =>
     cases operation
     all_goals plain_cases
+    all_goals rw [context.link]
     all_goals simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     all_goals repeat' first
       | contradiction
       | solve | simp only [FrameAction.relabel, context.next rfl]
       | solve | lockstep
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
@@ -959,6 +976,7 @@ theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un t
 
 theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -967,6 +985,7 @@ theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := b
 /-- A null receiver raises the same exception at the relocated pc. -/
 theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -978,6 +997,7 @@ theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance c
 theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
     StepRaise (.callVirtual targets argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -988,6 +1008,7 @@ theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat))
 /-- Tail-transfer faults retain their original location under pc relocation. -/
 theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
   plain_cases
+  link_cases
   exact h
 
 #print axioms step_raise_tailCall
@@ -995,6 +1016,7 @@ theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee ar
 theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRaise (.newAggregate callee argc size) := by
   plain_cases
+  link_cases
   by_cases short : (size = 0 || stack.length < argc) = true
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
@@ -1004,6 +1026,7 @@ theorem step_raise_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
     (bases : List Extraction.TypeExpr) (size : Nat) :
     StepRaise (.newObject callee argc owner bases size) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -1219,11 +1242,13 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
   case managed operation =>
     plain_cases
+    rw [context.link]
     simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     repeat' first
       | solve | raise_lockstep
+      | solve | simp [unlinkedCall] at h
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases

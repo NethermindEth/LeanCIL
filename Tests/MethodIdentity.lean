@@ -45,11 +45,12 @@ example : left = 1 ∧ right = 2 := ⟨rfl, rfl⟩
 example : leftBody = Extracted.helper 1 ∧ rightBody = Extracted.helper 2 := ⟨rfl, rfl⟩
 example : rootBody.code[4]? = some (.call left 2) := left.call
 example : rootBody.code[2]? = some (.call right 2) := right.call
+example : rootBody.linkAt 4 = some (.direct left) := left.link
 example : Extracted.signatures[right]? = some "System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)" := right.signature
 
 -- Generated bindings are kernel-checked `rfl`, never elaborator-only evidence.
 run_cmd do
-  for name in [``left.signature, ``left.found, ``left.call] do
+  for name in [``left.signature, ``left.found, ``left.call, ``left.link] do
     let some (.thmInfo info) := (← Lean.getEnv).find? name | throwError "missing {name}"
     unless info.value.isAppOf ``Eq.refl || info.value.isAppOf ``rfl do throwError "{name} is not rfl: {info.value}"
 
