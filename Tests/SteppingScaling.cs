@@ -67,7 +67,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
     ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false),
-    ("constructions", [16, 64, 256], false)
+    ("constructions", [16, 64, 256], false), ("elements", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -132,6 +132,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // The statics body loads one static field and pops it per cycle, with one static site per load.
 // The constructions body constructs a class instance and pops it per cycle, so each `newobj` reads its
 // `.object` link from the body's table and one allocation fact and enters a constructor that returns.
+// The elements body loads and pops one int32 element of its array argument, then stores its index
+// argument into that element, per cycle, so each access reads one element fact of constant size.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
@@ -151,6 +153,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "constructions" => ([], [$".newobj {{ owner := {NodeType}, name := name!\".ctor\", hasThis := true, " +
         "genericArity := 0, returnType := .void, parameters := [] }", ".pop"], [".ldc_i4 0", ".ret"]),
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
+    "elements" => ([], [".ldarg 0", ".ldarg 1", ".memory (.arrayLoad 4 true)", ".pop", ".ldarg 0", ".ldarg 1",
+        ".ldarg 1", ".memory (.arrayStore 4)"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -248,6 +252,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "allocation" or "constructions" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
         "objects" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
+        "elements" => "import CIL.Safety.ArrayContents\n",
         _ => ""
     };
     // The objects body reads field 1 of a class, an int64 in the slot at model offset 8; a step that
@@ -517,6 +522,19 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
                   .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [formed, located, loaded]
+            """,
+        "elements" => $$"""
+            /-- Every element access reads the one element the index names, whose store keeps the memory. -/
+            theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
+                (word : CIL.Value) (valid : view.validate memory = .ok ())
+                (found : arrayElement memory view index.toNat 4 = .ok element)
+                (loaded : loadValue memory (.address element) 4 true = .ok word)
+                (written : write memory element (numberBytes index.toNat 4) 1 = .ok memory) :
+                invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              have loadFact := step_arrayLoad_of_element (index := .i32 index) rfl found loaded
+              have storeFact := step_arrayStore_of_write (index := .i32 index) rfl found written
+              cil_checked_steps [valid, loadFact, storeFact]
             """,
         "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/
