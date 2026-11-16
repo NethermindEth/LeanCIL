@@ -314,10 +314,15 @@ if (Lean(Make("AddOffset", ulong.MaxValue - 7, true)) != "(.add 1844674407370955
     throw new Exception("A negative stride lost its two's complement spelling");
 var tail = Make("Call", Named("CallKind", "Tail"), 3, 0, false);
 var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
-Assign(renumbered, "Site", "site");
+// The call's operand is the typed method its raw operand names; its rendering is the call's operand term.
+object NoTypes() => Activator.CreateInstance(Model("ValueList`1").MakeGenericType(typeof(string)), [Array.Empty<string>()])!;
+var siteName = Model("MetadataName").GetMethod("OfText", Declared)!.Invoke(null, ["Site"])!;
+var site = Make("MethodRef", ".void", siteName, false, 0, ".void", NoTypes(), NoTypes());
+Assign(renumbered, "Site", site);
+var siteTerm = (string)site.GetType().GetMethod("ToLean", Declared)!.Invoke(site, [])!;
 if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) ||
     !((IEnumerable<int>)Property(renumbered, "Methods")).SequenceEqual([1]) ||
-    Lean(renumbered) != ".call (site) { tail := true }")
+    Lean(renumbered) != $".call ({siteTerm}) {{ tail := true }}")
     throw new Exception("A tail call does not expose and renumber its callee or render its prefix");
 try
 {

@@ -47,10 +47,16 @@ object Operation(object operation) => operation is not string text ? operation :
     "tail call 1" => Call("Tail", 1),
     _ => throw new ArgumentException("Unmodelled fixture operation: " + text)
 };
+// The one method operand every fixture call names, and the term the templates spell it by.
+var site = Create("MethodRef", ".void",
+    Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["Site"]),
+    false, 0, ".void", Listed(typeof(string), []), Listed(typeof(string), []));
+var siteTerm = (string)site.GetType().GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic)!
+    .Invoke(site, [])!;
 object Call(string kind, int method)
 {
     var call = Create("Call", Enum.Parse(Model("CallKind"), kind), method, 0, false);
-    call.GetType().GetProperty("Site", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(call, "site");
+    call.GetType().GetProperty("Site", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(call, site);
     return call;
 }
 object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadata", returnsValue,
@@ -86,7 +92,7 @@ Emit();
 var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
 var secondBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings1.lean"));
-if (!templates.Contains("if avx2 then (.call (site) {}) else (.nop)", StringComparison.Ordinal) ||
+if (!templates.Contains($"if avx2 then (.call ({siteTerm}) {{}}) else (.nop)", StringComparison.Ordinal) ||
     !templates.Contains("[(1, .direct callee0)]", StringComparison.Ordinal) ||
     !firstBinding.Contains("Templates.method0 Extracted.profile Extracted.environment false 0",
         StringComparison.Ordinal) ||
@@ -156,7 +162,7 @@ variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Metho
 variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", "tail call 1"), Method("Target", ".ret")]);
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
 var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
-if (!tailTemplate.Contains(".call (site) { tail := true }", StringComparison.Ordinal) ||
+if (!tailTemplate.Contains($".call ({siteTerm}) {{ tail := true }}", StringComparison.Ordinal) ||
     !tailTemplate.Contains("links := ([(0, .direct callee0)])", StringComparison.Ordinal))
     throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
