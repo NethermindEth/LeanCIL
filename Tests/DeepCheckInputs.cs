@@ -22,7 +22,8 @@ try
     Require(inputs.Images.Count == 2 && inputs.Digest.ToString() == Hash(Encoding.UTF8.GetBytes(source)),
         "File snapshot hash");
     var pins = inputs.MatchPins(Identity(digest, [digest, digest], "Unrelated, Version=1.0.0.0"));
-    Require(pins.Count == 3 && pins.All(pin => pin.Image.Digest.ToString() == digest), "Digest matching ignores names");
+    Require(pins.Count == 3 && pins.All(pin => pin.Image.Digest.ToString() == digest),
+        "Digest matching ignores names");
     var stated = Sha256Digest.Parse(digest.ToUpperInvariant(), "a test digest");
     Require(stated == Sha256Digest.Parse(digest, "a test digest") && stated == Sha256Digest.Of(original) &&
         stated.ToString() == digest && new HashSet<Sha256Digest> { stated, Sha256Digest.Of(original) }.Count == 1,

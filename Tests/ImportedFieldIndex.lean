@@ -11,8 +11,9 @@ so metadata binding refuses each as an instance field, at any index and whether 
 stores `Y` through its token fails every evidence check, with the emitted access at the offset of
 `X`, and so does an operand that flags `Y` static, since these instructions take only instance
 fields. `M(Ext.Point)` fails earlier, on its own signature, since no carried slice defines the
-class its parameter names, and is no valid translation with the access at the slot of `X`. Of the platform pair
-`ValueTuple<int, int>`, `Item1` and `Item2` keep indices 0 and 1 and any other member is refused.
+class its parameter names, and is no valid translation with the access at the slot of `X`. Of
+the platform pair `ValueTuple<int, int>`, `Item1` and `Item2` keep indices 0 and 1 and any other
+member is refused.
 -/
 
 namespace Tests.ImportedFieldIndex

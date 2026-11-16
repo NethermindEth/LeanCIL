@@ -308,7 +308,8 @@ partial class Program
             throw new InvalidOperationException($"The metadata rows module costs {split} heartbeats for {sizes[1]} " +
                 $"methods over two images and {heartbeats[1]} over one");
         Console.WriteLine($"PASS the metadata rows module is linear in the methods ({measured}; " +
-            $"{perMethod:F2} times per method; {split} heartbeats at {sizes[1]} over two images, {perImage:F2} times)");
+            $"{perMethod:F2} times per method; {split} heartbeats at {sizes[1]} over two images, " +
+            $"{perImage:F2} times)");
     }
 
     /// <summary>

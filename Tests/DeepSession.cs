@@ -243,7 +243,8 @@ using var missing = JsonDocument.Parse(manifest.ToJsonString());
 ExpectFailure(() => inputs.MatchPins(missing.RootElement), "No line of");
 Console.WriteLine("PASS every reference requires a consumer-stated digest");
 
-var same = new BindingImagePin("First", Sha256Digest.Parse(digest, "the test image"), inputs.Images[0].Bytes.ToArray());
+var same = new BindingImagePin("First", Sha256Digest.Parse(digest, "the test image"),
+    inputs.Images[0].Bytes.ToArray());
 BindingPlan shared = new("", [same, same with { Identity = "Second" }], 0);
 var sharedSource = ImagesModuleSource(shared);
 if (sharedSource.Split("import " + same.Module).Length != 2 ||
