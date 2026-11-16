@@ -29,10 +29,10 @@ internal static class VerificationSuites
     {
         [Core] =
         [
-            "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
-            "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "IdentitySummary", "InitializedTypes",
-            "LargeStruct", "PastEnd", "ProofBindingFamilies", "RepeatedSummary",
-            "StaticData", "Struct", "StructCopy", "SupportExtractionCache", "VerificationReuse", "WrongAdd"
+            "Add", "AddModel", "Alias", "Calls", "CallsSummary", "CertificateReuse", "Choose", "ConsumerBatchA",
+            "ConsumerBatchB", "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "IdentitySummary",
+            "InitializedTypes", "LargeStruct", "PastEnd", "ProofBindingFamilies", "RepeatedSummary", "StaticData",
+            "Struct", "StructCopy", "SummaryCalls", "SupportExtractionCache", "VerificationReuse", "WrongAdd"
         ],
         ["loops"] = ["Loops", "WordArrayOutlines"],
         ["outlines-control"] = ["ProofOutlines/control"],

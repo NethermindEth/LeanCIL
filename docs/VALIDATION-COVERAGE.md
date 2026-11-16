@@ -835,6 +835,8 @@ memory under its well-formedness hypothesis. Each unchanged contract rejects its
 compiled implementation. IdentitySummary and RepeatedSummary prove the statement of
 GenericIdentity for one and two calls twice: by stepping `Identity<ulong>`, and from a
 `DecodedSummary` of it bound to its pinned bytes, metadata token and type arguments.
+CallsSummary does the same for `Calls`, whose second callee writes through a reference, and
+`Tests/SummaryCalls.cs` for callers that pass one local to that callee 1, 4 and 16 times.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
 generated-evidence mutations and mandatory-certificate positive/negative checks.

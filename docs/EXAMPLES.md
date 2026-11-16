@@ -37,6 +37,9 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `Loops.AllZero` and `Loops.Sum`: an early-exit predicate and a wrapping fold over the symbolic
   contents of an arbitrary-length `ReadOnlySpan<uint>` or `ReadOnlySpan<ulong>`.
 - `Calls`: a managed-call chain with an address-taken mutable local.
+- `CallsSummary`: `Calls` for every input over well-formed caller memory, returning `x + 3` and
+  keeping all memory below its entry, proved once by stepping `Increment` and the byref `Mutate`
+  and once from a `DecodedSummary` of each.
 - `IdentitySummary` and `RepeatedSummary`: the identity of `GenericIdentity` for `Identity64` and
   `Repeated`, proved once by stepping `Identity<ulong>` and once from a `DecodedSummary` of it that
   each call applies without stepping its body. `calls_name_summary` shows that each call names the

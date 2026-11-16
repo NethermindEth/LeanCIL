@@ -106,7 +106,7 @@ if (suite is "all" or "core")
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
         "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/DecodedOpcodes.cs",
-        "Tests/SupportExtractionCache.cs"]);
+        "Tests/SupportExtractionCache.cs", "Tests/SummaryCalls.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
@@ -259,6 +259,8 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "SHA-1, assembly index, pin index scaling, field reference and runtime model tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
+RunFixture("Tests/SummaryCalls.cs", [], streamOutput: true, progress: "Byref calls through a decoded summary");
+Passed("1, 4 and 16 byref calls by stepping and through a decoded summary");
 RunFixture("Tests/DecodedOpcodes.cs", [], streamOutput: true, progress: "Decoded opcode table");
 Passed("the extractor's decoded opcode table against Instruction.valueOpcode");
 
