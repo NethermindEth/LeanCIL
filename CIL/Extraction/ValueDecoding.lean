@@ -5,19 +5,19 @@ import CIL.Extraction.Generics
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
-conversions, comparisons, integer indirect loads and stores, array allocations, lengths and
-element loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst`
-and the class instance field accesses `ldfld`, `ldflda` and `stfld`, the call `call` and the
-construction `newobj`, with every short and macro form folded into its constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it
-is that decoded instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes
-for some operand. Instantiation changes a decoded instruction only in the type a type operand
-names, the method a call or construction names, or through a field operand
-(`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original with each
-type test and typed array instruction at the instantiated type, each call and construction of
-the instantiated method, and each class field access at the same owner with its held type instantiated
-(`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is the total decoding: it writes a
-hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
-(`Instruction.ofRaw_eq_unadmitted_iff`).
+conversions, comparisons, integer indirect loads and stores, array allocations, lengths and element
+loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst` and the
+class instance field accesses `ldfld`, `ldflda` and `stfld`, the call `call` and the construction
+`newobj`, with every short and macro form folded into its constructor. `valueEncodingMatches`
+accepts an emitted instruction exactly when it is that decoded instruction, and
+`Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand. Instantiation
+changes a decoded instruction only in the type a type operand names, the method a call or
+construction names, or through a field operand (`Instruction.ofRaw?_substitute`), so a closed
+generic body decodes like its original with each type test and typed array instruction at the
+instantiated type, each call and construction of the instantiated method, and each class field
+access at the same owner with its held type instantiated (`Instruction.ofRaw?_substitute_field`).
+`Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw opcode,
+exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
@@ -196,9 +196,9 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. A type operand gives the type test or typed array
-    instruction its opcode names, an instance field of a class the field instruction its opcode names and a call site
-    the `call` of the method it names, whose target the method's link table gives, when its
-    opcode is `call`, and its construction when its opcode is `newobj`; any other
+    instruction its opcode names, an instance field of a class the field instruction its opcode
+    names and a call site the `call` of the method it names, whose target the method's link table
+    gives, when its opcode is `call`, and its construction when its opcode is `newobj`; any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
     operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can write one where
     this admits nothing. -/

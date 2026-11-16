@@ -552,8 +552,8 @@ internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, s
 {
     // Translation does not see the layout table the term indexes, so the emitter attaches it.
     internal override string Render(Func<int, string> calleeName) =>
-        $".{(Store ? "stelem_any" : "ldelem_any")} ({Element ??
-            throw new InvalidOperationException("A typed element access is rendered before its element type is attached")})";
+        $".{(Store ? "stelem_any" : "ldelem_any")} ({Element ?? throw new InvalidOperationException(
+            "A typed element access is rendered before its element type is attached")})";
 }
 
 /// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
