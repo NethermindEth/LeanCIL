@@ -1974,7 +1974,8 @@ theorem modelled_then_linked (memory : Memory) (object : Reference) (word : CIL.
 -- under the call's continuation the kernel rechecks at every call.
 open Lean in
 run_meta do
-  let some proof := (← getConstInfo ``modelled_then_linked).value? (allowOpaque := true) | throwError "no proof"
+  let info ← getConstInfo ``modelled_then_linked
+  let some proof := info.value? (allowOpaque := true) | throwError "no proof"
   let used := proof.getUsedConstants
   for name in [``CIL.Safety.step_call_model, ``CIL.Safety.step_call_direct] do
     unless used.contains name do throwError "modelled_then_linked does not use {name}"
