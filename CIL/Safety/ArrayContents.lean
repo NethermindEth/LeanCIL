@@ -244,7 +244,8 @@ theorem step_stelem_narrow_of_write (kind : CIL.NumericKind) {memory after : Mem
         .ok (.next (pc + 1) rest frame after) := by
   intro body pc args frame rest
   rw [step_stelem_eq]
-  cases kind <;> simp only [CIL.NumericKind.width] at narrow found written <;> (try omega) <;>
+  cases kind <;> simp only [CIL.NumericKind.width] at narrow found written <;>
+    (try (exfalso; revert narrow; decide)) <;>
   cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
     subst indexed <;>
     simp [instructionStep, instruction, elementInstruction, observerCount, unspecifiedOperands,
