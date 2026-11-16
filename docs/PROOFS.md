@@ -114,7 +114,7 @@ import-closure size guarantee. Import these separately when a proof uses them:
 | --- | --- |
 | State checked execution | `step`, `run`, `invoke`, `Execution`, `WP`, `Ensures` |
 | Compose instruction and segment proofs | `cil_checked_step`, `cil_checked_steps`, `CodeAt`, `Segment`, `Segment.trans`, `cil_segment` |
-| Use a proved helper | `MethodContract`, `CallResult`, `FrameInvariants`, `run_call_of_contract_formed`, `cil_contract_steps` |
+| Use a proved helper | `MethodContract`, `CallResult`, `FrameInvariants`, `run_call_of_contract_formed`, `cil_contract_steps`, `DecodedSummary` |
 | Describe byref arguments and overlap | `ArgumentView`, `ValidCall`, the `CallingFields` lemmas |
 | Preserve mixed local contents | `LocalSnapshots`, `LoopFrame`, `LoopFrame.after_local_write` |
 | Prove checked loop paths | `LoopReaches`, `LoopSpec`, `cil_loop_steps` |
