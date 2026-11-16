@@ -310,6 +310,19 @@ partial class Program
         }));
 
     /// <summary>
+    /// The environment a consumer's deep modules build in, beyond the extraction artifacts their key binds: the
+    /// verifier, the certified library and every module artifact certified with the prepared StrictBinding.
+    /// </summary>
+    string ConsumerDeepEnvironment() => ContentKey(JsonSerializer.Serialize(new
+    {
+        format = "consumer-deep-environment-v1",
+        policy = VerificationPolicy,
+        library = libraryKey ?? throw new InvalidOperationException("The certified library is not selected"),
+        artifacts = (bindingPreparation ??
+            throw new InvalidOperationException("StrictBinding has not been prepared")).CertifiedArtifacts
+    }));
+
+    /// <summary>
     /// Copies the generated modules a keyed deep contribution built into a new directory below
     /// `staging`, checking each copy against the audited hashes, for publication once the run succeeds.
     /// Restored and unkeyed contributions stage nothing.

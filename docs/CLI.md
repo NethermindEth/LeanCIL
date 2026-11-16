@@ -366,8 +366,9 @@ tables, and the `#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams. Unsupporte
 rejects the request. A deep request reuses the generated modules of an earlier successful request
 in the same certified environment, with the same extraction, StrictBinding sources, toolchain,
 pins and generated sources, which hold the image bytes; it skips their build and kernel replay
-but still audits every deep theorem's type and axioms against the current extraction. Requests
-under `--proof-root` repeat their binding work.
+but still audits every deep theorem's type and axioms against the current extraction. Under
+`--proof-root` the key also binds the certified library and the prepared StrictBinding artifacts,
+and a package that shadows a `CIL` module replays a restored result and publishes none.
 
 ## Start a proof
 

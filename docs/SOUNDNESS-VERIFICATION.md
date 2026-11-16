@@ -85,6 +85,9 @@ environment and extraction key, the prepared StrictBinding sources and toolchain
 extraction, the generated sources with the image bytes they hold, and the pins and requests. A
 restored result skips build and kernel replay of the generated modules, since its publisher
 replayed those bytes in the same keyed environment; their theorem audit runs on every request.
+Under `--proof-root` the environment is the verifier, the certified library and the artifacts
+certified with StrictBinding. The compiled extraction imports `CIL` modules by name, so a package
+that shadows one replays a restored result and publishes none.
 
 The single-file verifier's support audit key binds the audit schema, verification policy,
 certified library identity, extraction identity digest, ordered support imports and support
