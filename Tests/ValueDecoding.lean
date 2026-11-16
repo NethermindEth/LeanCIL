@@ -160,7 +160,7 @@ def undecoded : List Name := [
   ``Instruction.ldtoken]
 
 /-- What each named opcode decodes to. -/
-def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? ·.1)
+def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? none ·.1)
 
 /-- Raw instructions over every one-byte and two-byte opcode with each operand kind the value
     family reads, plus text, a type, a class field and a call site; `ofRaw?` must give `none`
@@ -176,7 +176,7 @@ def probes : List RawInstruction :=
     decodes to exactly the instruction ECMA-335 assigns it. -/
 theorem ofRaw?_exact :
     probes.all (fun raw =>
-      (Instruction.ofRaw? raw).isNone || Instruction.valueOpcode raw.opcode) = true ∧
+      (Instruction.ofRaw? none raw).isNone || Instruction.valueOpcode raw.opcode) = true ∧
     probes.all (fun raw => !Instruction.valueOpcode raw.opcode ||
       named.any (·.1.opcode == raw.opcode)) = true ∧
     named.all (fun (raw, expected) => valueEncodingMatches raw expected) = true := by
@@ -185,6 +185,10 @@ theorem ofRaw?_exact :
 /-- info: 'Tests.ValueDecoding.ofRaw?_exact' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms ofRaw?_exact
+
+-- No decoded instruction takes a prefix, so an instruction after one decodes as without it.
+example (previous : Option RawInstruction) (raw : RawInstruction) :
+    Instruction.ofRaw? previous raw = Instruction.ofRaw? none raw := rfl
 
 /-- Emitted instructions that differ from what the raw instruction decodes to: a constant out of
     its form's range, another operand, or another constructor with the same stack effect. -/
@@ -290,7 +294,7 @@ theorem element_emission_exact :
 
 /-- A decided match gives the decoded instruction, sign extension of a short constant included. -/
 theorem short_constant_decoded :
-    Instruction.ofRaw? ⟨0, 31, .integer (-5)⟩ = some (.ldc_i4 (BitVec.ofInt 32 (-5))) :=
+    Instruction.ofRaw? none ⟨0, 31, .integer (-5)⟩ = some (.ldc_i4 (BitVec.ofInt 32 (-5))) :=
   valueEncodingMatches_sound (by decide +kernel)
 
 /-- info: 'Tests.ValueDecoding.short_constant_decoded' depends on axioms: [propext, Quot.sound] -/
@@ -322,7 +326,7 @@ private def genericOperand : RawOperand :=
 
 -- Instantiating a class field with `int32` decodes to the access of `classField`.
 example : ((substituteOperand [.atom runtimeScope "System.Int32"] [] 0 genericOperand).bind
-    (fun operand => Instruction.ofRaw? ⟨0, 123, operand⟩)).any
+    (fun operand => Instruction.ofRaw? none ⟨0, 123, operand⟩)).any
       (·.sameValue (.ldfld classField)) = true := by
   decide +kernel
 
