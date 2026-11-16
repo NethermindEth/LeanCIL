@@ -185,8 +185,8 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 
 The `stepping` suite generates explicit scalar, checked-memory, reference, table, accumulate,
 locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting,
-arguments, homes, allocation, calls, table-calls, objects, statics, constructions and elements bodies
-and proves each end to end. The scalar, memory, reference, table, accumulate and locals bodies have 16, 64 and 256
+arguments, homes, allocation, calls, table-calls, objects, statics, constructions, elements,
+typed-elements and typed-steps bodies and proves each end to end. The scalar, memory, reference, table, accumulate and locals bodies have 16, 64 and 256
 instructions, and the accumulate body also 1,024. The memory bodies repeat an idempotent checked
 store and reload, so the operation facts stay constant as the
 instruction count grows. The reference and table bodies repeatedly `add` a symbolic int32 byte
@@ -226,7 +226,12 @@ step resolves its pc among all the body's sites. The constructions bodies have 1
 instructions and construct and pop a class instance per cycle, each `newobj` reading its link and
 one supplied allocation fact and entering a constructor that returns. The elements bodies have 16,
 64 and 256 instructions and per cycle load and pop an `int32` element of their array argument and
-store their index argument into it, each access reading one supplied element fact.
+store their index argument into it, each access reading one supplied element fact. The
+typed-elements bodies have 16, 58 and 254 instructions and per cycle do the same through `ldelem`
+and `stelem` with an `int32` type operand, then copy one struct element of a second array onto
+itself. The stepper evaluates each typed access from supplied element facts and takes the element
+shape from the body's layouts; the generated shape facts are in scope and leave the cost
+unchanged. The typed-steps bodies are the same bodies with one supplied step fact per access.
 The suite uses the proof-cost measuring frontend, with three sequential proof compilations and a
 header-only baseline per scalar, memory, reference, table, accumulate, locals, calls and table-calls
 body up to 256 instructions, and one compilation for every other body.
