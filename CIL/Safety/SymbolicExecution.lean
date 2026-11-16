@@ -813,12 +813,13 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        all_goals ((repeat constructor) <;> rfl)))
 
 /-- `cil_checked_step_by_equations` for a step whose equation matches on the link at its pc:
-    `facts`, which hold that link, rewrite in the first pass, so only the linked arm is
-    simplified. -/
-macro "cil_checked_linked_step_by_equations " "[" facts:term,* "]" : tactic =>
+    `links`, the link facts, rewrite with the step equations, so only the linked arm is
+    simplified; `facts` apply after them as they do for any step. -/
+macro "cil_checked_linked_step_by_equations " "[" links:term,* "]" "[" facts:term,* "]" :
+    tactic =>
   `(tactic| (
        cil_simp_only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
-         $[$facts:term],*]
+         $[$links:term],*]
        cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
@@ -1313,16 +1314,17 @@ elab_rules : tactic
     -- A call-family step's arm matches on its link; the read's fact lets that match reduce. It
     -- enters as a hypothesis, so the run's record, whose simp contexts are keyed by fact text and
     -- would hand a later pc this pc's fact, is not consulted for this step.
-    let stepFacts ← if linkedOpcodes.contains operation then
+    let linkFacts : Array Term ← if linkedOpcodes.contains operation then
         match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
             (← entryAt "cil_checked_step_normalized" args 2)) with
         | some proof =>
           let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
             (← inferType proof) proof).intro1P
           replaceMainGoal [goal]
-          pure (facts.getElems.push (← goal.withContext (Term.exprToSyntax (mkFVar link))))
-        | none => pure facts.getElems
-      else pure facts.getElems
+          pure #[← goal.withContext (Term.exprToSyntax (mkFVar link))]
+        | none => pure #[]
+      else pure #[]
+    let stepFacts := facts.getElems ++ linkFacts
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
       else if operation == ``CIL.Instruction.memory then
@@ -1343,7 +1345,8 @@ elab_rules : tactic
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else if operation == ``CIL.Instruction.newobj then
-        `(tactic| cil_strict (cil_checked_linked_step_by_equations [$[$stepFacts:term],*]))
+        `(tactic| cil_strict
+          (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
       else
         `(tactic| cil_checked_step_equations [$[$stepFacts:term],*])
     evalTactic strategy
