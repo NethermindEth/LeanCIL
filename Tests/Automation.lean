@@ -1970,4 +1970,13 @@ theorem modelled_then_linked (memory : Memory) (object : Reference) (word : CIL.
   cil_checked_steps [formed]
 #print axioms modelled_then_linked
 
+-- The stepper enters the model call by its one equation, not by `step_call_eq`, whose rewrite
+-- under the call's continuation the kernel rechecks at every call.
+open Lean in
+run_meta do
+  let some proof := (← getConstInfo ``modelled_then_linked).value? (allowOpaque := true) | throwError "no proof"
+  let used := proof.getUsedConstants
+  for name in [``CIL.Safety.step_call_model, ``CIL.Safety.step_call_direct] do
+    unless used.contains name do throwError "modelled_then_linked does not use {name}"
+
 end Tests.Automation

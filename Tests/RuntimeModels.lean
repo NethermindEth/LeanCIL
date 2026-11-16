@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Extraction.RuntimeModels
+import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
 import Tests.Support
 
@@ -358,6 +359,13 @@ example : callEmitsNoPop ⟨0, 38, .none⟩ .pop = true := by decide
 example :
     callEmitsNoPop (site objectConstructorMethod) (.call objectConstructorMethod {}) = true := by
   decide
+-- The method check applies the rule: a live call emitting `pop` fails it, the same call emitting
+-- its call passes, and a raw `pop` still emits `pop`.
+example : ¬ UnsafeCallsValid [] (method (site bigMul)) [true] [.pop] := by decide +kernel
+example : UnsafeCallsValid [] (method (site bigMul)) [true] [.call bigMul {}] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (method (site objectConstructorMethod)) [true] [.pop] := by
+  decide +kernel
+example : UnsafeCallsValid [] (method ⟨0, 38, .none⟩) [true] [.pop] := by decide +kernel
 
 -- An external call the table does not model needs a link.
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site bigMul)) [true]
