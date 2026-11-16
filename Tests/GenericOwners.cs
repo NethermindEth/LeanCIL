@@ -68,8 +68,7 @@ foreach (var name in new[] { "Identity", "Combined", "Nested", "NestedHelper", "
     var output = Path.Combine(root, name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"GenericOwners::{name}(uint)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (Regex.Matches(source,
-            @"(?m)^(def method\d+ : Method|cil_decoded_method method\d+(?: \[[^\]\n]*\])?) :=").Count != 2)
+    if (DefinedMethods(source).Length != 2)
         throw new InvalidOperationException("Closed specialization was duplicated: " + name);
     var proof = source + $$"""
 

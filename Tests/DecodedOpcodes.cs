@@ -9,6 +9,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:include GeneratedEvidence.cs
 
 extern alias IdentityExtractor;
 
@@ -67,15 +68,12 @@ using (var module = Mono.Cecil.ModuleDefinition.ReadModule(At("Examples/Assembly
 var deadOutput = Path.Combine(deadDirectory, "Extraction");
 Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::One()", deadOutput]);
 var deadSource = Path.Combine(deadOutput, "Extracted.lean");
-var deadLines = File.ReadAllText(deadSource).ReplaceLineEndings("\n").Split('\n');
-var header = Array.FindIndex(deadLines, line => line.StartsWith("def method0 : Method := ", StringComparison.Ordinal));
-// The literal lists one instruction per line after its header; the last one closes the list and the structure.
-string[] literal = header < 0 ? [] : deadLines.Skip(header + 1)
-    .TakeWhile(line => line.StartsWith("  ", StringComparison.Ordinal)).Select(line => line.Trim())
-    .Select(line => line.EndsWith("] }", StringComparison.Ordinal) ? line[..^3] : line.TrimEnd(',')).ToArray();
+var deadText = File.ReadAllText(deadSource).ReplaceLineEndings("\n");
+string[] literal = [.. ExtractedInstructions(deadText).Where(instruction => instruction.Method == 0)
+    .Select(instruction => instruction.Op)];
 string[] expectedLiteral =
     [".ldc_i4 1", ".ret", $".unadmitted {OpCodes.Ldc_I4_0.Value}", $".unadmitted {OpCodes.Ret.Value}"];
-if (deadLines.Any(line => line.StartsWith("cil_decoded_method ", StringComparison.Ordinal)) ||
+if (IsDecodedMethod(deadText, 0) ||
     !literal.SequenceEqual(expectedLiteral, StringComparer.Ordinal))
     throw new InvalidOperationException("A method with an unreachable tail must keep its literal with a hole " +
         "at each dead pc, found:\n" + string.Join('\n', literal));
