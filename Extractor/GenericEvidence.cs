@@ -219,6 +219,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
             fieldType = fields[index].Type;
         }
+        // Lean refuses such an operand at every pc, reachable or not, so the access is a stated blocker.
+        else if (!(instruction.OpCode.Code == Code.Ldsfld && FeatureProfile.PlatformField(field) is not null))
+            throw new InvalidDataException($"IL_{instruction.Offset:x4}: Unsupported field access: {field.FullName}\n" +
+                "  Its owner has no carried definition, so no metadata row gives the field's position.");
         // A class field of a type outside the model holds an object reference like an admitted one.
         var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
             ? ObjectType(fieldType) : Type(fieldType);

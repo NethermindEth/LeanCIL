@@ -535,6 +535,65 @@ Require(regexConstructs.SequenceEqual([
         "Unsupported class instance type: " + runnerType]),
     "The regex runner is not blocked by its own constructs: " + string.Join("; ", regexConstructs));
 
+// Lean refuses a field operand no carried row positions at every pc, so a dead read of one blocks its method.
+var unpinnedDirectory = Path.Combine(directory, "UnpinnedField");
+var unpinnedLibrary = Path.Combine(unpinnedDirectory, "Lib");
+var unpinnedApplication = Path.Combine(unpinnedDirectory, "App");
+Directory.CreateDirectory(unpinnedLibrary);
+Directory.CreateDirectory(unpinnedApplication);
+File.WriteAllText(Path.Combine(unpinnedLibrary, "Lib.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>Unpinned.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
+""");
+File.WriteAllText(Path.Combine(unpinnedLibrary, "Point.cs"), """
+namespace Unpinned;
+public struct Point { public int X; public int Y; }
+""");
+File.WriteAllText(Path.Combine(unpinnedApplication, "App.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>Unpinned.App</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+<ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+""");
+File.WriteAllText(Path.Combine(unpinnedApplication, "Reader.cs"), """
+using System.Runtime.Intrinsics.X86;
+public static class Reader
+{
+    public static Unpinned.Point Origin;
+
+    public static int Read(int x)
+    {
+        if (Avx2.IsSupported) return Origin.Y;
+        return x;
+    }
+}
+""");
+Run(["dotnet", "build", Path.Combine(unpinnedApplication, "App.csproj"), "-c", "Release"]);
+var unpinnedAssembly = Path.Combine(unpinnedApplication, "bin/Unpinned.App.dll");
+var unpinnedManifest = Path.Combine(unpinnedDirectory, "manifest.json");
+File.WriteAllText(unpinnedManifest, JsonSerializer.Serialize(new
+{
+    entries = new[] { new { signature = "Reader::Read(int)", profile = "scalar" } }
+}));
+var unpinnedReport = Path.Combine(unpinnedDirectory, "blockers.json");
+Run(["dotnet", ExtractorPath, "blockers", unpinnedAssembly, "--manifest", unpinnedManifest,
+    "--output", unpinnedReport]);
+const string UnpinnedConstruct = "Unsupported field access: System.Int32 Unpinned.Point::Y";
+const string UnpinnedReason = "Its owner has no carried definition, so no metadata row gives the field's position.";
+var unpinnedBlockers = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(unpinnedReport))
+    .GetProperty("blockers").EnumerateArray().ToArray();
+Require(unpinnedBlockers.Length == 1 &&
+    unpinnedBlockers[0].GetProperty("construct").GetString() == UnpinnedConstruct &&
+    unpinnedBlockers[0].GetProperty("sites")[0].GetProperty("message").GetString()!.Contains(UnpinnedReason,
+        StringComparison.Ordinal),
+    "A dead read of an unpinned struct's field is not blocked by that field: " + File.ReadAllText(unpinnedReport));
+var unpinnedExtraction = Execute(["dotnet", ExtractorPath, "extract", unpinnedAssembly, "Reader::Read(int)",
+    Path.Combine(unpinnedDirectory, "Extracted"), "scalar"]);
+var refusedWithReason = unpinnedExtraction.Code != 0 &&
+    unpinnedExtraction.Output.Contains(UnpinnedConstruct, StringComparison.Ordinal) &&
+    unpinnedExtraction.Output.Contains(UnpinnedReason, StringComparison.Ordinal);
+Require(refusedWithReason,
+    "Extraction does not refuse the dead read with the blocker's diagnostic: " + unpinnedExtraction.Output);
+
 // Each admitted entry is extracted again. Reading and hashing the whole image per entry makes that linear in the
 // image, so doubling the methods of an image that grows with them would make admission four times as long.
 const int FewAdmitted = 100;
