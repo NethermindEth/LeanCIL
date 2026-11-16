@@ -1069,6 +1069,14 @@ example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
 example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
     (.stfld next) = false := by decide
 -- The receiver of a field access is an object or null.
+example : scalarEmissionMatches #[] none (i 123 valueField) [.word64] (.ldfld value) = false := by
+  decide
+example : scalarEmissionMatches #[] none (i 123 valueField) [.reference] (.ldfld value) = false := by
+  decide
+example : scalarEmissionMatches #[] none (i 124 valueField) [.word64] (.ldflda value) = false := by
+  decide
+example : scalarEmissionMatches #[] none (i 124 valueField) [.reference] (.ldflda value) = false :=
+  by decide
 example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
     (.stfld value) = true := by decide
 example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .word64]
