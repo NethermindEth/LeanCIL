@@ -55,6 +55,14 @@ extraction and about 3.7 for the body. A ratio that rises toward 1.15 means some
 elaboration step walks the code list again. The suite also fails when a `cil_lookup` at a
 computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
 
+The same method at 125, 250 and 500 statements also reports, from its extraction, the heartbeats
+of `Extracted.method0_calls_validated` and of `Extracted.method0_evidence_validated` alone. The
+suite fails when the call check costs more than 1.15 times as much per statement as at the length
+before, or when the evidence theorem costs more than 1.15 times as much in total. The evidence
+theorem only assembles the conjuncts' theorems, so it costs about 260,000 heartbeats at every
+length; a conjunct stated through another term than `CIL.Extraction.MethodEvidenceValid` states
+makes the elaborator reduce the whole decoded body, about 390,000 heartbeats per instruction.
+
 The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
 characters long and differ only in their last character, less the same statement closed with
 `sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and
