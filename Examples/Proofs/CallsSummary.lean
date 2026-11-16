@@ -18,7 +18,8 @@ open CIL CIL.Safety CIL.Extraction
 
 bind_entry entry (memory : Safety.Memory) (x : W64) (wellFormed : memory.WellFormed) :=
   Extracted.method0 with [.scalar (.i64 x)] from memory allocating wellFormed
-bind_method increment incrementBody := "System.UInt64 Examples.Arithmetic::Increment(System.UInt64)"
+bind_method increment incrementBody :=
+  "System.UInt64 Examples.Arithmetic::Increment(System.UInt64)"
 bind_method mutate mutateBody := "System.Void Examples.Arithmetic::Mutate(System.UInt64&)"
 
 /-- The caller returns `x + 3` and keeps all memory below its entry, stepping both callees. -/

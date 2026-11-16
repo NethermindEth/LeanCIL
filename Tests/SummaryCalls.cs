@@ -192,7 +192,8 @@ static string SummaryProof(int calls)
         {
             var post = call == 2 ? "mutated1.post"
                 : $"show {Value(call - 2)} + 2 = {Value(call - 1)} by bv_omega ▸ mutated{call - 1}.post";
-            lines.Add($"  have permitted{call} : mutateContract.pre (reference, {Value(call - 1)}) final{call - 1} :=");
+            lines.Add($"  have permitted{call} : mutateContract.pre (reference, {Value(call - 1)}) " +
+                $"final{call - 1} :=");
             lines.Add($"    ⟨{frame}.homes.writable_at (kind := .word64) (home := reference) (index := 0) rfl,");
             lines.Add($"      {post}⟩");
         }
@@ -200,7 +201,8 @@ static string SummaryProof(int calls)
             : $"  cil_contract_steps [localAddress, {frame}.form_home 0]");
         lines.Add("  apply WP.exists_execution");
         lines.Add($"  apply WP.local_call {frame} summary.holds (reference, {Value(call - 1)}) (by rfl) (by rfl)");
-        lines.Add($"    (by cil_checked_step [localAddress, {frame}.form_home 0]) permitted{call} 0 .word64 reference");
+        lines.Add($"    (by cil_checked_step [localAddress, {frame}.form_home 0]) permitted{call} 0 .word64 " +
+            "reference");
         lines.Add($"    rfl rfl (fun _ => .i64 ({Value(call)})) (fun _ => ({Value(call)}).toNat) (fun _ => rfl)");
         lines.Add(call == 1 ? "    (fun _ _ post => post)"
             : $"    (fun _ _ post => by rw [← show {Value(call - 1)} + 2 = {Value(call)} by bv_omega]; exact post)");
