@@ -7,11 +7,12 @@ import Tests.BodyEncoding
 `T` names the type `Ext.Point` of an assembly `Ext` that no slice carries, and its fields `X`
 and `Y`, both `int`, by member references. No carried field list gives the position of either,
 so metadata binding refuses each as an instance field, at any index and whether the operand names
-`Ext.Point` as a struct or as a class. A method `M(ref Ext.Point)` or `M(Ext.Point)` whose body
-loads, addresses or stores `Y` through its token fails every evidence check, with the emitted
-access at the offset or slot of `X`, and so does an operand that flags `Y` static, since these
-instructions take only instance fields. Of the platform pair `ValueTuple<int, int>`, `Item1` and
-`Item2` keep indices 0 and 1 and any other member is refused.
+`Ext.Point` as a struct or as a class. A method `M(ref Ext.Point)` whose body loads, addresses or
+stores `Y` through its token fails every evidence check, with the emitted access at the offset of
+`X`, and so does an operand that flags `Y` static, since these instructions take only instance
+fields. `M(Ext.Point)` fails earlier, on its own signature, since no carried slice defines the
+class its parameter names, and is no valid translation with the access at the slot of `X`. Of the platform pair
+`ValueTuple<int, int>`, `Item1` and `Item2` keep indices 0 and 1 and any other member is refused.
 -/
 
 namespace Tests.ImportedFieldIndex
@@ -125,6 +126,14 @@ private def refusedAtY (owner : TypeExpr) (opcode index : Nat) : Bool :=
     token == (slice (owner == pointClass) opcode).2.2
   | _ => false
 
+/-- Whether decoding the body fails on the signature of `M`, whose parameter names a class no
+    carried slice defines, before any field operand is bound. -/
+private def refusedAtSignature (opcode index : Nat) (flagged := false) : Bool :=
+  match checkBody (body pointClass opcode index flagged) (raw pointClass opcode index flagged) []
+  with
+  | .error (.metadata (.methodMismatch token)) => token == (raw pointClass opcode index).token
+  | _ => false
+
 /-- Whether decoding the body with `Y` flagged static fails on its token, before binding. -/
 private def flaggedRefused (owner : TypeExpr) (opcode : Nat) : Bool :=
   match checkBody (body owner opcode 0 true) (raw owner opcode 0 true) [] with
@@ -196,10 +205,10 @@ theorem struct_access_of_y_at_offset_of_x_rejected :
   decide +kernel
 #print axioms struct_access_of_y_at_offset_of_x_rejected
 
-/-- Each class access to `Y` at the slot of index 0, which `X` shares, fails on its token and is
-    no valid translation. -/
+/-- Each class access to `Y` at the slot of index 0, which `X` shares, fails on the signature of
+    its method and is no valid translation. -/
 theorem class_access_of_y_at_slot_of_x_rejected :
-    ([ldfld, ldflda, stfld].all fun opcode => refusedAtY pointClass opcode 0) = true ∧
+    ([ldfld, ldflda, stfld].all fun opcode => refusedAtSignature opcode 0) = true ∧
     ¬ TranslationValid [] #[] [] [evidence pointClass ldfld 0] [] [classMethod ldfld 0] ∧
     ¬ TranslationValid [] #[] [] [evidence pointClass ldflda 0] [] [classMethod ldflda 0] ∧
     ¬ TranslationValid [] #[] [] [evidence pointClass stfld 0] [] [classMethod stfld 0] := by
@@ -207,11 +216,11 @@ theorem class_access_of_y_at_slot_of_x_rejected :
 #print axioms class_access_of_y_at_slot_of_x_rejected
 
 /-- An operand flagging `Y` static, the form binding admits at index 0, fails each instance field
-    instruction on its token, since those opcodes take only instance fields, and is no valid
-    translation. -/
+    instruction of the struct on its token, since those opcodes take only instance fields, and of
+    the class on its method's signature; neither is a valid translation. -/
 theorem static_flagged_access_of_y_rejected :
-    ([point, pointClass].all fun owner =>
-      [ldfld, ldflda, stfld].all fun opcode => flaggedRefused owner opcode) = true ∧
+    ([ldfld, ldflda, stfld].all fun opcode =>
+      flaggedRefused point opcode && refusedAtSignature opcode 0 true) = true ∧
     ¬ TranslationValid rawLayouts layouts [] [evidence point ldfld 0 true] []
       [structMethod ldfld 0] ∧
     ¬ TranslationValid rawLayouts layouts [] [evidence point ldflda 0 true] []
