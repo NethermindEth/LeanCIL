@@ -13,6 +13,15 @@ namespace Tests.ValueDecoding
 
 open CIL CIL.Extraction Lean Meta
 
+/-- An `int32` instance field of a class, at raw index 1. -/
+def classOperand : RawOperand :=
+  .field (.object "T" "T.Account") 1 (.atom runtimeScope "System.Int32") name!"balance" false
+
+/-- The field `classOperand` names. -/
+def classField : FieldRef :=
+  { owner := .object "T" "T.Account", index := 1, type := .atom runtimeScope "System.Int32",
+    name := name!"balance" }
+
 /-- The class the type test rows name. -/
 private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 
@@ -98,6 +107,9 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 217, .none⟩, .mul_ovf_un), (⟨0, 218, .none⟩, .sub_ovf), (⟨0, 219, .none⟩, .sub_ovf_un),
   (⟨0, 65025, .none⟩, .ceq), (⟨0, 65026, .none⟩, .cgt), (⟨0, 65027, .none⟩, .cgt_un),
   (⟨0, 65028, .none⟩, .clt), (⟨0, 65029, .none⟩, .clt_un),
+  -- Class instance field accesses.
+  (⟨0, 123, classOperand⟩, .ldfld classField), (⟨0, 124, classOperand⟩, .ldflda classField),
+  (⟨0, 125, classOperand⟩, .stfld classField),
   -- Dynamic frame storage.
   (⟨0, 65039, .none⟩, .localloc),
   -- Class type tests.
@@ -121,12 +133,12 @@ def undecoded : List Name := [
 def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? ·.1)
 
 /-- Raw instructions over every one-byte and two-byte opcode with each operand kind the value
-    family reads, plus text and a type; `ofRaw?` must give `none` for every opcode outside
-    `Instruction.valueOpcode`. -/
+    family reads, plus text, a type and a class field; `ofRaw?` must give `none` for every
+    opcode outside `Instruction.valueOpcode`. -/
 def probes : List RawInstruction :=
   ((List.range 256 ++ (List.range 32).map (65024 + ·)).flatMap fun opcode =>
     ([.none, .integer 1, .argument 1, .local 1, .target 1, .targets [1], .text "",
-      .type (.atom runtimeScope "System.Int32")] : List RawOperand).map
+      .type (.atom runtimeScope "System.Int32"), classOperand] : List RawOperand).map
       fun operand => { offset := 0, opcode, operand })
 
 /-- `ofRaw?` decodes only value opcodes, every value opcode is named, and every named form
@@ -175,7 +187,15 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 42, .integer 0⟩, .ret), (⟨0, 17, .argument 4⟩, .ldloc 4), (⟨0, 6, .local 0⟩, .ldloc 0),
   (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .ldarg 1), (⟨0, 15, .argument 1⟩, .ldarg 1),
   (⟨0, 107, .none⟩, .conv_i4), (⟨0, 65039, .integer 0⟩, .localloc),
-  (⟨0, 116, .none⟩, .castclass dog), (⟨0, 20, .type dog⟩, .ldnull), (⟨0, 20, .none⟩, .ldc_i4 0)]
+  (⟨0, 116, .none⟩, .castclass dog), (⟨0, 20, .type dog⟩, .ldnull), (⟨0, 20, .none⟩, .ldc_i4 0),
+  -- Another field, another access to the field, a static field or a field of a struct.
+  (⟨0, 123, classOperand⟩, .ldfld { classField with index := 2 }),
+  (⟨0, 123, classOperand⟩, .ldfld { classField with name := name!"limit" }),
+  (⟨0, 123, classOperand⟩, .ldflda classField), (⟨0, 125, classOperand⟩, .ldfld classField),
+  (⟨0, 123, .field (.object "T" "T.Account") 1 (.atom runtimeScope "System.Int32")
+    name!"balance" true⟩, .ldfld classField),
+  (⟨0, 123, .field (.aggregate "T::Pair" 0) 1 (.atom runtimeScope "System.Int32")
+    name!"balance" false⟩, .ldfld { classField with owner := .aggregate "T::Pair" 0 })]
 
 /-- No mutation matches its raw instruction. -/
 theorem mutations_rejected :
@@ -228,7 +248,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 70, undecoded 26 of 96 constructors -/
+/-- info: decoded 73, undecoded 26 of 99 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

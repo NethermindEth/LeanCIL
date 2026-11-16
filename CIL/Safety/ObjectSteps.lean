@@ -1,5 +1,6 @@
 import CIL.Safety.StepComposition
 import CIL.Safety.ObjectAllocationLemmas
+import CIL.Safety.ValueSteps
 
 /-!
 # Object step equations
@@ -68,19 +69,24 @@ section ObjectEquations
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
 /-- `newobj` of a class checks its `argc` arguments, allocates the instance and calls the
-    constructor with it as the receiver; the instance waits under the rest of the stack. -/
-@[cil_step] theorem step_newObject_eq (callee argc : Nat) (owner : CIL.Extraction.TypeExpr)
+    constructor its link names with it as the receiver; the instance waits under the rest of the
+    stack. -/
+@[cil_step] theorem step_newObject_eq (target argc : Nat) (owner : CIL.Extraction.TypeExpr)
     (bases : List CIL.Extraction.TypeExpr) (size : Nat) (stack : List Value) :
-    step body (.newObject callee argc owner bases size) pc args frame stack memory =
+    step body (.newObject target argc owner bases size) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
-        return FrameAction.call callee (.object (.address object) :: arguments)
-          (.object (.address object) :: stack.drop argc) allocated := by
+      else match body.linkAt pc with
+        | some (.object callee _ _) =>
+          if stack.length < argc then .error .invalidState
+          else do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
+            return FrameAction.call callee (.object (.address object) :: arguments)
+              (.object (.address object) :: stack.drop argc) allocated
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
+  rfl
 
 #print axioms step_newObject_eq
 
@@ -94,16 +100,19 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
   | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
-/-- `callvirt` of a non-virtual method checks its `argc` arguments and calls with a live receiver;
-    a null receiver throws `NullReferenceException` before the call. -/
-@[cil_step] theorem step_callInstance_eq (callee argc : Nat) (stack : List Value) :
-    step body (.callInstance callee argc) pc args frame stack memory =
+/-- `callvirt` of a non-virtual method checks its `argc` arguments and calls the method its link
+    names with a live receiver; a null receiver throws `NullReferenceException` before the call. -/
+@[cil_step] theorem step_callInstance_eq (target argc : Nat) (stack : List Value) :
+    step body (.callInstance target argc) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else (do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        receiverCall callee arguments (stack.drop argc) memory) := by
+      else match body.linkAt pc with
+        | some (.direct callee) =>
+          if stack.length < argc then .error .invalidState
+          else (do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            receiverCall callee arguments (stack.drop argc) memory)
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
@@ -135,17 +144,21 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
   | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
-/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its table
-    selects for the receiver; a null receiver throws `NullReferenceException` before the call. -/
-@[cil_step] theorem step_callVirtual_eq (targets : List (CIL.Extraction.TypeExpr × Nat))
+/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its link's
+    table selects for the receiver; a null receiver throws `NullReferenceException` before the
+    call. -/
+@[cil_step] theorem step_callVirtual_eq (stated : List (CIL.Extraction.TypeExpr × Nat))
     (argc : Nat) (stack : List Value) :
-    step body (.callVirtual targets argc) pc args frame stack memory =
+    step body (.callVirtual stated argc) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else (do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        virtualCall targets arguments (stack.drop argc) memory) := by
+      else match body.linkAt pc with
+        | some (.virtual targets) =>
+          if stack.length < argc then .error .invalidState
+          else (do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            virtualCall targets arguments (stack.drop argc) memory)
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
@@ -408,101 +421,6 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 #print axioms step_comparisonGuard_i32_eq
 #print axioms step_comparisonGuard_i64_eq
 
-/-- `ldfld` of a scalar field of an object loads it from the field's located address. -/
-theorem step_objectField_eq (owner : CIL.Extraction.TypeExpr)
-    (offset width : Nat) (signed : Bool) (fits : width ∈ [1, 2, 4, 8])
-    (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.objectField owner offset width signed)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let value ← loadValue memory (.address address) width signed
-      return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, fits, not_true_eq_false, ite_false, Value.hasUnspecified, Bool.false_eq_true,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cases objectFieldAddress memory reference owner offset <;> try rfl
-  rename_i address
-  dsimp only
-  cases loadValue memory (.address address) width signed <;> rfl
-
-/-- `stfld` of a 64-bit object field writes the value's bytes at the located address. -/
-@[cil_step high] theorem step_setObjectField_i64_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (bits : BitVec 64) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.setObjectField owner offset 8)) pc args frame
-        (.scalar (.i64 bits) :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let after ← checkedAt (.address address) 8
-        (write memory address (numberBytes bits.toNat 8) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame after := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
-    Bind.bind, Except.bind, Pure.pure, Except.pure]
-  cases objectFieldAddress memory reference owner offset <;> try rfl
-  rename_i address
-  dsimp only
-  cases checkedAt (.address address) 8
-    (write memory address (numberBytes bits.toNat 8) ordinaryAccessAlignment) <;> rfl
-
-/-- `stfld` of a 1-, 2- or 4-byte object field writes the low bytes of the int32 value. -/
-theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
-    (offset width : Nat) (narrow : width ∈ [1, 2, 4]) (bits : BitVec 32)
-    (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.setObjectField owner offset width)) pc args frame
-        (.scalar (.i32 bits) :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let after ← checkedAt (.address address) width
-        (write memory address (numberBytes bits.toNat width) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame after := by
-  simp only [List.mem_cons, List.mem_nil_iff, or_false] at narrow
-  rcases narrow with rfl | rfl | rfl
-  all_goals
-    simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-      objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-      List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true,
-      ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
-    cases objectFieldAddress memory reference owner offset <;> try rfl
-    rename_i address
-    dsimp only
-    cases checkedAt (.address address) _
-      (write memory address (numberBytes bits.toNat _) ordinaryAccessAlignment) <;> rfl
-
-
-/-- `ldfld` of a class-typed object field pushes the reference its located slot holds. -/
-@[cil_step high] theorem step_objectReferenceField_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.objectReferenceField owner offset)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let value ← loadSlot memory address
-      return .next (pc + 1) (value :: rest) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
-  cases objectFieldAddress memory reference owner offset <;> try rfl
-  rename_i address
-  dsimp only
-  cases loadSlot memory address <;> rfl
-
-/-- `stfld` of a class-typed object field stores the reference into its located slot. -/
-@[cil_step high] theorem step_setObjectReferenceField_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (value reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.setObjectReferenceField owner offset)) pc args frame
-        (.object value :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let after ← storeSlot memory address value
-      return .next (pc + 1) rest frame after := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
-  cases objectFieldAddress memory reference owner offset <;> try rfl
-  rename_i address
-  dsimp only
-  cases storeSlot memory address value <;> rfl
-
 /-- `ldlen` of an array of class references pushes its length as a native integer. -/
 @[cil_step high] theorem step_referenceArrayLength_eq (array : ManagedReference)
     (rest : List Value) :
@@ -510,8 +428,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let found ← referenceArrayOf memory array
       return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, referenceArrayLength, CIL.MemoryOp.argumentCount, unspecifiedOperands,
-    List.take,
+    referenceArrayInstruction, referenceArrayLength, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take,
     List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   cases referenceArrayOf memory array <;> rfl
@@ -525,8 +443,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let value ← loadSlot memory slot.1
       return .next (pc + 1) (value :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, referenceArrayLoad, CIL.MemoryOp.argumentCount, unspecifiedOperands,
-    List.take,
+    referenceArrayInstruction, referenceArrayLoad, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -545,8 +463,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let after ← storeSlot memory slot.1 value
       return .next (pc + 1) rest frame after := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, referenceArrayStore, CIL.MemoryOp.argumentCount, unspecifiedOperands,
-    List.take,
+    referenceArrayInstruction, referenceArrayStore, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -555,41 +473,6 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
   cases storableIn memory slot.2 value <;> try rfl
   dsimp only
   cases storeSlot memory slot.1 value <;> rfl
-
-/-- `ldfld` of a value-array field pushes the whole array its located slot names. -/
-@[cil_step high] theorem step_arrayField_eq (owner : CIL.Extraction.TypeExpr) (offset : Nat)
-    (element : CIL.ArrayElement) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.arrayField owner offset element)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let value ← loadArraySlot memory address element
-      return .next (pc + 1) (value :: rest) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
-  cases objectFieldAddress memory reference owner offset <;> try rfl
-  rename_i address
-  dsimp only
-  cases loadArraySlot memory address element <;> rfl
-
-/-- `stfld` of a value-array field keeps the stored array's origin in its located slot. -/
-@[cil_step high] theorem step_setArrayField_eq (owner : CIL.Extraction.TypeExpr) (offset : Nat)
-    (element : CIL.ArrayElement) (view : ArrayView) (reference : ManagedReference)
-    (rest : List Value) :
-    step body (.memory (.setArrayField owner offset element)) pc args frame
-        (.array view :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
-      let after ← storeArraySlot memory address view element
-      return .next (pc + 1) rest frame after := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
-  cases objectFieldAddress memory reference owner offset <;> try rfl
-  rename_i address
-  dsimp only
-  cases storeArraySlot memory address view element <;> rfl
 
 /-- A readable slot loads the reference it holds, which must still form. -/
 theorem loadSlot_of_access {memory : Memory} {field : Reference}
@@ -639,80 +522,353 @@ theorem storeArraySlot_whole {memory : Memory} {field array : Reference}
   simp only [storeArraySlot, arraySlotValue, writable, found, heap, origin, whole, checkedAt,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure, and_self, ↓reduceIte]
 
-/-- `ldfld` of a 1-byte object field, as `step_objectField_eq` states it. -/
-@[cil_step high] theorem step_objectField_1_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (signed : Bool) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.objectField owner offset 1 signed)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+/-- `ldfld` of a class field whose slot holds a `width`-byte integer loads it from the field's
+    located address. -/
+theorem step_ldfld_word_eq (field : CIL.Extraction.FieldRef) (offset width : Nat) (signed : Bool)
+    (fits : width ∈ [1, 2, 4, 8])
+    (shape : body.fieldShape field = .classSlot offset (.word width signed))
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let value ← loadValue memory (.address address) width signed
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  simp only [step_ldfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    ite_false, fieldLoad, shape, classFieldLoad, fits, not_true_eq_false,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference field.owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases loadValue memory (.address address) width signed <;> rfl
+
+/-- `stfld` of a class field whose slot holds an 8-byte integer writes the value's bytes at the
+    located address. -/
+theorem step_stfld_word_i64_eq (field : CIL.Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .classSlot offset (.word 8 signed))
+    (bits : BitVec 64) (reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame
+        (.scalar (.i64 bits) :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let after ← checkedAt (.address address) 8
+        (write memory address (numberBytes bits.toNat 8) ordinaryAccessAlignment)
+      return .next (pc + 1) rest frame after := by
+  simp only [step_stfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    CIL.Value.hasUnspecified, fieldStore, shape, classFieldStore,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference field.owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases checkedAt (.address address) 8
+    (write memory address (numberBytes bits.toNat 8) ordinaryAccessAlignment) <;> rfl
+
+/-- `stfld` of a class field whose slot holds a 1-, 2- or 4-byte integer writes the low bytes of
+    the int32 value. -/
+theorem step_stfld_word_i32_eq (field : CIL.Extraction.FieldRef) (offset width : Nat)
+    (signed : Bool) (narrow : width ∈ [1, 2, 4])
+    (shape : body.fieldShape field = .classSlot offset (.word width signed))
+    (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame
+        (.scalar (.i32 bits) :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let after ← checkedAt (.address address) width
+        (write memory address (numberBytes bits.toNat width) ordinaryAccessAlignment)
+      return .next (pc + 1) rest frame after := by
+  simp only [List.mem_cons, List.mem_nil_iff, or_false] at narrow
+  rcases narrow with rfl | rfl | rfl
+  all_goals
+    simp only [step_stfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, fieldStore, shape,
+      classFieldStore, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    cases objectFieldAddress memory reference field.owner offset <;> try rfl
+    rename_i address
+    dsimp only
+    cases checkedAt (.address address) _
+      (write memory address (numberBytes bits.toNat _) ordinaryAccessAlignment) <;> rfl
+
+/-- `ldfld` of a class field holding an object reference pushes the reference its located slot
+    holds. -/
+theorem step_ldfld_reference_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (shape : body.fieldShape field = .classSlot offset .reference)
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let value ← loadSlot memory address
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step_ldfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    fieldLoad, shape, classFieldLoad, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference field.owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases loadSlot memory address <;> rfl
+
+/-- `stfld` of a class field holding an object reference stores the reference into its located
+    slot. -/
+theorem step_stfld_reference_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (shape : body.fieldShape field = .classSlot offset .reference)
+    (value reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame (.object value :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let after ← storeSlot memory address value
+      return .next (pc + 1) rest frame after := by
+  simp only [step_stfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    fieldStore, shape, classFieldStore, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference field.owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases storeSlot memory address value <;> rfl
+
+/-- `ldfld` of a class field holding a value array pushes the whole array its located slot
+    names. -/
+theorem step_ldfld_array_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (element : CIL.ArrayElement)
+    (shape : body.fieldShape field = .classSlot offset (.array element))
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let value ← loadArraySlot memory address element
+      return .next (pc + 1) (value :: rest) frame memory := by
+  simp only [step_ldfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    fieldLoad, shape, classFieldLoad, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference field.owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases loadArraySlot memory address element <;> rfl
+
+/-- `stfld` of a class field holding a value array keeps the stored array's origin in its
+    located slot. -/
+theorem step_stfld_array_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (element : CIL.ArrayElement)
+    (shape : body.fieldShape field = .classSlot offset (.array element))
+    (view : ArrayView) (reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame (.array view :: .object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
+      let after ← storeArraySlot memory address view element
+      return .next (pc + 1) rest frame after := by
+  simp only [step_stfld_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    fieldStore, shape, classFieldStore, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+  cases objectFieldAddress memory reference field.owner offset <;> try rfl
+  rename_i address
+  dsimp only
+  cases storeArraySlot memory address view element <;> rfl
+
+/-- `ldflda` of a class field faults: the model gives no address into an object. -/
+theorem step_ldflda_class_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (slot : CIL.ClassSlot) (shape : body.fieldShape field = .classSlot offset slot)
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldflda field) pc args frame (.object reference :: rest) memory =
+      .error (.unsupported "Class field address") := by
+  simp only [step_ldflda_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    fieldAddressFault, shape]
+  rfl
+
+/-- `ldfld` of a class field whose slot holds a 1-byte integer, as `step_ldfld_word_eq` states
+    it. -/
+theorem step_ldfld_word_1_eq (field : CIL.Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .classSlot offset (.word 1 signed))
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
       let value ← loadValue memory (.address address) 1 signed
       return .next (pc + 1) (.scalar value :: rest) frame memory :=
-  by apply step_objectField_eq; decide
+  step_ldfld_word_eq body pc args frame memory field offset 1 signed (by decide) shape reference
+    rest
 
-/-- `ldfld` of a 2-byte object field, as `step_objectField_eq` states it. -/
-@[cil_step high] theorem step_objectField_2_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (signed : Bool) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.objectField owner offset 2 signed)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+/-- `ldfld` of a class field whose slot holds a 2-byte integer, as `step_ldfld_word_eq` states
+    it. -/
+theorem step_ldfld_word_2_eq (field : CIL.Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .classSlot offset (.word 2 signed))
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
       let value ← loadValue memory (.address address) 2 signed
       return .next (pc + 1) (.scalar value :: rest) frame memory :=
-  by apply step_objectField_eq; decide
+  step_ldfld_word_eq body pc args frame memory field offset 2 signed (by decide) shape reference
+    rest
 
-/-- `ldfld` of a 4-byte object field, as `step_objectField_eq` states it. -/
-@[cil_step high] theorem step_objectField_4_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (signed : Bool) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.objectField owner offset 4 signed)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+/-- `ldfld` of a class field whose slot holds a 4-byte integer, as `step_ldfld_word_eq` states
+    it. -/
+theorem step_ldfld_word_4_eq (field : CIL.Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .classSlot offset (.word 4 signed))
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
       let value ← loadValue memory (.address address) 4 signed
       return .next (pc + 1) (.scalar value :: rest) frame memory :=
-  by apply step_objectField_eq; decide
+  step_ldfld_word_eq body pc args frame memory field offset 4 signed (by decide) shape reference
+    rest
 
-/-- `ldfld` of a 8-byte object field, as `step_objectField_eq` states it. -/
-@[cil_step high] theorem step_objectField_8_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (signed : Bool) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.objectField owner offset 8 signed)) pc args frame
-        (.object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+/-- `ldfld` of a class field whose slot holds a 8-byte integer, as `step_ldfld_word_eq` states
+    it. -/
+theorem step_ldfld_word_8_eq (field : CIL.Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape field = .classSlot offset (.word 8 signed))
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.ldfld field) pc args frame (.object reference :: rest) memory = do
+      let address ← objectFieldAddress memory reference field.owner offset
       let value ← loadValue memory (.address address) 8 signed
       return .next (pc + 1) (.scalar value :: rest) frame memory :=
-  by apply step_objectField_eq; decide
+  step_ldfld_word_eq body pc args frame memory field offset 8 signed (by decide) shape reference
+    rest
 
-/-- `stfld` of a 1-byte object field, as `step_setObjectField_i32_eq` states it. -/
-@[cil_step high] theorem step_setObjectField_i32_1_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.setObjectField owner offset 1)) pc args frame
+/-- `stfld` of a class field whose slot holds a 1-byte integer, as `step_stfld_word_i32_eq`
+    states it. -/
+theorem step_stfld_word_i32_1_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (signed : Bool) (shape : body.fieldShape field = .classSlot offset (.word 1 signed))
+    (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame
         (.scalar (.i32 bits) :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+      let address ← objectFieldAddress memory reference field.owner offset
       let after ← checkedAt (.address address) 1
         (write memory address (numberBytes bits.toNat 1) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame after :=
-  by apply step_setObjectField_i32_eq; decide
+  step_stfld_word_i32_eq body pc args frame memory field offset 1 signed (by decide) shape bits
+    reference rest
 
-/-- `stfld` of a 2-byte object field, as `step_setObjectField_i32_eq` states it. -/
-@[cil_step high] theorem step_setObjectField_i32_2_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.setObjectField owner offset 2)) pc args frame
+/-- `stfld` of a class field whose slot holds a 2-byte integer, as `step_stfld_word_i32_eq`
+    states it. -/
+theorem step_stfld_word_i32_2_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (signed : Bool) (shape : body.fieldShape field = .classSlot offset (.word 2 signed))
+    (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame
         (.scalar (.i32 bits) :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+      let address ← objectFieldAddress memory reference field.owner offset
       let after ← checkedAt (.address address) 2
         (write memory address (numberBytes bits.toNat 2) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame after :=
-  by apply step_setObjectField_i32_eq; decide
+  step_stfld_word_i32_eq body pc args frame memory field offset 2 signed (by decide) shape bits
+    reference rest
 
-/-- `stfld` of a 4-byte object field, as `step_setObjectField_i32_eq` states it. -/
-@[cil_step high] theorem step_setObjectField_i32_4_eq (owner : CIL.Extraction.TypeExpr)
-    (offset : Nat) (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
-    step body (.memory (.setObjectField owner offset 4)) pc args frame
+/-- `stfld` of a class field whose slot holds a 4-byte integer, as `step_stfld_word_i32_eq`
+    states it. -/
+theorem step_stfld_word_i32_4_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (signed : Bool) (shape : body.fieldShape field = .classSlot offset (.word 4 signed))
+    (bits : BitVec 32) (reference : ManagedReference) (rest : List Value) :
+    step body (.stfld field) pc args frame
         (.scalar (.i32 bits) :: .object reference :: rest) memory = do
-      let address ← objectFieldAddress memory reference owner offset
+      let address ← objectFieldAddress memory reference field.owner offset
       let after ← checkedAt (.address address) 4
         (write memory address (numberBytes bits.toNat 4) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame after :=
-  by apply step_setObjectField_i32_eq; decide
+  step_stfld_word_i32_eq body pc args frame memory field offset 4 signed (by decide) shape bits
+    reference rest
 
 end ObjectEquations
+
+open Lean Meta in
+/-- How `body` resolves `field`, reduced to a `FieldShape` constructor where it can be, with
+    its proof: from the operand's shared shape fact, by evaluation for a closed body and operand,
+    which the kernel checks again, or else as simp rewrites the shape with the facts in scope. -/
+def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
+  let resolver := mkApp2 (mkConst ``CIL.Method.fieldShape) body field
+  if let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.fieldShape resolver then
+    if let some proof := shared.proof? then return (shared.expr, proof)
+  unless resolver.hasFVar || resolver.hasMVar do
+    let evaluated ← withDefault <| reduce resolver
+    if ← isConstructorApp evaluated then
+      return (evaluated, ← mkExpectedTypeHint (← mkEqRefl evaluated) (← mkEq resolver evaluated))
+  let shape ← Simp.simp resolver
+  return (← whnfR (← instantiateMVars shape.expr), ← shape.getProof)
+
+open Lean Meta in
+/-- The step a class field instruction takes by `equation`, showing the field's owner as the
+    operand writes it, so facts stated over that owner still match the stepped goal. -/
+def fieldStep (field equation : Expr) : MetaM Simp.Step := do
+  let some (_, lhs, stepped) := (← inferType equation).eq? | return .continue
+  let_expr CIL.Extraction.FieldRef.mk owner _ _ _ := (← withDefault <| whnf field).consumeMData
+    | return .visit { expr := stepped, proof? := some equation }
+  let projected := mkApp (mkConst ``CIL.Extraction.FieldRef.owner) field
+  let shown := stepped.replace fun term => if term == projected then some owner else none
+  let proof ← mkExpectedTypeHint equation (← mkEq lhs shown)
+  return .visit { expr := shown, proof? := some proof }
+
+open Lean Meta in
+/-- A class field load steps by the equation for the field's slot and the receiver on the
+    stack, as `fieldShapeIn` finds the slot. A load whose shape stays unknown steps to
+    `fieldLoad`, whose match a later fact can decide. -/
+simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldfld field := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, field]
+  let generic := mkAppN (mkConst ``step_ldfld_eq) (leading.push stack)
+  let (shape, proof) ← fieldShapeIn body field
+  let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
+  let_expr List.cons _ receiver rest := stack | equationStep generic
+  let_expr Value.object reference := receiver | equationStep generic
+  let known? ← match (← whnfR slot).getAppFnArgs with
+    | (``CIL.ClassSlot.word, #[width, signed]) =>
+      let equation? := match ← getNatValue? width with
+        | some 1 => some ``step_ldfld_word_1_eq
+        | some 2 => some ``step_ldfld_word_2_eq
+        | some 4 => some ``step_ldfld_word_4_eq
+        | some 8 => some ``step_ldfld_word_8_eq
+        | _ => none
+      pure (equation?.map fun name =>
+        mkAppN (mkConst name) (leading ++ #[offset, signed, proof, reference, rest]))
+    | (``CIL.ClassSlot.reference, _) =>
+      pure (some (mkAppN (mkConst ``step_ldfld_reference_eq)
+        (leading ++ #[offset, proof, reference, rest])))
+    | (``CIL.ClassSlot.array, #[element]) =>
+      pure (some (mkAppN (mkConst ``step_ldfld_array_eq)
+        (leading ++ #[offset, element, proof, reference, rest])))
+    | _ => pure none
+  match known? with
+  | some equation => fieldStep field equation
+  | none => equationStep generic
+
+open Lean Meta in
+/-- A class field store steps by the equation for the field's slot and the stored value and
+    receiver on the stack, as `fieldShapeIn` finds the slot. A store whose shape stays unknown
+    steps to `fieldStore`. -/
+simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.stfld field := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, field]
+  let generic := mkAppN (mkConst ``step_stfld_eq) (leading.push stack)
+  let (shape, proof) ← fieldShapeIn body field
+  let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
+  let_expr List.cons _ stored below := stack | equationStep generic
+  let_expr List.cons _ receiver rest := below | equationStep generic
+  let_expr Value.object reference := receiver | equationStep generic
+  let known? ← match (← whnfR slot).getAppFnArgs, stored.getAppFnArgs with
+    | (``CIL.ClassSlot.word, #[width, signed]), (``Value.scalar, #[number]) =>
+      let equation? := match ← getNatValue? width, number.getAppFnArgs with
+        | some 1, (``CIL.Value.i32, #[bits]) => some (``step_stfld_word_i32_1_eq, bits)
+        | some 2, (``CIL.Value.i32, #[bits]) => some (``step_stfld_word_i32_2_eq, bits)
+        | some 4, (``CIL.Value.i32, #[bits]) => some (``step_stfld_word_i32_4_eq, bits)
+        | some 8, (``CIL.Value.i64, #[bits]) => some (``step_stfld_word_i64_eq, bits)
+        | _, _ => none
+      pure (equation?.map fun (name, bits) =>
+        mkAppN (mkConst name) (leading ++ #[offset, signed, proof, bits, reference, rest]))
+    | (``CIL.ClassSlot.reference, _), (``Value.object, #[value]) =>
+      pure (some (mkAppN (mkConst ``step_stfld_reference_eq)
+        (leading ++ #[offset, proof, value, reference, rest])))
+    | (``CIL.ClassSlot.array, #[element]), (``Value.array, #[view]) =>
+      pure (some (mkAppN (mkConst ``step_stfld_array_eq)
+        (leading ++ #[offset, element, proof, view, reference, rest])))
+    | _, _ => pure none
+  match known? with
+  | some equation => fieldStep field equation
+  | none => equationStep generic
+
+open Lean Meta in
+/-- A class field address steps to its fault, as `fieldShapeIn` finds the class slot. An
+    address whose shape stays unknown steps to `fieldAddressFault`. -/
+simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldflda field := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, field]
+  let generic := mkAppN (mkConst ``step_ldflda_eq) (leading.push stack)
+  let (shape, proof) ← fieldShapeIn body field
+  let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
+  let_expr List.cons _ receiver rest := stack | equationStep generic
+  let_expr Value.object reference := receiver | equationStep generic
+  equationStep (mkAppN (mkConst ``step_ldflda_class_eq)
+    (leading ++ #[offset, slot, proof, reference, rest]))
 
 #print axioms step_ceq_object_eq
 #print axioms step_beq_object_eq
@@ -728,27 +884,28 @@ end ObjectEquations
 #print axioms allocateElements_value
 #print axioms allocateElements_reference
 #print axioms step_stringLiteral_eq
-#print axioms step_objectField_eq
-#print axioms step_setObjectField_i64_eq
-#print axioms step_setObjectField_i32_eq
-#print axioms step_objectField_1_eq
-#print axioms step_objectField_2_eq
-#print axioms step_objectField_4_eq
-#print axioms step_objectField_8_eq
-#print axioms step_setObjectField_i32_1_eq
-#print axioms step_setObjectField_i32_2_eq
-#print axioms step_setObjectField_i32_4_eq
-#print axioms step_objectReferenceField_eq
-#print axioms step_setObjectReferenceField_eq
 #print axioms step_referenceArrayLength_eq
 #print axioms step_referenceArrayLoad_eq
 #print axioms step_referenceArrayStore_eq
-#print axioms step_arrayField_eq
-#print axioms step_setArrayField_eq
 #print axioms loadArraySlot_of_access
 #print axioms arrayOfSlot_whole
 #print axioms storeArraySlot_whole
 #print axioms loadSlot_of_access
 #print axioms storeSlot_of_access
+#print axioms step_ldfld_word_eq
+#print axioms step_stfld_word_i64_eq
+#print axioms step_stfld_word_i32_eq
+#print axioms step_ldfld_reference_eq
+#print axioms step_stfld_reference_eq
+#print axioms step_ldfld_array_eq
+#print axioms step_stfld_array_eq
+#print axioms step_ldflda_class_eq
+#print axioms step_ldfld_word_1_eq
+#print axioms step_ldfld_word_2_eq
+#print axioms step_ldfld_word_4_eq
+#print axioms step_ldfld_word_8_eq
+#print axioms step_stfld_word_i32_1_eq
+#print axioms step_stfld_word_i32_2_eq
+#print axioms step_stfld_word_i32_4_eq
 
 end CIL.Safety

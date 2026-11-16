@@ -841,19 +841,45 @@ theorem wideArithmeticInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms wideArithmeticInstruction_contract
 
-/-- Object field loads and stores preserve checked effects and stack validity. -/
-theorem objectFieldInstruction_contract (operation : CIL.MemoryOp)
+/-- Reference array loads, stores and lengths preserve checked effects and stack validity. -/
+theorem referenceArrayInstruction_contract (operation : CIL.MemoryOp)
     (stack values : List Value) (memory result : Memory)
-    (executed : objectFieldInstruction operation stack memory = .ok (result, values)) :
+    (executed : referenceArrayInstruction operation stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
-  unfold objectFieldInstruction referenceArrayLength referenceArrayLoad referenceArrayStore
+  unfold referenceArrayInstruction referenceArrayLength referenceArrayLoad referenceArrayStore
     at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
     | cases executed
     | split at executed
-#print axioms objectFieldInstruction_contract
+#print axioms referenceArrayInstruction_contract
+
+/-- Class instance field loads preserve checked effects and stack validity. -/
+theorem classFieldLoad_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (slot : CIL.ClassSlot) (stack values : List Value) (memory result : Memory)
+    (executed : classFieldLoad owner offset slot stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold classFieldLoad at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms classFieldLoad_contract
+
+/-- Class instance field stores preserve checked effects and stack validity. -/
+theorem classFieldStore_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (slot : CIL.ClassSlot) (stack values : List Value) (memory result : Memory)
+    (executed : classFieldStore owner offset slot stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold classFieldStore at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms classFieldStore_contract
 
 /-- A string literal leaves memory unchanged and pushes a formed object reference. -/
 theorem stringLiteralInstruction_contract (text : String)
@@ -1118,15 +1144,9 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact staticSpanInstruction_contract _ _ _ _ _ h
     · exact staticSpanInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
-    · exact objectFieldInstruction_contract _ _ _ _ _ h
+    · exact referenceArrayInstruction_contract _ _ _ _ _ h
+    · exact referenceArrayInstruction_contract _ _ _ _ _ h
+    · exact referenceArrayInstruction_contract _ _ _ _ _ h
     · exact stringLiteralInstruction_contract _ _ _ _ _ h
     · exact throwIfNullInstruction_contract _ _ _ _ h
     · exact zeroGuardInstruction_contract _ _ _ _ _ _ _ h

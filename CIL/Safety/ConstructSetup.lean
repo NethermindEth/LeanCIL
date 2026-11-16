@@ -17,15 +17,16 @@ macro "cil_known_arguments" : tactic =>
   `(tactic| simp [CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified])
 
 /-- Unmanaged constructors receive fresh initialized aggregate storage of any
-    positive representable width. -/
-theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
+    positive representable width; the constructor is the one the call site's link names. -/
+theorem step_newAggregate {body : CIL.Method} {pc target callee : Nat} {linkedSize : Fin (2^64)}
     (size : Fin (2^64)) (positive : 0 < size.val)
+    (linked : body.linkAt pc = some (.aggregate callee linkedSize))
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
     (wellFormed : memory.WellFormed)
     (checked : arguments.mapM (checkedValue memory) = .ok arguments)
     (known : arguments.any Value.hasUnspecified = false := by cil_known_arguments) :
     ∃ temporary updated,
-      step body (.newAggregate callee arguments.length size) pc args frame
+      step body (.newAggregate target arguments.length size) pc args frame
           (arguments.reverse ++ rest) memory =
         .ok (.construct callee (.reference (.address temporary) :: arguments) rest
           { frame with owned := temporary.allocation :: frame.owned } temporary (.aggregate size)
@@ -39,7 +40,7 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
       (by simp) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved, fresh⟩
   have nonzero : size ≠ 0 := by intro h; have := congrArg Fin.val h; simp at this; omega
-  simp [step, observerCount, unspecifiedOperands, known, nonzero, checked, home,
+  simp [step, observerCount, unspecifiedOperands, linked, known, nonzero, checked, home,
     Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length), Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 

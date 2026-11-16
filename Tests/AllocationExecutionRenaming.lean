@@ -54,7 +54,8 @@ theorem bodies_related (code : List CIL.Instruction) :
       returnNarrow := rfl
       arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
       declared := rfl
-      environment := rfl }
+      environment := rfl
+      links := indices.linksOfCode_map code }
     declarations :=
       .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
         (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil))))
@@ -298,7 +299,8 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
         returnNarrow := rfl
         arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
         declared := rfl
-        environment := rfl }
+        environment := rfl
+        links := rfl }
       declarations := .skip kind initial fits .nil
       sourceReady := ?_
       targetReady := inserted_ready kind initial fits

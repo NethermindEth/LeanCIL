@@ -296,10 +296,10 @@ theorem StepContract.arrayAllocation {body : CIL.Method} {operation : CIL.Instru
 theorem StepContract.objectAllocation {body : CIL.Method} {frame : Frame}
     {stack arguments : List Value} {memory result : Memory} {object : Reference}
     {owner : CIL.Extraction.TypeExpr} {bases : List CIL.Extraction.TypeExpr}
-    {size callee argc : Nat}
+    {size target callee argc : Nat}
     (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
     (success : allocateObject memory ⟨owner, bases⟩ size = .ok (object, result)) :
-    StepContract body (.newObject callee argc owner bases size) frame stack memory
+    StepContract body (.newObject target argc owner bases size) frame stack memory
       (.call callee (.object (.address object) :: arguments)
         (.object (.address object) :: stack.drop argc) result) := by
   have effect := allocateObject_effect success
@@ -393,9 +393,9 @@ theorem methodTableLength_numeric {table : CIL.MethodTable} {length : CIL.Value}
 
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
-    (operation : CIL.ManagedOp) (pc : Nat)
+    (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
-    (executed : managedStep operation pc frame stack memory = .ok action) :
+    (executed : managedStep operation link pc frame stack memory = .ok action) :
     StepContract body dispatched frame stack memory action := by
   unfold managedStep methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
@@ -417,6 +417,28 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     | cases executed
     | split at executed
 #print axioms managedStep_contract
+
+/-- An instance field load that succeeds preserves checked effects and stack validity. -/
+theorem fieldLoad_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
+    (stack values : List Value) (memory result : Memory)
+    (executed : fieldLoad body field stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold fieldLoad at executed
+  split at executed
+  · exact classFieldLoad_contract _ _ _ _ _ _ _ executed
+  all_goals cases executed
+#print axioms fieldLoad_contract
+
+/-- An instance field store that succeeds preserves checked effects and stack validity. -/
+theorem fieldStore_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
+    (stack values : List Value) (memory result : Memory)
+    (executed : fieldStore body field stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold fieldStore at executed
+  split at executed
+  · exact classFieldStore_contract _ _ _ _ _ _ _ executed
+  all_goals cases executed
+#print axioms fieldStore_contract
 
 -- The walk splits every arm of both dispatcher matches, argument homes included.
 set_option maxHeartbeats 400000 in
@@ -453,6 +475,11 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         apply StepContract.instruction
         apply referenceAddInstruction_contract
         assumption
+    | solve |
+        apply StepContract.instruction
+        first
+          | (apply fieldLoad_contract; assumption)
+          | (apply fieldStore_contract; assumption)
     | solve |
         refine StepContract.of_effect ?_ ?_
         · first

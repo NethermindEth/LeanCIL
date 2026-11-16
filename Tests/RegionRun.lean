@@ -58,13 +58,15 @@ theorem calling_run (fuel : Nat) (args stack : List Value) (frame : Frame) (m : 
       code_agrees_of_drop (lower := 2) rfl (by simpa [calling, inStarts] using inside)) _ _ _ _ _ _ _ (by decide)
 
 /-- A branch back into the prefix leaves the region. -/
-example : regionClosedCheck [{ caller with code := [.ldc_i4 0, .ret, .br 0] }] [(0, 2)] = false := by decide
+example : regionClosedCheck [caller.withCode [.ldc_i4 0, .ret, .br 0]] [(0, 2)] = false := by
+  decide
 
 /-- A call into a method the region does not cover from pc 0 leaves it. -/
 example : regionClosedCheck [caller, helper] [(0, 2)] = false := by decide
 
 /-- A whole method of straight-line code is closed. -/
-example : regionClosedCheck [{ caller with code := [.ldc_i4 0, .ldc_i4 1, .ret] }] [(0, 0)] = true := by decide
+example : regionClosedCheck [caller.withCode [.ldc_i4 0, .ldc_i4 1, .ret]] [(0, 0)] = true := by
+  decide
 
 def longSuffix : List Instruction :=
   List.replicate 96 .nop ++ [.brfalse 102, .switch [3, 102], .bge 102, .ret]
@@ -178,7 +180,7 @@ theorem duplicateStarts :
 
 /-- A later duplicate cannot hide the earlier suffix's escaping branch. -/
 theorem earlierStartRejects : regionClosedCheck
-    [{ caller with code := [.ret, .br 0, .ret] }] [(0, 2), (0, 1)] = false := by
+    [caller.withCode [.ret, .br 0, .ret]] [(0, 2), (0, 1)] = false := by
   decide +kernel
 #print axioms earlierStartRejects
 
@@ -189,7 +191,7 @@ theorem absentAndEmpty : regionClosedCheck [caller, helper] [(99, 0), (0, 999)] 
 
 /-- A listed absent callee still belongs to the region; execution separately rejects it. -/
 theorem absentCallee : regionClosedCheck
-    [{ caller with code := [.call 99 0, .ret] }] [(0, 0), (99, 0)] = true := by
+    [caller.withCode [.call 99 0, .ret]] [(0, 0), (99, 0)] = true := by
   decide +kernel
 #print axioms absentCallee
 
@@ -198,6 +200,6 @@ theorem emptyStarts : regionClosedCheck [caller, helper] [] = true := by decide 
 #print axioms emptyStarts
 /-- Region membership extends past the body; execution checks instruction availability. -/
 theorem finalFallthrough : regionClosedCheck
-    [{ caller with code := [.nop] }] [(0, 0)] = true := by decide +kernel
+    [caller.withCode [.nop]] [(0, 0)] = true := by decide +kernel
 #print axioms finalFallthrough
 end Tests.RegionRun

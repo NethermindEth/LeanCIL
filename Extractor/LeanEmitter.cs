@@ -124,28 +124,6 @@ internal static class LeanEmitter
 
     static string LinkName(int method, int pc) => $"method{method}Link{pc}";
 
-    // The balanced index of the table's call sites, split exactly as FlowIndex.build splits a list.
-    static string LinkIndexLiteral(int method, IReadOnlyList<int> pcs)
-    {
-        var text = new StringBuilder();
-        void Tree(int start, int length)
-        {
-            if (length == 0) text.Append(".empty");
-            else if (length == 1) text.Append($".leaf ({pcs[start]}, {LinkName(method, pcs[start])})");
-            else
-            {
-                var middle = length / 2;
-                text.Append($".branch {middle} (");
-                Tree(start, middle);
-                text.Append(") (");
-                Tree(start + middle, length - middle);
-                text.Append(')');
-            }
-        }
-        Tree(0, pcs.Count);
-        return text.ToString();
-    }
-
     // These definitions guide proof simplification; the full validator still checks every call.
     static string? CallDefinitions(int caller, IReadOnlyList<Operation> operations, int methodCount)
     {
@@ -253,8 +231,13 @@ internal static class LeanEmitter
             {
                 var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                     scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
-                return operation is NewArray allocation
-                    ? allocation with { Element = genericEvidence.ArrayElementOf(m, i) } : operation;
+                // An allocation and a class field access name the element or field their raw operand names.
+                return operation switch
+                {
+                    NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
+                    ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, i) },
+                    _ => operation
+                };
             }
             List<Operation> ops = [];
             foreach (Instruction i in m.Body.Instructions)
@@ -294,27 +277,24 @@ internal static class LeanEmitter
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
+            // A class field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable);
             var decoded = refusals[n] is null;
             if (decoded)
+            {
                 // The decoder's raw definition is the method's only source; the command states its field facts.
                 lean.AppendLine($"cil_decoded_method method{n} := Method.ofRaw? profile " +
                     $"{FrameMetadata.EnvironmentLean} method{n}Original method{n}TypeArgumentsRaw");
+            }
             else
             {
                 // Links stay out of the frame: templates share it across profiles, but call indices differ.
                 lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
                     $"links := {linkTable}, code := [");
-                lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op.ToLean())) + "] }");
-            }
-            if (linkEntries.Count > 0)
-            {
-                // The literal index is checked once against the table; each fact then reads it in logarithmic time.
-                var indexLiteral = LinkIndexLiteral(n, [.. linkEntries.Select(entry => entry.Pc)]);
-                lean.AppendLine($"def method{n}LinkIndex : Extraction.FlowIndex (Nat × Link) := {indexLiteral}");
-                lean.AppendLine($"theorem method{n}_linkIndex_valid : " +
-                    $"Extraction.LinkIndexValid method{n}.links method{n}LinkIndex := {Decide}");
+                lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
+                    (op is ClassField { Reference: { } field } access
+                        ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             }
             lean.AppendLine($"theorem method{n}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts " +
                 $"computedLayouts method{n} method{n}LayoutUses := {Decide}");
@@ -328,7 +308,8 @@ internal static class LeanEmitter
             if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
                     $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
-            // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
+            // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
+            // in time linear in the body, so a stepping proof reads a link without evaluating the table lookup.
             lean.AppendLine($"cil_instruction_equations method{n}");
             (string Field, string Value)[] facts =
             [
@@ -341,14 +322,6 @@ internal static class LeanEmitter
                 foreach (var (field, value) in facts)
                     lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
             lean.AppendLine($"cil_resolution_facts method{n}");
-            // One fact per call site lets a stepping proof read its link without evaluating the table lookup.
-            for (var position = 0; position < linkEntries.Count; position++)
-            {
-                var pc = linkEntries[position].Pc;
-                lean.AppendLine($"@[cil_code] theorem method{n}_link{pc} : " +
-                    $"method{n}.linkAt {pc} = some {LinkName(n, pc)} := " +
-                    $"Extraction.linkAt_of_entry (position := {position}) method{n}_linkIndex_valid rfl");
-            }
         }
         lean.Insert(shapeFactsAt, operandShapes.Lean());
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
@@ -475,6 +448,9 @@ internal static class LeanEmitter
                 }
             }
         }
+
+        /// <summary>The definition that names the recorded field operand <paramref name="field"/>.</summary>
+        internal string FieldName(FieldRef field) => $"fieldRef{fields[field]}";
 
         /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
         internal string Lean() => text.ToString();

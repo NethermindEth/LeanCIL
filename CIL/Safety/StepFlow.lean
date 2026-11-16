@@ -10,22 +10,23 @@ loop proofs can enumerate successors without stepping.
 
 namespace CIL
 
-/-- Every method index an instruction calls or constructs with. -/
-def Instruction.callees : Instruction → List Nat
-  | .managed (.call _ catalog _) => catalog.map ManagedTarget.method
-  | .callVirtual targets _ => targets.map Prod.snd
-  | .call method _ | .callInstance method _ | .tailCall method _ | .newAggregate method _ _
-  | .newObject method .. => [method]
-  | _ => []
+/-- Every method index the call site at `pc` may enter: the callees of its link, none when the
+    link table gives the pc no entry. -/
+def Method.calleesAt (body : Method) (pc : Nat) : List Nat :=
+  ((body.linkAt pc).map Link.callees).getD []
 
-/-- The link an instruction implies enters exactly the methods the instruction names. -/
-theorem Instruction.link?_callees (op : Instruction) :
-    (op.link?.map Link.callees).getD [] = op.callees := by
-  cases op <;> simp [Instruction.link?, Link.callees, Instruction.callees]
-  case managed operation =>
-    cases operation <;> simp [Link.callees]
+/-- A method a call site may enter is a callee of an entry of the link table at that pc. -/
+theorem Method.calleesAt_mem {body : Method} {pc callee : Nat}
+    (member : callee ∈ body.calleesAt pc) :
+    ∃ entry ∈ body.links, entry.1 = pc ∧ callee ∈ entry.2.callees := by
+  simp only [Method.calleesAt, Method.linkAt, linkLookup] at member
+  cases found : body.links.find? (fun entry => entry.1 == pc) with
+  | none => simp [found] at member
+  | some entry =>
+    simp only [found, Option.map_some, Option.getD_some] at member
+    exact ⟨entry, List.mem_of_find?_eq_some found, by simpa using List.find?_some found, member⟩
 
-#print axioms Instruction.link?_callees
+#print axioms Method.calleesAt_mem
 
 end CIL
 
@@ -36,12 +37,13 @@ def FrameAction.callee : FrameAction → Option Nat
   | .call callee .. | .tailCall callee .. | .construct callee .. => some callee
   | _ => none
 
-/-- An indirect call can enter only a body named in its authenticated catalog. -/
-theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame}
-    {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
-    (executed : managedStep operation pc frame stack memory = .ok action)
+/-- An indirect call can enter only a body named in the authenticated catalog of its link. -/
+theorem managedStep_callee {operation : CIL.ManagedOp} {link : Option CIL.Link} {pc : Nat}
+    {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
+    (executed : managedStep operation link pc frame stack memory = .ok action)
     (enters : action.callee = some callee) :
-      callee ∈ (CIL.Instruction.managed operation).callees := by
+      (CIL.Instruction.managed operation).link?.isSome = true ∧
+        callee ∈ (link.map CIL.Link.callees).getD [] := by
   unfold managedStep methodTableLength methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
@@ -49,45 +51,25 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame
       cases executed
       simp only [FrameAction.callee, Option.some.injEq] at enters
       subst callee
+      refine ⟨rfl, ?_⟩
+      simp only [Option.map_some, Option.getD_some, CIL.Link.callees]
       exact indirectTarget_mem (by assumption)
     | solve | cases executed; cases enters
     | cases executed
     | split at executed
 #print axioms managedStep_callee
 
-/-- A virtual call enters only a body its table lists. -/
-theorem step_callVirtual_callee {body : CIL.Method}
-    {targets : List (CIL.Extraction.TypeExpr × Nat)} {argc pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
-    (executed : step body (.callVirtual targets argc) pc args frame stack memory = .ok action)
-    (enters : action.callee = some callee) :
-    callee ∈ (CIL.Instruction.callVirtual targets argc).callees := by
-  simp only [step] at executed
-  split at executed
-  · cases executed
-  split at executed
-  · cases executed
-  obtain ⟨arguments, _, executed⟩ := except_bind_ok executed
-  split at executed
-  · obtain ⟨selectedCallee, selected, executed⟩ := except_bind_ok executed
-    cases executed
-    simp only [FrameAction.callee, Option.some.injEq] at enters
-    subst callee
-    exact virtualTarget_mem selected
-  all_goals cases executed
-#print axioms step_callVirtual_callee
-
 set_option maxHeartbeats 800000 in
-/-- A successful call or construction enters a method listed by its instruction. -/
+/-- A successful call or construction is a step of a call-family instruction, and enters a method
+    its link at the step's pc lists. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction} {callee : Nat}
     (h : step body op pc args frame stack m = .ok action)
-    (enters : action.callee = some callee) : callee ∈ op.callees := by
-  cases op
-  case callVirtual targets argc => exact step_callVirtual_callee h enters
-  all_goals unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
-  all_goals dsimp only at h
-  all_goals split at h
+    (enters : action.callee = some callee) :
+    op.link?.isSome = true ∧ callee ∈ body.calleesAt pc := by
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
+  dsimp only at h
+  split at h
   all_goals repeat' first
     | exact managedStep_callee h enters
     | unfold returnFrom at h
@@ -97,7 +79,12 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
       cases h
       simp only [FrameAction.callee, Option.some.injEq] at enters
       subst callee
-      simp only [Instruction.callees, List.mem_singleton]
+      refine ⟨rfl, ?_⟩
+      rw [CIL.Method.calleesAt, ‹body.linkAt pc = _›]
+      first
+      | (simp only [Option.map_some, Option.getD_some, CIL.Link.callees, List.mem_singleton]; done)
+      | (simp only [Option.map_some, Option.getD_some, CIL.Link.callees]
+         exact virtualTarget_mem ‹_›)
     | contradiction
     | (obtain ⟨_, _, h⟩ := except_bind_ok h)
     | split at h
@@ -110,8 +97,7 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
     (executed : step body (.managed (.call signature catalog true)) pc args frame stack memory =
       .ok action) :
     ∃ callee arguments result, action = .tailCall callee arguments result := by
-  simp only [step, managedStep,
-    Bind.bind, Except.bind, Pure.pure, Except.pure, Bool.true_eq, ite_true] at executed
+  simp only [step, managedStep, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; exact ⟨_, _, _, rfl⟩
     | cases executed
@@ -140,38 +126,43 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
   have : r target = target + 1 := ite_eq_left rfl
   omega
 
-/-- A call instruction only ever enters the method it names as a call, never as a
+/-- A call instruction only ever enters the method its link names, as a call, never as a
     construction. -/
-theorem step_call_action {body : CIL.Method} {callee argc pc : Nat} {args : List Value}
+theorem step_call_action {body : CIL.Method} {target argc pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.call callee argc) pc args frame stack m = .ok action) :
-    ∃ arguments rest m', action = .call callee arguments rest m' := by
+    (h : step body (.call target argc) pc args frame stack m = .ok action) :
+    ∃ callee arguments rest m', body.linkAt pc = some (.direct callee) ∧
+      action = .call callee arguments rest m' := by
   unfold step at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, rfl⟩)
+  all_goals (cases h; exact ⟨_, _, _, _, by assumption, rfl⟩)
+#print axioms step_call_action
 
-/-- A tail-call instruction requests frame retirement and exactly its named callee. -/
-theorem step_tailCall_action {body : CIL.Method} {callee argc pc : Nat} {args : List Value}
+/-- A tail-call instruction requests frame retirement and exactly the callee its link names. -/
+theorem step_tailCall_action {body : CIL.Method} {target argc pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.tailCall callee argc) pc args frame stack m = .ok action) :
-    ∃ arguments updated, action = .tailCall callee arguments updated := by
+    (h : step body (.tailCall target argc) pc args frame stack m = .ok action) :
+    ∃ callee arguments updated, body.linkAt pc = some (.direct callee) ∧
+      action = .tailCall callee arguments updated := by
   unfold step at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, rfl⟩)
+  all_goals (cases h; exact ⟨_, _, _, by assumption, rfl⟩)
 #print axioms step_tailCall_action
 
-/-- Aggregate construction enters the constructor it names with a temporary, never as a plain
-    call. -/
-theorem step_newAggregate_action {body : CIL.Method} {callee argc pc : Nat} {size}
+/-- Aggregate construction enters the constructor its link names with a temporary, never as a
+    plain call. -/
+theorem step_newAggregate_action {body : CIL.Method} {target argc pc : Nat} {size}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.newAggregate callee argc size) pc args frame stack m = .ok action) :
-    ∃ arguments rest frame' temporary kind m',
+    (h : step body (.newAggregate target argc size) pc args frame stack m = .ok action) :
+    ∃ callee linkedSize arguments rest frame' temporary kind m',
+      body.linkAt pc = some (.aggregate callee linkedSize) ∧
       action = .construct callee arguments rest frame' temporary kind m' := by
   unfold step at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, _, _, _, rfl⟩)
+  all_goals (cases h; exact ⟨_, _, _, _, _, _, _, _, by assumption, rfl⟩)
+#print axioms step_newAggregate_action
 
 end CIL.Safety

@@ -1354,7 +1354,7 @@ for (var producer = 0; producer < producers.Length; producer++)
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
 
-// The extraction of a body with many calls: its link table, link index, per-site facts and the checks that
+// The extraction of a body with many calls: its link table, key check, per-site facts and the checks that
 // tie them together must each cost the same per call site at four times the size.
 long CallingCost(string name)
 {
@@ -1468,7 +1468,7 @@ CheckEmbeddingGrowth("Embedding", "a body with many calls", DeadBlocks, 1, Embed
 CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders", Reordered, 2,
     ReorderFewSegments, ReorderManySegments);
 
-// The text a method emits for its links and the kernel heartbeats to recheck its link index, for a body
+// The text a method emits for its links and the kernel heartbeats to recheck that its table keys ascend, for a body
 // with two calls: both depend on the calls, not on the length of the body.
 (long Bytes, long Heartbeats) SparseLinkCost(string name)
 {
@@ -1478,24 +1478,24 @@ CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders",
     var linkLines = extracted.Split('\n').Where(line => LookupPatterns.LinkLine().IsMatch(line))
         .Sum(line => (long)line.Length + 1);
     if (linkLines == 0) throw new InvalidOperationException("The extraction of " + name + " has no link output.");
-    var path = Path.Combine(output, "LinkIndex.lean");
+    var path = Path.Combine(output, "LinkAscend.lean");
     File.WriteAllText(path, extracted + """
 
         open Lean in
         run_cmd do
           let env ← getEnv
-          let some (.thmInfo declaration) := env.find? `Extracted.method0_linkIndex_valid
-            | throwError "missing the link index check"
+          let some (.thmInfo declaration) := env.find? `Extracted.method0_links_ascend
+            | throwError "missing the link key check"
           let start ← IO.getNumHeartbeats
           let copy : Declaration := .thmDecl { declaration with name := declaration.name ++ `recheck }
           match env.toKernelEnv.addDeclCore 0 1000000 copy none with
           | .ok _ => pure ()
-          | .error _ => throwError "Kernel rejected the link index check"
+          | .error _ => throwError "Kernel rejected the link key check"
           logInfo m!"{(← IO.getNumHeartbeats) - start} kernel heartbeats"
         """ + "\n");
     var report = Run(["lake", "env", "lean", path], cwd: FixturePackage());
     var beats = LookupPatterns.KernelHeartbeats().Match(report);
-    if (!beats.Success) throw new InvalidOperationException("Missing the link index recheck cost:\n" + report);
+    if (!beats.Success) throw new InvalidOperationException("Missing the link key recheck cost:\n" + report);
     return (linkLines, long.Parse(beats.Groups[1].Value, CultureInfo.InvariantCulture));
 }
 var sparseShort = SparseLinkCost("SparseShort");
@@ -1504,7 +1504,7 @@ var sparseMeasured = $"{sparseShort.Bytes} link bytes and {sparseShort.Heartbeat
     $"{SparseShortStatements} statements, {sparseLong.Bytes} and {sparseLong.Heartbeats} at {SparseLongStatements}";
 if (sparseLong.Bytes > sparseShort.Bytes * 1.1 || sparseLong.Heartbeats > sparseShort.Heartbeats * AllowedCallGrowth)
     throw new InvalidOperationException("A longer body with the same calls emits more link output: " + sparseMeasured);
-Console.WriteLine("PASS link output and index check of a body with two calls do not grow with the body: " +
+Console.WriteLine("PASS link output and key check of a body with two calls do not grow with the body: " +
     sparseMeasured);
 
 // Subtract the same generated body's cost to isolate computed lookup from equation generation.
@@ -2289,7 +2289,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"([0-9]+) kernel heartbeats")]
     internal static partial Regex KernelHeartbeats();
 
-    [GeneratedRegex(@"^(@\[cil_code\] )?(def method0Link|theorem method0_link)")]
+    [GeneratedRegex(@"^@\[cil_code\] def method0Link")]
     internal static partial Regex LinkLine();
 
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]

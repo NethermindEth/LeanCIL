@@ -170,9 +170,7 @@ example : [CIL.MemoryOp.copyBlock 1, .initBlock 1, .load128, .load256, .load512,
     .store256, .store512,
     .staticAddress [], .staticValue [], .arrayLength, .arrayLoad 4 false, .arrayStore 4,
     .arrayAddress element, .arrayTransfer element false, .stringLiteral "",
-    .objectField .void 0 4 false, .setObjectField .void 0 4, .objectReferenceField .void 0,
-    .setObjectReferenceField .void 0, .referenceArrayLength, .referenceArrayLoad,
-    .referenceArrayStore, .arrayField .void 0 element, .setArrayField .void 0 element].any
+    .referenceArrayLength, .referenceArrayLoad, .referenceArrayStore].any
       CIL.MemoryOp.callReached = false := rfl
 
 

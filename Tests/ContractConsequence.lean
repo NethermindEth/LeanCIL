@@ -341,7 +341,8 @@ theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_p
 /-- `Sum` passes its arguments through in order, so it meets `addPublic` itself. -/
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_public.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged (by decide) _)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 
@@ -356,7 +357,7 @@ def swappedArgs (input : AddInput) : List Value :=
     about `a` follows from `AddTo`'s footprint although `a` is now the second argument. -/
 theorem swapped_forwards : (addPublic.withArgs swappedArgs).Holds Extracted.program swapped :=
   add_public.forward (loads := [1, 0, 2]) (narrow := none) (forwarded := swappedArgs)
-    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl (by
       simp only [swappedArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
@@ -434,7 +435,7 @@ theorem discard_forwards : discardContract.Holds Extracted.program discard :=
     (kind := .word64) (initial := .unmodeled)
     (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
     discard.found addFlag.found
-    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
+    ⟨rfl, rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
       fun _ => nofun, nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
@@ -478,7 +479,7 @@ def fromArgs (input : AddInput) : List Value :=
 /-- `AddFrom` meets `addPublic` over its own argument order. -/
 theorem add_from_forwards : (addPublic.withArgs fromArgs).Holds Extracted.program addFrom :=
   add_public.forward (loads := [2, 1, 0]) (narrow := none) (forwarded := fromArgs)
-    addFrom.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    addFrom.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl (by
       simp only [fromArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
@@ -512,7 +513,7 @@ theorem copy_forwards : copyContract.Holds Extracted.program copyTo :=
     (kind := .word64) (initial := .i64 0)
     (fun input home => ⟨home, input.b, input.res, input.region, 0, input.y⟩)
     copyTo.found addFrom.found
-    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
+    ⟨rfl, rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
       fun _ => nofun, nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readB, writable, _⟩ => ⟨formed, fun value member => by
@@ -564,7 +565,7 @@ theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
 theorem is_zero_forwards :
     (isZeroContract.withArgs isZeroContract.args).Holds Extracted.program isZeroForward :=
   is_zero_holds.forward (loads := [0]) (narrow := some .unsigned8)
-    isZeroForward.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isZeroForward.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
@@ -579,7 +580,7 @@ def ignoringArgs (v : CIL.W64) : List Value := [.scalar (.i64 v), .scalar (.i64 
 theorem is_zero_ignoring_forwards :
     (isZeroContract.withArgs ignoringArgs).Holds Extracted.program isZeroIgnoring :=
   is_zero_holds.forward (loads := [0]) (narrow := some .unsigned8)
-    isZeroIgnoring.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isZeroIgnoring.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ value member => by
       simp only [ignoringArgs, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -612,7 +613,7 @@ def pairArgs (pair : CIL.W64 × CIL.W64) : List Value :=
 theorem is_zero_second_forwards :
     (secondZero.withArgs pairArgs).Holds Extracted.program isZeroSecond :=
   second_zero_holds.forward (loads := [1]) (narrow := some .unsigned8)
-    isZeroSecond.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isZeroSecond.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ value member => by
       simp only [pairArgs, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -644,7 +645,7 @@ theorem is_set_holds : isSetContract.Holds Extracted.program isSet := by
 theorem is_set_forwards :
     (isSetContract.withArgs isSetContract.args).Holds Extracted.program isSetForward :=
   is_set_holds.forward (loads := [0]) (narrow := some .unsigned8)
-    isSetForward.found isSet.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isSetForward.found isSet.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun flag _ _ pair member => by
       simp only [isSetContract, List.zip_cons_cons, List.zip_nil_left,
         List.mem_singleton] at member

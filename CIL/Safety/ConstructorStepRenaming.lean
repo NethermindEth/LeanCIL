@@ -29,18 +29,25 @@ theorem Memory.Renamed.stepNewAggregate {indices : LocalIndexMap} {mapping : All
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
     (sourceBody targetBody : CIL.Method) (callee argc pc : Nat) (size : Fin (2 ^ 64))
-    (arguments stack : List Value)
+    (linked : targetBody.linkAt pc = sourceBody.linkAt pc) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.newAggregate callee argc size) pc arguments sourceFrame stack source)
         (step targetBody (.newAggregate callee argc size) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map,
+  simp only [step, mapping.unspecifiedOperands, List.length_map, linked,
     ← List.map_take, ← List.map_drop, ← List.map_reverse]
   split
   · exact ⟨mapping, .refl mapping, .error _⟩
-  · split
+  · -- The constructor is the link's; both bodies read the same one.
+    generalize sourceBody.linkAt pc = link
+    rcases link with _ | link
+    · exact ⟨mapping, .refl mapping, .error _⟩
+    cases link <;> try exact ⟨mapping, .refl mapping, .error _⟩
+    rename_i callee linkedSize
+    try dsimp only
+    split
     · exact ⟨mapping, .refl mapping, .error _⟩
     · have checks := related.checkedValues (stack.take argc).reverse (by
         intro value member

@@ -484,7 +484,7 @@ the helper's contract. Confinement, access permissions and content snapshots req
 proved effects; a cell-only footprint does not imply `Confined`.
 
 `WP.load_call_store` composes a placed `loadCallStoreCode` segment with any proved scalar helper
-contract. Both input words are loaded before the call and the output write, so the argument ranges
+contract, given the body's link of the call site to the helper (`linked`). Both input words are loaded before the call and the output write, so the argument ranges
 may overlap. The continuation receives the helper's `CallResult` and the actual checked write, and
 retains the helper's full postcondition and footprint without unfolding the helper body.
 
@@ -614,8 +614,8 @@ fields instead of offsets. For every field of an admitted class that its methods
 extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
 WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
 the class and the model offset the extractor validated. Each comes with a theorem, checked by
-`decide`, that the descriptor matches the operands of an instruction it names
-(`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
+`decide`, that the method's `Method.fieldShape` of the field an instruction it names accesses is
+the descriptor's slot (`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
 element are relied on.
 
 `CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
@@ -714,7 +714,7 @@ or references it may change.
 | --- | --- |
 | Confine a store to that entry | `Confined.setSlot`, `Confined.storeSlot` |
 | Keep the reference a field of a different, older object holds | `Confined.objectSlot_of_ne` |
-| Step the field accesses | `step_objectReferenceField_eq`, `step_setObjectReferenceField_eq` |
+| Step the field accesses | the `cil_step` simprocs, by `step_ldfld_reference_eq` and `step_stfld_reference_eq` |
 | Reduce them, given the slot's access check, to the held reference and to `setSlot` | `loadSlot_of_access`, `storeSlot_of_access` |
 | Read `setSlot` back | `setSlot_slots_same`, `setSlot_slots_of_ne` |
 | `setSlot` leaves bytes, authority and field locations unchanged | `read_setSlot`, `access_setSlot`, `objectFieldAddress_setSlot` |
@@ -826,7 +826,7 @@ one, whose view validates.
 | Keep an array whole across the same changes, whatever its elements then hold | `WholeArray.after_confined`, `after_below`, `after_kept` |
 | Pass a whole array as a call argument, from its view's `valid` | `checkedValue_array` |
 | Move it through a local, from its view's `valid` | `storeLocal_array`, `loadLocal_array` |
-| Step `ldfld` and `stfld` | `step_arrayField_eq`, `step_setArrayField_eq` |
+| Step `ldfld` and `stfld` | the `cil_step` simprocs, by `step_ldfld_array_eq` and `step_stfld_array_eq` |
 | Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_memory_arrayLength_address_eq` |
 | Step `ldlen` of the null array to its throw | `step_memory_arrayLength_null_eq` |
 
@@ -877,7 +877,7 @@ theorem pair_constructs :
 
 The storage does not exist before the step, so a caller names the contract input as a function of
 it. `cil_contract_construct holds constructs input [facts]` applies `run_newAggregate_of_contract`
-at the fetched `newobj` and leaves:
+at the fetched `newobj`, whose link gives the constructor and the size of the storage, and leaves:
 
 - the caller memory's `WellFormed`;
 - the precondition over the fresh storage;
@@ -1032,13 +1032,14 @@ body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 ```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_holds.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged (by decide) _)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
-`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee`
-with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
+`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee`, its
+call linked to `callee` (`linked`), with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
 are data: each is an argument index, read as `Method.argumentAccess` says, which narrows `bool`,
 `char`, `byte`, `sbyte`, `short` and `ushort` parameters, and enums over them, to their declared
@@ -1128,10 +1129,11 @@ rule; the next section describes relocating a library into the slot.
 A library extracted on its own calls its helpers by its own method indices. `CIL.Safety.Linking`
 relocates it into a linked program:
 
-- `Instruction.relocate f` renames only the method indices of calls, constructions and managed-call
-  catalogs (`Instruction.callees`); pcs, locals, profiles and static sites are unchanged.
-- `Closed lib` says every callee index in `lib` is one of its methods (`Closed.of_check` decides
-  it).
+- `Method.relocate f` renames only the method indices of the link table: the callees of calls,
+  constructions and managed-call catalogs. Code, pcs, locals, profiles and static sites are
+  unchanged, since each call reads its target from the table.
+- `Closed lib` says every callee of every link-table entry in `lib` is one of its methods
+  (`Closed.of_check` decides it).
 - `RelocatesInto lib linked f` says method `i` sits at `f i` relocated by `f`.
 - `run_relocate` and `invoke_relocate` then give exactly the same result: the same memory and
   values on return, and on a fault the same pc and fault with only its method index renamed to
