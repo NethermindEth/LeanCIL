@@ -348,7 +348,8 @@ pinned image its identity names: its table header, Assembly row, table rows and 
 `#Strings` and `#Blob` offsets per heap for the table rows and another for the Assembly row. The
 assembly identity, key token, core library, links, the `#GUID` heap, the `Module` table and the
 RVAs of MethodDefs outside the evidence are not part of that check. Both facts are checked in pages
-of about 250 methods, capped at eight pages, and each page decodes the pinned images again. These
+of about 250 methods, capped at eight pages, and each page decodes the pinned images again; the
+metadata check also checks each distinct Assembly block once, in one more lemma. These
 theorems join the extraction certificate and the selected proof for kernel replay, expected-type
 checks and axiom checks. Source, artifact, identity and toolchain guards run before successful
 publication.

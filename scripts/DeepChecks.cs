@@ -331,22 +331,27 @@ partial class Program
     /// <summary>
     /// A paged fact's generated module and the namespace of its pages; the theorem that states it, the proposition
     /// it states about `BindingAudit.images` and `Extracted.methodEvidence`, and the check and claims its pages
-    /// read; and the module title, summary and theorem docstring.
+    /// read; the lemma its proposition conjoins before the pages, proved once over the whole evidence, if any; and
+    /// the module title, summary and theorem docstring.
     /// </summary>
     static (string Module, string Pages, string Theorem, string Proposition, string Check, string Claims,
-        string Title, string Summary, string Statement) PagedFact(BindingFact fact) => fact switch
+        (string Theorem, string Proposition, string Docstring)? Once, string Title, string Summary, string Statement)
+        PagedFact(BindingFact fact) => fact switch
     {
         BindingFact.BodyBytes => (BodiesModule, "Bodies", "bodies", "StrictBinding.BodiesBound",
-            "StrictBinding.bodyClaimBound", "StrictBinding.bodyClaims", "Method bodies in the pinned images",
+            "StrictBinding.bodyClaimBound", "StrictBinding.bodyClaims", null, "Method bodies in the pinned images",
             "Every method body of the extraction's evidence is the bytes at the place the MethodDef row of its\n" +
             "token gives in the pinned image of its assembly",
             "The method bodies of `Extracted.methodEvidence` are in the pinned images."),
         BindingFact.MetadataRows => (MetadataRowsModule, "MetadataRows", "metadataRows",
             "StrictBinding.MetadataRowsBound", "StrictBinding.methodMetadataBound", "StrictBinding.metadataClaims",
+            ("blocks", "StrictBinding.ClaimsHold StrictBinding.assemblyBlockBound images\n" +
+                "    (StrictBinding.assemblyBlocks (StrictBinding.metadataClaims Extracted.methodEvidence))",
+                "Each distinct Assembly block of the evidence is the pinned image's."),
             "Method metadata in the pinned images",
             "Every metadata block of the extraction's evidence holds the table header, Assembly row, table rows\n" +
             "and heap entries of the pinned image its identity names, under one numbering of the #Strings and\n" +
-            "#Blob offsets per heap and with MethodDef RVAs zeroed",
+            "#Blob offsets per heap and with MethodDef RVAs zeroed, each distinct Assembly block checked once",
             "The metadata blocks of `Extracted.methodEvidence` belong to the pinned images."),
         _ => throw new ArgumentOutOfRangeException(nameof(fact), fact, "Not a paged binding fact")
     };
@@ -572,6 +577,20 @@ partial class Program
             """));
         var chain = string.Concat(Enumerable.Range(0, pages).Reverse()
             .Select(page => $"(.succ {paged.Pages}.page{page} "));
+        var composed = $"StrictBinding.claimsHold_of_pages (size := {size}) (count := {pages}) " +
+            $"{paged.Pages}.prepared\n    (by decide +kernel) {chain}.zero{new string(')', pages)}";
+        var once = paged.Once is { } whole ? $$"""
+            set_option debug.skipKernelTC true in
+            /-- {{whole.Docstring}} -/
+            theorem {{whole.Theorem}} : {{whole.Proposition}} := by
+              decide +kernel
+
+
+            """ : "";
+        var proof = paged.Once is { } conjoined
+            ? $"And.intro {paged.Pages}.{conjoined.Theorem}\n  " +
+                $"({composed.Replace("\n", "\n  ", StringComparison.Ordinal)})"
+            : composed;
         return $$"""
             import BindingAudit.Images
             import Extracted
@@ -591,12 +610,11 @@ partial class Program
             /-- The pinned images decode and spell the identities they are pinned under. -/
             theorem prepared : StrictBinding.ok (StrictBinding.prepare images) = true := by decide +kernel
 
-            {{lemmas}}end {{paged.Pages}}
+            {{once}}{{lemmas}}end {{paged.Pages}}
 
             /-- {{paged.Statement}} -/
             theorem {{paged.Theorem}} : {{paged.Proposition}} images Extracted.methodEvidence :=
-              StrictBinding.claimsHold_of_pages (size := {{size}}) (count := {{pages}}) {{paged.Pages}}.prepared
-                (by decide +kernel) {{chain}}.zero{{new string(')', pages)}}
+              {{proof}}
 
             end BindingAudit
             """;
