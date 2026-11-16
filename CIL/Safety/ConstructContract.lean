@@ -178,8 +178,8 @@ theorem run_newobj_aggregate_of_contract {Input Output : Type} {c : MethodContra
   rw [same] at checked
   obtain ⟨temporary, updated, stepped, zeroed, writable, preserved, fresh⟩ :=
     step_newobj_aggregate (body := body) (pc := pc) (constructor := constructor) size positive
-      linked args arguments (stack.drop constructor.parameters.length) frame memory formed length.symm
-      (by rw [same]; exact checked) known
+      linked args arguments (stack.drop constructor.parameters.length) frame memory formed
+      length.symm (by rw [same]; exact checked) known
   rw [split] at stepped
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed
     ⟨body, _, methodFound, instructionFound, stepped⟩
