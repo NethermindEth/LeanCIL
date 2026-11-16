@@ -6,9 +6,10 @@ import CIL.Extraction.Translation
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
 instruction of the instantiated definition as `Instruction.ofRaw` decodes it, a hole where no
-family admits the opcode yet and a type test naming the type argument, and the frame, homes and
-signature from the same definition. `Method.ofBody?` reads the code and init flag from pinned
-body bytes instead of the definition, and `decodedProgram?` applies it to every evidence record.
+family admits the opcode yet, a type test naming the type argument and a field access naming the
+instantiated field, and the frame, homes and signature from the same definition.
+`Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
+and `decodedProgram?` applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
 the bytes is the method of the definition, so a proof about the decoded program needs no
 translator output.
@@ -89,7 +90,7 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 
 /-- Each pc of a decoded method holds what `Instruction.ofRawAt` decodes at that pc of the
     instantiated definition's code, so the method has one instruction per raw instruction and a
-    type test names the type argument. -/
+    type test names the type argument and a field access the instantiated field. -/
 theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {source : RawMethod} {arguments : List TypeExpr}
     {method : Method}
@@ -97,8 +98,7 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
   unfold Method.ofRaw? at decoded
-  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
-    Option.some.injEq] at decoded
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
   obtain ⟨closed, instantiated, _, _, _, _, _, _, built⟩ := decoded
   refine ⟨closed, instantiated, fun pc => ?_⟩
   -- The argument rule either refuses the code or leaves the decoded method as it was built.

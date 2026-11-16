@@ -15,8 +15,7 @@ internal static class InstructionTranslation
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
         IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
-        MetadataValidation.LayoutContext? layouts = null, ConstrainedCalls.TargetIndex? constrainedTargets = null,
-        Func<Instruction, FieldRef>? staticFields = null)
+        MetadataValidation.LayoutContext? layouts = null, ConstrainedCalls.TargetIndex? constrainedTargets = null)
     {
         if (imports is not null && imports.TryTranslate(i, methods.Count, out Operation? imported)) return imported;
         profile ??= FeatureProfile.Scalar;
@@ -60,11 +59,8 @@ internal static class InstructionTranslation
         if (ReferenceArrays.Translate(i, referenceArray) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
-        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
+        return TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
             layouts, constrainedTargets);
-        // The field operand is spelled as the raw operand spells it, which only the emitter's evidence knows.
-        return translated is StaticFieldInstruction access && staticFields is not null
-            ? access with { Field = staticFields(i) } : translated;
     }
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,

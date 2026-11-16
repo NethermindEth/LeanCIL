@@ -19,7 +19,7 @@ private def frame : Frame := { activation := 0, locals := [], owned := [] }
 
 /-- A table lookup retains stable identity rather than turning it into a numeric address. -/
 theorem table_provenance :
-    managedStep (.tableElement signature) 0 frame
+    managedStep (.tableElement signature) none 0 frame
       [.scalar (.i32 1),
         .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
         .ok (.next 1 [.methodPointer ⟨signature, some identity⟩] frame memory) := rfl
@@ -27,38 +27,40 @@ theorem table_provenance :
 
 /-- A numerical value is never callable, even when it equals an admitted program index. -/
 theorem numeric_pointer_rejected :
-    managedStep (.call signature [⟨identity, 1⟩] true) 0 frame
+    managedStep (.call signature [⟨identity, 1⟩] true) (some (.indirect [⟨identity, 1⟩])) 0 frame
       [.scalar (.i64 1), .scalar (.i32 42)] memory = .error .invalidState := rfl
 #print axioms numeric_pointer_rejected
 
 /-- A well-typed pointer still needs its exact identity in the admitted target catalog. -/
 theorem foreign_target_rejected :
-    managedStep (.call signature [⟨identity, 1⟩] true) 0 frame
+    managedStep (.call signature [⟨identity, 1⟩] true) (some (.indirect [⟨identity, 1⟩])) 0 frame
       [.methodPointer ⟨signature, some other⟩, .scalar (.i32 42)] memory =
         .error .invalidState := rfl
 #print axioms foreign_target_rejected
 
 /-- A successful indirect tail call uses the existing frame-retiring driver action. -/
 theorem checked_tail_target :
-    managedStep (.call signature [⟨identity, 1⟩] true) 0 frame
+    managedStep (.call signature [⟨identity, 1⟩] true) (some (.indirect [⟨identity, 1⟩])) 0 frame
       [.methodPointer ⟨signature, some identity⟩, .scalar (.i32 42)] memory =
         .ok (.tailCall 1 [.scalar (.i32 42)] memory) := rfl
 #print axioms checked_tail_target
 
 /-- Null array values returned by ordinary helpers retain the same named access fault. -/
 theorem literal_null_table_rejected :
-    managedStep .tableLength 0 frame [.object .null] memory =
+    managedStep .tableLength none 0 frame [.object .null] memory =
       .error (.thrown .nullReference) ∧
-    managedStep (.tableElement signature) 0 frame [.scalar (.i32 0), .object .null] memory =
+    managedStep (.tableElement signature) none 0 frame [.scalar (.i32 0), .object .null] memory =
       .error (.thrown .nullReference) := ⟨rfl, rfl⟩
 #print axioms literal_null_table_rejected
 
-/-- The selection `indirectTarget` names is the comparison the call arm made in place: a pointer
-    of another signature, a null pointer and a target outside the catalog all fault alike. -/
-theorem call_selection_unchanged (signature : ManagedSignature) (catalog : List ManagedTarget)
-    (tail : Bool) (pc : Nat) (frame : Frame) (pointer : MethodPointer)
-    (values : List CIL.Safety.Value) (memory : CIL.Safety.Memory) :
-    managedStep (.call signature catalog tail) pc frame (.methodPointer pointer :: values) memory =
+/-- The selection `indirectTarget` names is the comparison the call arm made in place over the
+    catalog of the site's link: a pointer of another signature, a null pointer and a target
+    outside the catalog all fault alike. -/
+theorem call_selection_unchanged (signature : ManagedSignature)
+    (stated catalog : List ManagedTarget) (tail : Bool) (pc : Nat) (frame : Frame)
+    (pointer : MethodPointer) (values : List CIL.Safety.Value) (memory : CIL.Safety.Memory) :
+    managedStep (.call signature stated tail) (some (.indirect catalog)) pc frame
+        (.methodPointer pointer :: values) memory =
       (do
         if pointer.signature != signature then .error .invalidState else pure ()
         let some identity := pointer.target | .error .invalidState
@@ -94,8 +96,12 @@ private def longIdentity : ManagedIdentity :=
 /-- A catalog whose second entry is the long owner's body, method 1. -/
 private def longCatalog : List ManagedTarget := [⟨other, 2⟩, ⟨longIdentity, 1⟩]
 
-/-- A body for the step; the indirect call arm reads none of its fields. -/
-private def caller : Method := { returnsValue := true, locals := [], code := [] }
+/-- A body for the step; the indirect call arm reads only its link at pc 1. -/
+private def caller : Method :=
+  { returnsValue := true, locals := [], code := [], links := [(1, .indirect longCatalog)] }
+
+/-- The call site's link, as an extraction states it. -/
+private theorem caller_link : caller.linkAt 1 = some (.indirect longCatalog) := rfl
 
 /-- The call site's signature takes one argument. -/
 private theorem parameter_count : signature.parameters.length = 1 := rfl
@@ -113,7 +119,7 @@ theorem long_owner_call (rest : List CIL.Safety.Value) :
     step caller (.managed (.call signature longCatalog false)) 1 [] frame
       (.methodPointer ⟨signature, some longIdentity⟩ :: .scalar (.i32 42) :: rest) memory =
       .ok (.call 1 [.scalar (.i32 42)] rest memory) := by
-  simp only [cil_step, long_selected, parameter_count]
+  simp only [cil_step, caller_link, long_selected, parameter_count]
   simp [unspecifiedOperands, CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]
   rfl
 #print axioms long_owner_call

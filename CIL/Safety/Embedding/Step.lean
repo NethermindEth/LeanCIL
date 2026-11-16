@@ -253,6 +253,16 @@ macro "plain_cases" : tactic => `(tactic| (
   (try rw [context.returnsValue])))
 
 set_option hygiene false in
+/-- Reads the call site's link in both steps through the context and splits on it: a link of
+    another kind faults alike in both, and the matching one is substituted in the goal. -/
+macro "link_cases" : tactic => `(tactic| (
+  rw [context.link]
+  split at h
+  rotate_left
+  · first | cases h | (simp [unlinkedCall] at h)
+  try simp only [‹expected.linkAt pc = _›]))
+
+set_option hygiene false in
 /-- Splits an optional lookup shared by both steps. -/
 macro "lookup_lockstep" : tactic => `(tactic| (
   split at h
@@ -350,6 +360,7 @@ theorem step_relabel_initializeSpanLocal (index : Nat) (constructor : SpanConstr
 
 theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -359,6 +370,7 @@ theorem step_relabel_call (callee argc : Nat) : StepRelabel (.call callee argc) 
 theorem step_relabel_callInstance (callee argc : Nat) :
     StepRelabel (.callInstance callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -373,6 +385,7 @@ theorem step_relabel_callInstance (callee argc : Nat) :
 theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
     StepRelabel (.callVirtual targets argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -390,6 +403,7 @@ theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat
 /-- A tail transfer has no continuation pc to relocate. -/
 theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall callee argc) := by
   plain_cases
+  link_cases
   by_cases short : (stack.length != argc) = true
   · simp [short] at h
   · simp only [short] at h ⊢
@@ -400,6 +414,7 @@ theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall calle
 theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRelabel (.newAggregate callee argc size) := by
   plain_cases
+  link_cases
   by_cases short : (size = 0 || stack.length < argc) = true
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
@@ -409,6 +424,7 @@ theorem step_relabel_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
     (bases : List Extraction.TypeExpr) (size : Nat) :
     StepRelabel (.newObject callee argc owner bases size) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -566,6 +582,31 @@ theorem step_relabel_isinst (type : CIL.Extraction.TypeExpr) :
 
 #print axioms step_relabel_isinst
 
+/-- An instance field load resolves its field in the layout environment both methods share. -/
+theorem step_relabel_ldfld (field : CIL.Extraction.FieldRef) : StepRelabel (.ldfld field) := by
+  plain_cases
+  rw [show fieldLoad actual field stack m = fieldLoad expected field stack m by
+    simp only [fieldLoad, CIL.Method.fieldShape, context.environment]]
+  lockstep
+
+#print axioms step_relabel_ldfld
+
+/-- An instance field store resolves its field in the layout environment both methods share. -/
+theorem step_relabel_stfld (field : CIL.Extraction.FieldRef) : StepRelabel (.stfld field) := by
+  plain_cases
+  rw [show fieldStore actual field stack m = fieldStore expected field stack m by
+    simp only [fieldStore, CIL.Method.fieldShape, context.environment]]
+  lockstep
+
+#print axioms step_relabel_stfld
+
+/-- A field address never succeeds, so it has no successful step to match. -/
+theorem step_relabel_ldflda (field : CIL.Extraction.FieldRef) : StepRelabel (.ldflda field) := by
+  plain_cases
+  cases h
+
+#print axioms step_relabel_ldflda
+
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
   stack_cases =>
@@ -700,13 +741,14 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case managed operation =>
     cases operation
     all_goals plain_cases
+    all_goals rw [context.link]
     all_goals simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     all_goals repeat' first
       | contradiction
       | solve | simp only [FrameAction.relabel, context.next rfl]
       | solve | lockstep
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
@@ -766,6 +808,9 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case brtrue target => exact step_relabel_brtrue target
   case castclass type => exact step_relabel_castclass type
   case isinst type => exact step_relabel_isinst type
+  case ldfld field => exact step_relabel_ldfld field
+  case ldflda field => exact step_relabel_ldflda field
+  case stfld field => exact step_relabel_stfld field
   case beq target => exact step_relabel_beq target
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
@@ -1002,6 +1047,7 @@ theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un t
 
 theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -1010,6 +1056,7 @@ theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := b
 /-- A null receiver raises the same exception at the relocated pc. -/
 theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance callee argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -1021,6 +1068,7 @@ theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance c
 theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
     StepRaise (.callVirtual targets argc) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -1031,6 +1079,7 @@ theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat))
 /-- Tail-transfer faults retain their original location under pc relocation. -/
 theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee argc) := by
   plain_cases
+  link_cases
   exact h
 
 #print axioms step_raise_tailCall
@@ -1038,6 +1087,7 @@ theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee ar
 theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRaise (.newAggregate callee argc size) := by
   plain_cases
+  link_cases
   by_cases short : (size = 0 || stack.length < argc) = true
   · simp only [short, ↓reduceIte] at h; cases h
   · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
@@ -1047,6 +1097,7 @@ theorem step_raise_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
     (bases : List Extraction.TypeExpr) (size : Nat) :
     StepRaise (.newObject callee argc owner bases size) := by
   plain_cases
+  link_cases
   by_cases short : stack.length < argc
   · simp [short] at h
   · simp only [short, ↓reduceIte] at h ⊢
@@ -1129,6 +1180,33 @@ theorem step_raise_isinst (type : CIL.Extraction.TypeExpr) : StepRaise (.isinst 
         | raise_lockstep
 
 #print axioms step_raise_isinst
+
+/-- A thrown instance field load, such as a null receiver, is thrown by the relabeled load. -/
+theorem step_raise_ldfld (field : CIL.Extraction.FieldRef) : StepRaise (.ldfld field) := by
+  plain_cases
+  rw [show fieldLoad actual field stack m = fieldLoad expected field stack m by
+    simp only [fieldLoad, CIL.Method.fieldShape, context.environment]]
+  raise_lockstep
+
+#print axioms step_raise_ldfld
+
+/-- A thrown instance field store is thrown by the relabeled store. -/
+theorem step_raise_stfld (field : CIL.Extraction.FieldRef) : StepRaise (.stfld field) := by
+  plain_cases
+  rw [show fieldStore actual field stack m = fieldStore expected field stack m by
+    simp only [fieldStore, CIL.Method.fieldShape, context.environment]]
+  raise_lockstep
+
+#print axioms step_raise_stfld
+
+/-- A field address faults alike in both methods, which share the field's resolution. -/
+theorem step_raise_ldflda (field : CIL.Extraction.FieldRef) : StepRaise (.ldflda field) := by
+  plain_cases
+  rw [show fieldAddressFault actual field = fieldAddressFault expected field by
+    simp only [fieldAddressFault, CIL.Method.fieldShape, context.environment]]
+  first | exact h | raise_lockstep
+
+#print axioms step_raise_ldflda
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
@@ -1262,11 +1340,13 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
   case managed operation =>
     plain_cases
+    rw [context.link]
     simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     repeat' first
       | solve | raise_lockstep
+      | solve | simp [unlinkedCall] at h
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
+      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
@@ -1371,6 +1451,9 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case brtrue target => exact step_raise_brtrue target
   case castclass type => exact step_raise_castclass type
   case isinst type => exact step_raise_isinst type
+  case ldfld field => exact step_raise_ldfld field
+  case ldflda field => exact step_raise_ldflda field
+  case stfld field => exact step_raise_stfld field
   case beq target => exact step_raise_beq target
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1

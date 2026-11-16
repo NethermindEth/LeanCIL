@@ -110,7 +110,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, the method name clause of the call operand check and the encoding of a metadata name at a per-byte cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters, and its static site facts and the reads through them at a per-site cost that does not grow with the sites; the array element shape facts of `cil_resolution_facts` and the reads through them at a per-element-type cost that does not grow with the layouts or the sites naming each type; a runtime model lookup at a kernel cost that does not grow with the model table, and the runtime model agreement check at a per-site cost that does not grow with the call sites; the shape facts of `cil_field_shape` and the reads through them at a per-field cost that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 to 512 fields in a struct each, and the facts of `cil_value_shape` and their reads at a per-type cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the method decoded from a raw body at a per-instruction kernel cost that does not grow with the body; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
-| `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting, arguments, homes, array-allocation and statics bodies with per-instruction heartbeat and proof-size budgets and a per-hypothesis heartbeat limit |
+| `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting, arguments, homes, array-allocation, calls, table-calls, class-field-load and statics bodies with per-instruction heartbeat and proof-size budgets and a per-hypothesis heartbeat limit |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus |
@@ -184,10 +184,11 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
 The `stepping` suite generates explicit scalar, checked-memory, reference, table, accumulate,
-locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting, arguments,
-homes, allocation and statics bodies and proves each end to end. The scalar, memory, reference, table, accumulate and
-locals bodies have 16, 64 and 256 instructions, and the accumulate body also 1,024. The memory
-bodies repeat an idempotent checked store and reload, so the operation facts stay constant as the
+locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting,
+arguments, homes, allocation, calls, table-calls, objects and statics bodies and proves each end to
+end. The scalar, memory, reference, table, accumulate and locals bodies have 16, 64 and 256
+instructions, and the accumulate body also 1,024. The memory bodies repeat an idempotent checked
+store and reload, so the operation facts stay constant as the
 instruction count grows. The reference and table bodies repeatedly `add` a symbolic int32 byte
 offset to a reference argument or a native method table argument and pop the result, each step
 reading one supplied fact that the offset succeeds. The accumulate, contract, loop, loop-facts,
@@ -212,12 +213,18 @@ slowly with the stores. The arguments bodies have 16, 64 and 256 instructions an
 in scope. The homes bodies have 16, 64 and 256 instructions and read each of 8, 32 and 128 reference
 parameters once from its home in a literal frame. The allocation bodies have 16, 64 and 256
 instructions and allocate and pop an array of two class references per cycle, each `newarr`
-resolving its element shape and reading one supplied allocation fact. The statics bodies have 16,
-64 and 256 instructions and load a static field and pop it per cycle, with one static site per
-load, so each step resolves its pc among all the body's sites. The suite uses the proof-cost
-measuring frontend, with three sequential proof compilations and a header-only baseline per
-scalar, memory, reference, table, accumulate and locals body up to 256 instructions, and one
-compilation for every other body.
+resolving its element shape and reading one supplied allocation fact. The calls bodies have 16, 64
+and 256 instructions and pass their argument through 14, 62 and 254 calls of a callee that returns
+it, each call reading its target from a link fact that `cil_instruction_equations` states; the
+table-calls bodies are the same bodies with their link table written out, as a template writes it.
+The objects bodies have 16, 64 and 256 instructions and load and pop an `int64` field of their
+object argument per cycle, each `ldfld` reading the field's `cil_field_shape` fact and two supplied
+facts that locate and read its slot. The statics bodies have 16, 64 and 256 instructions and load a
+static field and pop it per cycle, with one static site per load, so each step resolves its pc
+among all the body's sites.
+The suite uses the proof-cost measuring frontend, with three sequential proof compilations and a
+header-only baseline per scalar, memory, reference, table, accumulate, locals, calls and table-calls
+body up to 256 instructions, and one compilation for every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. The arguments and homes bodies read one of a list of arguments or home slots that

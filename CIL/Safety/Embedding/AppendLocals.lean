@@ -1049,6 +1049,39 @@ theorem step_appendLocals_isinst (type : CIL.Extraction.TypeExpr) :
 
 #print axioms step_appendLocals_isinst
 
+/-- Instance field loads do not inspect or change a frame's local slots. -/
+theorem step_appendLocals_ldfld (field : CIL.Extraction.FieldRef) :
+    StepAppendLocals (.ldfld field) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  simp only [step]
+  frame_natural
+
+#print axioms step_appendLocals_ldfld
+
+/-- Instance field stores do not inspect or change a frame's local slots. -/
+theorem step_appendLocals_stfld (field : CIL.Extraction.FieldRef) :
+    StepAppendLocals (.stfld field) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  simp only [step]
+  frame_natural
+
+#print axioms step_appendLocals_stfld
+
+/-- A field address faults whatever the frame's local slots. -/
+theorem step_appendLocals_ldflda (field : CIL.Extraction.FieldRef) :
+    StepAppendLocals (.ldflda field) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  simp only [step]
+  split <;> rfl
+
+#print axioms step_appendLocals_ldflda
+
 /-- `blt_un` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_blt_un (target : Nat) :
     StepAppendLocals (.blt_un target) := by
@@ -1494,6 +1527,9 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_brfalse target
     case brtrue target =>
       exact step_appendLocals_brtrue target
+    case ldfld field => exact step_appendLocals_ldfld field
+    case ldflda field => exact step_appendLocals_ldflda field
+    case stfld field => exact step_appendLocals_stfld field
     case castclass type =>
       exact step_appendLocals_castclass type
     case isinst type =>

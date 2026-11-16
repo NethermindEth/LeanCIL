@@ -4,17 +4,18 @@ import CIL.Instructions
 /-!
 # Link lookups
 
-Two forms keep a read of a method's link table from costing the table's length. The extractor
-emits, per method with calls, a balanced index of the table's entries (call sites only) and one
-equation checking that literal against the table, so a per-site fact reads its link in
-logarithmic time. An embedding reads the link of every live instruction on each side; when the
-table keys ascend, which holds for every extracted table and every table `linksOfCode` builds, a
-walk over the table answers all queries. The walk advances while the queried pcs do not
-decrease and starts again from the head of the table at each pc below the one before, so a map
-that reorders a few blocks costs a few passes. A hand-written table without ascending keys takes
-the scan, which costs the table's length per query. The extraction call check reads each pc's
-link by the walk; a table with ascending keys at pcs of the code is the one the code implies
-exactly when every pc reads its instruction's link (`eq_linksOfCode_iff`).
+Two forms keep a read of a method's link table from costing the table's length. For a table
+whose keys ascend, the entry at a position is the first for its key (`linkAt_of_position`), so
+`cil_instruction_equations` proves each call site's link from its entry, read through named
+suffixes of the table, after checking once that the keys ascend. An embedding reads the link of
+every live instruction on each side; when the table keys ascend, which holds for every extracted
+table and every table `linksOfCode` builds, a walk over the table answers all queries. The walk
+advances while the queried pcs do not decrease and starts again from the head of the table at
+each pc below the one before, so a map that reorders a few blocks costs a few passes. A
+hand-written table without ascending keys takes the scan, which costs the table's length per
+query. The extraction call check reads each pc's link by the walk; a table with ascending keys at
+pcs of the code is the one the code implies exactly when every pc reads its instruction's link
+(`eq_linksOfCode_iff`).
 -/
 
 namespace CIL.Extraction
@@ -83,27 +84,17 @@ theorem find_entry_of_ascending (links : List (Nat × Link)) (lower : Nat)
 
 #print axioms find_entry_of_ascending
 
-/-- The literal `index` holds the entries of the ascending table `links`, in order. -/
-def LinkIndexValid (links : List (Nat × Link)) (index : FlowIndex (Nat × Link)) : Prop :=
-  keysAscend 0 links = true ∧ index = FlowIndex.ofList links
-
-instance (links : List (Nat × Link)) (index : FlowIndex (Nat × Link)) :
-    Decidable (LinkIndexValid links index) :=
-  inferInstanceAs (Decidable (_ ∧ _))
-
-/-- An entry the index holds is the link the method's table gives for its pc. -/
-theorem linkAt_of_entry {body : Method} {index : FlowIndex (Nat × Link)}
-    (valid : LinkIndexValid body.links index) {position pc : Nat} {link : Link}
-    (read : index.get? position = some (pc, link)) : body.linkAt pc = some link := by
-  obtain ⟨ascending, rfl⟩ := valid
-  rw [FlowIndex.get?_ofList] at read
+/-- An entry of a table whose keys ascend is the link the method gives its pc. -/
+theorem linkAt_of_position {body : Method} (ascending : keysAscend 0 body.links = true)
+    {position pc : Nat} {link : Link} (found : body.links[position]? = some (pc, link)) :
+    body.linkAt pc = some link := by
   have first : body.links.find? (fun entry => entry.1 == pc) = some (pc, link) :=
-    find_entry_of_ascending body.links 0 ascending position (pc, link) read
+    find_entry_of_ascending body.links 0 ascending position (pc, link) found
   simp only [Method.linkAt, linkLookup]
   rw [first]
   rfl
 
-#print axioms linkAt_of_entry
+#print axioms linkAt_of_position
 
 /-- The entries from the first whose key is at least `query`. -/
 def dropBelow (query : Nat) : List (Nat × Link) → List (Nat × Link)

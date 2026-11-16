@@ -39,16 +39,43 @@ example : step body (.bge 7) 3 args frame [.scalar (.i32 1), .scalar (.i32 0)] m
 
 example {r : Reference} (h : step body (.call 2 1) pc args frame stack m = .ok (.construct 2 args stack frame' r .word64 m')) :
     False := by
-  obtain ⟨_, _, _, contradiction⟩ := step_call_action h
+  obtain ⟨_, _, _, _, _, contradiction⟩ := step_call_action h
   cases contradiction
 
 example {argc size}
     (h : step body (.newAggregate 2 argc size) pc args frame stack m =
       .ok (.call 2 args stack m')) :
     False := by
-  obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newAggregate_action h
+  obtain ⟨_, _, _, _, _, _, _, _, _, contradiction⟩ := step_newAggregate_action h
   cases contradiction
 
+/-- A call whose operand names method 1 at a pc whose link names method 2. -/
+def relinked : Method :=
+  { code := [.call 1 0, .ret], locals := [], returnsValue := false, links := [(0, .direct 2)] }
+
+/-- The call enters the method its link names, not the one its operand names. -/
+theorem relinked_call : step relinked (.call 1 0) 0 args frame [] m = .ok (.call 2 [] [] m) := rfl
+
+/-- A call site the table gives no link faults instead of entering its operand. -/
+theorem unlinked_call :
+    step { relinked with links := [] } (.call 1 0) 0 args frame [] m = .error unlinkedCall := rfl
+
+/-- A tail call the table gives no link faults before its stack check, which an empty stack under
+    one argument would fail with `invalidState`. -/
+theorem unlinked_tail_call :
+    step { code := [.tailCall 1 1], locals := [], returnsValue := false, links := [] }
+      (.tailCall 1 1) 0 args frame [] m = .error unlinkedCall := rfl
+
+/-- A construction the table gives no link faults before its size check, which size 0 would fail
+    with `invalidState`. -/
+theorem unlinked_aggregate :
+    step { code := [.newAggregate 1 0 0], locals := [], returnsValue := true, links := [] }
+      (.newAggregate 1 0 0) 0 args frame [] m = .error unlinkedCall := rfl
+
+#print axioms relinked_call
+#print axioms unlinked_call
+#print axioms unlinked_tail_call
+#print axioms unlinked_aggregate
 #print axioms step_next_target
 #print axioms step_call_action
 #print axioms step_newAggregate_action

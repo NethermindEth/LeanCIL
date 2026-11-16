@@ -3,6 +3,7 @@ import CIL.Safety.SpanViews
 import CIL.Safety.ArrayViews
 import CIL.Safety.NativeMethodTables
 import CIL.Semantics
+import CIL.Resolution
 
 /-!
 # Checked memory instructions
@@ -91,6 +92,8 @@ def observerCount : CIL.Instruction → Nat
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .bgt _ | .ble _ | .ble_un _
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => 2
   | .brfalse _ | .brtrue _ | .switch _ | .castclass _ | .isinst _ => 1
+  | .ldfld _ | .ldflda _ => 1
+  | .stfld _ => 2
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
   | .ldind _ | .skipInit | .initAggregate _ => 1
@@ -1051,18 +1054,41 @@ def referenceArrayStore (stack : List Value) (memory : Memory) :
     return (← storeSlot memory slot value, rest)
   | _ => .error .invalidState
 
-/-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
-    field moves bytes, a class-typed field moves the object reference its slot holds. `ldlen`,
-    `ldelem.ref` and `stelem.ref` reach the slots of an array of class references the same way,
-    checking the null array, then the index, then a stored value's class, as the CLR does. -/
-def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) := do
+/-- `ldlen`, `ldelem.ref` and `stelem.ref` of an array of class references, whose slots hold
+    object references. -/
+def referenceArrayInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) :=
   match operation, stack with
-  | .objectField owner offset width signed, .object reference :: rest =>
+  | .referenceArrayLength, _ => referenceArrayLength stack memory
+  | .referenceArrayLoad, _ => referenceArrayLoad stack memory
+  | .referenceArrayStore, _ => referenceArrayStore stack memory
+  | _, _ => .error .invalidState
+
+/-- `ldfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
+    receiver gives way to the word, object reference or array reference the slot keeps. A null
+    receiver throws `NullReferenceException` and a receiver of another class lineage faults. -/
+def classFieldLoad (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match slot, stack with
+  | .word width signed, .object reference :: rest =>
     if width ∉ [1, 2, 4, 8] then .error (.unsupported "Object field width") else
     let address ← objectFieldAddress memory reference owner offset
     return (memory, .scalar (← loadValue memory (.address address) width signed) :: rest)
-  | .setObjectField owner offset width, .scalar value :: .object reference :: rest =>
+  | .reference, .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, (← loadSlot memory address) :: rest)
+  | .array element, .object reference :: rest =>
+    let address ← objectFieldAddress memory reference owner offset
+    return (memory, (← loadArraySlot memory address element) :: rest)
+  | _, _ => .error .invalidState
+
+/-- `stfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
+    value on top of the stack, an integer of the slot's width, an object or an array of the
+    slot's element, replaces what the receiver below it keeps there. -/
+def classFieldStore (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
+    (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+  match slot, stack with
+  | .word width _, .scalar value :: .object reference :: rest =>
     let address ← objectFieldAddress memory reference owner offset
     let number ← match width, value with
       | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
@@ -1070,19 +1096,10 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       | _, _ => .error .invalidState
     return (← checkedAt (.address address) width
       (write memory address (numberBytes number width) ordinaryAccessAlignment), rest)
-  | .objectReferenceField owner offset, .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    return (memory, (← loadSlot memory address) :: rest)
-  | .setObjectReferenceField owner offset, .object value :: .object reference :: rest =>
+  | .reference, .object value :: .object reference :: rest =>
     let address ← objectFieldAddress memory reference owner offset
     return (← storeSlot memory address value, rest)
-  | .referenceArrayLength, _ => referenceArrayLength stack memory
-  | .referenceArrayLoad, _ => referenceArrayLoad stack memory
-  | .referenceArrayStore, _ => referenceArrayStore stack memory
-  | .arrayField owner offset element, .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    return (memory, (← loadArraySlot memory address element) :: rest)
-  | .setArrayField owner offset element, .array view :: .object reference :: rest =>
+  | .array element, .array view :: .object reference :: rest =>
     let address ← objectFieldAddress memory reference owner offset
     return (← storeArraySlot memory address view element, rest)
   | _, _ => .error .invalidState
@@ -1199,11 +1216,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .spanCreate | .createSpan _ => staticSpanInstruction operation stack memory
-  | .objectField .. | .setObjectField ..
-  | .objectReferenceField .. | .setObjectReferenceField ..
-  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore
-  | .arrayField .. | .setArrayField .. =>
-    objectFieldInstruction operation stack memory
+  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore =>
+    referenceArrayInstruction operation stack memory
   | .stringLiteral text => stringLiteralInstruction text stack memory
   | .throwIfNull => throwIfNullInstruction stack memory
   | .zeroGuard guard width signed => zeroGuardInstruction guard width signed stack memory

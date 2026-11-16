@@ -1,6 +1,7 @@
 import Lean
 import CIL.Instructions
 import CIL.SymbolicExecution
+import CIL.Extraction.LinkIndex
 
 /-!
 # Instruction equations
@@ -21,6 +22,15 @@ suffix before it, and proves each equation from the suffix that starts its block
 walks more than one block, so the equations of a body cost time linear in its length. The
 kernel checks every declaration, so the command proves nothing about the body beyond what its
 definition says.
+
+The command also states `body_link{pc} : (body xs).linkAt pc = some link`, tagged
+`@[cil_code ↓]`, at every call site; a call reads its target from `linkAt`, so stepping one
+rewrites by this fact instead of walking the table. For a body whose table is the one its code
+implies, `linksOfCode`, each fact comes from that pc's instruction equation through
+`body_links_implied`. For an explicit table, as an extraction or a template writes, whose keys
+are literals that ascend, each comes from `body_links_ascend` and the table's entry, read through
+named suffixes `body_linkSuffix{start}` as the code is. A table whose cells or keys do not reduce
+to literals, as when a feature flag decides an entry, gets no facts.
 -/
 
 namespace CIL.InstructionEquations
@@ -152,9 +162,78 @@ def declareSuffixes (body : Body) (elementType : Expr) (stem : String)
           (suffix start) (mkNatLit previous) (mkNatLit suffixBlock)
           (body.constant s!"{stem}{previous}_placed") (refl (suffix start)))
 
+/-- Whether `method` unfolds to a structure whose link table is `linksOfCode` of its code. -/
+def impliedLinks (method : Expr) : MetaM Bool := do
+  let head ← whnf method
+  unless head.isAppOf ``CIL.Method.mk do return false
+  let some index := (getStructureFields (← getEnv) ``CIL.Method).idxOf? `links | return false
+  let some links := head.getAppArgs[index]? | return false
+  return links.isAppOfArity ``CIL.linksOfCode 1
+
+/-- Declares `body_links_implied` and, at each pc whose instruction reduces to a link,
+    `body_link{pc} : ∀ xs, (body xs).linkAt pc = some link` from its instruction equation. -/
+def declareLinks (body : Body) (simpSet : SimpExtension) (method : Expr) (ops : Array Expr) :
+    TermElabM Unit := do
+  let code := mkApp (mkConst ``CIL.Method.code) method
+  let implied ← mkEq (mkApp (mkConst ``CIL.Method.links) method)
+    (mkApp (mkConst ``CIL.linksOfCode) code)
+  body.prove "_links_implied" s!"The link table of `{body.name}` is the one its code implies."
+    implied (← mkEqRefl (mkApp (mkConst ``CIL.Method.links) method))
+  for inRange : pc in [0:ops.size] do
+    let link ← whnfD (mkApp (mkConst ``CIL.Instruction.link?) ops[pc])
+    unless link.isAppOfArity ``Option.some 2 do continue
+    withCurrHeartbeats do
+      let statement ← mkEq (mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc)) link
+      let proof ← mkAppM ``CIL.Method.linkAt_of_instruction
+        #[body.constant "_links_implied", body.constant s!"_instruction{pc}"]
+      body.prove s!"_link{pc}" s!"The link of the call site at pc {pc} of `{body.name}`."
+        statement proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
+        (inv := false) .global (eval_prio default)
+
+/-- The entries of an explicit link table, each as written with its literal key, when every
+    cell reduces and the keys ascend from 0; `none` otherwise. -/
+def explicitLinks (method : Expr) : MetaM (Option (Array Expr × Array (Nat × Expr))) := do
+  let (entries, complete) ← listElements (mkApp (mkConst ``CIL.Method.links) method)
+  unless complete do return none
+  let mut keyed := #[]
+  let mut lowest := 0
+  for entry in entries do
+    let some (_, _, key, link) := (← whnfR entry).app4? ``Prod.mk | return none
+    let some pc ← (evalNat (← instantiateMVars key)).run | return none
+    unless lowest ≤ pc do return none
+    lowest := pc + 1
+    keyed := keyed.push (pc, link)
+  return some (entries, keyed)
+
+/-- Declares `body_links_ascend`, the suffixes `body_linkSuffix{start}` of the table and, at each
+    entry, `body_link{pc} : ∀ xs, (body xs).linkAt pc = some link` from the entry's position. -/
+def declareExplicitLinks (body : Body) (simpSet : SimpExtension) (method : Expr)
+    (entries : Array Expr) (keyed : Array (Nat × Expr)) : TermElabM Unit := do
+  let links := mkApp (mkConst ``CIL.Method.links) method
+  let entryType := mkApp2 (mkConst ``Prod [.zero, .zero]) (mkConst ``Nat) (mkConst ``CIL.Link)
+  declareSuffixes body entryType "_linkSuffix"
+    (fun start => s!"The link table of `{body.name}` from entry {start} on") links entries
+  let ascending ← mkEq (mkApp3 (mkConst ``CIL.Extraction.keysAscend) (mkConst ``CIL.Link)
+    (mkNatLit 0) links) (mkConst ``Bool.true)
+  body.prove "_links_ascend" s!"The keys of the link table of `{body.name}` ascend."
+    ascending (← mkEqRefl (mkConst ``Bool.true))
+  for inRange : position in [0:keyed.size] do
+    let (pc, link) := keyed[position]
+    withCurrHeartbeats do
+      let statement ← mkEq (mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc))
+        (← mkAppM ``Option.some #[link])
+      let proof ← mkAppM ``CIL.Extraction.linkAt_of_position #[body.constant "_links_ascend",
+        ← foundAt body "_linkSuffix" entryType links entries position]
+      body.prove s!"_link{pc}" s!"The link of the call site at pc {pc} of `{body.name}`."
+        statement proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
+        (inv := false) .global (eval_prio default)
+
 /-- `cil_instruction_equations body` declares `body_instruction{pc}`, the `@[cil_code ↓]`
     equation `∀ xs, (body xs).code[pc]? = some op`, for every pc of the method-valued
-    definition `body`, with the named suffixes `body_suffix{start}` its proofs go through. -/
+    definition `body`, with the named suffixes `body_suffix{start}` its proofs go through, and
+    the link fact `body_link{pc}` at each call site its table gives a link. -/
 syntax (name := instructionEquations) "cil_instruction_equations " ident : command
 
 elab_rules : command
@@ -187,5 +266,8 @@ elab_rules : command
             -- Pre-order, as `@[cil_code ↓]`: simp rewrites the lookup before unfolding the body.
             addSimpTheorem simpSet (name.appendAfter s!"_instruction{pc}") (post := false)
               (inv := false) .global (eval_prio default)
+        if ← impliedLinks method then declareLinks body simpSet method ops
+        else if let some (entries, keyed) ← explicitLinks method then
+          declareExplicitLinks body simpSet method entries keyed
 
 end CIL.InstructionEquations

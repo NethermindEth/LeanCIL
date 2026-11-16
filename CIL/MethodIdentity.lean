@@ -90,23 +90,44 @@ structure CallAt where
 def CallAt.instruction (site : CallAt) (index : Term) : MacroM Term :=
   `($(mkCIdent site.opcode) $index $(quote site.argc))
 
-/-- Every call in a method body, reduced one cell at a time so the cost is linear in the body
-and the body is never normalized. -/
+/-- The callee of each direct link in a method's table, keyed by pc; the first entry for a pc
+wins, as in `Method.linkAt`. One cell is reduced at a time, so the cost is linear in the table. -/
+def directLinks (method : Expr) : MetaM (Std.HashMap Nat Nat) := do
+  let mut cell := mkApp (mkConst ``CIL.Method.links) method
+  let mut found : Std.HashMap Nat Nat := {}
+  repeat
+    match (← whnf cell).getAppFnArgs with
+    | (``List.cons, #[_, entry, tail]) =>
+      if let (``Prod.mk, #[_, _, pc, link]) := (← whnf entry).getAppFnArgs then
+        if let (``CIL.Link.direct, #[callee]) := (← whnf link).getAppFnArgs then
+          let (pc, callee) := (← whnf pc, ← whnf callee)
+          if let (some pc, some callee) := (← (evalNat pc).run, ← (evalNat callee).run) then
+            unless found.contains pc do found := found.insert pc callee
+      cell := tail
+    | _ => break
+  return found
+
+/-- Every call in a method body, with the callee its link table gives the call's pc. Code and
+table are reduced one cell at a time, so the cost is linear in the body and the body is never
+normalized; a call the table does not link to a method is no call site. -/
 def calls (method : Expr) : MetaM (Array CallAt) := do
   let mut cell := mkApp (mkConst ``CIL.Method.code) method
   let mut pc := 0
-  let mut found := #[]
+  let mut sites := #[]
   repeat
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, op, tail]) =>
-      if let (opcode, #[callee, argc]) := (← whnf op).getAppFnArgs then
+      if let (opcode, #[_, argc]) := (← whnf op).getAppFnArgs then
         if opcode == ``CIL.Instruction.call || opcode == ``CIL.Instruction.callInstance then
-          if let (some callee, some argc) := (← (evalNat callee).run, ← (evalNat argc).run) then
-            found := found.push { pc, callee, argc, opcode }
+          if let some argc ← (evalNat argc).run then sites := sites.push (pc, argc, opcode)
       cell := tail
       pc := pc + 1
     | _ => break
-  return found
+  -- A table the code implies reduces past every pc before a call, so its depth grows with the pc.
+  let linked ← withTheReader Core.Context (fun context =>
+      { context with maxRecDepth := context.maxRecDepth + 4 * pc }) (directLinks method)
+  return sites.filterMap fun (pc, argc, opcode) =>
+    linked[pc]?.map fun callee => { pc, callee, argc, opcode }
 
 /-- The candidate selected by `[occurrence]`, or the only one; never the first of several. -/
 def choose (subject : MessageData) (candidates : Array String) (occurrence : Option Nat) :
@@ -138,6 +159,11 @@ def emit (index body : Ident) (signature : StrLit) (method : Nat) : CommandElabM
     $signatures[$index]? = some $signature := rfl))
   elabCommand (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `found)) :
     $program[$index]? = some $body := rfl))
+
+/-- Declares `name : parent.linkAt pc = some (.direct callee)`, the link a call site enters by. -/
+def emitLink (name : Ident) (parent : Term) (pc : Nat) (callee : Term) : CommandElabM Unit := do
+  elabAtPc pc (← `(@[cil_code] theorem $name :
+    ($parent).linkAt $(quote pc) = some (.direct $callee) := rfl))
 
 /-- `bind_method index body := "signature"` defines `index` as the extraction index of
 the method with that exact signature and `body` as its extracted body, with
@@ -172,9 +198,10 @@ def callSite (parent : Term) (method : Nat) (callee : String) (occurrence : Opti
   entryAt "callSite" sites chosen
 
 /-- `bind_callee index body := "signature" from parent` binds as `bind_method` does and
-also requires `parent` to call that method; `index.call` states the instruction at its
-call site, and `[k]` selects one of several. Expected bodies take `index` as a parameter,
-`.call index argc`, so a renumbered extraction never changes them. -/
+also requires `parent` to call that method, by the link of the call site; `index.call` states
+the instruction at the site, `index.link` its link, and `[k]` selects one of several. Expected
+bodies take `index` as a parameter, `.call index argc`, so a renumbered extraction never
+changes them. -/
 syntax (name := bindCallee)
   (docComment)? "bind_callee " ident ppSpace ident " := " str " from " term:max (" [" num "]")? :
     command
@@ -190,6 +217,7 @@ elab_rules : command
     let instruction ← liftMacroM (site.instruction index)
     elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote site.pc)]? = some $instruction := rfl))
+    emitLink (mkIdent (index.getId ++ `link)) parent site.pc index
 
 /-- `bind_callee index body := call argc from parent` binds the method `parent` calls with
 `argc` arguments, for helpers whose names are not stable; `[k]` selects one of several such
@@ -222,6 +250,7 @@ elab_rules : command
     let instruction ← liftMacroM (site.instruction index)
     elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
       ($parent).code[$(quote site.pc)]? = some $instruction := rfl))
+    emitLink (mkIdent (index.getId ++ `link)) parent site.pc index
 
 /-- The number of cells in a closed list, reduced one cell at a time without normalizing its
     elements. -/
