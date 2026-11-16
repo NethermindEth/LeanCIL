@@ -7,10 +7,11 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
-    /// <summary>An extraction's Lean source and what it is built from; `Decoded` marks each method defined from
-    /// its decoder rather than written as a literal.</summary>
+    /// <summary>An extraction's Lean source and what it is built from; `Refusals` holds, per method, why it is
+    /// written as a literal, or null for a method defined from its decoder.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts, bool[] Decoded);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts,
+        GenericEvidence.DecodeRefusal?[] Refusals);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -182,7 +183,7 @@ internal static class LeanEmitter
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
         var callDefinitions = new string?[methods.Length];
-        var decoded = new bool[methods.Length];
+        var refusals = new GenericEvidence.DecodeRefusal?[methods.Length];
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
             import CIL.Extraction.DecodedDefinition
@@ -294,8 +295,9 @@ internal static class LeanEmitter
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
             operandShapes.Add(m, reachable, genericEvidence);
-            decoded[n] = GenericEvidence.DecodesInFull(m, reachable);
-            if (decoded[n])
+            refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable);
+            var decoded = refusals[n] is null;
+            if (decoded)
                 // The decoder's raw definition is the method's only source; the command states its field facts.
                 lean.AppendLine($"cil_decoded_method method{n} := Method.ofRaw? profile " +
                     $"{FrameMetadata.EnvironmentLean} method{n}Original method{n}TypeArgumentsRaw");
@@ -319,11 +321,11 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
                 $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
-            if (!decoded[n])
+            if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
                     $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);
-            if (!decoded[n])
+            if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
                     $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
             // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
@@ -335,7 +337,7 @@ internal static class LeanEmitter
                 ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
                 ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
             ];
-            if (!decoded[n])
+            if (!decoded)
                 foreach (var (field, value) in facts)
                     lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
             lean.AppendLine($"cil_resolution_facts method{n}");
@@ -432,7 +434,7 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, decoded);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, refusals);
     }
 
     /// <summary>

@@ -432,15 +432,61 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Conv_Ovf_U1_Un, Code.Conv_Ovf_U2_Un, Code.Conv_Ovf_U4_Un, Code.Conv_Ovf_U8_Un, Code.Conv_Ovf_U_Un
     }.ToFrozenSet();
 
+    /// <summary>What keeps a method's literal at one pc: a pc the reachability certificate rules out, since a
+    /// decoded instruction there fails the feature check, or an opcode `Method.ofRaw?` writes as a hole.</summary>
+    internal enum RefusalKind { UnreachablePc, Hole }
+
+    /// <summary>The part of the model an opcode outside <see cref="DecodedOpcodes"/> needs before it decodes.</summary>
+    internal enum HoleFamily
+    {
+        Calls, Fields, Arrays, Objects, Tokens, FloatingPoint, ReferenceIndirection, Exceptions, Prefixes, Other
+    }
+
+    /// <summary>The first pc, in body order, that keeps a method's literal definition, with its opcode.</summary>
+    internal sealed record DecodeRefusal(int Offset, OpCode Opcode, RefusalKind Kind)
+    {
+        /// <summary>The family of a hole's opcode; an unreachable pc has none.</summary>
+        internal HoleFamily? Family => Kind == RefusalKind.Hole ? FamilyOf(Opcode.Code) : null;
+    }
+
     /// <summary>
-    /// Whether the extraction defines `method` from its decoder: `Method.ofRaw?` writes no hole at any pc (every
-    /// opcode is in <see cref="DecodedOpcodes"/>) and every pc is in the reachability certificate, since a decoded
-    /// instruction at a pc the certificate rules out fails the feature check. A wrong answer fails the build at
-    /// the method's `cil_decoded_method` definition.
+    /// Why the extraction does not define `method` from its decoder, or null when it does: `Method.ofRaw?` writes no
+    /// hole at any pc and every pc is in the reachability certificate. A wrong null fails the build at the method's
+    /// `cil_decoded_method` definition. One pass over the body.
     /// </summary>
-    internal static bool DecodesInFull(MethodDefinition method, IReadOnlySet<Instruction> reachable) =>
-        method.Body.Instructions.All(instruction =>
-            reachable.Contains(instruction) && DecodedOpcodes.Contains(instruction.OpCode.Code));
+    internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable)
+    {
+        foreach (var instruction in method.Body.Instructions)
+        {
+            if (!reachable.Contains(instruction))
+                return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
+            if (!DecodedOpcodes.Contains(instruction.OpCode.Code))
+                return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
+        }
+        return null;
+    }
+
+    static HoleFamily FamilyOf(Code opcode) => opcode switch
+    {
+        Code.Call or Code.Callvirt or Code.Calli or Code.Newobj or Code.Jmp or Code.Ldftn or Code.Ldvirtftn
+            or Code.Constrained or Code.Tail => HoleFamily.Calls,
+        Code.Ldfld or Code.Ldflda or Code.Stfld or Code.Ldsfld or Code.Ldsflda or Code.Stsfld => HoleFamily.Fields,
+        Code.Newarr or Code.Ldlen or Code.Ldelema or Code.Readonly or Code.Ldelem_Any or Code.Stelem_Any
+            or Code.Ldelem_I1 or Code.Ldelem_U1 or Code.Ldelem_I2 or Code.Ldelem_U2 or Code.Ldelem_I4
+            or Code.Ldelem_U4 or Code.Ldelem_I8 or Code.Ldelem_I or Code.Ldelem_R4 or Code.Ldelem_R8
+            or Code.Ldelem_Ref or Code.Stelem_I or Code.Stelem_I1 or Code.Stelem_I2 or Code.Stelem_I4
+            or Code.Stelem_I8 or Code.Stelem_R4 or Code.Stelem_R8 or Code.Stelem_Ref => HoleFamily.Arrays,
+        Code.Box or Code.Unbox or Code.Unbox_Any or Code.Ldobj or Code.Stobj or Code.Cpobj or Code.Initobj
+            or Code.Sizeof or Code.Mkrefany or Code.Refanyval or Code.Refanytype => HoleFamily.Objects,
+        Code.Ldstr or Code.Ldtoken => HoleFamily.Tokens,
+        Code.Ldc_R4 or Code.Ldc_R8 or Code.Conv_R4 or Code.Conv_R8 or Code.Conv_R_Un or Code.Ckfinite
+            or Code.Ldind_R4 or Code.Ldind_R8 or Code.Stind_R4 or Code.Stind_R8 => HoleFamily.FloatingPoint,
+        Code.Ldind_Ref or Code.Stind_Ref => HoleFamily.ReferenceIndirection,
+        Code.Throw or Code.Rethrow or Code.Leave or Code.Leave_S or Code.Endfinally or Code.Endfilter =>
+            HoleFamily.Exceptions,
+        Code.Volatile or Code.Unaligned or Code.No => HoleFamily.Prefixes,
+        _ => HoleFamily.Other
+    };
 
     static readonly HashSet<Instruction> EmptySet = [];
 

@@ -47,13 +47,19 @@ internal static partial class Program
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
+    /// <summary>The extracted methods and, at the same index, why each is a literal, or null when its decoder
+    /// defines it.</summary>
+    internal sealed record MethodDefinitions(MethodDefinition[] Methods, GenericEvidence.DecodeRefusal?[] Refusals);
+
     /// <summary>Runs <c>extract</c> or <c>check</c> in this process without printing its report;
     /// a rejection throws instead of returning an exit code. A batch shares the files read by earlier runs, and
-    /// `decoded` receives the full names of the methods defined from their decoder.</summary>
-    internal static void RunQuietly(string[] args, ExtractionBatch? batch = null, Action<string[]>? decoded = null)
+    /// `definitions` receives each extracted method with why it is a literal, or null when its decoder defines it.
+    /// </summary>
+    internal static void RunQuietly(string[] args, ExtractionBatch? batch = null,
+        Action<MethodDefinitions>? definitions = null)
     {
         if (args is not ["extract" or "check", ..]) throw new ArgumentException(Usage);
-        Run(args, batch, report: TextWriter.Null, rethrow: true, decoded: decoded);
+        Run(args, batch, report: TextWriter.Null, rethrow: true, definitions: definitions);
     }
 
     /// <summary>
@@ -72,7 +78,8 @@ internal static partial class Program
 
     static int Run(string[] args, ExtractionBatch? batch = null,
         Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
-        Action<ProofOutline.Extraction>? inspect = null, bool refresh = false, Action<string[]>? decoded = null)
+        Action<ProofOutline.Extraction>? inspect = null, bool refresh = false,
+        Action<MethodDefinitions>? definitions = null)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -481,8 +488,7 @@ internal static partial class Program
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
-            decoded?.Invoke(
-                [.. methods.Where((_, index) => emitted.Decoded[index]).Select(method => method.FullName)]);
+            definitions?.Invoke(new(methods, emitted.Refusals));
             if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Templates, emitted.Views,
                     profile.Architecture, emitted.Layouts));

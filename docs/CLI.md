@@ -253,6 +253,12 @@ whatever the entries' status. Each entry has one status:
 | `blocked` | At least one blocker is listed. An entry the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of an open generic type, is `blocked`, and its definition is analysed as an entry. |
 | `notChecked` | Nothing was analysed, for the reason given: a selector that matches no method or several, a malformed type argument, an unknown profile, or an assembly, import or assumption that fails before any method is checked. |
 
+An admitted entry lists its extracted methods in `decodedMethods`, those the extraction defines
+from their decoder, and in `literalMethods`, those it writes as literals. Each literal method
+gives the IL offset and opcode of its first pc that keeps the literal, the refusal (`hole` for an
+opcode the decoder does not decode, `unreachablePc` for a pc the reachability certificate rules
+out) and, for a hole, the opcode's family.
+
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source
 location when one is present, and every affected entry with the call chains from it to those

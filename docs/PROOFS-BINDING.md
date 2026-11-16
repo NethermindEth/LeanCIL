@@ -701,7 +701,7 @@ errors, so a file builds only when the kernel confirms what compiled code comput
 
 The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs and
 every pc is reachable under the profile; a method with a pc the reachability certificate rules out
-keeps its literal, whose `.unsupported` padding at that pc the feature check requires. Its
+keeps its literal, whose `.unadmitted` hole at that pc the feature check requires. Its
 `Extracted.lean` then states the method as
 
 ```text
