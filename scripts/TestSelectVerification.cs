@@ -239,7 +239,7 @@ void MustReject(Action action)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException("Invalid export routing/coverage was accepted.");
 }
-Test("independent export cohort map preserves 23 leaves, 49 base cases and one discovery completion", () =>
+Test("independent export cohort map preserves 23 leaves, 50 base cases and one discovery completion", () =>
 {
     Dictionary<string, (string Cohort, string[] Cases)> expected = new(StringComparer.Ordinal)
     {
@@ -250,7 +250,8 @@ Test("independent export cohort map preserves 23 leaves, 49 base cases and one d
             "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
         ["exportsaudit"] = ("audit", ["audit.proof-source", "audit.wrapper-artifact"]),
         ["exportsprotected"] = ("protected", ["protected.publication", "protected.caller", "protected.visibility"]),
-        ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file"]),
+        ["exportsresolution"] = ("resolution", ["resolution.same-files", "resolution.changed-file",
+            "resolution.rewritten-artifact"]),
         ["exportsfullconsumer"] =
             ("consumer", ["full.consumer-explicit", "full.consumer-repeat", "full.artifact-mode"]),
         ["exportsfullordinary"] = ("ordinary", ["full.ordinary"]),
@@ -316,10 +317,10 @@ Test("independent export cohort map preserves 23 leaves, 49 base cases and one d
     ExportSuite[] all = ExportVerificationSuites.Plan();
     ExactPlan(all);
     string[] baseCases = all.Where(entry => entry.Cohort != "discovery").SelectMany(entry => entry.Cases).ToArray();
-    Require(baseCases.Length == 49 && baseCases.Distinct(StringComparer.Ordinal).Count() == 49,
+    Require(baseCases.Length == 50 && baseCases.Distinct(StringComparer.Ordinal).Count() == 50,
         "Lost or duplicate base behavior");
-    Require(all.SelectMany(entry => entry.Cases).Count() == 50 &&
-        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 50,
+    Require(all.SelectMany(entry => entry.Cases).Count() == 51 &&
+        all.SelectMany(entry => entry.Cases).Distinct(StringComparer.Ordinal).Count() == 51,
         "Lost or duplicate discovery completion");
     Equal(ExportVerificationSuites.DiscoveryArguments("sidecar", "caller-proof", "caller-package", "producer-package",
             "producer-proof", "interface-source"),
