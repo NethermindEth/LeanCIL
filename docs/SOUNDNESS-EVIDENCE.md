@@ -191,6 +191,12 @@ What `MetadataResolution` and `MetadataBinding` check:
   owner fails with `instantiatedStaticField`, since each closed instantiation has its own storage.
   The descriptor of the static site at an access must name the instruction's field operand as its
   `field`.
+- The decoder records the instruction index and token of each static access whose field a carried
+  row defines, and the body must list the same ones (`BodyEvidence.statics`). Over the whole
+  program, `StaticIdentitiesValid` requires two static sites to share an identity exactly when
+  their tokens name the same `Field` row of the same assembly, so the model's storage keyed by
+  identity is one storage per field. Two sorts of the S sites decide it in O(S log S) comparisons,
+  and `StaticIdentitiesValid.pairs` states what it guarantees.
   A field's name, index and static flag,
   the generic arguments of a type or method instantiation,
   the parameter and return types after substitution, the definition a member reference resolves to

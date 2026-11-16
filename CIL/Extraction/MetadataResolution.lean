@@ -129,7 +129,7 @@ def MetadataEnv.slice (env : MetadataEnv) (position token : Nat) :
   | none => .error (.unresolvedType token)
 
 /-- The slice, link-resolved: the link of a kind from a token, if the slice states one. -/
-def MetadataIndex.link (index : MetadataIndex) (kind source : Nat) : Option (Nat × Nat) :=
+def IndexTables.link (index : IndexTables) (kind source : Nat) : Option (Nat × Nat) :=
   index.links.find? (kind * 0x100000000 + source)
 
 /-- How deeply names, enclosing types and signature types may nest. -/

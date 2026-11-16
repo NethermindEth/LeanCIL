@@ -355,6 +355,8 @@ internal static class LeanEmitter
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
+        lean.AppendLine("theorem static_identities_validated : Extraction.StaticIdentitiesValid program " +
+            "(methodEvidence.map (·.body)) := " + Decide);
         for (int n = 0; n < methods.Length; n++)
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
@@ -389,7 +391,8 @@ internal static class LeanEmitter
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
             "assemblies methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
+        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated");
+        lean.AppendLine("    static_identities_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");

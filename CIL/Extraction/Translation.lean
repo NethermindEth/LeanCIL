@@ -5,6 +5,7 @@ import CIL.Extraction.ExactIntrinsics
 import CIL.Extraction.RuntimeModels
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
+import CIL.Extraction.StaticIdentities
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
 import CIL.Extraction.Assemblies
@@ -20,7 +21,8 @@ import CIL.Resolution
 
 The top of the extraction checks. `TranslationValid` conjoins the kernel-checked validators
 for one extraction: layouts recompute, every emitted method passes the per-method validators
-against its evidence record, static values are reproduced by their initializers, import
+against its evidence record, static values are reproduced by their initializers, each static
+identity stands for exactly one field, import
 layouts agree, every body is owned by the pinned assembly its evidence names, and every decoded
 method definition is what its body bytes and carried metadata say. It is not a simulation proof for
 every raw opcode; general instruction translation, that the carried metadata rows are the image's,
@@ -394,6 +396,7 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
     MethodAtValid rawLayouts layouts pins evidence imports evidence[index]
       program[index.val]?) ∧
   StaticValuesValid program ∧
+  StaticIdentitiesValid program (evidence.map (·.body)) ∧
   ImportedLayoutsValid imports (programArchitecture program) ∧
   ImportedLocalLayoutsBound rawLayouts layouts imports ∧
   AttributionValid (bodyOwners evidence) = true
@@ -402,7 +405,7 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (evidence : List MethodEvidence) (imports : List ImportSlot)
     (program : Program) :
     Decidable (TranslationValid rawLayouts layouts pins evidence imports program) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
@@ -420,6 +423,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     {program : Program}
     (layout : LayoutsValid rawLayouts layouts (programArchitecture program))
     (statics : StaticValuesValid program)
+    (identities : StaticIdentitiesValid program (evidence.map (·.body)))
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
     (attribution : AttributionValid (bodyOwners evidence) = true)
@@ -438,7 +442,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       cases index with
       | zero => exact valid
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
-  exact ⟨layout, (compose methods).1, (compose methods).2, statics, importLayouts,
+  exact ⟨layout, (compose methods).1, (compose methods).2, statics, identities, importLayouts,
     importedLocals, attribution⟩
 
 /-- Each method of a valid translation passes every per-method validator. -/

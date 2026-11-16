@@ -72,7 +72,7 @@ theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : B
   split at matched
   · next decoded checks =>
     simp only [Bool.and_eq_true, beq_iff_eq] at matched
-    exact ⟨decoded, checks, matched.2, matched.1.2⟩
+    exact ⟨decoded, checks, matched.1.2, matched.1.1.2⟩
   · exact absurd matched Bool.false_ne_true
 
 #print axioms BodyDecodes.code

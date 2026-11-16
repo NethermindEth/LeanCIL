@@ -13,7 +13,9 @@ instruction. Of the fields of types no slice carries, only `BitConverter.IsLittl
 admitted, and only as the `ldsfld` the feature check reads as a constant.
 
 A static of the generic `Box`1` named through `Box<int>` is refused for each instruction, since
-each closed instantiation has its own storage.
+each closed instantiation has its own storage. Across the program an identity names one field and
+a field has one identity: two fields read under one identity, in one method or in two, and one
+field read under two identities are refused.
 -/
 
 namespace Tests.StaticFieldSites
@@ -147,10 +149,12 @@ private def body (opcode : Nat) (field : FieldRef) (returnType : TypeExpr) (worl
 private def returnType (opcode : Nat) : TypeExpr :=
   if opcode == ldsfld then int32 else if opcode == ldsflda then .byref int32 else .void
 
-/-- The body accessing `Y` of `owner carried` with `opcode`. -/
+/-- The body accessing `Y` of `owner carried` with `opcode`; the decoder records the access of
+    a carried field. -/
 private def yBody (carried : Bool) (opcode : Nat) : BodyEvidence :=
   let world := slice carried (resultBytes opcode)
-  body opcode (yField carried) (returnType opcode) world.1 world.2.y
+  { body opcode (yField carried) (returnType opcode) world.1 world.2.y with
+    statics := if carried then [(if opcode == stsfld then 1 else 0, world.2.y)] else [] }
 
 private def unknown (count : Nat) : Option FeatureState := some ⟨List.replicate count none, []⟩
 
@@ -325,5 +329,86 @@ theorem instantiated_owner_static_rejected :
     refusedAsInstantiated stsfld = true ∧ refusedAsInstantiated ldtoken = true := by
   decide +kernel
 #print axioms instantiated_owner_static_rejected
+
+/-! ## One identity for one field -/
+
+/-- The carried world of a method returning an `int`. -/
+private def intWorld : MetadataSlice × Tokens := slice true [0x08]
+
+/-- The raw body `ldsflda X; ldsflda Y; ceq; ret`, which compares the two fields' addresses. -/
+private def compareRaw : RawMethod :=
+  { raw ldsflda (yField true) int32 with
+    code := [⟨0, ldsflda, operandOf (xField true)⟩, ⟨5, ldsflda, operandOf (yField true)⟩,
+      ⟨10, 0xFE01, .none⟩, ⟨12, 0x2A, .none⟩] }
+
+/-- The bytes, token table and recorded static accesses of `compareRaw`. -/
+private def compareBody : BodyEvidence :=
+  let x := intWorld.2.x
+  let y := intWorld.2.y
+  let encoded := MetadataBuilder.littleEndian 4
+  let bytes := [13 * 4 + 2, ldsflda] ++ encoded x ++ [ldsflda] ++ encoded y ++ [0xFE, 0x01, 0x2A]
+  let table := [(x, operandOf (xField true)), (y, operandOf (yField true))]
+  { evidenceOf bytes table { own := intWorld.1 } compareRaw with statics := [(0, x), (1, y)] }
+
+/-- The evidence of the comparison: two references, then the `int` that compares them. -/
+private def compareEvidence : MethodEvidence :=
+  { original := compareRaw, body := compareBody, arguments := [], closed := compareRaw,
+    parameterInput := { arguments := [], locals := [], code := List.replicate 4 .other },
+    reachable := List.replicate 4 true,
+    featureStates := [unknown 0, unknown 1, unknown 2, unknown 1],
+    scalarStates := [some [], some [.reference], some [.reference, .reference], some [.word32]],
+    layoutUses := [], assembly := pin,
+    signature := (spelled? compareBody.names.signature).getD "" }
+
+/-- The emitted comparison, with the sites of `X` and `Y` keyed by the given identities. -/
+private def compareMethod (xIdentity yIdentity : Nat) : Method :=
+  { locals := [], returnsValue := true, declared := DeclaredSignature.ofRaw compareRaw,
+    code := [.ldsflda (xField true), .ldsflda (yField true), .ceq, .ret],
+    staticSites := [(0, descriptorOf (xField true) xIdentity 0),
+      (1, descriptorOf (yField true) yIdentity 0)] }
+
+/-- Keyed by one identity, `X` and `Y` would share one storage in the model and their addresses
+    would compare equal; the evidence check refuses that, and accepts two identities. -/
+theorem shared_identity_in_one_method_rejected :
+    ¬ StaticIdentitiesValid [compareMethod 1 1] [compareBody] ∧
+    ¬ TranslationValid [] #[] [] [compareEvidence] [] [compareMethod 1 1] ∧
+    TranslationValid [] #[] [] [compareEvidence] [] [compareMethod 1 2] := by
+  decide +kernel
+#print axioms shared_identity_in_one_method_rejected
+
+/-- The evidence of a method of its own that loads the carried `field` with `token`. -/
+private def loadEvidence (field : FieldRef) (token : Nat) : MethodEvidence :=
+  let original := raw ldsfld field int32
+  let decoded := { body ldsfld field int32 intWorld.1 token with statics := [(0, token)] }
+  { original, body := decoded, arguments := [], closed := original,
+    parameterInput := { arguments := [], locals := [], code := [.other, .other] },
+    reachable := [true, true], featureStates := [unknown 0, unknown 1],
+    scalarStates := [some [], some [.word32]], layoutUses := [], assembly := pin,
+    signature := (spelled? decoded.names.signature).getD "" }
+
+/-- The emitted `ldsfld field; ret`, its site keyed by `identity`. -/
+private def loadMethod (field : FieldRef) (identity : Nat) : Method :=
+  { locals := [], returnsValue := true,
+    declared := DeclaredSignature.ofRaw (raw ldsfld field int32),
+    code := [.ldsfld field, .ret], staticSites := [(0, descriptorOf field identity 2)] }
+
+/-- A program of one load method per entry: the field, its token and the identity of its site. -/
+private abbrev loadsValid (loads : List (FieldRef × Nat × Nat)) : Prop :=
+  TranslationValid [] #[] [] (loads.map fun (field, token, _) => loadEvidence field token) []
+    (loads.map fun (field, _, identity) => loadMethod field identity)
+
+/-- Two methods may not key `X` and `Y` by one identity, and may key them by two. -/
+theorem shared_identity_across_methods_rejected :
+    ¬ loadsValid [(xField true, intWorld.2.x, 1), (yField true, intWorld.2.y, 1)] ∧
+    loadsValid [(xField true, intWorld.2.x, 1), (yField true, intWorld.2.y, 2)] := by
+  decide +kernel
+#print axioms shared_identity_across_methods_rejected
+
+/-- Two methods may not key `Y` by two identities, and may share its one identity. -/
+theorem one_field_with_two_identities_rejected :
+    ¬ loadsValid [(yField true, intWorld.2.y, 1), (yField true, intWorld.2.y, 2)] ∧
+    loadsValid [(yField true, intWorld.2.y, 2), (yField true, intWorld.2.y, 2)] := by
+  decide +kernel
+#print axioms one_field_with_two_identities_rejected
 
 end Tests.StaticFieldSites
