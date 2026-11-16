@@ -67,8 +67,7 @@ evidence.Check();
 // writes a field, which the decoder leaves holes, so its extraction writes the literal the code mutations edit.
 var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
 var baseline = File.ReadAllText(Path.Combine(output, "7", "Extracted.lean"));
-if (!decoded.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) ||
-    !baseline.Contains("\ndef method0 : Method := ", StringComparison.Ordinal))
+if (!IsDecodedMethod(decoded, 0) || IsDecodedMethod(baseline, 0) || !DefinedMethods(baseline).Contains(0))
     throw new InvalidOperationException(
         "Overwrite must be defined from its decoder and Counter::Parameter by its literal");
 void Reject(string name, string mutated, string? source = null)

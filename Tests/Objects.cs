@@ -10,6 +10,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -124,11 +125,6 @@ foreach (var (name, forged) in new[]
 // the forgery edits the decoder's input and leaves the closed definition the check reads.
 var cast = File.ReadAllText(Path.Combine(root, "DogCast", "Extracted.lean"));
 var castTest = $"opcode := 116, operand := .type ({dogEntry.TrimStart('(').TrimEnd(',', ' ')})";
-var original = cast.Split('\n')
-    .SingleOrDefault(line => line.StartsWith("def method0Original ", StringComparison.Ordinal));
-if (!cast.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) || original is null ||
-    !original.Contains(castTest, StringComparison.Ordinal))
-    throw new InvalidOperationException("The extraction does not test the cast against Dog: " + castTest);
 foreach (var (name, forged) in new[]
 {
     ("class", castTest.Replace("Examples.Dog", "Examples.Bird", StringComparison.Ordinal)),
@@ -136,8 +132,7 @@ foreach (var (name, forged) in new[]
 })
 {
     var path = Path.Combine(root, $"ForgedCast-{name}.lean");
-    File.WriteAllText(path, cast.Replace(original, original.Replace(castTest, forged, StringComparison.Ordinal),
-        StringComparison.Ordinal));
+    File.WriteAllText(path, ForgeDecodedOriginal(cast, 0, castTest, forged));
     forgedViews.Add(path, $"PASS forged type test rejected: {name}", "Extraction.ScalarFlowValid");
 }
 forgedViews.Check();
