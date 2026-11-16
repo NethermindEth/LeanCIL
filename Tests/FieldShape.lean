@@ -264,4 +264,24 @@ theorem inline_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
   exact ⟨_, rfl⟩
 #print axioms inline_lanes_load
 
+-- With shape facts required, the operand that has none is refused instead of evaluated.
+/-- error: class field inlineLanes of a closed body has no shape fact -/
+#guard_msgs in
+set_option cil.requireFieldShapeFacts true in
+example (frame : Safety.Frame) (memory : Safety.Memory) (receiver : Safety.ManagedReference) :
+    ∃ outcome, Safety.step body (.ldfld inlineLanes) 0 [] frame [.object receiver] memory =
+      outcome := by
+  simp only [cil_step]
+  exact ⟨_, rfl⟩
+
+-- The operand with a fact still steps by it.
+set_option cil.requireFieldShapeFacts true in
+theorem fact_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    ∃ outcome, Safety.step body (.ldfld lanesField) 0 [] frame [.object receiver] memory =
+      outcome := by
+  simp only [cil_step]
+  exact ⟨_, rfl⟩
+#print axioms fact_lanes_load
+
 end Tests.FieldShape

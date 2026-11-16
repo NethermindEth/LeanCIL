@@ -218,7 +218,8 @@ it, each call reading its target from a link fact that `cil_instruction_equation
 table-calls bodies are the same bodies with their link table written out, as a template writes it.
 The objects bodies have 16, 64 and 256 instructions and load and pop an `int64` field of their
 object argument per cycle, each `ldfld` reading the field's `cil_field_shape` fact and two supplied
-facts that locate and read its slot.
+facts that locate and read its slot; `cil.requireFieldShapeFacts` fails the body if a step
+evaluates the shape instead of reading the fact.
 The suite uses the proof-cost measuring frontend, with three sequential proof compilations and a
 header-only baseline per scalar, memory, reference, table, accumulate, locals, calls and table-calls
 body up to 256 instructions, and one compilation for every other body.
