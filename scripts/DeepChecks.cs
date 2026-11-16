@@ -116,10 +116,14 @@ partial class Program
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
     sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods);
 
-    /// <summary>Artifacts and requests that must join the caller's extraction and proof audit.</summary>
+    /// <summary>
+    /// Artifacts and requests that must join the caller's extraction and proof audit. A contribution with a result
+    /// key may be published once the run succeeds; a restored one holds artifacts an earlier run replayed.
+    /// </summary>
     sealed record DeepSessionContribution(string[] Modules, BindingTargets Targets,
         SortedDictionary<string, string> Artifacts, SortedDictionary<string, string> Hashes,
-        SortedDictionary<string, string> SourceHashes, string SourceDirectory)
+        SortedDictionary<string, string> SourceHashes, string SourceDirectory, string? ResultKey = null,
+        bool Restored = false)
     {
         internal BindingRequest[] Requests => Targets.Requests;
 
@@ -218,9 +222,14 @@ partial class Program
         return HashFiles(files);
     }
 
-    /// <summary>Builds deep modules against the caller's existing extraction in its verification session.</summary>
+    /// <summary>
+    /// Builds deep modules against the caller's existing extraction in its verification session. Given the key of
+    /// the certified environment and extraction, restores modules an earlier successful run built and replayed for
+    /// the same generated sources instead.
+    /// </summary>
     DeepSessionContribution BuildDeepSession(string session, string leanPath, string extractedOlean,
-        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins, Action? sourcesReady = null)
+        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins, Action? sourcesReady = null,
+        string? environment = null)
     {
         session = Path.GetFullPath(session);
         extractedOlean = Path.GetFullPath(extractedOlean);
@@ -243,7 +252,14 @@ partial class Program
         WriteBindingSources(plan);
         sourcesReady?.Invoke();
         var sources = BindingSourceHashes(directory);
-        var failures = BuildBindingModules(plan, leanPath);
+        var resultKey = environment is null ? null : DeepResultKey(environment,
+            bindingSourcesKey ?? throw new InvalidOperationException("StrictBinding has not been prepared"),
+            bindingPreparation?.Toolchain ?? throw new InvalidOperationException("StrictBinding has not been prepared"),
+            Relative(Path.GetDirectoryName(extractedOlean)!, extractedHashes), Relative(directory, sources),
+            pins, targets.Requests);
+        var restored = resultKey is not null && RestoreSuccess(resultKey, session);
+        Dictionary<string, string> failures = restored ? new(StringComparer.Ordinal)
+            : BuildBindingModules(plan, leanPath);
         if (failures.Count != 0)
             throw new InvalidOperationException("Deep-check module build failed: " +
                 string.Join("; ", failures.Select(pair => pair.Key + ": " + pair.Value)));
@@ -258,9 +274,63 @@ partial class Program
         if (!Same(extractedHashes, BindingArtifactHashes([extractedOlean])))
             throw new InvalidDataException("Deep-check artifact changed: " + extractedOlean);
         DeepSessionContribution contribution = new(modules, targets, artifacts,
-            BindingArtifactHashes(artifacts.Values), sources, directory);
+            BindingArtifactHashes(artifacts.Values), sources, directory, resultKey, restored);
         contribution.RequireStable();
         return contribution;
+
+        static SortedDictionary<string, string> Relative(string root, SortedDictionary<string, string> hashes) =>
+            new(hashes.ToDictionary(pair => Path.GetRelativePath(root, pair.Key).Replace('\\', '/'),
+                pair => pair.Value), StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The key of a deep result: the certified environment and extraction it was checked in, the prepared
+    /// StrictBinding sources and toolchain, the extraction module's artifacts, and the generated sources, pins and
+    /// requests. The generated sources hold the image bytes, identities and page size.
+    /// </summary>
+    static string DeepResultKey(string environment, string bindingSources, string toolchain,
+        SortedDictionary<string, string> extracted, SortedDictionary<string, string> sources,
+        IReadOnlyList<BindingImagePin> pins, IReadOnlyList<BindingRequest> requests) =>
+        ContentKey(JsonSerializer.Serialize(new
+        {
+            format = "deep-result-v1",
+            environment,
+            bindingSources,
+            toolchain,
+            extracted,
+            sources,
+            pins = pins.Select(pin => new { identity = pin.Identity, digest = pin.Digest.ToString() }),
+            requests = requests.Select(request => new
+            {
+                module = request.Module,
+                audit = request.Audit,
+                fact = (request.Subject as BindingSubject.Fact)?.Value,
+                image = (request.Subject as BindingSubject.Image)?.Digest.ToString()
+            })
+        }));
+
+    /// <summary>
+    /// Copies the generated modules a keyed deep contribution built into a new directory below
+    /// `staging`, checking each copy against the audited hashes, for publication once the run succeeds.
+    /// Restored and unkeyed contributions stage nothing.
+    /// </summary>
+    static string? StageDeepResult(DeepSessionContribution deep, string staging)
+    {
+        if (deep.ResultKey is null || deep.Restored) return null;
+        deep.RequireStable();
+        var root = Path.GetDirectoryName(deep.SourceDirectory)!;
+        var publication = Path.Combine(staging, "deep-cache");
+        Directory.CreateDirectory(publication);
+        foreach (var (path, hash) in deep.Hashes)
+        {
+            var generated = Path.GetRelativePath(deep.SourceDirectory, path);
+            if (generated.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(generated)) continue;
+            var target = Path.Combine(publication, Path.GetRelativePath(root, path));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(path, target);
+            if (Sha(target) != hash) throw new InvalidDataException("Deep-check artifact changed: " + path);
+        }
+        return publication;
     }
 
     /// <summary>

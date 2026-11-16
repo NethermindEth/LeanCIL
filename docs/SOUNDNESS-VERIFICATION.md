@@ -76,8 +76,15 @@ to replace them, the driver or the checker is outside the model.
 Consumer support reuse requires authenticated receipts, matching source and compiled-import
 closures, file hashes and unchanged artifacts after building. Imports of `Extracted` and
 `ExtractedSymbols` do not gain extraction-independent reuse authority. Restored
-extraction-dependent modules and closed generated certificates still undergo required kernel replay
-when proof checking. Certificate/theorem audits and extraction regeneration remain mandatory.
+extraction-dependent support modules and closed generated certificates still undergo required
+kernel replay when proof checking. Certificate/theorem audits and extraction regeneration remain
+mandatory.
+
+A deep result is published only after its whole request succeeds. Its key binds the certified
+environment and extraction key, the prepared StrictBinding sources and toolchain, the compiled
+extraction, the generated sources with the image bytes they hold, and the pins and requests. A
+restored result skips build and kernel replay of the generated modules, since its publisher
+replayed those bytes in the same keyed environment; their theorem audit runs on every request.
 
 The single-file verifier's support audit key binds the audit schema, verification policy,
 certified library identity, extraction identity digest, ordered support imports and support

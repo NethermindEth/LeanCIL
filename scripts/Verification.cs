@@ -207,6 +207,7 @@ partial class Program : IDisposable
     int extractionCacheHits;
     int proofCacheHits;
     int supportCacheHits;
+    int deepCacheHits;
     SortedDictionary<string, string>? certifiedModules;
 
     byte[]? receiptKey;
@@ -4845,7 +4846,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 stage?.Invoke("deep checks");
                 deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
-                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"));
+                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"), extractedKey);
+                if (deep.Restored)
+                {
+                    deepCacheHits++;
+                    CacheProgress("certified deep checks: " + entry);
+                }
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next,
                     [.. deep.Modules.Where(module => module != "Extracted")
@@ -4988,7 +4994,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .. proofRestored ? Array.Empty<string>() : ["Proof"]];
             // Replaying every module from the extraction to the proof lets the audit read that environment without a
             // second import. ExtractedImports imports Extracted from outside the set, which a joint replay rejects.
-            string[] replay = unreplayed.Length == 0 || importModules.Length > 0 ? unreplayed :
+            // The audit imports restored deep modules, so a full replay could not give it a fused environment.
+            string[] replay = unreplayed.Length == 0 || importModules.Length > 0 ||
+                deep?.Restored == true ? unreplayed :
                 ["Extracted", .. selected.Where(module => !SelectionModules.IsSymbols(module)),
                     .. symbols ? ["ExtractedSymbols", .. selected.Where(SelectionModules.IsSymbols)]
                         : Array.Empty<string>(),
@@ -5002,7 +5010,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (deep.Requests.Any(request => request.Audit.name == theorem))
                     throw new InvalidOperationException(
                         "Proof theorem collides with a deep-check request: " + theorem);
-                replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                // Restored deep modules were replayed by the run that published them, in the same keyed environment.
+                if (!deep.Restored) replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
                 auditModules = [.. auditModules.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
                 proofAudits = [proofAudits[0], .. deep.Requests.Select(request => request.Audit)];
             }
@@ -5166,9 +5175,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireDeepStable();
+            var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);
             if (!proofRestored && deep is not null) PublishProof();
             if (deep is not null && extractionPublication is not null)
                 PublishSuccess(extractedKey, extractionPublication);
+            if (deepPublication is not null) PublishSuccess(deep!.ResultKey!, deepPublication);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             completesLibrary = libraryModules is not null;
             standaloneCachePromotion = completesLibrary && deep is null && UseSuccessCache

@@ -8,6 +8,10 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include MultiAssemblyFixture.cs
 
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
 using Program verification = new();
 bool focusedDiagnostics = args is ["--diagnostics"] or ["--diagnostic", _];
 Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
@@ -181,6 +185,7 @@ if (withoutRows.facts.Single(fact => fact.id == BindingFact.MetadataRows).status
     withoutRows.facts.Single(fact => fact.id == BindingFact.BodyBytes).theorem != "BindingAudit.bodies")
     throw new InvalidOperationException("A fact without an audited request was reported as reconfirmed");
 Console.WriteLine("PASS the deep report reconfirms exactly the subjects of its audited requests");
+CheckDeepResultKey();
 double previousMilliseconds = 0;
 foreach (var count in new[] { 64, 512, 4096 })
 {
@@ -204,20 +209,7 @@ foreach (var count in new[] { 64, 512, 4096 })
     Console.WriteLine($"PASS {count} image associations reported 64 times in {milliseconds:F1} ms minimum");
 }
 
-bool auditedAgain = false;
-var previousProofHits = verification.proofCacheHits;
-var previousReplay = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY");
-try
-{
-    Environment.SetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY", "true");
-    verification.Verify(image, "DeepFixture", selector, proof, output, check: true, deepChecks: inputs,
-        stage: stage => auditedAgain |= stage == "theorem audit");
-}
-finally { Environment.SetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY", previousReplay); }
-if (!auditedAgain) throw new InvalidOperationException("Deep check reused a report without a fresh audit");
-if (verification.proofCacheHits <= previousProofHits)
-    throw new InvalidOperationException("Deep verification did not exercise a cached proof");
-Console.WriteLine("PASS cached proof and check requests run a complete fallback deep audit");
+CheckDeepResultReuse();
 if (args is ["--support-reuse"]) return;
 
 Reject("generated source mutation", "Deep-check source changed", "theorem audit", fresh =>
@@ -237,20 +229,9 @@ ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, o
     }), "Compiled artifacts changed");
 RequireNoReport();
 Console.WriteLine("PASS a pre-build extraction companion mutation prevents deep report publication");
-Reject("wrong body evidence", "Compiled artifacts changed", "kernel replay", fresh =>
-{
-    var source = Path.Combine(fresh, "BindingAudit", "Bodies.lean");
-    var text = File.ReadAllText(source);
-    var start = text.IndexOf("theorem bodies :", StringComparison.Ordinal);
-    if (start < 0) throw new InvalidOperationException("Missing body theorem");
-    File.WriteAllText(source, text[..start] + """
-        theorem bodies : StrictBinding.BodiesBound images [] := StrictBinding.claimsHold_nil Bodies.prepared
-        #print axioms bodies
-        end BindingAudit
-        """);
-    Run([verification.LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source],
-        leanPath: fresh + Path.PathSeparator + verification.SessionLeanPath(verification.session!));
-});
+Reject("wrong body evidence", "Compiled artifacts changed", "theorem audit", fresh => WriteWrongBodies(fresh));
+Reject("cold wrong body evidence", "Compiled artifacts changed", "kernel replay", fresh => WriteWrongBodies(fresh),
+    Path.Combine(fixture.Root, "ColdRejectCache"));
 
 var wrongManifest = Path.Combine(fixture.Root, "wrong.sha256");
 File.WriteAllText(wrongManifest, Sha(unused) + "  " + Path.GetFileName(unused) + "\n");
@@ -290,11 +271,11 @@ try
             File.AppendAllText(Path.Combine(fresh, "BindingAudit", "Images.lean"), "\n-- changed\n");
         }), "Deep-check source changed");
     if (receipts is null || !receipts.SequenceEqual(Receipts()))
-        throw new InvalidOperationException("Rejected cold deep verification published a successful receipt");
+        throw new InvalidOperationException("Rejected cold deep verification published a receipt");
     RequireNoReport();
 }
 finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousCache); }
-Console.WriteLine("PASS rejected cold deep verification publishes no proof or extraction receipt");
+Console.WriteLine("PASS rejected cold deep verification publishes no proof, extraction or deep result receipt");
 
 string[] Receipts() => Directory.Exists(SuccessCacheRoot)
     ? [.. Directory.EnumerateFiles(SuccessCacheRoot, "receipt.json", SearchOption.AllDirectories)
@@ -312,24 +293,213 @@ foreach (var name in new[] { "source", "toolchain" })
     finally { File.WriteAllBytes(path, original); }
 }
 
-void Reject(string name, string marker, string callback, Action<string> mutate)
+// Each input of a deep result key, the StrictBinding sources by content alone, selects another key.
+void CheckDeepResultKey()
+{
+    BindingImagePin[] pins = [new("Identity", inputs.Images[0].Digest, [])];
+    var requests = BindingRequests(new("", pins, 1));
+    string Key(string environment = "environment", string sources = "sources", string toolchain = "toolchain",
+        char extracted = 'a', char generated = 'b', BindingImagePin[]? pinned = null,
+        BindingRequest[]? requested = null) => DeepResultKey(environment, sources, toolchain,
+        new(StringComparer.Ordinal) { ["Extracted.olean"] = new string(extracted, 64) },
+        new(StringComparer.Ordinal) { ["BindingAudit/Bodies.lean"] = new string(generated, 64) },
+        pinned ?? pins, requested ?? requests);
+    var copy = Path.Combine(fixture.Root, "BindingSources");
+    foreach (var source in Directory.EnumerateFiles(At("StrictBinding"), "*.lean", SearchOption.AllDirectories)
+        .Append(At("StrictBinding.lean")))
+    {
+        var destination = Path.Combine(copy, Path.GetRelativePath(Root, source));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Copy(source, destination);
+    }
+    var original = BindingSourcesKey(copy);
+    var edited = Path.Combine(copy, "StrictBinding.lean");
+    var written = File.GetLastWriteTimeUtc(edited);
+    var bytes = File.ReadAllBytes(edited);
+    bytes[^1] ^= 1;
+    File.WriteAllBytes(edited, bytes);
+    File.SetLastWriteTimeUtc(edited, written);
+    string[] changed = [Key("other"), Key(sources: BindingSourcesKey(copy)), Key(toolchain: "other"),
+        Key(extracted: 'c'), Key(generated: 'c'), Key(pinned: [new("Other", inputs.Images[0].Digest, [])]),
+        Key(pinned: [new("Identity", Sha256Digest.Of([1]), [])]), Key(requested: requests[..^1])];
+    if (Key() != Key() ||
+        changed.Append(Key(sources: original)).Append(Key()).Distinct().Count() != changed.Length + 2)
+        throw new InvalidOperationException("A deep result key ignores one of its inputs");
+    Console.WriteLine("PASS a same-length StrictBinding change and every other deep result input change the key");
+}
+
+// One cache holds every run here, so whether each run restores its deep result is known.
+void CheckDeepResultReuse()
+{
+    var previousCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(fixture.Root, "ReuseCache"));
+        var cold = DeepRun(image, selector, proof, output, inputs);
+        Require(cold.DeepHits == 0 && cold.AfterDeepChecks.Contains("kernel replay") &&
+            cold.AfterDeepChecks.Contains("theorem audit") && SameFacts(cold.Report),
+            "A first deep request in an empty cache did not build, replay and audit its modules");
+        var unchanged = DeepRun(image, selector, proof, output, inputs, check: true);
+        Require(unchanged.DeepHits == 1 && unchanged.ProofHits == 1 &&
+            unchanged.AfterDeepChecks.Contains("theorem audit") &&
+            !unchanged.AfterDeepChecks.Contains("kernel replay") && SameFacts(unchanged.Report),
+            "An unchanged deep request did not reuse its result under a fresh theorem audit");
+        Console.WriteLine("PASS an unchanged deep request reuses its replayed modules and runs the theorem audit");
+
+        var changedProof = Path.Combine(fixture.Root, "ChangedProof.lean");
+        File.WriteAllText(changedProof, File.ReadAllText(proof) + "\n-- A changed proof input.\n");
+        var reproved = DeepRun(image, selector, changedProof, output, inputs);
+        Require(reproved.DeepHits == 1 && reproved.ProofHits == 0 &&
+            reproved.AfterDeepChecks.Contains("kernel replay") &&
+            reproved.Output.Contains("\"auditFused\":false", StringComparison.Ordinal) && SameFacts(reproved.Report),
+            "A changed proof did not reuse the deep result through the joint replay of the proof");
+        Console.WriteLine("PASS a changed proof is replayed jointly while its deep result is reused");
+
+        var entry = Directory.EnumerateDirectories(SuccessCacheRoot).Single(directory =>
+            File.Exists(Path.Combine(directory, "files", "BindingAudit", "Bodies.olean")));
+        var cachedBodies = Path.Combine(entry, "files", "BindingAudit", "Bodies.olean");
+        var forged = Path.Combine(fixture.Root, "WrongBodies.olean");
+        ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+            stage: stage =>
+            {
+                if (stage != "theorem audit" || File.Exists(forged)) return;
+                var fresh = Directory.EnumerateDirectories(output, "proof-*").Single();
+                WriteWrongBodies(fresh);
+                File.Copy(Path.Combine(fresh, "BindingAudit", "Bodies.olean"), forged);
+            }), "Compiled artifacts changed");
+        File.Copy(forged, cachedBodies, true);
+        var manifest = JsonSerializer.SerializeToUtf8Bytes(CacheFiles(Path.Combine(entry, "files")));
+        File.WriteAllBytes(Path.Combine(entry, "receipt.json"), manifest);
+        File.WriteAllBytes(Path.Combine(entry, "receipt.hmac"), HMACSHA256.HashData(verification.ReceiptKey,
+            Encoding.UTF8.GetBytes(Path.GetFileName(entry)).Concat(manifest).ToArray()));
+        var deepHits = verification.deepCacheHits;
+        var audited = new DeepCheckRun(inputs);
+        ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+            deepRun: audited), "Theorem statement mismatch");
+        Require(verification.deepCacheHits == deepHits + 1 && audited.Attempt!.Failure("theorem audit", "rejected")
+            .facts.Single(fact => fact.id == "body-bytes").status == FailureReports.BindingFailureStatus.Failed,
+            "The theorem audit did not reject a restored body module that states another fact");
+        RequireNoReport();
+        Console.WriteLine("PASS the theorem audit rejects an authenticated restored module that states another fact");
+
+        var written = File.GetLastWriteTimeUtc(cachedBodies);
+        var bytes = File.ReadAllBytes(cachedBodies);
+        bytes[^1] ^= 1;
+        File.WriteAllBytes(cachedBodies, bytes);
+        File.SetLastWriteTimeUtc(cachedBodies, written);
+        var previousReplay = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY");
+        (Report Report, string[] AfterDeepChecks, string Output, int DeepHits, int ProofHits) rebuilt;
+        try
+        {
+            // The cold run takes the separate replay that follows a rejected joint replay.
+            Environment.SetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY", "true");
+            rebuilt = DeepRun(image, selector, proof, output, inputs);
+        }
+        finally { Environment.SetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY", previousReplay); }
+        Require(rebuilt.DeepHits == 0 && rebuilt.AfterDeepChecks.Contains("kernel replay") &&
+            rebuilt.AfterDeepChecks.Contains("theorem audit") && SameFacts(rebuilt.Report),
+            "A same-length change to a cached deep module with its timestamp restored was restored");
+        Require(DeepRun(image, selector, proof, output, inputs).DeepHits == 1,
+            "A rebuilt deep result did not replace the changed entry");
+        Console.WriteLine("PASS a changed cached deep module runs a complete cold deep audit and is replaced");
+
+        var variant = fixture.Build("Variant", "DeepFixture", """
+            public static class Input
+            {
+                public static ulong Value(ulong value) => value | 1;
+                public static ulong Other(ulong value) => value + 1;
+            }
+            """);
+        var variantDigests = Path.Combine(fixture.Root, "variant.sha256");
+        File.WriteAllText(variantDigests, Sha(variant) + "  " + Path.GetRelativePath(fixture.Root, variant) + "\n");
+        var variantInputs = DeepCheckInputs.Read(variantDigests);
+        Require(DeepRun(variant, selector, proof, fixture.Artifact("Variant"), variantInputs).DeepHits == 0,
+            "A changed instruction in the library reused a deep result");
+        Require(DeepRun(variant, "Input::Other(System.UInt64)", proof, fixture.Artifact("VariantOther"),
+            variantInputs).DeepHits == 0, "Another entry method of one image reused a deep result");
+        Console.WriteLine("PASS a changed library instruction and another entry method of one image miss");
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousCache); }
+}
+
+// Runs one deep request with its stages from the deep checks on, its standard output and its cache hits.
+(Report Report, string[] AfterDeepChecks, string Output, int DeepHits, int ProofHits) DeepRun(string assembly,
+    string entry, string proofPath, string outputPath, DeepCheckInputs digests, bool check = false)
+{
+    List<string> stages = [];
+    var deepHits = verification.deepCacheHits;
+    var proofHits = verification.proofCacheHits;
+    var previousOutput = Console.Out;
+    using var captured = new StringWriter();
+    Report result;
+    try
+    {
+        Console.SetOut(captured);
+        result = verification.Verify(assembly, "DeepFixture", entry, proofPath, outputPath, check: check,
+            deepChecks: digests, stage: stages.Add);
+    }
+    finally
+    {
+        Console.SetOut(previousOutput);
+        Console.Write(captured.ToString());
+    }
+    return (result, [.. stages.SkipWhile(stage => stage != "deep checks")], captured.ToString(),
+        verification.deepCacheHits - deepHits, verification.proofCacheHits - proofHits);
+}
+
+bool SameFacts(Report checkedReport) => checkedReport.binding.facts
+    .Select(fact => (fact.id, fact.status, fact.theorem))
+    .SequenceEqual(report.binding.facts.Select(fact => (fact.id, fact.status, fact.theorem)));
+
+static void Require(bool condition, string message)
+{
+    if (!condition) throw new InvalidOperationException(message);
+}
+
+// A run with a cold cache builds its deep modules; any other run restores those an earlier run published.
+void Reject(string name, string marker, string callback, Action<string> mutate, string? coldCache = null)
 {
     bool changed = false;
     var run = new DeepCheckRun(inputs);
-    ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
-        deepRun: run,
-        stage: stage =>
-        {
-            if (changed || stage != callback) return;
-            var fresh = Directory.EnumerateDirectories(output, "proof-*").SingleOrDefault();
-            if (fresh is null || !File.Exists(Path.Combine(fresh, "BindingAudit", "Bodies.olean"))) return;
-            mutate(fresh);
-            changed = true;
-        }), marker);
+    var deepHits = verification.deepCacheHits;
+    var previousCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+    try
+    {
+        if (coldCache is not null) Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", coldCache);
+        ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+            deepRun: run,
+            stage: stage =>
+            {
+                if (changed || stage != callback) return;
+                var fresh = Directory.EnumerateDirectories(output, "proof-*").SingleOrDefault();
+                if (fresh is null || !File.Exists(Path.Combine(fresh, "BindingAudit", "Bodies.olean"))) return;
+                mutate(fresh);
+                changed = true;
+            }), marker);
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousCache); }
     if (!changed) throw new InvalidOperationException("Mutation callback did not execute: " + name);
+    if (verification.deepCacheHits != deepHits + (coldCache is null ? 1 : 0))
+        throw new InvalidOperationException("Mutation ran on the wrong deep result path: " + name);
     RequireUnattributed(run, callback);
     RequireNoReport();
     Console.WriteLine("PASS " + name + " prevents deep report publication");
+}
+
+// Replaces the body theorem with one about no evidence and compiles it over the generated module.
+void WriteWrongBodies(string fresh)
+{
+    var source = Path.Combine(fresh, "BindingAudit", "Bodies.lean");
+    var text = File.ReadAllText(source);
+    var start = text.IndexOf("theorem bodies :", StringComparison.Ordinal);
+    if (start < 0) throw new InvalidOperationException("Missing body theorem");
+    File.WriteAllText(source, text[..start] + """
+        theorem bodies : StrictBinding.BodiesBound images [] := StrictBinding.claimsHold_nil Bodies.prepared
+        #print axioms bodies
+        end BindingAudit
+        """);
+    Run([verification.LeanExecutable, "--root=" + fresh, "-o", Path.ChangeExtension(source, ".olean"), source],
+        leanPath: fresh + Path.PathSeparator + verification.SessionLeanPath(verification.session!));
 }
 
 void RequireUnattributed(DeepCheckRun run, string stage)

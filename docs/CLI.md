@@ -363,7 +363,11 @@ and have no binding payload. A failed attempt never reports a fact as trusted or
 
 The image decoder supports metadata tables through `0x2C`, without pointer or edit-and-continue
 tables, and the `#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams. Unsupported image structure
-rejects the request. Deep verification repeats its binding work on each request.
+rejects the request. A deep request reuses the generated modules of an earlier successful request
+in the same certified environment, with the same extraction, StrictBinding sources, toolchain,
+pins and generated sources, which hold the image bytes; it skips their build and kernel replay
+but still audits every deep theorem's type and axioms against the current extraction. Requests
+under `--proof-root` repeat their binding work.
 
 ## Start a proof
 
