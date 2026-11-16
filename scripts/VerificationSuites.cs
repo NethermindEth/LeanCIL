@@ -29,10 +29,11 @@ internal static class VerificationSuites
     {
         [Core] =
         [
-            "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
-            "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
-            "ProofBindingFamilies",
-            "StaticData", "Struct", "StructCopy", "SupportExtractionCache", "VerificationReuse", "WrongAdd"
+            "Add", "AddModel", "Alias", "Calls", "CallsSummary", "CertificateReuse", "Choose", "ConsumerBatchA",
+            "ConsumerBatchB", "ConsumerSupportUnion", "CountCallsSummary", "DecodedAdd", "Escape", "Hardware",
+            "IdentitySummary", "InitializedTypes", "LargeStruct", "PastEnd", "ProofBindingFamilies", "RepeatedSummary",
+            "StaticData", "Struct", "StructCopy", "SummaryCalls", "SupportExtractionCache", "VerificationReuse",
+            "WrongAdd"
         ],
         ["loops"] = ["Loops", "WordArrayOutlines"],
         ["outlines-control"] = ["ProofOutlines/control"],
@@ -143,8 +144,9 @@ internal static class VerificationSuites
             "the name, and one native method table step and one load of its first entry at a kernel cost that " +
             "does not grow with the table's entries; the managed-call check of a body with many call sites at " +
             "a per-site cost that does not grow with the call sites; the call check and the evidence theorem of " +
-            "a body with no call at a per-statement and a total cost that do not grow with the body; the " +
-            "argument facts of " +
+            "a body with no call at a per-statement and a total cost that do not grow with the body; the proof " +
+            "that 8, 32 and 128 evidence records decode to their methods at a per-record cost that does not grow " +
+            "with the records; the argument facts of " +
             "cil_resolution_facts and the reads through them at a per-argument cost that does not grow with " +
             "the parameters, and its static site facts and the reads through them at a per-site cost that does " +
             "not grow with the sites; the array element shape facts of cil_resolution_facts and the reads " +

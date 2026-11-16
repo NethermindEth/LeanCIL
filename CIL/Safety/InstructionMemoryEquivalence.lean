@@ -237,11 +237,10 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
       (otherMemoryInstruction operation stack n) := by
-  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress CIL.Safety.arrayLength
-    CIL.Safety.arrayLoad CIL.Safety.arrayStore
+  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
-    same.arrayValidate, same.arrayElement, same.loadTransfer]
+    same.arrayElement, same.loadTransfer]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -285,15 +284,16 @@ private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same
     | split
 #print axioms Memory.Equivalent.wideArithmeticInstruction
 
-/-- Reference array accesses locate the same slot and perform equivalent checked accesses. -/
-private theorem Memory.Equivalent.referenceArrayInstruction {m n : Memory}
-    (same : m.Equivalent n) (operation : CIL.MemoryOp) (stack : List Value) :
-    ResultEquivalent MemoryFirstEquivalent (referenceArrayInstruction operation stack m)
-      (referenceArrayInstruction operation stack n) := by
-  unfold CIL.Safety.referenceArrayInstruction CIL.Safety.referenceArrayLength
-    CIL.Safety.referenceArrayLoad CIL.Safety.referenceArrayStore
+/-- Array lengths and element accesses, and the two reads of a handler table, locate the same
+    element and perform equivalent checked accesses. -/
+private theorem Memory.Equivalent.elementInstruction {m n : Memory}
+    (same : m.Equivalent n) (op : CIL.Instruction) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (elementInstruction op stack m)
+      (elementInstruction op stack n) := by
+  unfold CIL.Safety.elementInstruction CIL.Safety.arrayLoad CIL.Safety.arrayStore
+    CIL.Safety.methodTableElement
   split <;> try simp only [same.loadSlot, same.referenceArrayOf, same.referenceArraySlot,
-    same.storableIn]
+    same.storableIn, same.loadValue, same.arrayValidate, same.arrayElement, same.loadNativeTable]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -301,8 +301,11 @@ private theorem Memory.Equivalent.referenceArrayInstruction {m n : Memory}
     | (apply ResultEquivalent.bind (same.storeSlot _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | split
-#print axioms Memory.Equivalent.referenceArrayInstruction
+#print axioms Memory.Equivalent.elementInstruction
 
 /-- Class field loads locate the same field and read equivalent memories alike. -/
 theorem Memory.Equivalent.classFieldLoad {m n : Memory} (same : m.Equivalent n)
@@ -454,6 +457,29 @@ theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equi
     | split
 #print axioms Memory.Equivalent.arrayTransferInstruction
 
+/-- A typed element access takes the same access from its element's shape and performs it alike
+    over equivalent memories. -/
+theorem Memory.Equivalent.typedElementInstruction {m n : Memory} (same : m.Equivalent n)
+    (shape : CIL.ElementShape) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (typedElementInstruction shape store stack m)
+      (typedElementInstruction shape store stack n) := by
+  unfold CIL.Safety.typedElementInstruction
+  split
+  any_goals split
+  any_goals exact same.arrayTransferInstruction _ _ _
+  all_goals (try unfold CIL.Safety.arrayLoad); (try unfold CIL.Safety.arrayStore)
+  all_goals try unfold CIL.Safety.methodTableElement
+  all_goals try simp only [same.loadValue, same.arrayElement, same.loadNativeTable]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.typedElementInstruction
+
 /-- Aligned transfers retain exact access failures and the existing typed transfer equivalence. -/
 theorem Memory.Equivalent.pointerTransferInstruction {m n : Memory} (same : m.Equivalent n)
     (kind : CIL.TransferKind) (alignment : Nat) (store : Bool) (stack : List Value) :
@@ -515,7 +541,6 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.referenceAddInstruction _ _ _
     · exact same.pointerTransferInstruction _ _ _ _
     · exact same.vector128UnsafeInstruction _ _ _
-    · exact same.arrayTransferInstruction _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.singleSpanInstruction _ _ _
@@ -527,9 +552,6 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.wideArithmeticInstruction _ _
     · exact same.staticSpanInstruction _ _
     · exact same.staticSpanInstruction _ _
-    · exact same.referenceArrayInstruction _ _
-    · exact same.referenceArrayInstruction _ _
-    · exact same.referenceArrayInstruction _ _
     · exact same.stringLiteralInstruction _ _
     · exact same.throwIfNullInstruction _
     · exact same.zeroGuardInstruction _ _ _ _
@@ -545,6 +567,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
     | exact same.memoryInstruction _ _
+    | exact same.elementInstruction _ _
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)

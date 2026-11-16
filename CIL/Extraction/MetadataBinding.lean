@@ -261,7 +261,9 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
   if isStaticFact.any (· != isStatic) then throw (.operandMismatch token)
   if !(frame.admits site.owner owner) then throw (.operandMismatch token)
   if index != expected then throw (.fieldIndexMismatch token index expected)
-  if !(frame.admits held fieldType) then throw (.operandMismatch token)
+  let heldAdmitted := if classOwner && !isStatic then frame.admitsHeld held fieldType
+    else frame.admits held fieldType
+  if !heldAdmitted then throw (.operandMismatch token)
   .ok { staticField := isStaticFact }
 
 /-! ## Methods and calls -/

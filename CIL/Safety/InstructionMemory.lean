@@ -99,6 +99,9 @@ def observerCount : CIL.Instruction → Nat
   | .ldind _ | .skipInit | .initAggregate _ => 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .stind _ | .copyObject _ => 2
+  | .ldlen => 1
+  | .ldelem _ | .ldelem_ref | .ldelem_any _ => 2
+  | .stelem _ | .stelem_ref | .stelem_any _ => 3
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
   | .stsfld _ => 1
   -- Method boundaries
@@ -107,8 +110,6 @@ def observerCount : CIL.Instruction → Nat
   | .callInstance _ argc | .callVirtual _ argc => argc
   | .newobj constructor => constructor.parameters.length
   | .managed (.call signature _ _) => signature.parameters.length + 1
-  | .managed (.tableElement _) => 2
-  | .managed .tableLength => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
@@ -634,18 +635,6 @@ def wideArithmeticInstruction (operation : CIL.MemoryOp) (stack : List Value) (m
         .scalar (.i64 quotient) :: rest)
   | _, _ => .error .invalidState
 
-/-- `ldlen` of a value array: its supplied length once its storage checks; a null array throws
-    `NullReferenceException`. -/
-def arrayLength (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) := do
-  match stack with
-  | .array view :: rest =>
-    let _ ← checkedAt view.reference 0 (view.validate memory)
-    if view.reference == .null then .error (.thrown .nullReference) else
-      return (memory, .scalar (.i64 (BitVec.ofNat 64 view.length)) :: rest)
-  | .object .null :: _ => .error (.thrown .nullReference)
-  | _ => .error .invalidState
-
 /-- `ldelem` of a numeric value-array element of `width` bytes, extended as `signed` says; a null
     array throws `NullReferenceException` once the index is well formed. -/
 def arrayLoad (width : Nat) (signed : Bool) (stack : List Value) (memory : Memory) :
@@ -824,9 +813,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .arrayAddress element writable, _ => arrayAddress element writable stack memory
-  | .arrayLength, _ => arrayLength stack memory
-  | .arrayLoad width signed, _ => arrayLoad width signed stack memory
-  | .arrayStore width, _ => arrayStore width stack memory
   -- Spans
   | .spanEmpty width writable, rest =>
     let view : SpanView := ⟨.null, 0, width, writable⟩
@@ -1022,48 +1008,83 @@ def storeArraySlot (memory : Memory) (field : Reference) (view : ArrayView)
   let held ← arraySlotValue memory view element
   return setSlot memory field held
 
-/-- `ldlen` of an array of class references: its length; a null array throws
+/-- `ldlen` of a method table: its entry count; a table without entries throws
     `NullReferenceException`. -/
-def referenceArrayLength (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) := do
-  match stack with
-  | .object array :: rest =>
+def methodTableLength (table : CIL.MethodTable) : ExecutionResult CIL.Value := do
+  let some targets := table.targets | .error (.thrown .nullReference)
+  if targets.size >= 2^31 then .error .invalidState else pure ()
+  return .i64 (BitVec.ofNat 64 targets.size)
+
+/-- `ldelem` of a method table: the pointer at `index`, read from the native backing when the
+    table has one; a table without entries throws before an index outside them. -/
+def methodTableElement (table : CIL.MethodTable) (index : CIL.Value) (memory : Memory) :
+    ExecutionResult CIL.MethodPointer := do
+  let some index := arrayIndex index | .error .invalidState
+  let some targets := table.targets | .error (.thrown .nullReference)
+  if targets.size >= 2^31 then .error .invalidState else pure ()
+  let some target := targets[index]? | .error (.thrown .indexOutOfRange)
+  match table.backing with
+  | some backing =>
+    let selected := { table with backing := some { backing with
+      byteOffset := nativeMethodWidth * index } }
+    checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
+  | none => return ⟨table.signature, some target⟩
+
+/-- `ldlen`, `ldelem`, `stelem`, `ldelem.ref` and `stelem.ref` on a value array or an
+    array of class references; `ldlen` and `ldelem.i` of a managed handler table read the
+    table. A null array throws `NullReferenceException` after a well-formed index; any other
+    operand is an ill-typed state. -/
+def elementInstruction (op : CIL.Instruction) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) :=
+  -- Arms of one opcode differ in a stack constructor, so a renamed stack selects the same arm.
+  match op, stack with
+  -- Lengths: a value array's view is validated before its null check.
+  | .ldlen, .array view :: rest => do
+    let _ ← checkedAt view.reference 0 (view.validate memory)
+    if view.reference == .null then .error (.thrown .nullReference) else
+      return (memory, .scalar (.i64 (BitVec.ofNat 64 view.length)) :: rest)
+  | .ldlen, .object array :: rest => do
     let (_, _, length) ← referenceArrayOf memory array
     return (memory, .scalar (.i64 (BitVec.ofNat 64 length)) :: rest)
-  | _ => .error .invalidState
-
-/-- `ldelem.ref`: the reference in an element slot, checking the index, then the null array,
-    then the bounds. -/
-def referenceArrayLoad (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) := do
-  match stack with
-  | .scalar index :: .object array :: rest =>
+  | .ldlen, .methodTable table :: rest => do
+    return (memory, .scalar (← methodTableLength table) :: rest)
+  -- Numeric elements.
+  | .ldelem .i, .scalar index :: .methodTable table :: rest => do
+    return (memory, .methodPointer (← methodTableElement table index memory) :: rest)
+  | .ldelem kind, .scalar _ :: .array _ :: _ | .ldelem kind, .scalar _ :: .object .null :: _ =>
+    arrayLoad kind.width kind.signed stack memory
+  | .stelem kind, .scalar _ :: .scalar _ :: .array _ :: _
+  | .stelem kind, .scalar _ :: .scalar _ :: .object .null :: _ =>
+    arrayStore kind.width stack memory
+  -- Class reference elements: the index, then the null array, then the bounds are checked.
+  | .ldelem_ref, .scalar index :: .object array :: rest => do
     let some index := arrayIndex index | .error .invalidState
     let (slot, _) ← referenceArraySlot memory array index
     return (memory, (← loadSlot memory slot) :: rest)
-  | _ => .error .invalidState
-
-/-- `stelem.ref`: stores a reference in an element slot, checking the index, the null array and
-    the bounds, then that the value's class is storable in the element type. -/
-def referenceArrayStore (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) := do
-  match stack with
-  | .object value :: .scalar index :: .object array :: rest =>
+  | .stelem_ref, .object value :: .scalar index :: .object array :: rest => do
     let some index := arrayIndex index | .error .invalidState
     let (slot, element) ← referenceArraySlot memory array index
     let _ ← storableIn memory element value
     return (← storeSlot memory slot value, rest)
-  | _ => .error .invalidState
-
-/-- `ldlen`, `ldelem.ref` and `stelem.ref` of an array of class references, whose slots hold
-    object references. -/
-def referenceArrayInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) :=
-  match operation, stack with
-  | .referenceArrayLength, _ => referenceArrayLength stack memory
-  | .referenceArrayLoad, _ => referenceArrayLoad stack memory
-  | .referenceArrayStore, _ => referenceArrayStore stack memory
   | _, _ => .error .invalidState
+
+/-- Typed `ldelem` (`store` false) or `stelem` (`store` true) of an element of `shape`: a
+    struct or vector element by checked snapshot, any other value element by its width and sign,
+    or with `ldelem` the entry of a managed handler table of the shape's signature, a null table
+    throwing `NullReferenceException`. Class and unsupported shapes and table stores fault. -/
+def typedElementInstruction (shape : ElementShape) (store : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match shape, store, stack with
+  | .value element, store, _ =>
+    if element.composite then arrayTransferInstruction element store stack memory
+    else if store then arrayStore element.width stack memory
+    else arrayLoad element.width element.signed stack memory
+  | .method signature, false, .scalar index :: .methodTable table :: rest => do
+    if table.signature != signature then .error .invalidState else pure ()
+    return (memory, .methodPointer (← methodTableElement table index memory) :: rest)
+  | .method _, false, .scalar _ :: .object .null :: _ => .error (.thrown .nullReference)
+  | .unsupported reason, _, _ => .error (.unsupported reason)
+  | _, _, _ => .error .invalidState
 
 /-- `ldfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
     receiver gives way to the word, object reference or array reference the slot keeps. A null
@@ -1207,7 +1228,6 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .pointerTransfer kind alignment store =>
     pointerTransferInstruction kind alignment store stack memory
   | .vector128Unsafe store offset => vector128UnsafeInstruction store offset stack memory
-  | .arrayTransfer element store => arrayTransferInstruction element store stack memory
   | .binaryRead width signed bigEndian trying =>
     binaryTransferInstruction width signed bigEndian true trying stack memory
   | .binaryWrite width bigEndian trying =>
@@ -1219,8 +1239,6 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .spanCreate | .createSpan _ => staticSpanInstruction operation stack memory
-  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore =>
-    referenceArrayInstruction operation stack memory
   | .stringLiteral text => stringLiteralInstruction text stack memory
   | .throwIfNull => throwIfNullInstruction stack memory
   | .zeroGuard guard width signed => zeroGuardInstruction guard width signed stack memory
@@ -1378,6 +1396,9 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     return (← checkedAt r kind.width
       (write m address (numberBytes bits.toNat kind.width) ordinaryAccessAlignment), rest)
   | .stind kind, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r kind.width)
+  -- Array lengths and elements, and the two reads of a managed handler table.
+  | .ldlen, _ | .ldelem _, _ | .ldelem_ref, _ | .stelem _, _ | .stelem_ref, _ =>
+    elementInstruction op stack m
   -- References and stack shuffles
   | .skipInit, .reference r :: rest =>
     let _ ← formValue m r

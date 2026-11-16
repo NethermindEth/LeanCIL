@@ -10,7 +10,7 @@ internal static partial class ProofOutline
 {
     /// <summary>The array read and the index argument of a method returning `values[index]`, and the helper
     /// returning `ref values[index]` it calls instead of `ldelem`, if any.</summary>
-    sealed record ArrayAccess(Parameter Array, Parameter Index, ElementHelper? Helper);
+    sealed record ArrayAccess(Parameter Array, Parameter Index, ElementHelper? Helper, Arrays.NumericAccess? Load);
 
     /// <summary>A static method `(T[] values, int index)` whose body only returns `ref values[index]`.</summary>
     sealed record ElementHelper(int Index, MethodDefinition Method, string Name);
@@ -27,15 +27,15 @@ internal static partial class ProofOutline
             spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return)
             return null;
         if (ops.Length == 4 &&
-            ops[2] is Memory { Operation: ArrayLoad { Signed: false } load } && load.Width == array.Width)
-            return new(array, index, null);
+            Arrays.Numeric(ops[2]) is { Store: false, Signed: false } load && load.Width == array.Width)
+            return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
             ops[3] is not IndirectAccess { Kind: NumericKind.I4, Store: false } ||
             ops[2] is not Call { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
         return ElementAddress(extraction, call.Method, array.Element!) is { } method
-            ? new(array, index, new(call.Method, method, "")) : null;
+            ? new(array, index, new(call.Method, method, ""), null) : null;
 
         Parameter? Argument(Operation op) =>
             op is Arg load && MethodArguments.Plain(spec.Method, load.Index) ? spec.Parameters[load.Index] : null;
@@ -83,7 +83,7 @@ internal static partial class ProofOutline
         {
             lean.Line("    refine ⟨CIL.executionBound Extracted.program 0, ?final, ?results, ?run, ?postcondition⟩");
             lean.Line("    case run =>");
-            lean.Line($"      cil_checked_steps [step_arrayLoad_of_element (index := .i32 {index.Name}) rfl {element}");
+            lean.Line($"      cil_checked_steps [{access.Load!.LoadLemma} (index := .i32 {index.Name}) rfl {element}");
             lean.Line($"        {loaded}, {array.Name}Valid]");
         }
         else

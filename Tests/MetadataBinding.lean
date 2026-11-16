@@ -169,6 +169,99 @@ theorem rejects_a_pinned_local :
   decide +kernel
 #print axioms rejects_a_pinned_local
 
+/-! ## Objects outside a class field -/
+
+/-- The coded `TypeDefOrRef` index of a type reference, as a signature writes it. -/
+private def typeRefCoded (token : Nat) : Nat := (token - 0x01000000) * 4 + 1
+
+/-- The own slice with its one local retyped to an array of the signature type `element`. -/
+private def arrayLocal (element : List Nat) : MetadataSlice :=
+  mutateBlob own.1 (blobOffset own.1 [0x07, 0x01, 0x0B]) fun _ =>
+    [element.length + 3, 0x07, 0x01, 0x1D] ++ element
+
+/-- Whether the locals check accepts these local types. -/
+private def localsPass (slice : MetadataSlice) (locals : List TypeExpr) : Bool :=
+  match (do
+    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
+    checkLocals env 0 tokens.localsSignature locals) with
+  | .ok _ => true
+  | .error _ => false
+
+/-- A type operand names as an object a class of a carried slice or `System.String`, never an
+    interface, an external class or `System.Object`, whose lineage no instance records. -/
+theorem names_only_carried_classes_and_strings_as_objects :
+    passes own.1 lib tokens.boxRef (.type (.object libScope "Lib.Box")) = true ∧
+    passes own.1 lib tokens.stringRef (.type (.object runtimeScope "System.String")) = true ∧
+    rejects own.1 lib tokens.shapeRef (.type (.object libScope "Lib.IShape"))
+      (.operandMismatch tokens.shapeRef) = true ∧
+    rejects own.1 lib tokens.consoleRef (.type (.object runtimeScope "System.Console"))
+      (.operandMismatch tokens.consoleRef) = true ∧
+    rejects own.1 lib tokens.objectRef (.type (.object runtimeScope "System.Object"))
+      (.operandMismatch tokens.objectRef) = true := by decide +kernel
+#print axioms names_only_carried_classes_and_strings_as_objects
+
+/-- An array of objects holds carried classes or strings: `stelem.ref` decides a store by the
+    stored instance's lineage, which never lists an interface or `System.Object`. -/
+theorem holds_only_carried_classes_and_strings_in_object_arrays :
+    localsPass (arrayLocal [0x12, typeRefCoded tokens.boxRef])
+      [.array (.object libScope "Lib.Box")] = true ∧
+    localsPass (arrayLocal [0x0E]) [.array (.object runtimeScope "System.String")] = true ∧
+    localsFail (arrayLocal [0x12, typeRefCoded tokens.shapeRef])
+      [.array (.object libScope "Lib.IShape")] (.localMismatch 0) = true ∧
+    localsFail (arrayLocal [0x12, typeRefCoded tokens.objectRef])
+      [.array (.object runtimeScope "System.Object")] (.localMismatch 0) = true ∧
+    localsFail (arrayLocal [0x12, typeRefCoded tokens.consoleRef])
+      [.array (.object runtimeScope "System.Console")] (.localMismatch 0) = true := by
+  decide +kernel
+#print axioms holds_only_carried_classes_and_strings_in_object_arrays
+
+/-- `System.Console.Id<T>` as a call site instantiated with `argument`. -/
+private def idWith (argument : TypeExpr) : CallSite :=
+  let method := { idSite.method with
+    returnType := argument, parameters := [argument], methodArguments := [argument] }
+  { idSite with method := method, typeArguments := [argument] }
+
+/-- The own slice with `Id` instantiated with the class the reference `token` names. -/
+private def idInstantiatedWith (token : Nat) : MetadataSlice :=
+  mutateBlob own.1 (blobOffset own.1 [0x0A, 0x01, 0x09]) fun _ =>
+    [4, 0x0A, 0x01, 0x12, typeRefCoded token]
+
+/-- A generic argument named as an object is a carried class, so substituting it into an
+    element position never forms an array of interfaces or of `System.Object`. -/
+theorem passes_only_carried_classes_as_object_arguments :
+    passes (idInstantiatedWith tokens.boxRef) lib tokens.idSpec
+      (.call (idWith (.object libScope "Lib.Box"))) = true ∧
+    rejects (idInstantiatedWith tokens.shapeRef) lib tokens.idSpec
+      (.call (idWith (.object libScope "Lib.IShape"))) (.genericMismatch tokens.idSpec) = true ∧
+    rejects (idInstantiatedWith tokens.objectRef) lib tokens.idSpec
+      (.call (idWith (.object runtimeScope "System.Object")))
+      (.genericMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms passes_only_carried_classes_as_object_arguments
+
+/-- The own slice with the fields `count`, `total` and `second` retyped to `held`. -/
+private def fieldsHolding (held : List Nat) : MetadataSlice :=
+  mutateBlob own.1 (blobOffset own.1 [0x06, 0x08]) fun _ => [held.length + 1, 0x06] ++ held
+
+/-- The instance field `count` of the class `T.Program`, holding `held`. -/
+private def countHolding (held : TypeExpr) : RawOperand :=
+  .field (.object ownIdentity "Program") 0 held name!"count" false
+
+/-- A class instance field keeps a reference it never reads through, so it may hold an
+    interface or an external class as an object; an array it holds still holds carried classes,
+    and a static field holds no such reference. -/
+theorem holds_opaque_objects_only_in_class_instance_fields :
+    passes (fieldsHolding [0x12, typeRefCoded tokens.shapeRef]) lib tokens.countField
+      (countHolding (.object libScope "Lib.IShape")) = true ∧
+    passes (fieldsHolding [0x12, typeRefCoded tokens.consoleRef]) lib tokens.countField
+      (countHolding (.object runtimeScope "System.Console")) = true ∧
+    rejects (fieldsHolding [0x1D, 0x12, typeRefCoded tokens.objectRef]) lib tokens.countField
+      (countHolding (.array (.object runtimeScope "System.Object")))
+      (.operandMismatch tokens.countField) = true ∧
+    rejects (fieldsHolding [0x12, typeRefCoded tokens.shapeRef]) lib tokens.totalField
+      (.field (.atom ownIdentity "Program") 1 (.object libScope "Lib.IShape") name!"total" true)
+      (.operandMismatch tokens.totalField) = true := by decide +kernel
+#print axioms holds_opaque_objects_only_in_class_instance_fields
+
 /-! ## Rows and heap entries the decoder refuses -/
 
 theorem rejects_a_row_of_the_wrong_length :
@@ -444,7 +537,8 @@ private def receiverWorld (baseName : String) (interfaceType hasThis generic : B
 
 /-- The complete receiver binding result for a metadata owner and a claimed receiver bit. -/
 private def receiverIdentity (baseName : String) (interfaceType hasThis objectReceiver : Bool)
-    (generic : Bool := false) (omitLink omitParameters : Bool := false) :
+    (generic : Bool := false) (omitLink omitParameters : Bool := false)
+    (argument : ResolvedType := .primitive 8) (claimed : TypeExpr := int32) :
     Except MetadataError MethodNames := do
   let fixture := build (receiverWorld baseName interfaceType hasThis generic)
     (bytesOf "T") ownIdentity
@@ -459,8 +553,8 @@ private def receiverIdentity (baseName : String) (interfaceType hasThis objectRe
       { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
     else fixture.1
   let env := MetadataEnv.ofSlices [← metadata.index]
-  methodIdentityValid env method (if generic && !omitParameters then [.primitive 8] else [])
-    (if generic && !omitParameters then [int32] else [])
+  methodIdentityValid env method (if generic && !omitParameters then [argument] else [])
+    (if generic && !omitParameters then [claimed] else [])
 
 /-- Carried owner parameters remain binding when their optional link is absent. -/
 theorem binds_generic_owner_without_link :
@@ -470,6 +564,21 @@ theorem binds_generic_owner_without_link :
 /-- info: 'Tests.MetadataBinding.binds_generic_owner_without_link' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms binds_generic_owner_without_link
+
+/-- `Lib.Box` resolved as a carried type of the given kind. -/
+private def carriedBox (kind : Extraction.TypeKind) : ResolvedType :=
+  .named { scope := bytesOf libScope, name := bytesOf "Lib.Box", parts := [], kind := kind,
+           pinned := true }
+
+/-- An owner's generic argument named as an object binds a carried class only, so no
+    substitution forms an array of interfaces. -/
+theorem instantiates_owners_with_only_carried_classes_as_objects :
+    (receiverIdentity "Object" false false false true (argument := carriedBox .classType)
+      (claimed := .object libScope "Lib.Box")).isOk = true ∧
+    (receiverIdentity "Object" false false false true (argument := carriedBox .interfaceType)
+      (claimed := .object libScope "Lib.Box")).isOk = false := by
+  decide +kernel
+#print axioms instantiates_owners_with_only_carried_classes_as_objects
 
 /-- A parameter table whose entries give a parameter number and its coded owner. -/
 private def parameterWorld (parameters : List (Nat × Nat)) : MetadataSlice :=
@@ -664,15 +773,15 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.primitive 1, .void), (.primitive 8, int32Atom),
   (.primitive 0x0E, .atom "C" "System.String"), (.primitive 0x1C, .atom "C" "System.Object"),
   (.primitive 0x0E, .object "C" "System.String"),
-  -- Named types: an atom unless a carried enum, an object if class-like, an aggregate if
-  -- value-like, and an enum over the carried underlying type or, outside, any integer atom.
+  -- Named types: an atom unless a carried enum, an object if a carried class or the runtime's
+  -- string, an aggregate if value-like, and an enum over the carried underlying type or,
+  -- outside, any integer atom.
   (.named (namedIn "L" "N" .valueType), .atom "L" "N"),
   (.named (namedIn "L" "N" .classType), .atom "L" "N"),
   (.named (namedIn "L" "N" (.external none)), .atom "L" "N"),
-  (.named (namedIn "L" "N" .classType), .object "L" "N"),
-  (.named (namedIn "L" "N" .interfaceType), .object "L" "N"),
-  (.named (namedIn "L" "N" (.external (some false))), .object "L" "N"),
-  (.named (namedIn "L" "N" (.external none)), .object "L" "N"),
+  (.named (namedIn "L" "N" .classType true), .object "L" "N"),
+  (.named (namedIn runtimeScope "System.String" (.external none)),
+    .object runtimeScope "System.String"),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
@@ -684,6 +793,7 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   -- Element types, element by element.
   (.byref (.primitive 8), .byref int32Atom), (.pointer (.primitive 8), .pointer int32Atom),
   (.szarray (.primitive 8), .array int32Atom),
+  (.szarray (.named (namedIn "L" "N" .classType true)), .array (.object "L" "N")),
   -- Instances: a value-like one as an aggregate, its arguments scoped when the head is
   -- carried, and any instance as an `apply` chain.
   (instanceOf .valueType, .aggregate "L::G`1<System.Int32>" 0),
@@ -714,6 +824,11 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   (.named (namedIn "L" "N" (.enumType 8)), .atom "L" "N"),
   (.named (namedIn "L" "N" .valueType), .object "L" "N"),
   (.named (namedIn "L" "N" (.external (some true))), .object "L" "N"),
+  (.named (namedIn "L" "N" .classType), .object "L" "N"),
+  (.named (namedIn "L" "N" .interfaceType true), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external (some false))), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external none)), .object "L" "N"),
+  (.named (namedIn "L" "System.String" (.external none)), .object "L" "System.String"),
   (.named (namedIn "L" "N" .classType), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" (.external (some false))), .aggregate "L::N" 0),
   (.named (namedIn "L" "N" .valueType), .aggregate "L::M" 0),
@@ -729,6 +844,7 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   -- Element types.
   (.byref (.primitive 8), .pointer int32Atom), (.byref (.primitive 8), .array int32Atom),
   (.pointer (.primitive 8), .byref int32Atom), (.szarray (.primitive 8), .pointer int32Atom),
+  (.szarray (.named (namedIn "L" "N" .interfaceType true)), .array (.object "L" "N")),
   (.byref (.primitive 9), .byref int32Atom),
   -- Instances.
   (instanceOf .valueType true, .aggregate "L::G`1<System.Int32>" 0),

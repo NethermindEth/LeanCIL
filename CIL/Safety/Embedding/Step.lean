@@ -467,6 +467,32 @@ theorem step_relabel_ldsflda (field : Extraction.FieldRef) : StepRelabel (.ldsfl
 
 #print axioms step_relabel_ldsflda
 
+/-- A typed element access reads its element's shape from the layouts, which relabeling keeps. -/
+theorem step_relabel_ldelem_any (element : Extraction.TypeExpr) :
+    StepRelabel (.ldelem_any element) := by
+  plain_cases
+  simp only [CIL.Method.elementShape, context.environment] at h ⊢
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+  cases h
+  simp only [FrameAction.relabel]
+  rw [context.next rfl]
+
+#print axioms step_relabel_ldelem_any
+
+/-- A typed element store reads its element's shape from the layouts, which relabeling keeps. -/
+theorem step_relabel_stelem_any (element : Extraction.TypeExpr) :
+    StepRelabel (.stelem_any element) := by
+  plain_cases
+  simp only [CIL.Method.elementShape, context.environment] at h ⊢
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+  cases h
+  simp only [FrameAction.relabel]
+  rw [context.next rfl]
+
+#print axioms step_relabel_stelem_any
+
 theorem step_relabel_ldtoken (operand : TokenOperand) : StepRelabel (.ldtoken operand) := by
   cases operand
   plain_cases
@@ -748,14 +774,13 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     cases operation
     all_goals plain_cases
     all_goals rw [context.link]
-    all_goals simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
+    all_goals simp only [managedStep] at h ⊢
     all_goals repeat' first
       | contradiction
-      | solve | simp only [FrameAction.relabel, context.next rfl]
+      | solve | simp only [FrameAction.relabel]
       | solve | lockstep
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
-          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
+      | (split at h <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
     rw [context.declared]
@@ -793,6 +818,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
+  case ldelem_any element => exact step_relabel_ldelem_any element
+  case stelem_any element => exact step_relabel_stelem_any element
   case ldtoken operand => exact step_relabel_ldtoken operand
   case stsfld field => exact step_relabel_stsfld field
   case ret => exact step_relabel_ret
@@ -822,7 +849,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
+    | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -877,6 +905,11 @@ theorem step_relabel_shr_un : StepRelabel .shr_un := step_relabel _
 theorem step_relabel_clt : StepRelabel .clt := step_relabel _
 theorem step_relabel_ldind (kind : CIL.NumericKind) : StepRelabel (.ldind kind) := step_relabel _
 theorem step_relabel_stind (kind : CIL.NumericKind) : StepRelabel (.stind kind) := step_relabel _
+theorem step_relabel_ldlen : StepRelabel .ldlen := step_relabel _
+theorem step_relabel_ldelem (kind : CIL.NumericKind) : StepRelabel (.ldelem kind) := step_relabel _
+theorem step_relabel_ldelem_ref : StepRelabel .ldelem_ref := step_relabel _
+theorem step_relabel_stelem (kind : CIL.NumericKind) : StepRelabel (.stelem kind) := step_relabel _
+theorem step_relabel_stelem_ref : StepRelabel .stelem_ref := step_relabel _
 theorem step_relabel_dup : StepRelabel .dup := step_relabel _
 theorem step_relabel_pop : StepRelabel .pop := step_relabel _
 theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabel _
@@ -1350,13 +1383,12 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case managed operation =>
     plain_cases
     rw [context.link]
-    simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
+    simp only [managedStep] at h ⊢
     repeat' first
       | solve | raise_lockstep
       | solve | simp [unlinkedCall] at h
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
-          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
+      | (split at h <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
     rw [context.declared]
@@ -1429,6 +1461,11 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticAddress_congr context.statics]
     raise_lockstep
+  case ldelem_any | stelem_any =>
+    plain_cases
+    simp only [CIL.Method.elementShape, context.environment] at h ⊢
+    dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+    first | cases h | raise_lockstep
   case ldtoken operand =>
     cases operand
     plain_cases
@@ -1468,7 +1505,8 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
+    | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

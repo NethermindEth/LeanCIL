@@ -437,31 +437,32 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 #print axioms step_comparisonGuard_i64_eq
 
 /-- `ldlen` of an array of class references pushes its length as a native integer. -/
-@[cil_step high] theorem step_referenceArrayLength_eq (array : ManagedReference)
-    (rest : List Value) :
-    step body (.memory .referenceArrayLength) pc args frame (.object array :: rest) memory = do
+@[cil_step high] theorem step_ldlen_object_eq (array : ManagedReference) (rest : List Value) :
+    step body .ldlen pc args frame (.object array :: rest) memory = do
       let found ← referenceArrayOf memory array
       return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    referenceArrayInstruction, referenceArrayLength, CIL.MemoryOp.argumentCount,
-    unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
-    Pure.pure, Except.pure]
+  rw [step_ldlen_eq]
+  simp only [instructionStep, instruction, elementInstruction, Bind.bind, Except.bind, Pure.pure,
+    Except.pure]
   cases referenceArrayOf memory array <;> rfl
 
+/-- `ldlen` of a null object reference, as `ldnull` pushes it, throws `NullReferenceException`. -/
+@[cil_step high] theorem step_ldlen_object_null_eq (rest : List Value) :
+    step body .ldlen pc args frame (.object .null :: rest) memory =
+      .error (.thrown .nullReference) := by
+  rw [step_ldlen_object_eq]
+  rfl
+
 /-- `ldelem.ref` with an int32 index pushes the reference its element's slot holds. -/
-@[cil_step high] theorem step_referenceArrayLoad_eq (index : BitVec 32)
+@[cil_step high] theorem step_ldelem_ref_i32_eq (index : BitVec 32)
     (array : ManagedReference) (rest : List Value) :
-    step body (.memory .referenceArrayLoad) pc args frame
-        (.scalar (.i32 index) :: .object array :: rest) memory = do
+    step body .ldelem_ref pc args frame (.scalar (.i32 index) :: .object array :: rest) memory = do
       let slot ← referenceArraySlot memory array index.toNat
       let value ← loadSlot memory slot.1
       return .next (pc + 1) (value :: rest) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    referenceArrayInstruction, referenceArrayLoad, CIL.MemoryOp.argumentCount,
-    unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
-    arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  rw [step_ldelem_ref_eq]
+  simp only [instructionStep, instruction, elementInstruction, arrayIndex, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
   rename_i slot
   dsimp only
@@ -469,19 +470,17 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 
 /-- `stelem.ref` with an int32 index checks the stored object's class against the element
     class, then stores it into the element's slot. -/
-@[cil_step high] theorem step_referenceArrayStore_eq (index : BitVec 32)
+@[cil_step high] theorem step_stelem_ref_i32_eq (index : BitVec 32)
     (value array : ManagedReference) (rest : List Value) :
-    step body (.memory .referenceArrayStore) pc args frame
+    step body .stelem_ref pc args frame
         (.object value :: .scalar (.i32 index) :: .object array :: rest) memory = do
       let slot ← referenceArraySlot memory array index.toNat
       let _ ← storableIn memory slot.2 value
       let after ← storeSlot memory slot.1 value
       return .next (pc + 1) rest frame after := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    referenceArrayInstruction, referenceArrayStore, CIL.MemoryOp.argumentCount,
-    unspecifiedOperands, List.take,
-    List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
-    arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  rw [step_stelem_ref_eq]
+  simp only [instructionStep, instruction, elementInstruction, arrayIndex, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
   rename_i slot
   dsimp only
@@ -912,9 +911,10 @@ simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expr
 #print axioms allocateElements_value
 #print axioms allocateElements_reference
 #print axioms step_stringLiteral_eq
-#print axioms step_referenceArrayLength_eq
-#print axioms step_referenceArrayLoad_eq
-#print axioms step_referenceArrayStore_eq
+#print axioms step_ldlen_object_eq
+#print axioms step_ldlen_object_null_eq
+#print axioms step_ldelem_ref_i32_eq
+#print axioms step_stelem_ref_i32_eq
 #print axioms loadArraySlot_of_access
 #print axioms arrayOfSlot_whole
 #print axioms storeArraySlot_whole

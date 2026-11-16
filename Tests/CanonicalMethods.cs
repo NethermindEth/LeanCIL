@@ -96,7 +96,10 @@ string[] requiredExamples =
     "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
     "System.UInt32 Examples.Loops::Countdown(System.UInt32)",
     // Calls decodes through its two direct calls, whose targets are the links of their pcs.
-    "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)"
+    "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
+    // The summary examples bind their callee's contract to the bytes that decode to it.
+    "System.UInt64 Examples.GenericMethods::Identity64(System.UInt64)",
+    "System.UInt64 Examples.GenericMethods::Repeated(System.UInt64)"
 ];
 // SameText keeps its literal for the string literal it loads first; Mutate, a callee of Calls, decodes through an
 // integer indirect load and store.

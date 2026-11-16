@@ -142,6 +142,42 @@ theorem doubles_by_default (memory : Memory) (value : W32) (wellFormed : memory.
       bv_omega
 #print axioms doubles_by_default
 
+/-- A contract held by a structure whose parameters name it, as a decoded summary holds one. -/
+structure HeldContract (contract : MethodContract W32 W32) (index : Nat) : Prop where
+  /-- The contract of the method at `index`. -/
+  holds : contract.Holds program index
+
+/-- `cil_loop_call` reads the contract of a projection, whose type names it through the
+    structure's parameters, and unfolds its footprint as for a named contract proof. -/
+theorem doubles_through_projection (held : HeldContract addTwoContract 1) (memory : Memory)
+    (value : W32) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 (2 * value))]) ∧
+      MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (header memory value home)
+    (fun state => state.values.2 = 2 * state.values.1)
+    (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start (0, 0)
+    rfl
+  rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
+  dsimp only at doubled
+  by_cases done : count = value
+  · subst done
+    rw [← doubled]
+    cil_loop_finish
+  · cil_loop_advance
+    cil_loop_call held.holds sum
+    cil_loop_recurse recurse (count + 1, sum + 2)
+    case measure =>
+      show (value - (count + 1)).toNat < (value - count).toNat
+      bv_omega
+    case invariant =>
+      show sum + 2 = 2 * (count + 1)
+      rw [doubled]
+      bv_omega
+#print axioms doubles_through_projection
+
 -- Loop values that are not the reached head state's are refused, showing the reached state.
 /-- error: cil_loop_recurse: the reached state is not the head of recurse at -/
 #guard_msgs (whitespace := lax, substring := true) in
