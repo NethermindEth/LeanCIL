@@ -268,7 +268,8 @@ states that read as `body_link{pc} : body.linkAt pc = some link` for each call s
 walks the table. For a body that keeps the table its code implies, the fact comes from the
 instruction equation of its pc through `Method.linkAt_of_instruction`, whatever the callee of a
 template is. For an explicit table, as an extraction or a template writes, the command checks once
-that the keys ascend (`body_links_ascend`) and proves each fact from the table's entry
+that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
+table's entry
 (`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
 `cil_code` simp set unfolds an extracted method's named link `methodNLinkPC` to its constructor.
 For a pc without a call the table is read by its listed keys, which costs the number of calls and
