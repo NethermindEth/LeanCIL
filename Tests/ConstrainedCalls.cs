@@ -638,7 +638,7 @@ foreach (var (mutation, selector, marker) in new[]
 foreach (var (mutation, marker) in new[]
 {
     ("prefix", "adjacent concrete constrained receiver"),
-    ("branch", "Branch bypasses constrained receiver prefix"),
+    ("branch", "Branch enters the instruction after a prefix"),
     ("constraint", "Unsupported generic method constraints")
 })
 {

@@ -72,7 +72,11 @@ against the metadata it carries ([Metadata binding](#metadata-binding)):
 - A branch must land on the first byte of an instruction inside the body, and its operand
   becomes that instruction's index. A target outside the body, inside an instruction or on the
   instruction after a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`, `no.`,
-  `readonly.`) is an error.
+  `readonly.`) is an error, whether or not any path reaches the branch. Decoded code therefore
+  satisfies `PrefixEntryFree` over instruction indices (`checkBody_prefixEntryFree`), and so
+  does the instantiated code of every method whose evidence is valid
+  (`MethodEvidenceValid.prefixEntryFree`). The extractor refuses such a body with the blocker
+  "Branch enters the instruction after a prefix".
 - A token operand is read from the four bytes in the body, looked up in the table, and must
   belong to a metadata table the opcode accepts. A token has one entry, and a field access names
   a static or instance field as its opcode requires.

@@ -97,6 +97,11 @@ if (args.Contains("--lineage-only", StringComparer.Ordinal))
     LineageCosts();
     return;
 }
+if (args.Contains("--prefix-entry-only", StringComparer.Ordinal))
+{
+    PrefixEntryCosts();
+    return;
+}
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 ExceptionDecisionCosts();
@@ -114,6 +119,7 @@ MethodDecodeCosts();
 StaticFactCosts();
 DecodedDefinitionCosts();
 DecodedProgramCosts();
+PrefixEntryCosts();
 ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -936,6 +942,79 @@ void DecodeCosts()
             $"Decoding raw value opcodes costs {measured} heartbeats per instruction; the limit is " +
             $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
     Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
+}
+
+// The heartbeats `decide +kernel` adds to deciding that no branch of a body of 500, 2000 and 8000 instructions enters
+// the instruction after a prefix, and to deciding the readonly rule at every pc of the same body. The prefix rule tests
+// bits of a mask of branch destinations built in one pass, so four times the instructions may cost at most
+// `AllowedLocalGrowth` more per instruction, and as it replaces the readonly rule's entry checks it may cost no more
+// than that rule, whose `Std.TreeSet` of destinations costs the logarithm of the body at each lookup.
+void PrefixEntryCosts()
+{
+    const int SegmentLength = 4;
+    var directory = At("artifacts/LookupScaling/PrefixEntry");
+    Directory.CreateDirectory(directory);
+    var samples = new List<(int Instructions, long Prefix, long Window)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(directory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.Scalars
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            namespace PrefixEntryCost
+            /-- The element type of every address. -/
+            def intType : TypeExpr := .atom runtimeScope "System.Int32"
+            /-- One segment: a `readonly.` prefix, the element address it modifies, a pop and a branch
+                to the prefix of the next segment. -/
+            def segment (index : Nat) : List RawInstruction :=
+              let start := {{SegmentLength}} * index
+              [⟨start, 65054, .none⟩, ⟨start + 1, 143, .type intType⟩, ⟨start + 2, 38, .none⟩,
+                ⟨start + 3, 43, .target (start + {{SegmentLength}})⟩]
+            /-- The instructions the translator emits for one segment. -/
+            def codeSegment (index : Nat) : List Instruction :=
+              [.nop, .memory (.arrayAddress .signed32 false), .pop, .br ({{SegmentLength}} * (index + 1))]
+            /-- A body of {{instructions}} raw instructions. -/
+            def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
+            /-- The {{instructions}} emitted instructions of the body. -/
+            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            #kernel_cost "prefix entry {{instructions}}"
+              prefixEntryFreeWith (branchTargetMask raw).testBit 0 raw = true
+            #kernel_cost "readonly window {{instructions}}"
+              (let rawAt := (FlowIndex.ofList raw).get?
+               let targeted := (Std.TreeSet.ofList (branchTargets raw) compare).contains
+               (raw.zipIdx.zip code).all fun ((instruction, pc), emitted) =>
+                 readOnlySiteWindow rawAt targeted pc instruction emitted) = true
+            end PrefixEntryCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var costs = LookupPatterns.PrefixEntry().Matches(output)
+            .ToDictionary(match => match.Groups[1].Value,
+                match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture), StringComparer.Ordinal);
+        if (!costs.TryGetValue("prefix entry", out var prefix) ||
+            !costs.TryGetValue("readonly window", out var window))
+            throw new InvalidOperationException($"Missing the prefix entry costs:\n{output}");
+        samples.Add((instructions, prefix, window));
+    }
+    string Measured(Func<(int Instructions, long Prefix, long Window), long> cost) => string.Join("; ",
+        samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{(double)cost(sample) / sample.Instructions:F1} at {sample.Instructions}")));
+    bool Grows(Func<(int Instructions, long Prefix, long Window), long> cost)
+    {
+        var perInstruction = samples.Select(sample => (double)cost(sample) / sample.Instructions).ToArray();
+        return samples.Any(sample => cost(sample) < KernelDecisionFloor) ||
+            perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth);
+    }
+    var measured = $"{Measured(sample => sample.Prefix)} heartbeats per instruction, against " +
+        $"{Measured(sample => sample.Window)} for the readonly rule";
+    if (Grows(sample => sample.Prefix) || Grows(sample => sample.Window) ||
+        samples.Any(sample => sample.Prefix > sample.Window))
+        throw new InvalidOperationException(
+            $"Deciding prefix entry costs {measured}; the limit is {AllowedLocalGrowth} times the cost per " +
+            "instruction at the size before, and no more than the readonly rule at each size.");
+    Console.WriteLine($"PASS deciding prefix entry costs {measured}");
 }
 
 // The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
@@ -2642,6 +2721,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedDefinition();
+
+    [GeneratedRegex(@"(prefix entry|readonly window) [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex PrefixEntry();
 
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedProgram();

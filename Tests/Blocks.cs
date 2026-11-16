@@ -277,7 +277,7 @@ foreach (var mutation in new[] { "zero", "three", "eight", "target", "duplicate"
         module.Write(dll);
     }
     var result = Execute(Extract("extract", dll, "Examples", selector, output));
-    var expected = mutation is "branch" or "switch" ? "Branch enters" :
+    var expected = mutation is "branch" or "switch" ? "Branch enters the instruction after a prefix" :
         mutation is "count64" or "native-count" or "value64" ? "Unsupported block memory operand types" : "malformed unaligned prefix";
     if (result.Code == 0 || !result.Output.Contains(expected) || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException("Incorrect block metadata rejection: " + mutation + "\n" + result.Output);

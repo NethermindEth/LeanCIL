@@ -455,7 +455,8 @@ foreach (var mutation in new[] { "missing-switch-target", "switch-tail-interior"
     module.Write(mutatedAssembly);
     var result = Execute(Extract("extract", mutatedAssembly, "Examples", "Capabilities::Platform()",
         Path.Combine(output, mutation)));
-    var diagnostic = mutation == "missing-switch-target" ? "Malformed switch targets" : "middle of a tail transfer";
+    var diagnostic = mutation == "missing-switch-target" ? "Malformed switch targets"
+        : "Branch enters the instruction after a prefix";
     if (result.Code == 0 || !result.Output.Contains(diagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Invalid unselected target accepted: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS invalid unselected control-flow target rejected: " + mutation);
