@@ -222,8 +222,8 @@ run_cmd Command.liftTermElabM do
 def countField : FieldRef :=
   { owner := node, index := 0, type := .atom runtimeScope "System.Int32", name := name!"count" }
 
--- `ldflda` of a class field faults with a refutable fault, since the model forms no address
--- into an object; the fault is not definite, so no refutation lemma closes it.
+-- `ldflda` of a class field faults as unsupported, since the model forms no address into an
+-- object; the fault is not definite, so no refutation lemma takes it as evidence about the method.
 theorem class_field_address_faults (frame : Safety.Frame) (memory : Safety.Memory)
     (receiver : Safety.ManagedReference) :
     Safety.step body (.ldflda countField) 0 [] frame [.object receiver] memory =
