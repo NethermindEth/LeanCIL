@@ -77,11 +77,15 @@ foreach (var method in methods)
         """);
     evidence.Add(proof, "PASS aggregate array: " + name);
 }
+var pairToken = ".type (.aggregate " + JsonSerializer.Serialize(metadata.Assembly.Name.FullName +
+    "::Examples.AggregateArrays/Pair") + " ";
 foreach (var (name, before, after, theorem) in new[]
 {
     // A typed element access is decoded from its body, so a forgery names another element at its raw token, which
     // the certified stack states bind; the element's width is the one its checked layout gives.
     ("Read", "/Pair\" 0) }", "/Other\" 0) }", "method0_scalars_validated"),
+    // The raw token names the struct's checked layout by index, which the layout coverage binds.
+    ("Read", pairToken + "0)", pairToken + "1)", "method0_coverage_validated"),
     ("ReadVector", "\"System.UInt64\")) }", "\"System.Int64\")) }", "method0_scalars_validated"),
     ("ReadOnlyView", " 16) false .whole)", " 16) true .whole)", "method0_scalars_validated"),
     ("View", " 16) true .whole)", " 8) true .whole)", "method0_layouts_validated")
@@ -94,8 +98,12 @@ foreach (var (name, before, after, theorem) in new[]
     if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing array mutation: " + name);
     var path = Path.Combine(root, "Rejected" + name + theorem + ".lean");
     File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS aggregate array evidence rejection: " + name,
-        theorem.EndsWith("layouts_validated", StringComparison.Ordinal) ? "MethodLayoutsValid" : "ScalarFlowValid");
+    rejected.Add(path, "PASS aggregate array evidence rejection: " + name, theorem switch
+    {
+        "method0_layouts_validated" => "MethodLayoutsValid",
+        "method0_coverage_validated" => "LayoutUsesComplete",
+        _ => "ScalarFlowValid"
+    });
 }
 evidence.Check();
 rejected.Check();

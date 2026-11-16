@@ -289,6 +289,7 @@ foreach (var (name, element, width) in allocations)
         {
             ("identity", target, target.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal),
                 "method0_scalars_validated", "ScalarFlowValid"),
+            ("index", target, $"{prefix}{index + 1})", "method0_coverage_validated", "LayoutUsesComplete"),
             ("layout-identity", $".aggregate {identity}", $".aggregate {otherIdentity}",
                 "method0_coverage_validated", "LayoutUsesComplete")
         })
