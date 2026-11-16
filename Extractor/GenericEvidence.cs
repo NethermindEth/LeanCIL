@@ -411,8 +411,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Indirect loads and stores of integers and native integers.
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
-        // Class type tests.
-        Code.Castclass, Code.Isinst,
+        // Class type tests and class instance field accesses.
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
         // Branches.
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
@@ -461,11 +461,18 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         {
             if (!reachable.Contains(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
-            if (!DecodedOpcodes.Contains(instruction.OpCode.Code))
+            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
         }
         return null;
     }
+
+    // The decoder reads a field instruction only on a class instance field, whose raw owner `Type` writes as
+    // `.object`: a reference type that is not a generic instance. A wrong answer fails at `cil_decoded_method`.
+    static bool UndecodedFieldAccess(Instruction instruction) =>
+        instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld &&
+        ((FieldReference)instruction.Operand).DeclaringType is var owner &&
+        (owner is GenericInstanceType || !ObjectTypes.Reference(owner));
 
     static HoleFamily FamilyOf(Code opcode) => opcode switch
     {

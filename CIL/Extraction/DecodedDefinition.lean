@@ -13,8 +13,10 @@ the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`,
 literals to `cil_instruction_equations`, `cil_resolution_facts` and stepping, and no text an
 extractor writes supplies any part of the method. A field whose type is that of a constant
 passed to the decoder, such as an extraction's `profile` and `environment`, is written as that
-constant. Neither the compiled evaluation nor that choice is trusted: the kernel checks
-`name_decoded` and every fact.
+constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand equal to
+a listed `FieldRef` constant as that constant, as an extraction's literal names it, so the facts
+`cil_field_shape` states about the constant apply. Neither the compiled evaluation nor that
+choice is trusted: the kernel checks `name_decoded` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -49,10 +51,11 @@ def numeral (type : Expr) (value : Int) : MetaM Expr := do
 /-- The literal form of the closed term `term` of type `type`: a numeral for a natural
     number, integer, bit vector or `Fin`, a string literal or named string, and otherwise the
     constructor it reduces to applied to the literal forms of its fields. Parameters and proofs
-    stay as they are, and so does every term `keep` holds. Each node is reduced once, from the
-    term its parent reduced to, so the walk is linear in the size of the value. -/
-partial def literal (keep : Expr → Bool) (type term : Expr) : MetaM Expr := do
-  if keep term then return term
+    stay as they are, and a term `named` maps to a constant is written as that constant. Each
+    node is reduced once, from the term its parent reduced to, so the walk is linear in the size
+    of the value. -/
+partial def literal (named : Expr → Option Expr) (type term : Expr) : MetaM Expr := do
+  if let some constant := named term then return constant
   let shape ← whnfD type
   match shape.getAppFnArgs with
   | (``Nat, #[]) => numeral type (← natValue term)
@@ -82,7 +85,7 @@ partial def literal (keep : Expr → Bool) (type term : Expr) : MetaM Expr := do
         | throwError "cil_decoded_method: {head} takes fewer arguments than given"
       let argument := arguments[index]
       let field ← if index < constructor.numParams || (← isProp domain) then pure argument
-        else literal keep domain argument
+        else literal named domain argument
       written := written.push field
       remaining := body.instantiate1 field
     return mkAppN value.getAppFn written
@@ -151,6 +154,14 @@ unsafe def evaluateUnsafe (decoder : Expr) : MetaM (Option Method) :=
 @[implemented_by evaluateUnsafe]
 opaque evaluate (decoder : Expr) : MetaM (Option Method)
 
+/-- The value of the closed field reference `field`, computed by compiled code. -/
+unsafe def evaluateFieldUnsafe (field : Expr) : MetaM Extraction.FieldRef :=
+  evalExpr Extraction.FieldRef (mkConst ``Extraction.FieldRef) field
+
+/-- The value of the closed field reference `field`, computed by compiled code. -/
+@[implemented_by evaluateFieldUnsafe]
+opaque evaluateField (field : Expr) : MetaM Extraction.FieldRef
+
 /-- The term `method` denotes, with each field whose type is that of a constant in `passed`
     written as that constant and every other field as its constructors. -/
 def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
@@ -194,14 +205,20 @@ def proveByReduction (name : Name) (doc : String) (statement : Expr) : MetaM Uni
     throwError "cil_decoded_method: the kernel does not reduce both sides of {name} to one term"
   addDocStringCore name doc
 
-/-- `cil_decoded_method name := decoder` defines `name` as the method the closed
-    `Option CIL.Method` `decoder` evaluates to, proves `name_decoded : decoder = some name` and
+/-- The `FieldRef` constants a decoded method's field operands are written as. -/
+syntax decodedFields := "[" ident,* "]"
+
+/-- `cil_decoded_method name [field, ...] := decoder` defines `name` as the method the closed
+    `Option CIL.Method` `decoder` evaluates to, with each field operand equal to a listed
+    `FieldRef` constant written as that constant, proves `name_decoded : decoder = some name` and
     the `@[cil_code]` facts `name_{field}` for each of `factFields`. Fails when the decoder
-    gives `none` or does not reduce. -/
-syntax (name := decodedMethod) "cil_decoded_method " ident " := " term : command
+    gives `none` or does not reduce, or when a listed constant names no field operand. -/
+syntax (name := decodedMethod)
+  "cil_decoded_method " ident (decodedFields)? " := " term : command
 
 elab_rules : command
-  | `(cil_decoded_method $nameSyntax:ident := $decoderSyntax) => liftTermElabM do
+  | `(cil_decoded_method $nameSyntax:ident $[$fieldsSyntax:decodedFields]? := $decoderSyntax) =>
+    liftTermElabM do
     let methodType := mkConst ``CIL.Method
     let optionType := mkApp (mkConst ``Option [.zero]) methodType
     let decoder ← Term.elabTermEnsuringType decoderSyntax optionType
@@ -213,9 +230,30 @@ elab_rules : command
       | throwError "cil_decoded_method: the cil_code simp set is not registered"
     let name := (← getCurrNamespace) ++ nameSyntax.getId
     let passed := decoder.getAppArgs.filter (·.isConst)
+    let fieldIdents : Array Ident ← match fieldsSyntax with
+      | none => pure #[]
+      | some listedSyntax =>
+        match listedSyntax with
+        | `(decodedFields| [$listed,*]) => pure listed.getElems
+        | _ => throwError "cil_decoded_method: malformed field list {listedSyntax}"
+    let mut fieldConstants : Std.HashMap Expr Expr := {}
+    let mut fieldNames := #[]
+    for fieldIdent in fieldIdents do
+      let fieldName ← realizeGlobalConstNoOverloadWithInfo fieldIdent
+      let constant := mkConst fieldName
+      unless (← inferType constant) == mkConst ``Extraction.FieldRef do
+        throwError "cil_decoded_method: {fieldName} is not a field reference"
+      fieldConstants := fieldConstants.insert (toExpr (← evaluateField constant)) constant
+      fieldNames := fieldNames.push fieldName
     let some method ← evaluate decoder
       | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
-    let value ← literal passed.contains methodType (← methodTerm passed method)
+    let named (term : Expr) : Option Expr :=
+      if passed.contains term then some term else fieldConstants.get? term
+    let value ← literal named methodType (← methodTerm passed method)
+    let used := value.getUsedConstants
+    for fieldName in fieldNames do
+      unless used.contains fieldName do
+        throwError "cil_decoded_method: the decoded method has no field operand {fieldName}"
     addAndCompile <| .defnDecl {
       name, levelParams := [], type := methodType, value,
       hints := .regular (getMaxHeight (← getEnv) value + 1), safety := .safe }

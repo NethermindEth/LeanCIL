@@ -709,7 +709,10 @@ then checks by reduction the theorem, named with the suffix `_decoded`, that
 `_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
 `Extracted.method0_decoded`, `Extracted.method0_profile` and so on. A decoder with a hole, a
 decoder that gives `none`, and a value the kernel does not reduce to the evaluated method are
-errors, so a file builds only when the kernel confirms what compiled code computed.
+errors, so a file builds only when the kernel confirms what compiled code computed. The form
+`cil_decoded_method name [field, ...] := decoder` also writes each field operand equal to a listed
+`FieldRef` constant as that constant, so the facts `cil_field_shape` states about the constant
+apply to the method; a listed constant that names no field operand is an error.
 
 The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs and
 every pc is reachable under the profile; a method with a pc the reachability certificate rules out
@@ -720,7 +723,9 @@ keeps its literal, whose `.unadmitted` hole at that pc the feature check require
 cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw
 ```
 
-in place of a `def method0 : Method` literal, followed by
+in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when
+the method accesses class instance fields, naming the operand definitions the literal would name,
+followed by
 `cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
 its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.lookup{n}`
 equations.

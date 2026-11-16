@@ -283,9 +283,14 @@ internal static class LeanEmitter
             var decoded = refusals[n] is null;
             if (decoded)
             {
-                // The decoder's raw definition is the method's only source; the command states its field facts.
-                lean.AppendLine($"cil_decoded_method method{n} := Method.ofRaw? profile " +
-                    $"{FrameMetadata.EnvironmentLean} method{n}Original method{n}TypeArgumentsRaw");
+                // The decoder's raw definition is the method's only source; the command states its field facts and
+                // writes each field operand as the definition the literal form names.
+                var naming = string.Join(", ", ops.OfType<ClassField>().Select(access =>
+                    operandShapes.FieldName(access.Reference ?? throw new InvalidOperationException(
+                        "A class field access has no field operand."))).Distinct());
+                lean.AppendLine($"cil_decoded_method method{n} {(naming.Length == 0 ? "" : $"[{naming}] ")}:= " +
+                    $"Method.ofRaw? profile {FrameMetadata.EnvironmentLean} method{n}Original " +
+                    $"method{n}TypeArgumentsRaw");
             }
             else
             {

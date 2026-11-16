@@ -274,6 +274,33 @@ cil_instruction_equations newarrMethod
   newarrMethod.code[1]? = some (Instruction.unadmitted 141) -/
 #guard_msgs (whitespace := lax) in #check newarrMethod_instruction1
 
+/-- The `uint32` field of `Dog` the decoded definition below names. -/
+def ageField : FieldRef := { owner := dogClass, index := 0, type := uint32, name := name!"Age" }
+
+/-- `ldarg.0; ldfld Dog.Age; ret` over one `Dog` parameter. -/
+private def ageRaw : RawMethod :=
+  { method 8 false [] [instr 0 2, instr 1 0x7B (.field dogClass 0 uint32 name!"Age" false),
+      instr 6 0x2A] with parameters := [dogClass], returnType := uint32 }
+
+-- A field operand equal to a listed constant is written as that constant, as an extraction's
+-- literal names it, so the shape facts stated about the constant apply to the decoded method.
+cil_decoded_method ageMethod [ageField] := Method.ofRaw? testProfile testEnvironment ageRaw []
+cil_instruction_equations ageMethod
+
+/-- info: Tests.DecodedMethod.ageMethod_instruction1 :
+  ageMethod.code[1]? = some (Instruction.ldfld ageField) -/
+#guard_msgs (whitespace := lax) in #check ageMethod_instruction1
+
+/-- A field of `Dog` that `ageRaw` does not access. -/
+def weightField : FieldRef := { ageField with index := 1 }
+
+-- A listed constant that names no field operand is refused rather than ignored.
+/-- error: cil_decoded_method: the decoded method has no field operand
+  Tests.DecodedMethod.weightField -/
+#guard_msgs (whitespace := lax) in
+cil_decoded_method weightMethod [weightField] :=
+  Method.ofRaw? testProfile testEnvironment ageRaw []
+
 -- A body naming an undeclared argument defines nothing.
 /-- error: cil_decoded_method: the decoder gives no method
   Method.ofRaw? testProfile testEnvironment (argumentRaw 14 1) [] -/
