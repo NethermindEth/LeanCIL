@@ -108,7 +108,7 @@ local pushes, or `none`.
 | Keep snapshots across a call confined apart from the homes | `LocalSnapshots.after_confined` |
 | Keep snapshots across a write, or memory that keeps old allocations | `after_write_apart`, `after_below` |
 | The typed read of a remembered local whose slot is known | `snapshots.read_at specified slot` |
-| That read for a vector | `read_vector128`, `read_vector256`, `read_vector512` |
+| That read for a 64-bit word or a vector | `read_word64`, `read_vector128`, `read_vector256`, `read_vector512` |
 
 The vector reads are stated as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its
 wider forms. A snapshot that overlaps a callee's footprint is not kept: restate it from the
@@ -391,8 +391,9 @@ calls. At a call it applies:
 - a proved `MethodContract.Holds` theorem marked `@[cil_contract]`, or one whose proof is in
   `facts`. Contracts merely present in the local context are not selected. The theorem's program
   and method binding must match the actual call; required binding premises are checked;
-- a supplied successful child invocation, with fixed or existential fuel, or an
-  `InvocationCertificate`, without unfolding the helper body.
+- a supplied or local successful child invocation, with fixed or existential fuel, a
+  `CallResult` or an `InvocationCertificate`, without unfolding the helper body. A local fact
+  that starts from another memory variable than the call is not tried.
 
 Input fields, each component of a tuple input included, are inferred from the encoded arguments;
 an input that is one word or one reference is the argument as the caller wrote it. The
@@ -423,6 +424,10 @@ The stepping tactics state the goal with the `args`, `results`, `pre`, `footprin
 each defined contract unfolded, at entry and in each call's continuation, so the stack holds the
 encoded output. A fact read from `call.post` keeps the contract folded until
 `dsimp only [mixContract] at` it.
+
+A proof that composes calls with `WP.local_call` gets a `LoopFrame` after each call. `clear` the
+frame of the call before once the next one is introduced: the stepping tactics read every frame
+in scope at each step, so frames left in scope make each call cost more than the one before.
 
 The tactic has these variants:
 
@@ -500,6 +505,33 @@ A contract whose precondition implies well-formed memory and a valid static worl
 | `Certified.weaken` | Keeps the certificate through a `Refines` |
 | `InvocationCertificate.of_invoke` | Certifies any successful `invoke` from those two premises |
 | `InvocationCertificate.of_run` | Certifies a run of the frame that checked arguments enter |
+
+### Bind a contract to a decoded method
+
+`CIL.Safety.DecodedSummary` ties a contract to the method it was proved for.
+`DecodedSummary program evidence profile environment index pin token arguments contract` holds
+when `contract.Holds program index` and record `index` of `evidence` is the method with
+metadata token `token` of the assembly pinned by `pin`, closed at type arguments `arguments`,
+whose pinned body bytes decode to `program[index]?`. `MethodContract.Certified` names only an
+index, which another extraction can fill with another body; a summary also names the metadata
+method and the bytes.
+
+| Name | Use |
+| --- | --- |
+| `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
+| `decodedProgram?_eq_some` | Turns `BodiesDecode` into `decodedProgram? profile environment evidence = some program` |
+| `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
+| `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
+| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call |
+| `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |
+
+An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
+`(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
+for a method defined from its decoder. The proof of `decodedProgram?_eq_some` adds one
+constructor per record, so its cost is linear in the methods of the extraction
+([scaling](performance/InstructionLookups.md)).
+A summary whose bound names another token, or whose record's bytes decode to another method, does
+not type-check, and `site` at a call that names another token proves `False` from the summary.
 
 ### Pass byref arguments with ValidCall
 
@@ -799,7 +831,7 @@ predicates in the `ReferenceArray` namespace:
 | Carry a covariance check across an allocation from well-formed memory | `storableIn_of_confined` |
 | Let `Confined.forget_fresh` drop the elements of an array the method allocated | `entries_young` |
 | A fresh array from `newReferenceArray_ok`, live with every element owned and null | `ReferenceArray.fresh` |
-| Step the three instructions | `step_referenceArrayLength_eq`, `step_referenceArrayLoad_eq`, `step_referenceArrayStore_eq` |
+| Step the three instructions | `step_ldlen_object_eq`, `step_ldelem_ref_i32_eq`, `step_stelem_ref_i32_eq` |
 
 | Example | Shows |
 | --- | --- |
@@ -827,8 +859,8 @@ one, whose view validates.
 | Pass a whole array as a call argument, from its view's `valid` | `checkedValue_array` |
 | Move it through a local, from its view's `valid` | `storeLocal_array`, `loadLocal_array` |
 | Step `ldfld` and `stfld` | the `cil_step` simprocs, by `step_ldfld_array_eq` and `step_stfld_array_eq` |
-| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_memory_arrayLength_address_eq` |
-| Step `ldlen` of the null array to its throw | `step_memory_arrayLength_null_eq` |
+| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_ldlen_address_eq` |
+| Step `ldlen` of the null array to its throw | `step_ldlen_null_eq` |
 
 | Example | Shows |
 | --- | --- |

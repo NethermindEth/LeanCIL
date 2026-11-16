@@ -391,23 +391,13 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {site : Nat}
 
 #print axioms StepContract.initializeSpanLocal
 
-/-- The length a method table answers is a well-formed native integer. -/
-theorem methodTableLength_numeric {table : CIL.MethodTable} {length : CIL.Value}
-    (counted : methodTableLength table = .ok length) : numericValue length = true := by
-  unfold methodTableLength at counted
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at counted
-  repeat' first
-    | (cases counted <;> rfl)
-    | split at counted
-#print axioms methodTableLength_numeric
-
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
     (executed : managedStep operation link pc frame stack memory = .ok action) :
     StepContract body pc dispatched frame stack memory action := by
-  unfold managedStep methodTableElement at executed
+  unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |
@@ -421,8 +411,6 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
         | exact retained.tail.drop _
         | exact (checkedValues_valid _ _ _ (by assumption)).2
         | (apply ValuesValid.cons; first | trivial | exact retained | exact retained.tail.tail)
-        | (refine ValuesValid.cons ?_ retained.tail
-           exact methodTableLength_numeric (by assumption))
         | constructor
     | cases executed
     | split at executed
@@ -498,6 +486,10 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | solve |
         apply StepContract.instruction
         apply referenceAddInstruction_contract
+        assumption
+    | solve |
+        apply StepContract.instruction
+        apply typedElementInstruction_contract
         assumption
     | solve |
         apply StepContract.instruction

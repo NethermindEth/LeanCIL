@@ -29,12 +29,11 @@ internal static class InstructionTranslation
             var signature = ManagedPointers.SignatureEvidence(indirect);
             return new IndirectCall(signature, ManagedPointers.Catalog(indirect, methods, methodIndex, tail), tail);
         }
-        if (i.OpCode.Code is Code.Ldlen or Code.Ldelem_I or Code.Ldelem_Any &&
-            nativeOperands.Incoming.TryGetValue(i, out var tableStack) &&
-            tableStack.Length >= (i.OpCode.Code == Code.Ldlen ? 1 : 2) &&
-            tableStack[^(i.OpCode.Code == Code.Ldlen ? 1 : 2)] is
-                { Kind: NativeOperands.Kind.MethodTable, Metadata: LocalKind.MethodTable table })
-            return i.OpCode.Code == Code.Ldlen ? new TableLength() : new TableElement(table.Signature);
+        // Element loads of a handler table emit their decoded instructions with every other array.
+        if (i.OpCode.Code is Code.Ldelem_Any &&
+            nativeOperands.Incoming.TryGetValue(i, out var tableStack) && tableStack.Length >= 2 &&
+            tableStack[^2] is { Kind: NativeOperands.Kind.MethodTable })
+            return new TypedElementAccess(false, null);
         if (i.OpCode.Code == Code.Ldftn && i.Operand is MethodReference address)
         {
             var target = address.Resolve() ?? throw new InvalidDataException("Unresolved managed pointer target");
@@ -53,10 +52,7 @@ internal static class InstructionTranslation
             return StackOperation.Nop;
         }
         if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
-        var referenceArray = i.OpCode.Code == Code.Ldlen &&
-            nativeOperands.Incoming.TryGetValue(i, out var lengthStack) &&
-            lengthStack.LastOrDefault().Kind == NativeOperands.Kind.Object;
-        if (ReferenceArrays.Translate(i, referenceArray) is { } referenceOperation) return referenceOperation;
+        if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         return TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,

@@ -103,16 +103,10 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
             }
         }
         evidence.Add(proof, "PASS runtime, certificate and checked array execution: " + name);
-        if (name != "ReadSByte") continue;
-        foreach (var (mutation, replacement) in new[]
-            { ("signedness", ".arrayLoad 1 false"), ("width", ".arrayLoad 2 true") })
-        {
-            const string target = ".arrayLoad 1 true";
-            if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing mutation target");
-            var forged = Path.Combine(root, "ForgedArray-" + mutation + ".lean");
-            File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array operation: " + replacement, "ScalarFlowValid");
-        }
+        // The decoder reads each element access from the body, so no emitted kind is left to forge; the
+        // mutations of Tests/ValueDecoding.lean reject another sign or width at the opcode.
+        if (!source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+            throw new Exception("Element accessor is not decoded from its body: " + name);
     }
 }
 var compositions = new (string Name, string Signature, string Arguments, string Expected)[]
@@ -241,12 +235,17 @@ foreach (var (name, element, width) in allocations)
         }
         catch (TargetInvocationException fault) when (fault.InnerException is OverflowException) { }
     }
+    // The decoder reads each allocation from the body, so a forgery names another element type at its raw token,
+    // which the certified stack states bind.
+    if (name is "Allocate" or "AllocateSigned8" or "AllocatePacked" &&
+        !source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+        throw new Exception("Allocation is not decoded from its body: " + name);
     if (name == "Allocate")
     {
         foreach (var (mutation, replacement) in new[]
-            { ("element", ".newarr (.atom Extraction.runtimeScope \"System.UInt32\")"), ("operation", ".nop") })
+            { ("element", ".type (.atom Extraction.runtimeScope \"System.UInt32\")") })
         {
-            const string target = ".newarr (.atom Extraction.runtimeScope \"System.Int32\")";
+            const string target = ".type (.atom Extraction.runtimeScope \"System.Int32\")";
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing newarr mutation");
             var forged = Path.Combine(root, "ForgedAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
@@ -258,13 +257,13 @@ foreach (var (name, element, width) in allocations)
         // The token names the enum and its underlying type; its storage is resolved from them.
         var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.Signed8");
         const string underlying = ".atom Extraction.runtimeScope \"System.SByte\"";
-        var target = $".newarr (.enum {identity} ({underlying}))";
+        var target = $".type (.enum {identity} ({underlying}))";
         foreach (var (mutation, replacement) in new[]
         {
             ("identity", target.Replace("Examples.Signed8", "Examples.Unsigned8", StringComparison.Ordinal)),
             ("underlying", target.Replace("System.SByte", "System.Byte", StringComparison.Ordinal)),
             ("width", target.Replace("System.SByte", "System.Int16", StringComparison.Ordinal)),
-            ("primitive", $".newarr ({underlying})")
+            ("primitive", $".type ({underlying})")
         })
         {
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing enum newarr target");
@@ -279,7 +278,7 @@ foreach (var (name, element, width) in allocations)
         var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.PackedLeaf");
         var otherIdentity = identity.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal);
         // The token names the struct by identity and layout index; its stride is the checked layout's.
-        var prefix = $".newarr (.aggregate {identity} ";
+        var prefix = $".type (.aggregate {identity} ";
         var start = source.IndexOf(prefix, StringComparison.Ordinal);
         if (start < 0) throw new Exception("Missing composite newarr token");
         var index = int.Parse(source.AsSpan(start + prefix.Length,
@@ -290,7 +289,7 @@ foreach (var (name, element, width) in allocations)
         {
             ("identity", target, target.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal),
                 "method0_scalars_validated", "ScalarFlowValid"),
-            ("index", target, $"{prefix}{index + 1})", "method0_scalars_validated", "ScalarFlowValid"),
+            ("index", target, $"{prefix}{index + 1})", "method0_coverage_validated", "LayoutUsesComplete"),
             ("layout-identity", $".aggregate {identity}", $".aggregate {otherIdentity}",
                 "method0_coverage_validated", "LayoutUsesComplete")
         })

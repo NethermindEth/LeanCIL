@@ -157,6 +157,13 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
     observerCount (.setAggregateFieldAt offset size) = 2 := rfl
 @[cil_guard] theorem guard_ldind (kind : CIL.NumericKind) : observerCount (.ldind kind) = 1 := rfl
 @[cil_guard] theorem guard_stind (kind : CIL.NumericKind) : observerCount (.stind kind) = 2 := rfl
+@[cil_guard] theorem guard_ldlen : observerCount .ldlen = 1 := rfl
+@[cil_guard] theorem guard_ldelem (kind : CIL.NumericKind) : observerCount (.ldelem kind) = 2 :=
+  rfl
+@[cil_guard] theorem guard_ldelem_ref : observerCount .ldelem_ref = 2 := rfl
+@[cil_guard] theorem guard_stelem (kind : CIL.NumericKind) : observerCount (.stelem kind) = 3 :=
+  rfl
+@[cil_guard] theorem guard_stelem_ref : observerCount .stelem_ref = 3 := rfl
 @[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
 @[cil_guard] theorem guard_ldsfld (field : CIL.Extraction.FieldRef) :
     observerCount (.ldsfld field) = 0 := rfl

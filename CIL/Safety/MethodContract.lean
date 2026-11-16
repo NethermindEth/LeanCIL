@@ -768,14 +768,38 @@ def cilInvocationEvidence (type : Expr) : Bool :=
       | some (.lam _ _ body _) => invocation body
       | _ => false)
 
+open Lean Meta in
+/-- The memory an invocation fact starts from, when its type states it. -/
+def cilInvocationMemory? (type : Expr) : Option Expr :=
+  let type := type.consumeMData
+  if type.isAppOf `CIL.Safety.InvocationCertificate then type.getAppArgs[3]?
+  else if type.isAppOf ``CIL.Safety.CallResult then type.getAppArgs[type.getAppNumArgs - 3]?
+  else (type.find? (·.isAppOfArity ``CIL.Safety.invoke 5)).bind (·.getAppArgs[4]?)
+
+open Lean Meta in
+/-- Whether invocation evidence that starts from `start` can match a call stepped from `current`.
+    A call passes on the memory it steps from or a term built from it, never another variable. -/
+def cilStartsAt (current start : Expr) : MetaM Bool := do
+  let (.fvar current, .fvar start) := (current.consumeMData, start.consumeMData) | return true
+  if current == start then return true
+  return (← current.isLetVar) || (← start.isLetVar)
+
 open Lean Elab Tactic Meta in
-/-- Use supplied or local successful invocation evidence at the fetched call. -/
+/-- Use supplied or local successful invocation evidence at the fetched call. A local fact that
+    starts from another memory variable than the call is not tried, so the results of earlier
+    calls in scope cost no step each. -/
 def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
   let mut candidates := facts
+  let current := ((← getMainTarget).find? (·.isAppOfArity ``CIL.Safety.run 8)).bind
+    (·.getAppArgs[7]?)
   for declaration in ← getLCtx do
     unless declaration.isImplementationDetail do
       if cilInvocationEvidence declaration.type then
-        candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
+        let type ← instantiateMVars declaration.type
+        let starts ← match current, cilInvocationMemory? type with
+          | some current, some start => cilStartsAt current start
+          | _, _ => pure true
+        if starts then candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
   for candidate in candidates do
     let saved ← saveState
     try

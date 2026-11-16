@@ -22,7 +22,7 @@ private theorem managedStep_not_returned (operation : CIL.ManagedOp) (link : Opt
     (pc : Nat) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value) :
     managedStep operation link pc frame stack memory ≠ .ok (.returned values final) := by
   intro executed
-  unfold managedStep methodTableLength methodTableElement at executed
+  unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first | cases executed | split at executed
 #print axioms managedStep_not_returned

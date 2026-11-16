@@ -5,12 +5,12 @@ import CIL.Safety.GuardNormalization
 # Instruction step equations
 
 One `@[cil_instruction_step]` equation per `instruction` arm and operand shape for the indirect
-integer, scalar-store, field, reference and aggregate-initialization opcodes, so a step rewrites
-to that arm's body at the level of `loadValue`, `storeValue`, `add`, `write` and `formValue`,
-where callers state their memory facts, and never unfolds `instruction`. Other operand shapes
-keep the generic `instructionStep` equations in `StepComposition`, which these outrank. The
-stepping tactics use this set alongside `cil_step`, and `cil_instruction_step_goal` lists its
-opcodes; a hand-written `simp only [cil_step]` does not use it.
+integer, handler-table, scalar-store, field, reference and aggregate-initialization opcodes, so a
+step rewrites to that arm's body at the level of `loadValue`, `storeValue`, `add`, `write` and
+`formValue`, where callers state their memory facts, and never unfolds `instruction`. Other
+operand shapes keep the generic `instructionStep` equations in `StepComposition`, which these
+outrank. The stepping tactics use this set alongside `cil_step`, and `cil_instruction_step_goal`
+lists its opcodes; a hand-written `simp only [cil_step]` does not use it.
 -/
 
 namespace CIL.Safety
@@ -19,7 +19,8 @@ namespace CIL.Safety
     decided guard leaves the single matching arm. -/
 local macro "instruction_step_proof " generic:ident : tactic => `(tactic| (
   rw [$generic:ident]
-  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+  simp only [instructionStep, instruction, elementInstruction, cil_guard, unspecifiedOperands,
+    List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_assoc, pure_bind]
   all_goals first | rfl | (split <;> rfl)))
 
@@ -54,6 +55,25 @@ theorem step_ldind_table_eq (table : CIL.MethodTable) (rest : List Value) :
       let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
       return .next (pc + 1) (.methodPointer pointer :: rest) frame memory := by
   instruction_step_proof step_ldind_eq
+
+-- Handler table reads.
+/-- `ldlen` of a managed handler table pushes its entry count. -/
+@[cil_instruction_step high]
+theorem step_ldlen_table_eq (table : CIL.MethodTable) (rest : List Value) :
+    step body .ldlen pc args frame (.methodTable table :: rest) memory = do
+      let length ← methodTableLength table
+      return .next (pc + 1) (.scalar length :: rest) frame memory := by
+  instruction_step_proof step_ldlen_eq
+
+/-- `ldelem.i` of a managed handler table at an int32 index pushes the method pointer there. -/
+@[cil_instruction_step high]
+theorem step_ldelem_i_table_eq (index : CIL.W32) (table : CIL.MethodTable)
+    (rest : List Value) :
+    step body (.ldelem .i) pc args frame (.scalar (.i32 index) :: .methodTable table :: rest)
+      memory = do
+      let pointer ← methodTableElement table (.i32 index) memory
+      return .next (pc + 1) (.methodPointer pointer :: rest) frame memory := by
+  instruction_step_proof step_ldelem_eq
 
 /-- `stind.i8` writes an i64 through a writable reference. -/
 @[cil_instruction_step high]
@@ -317,6 +337,8 @@ end InstructionEquations
 #print axioms step_ldind_reference_eq
 #print axioms step_ldind_readOnlyReference_eq
 #print axioms step_ldind_table_eq
+#print axioms step_ldlen_table_eq
+#print axioms step_ldelem_i_table_eq
 #print axioms step_stind_i8_eq
 #print axioms step_stind_i_eq
 #print axioms step_stind_i32_eq

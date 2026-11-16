@@ -78,8 +78,6 @@ def MemoryOp.callReached : MemoryOp → Bool
   -- Opcode meanings: blocks, vector loads and stores, arrays and literals
   | .copyBlock _ | .initBlock _
   | .load128 | .load256 | .load512 | .store128 | .store256 | .store512
-  | .arrayLength | .arrayLoad .. | .arrayStore _
-  | .arrayAddress .. | .arrayTransfer .. | .stringLiteral _
-  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore => false
+  | .arrayAddress .. | .stringLiteral _ => false
 
 end CIL

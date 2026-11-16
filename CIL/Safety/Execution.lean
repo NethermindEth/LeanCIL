@@ -152,45 +152,14 @@ theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CI
       exact List.mem_map.mpr ⟨entry, List.mem_of_find?_eq_some found, rfl⟩
 #print axioms indirectTarget_mem
 
-/-- `ldlen` of a method table: its entry count; a table without entries throws
-    `NullReferenceException`. -/
-def methodTableLength (table : CIL.MethodTable) : ExecutionResult CIL.Value := do
-  let some targets := table.targets | .error (.thrown .nullReference)
-  if targets.size >= 2^31 then .error .invalidState else pure ()
-  return .i64 (BitVec.ofNat 64 targets.size)
-
-/-- `ldelem` of a method table: the pointer at `index`, read from the native backing when the
-    table has one; a table without entries throws before an index outside them. -/
-def methodTableElement (table : CIL.MethodTable) (index : CIL.Value) (memory : Memory) :
-    ExecutionResult CIL.MethodPointer := do
-  let some index := arrayIndex index | .error .invalidState
-  let some targets := table.targets | .error (.thrown .nullReference)
-  if targets.size >= 2^31 then .error .invalidState else pure ()
-  let some target := targets[index]? | .error (.thrown .indexOutOfRange)
-  match table.backing with
-  | some backing =>
-    let selected := { table with backing := some { backing with
-      byteOffset := nativeMethodWidth * index } }
-    checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
-  | none => return ⟨table.signature, some target⟩
-
 /-- Managed dispatch checks stable pointer identity and signature before selecting a body from
     the catalog `link`, the call site's entry in its method's link table. Tail calls use the same
     retirement action as direct tail calls. -/
 def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   match operation, stack with
-  | .tableLength, .object .null :: _
-  | .tableElement _, .scalar _ :: .object .null :: _ =>
-    .error (.thrown .nullReference)
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
-  | .tableLength, .methodTable table :: rest =>
-    return .next (pc + 1) (.scalar (← methodTableLength table) :: rest) frame memory
-  | .tableElement signature, .scalar index :: .methodTable table :: rest =>
-    if table.signature != signature then .error .invalidState else pure ()
-    let pointer ← methodTableElement table index memory
-    return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature _ tail, .methodPointer pointer :: values =>
     let some (.indirect catalog) := link | .error unlinkedCall
     let some method := indirectTarget signature catalog pointer | .error .invalidState
@@ -609,6 +578,13 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .newarr element, .scalar length :: rest =>
     let (array, memory) ← allocateElements (body.elementShape element) length m
     return .next (pc + 1) (array :: rest) frame memory
+  -- Typed element accesses take the storage the layouts give their declared element type.
+  | .ldelem_any element, _ =>
+    let (memory, values) ← typedElementInstruction (body.elementShape element) false stack m
+    return .next (pc + 1) values frame memory
+  | .stelem_any element, _ =>
+    let (memory, values) ← typedElementInstruction (body.elementShape element) true stack m
+    return .next (pc + 1) values frame memory
   -- A call enters the body its pc links to; a pc with no link runs the runtime model its
   -- operand names, which leaves no frame for a `tail.` call to retire.
   | .call method prefixes, _ =>

@@ -22,6 +22,8 @@ const int HypothesisBodyCycles = 30;
 const string Int32Type = ".atom CIL.Extraction.runtimeScope \"System.Int32\"";
 const string Int64Type = ".atom CIL.Extraction.runtimeScope \"System.Int64\"";
 const string NodeType = ".object \"Examples\" \"Examples.Node\"";
+const string PairType = ".aggregate \"Examples.Pair\" 0";
+const string PairElement = ".aggregate \"Examples.Pair\" 8";
 var localSlots = string.Join(", ", Enumerable.Repeat(".root (some target)", LocalCount));
 
 ScalingChecks();
@@ -67,7 +69,9 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
     ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false),
-    ("constructions", [16, 64, 256], false), ("objectconstructors", [16, 64, 256], false)
+    ("constructions", [16, 64, 256], false), ("objectconstructors", [16, 64, 256], false),
+    ("elements", [16, 64, 256], false), ("typedelements", [16, 64, 256], false),
+    ("typedsteps", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -135,6 +139,12 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // `.object` link from the body's table and one allocation fact and enters a constructor that returns.
 // The objectconstructors body calls the `System.Object` constructor on its object argument per cycle, so
 // each call reads that its pc has no link and the runtime model fact of its pc.
+// The elements body loads and pops one int32 element of its array argument, then stores its index
+// argument into that element, per cycle, so each access reads one element fact of constant size.
+// The typed elements body does the same through `ldelem` and `stelem` with an `int32` type operand,
+// then copies one struct element of a second array onto itself. Each step evaluates the typed access
+// from element facts, its shape from the literal body's layouts; the generated shape facts are in scope
+// but leave the cost unchanged. The typed steps body is the same body stepped by one fact per access.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
@@ -156,6 +166,11 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
     "objectconstructors" => ([], [".ldarg 0", ".call CIL.Extraction.objectConstructorMethod {}"],
         [".ldc_i4 0", ".ret"]),
+    "elements" => ([], [".ldarg 0", ".ldarg 1", ".ldelem .i4", ".pop", ".ldarg 0", ".ldarg 1",
+        ".ldarg 1", ".stelem .i4"], [".ldc_i4 0", ".ret"]),
+    "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
+        ".ldarg 1", ".ldarg 1", $".stelem_any ({Int32Type})", ".ldarg 2", ".ldarg 1", ".ldarg 2", ".ldarg 1",
+        $".ldelem_any ({PairType})", $".stelem_any ({PairType})"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -216,7 +231,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     {
         "arguments" => $" declared := {signature},",
         "homes" => $" declared := {signature}, parameterHomes := [{homes}],",
-        "objects" => " environment := environment,",
+        "objects" or "typedelements" or "typedsteps" => " environment := environment,",
         _ => ""
     };
     var statics = workload == "statics";
@@ -263,17 +278,47 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "allocation" or "constructions" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
         "objects" or "objectconstructors" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
+        "elements" => "import CIL.Safety.ArrayContents\n",
+        "typedelements" or "typedsteps" => "import CIL.Safety.ArrayContents\nimport CIL.Safety.ResolutionFacts\n",
         _ => ""
     };
     // The objects body reads field 1 of a class, an int64 in the slot at model offset 8; a step that
     // evaluates the shape instead of reading the fact fails the row.
-    var fieldDefinitions = workload == "objects" ? $$"""
-        @[cil_code] def environment : CIL.LayoutEnvironment := {}
-        /-- The `int64` field 1 of a class. -/
-        def counter : CIL.Extraction.FieldRef :=
-          { owner := {{NodeType}}, index := 1, type := {{Int64Type}}, name := name!"count" }
-        cil_field_shape environment counter
-        set_option cil.requireFieldShapeFacts true
+    var fieldDefinitions = workload switch
+    {
+        "objects" => $$"""
+            @[cil_code] def environment : CIL.LayoutEnvironment := {}
+            /-- The `int64` field 1 of a class. -/
+            def counter : CIL.Extraction.FieldRef :=
+              { owner := {{NodeType}}, index := 1, type := {{Int64Type}}, name := name!"count" }
+            cil_field_shape environment counter
+            set_option cil.requireFieldShapeFacts true
+            """ + "\n",
+        "typedelements" or "typedsteps" => """
+            /-- A struct of two `int32` fields. -/
+            def pairLayout : CIL.Extraction.RawLayout :=
+              { identity := "Examples.Pair", explicit := false, packing := 0, declaredSize := 0,
+                fields := [{ type := .signed32 }, { type := .signed32 }] }
+            /-- The checked layout of `pairLayout`: eight bytes. -/
+            def pairComputed : CIL.Extraction.ComputedLayout :=
+              { layout := { size := 8, fields := [{ offset := 0, width := 4 }, { offset := 4, width := 4 }] },
+                alignment := 4 }
+            /-- The one struct the body's typed accesses name. -/
+            def environment : CIL.LayoutEnvironment := { rawLayouts := [pairLayout], layouts := #[pairComputed] }
+            """ + "\n",
+        _ => ""
+    };
+    // The raw view names each element type a typed access of the body names, as an extraction's does.
+    var rawView = workload is "typedelements" or "typedsteps" ? $$"""
+        /-- The element opcodes of `body` with their type operands. -/
+        def bodyClosed : CIL.Extraction.RawMethod :=
+          { token := 1, owner := "Examples", hasThis := false, explicitThis := false, callingConvention := 0,
+            attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+            initLocals := true, maxStack := 4, genericParameters := [],
+            code := [⟨0, 163, .type ({{Int32Type}})⟩,
+              ⟨5, 164, .type ({{Int32Type}})⟩,
+              ⟨10, 163, .type ({{PairType}})⟩,
+              ⟨15, 164, .type ({{PairType}})⟩] }
         """ + "\n" : "";
     var localKinds = string.Join(", ", Enumerable.Repeat(".word64", SnapshotLocalCount));
     var localValues = string.Join(", ", Enumerable.Repeat(".i64 0", SnapshotLocalCount));
@@ -308,10 +353,10 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         cil_instruction_equations constructor
         """ + "\n" : "") + (workload == "objectconstructors" ? """
         cil_runtime_models body
-        """ + "\n" : "") + (workload is "arguments" or "homes" || statics ? $$"""
+        """ + "\n" : "") + (workload is "arguments" or "homes" or "typedelements" or "typedsteps" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
-        theorem body_declared : body.declared = {{(statics ? "{}" : signature)}} := rfl
-        cil_resolution_facts body
+        theorem body_declared : body.declared = {{(workload is "arguments" or "homes" ? signature : "{}")}} := rfl
+        {{rawView}}cil_resolution_facts body
         """ + "\n" : "");
     var incoming = string.Join(", ",
         Enumerable.Range(0, parameters).Select(index => $".scalar (.i32 (argument {index}))"));
@@ -542,6 +587,59 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
                   .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [formed]
+            """,
+        "elements" => $$"""
+            /-- Every element access reads the one element the index names, whose store keeps the memory. -/
+            theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
+                (word : CIL.Value) (valid : view.validate memory = .ok ())
+                (found : arrayElement memory view index.toNat 4 = .ok element)
+                (loaded : loadValue memory (.address element) 4 false = .ok word)
+                (written : write memory element (numberBytes index.toNat 4) 1 = .ok memory) :
+                invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              have loadFact := step_ldelem_of_element .i4 (index := .i32 index) rfl found loaded
+              have storeFact := step_stelem_narrow_of_write .i4 (index := .i32 index) rfl found written
+              cil_checked_steps [valid, loadFact, storeFact]
+            """,
+        "typedelements" => $$"""
+            /-- Every typed access evaluates to the element the index names, and every store keeps the
+                memory. -/
+            theorem checked (memory : Memory) (view pairs : ArrayView) (index : CIL.W32) (element : Reference)
+                (word pair : CIL.Value) (valid : view.validate memory = .ok ())
+                (pairsValid : pairs.validate memory = .ok ())
+                (found : arrayElement memory view index.toNat 4 = .ok element)
+                (loaded : loadValue memory (.address element) 4 false = .ok word)
+                (written : write memory element (numberBytes index.toNat 4) 1 = .ok memory)
+                (specified : pair.hasUnspecified = false)
+                (pairLoaded : ∀ rest, arrayTransferInstruction ({{PairElement}}) false
+                  (.scalar (.i32 index) :: .array pairs :: rest) memory = .ok (memory, .scalar pair :: rest))
+                (pairStored : ∀ rest, arrayTransferInstruction ({{PairElement}}) true
+                  (.scalar pair :: .scalar (.i32 index) :: .array pairs :: rest) memory = .ok (memory, rest)) :
+                invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index), .array pairs]
+                  memory = .ok (memory, [.scalar (.i32 0)]) := by
+              have loadFact := arrayLoad_of_element (index := .i32 index) rfl found loaded
+              have storeFact := arrayStore_of_write (index := .i32 index) rfl found written
+              cil_checked_steps [valid, pairsValid, loadFact, storeFact, specified, pairLoaded, pairStored]
+            """,
+        "typedsteps" => $$"""
+            /-- Every typed access steps by one supplied fact, and every store keeps the memory. -/
+            theorem checked (memory : Memory) (view pairs : ArrayView) (index : CIL.W32) (word pair : CIL.Value)
+                (valid : view.validate memory = .ok ()) (pairsValid : pairs.validate memory = .ok ())
+                (load : ∀ body pc args frame rest, step body (.ldelem_any ({{Int32Type}})) pc args frame
+                  (.scalar (.i32 index) :: .array view :: rest) memory =
+                  .ok (.next (pc + 1) (.scalar word :: rest) frame memory))
+                (store : ∀ body pc args frame rest, step body (.stelem_any ({{Int32Type}})) pc args frame
+                  (.scalar (.i32 index) :: .scalar (.i32 index) :: .array view :: rest) memory =
+                  .ok (.next (pc + 1) rest frame memory))
+                (pairLoad : ∀ body pc args frame rest, step body (.ldelem_any ({{PairType}})) pc args frame
+                  (.scalar (.i32 index) :: .array pairs :: rest) memory =
+                  .ok (.next (pc + 1) (.scalar pair :: rest) frame memory))
+                (pairStore : ∀ body pc args frame rest, step body (.stelem_any ({{PairType}})) pc args frame
+                  (.scalar pair :: .scalar (.i32 index) :: .array pairs :: rest) memory =
+                  .ok (.next (pc + 1) rest frame memory)) :
+                invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index), .array pairs]
+                  memory = .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [valid, pairsValid, load, store, pairLoad, pairStore]
             """,
         "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/

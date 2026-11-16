@@ -253,6 +253,21 @@ def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
       ownerArgumentCount := original.ownerParameters.length,
       callingConvention := original.callingConvention &&& 239 }
 
+/-- Instantiation keeps the metadata token, so a closed body names the definition it closes. -/
+theorem instantiateMethod_token {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr}
+    (instantiated : instantiateMethod layouts original arguments = some closed) :
+    closed.token = original.token := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    rfl
+
+#print axioms instantiateMethod_token
+
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
 def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   match instruction.opcode, instruction.operand with
@@ -756,6 +771,41 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
   exact checked.1
 
 #print axioms ManagedCallsValid.linkFits
+
+/-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
+    link enters has that token and the site's type arguments. -/
+theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted) {pc target token : Nat}
+    {method : MethodRef} {prefixes : CallPrefixes} {instruction : RawInstruction}
+    {site : CallSite}
+    (found : emitted.code[pc]? = some (.call method prefixes))
+    (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
+    (operand : instruction.operand = .call site) (managed : site.target = .managed token)
+    (linked : emitted.linkAt pc = some (.direct target)) :
+    ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
+      callee.arguments = site.typeArguments := by
+  obtain ⟨_, _, _, _, checks⟩ := (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
+  have inside : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
+  have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc]? =
+      some (true, some (.direct target)) := by
+    simp [List.getElem?_zip_eq_some, live, inside, linked]
+  have checked := all3_at checks rawFound paired found
+  simp only [validateLinkedCallWith, Instruction.constructor?, validateManagedCallWith,
+    managedCallTarget, operand, managed, Bool.not_true, Bool.false_eq_true, ite_false,
+    Bool.and_eq_true] at checked
+  obtain ⟨_, _, checked⟩ := checked
+  by_cases opcode : instruction.opcode = 40
+  · simp only [opcode, ite_true] at checked
+    cases selected : methods[target]? with
+    | none => simp [selected] at checked
+    | some callee =>
+      simp only [selected, calleeMatchesSite, Bool.and_eq_true, beq_iff_eq] at checked
+      exact ⟨callee, rfl, checked.1.1.1.1.1.1.1.1.1.2, checked.1.1.1.1.1.1.1.1.2⟩
+  · simp [opcode] at checked
+
+#print axioms ManagedCallsValid.callee_token
 
 instance (methods : List SpecializedMethod) (imports : List ImportSlot)
     (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :

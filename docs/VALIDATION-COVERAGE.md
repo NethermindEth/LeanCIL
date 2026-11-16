@@ -833,7 +833,17 @@ These fixtures cover constrained and constant calls, all in the `dispatch` suite
 The core and universal-contract suites cover checked execution and memory preservation. Choose
 and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller
 memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect
-compiled implementation.
+compiled implementation. IdentitySummary and RepeatedSummary prove the statement of
+GenericIdentity for one and two calls twice: by stepping `Identity<ulong>`, and from a
+`DecodedSummary` of it bound to its pinned bytes, metadata token and type arguments.
+CallsSummary does the same for `Calls`, whose second callee writes through a reference, and
+`Tests/SummaryCalls.cs` for callers that pass one local to that callee 1, 4 and 16 times. It
+fails when, through the summary, a call costs more than 1.6 times as many frontend or kernel
+heartbeats from 4 to 16 calls as from 1 to 4, or when 16 calls through it cost at least as much
+as stepping them. It refuses a contract of the callee without its write, a caller that leaves the callee's
+precondition unproved, and, for a callee whose original is forged, its record, its contract and
+the summary built on them.
+`Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
 generated-evidence mutations and mandatory-certificate positive/negative checks.

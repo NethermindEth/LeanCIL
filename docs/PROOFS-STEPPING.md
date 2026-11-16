@@ -237,7 +237,8 @@ directly or `simp only [cil_step, facts]`.
 Reference and field instructions have one `@[cil_instruction_step]` equation per operand shape in
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
 and formation operations. They cover the `instruction` arms of `ldind`, `stind` and
-`storeScalar` through a reference, `ldind.i` on a native method table cursor, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
+`storeScalar` through a reference, `ldind.i` on a native method table cursor, `ldlen` and
+`ldelem.i` of a managed handler table, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
 width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`.
 
 - Supply successful encoded byte reads and writes directly: the stepper derives the scalar or
