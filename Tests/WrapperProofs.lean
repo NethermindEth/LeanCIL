@@ -17,8 +17,8 @@ theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
 /-- Simplify one known intrinsic step through its step equation, without unfolding the
     interpreter: `step` reaches an intrinsic only through `intrinsicCall`. -/
 macro "math_wrapper_step " evaluated:term : tactic => `(tactic|
-  (simp only [CIL.Safety.step_intrinsic_eq, CIL.Intrinsic.available, Bool.not_true, Bool.false_eq_true,
-    List.length_cons, List.length_nil, Nat.reduceAdd, ite_false,
+  (simp only [CIL.Safety.step_intrinsic_eq, CIL.Intrinsic.available, Bool.not_true,
+    Bool.false_eq_true, List.length_cons, List.length_nil, Nat.reduceAdd, ite_false,
     List.take, List.reverse, List.reverseAux, CIL.Safety.scalars, CIL.Safety.numericValue,
     ite_true, Bind.bind, Except.bind, Pure.pure, Except.pure,
     CIL.Safety.checkedIntrinsic, $evaluated:term, Except.mapError,
@@ -29,7 +29,7 @@ def minimumMethod : CIL.Method := {
   code := [.ldarg 0, .ldarg 1, .intrinsic (.scalar (.math .min 32 true)) 2, .ret]
   locals := [], returnsValue := true }
 
-/-- The minimum intrinsic pushes the evaluator's result, stated as a generated wrapper states it. -/
+/-- The minimum intrinsic pushes the evaluator's result, stated as a generated wrapper does. -/
 theorem minimum_step (left right result : CIL.W32)
     (evaluated : CIL.evalIntegerMath .min 32 true [.i32 left, .i32 right] = .ok (.i32 result)) :
     CIL.Safety.step minimumMethod (.intrinsic (.scalar (.math .min 32 true)) 2) 2 []
