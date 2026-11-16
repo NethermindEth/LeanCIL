@@ -392,8 +392,8 @@ calls. At a call it applies:
   `facts`. Contracts merely present in the local context are not selected. The theorem's program
   and method binding must match the actual call; required binding premises are checked;
 - a supplied or local successful child invocation, with fixed or existential fuel, a
-  `CallResult` or an `InvocationCertificate`, without unfolding the helper body. The call is
-  stepped once, and each candidate is then only unified with the invocation the call needs.
+  `CallResult` or an `InvocationCertificate`, without unfolding the helper body. A local fact
+  that starts from another memory variable than the call is not tried.
 
 Input fields, each component of a tuple input included, are inferred from the encoded arguments;
 an input that is one word or one reference is the argument as the caller wrote it. The
