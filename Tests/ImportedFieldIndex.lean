@@ -262,15 +262,15 @@ private def checkPair (token : Nat) (operand : RawOperand) : Option MetadataErro
   | .ok _ => none
   | .error found => some found
 
-/-- `Item1` and `Item2` are the pair's fields 0 and 1; `Rest` is refused at index 0, as an
-    instance and as a static member. -/
+/-- `Item1` and `Item2` are the pair's fields 0 and 1; `Rest` is refused at index 0 as an
+    instance member, and as a static since the pair is an instantiation. -/
 theorem pair_items_bound_and_other_members_refused :
     checkPair pairSlice.2.1 (.field pair 0 int32 name!"Item1" false) = none ∧
     checkPair pairSlice.2.2.1 (.field pair 1 int32 name!"Item2" false) = none ∧
     checkPair pairSlice.2.2.2 (.field pair 0 int32 name!"Rest" false) =
       some (.unboundInstanceField pairSlice.2.2.2) ∧
     checkPair pairSlice.2.2.2 (.field pair 0 int32 name!"Rest" true) =
-      some (.unboundInstanceField pairSlice.2.2.2) := by decide +kernel
+      some (.instantiatedStaticField pairSlice.2.2.2) := by decide +kernel
 #print axioms pair_items_bound_and_other_members_refused
 
 end Tests.ImportedFieldIndex

@@ -251,6 +251,7 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
     throw (.unsupportedTable token)
   let site ← env.fieldSite token
   if !name.spells site.name then throw (.operandMismatch token)
+  if isStatic && site.owner.arguments.isSome then throw (.instantiatedStaticField token)
   let classOwner := match owner with
     | .object .. => true
     | _ => false

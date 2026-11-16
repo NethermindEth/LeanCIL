@@ -11,6 +11,9 @@ access carries the descriptor of `X`, so the model would use `X`'s storage for `
 body is refused, while the carried `Y` with its own descriptor is a valid translation for each
 instruction. Of the fields of types no slice carries, only `BitConverter.IsLittleEndian` is
 admitted, and only as the `ldsfld` the feature check reads as a constant.
+
+A static of the generic `Box`1` named through `Box<int>` is refused for each instruction, since
+each closed instantiation has its own storage.
 -/
 
 namespace Tests.StaticFieldSites
@@ -44,10 +47,33 @@ private def yField (carried : Bool) : FieldRef :=
 private def resultBytes (opcode : Nat) : List Nat :=
   if opcode == ldsfld then [0x08] else if opcode == ldsflda then [0x10, 0x08] else [0x01]
 
-/-- `T` with `static M()`, the fields `X` and `Y` of `Fixture` when `carried` or references to
-    those of `Ext.Point` otherwise, and a reference to `BitConverter.IsLittleEndian`; it returns
-    the tokens of `Y` and of `IsLittleEndian`. -/
-private def world (carried : Bool) (result : List Nat) : Step (Nat × Nat) := do
+/-- The tokens of `T`'s world: `Y`, `IsLittleEndian`, `X` and `V` of `Box<int>` (0 when absent). -/
+private structure Tokens where
+  y : Nat
+  endian : Nat
+  x : Nat
+  boxed : Nat
+
+/-- The generic class `Box`1` of `T`, whose fields start at row `fieldList`, with its parameter
+    and the static `V : int`, and a reference to `V` through `Box<int>`, whose token it returns. -/
+private def boxWorld (fieldList intField : Nat) : Step Nat := do
+  let boxName ← string "Box`1"
+  let box ← row Table.typeDef [1, boxName, 0, 1 * 4 + 1, fieldList, 2]
+  let parameterName ← string "T"
+  let parameter ← row Table.genericParam [0, 0, (box - 0x02000000) * 2, parameterName]
+  link linkGenericParams box 0 parameter
+  let valueName ← string "V"
+  let value ← row Table.field [0x0016, valueName, intField]
+  link linkDeclaring value 0 box
+  let boxOfInt ← row Table.typeSpec [← blob [0x15, 0x12, (box - 0x02000000) * 4, 1, 0x08]]
+  let reference ← row Table.memberRef [(boxOfInt - 0x1B000000) * 8 + 4, valueName, intField]
+  link linkDefinition reference 0 value
+  pure reference
+
+/-- `T` with `static M()`, the fields `X` and `Y` of `Fixture` and `Box` when `carried` or
+    references to those of `Ext.Point` otherwise, and a reference to
+    `BitConverter.IsLittleEndian`. -/
+private def world (carried : Bool) (result : List Nat) : Step Tokens := do
   let runtimeName ← string "System.Runtime"
   let extName ← string "Ext"
   let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
@@ -74,20 +100,21 @@ private def world (carried : Bool) (result : List Nat) : Step (Nat × Nat) := do
       let y ← row Table.field [staticFlags, yName, intField]
       pure [x, y]
     else pure []
+  let boxed ← if carried then boxWorld 3 intField else pure 0
   let methodName ← string "M"
   let methodBlob ← blob ([0x00, 0x00] ++ result)
   let definition ← row Table.methodDef [0, 0, 0, methodName, methodBlob, 1]
   link linkDeclaring definition 0 fixture
   for field in fields do link linkDeclaring field 0 fixture
   let pointParent := (pointRef - 0x01000000) * 8 + 1
-  let _ ← row Table.memberRef [pointParent, xName, intField]
+  let xRef ← row Table.memberRef [pointParent, xName, intField]
   let yRef ← row Table.memberRef [pointParent, yName, intField]
   let endianName ← string "IsLittleEndian"
   let booleanField ← blob [0x06, 0x02]
   let endian ← row Table.memberRef [(converterRef - 0x01000000) * 8 + 1, endianName, booleanField]
-  pure (fields.getLast?.getD yRef, endian)
+  pure { y := fields.getLast?.getD yRef, endian, x := fields.headD xRef, boxed }
 
-private def slice (carried : Bool) (result : List Nat) : MetadataSlice × Nat × Nat :=
+private def slice (carried : Bool) (result : List Nat) : MetadataSlice × Tokens :=
   build (world carried result) (bytesOf "T") pin.identity
 
 /-- The static operand of `field`. -/
@@ -123,7 +150,7 @@ private def returnType (opcode : Nat) : TypeExpr :=
 /-- The body accessing `Y` of `owner carried` with `opcode`. -/
 private def yBody (carried : Bool) (opcode : Nat) : BodyEvidence :=
   let world := slice carried (resultBytes opcode)
-  body opcode (yField carried) (returnType opcode) world.1 world.2.1
+  body opcode (yField carried) (returnType opcode) world.1 world.2.y
 
 private def unknown (count : Nat) : Option FeatureState := some ⟨List.replicate count none, []⟩
 
@@ -197,7 +224,7 @@ theorem carried_access_with_descriptor_of_x_rejected :
 private def refusedAtY (opcode : Nat) : Bool :=
   match checkBody (yBody false opcode) (raw opcode (yField false) (returnType opcode)) [] with
   | .error (.metadata (.unboundStaticField token)) =>
-    token == (slice false (resultBytes opcode)).2.1
+    token == (slice false (resultBytes opcode)).2.y
   | _ => false
 
 /-- Each access to `Y` of `Ext.Point` fails on its token, whichever descriptor its site
@@ -223,7 +250,7 @@ private def endianResult (opcode : Nat) : List Nat :=
 /-- The decoding of the body accessing `IsLittleEndian` with `opcode`. -/
 private def endianDecoding (opcode : Nat) : Option BodyError :=
   let world := slice false (endianResult opcode)
-  match checkBody (body opcode littleEndianField (endianReturn opcode) world.1 world.2.2)
+  match checkBody (body opcode littleEndianField (endianReturn opcode) world.1 world.2.endian)
       (raw opcode littleEndianField (endianReturn opcode)) [] with
   | .ok _ => none
   | .error found => some found
@@ -233,7 +260,7 @@ private def endianDecoding (opcode : Nat) : Option BodyError :=
 theorem endian_field_only_loaded :
     endianDecoding ldsfld = none ∧
     ([ldsflda, stsfld, ldtoken].all fun opcode => match endianDecoding opcode with
-      | some (.mismatchedToken _ token) => token == (slice false (endianResult opcode)).2.2
+      | some (.mismatchedToken _ token) => token == (slice false (endianResult opcode)).2.endian
       | _ => false) = true := by
   decide +kernel
 #print axioms endian_field_only_loaded
@@ -242,7 +269,7 @@ theorem endian_field_only_loaded :
 private def endianEvidence : MethodEvidence :=
   let world := slice false (endianResult ldsfld)
   let original := raw ldsfld littleEndianField (endianReturn ldsfld)
-  let decoded := body ldsfld littleEndianField (endianReturn ldsfld) world.1 world.2.2
+  let decoded := body ldsfld littleEndianField (endianReturn ldsfld) world.1 world.2.endian
   { original, body := decoded, arguments := [], closed := original,
     parameterInput := { arguments := [], locals := [], code := [.other, .other] },
     reachable := [true, true], featureStates := [unknown 0, unknown 1],
@@ -274,5 +301,29 @@ theorem endian_field_as_static_load_rejected :
          staticSites := [(0, endianDescriptor)] }] := by
   decide +kernel
 #print axioms endian_field_as_static_load_rejected
+
+/-! ## A static of a generic instantiation -/
+
+/-- `V` of `Box<int>` as an instruction names it. -/
+private def boxedField : FieldRef :=
+  { owner := .apply (.constructor pin.identity "Box`1") int32, index := 0, type := int32,
+    name := name!"V" }
+
+/-- Whether decoding the body accessing `V` of `Box<int>` with `opcode` fails on the refusal of
+    a static named through an instantiation, at its token. -/
+private def refusedAsInstantiated (opcode : Nat) : Bool :=
+  let world := slice true (resultBytes opcode)
+  match checkBody (body opcode boxedField (returnType opcode) world.1 world.2.boxed)
+      (raw opcode boxedField (returnType opcode)) [] with
+  | .error (.metadata (.instantiatedStaticField token)) => token == world.2.boxed
+  | _ => false
+
+/-- Each static field instruction on `V` of `Box<int>` fails on its token, though a carried row
+    defines `V`: the model's one storage per field cannot stand for each instantiation's own. -/
+theorem instantiated_owner_static_rejected :
+    refusedAsInstantiated ldsfld = true ∧ refusedAsInstantiated ldsflda = true ∧
+    refusedAsInstantiated stsfld = true ∧ refusedAsInstantiated ldtoken = true := by
+  decide +kernel
+#print axioms instantiated_owner_static_rejected
 
 end Tests.StaticFieldSites

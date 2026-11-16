@@ -350,23 +350,23 @@ private def holderOfMethodParameter : TypeExpr :=
 private def lazyOfMethodParameter : TypeExpr :=
   .apply (.constructor runtimeScope "System.Lazy`1") (.parameter 0)
 
-/-- A field typed `!0` holds the declaring instance's first argument, here the method's own type
-    parameter `!!0`, not the reading method's owner parameter, for a static field of a pinned
-    generic class. A static field of the external `System.Lazy<!!0>` names no carried row, so it is
-    refused whatever type the operand gives it. -/
-theorem reads_a_field_parameter_against_the_declaring_instance :
-    passes own.1 lib tokens.holderValueRef
-      (.field holderOfMethodParameter 0 (.parameter 0) name!"Value" true) (arity := 1) = true ∧
+/-- Each closed instantiation of a generic class has its own statics, so a static field named
+    through `Lib.Holder<!!0>`, whose row a pinned slice carries, or through the external
+    `System.Lazy<!!0>` is refused whatever type the operand gives it. -/
+theorem refuses_a_static_field_of_an_instantiation :
+    rejects own.1 lib tokens.holderValueRef
+      (.field holderOfMethodParameter 0 (.parameter 0) name!"Value" true)
+      (.instantiatedStaticField tokens.holderValueRef) (arity := 1) = true ∧
     rejects own.1 lib tokens.holderValueRef
       (.field holderOfMethodParameter 0 (.parameter 1) name!"Value" true)
-      (.operandMismatch tokens.holderValueRef) (arity := 1) = true ∧
+      (.instantiatedStaticField tokens.holderValueRef) (arity := 1) = true ∧
     rejects own.1 lib tokens.lazyValueRef
       (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" true)
-      (.unboundStaticField tokens.lazyValueRef) (arity := 1) = true ∧
+      (.instantiatedStaticField tokens.lazyValueRef) (arity := 1) = true ∧
     rejects own.1 lib tokens.lazyValueRef
       (.field lazyOfMethodParameter 0 (.parameter 1) name!"Value" true)
-      (.unboundStaticField tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
-#print axioms reads_a_field_parameter_against_the_declaring_instance
+      (.instantiatedStaticField tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
+#print axioms refuses_a_static_field_of_an_instantiation
 
 /-- No carried field list gives the position of an instance field of an unpinned type, so
     `System.Lazy<!!0>.Value` read as an instance field is refused at every index, and an operand
