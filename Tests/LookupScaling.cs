@@ -385,7 +385,7 @@ void StaticFactCosts()
     foreach (var size in new[] { 8, 32, 128 })
     {
         string Descriptor(int index) => string.Create(CultureInfo.InvariantCulture,
-            $"{{ identity := {index}, fieldName := \"Fixture::Field\", bytes := [{index % 256}] }}");
+            $"{{ identity := {index}, field := field, bytes := [{index % 256}] }}");
         var code = string.Join(", ", Enumerable.Repeat(".ldsfld field, .pop", size)) + ", .ret";
         var sites = string.Join(", ",
             Enumerable.Range(0, size).Select(index => $"({2 * index}, {Descriptor(index)})"));

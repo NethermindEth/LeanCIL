@@ -9,8 +9,8 @@ and `Y`, both `int`, by member references. No carried field list gives the posit
 so metadata binding refuses each as an instance field, at any index and whether the operand names
 `Ext.Point` as a struct or as a class. A method `M(ref Ext.Point)` or `M(Ext.Point)` whose body
 loads, addresses or stores `Y` through its token fails every evidence check, with the emitted
-access at the offset or slot of `X`, and so does an operand that flags `Y` static, since these
-instructions take only instance fields. Of the platform pair `ValueTuple<int, int>`, `Item1` and
+access at the offset or slot of `X`, and so does an operand that flags `Y` static, since no carried
+row gives a static of `Ext.Point` either. Of the platform pair `ValueTuple<int, int>`, `Item1` and
 `Item2` keep indices 0 and 1 and any other member is refused.
 -/
 
@@ -125,10 +125,12 @@ private def refusedAtY (owner : TypeExpr) (opcode index : Nat) : Bool :=
     token == (slice (owner == pointClass) opcode).2.2
   | _ => false
 
-/-- Whether decoding the body with `Y` flagged static fails on its token, before binding. -/
+/-- Whether decoding the body with `Y` flagged static fails on its token, which names a static
+    of a type no slice carries. -/
 private def flaggedRefused (owner : TypeExpr) (opcode : Nat) : Bool :=
   match checkBody (body owner opcode 0 true) (raw owner opcode 0 true) [] with
-  | .error (.mismatchedToken _ token) => token == (slice (owner == pointClass) opcode).2.2
+  | .error (.metadata (.unboundStaticField token)) =>
+    token == (slice (owner == pointClass) opcode).2.2
   | _ => false
 
 private def evidence (owner : TypeExpr) (opcode index : Nat) (flagged := false) :
@@ -206,9 +208,8 @@ theorem class_access_of_y_at_slot_of_x_rejected :
   decide +kernel
 #print axioms class_access_of_y_at_slot_of_x_rejected
 
-/-- An operand flagging `Y` static, the form binding admits at index 0, fails each instance field
-    instruction on its token, since those opcodes take only instance fields, and is no valid
-    translation. -/
+/-- An operand flagging `Y` static fails each instance field instruction on its token, since no
+    carried row gives a static of `Ext.Point`, and is no valid translation. -/
 theorem static_flagged_access_of_y_rejected :
     ([point, pointClass].all fun owner =>
       [ldfld, ldflda, stfld].all fun opcode => flaggedRefused owner opcode) = true ∧

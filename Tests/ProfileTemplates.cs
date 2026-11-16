@@ -300,7 +300,7 @@ for (var index = 0; index < staticOutputs.Length; index++)
 var staticShared = Path.Combine(directory, "StaticShared");
 Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
 var staticTemplate = File.ReadAllText(Path.Combine(staticShared, "Templates.lean"));
-if (!staticTemplate.Contains("fieldName := \"System.UInt32 StaticDispatch::Bias\"", StringComparison.Ordinal))
+if (!staticTemplate.Contains("name := name!\"Bias\" }", StringComparison.Ordinal))
     throw new InvalidOperationException("Static template omitted its field identity.");
 var staticFiles = Directory.GetFiles(staticShared).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllText);
 Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);

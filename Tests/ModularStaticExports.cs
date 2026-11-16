@@ -132,14 +132,19 @@ void CreatePackage(string path, string name, params string[] modules)
 }
 CreatePackage(package, "staticproducer", "PublishedTable", "LibraryProof");
 CreatePackage(caller, "staticconsumer", "CallerProof");
+// The published descriptor names the field as the library extraction's static site does.
+string extractedLibrary = File.ReadAllText(Path.Combine(libArtifact, "Extracted.lean"));
+int fieldStart = extractedLibrary.IndexOf("field := {", StringComparison.Ordinal) + "field := ".Length;
+if (fieldStart < "field := ".Length)
+    throw new InvalidOperationException("The library extraction names no static field.");
+string libField = extractedLibrary[fieldStart..(extractedLibrary.IndexOf('}', fieldStart) + 1)];
 string contract = Path.Combine(package, "PublishedTable.lean");
 File.WriteAllText(contract, $$"""
 import CIL.Safety.MethodContract
 namespace PublishedTable
 open CIL.Safety
 def table : CIL.StaticDescriptor :=
-  { identity := {{libKey}}, assemblyIdentity := {{JsonSerializer.Serialize(libStatic["assemblyIdentity"]!.GetValue<string>())}},
-    fieldName := {{JsonSerializer.Serialize(libStatic["fieldName"]!.GetValue<string>())}},
+  { identity := {{libKey}}, field := {{libField}},
     bytes := [17#8, 0#8, 0#8, 0#8, 0#8, 0#8, 0#8, 0#8] }
 def read : MethodContract Unit CIL.W64 where
   args _ := []

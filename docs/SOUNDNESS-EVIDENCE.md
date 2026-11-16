@@ -183,7 +183,13 @@ What `MetadataResolution` and `MetadataBinding` check:
   field's index; the one exception is a field of a platform ``ValueTuple`2``, which reads as the
   pair's first or second item only when the pair's own `TypeRef` is scoped by a core-library
   assembly. Any other instance field of an owner outside the carried slices, and any other member
-  of the pair, fails with `unboundInstanceField`. A field's name, index and static flag,
+  of the pair, fails with `unboundInstanceField`. A static field access by `ldsfld`, `ldsflda`,
+  `stsfld` or a field `ldtoken` likewise needs its owner's definition in a carried slice and
+  otherwise fails with `unboundStaticField`; the one exception is System.Runtime's
+  `BitConverter.IsLittleEndian`, admitted only as an `ldsfld`, which the feature check reads as
+  the profile's endianness constant. The descriptor of the static site at an access must name the
+  instruction's field operand as its `field`, so no site gives one field's storage to another.
+  A field's name, index and static flag,
   the generic arguments of a type or method instantiation,
   the parameter and return types after substitution, the definition a member reference resolves to
   in a pinned assembly (its name, its signature and its place in its type's members) and the

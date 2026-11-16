@@ -202,11 +202,13 @@ def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classO
 
 /-- The index a field operand must carry, and the type it must hold. A field signature's `!n`
     names the declaring type's parameter, so the held type reads it as the declaring instance's
-    argument, which may itself be a parameter of the reading method or its owner. An instance
-    field of an owner no carried slice defines has a position only as an item of the platform
-    pair; any other is refused, as is any other member of the pair. -/
+    argument, which may itself be a parameter of the reading method or its owner. No carried
+    row gives a field of an owner no carried slice defines, so such a field is refused except
+    as an item of the platform pair, read as an instance field, and as the `platform` constant
+    field; any other member of the pair is refused too. -/
 def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSite)
-    (classOwner isStatic : Bool) : Except MetadataError (Nat × ResolvedType × Option Bool) := do
+    (classOwner isStatic platform : Bool) :
+    Except MetadataError (Nat × ResolvedType × Option Bool) := do
   let some held := substituteResolved none site.owner.arguments resolveFuel site.declared
     | throw (.operandMismatch token)
   match site.definition with
@@ -232,10 +234,13 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
       | _ => none
     match pair with
     | some (first, second) =>
-      if site.name == firstItemName then .ok (0, first, none)
-      else if site.name == secondItemName then .ok (1, second, none)
+      if site.name == firstItemName then .ok (0, first, some false)
+      else if site.name == secondItemName then .ok (1, second, some false)
       else throw (.unboundInstanceField token)
-    | none => if isStatic then .ok (0, held, none) else throw (.unboundInstanceField token)
+    | none =>
+      if !isStatic then throw (.unboundInstanceField token)
+      else if platform then .ok (0, held, none)
+      else throw (.unboundStaticField token)
 
 /-- Check a `.field` operand: the owner, the field's model index, the type it holds and the
     name, which must spell the name of the row the token names. -/
@@ -249,7 +254,9 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
   let classOwner := match owner with
     | .object .. => true
     | _ => false
-  let (expected, held, isStaticFact) ← env.expectedField token site classOwner isStatic
+  let platform := isStatic && ({ owner, index, type := fieldType, name } : FieldRef) ==
+    littleEndianField
+  let (expected, held, isStaticFact) ← env.expectedField token site classOwner isStatic platform
   if isStaticFact.any (· != isStatic) then throw (.operandMismatch token)
   if !(frame.admits site.owner owner) then throw (.operandMismatch token)
   if index != expected then throw (.fieldIndexMismatch token index expected)
@@ -486,10 +493,12 @@ def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOpe
   checkEntryIn env (← env.frame arity ownerArity) token operand
 
 /-- The facts that depend on the opcode using a token: a static field access names a static
-    field, an instance access an instance field, and `ldtoken` of a field takes the static form. -/
+    field, an instance access an instance field, `ldtoken` of a field takes the static form, and
+    the platform constant field is only loaded. -/
 def checkSite (opcode : Nat) (facts : TokenFacts) : RawOperand → Bool
-  | .field _ _ _ _ isStatic =>
-    if opcode == 0x7E || opcode == 0x7F || opcode == 0x80 then
+  | .field owner index type name isStatic =>
+    if ({ owner, index, type, name } : FieldRef) == littleEndianField && opcode != 0x7E then false
+    else if opcode == 0x7E || opcode == 0x7F || opcode == 0x80 then
       isStatic && facts.staticField != some false
     else if opcode == 0x7B || opcode == 0x7C || opcode == 0x7D then
       !isStatic && facts.staticField != some true

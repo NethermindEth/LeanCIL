@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Nethermind.LeanCIL;
 
 /// <summary>An argument kept in a local slot, with the kind of that slot.</summary>
@@ -25,8 +23,11 @@ internal sealed record InitializedStaticValue(bool? Signed, int? Initializer, Va
 /// <summary>The address of static data aligned to <paramref name="Alignment"/> bytes.</summary>
 internal sealed record StaticDataBlock(int Alignment) : StaticSiteDetail;
 
-/// <summary>An instruction of a method that reads or addresses a static field.</summary>
-internal sealed record StaticSite(int Pc, StaticIdentityRecord Identity, string FieldName, ValueList<byte> Bytes,
+/// <summary>
+/// An instruction of a method that reads or addresses a static field: <paramref name="Field"/> is the field as the
+/// instruction's operand names it, and <paramref name="Identity"/> keys its storage.
+/// </summary>
+internal sealed record StaticSite(int Pc, StaticIdentityRecord Identity, FieldRef Field, ValueList<byte> Bytes,
     StaticSiteDetail Detail)
 {
     internal string ToLean() => ToLean(LeanText.MethodNumber);
@@ -42,9 +43,8 @@ internal sealed record StaticSite(int Pc, StaticIdentityRecord Identity, string 
     /// <summary>The Lean site term, with the initializer written as <paramref name="calleeName"/> of it.</summary>
     internal string ToLean(Func<int, string> calleeName)
     {
-        var header = $"({Pc}, {{ identity := {Identity.Identity}, " +
-            $"assemblyIdentity := {JsonSerializer.Serialize(Identity.AssemblyIdentity)}, " +
-            $"fieldName := {JsonSerializer.Serialize(FieldName)}, bytes := {StaticData.LeanBytes(Bytes)}, ";
+        var header = $"({Pc}, {{ identity := {Identity.Identity}, field := {Field.ToLean()}, " +
+            $"bytes := {StaticData.LeanBytes(Bytes)}, ";
         return Detail switch
         {
             OpaqueStaticValue opaque => header + $"scalar := {Scalar(opaque.Signed)}, opaqueValue := true }})",

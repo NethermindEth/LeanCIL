@@ -57,27 +57,27 @@ internal static class LeanEmitter
         };
     }
     // An opaque value names no initializer; its zero bytes fix only the load width.
-    static StaticSite OpaqueSite(int pc, StaticValues.Value value) =>
-        new(pc, StaticIdentity.Of(value.Field), value.Field.FullName, value.Bytes,
+    static StaticSite OpaqueSite(int pc, FieldRef reference, StaticValues.Value value) =>
+        new(pc, StaticIdentity.Of(value.Field), reference, value.Bytes,
             new OpaqueStaticValue(StaticValues.ScalarSign(value.Field)));
 
-    static StaticSite SiteOf(Instruction i, int pc, MethodDefinition method,
+    static StaticSite SiteOf(Instruction i, int pc, FieldRef reference, MethodDefinition method,
         IReadOnlyDictionary<MethodDefinition, int> methodIndices, FeatureProfile profile)
     {
         if (StaticValues.IsLoad(i))
         {
             var value = StaticValues.Resolve((FieldReference)i.Operand, method.Module, profile.Architecture);
-            if (value.Opaque) return OpaqueSite(pc, value);
+            if (value.Opaque) return OpaqueSite(pc, reference, value);
             int? initializer = value.Initializer is null
                 ? null : methodIndices.GetValueOrDefault(value.Initializer, -1);
             if (initializer < 0)
                 throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
-            return new(pc, StaticIdentity.Of(value.Field), value.Field.FullName, value.Bytes,
+            return new(pc, StaticIdentity.Of(value.Field), reference, value.Bytes,
                 new InitializedStaticValue(StaticValues.ScalarSign(value.Field), initializer, value.Arguments,
                     value.Literal, value.Construct));
         }
         FieldDefinition field = StaticData.Validate((FieldReference)i.Operand, method.Module);
-        return new(pc, StaticIdentity.Of(field), field.FullName, field.InitialValue,
+        return new(pc, StaticIdentity.Of(field), reference, field.InitialValue,
             new StaticDataBlock(StaticData.Alignment(field)));
     }
 
@@ -255,7 +255,8 @@ internal static class LeanEmitter
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
-                .Select(s => SiteOf(s.i, s.pc, m, methodIndices, profile))];
+                .Select(s => SiteOf(s.i, s.pc, genericEvidence.FieldReferenceOf(m, s.pc), m, methodIndices,
+                    profile))];
             var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, opaqueLocals, homes, sites,
                 genericEvidence.Declared(m));
             // The table is derived from the operations, so it needs no renumbering beside the code.

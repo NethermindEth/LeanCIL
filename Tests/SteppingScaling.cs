@@ -221,7 +221,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
             "    name := name!\"Value\" }\n" +
             "def staticValue : CIL.StaticDescriptor :=\n" +
-            "  { identity := 0, fieldName := \"Fixture::Value\", bytes := [7, 0, 0, 0],\n" +
+            "  { identity := 0, field := staticField, bytes := [7, 0, 0, 0],\n" +
             "    initializer := some { method := 1, arguments := [] }, scalar := some true }\n"
         : "";
     // One site per load, so every step resolves its own pc among all the body's sites.

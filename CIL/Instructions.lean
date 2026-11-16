@@ -301,16 +301,17 @@ structure StaticInitializer where
   construct : Bool := false
   deriving DecidableEq, Repr
 
-/-- A static field the method reads: its bytes as extracted, and where they came from. -/
+/-- A static field the method reads: its bytes as extracted, and where they came from. `field` is
+    the field as the instruction at the site names it, which metadata binding ties to its row;
+    `identity` keys the field's storage. -/
 structure StaticDescriptor where
   identity : Nat
-  fieldName : String
+  field : Extraction.FieldRef
   bytes : List (BitVec 8)
   /-- `some` for a value fixed by its static constructor, `none` for RVA data. -/
   initializer : Option StaticInitializer := none
   /-- Integer fields use their byte width and this signed-load flag; aggregates use `none`. -/
   scalar : Option Bool := none
-  assemblyIdentity : String := ""
   /-- Guaranteed alignment of the field's storage: the declared packing of RVA data, which the
       extractor checked divides the field's RVA. `1` promises nothing beyond byte alignment. -/
   alignment : Nat := 1

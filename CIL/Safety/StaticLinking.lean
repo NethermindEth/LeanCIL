@@ -27,8 +27,8 @@ def staticCollision (descriptors : List CIL.StaticDescriptor) : String :=
   with
   | none => "Static identity collision"
   | some (left, right) =>
-    s!"Static identity collision {left.identity}: {left.assemblyIdentity}::{left.fieldName}" ++
-      s!" and {right.assemblyIdentity}::{right.fieldName}"
+    s!"Static identity collision {left.identity}: {reprStr left.field}" ++
+      s!" and {reprStr right.field}"
 
 /-- Links `app` with `libraries`, failing when two static descriptors collide. -/
 def linkChecked (app : CIL.Program) (libraries : List Library) : Except String CIL.Program :=

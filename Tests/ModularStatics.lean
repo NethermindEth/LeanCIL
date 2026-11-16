@@ -10,15 +10,15 @@ namespace Tests.ModularStatics
 
 open CIL CIL.Safety
 
-private def appField : StaticDescriptor :=
-  { identity := 101, assemblyIdentity := "App", fieldName := "App::Table", bytes := numberBytes 7 8 }
-private def libField : StaticDescriptor :=
-  { identity := 202, assemblyIdentity := "Lib", fieldName := "Lib::Table", bytes := numberBytes 17 8 }
-
 /-- The field of `owner`'s table, an eight-byte static. -/
 private def tableRef (owner : String) : Extraction.FieldRef :=
   { owner := .atom owner (owner ++ ".Holder"), index := 0, type := .atom owner (owner ++ ".Table"),
     name := name!"Table" }
+
+private def appField : StaticDescriptor :=
+  { identity := 101, field := tableRef "App", bytes := numberBytes 7 8 }
+private def libField : StaticDescriptor :=
+  { identity := 202, field := tableRef "Lib", bytes := numberBytes 17 8 }
 
 @[cil_code] def libBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, libField)],
@@ -161,8 +161,11 @@ example : ∃ fuel result values, invoke linked fuel 1 [] afterApp = .ok (result
 private def collision : Library :=
   { entry := { libBody with staticSites := [(0, { libField with identity := 101 })] } }
 
-example : linkChecked [appBody] [collision] =
-    .error "Static identity collision 101: App::App::Table and Lib::Lib::Table" := rfl
+-- The report names both fields; the interpreter checks it, since the kernel does not reduce `repr`.
+#guard match linkChecked [appBody] [collision] with
+  | .error message => message == "Static identity collision 101: " ++ reprStr (tableRef "App") ++
+    " and " ++ reprStr (tableRef "Lib")
+  | .ok _ => false
 
 /-- `library` with the table's bytes changed under the same identity and field. -/
 private def changedTable : Library :=
@@ -174,14 +177,18 @@ theorem shared_table_links :
   linkChecked_of_compatible (by decide +kernel)
 
 /-- Reusing an identity with different table bytes prevents checked linking. -/
-theorem changed_shared_table_rejected : linkChecked [appBody] [library, changedTable] =
-    .error "Static identity collision 202: Lib::Lib::Table and Lib::Lib::Table" := by
+theorem changed_shared_table_rejected :
+    ∃ message, linkChecked [appBody] [library, changedTable] = .error message := by
   have incompatible : ¬ StaticDescriptorsCompatible
       (programStaticDescriptors (link [appBody] [library, changedTable])) := by decide +kernel
   unfold linkChecked
   rw [ite_eq_right incompatible]
-  apply congrArg Except.error
-  decide +kernel
+  exact ⟨_, rfl⟩
+
+#guard match linkChecked [appBody] [library, changedTable] with
+  | .error message => message == "Static identity collision 202: " ++ reprStr (tableRef "Lib") ++
+    " and " ++ reprStr (tableRef "Lib")
+  | .ok _ => false
 
 /-- A loaded table with different bytes cannot satisfy a contract's static-world premise. -/
 theorem changed_loaded_table_not_valid :

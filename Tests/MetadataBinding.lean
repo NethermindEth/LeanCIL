@@ -351,19 +351,21 @@ private def lazyOfMethodParameter : TypeExpr :=
   .apply (.constructor runtimeScope "System.Lazy`1") (.parameter 0)
 
 /-- A field typed `!0` holds the declaring instance's first argument, here the method's own type
-    parameter `!!0`, not the reading method's owner parameter: for a static field of a pinned
-    generic class and for a static field of an external generic class. -/
+    parameter `!!0`, not the reading method's owner parameter, for a static field of a pinned
+    generic class. A static field of the external `System.Lazy<!!0>` names no carried row, so it is
+    refused whatever type the operand gives it. -/
 theorem reads_a_field_parameter_against_the_declaring_instance :
     passes own.1 lib tokens.holderValueRef
       (.field holderOfMethodParameter 0 (.parameter 0) name!"Value" true) (arity := 1) = true ∧
     rejects own.1 lib tokens.holderValueRef
       (.field holderOfMethodParameter 0 (.parameter 1) name!"Value" true)
       (.operandMismatch tokens.holderValueRef) (arity := 1) = true ∧
-    passes own.1 lib tokens.lazyValueRef
-      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" true) (arity := 1) = true ∧
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" true)
+      (.unboundStaticField tokens.lazyValueRef) (arity := 1) = true ∧
     rejects own.1 lib tokens.lazyValueRef
       (.field lazyOfMethodParameter 0 (.parameter 1) name!"Value" true)
-      (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
+      (.unboundStaticField tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
 #print axioms reads_a_field_parameter_against_the_declaring_instance
 
 /-- No carried field list gives the position of an instance field of an unpinned type, so
