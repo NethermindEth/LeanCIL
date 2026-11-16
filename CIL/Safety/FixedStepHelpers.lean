@@ -276,9 +276,9 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
       rename_i loadsField addressesField storesField addressHome localAllocation unadmitted
-        offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn
-        rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray
+        offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div
+        divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal
+        objectAbove objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray
       guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
       guard_hyp storesField : ∀ (field : CIL.Extraction.FieldRef), operation = .stfld field → False
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False

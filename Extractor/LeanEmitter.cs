@@ -296,8 +296,9 @@ internal static class LeanEmitter
                 $"links := {linkTable}, code := [");
             // A class field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
-            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + (op is ClassField { Reference: { } field } access
-                ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
+            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
+                (op is ClassField { Reference: { } field } access
+                    ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             if (linkEntries.Count > 0)
             {
                 // The literal index is checked once against the table; each fact then reads it in logarithmic time.

@@ -103,8 +103,8 @@ internal static partial class ClassViews
                     $"at model offset {field.Offset}. -/");
                 lean.AppendLine($"@[reducible] def {field.Lean} : {descriptor} := ⟨type, {field.Offset}⟩");
                 lean.AppendLine($"theorem {Identifier(field.Name + "_accessed")} : " +
-                    $"(method{access.Method}.code[{access.Pc}]?).any ({field.Lean}.accessedBy method{access.Method}) " +
-                    "= true := " +
+                    $"(method{access.Method}.code[{access.Pc}]?).any " +
+                    $"({field.Lean}.accessedBy method{access.Method}) = true := " +
                     LeanEmitter.Decide);
             }
             lean.AppendLine($"end {view.Path}");
