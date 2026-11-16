@@ -1,4 +1,6 @@
 import CIL.Safety.ResolutionFacts
+import CIL.Safety.ObjectSteps
+import CIL.Safety.FuelLemmas
 
 /-!
 # Field and value shapes
@@ -9,7 +11,8 @@ resolves to the offset and width of its checked layout entry, sign-extended only
 declared as a narrow signed integer; a field whose index or held type does not match the
 declaration is unsupported; a class field resolves to the model slot of its index, a struct array
 element taking its size from the layout; and a method, defined or known by a hypothesis on its
-environment, reads the shared facts through the `cil_code` simprocs.
+environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
+field and `ldfld` of a resolved value-type field gives the faults the step states for them.
 -/
 
 namespace Tests.FieldShape
@@ -214,5 +217,29 @@ run_cmd Command.liftTermElabM do
   unless refused do throwError "the kernel did not refuse a misstated shape fact"
   if (← getEnv).contains `Tests.FieldShape.misstatedField_shape then
     throwError "a refused shape fact stayed in the environment"
+
+/-- `Node.count`, an `int32` class field at raw index 0. -/
+def countField : FieldRef :=
+  { owner := node, index := 0, type := .atom runtimeScope "System.Int32", name := name!"count" }
+
+-- `ldflda` of a class field faults with a refutable fault, since the model forms no address
+-- into an object; the fault is not definite, so no refutation lemma closes it.
+theorem class_field_address_faults (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    Safety.step body (.ldflda countField) 0 [] frame [.object receiver] memory =
+      .error (.unsupported "Class field address") ∧
+    (Safety.ExecutionFault.unsupported "Class field address").definite = false := by
+  refine ⟨?_, rfl⟩
+  simp only [cil_step]
+#print axioms class_field_address_faults
+
+-- A value-type field that the layouts resolve is never reached through `ldfld` of an object.
+theorem value_field_load_faults (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    Safety.step body (.ldfld highField) 0 [] frame [.object receiver] memory =
+      .error (.unsupported "Value-type field instruction") := by
+  simp only [cil_step, cil_code]
+  rfl
+#print axioms value_field_load_faults
 
 end Tests.FieldShape
