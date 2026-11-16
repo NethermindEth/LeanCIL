@@ -813,7 +813,8 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        all_goals ((repeat constructor) <;> rfl)))
 
 /-- `cil_checked_step_by_equations` for a step whose equation matches on the link at its pc:
-    `facts`, which hold that link, rewrite in the first pass, so only the linked arm is simplified. -/
+    `facts`, which hold that link, rewrite in the first pass, so only the linked arm is
+    simplified. -/
 macro "cil_checked_linked_step_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        cil_simp_only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
