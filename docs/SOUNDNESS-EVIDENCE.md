@@ -188,7 +188,7 @@ What `MetadataResolution` and `MetadataBinding` check:
   otherwise fails with `unboundStaticField`; the one exception is System.Runtime's
   `BitConverter.IsLittleEndian`, admitted only as an `ldsfld`, which the feature check reads as
   the profile's endianness constant. The descriptor of the static site at an access must name the
-  instruction's field operand as its `field`, so no site gives one field's storage to another.
+  instruction's field operand as its `field`.
   A field's name, index and static flag,
   the generic arguments of a type or method instantiation,
   the parameter and return types after substitution, the definition a member reference resolves to
