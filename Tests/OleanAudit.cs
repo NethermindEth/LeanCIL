@@ -252,8 +252,8 @@ int Depth(JsonElement element) => element.ValueKind switch
 foreach (var count in new[] { 16, 128, 1024 })
 {
     BindingImagePin[] pins = [.. Enumerable.Range(0, count).Select(index =>
-        new BindingImagePin("Identity" + index, (index % 2).ToString("x16") + new string('0', 48),
-            []))];
+        new BindingImagePin("Identity" + index,
+            Sha256Digest.Parse((index % 2).ToString("x16") + new string('0', 48), "a test pin"), []))];
     BindingPlan plan = new("", pins, 0);
     foreach (var pin in pins.DistinctBy(pin => pin.Module))
         Compile(pin.Module, "def " + pin.Module + ".image : Nat := 0\n");

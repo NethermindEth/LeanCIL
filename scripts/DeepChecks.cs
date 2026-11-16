@@ -42,19 +42,19 @@ partial class Program
     sealed class DeepCheckAttempt
     {
         readonly FailureReports.BindingFailureDigest digests;
-        readonly (string Identity, string Digest)[] images;
-        readonly HashSet<string> imageDigests;
-        readonly Dictionary<string, string> rejectedImages = new(StringComparer.Ordinal);
+        readonly (string Identity, Sha256Digest Digest)[] images;
+        readonly HashSet<Sha256Digest> imageDigests;
+        readonly Dictionary<Sha256Digest, string> rejectedImages = [];
         readonly Dictionary<BindingFact, string> rejectedFacts = [];
         internal string IdentitySha256 { get; }
 
         internal DeepCheckAttempt(DeepCheckInputs inputs, string identitySha256,
             IReadOnlyList<DeepCheckInputs.Pin> pins)
         {
-            digests = new(inputs.Path, inputs.Digest);
+            digests = new(inputs.Path, inputs.Digest.ToString());
             IdentitySha256 = identitySha256;
             images = [.. pins.Select(pin => (pin.Identity, pin.Image.Digest))];
-            imageDigests = images.Select(image => image.Digest).ToHashSet(StringComparer.Ordinal);
+            imageDigests = [.. images.Select(image => image.Digest)];
         }
 
         internal void RequireIdentity(ExtractionIdentity identity)
@@ -64,7 +64,7 @@ partial class Program
                 throw new InvalidDataException("Deep-check extraction identity changed.");
         }
 
-        internal void RejectImage(string digest, string reason)
+        internal void RejectImage(Sha256Digest digest, string reason)
         {
             if (!imageDigests.Contains(digest)) throw new ArgumentException("Unknown deep-check image.");
             ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -84,7 +84,8 @@ partial class Program
             var incomplete = "verification did not complete: " + stage +
                 (string.IsNullOrWhiteSpace(diagnostic) ? "" : ": " + diagnostic);
             return new(digests,
-                [.. images.Select(image => new FailureReports.BindingFailureImage(image.Identity, image.Digest,
+                [.. images.Select(image => new FailureReports.BindingFailureImage(image.Identity,
+                    image.Digest.ToString(),
                     rejectedImages.ContainsKey(image.Digest) ? FailureReports.BindingFailureStatus.Failed
                         : FailureReports.BindingFailureStatus.NotCovered,
                     rejectedImages.GetValueOrDefault(image.Digest) ?? incomplete))],
@@ -100,14 +101,14 @@ partial class Program
     abstract record BindingSubject
     {
         internal sealed record Fact(BindingFact Value) : BindingSubject;
-        internal sealed record Image(string Digest) : BindingSubject;
+        internal sealed record Image(Sha256Digest Digest) : BindingSubject;
     }
 
     /// <summary>An assembly file the extraction read, with the digest the caller must confirm.</summary>
-    sealed record BindingImagePin(string Identity, string Sha256, byte[] Bytes)
+    sealed record BindingImagePin(string Identity, Sha256Digest Digest, byte[] Bytes)
     {
         /// <summary>The generated module that holds the file's bytes, named by its full digest.</summary>
-        internal string Module => "BindingAudit.I" + Sha256;
+        internal string Module => "BindingAudit.I" + Digest;
 
         internal string Theorem => Module + ".digest";
     }
@@ -225,7 +226,7 @@ partial class Program
         extractedOlean = Path.GetFullPath(extractedOlean);
         if (!File.Exists(extractedOlean)) throw new FileNotFoundException("Missing extraction module", extractedOlean);
         var extractedHashes = BindingArtifactHashes([extractedOlean]);
-        Dictionary<string, byte[]> bytes = new(StringComparer.Ordinal);
+        Dictionary<Sha256Digest, byte[]> bytes = [];
         var pins = matchedPins.Select(pin =>
         {
             if (!bytes.TryGetValue(pin.Image.Digest, out var snapshot))
@@ -271,7 +272,7 @@ partial class Program
         IReadOnlyList<BindingRequest> audited, StatementSources sources)
     {
         Dictionary<BindingFact, string> factTheorems = [];
-        Dictionary<string, string> imageTheorems = new(StringComparer.Ordinal);
+        Dictionary<Sha256Digest, string> imageTheorems = [];
         foreach (var request in audited)
         {
             var distinct = request.Subject switch
@@ -283,23 +284,24 @@ partial class Program
             if (!distinct) throw new InvalidOperationException("Two deep-check requests name one subject: " +
                 request.Audit.name);
         }
-        var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet(StringComparer.Ordinal);
+        var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet();
         ImageResult[] images =
         [
             .. pins.Select(pin => imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
-                ? new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned, BindingStatus.Reconfirmed,
-                    theorem, null)
-                : new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned, BindingStatus.NotCovered, null,
+                ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
+                    BindingStatus.Reconfirmed, theorem, null)
+                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned, BindingStatus.NotCovered,
+                    null,
                     "no checked theorem states the digest of this image")),
             .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
-                new ImageResult(image.Path, image.Digest, ImageRole.Unused, BindingStatus.NotCovered, null,
+                new ImageResult(image.Path, image.Digest.ToString(), ImageRole.Unused, BindingStatus.NotCovered, null,
                     "no extraction pin or checked binding claim names this image"))
         ];
         BindingFactResult[] facts = [.. Enum.GetValues<BindingFact>().Select(fact =>
             factTheorems.TryGetValue(fact, out var theorem)
                 ? new BindingFactResult(fact, BindingStatus.Reconfirmed, theorem, null)
                 : new BindingFactResult(fact, BindingStatus.NotCovered, null, NotCoveredReason(fact)))];
-        return new(BindingMode.Deep, new(inputs.Path, inputs.Digest), sources, images, facts);
+        return new(BindingMode.Deep, new(inputs.Path, inputs.Digest.ToString()), sources, images, facts);
     }
 
     /// <summary>Why a deep run that audited no theorem about a fact does not cover it.</summary>
@@ -489,7 +491,7 @@ partial class Program
     /// <summary>Writes one image module per digest and retains every pinned identity association.</summary>
     static void WriteBindingSources(BindingPlan plan)
     {
-        foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
+        foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
         foreach (var fact in PagedFacts)
@@ -519,7 +521,7 @@ partial class Program
 
     static string ImagesModuleSource(BindingPlan plan)
     {
-        var imports = string.Concat(plan.Images.DistinctBy(image => image.Sha256)
+        var imports = string.Concat(plan.Images.DistinctBy(image => image.Digest)
             .Select(image => $"import {image.Module}\n"));
         var entries = string.Join(",\n   ", plan.Images.Select(image =>
             $"{{ identity := {LeanString(image.Identity)}, image := {image.Module}.image }}"));
@@ -639,8 +641,13 @@ partial class Program
         static object Const(string name, params int[] levels) =>
             levels.Length == 0 ? new { @const = name } : new { @const = name, levels };
         static object App(params object[] parts) => new { app = parts };
-        static JsonElement Nat(string hex) => JsonDocument.Parse("{\"nat\":" +
-            BigInteger.Parse("0" + hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + "}").RootElement;
+        static JsonElement Nat(Sha256Digest digest)
+        {
+            Span<byte> bytes = stackalloc byte[Sha256Digest.Length];
+            digest.CopyTo(bytes);
+            var value = new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
+            return JsonDocument.Parse("{\"nat\":" + value.ToString(CultureInfo.InvariantCulture) + "}").RootElement;
+        }
         var pinned = Const("StrictBinding.PinnedImage");
         var images = new
         {
@@ -662,10 +669,10 @@ partial class Program
                 item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
                     Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
                 new BindingSubject.Fact(item.Fact))),
-            .. plan.Images.DistinctBy(image => image.Sha256).Select(image => new BindingRequest(image.Module,
+            .. plan.Images.DistinctBy(image => image.Digest).Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
-                App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Sha256)),
-                ApprovedAxioms), new BindingSubject.Image(image.Sha256)))
+                App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Digest)),
+                ApprovedAxioms), new BindingSubject.Image(image.Digest)))
         ];
     }
 
@@ -684,7 +691,7 @@ partial class Program
             return result.Code == 0 ? null : BindingDiagnostic(result.Output);
         }
         Dictionary<string, string> failures = new(StringComparer.Ordinal);
-        foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
+        foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             if (Build(image.Module) is { } error) failures[image.Module] = "build: " + error;
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
