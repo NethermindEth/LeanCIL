@@ -392,7 +392,8 @@ def fieldStore (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : Li
   | .value .. | .aggregate .. => .error (.unsupported "Value-type field instruction")
 
 /-- The fault of `ldflda` of `field` as `body` resolves it: a class field's address is never
-    formed, and a value-type field is not reached through this instruction. -/
+    formed, and a value-type field is not reached through this instruction. The extractor
+    refuses a class field address at admission, so only a hand-written body steps one. -/
 def fieldAddressFault (body : CIL.Method) (field : CIL.Extraction.FieldRef) : ExecutionFault :=
   match body.fieldShape field with
   | .classSlot .. => .unsupported "Class field address"
