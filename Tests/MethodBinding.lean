@@ -64,15 +64,19 @@ def field : StaticDescriptor :=
 def calling : Method := {
   code := [.ldarg 0, .br 2, .call 7 1, .ret], locals := [], returnsValue := true }
 
+/-- The field operand of the static reads below. -/
+def fieldRef : CIL.Extraction.FieldRef :=
+  { owner := .atom "Fixture" "Fixture", index := 0, type := .atom "Fixture" "System.Int64",
+    name := name!"Value" }
+
 /-- An extracted method that reads a static at pc 0 and calls at pc 3. -/
 def reading : Method := {
-  code := [.memory (.staticAddress (List.replicate 8 0)), .pop, .ldarg 0, .call 7 1, .ret]
+  code := [.ldsflda fieldRef, .pop, .ldarg 0, .call 7 1, .ret]
   locals := [], returnsValue := true, staticSites := [(0, field)] }
 
 /-- Another method whose frame fields a body is built on, with a call and a static at other pcs. -/
 def donor : Method := {
-  code := [.ldarg 0, .memory (.staticAddress (List.replicate 8 0)), .pop, .ldarg 0, .call 3 1,
-      .ret]
+  code := [.ldarg 0, .ldsflda fieldRef, .pop, .ldarg 0, .call 3 1, .ret]
   locals := [], returnsValue := true, staticSites := [(1, field)] }
 
 def withCodeProgram : Program := [calling, reading]

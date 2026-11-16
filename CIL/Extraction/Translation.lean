@@ -110,16 +110,37 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
     | _ => false
   | _, _ => false
 
-/-- Check static loads using precomputed instruction and site indexes. -/
+/-- Raw opcode of `ldsfld`. -/
+private def ldsfldOpcode : Nat := 126
+/-- Raw opcode of `ldsflda`. -/
+private def ldsfldaOpcode : Nat := 127
+/-- Raw opcode of `stsfld`. -/
+private def stsfldOpcode : Nat := 128
+/-- Raw opcode of `ldtoken`. -/
+private def ldtokenOpcode : Nat := 208
+
+/-- The raw instruction has `opcode` and names `field` as a static field. -/
+private def staticFieldMatches (opcode : Nat) (field : FieldRef)
+    (instruction : Option RawInstruction) : Bool :=
+  match instruction with
+  | some instruction => instruction.opcode == opcode &&
+      instruction.operand == .field field.owner field.index field.type field.name true
+  | none => false
+
+/-- Every static field instruction names the field of the raw instruction at its pc, and every
+    static load fits the descriptor bound there, using precomputed instruction and site indexes. -/
 def methodShapeInstructions (closed : RawMethod)
     (method : Method) : Bool :=
   let raw := FlowIndex.ofList closed.code
   let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
-    | .memory (.staticValue _) => staticLoadMatches 126 (raw.get? pc) sites[pc]?
-    | .memory (.staticAddress _) =>
-      if (sites[pc]?.bind (·.initializer)).isSome then
-        staticLoadMatches 127 (raw.get? pc) sites[pc]? else true
+    | .ldsfld field => staticFieldMatches ldsfldOpcode field (raw.get? pc) &&
+        staticLoadMatches ldsfldOpcode (raw.get? pc) sites[pc]?
+    | .ldsflda field => staticFieldMatches ldsfldaOpcode field (raw.get? pc) &&
+        if (sites[pc]?.bind (·.initializer)).isSome then
+          staticLoadMatches ldsfldaOpcode (raw.get? pc) sites[pc]? else true
+    | .stsfld field => staticFieldMatches stsfldOpcode field (raw.get? pc)
+    | .ldtoken (.field field) => staticFieldMatches ldtokenOpcode field (raw.get? pc)
     | _ => true
 
 /-- Indexed instruction-shape checks agree with direct list lookups at every emitted pc. -/
@@ -127,14 +148,16 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
     (method : Method) :
     methodShapeInstructions closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
-      | .memory (.staticValue _) => staticLoadMatches 126 closed.code[pc]?
-          ((method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd)
-      | .memory (.staticAddress _) =>
-        let descriptor := (method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
-        if (descriptor.bind (·.initializer)).isSome then
-          staticLoadMatches 127 closed.code[pc]? descriptor else true
+      | .ldsfld field => staticFieldMatches ldsfldOpcode field closed.code[pc]? &&
+          staticLoadMatches ldsfldOpcode closed.code[pc]? (method.staticAt pc)
+      | .ldsflda field => staticFieldMatches ldsfldaOpcode field closed.code[pc]? &&
+          if ((method.staticAt pc).bind (·.initializer)).isSome then
+            staticLoadMatches ldsfldaOpcode closed.code[pc]? (method.staticAt pc) else true
+      | .stsfld field => staticFieldMatches stsfldOpcode field closed.code[pc]?
+      | .ldtoken (.field field) => staticFieldMatches ldtokenOpcode field closed.code[pc]?
       | _ => true) := by
   simp only [methodShapeInstructions, FlowIndex.get?_ofList, firstEntryIndex_get]
+  rfl
 
 #print axioms methodShapeInstructions_eq_scan
 /-- The declared signature a closed raw method implies: its receiver kind, parameter types,

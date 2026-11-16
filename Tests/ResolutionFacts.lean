@@ -622,6 +622,61 @@ cil_resolution_facts noParameters
 #guard_msgs in #check noParameters_argumentAccess0
 /-- error: Unknown identifier `noParameters_parameterSuffix0` -/
 #guard_msgs in #check noParameters_parameterSuffix0
+/-- error: Unknown identifier `noParameters_sitesAscend` -/
+#guard_msgs in #check noParameters_sitesAscend
+
+/-- The descriptor of the static site with index `k`. -/
+def siteDescriptor (k : Nat) : StaticDescriptor :=
+  { identity := k, fieldName := "Fixture::Field", bytes := [BitVec.ofNat 8 k] }
+
+/-- A method with eighteen static sites at the even pcs, so its facts cross a suffix block. -/
+def staticReads : Method :=
+  { code := [.ret], locals := [], returnsValue := false, declared := {},
+    staticSites := [(0, siteDescriptor 0), (2, siteDescriptor 1), (4, siteDescriptor 2),
+      (6, siteDescriptor 3), (8, siteDescriptor 4), (10, siteDescriptor 5),
+      (12, siteDescriptor 6), (14, siteDescriptor 7), (16, siteDescriptor 8),
+      (18, siteDescriptor 9), (20, siteDescriptor 10), (22, siteDescriptor 11),
+      (24, siteDescriptor 12), (26, siteDescriptor 13), (28, siteDescriptor 14),
+      (30, siteDescriptor 15), (32, siteDescriptor 16), (34, siteDescriptor 17)] }
+
+/-- The return fact the facts command also reads. -/
+theorem staticReads_returnsValue : staticReads.returnsValue = false := rfl
+#print axioms staticReads_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem staticReads_declared : staticReads.declared = {} := rfl
+#print axioms staticReads_declared
+
+cil_resolution_facts staticReads
+
+-- Each site's fact names its own descriptor, in the first block and past it.
+example : staticReads.staticAt 0 = some (siteDescriptor 0) := staticReads_staticAt0
+example : staticReads.staticAt 30 = some (siteDescriptor 15) := staticReads_staticAt30
+example : staticReads.staticAt 34 = some (siteDescriptor 17) := staticReads_staticAt34
+#print axioms staticReads_staticAt34
+-- A pc without a site has no fact.
+/-- error: Unknown identifier `staticReads_staticAt1` -/
+#guard_msgs in #check staticReads_staticAt1
+
+/-- Sites out of pc order, which the emitter never writes; the first-match lookup would hide
+    the later site at pc 2. -/
+def unorderedSites : Method :=
+  { code := [.ret], locals := [], returnsValue := false, declared := {},
+    staticSites := [(2, siteDescriptor 0), (0, siteDescriptor 1), (2, siteDescriptor 2)] }
+
+/-- The return fact the facts command also reads. -/
+theorem unorderedSites_returnsValue : unorderedSites.returnsValue = false := rfl
+#print axioms unorderedSites_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem unorderedSites_declared : unorderedSites.declared = {} := rfl
+#print axioms unorderedSites_declared
+
+/--
+error: cil_resolution_facts: the static sites of Tests.ResolutionFacts.unorderedSites do not ascend
+-/
+#guard_msgs in
+cil_resolution_facts unorderedSites
 
 -- One fact per declared argument and no more: argument 1 is the last of `twoParameters`.
 /-- error: Unknown identifier `twoParameters_argumentAccess2` -/

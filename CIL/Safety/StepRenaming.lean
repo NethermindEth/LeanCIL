@@ -52,6 +52,23 @@ theorem stepTransport : StepTransport := by
     case newObject.refl callee argc owner bases size =>
       exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
         callee argc owner bases size pc (metadata.linkAt pc) arguments stack bounds observable
+    case ldsfld.refl field =>
+      exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
+        targetBody metadata field pc arguments stack⟩
+    case ldsflda.refl field =>
+      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
+        observable
+    case ldtoken.refl operand =>
+      cases operand
+      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
+        observable
+    case stsfld.refl field =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      dsimp only [LocalIndexMap.operation]
+      rw [step_stsfld_eq, step_stsfld_eq, mapping.unspecifiedOperands]
+      split <;> exact .error _
     case ldfld.refl field =>
       exact memories.stepFieldLoad frames sourceFormed sourceBody targetBody metadata field pc
         arguments stack bounds observable
@@ -65,8 +82,8 @@ theorem stepTransport : StepTransport := by
     | exact ⟨mapping, .refl mapping,
         frames.stepInitializeSpanLocal memories sourceFormed sourceBody targetBody _ pc _
           arguments stack bounds observable⟩
-    | exact memories.stepMemory frames sourceFormed targetFormed staticBounds sourceBody targetBody
-        metadata _ pc arguments stack bounds observable
+    | exact memories.stepMemory frames sourceFormed sourceBody targetBody _ pc arguments stack
+        bounds observable
     | exact memories.stepLocalloc frames sourceFormed targetFormed staticBounds
         sourceBody targetBody metadata.declared pc arguments stack observable
     | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds

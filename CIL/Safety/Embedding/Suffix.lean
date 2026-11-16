@@ -54,7 +54,7 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     (suffix : actual.code.drop start =
       (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start)))
     (targets : ∀ op ∈ expected.code.drop lower, ∀ target ∈ op.targets, lower ≤ target)
-    (statics : ∀ pc, lower ≤ pc → staticAt actual (pc - lower + start) = staticAt expected pc)
+    (statics : ∀ pc, lower ≤ pc → actual.staticAt (pc - lower + start) = expected.staticAt pc)
     (links : ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc) :
     BodyRefines expected actual (suffixRename lower start) := by
   refine ⟨by simpa only using congrArg Method.profile metadata,

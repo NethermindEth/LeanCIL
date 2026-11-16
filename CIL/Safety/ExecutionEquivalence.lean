@@ -366,6 +366,18 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherMemory, otherValues⟩ := right
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.staticLoad _ _)
+       intro left right related
+       obtain ⟨memory, value⟩ := left
+       obtain ⟨otherMemory, otherValue⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.staticAddress _ _)
+       intro left right related
+       obtain ⟨memory, value⟩ := left
+       obtain ⟨otherMemory, otherValue⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.referenceAddInstruction _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left

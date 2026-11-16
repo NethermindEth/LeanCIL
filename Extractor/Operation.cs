@@ -339,6 +339,26 @@ internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets
         Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})")) + "]";
 }
 
+/// <summary>The CIL instruction of a static field access.</summary>
+internal enum StaticFieldOpcode { Ldsfld, Ldsflda, Ldtoken }
+
+/// <summary>
+/// A static field load, address load or field token over the field its raw operand names; the field is null
+/// until the emitter resolves it, and rendering an unresolved access fails.
+/// </summary>
+internal sealed record StaticFieldInstruction(StaticFieldOpcode Opcode, FieldRef? Field) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => Opcode switch
+    {
+        StaticFieldOpcode.Ldsfld => $".ldsfld {Operand}",
+        StaticFieldOpcode.Ldsflda => $".ldsflda {Operand}",
+        _ => $".ldtoken (.field {Operand})"
+    };
+
+    string Operand => (Field ?? throw new InvalidOperationException(
+        $"Static field {Opcode} rendered before its field operand was resolved")).ToLean();
+}
+
 /// <summary>A boolean read of a runtime feature of the selected profile.</summary>
 internal sealed record FeatureTest(Feature Feature) : Operation
 {

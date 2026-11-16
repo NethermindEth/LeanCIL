@@ -136,6 +136,7 @@ inductive FixedStepFamily where
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newarr _
   | .newAggregate .. | .newObject .. | .memory _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded
+  | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
@@ -275,14 +276,19 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- ones; `fixed_fallback` reads the hole and table-offset exclusions, the others are cleared.
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
-      rename_i loadsField addressesField storesField addressHome localAllocation unadmitted
-        offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div
-        divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal
-        objectAbove objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray
+      rename_i loadsField addressesField storesField addressHome localAllocation loadsStatic
+        addressesStatic tokensStatic storesStatic unadmitted offsetBeforeTable tableBeforeOffset
+        addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn
+        objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse
+        objectBranchTrue castClass isInst storeHome allocatedArray
       guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
       guard_hyp storesField : ∀ (field : CIL.Extraction.FieldRef), operation = .stfld field → False
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
       guard_hyp localAllocation : operation = .localloc → False
+      guard_hyp loadsStatic : ∀ field, operation = .ldsfld field → False
+      guard_hyp addressesStatic : ∀ field, operation = .ldsflda field → False
+      guard_hyp tokensStatic : ∀ field, operation = .ldtoken (.field field) → False
+      guard_hyp storesStatic : ∀ field, operation = .stsfld field → False
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
       guard_hyp storeHome : ∀ (index : Nat) (value : Value) (rest : List Value),
         operation = .starg index → stack = value :: rest → False
@@ -301,7 +307,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
         objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
-        localAllocation loadsField addressesField storesField
+        localAllocation loadsField addressesField storesField loadsStatic addressesStatic
+        tokensStatic storesStatic
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

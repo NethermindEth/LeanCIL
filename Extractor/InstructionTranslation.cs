@@ -59,9 +59,8 @@ internal static class InstructionTranslation
         if (ReferenceArrays.Translate(i, referenceArray) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
-        var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
+        return TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
             layouts, constrainedTargets);
-        return translated;
     }
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,
@@ -265,8 +264,7 @@ internal static class InstructionTranslation
                 StaticLoad(i, m.Module, profile.Architecture),
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
             Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
-                MemoryOperation.Of(new StaticAddress(
-                    StaticData.Validate((FieldReference)i.Operand, m.Module).InitialValue)),
+                StaticDataAccess(i, m.Module),
             Code.Ldobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
                 new AggregateTransfer(AggregateAccess.Load, Layout((TypeReference)i.Operand)),
             Code.Initobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
@@ -356,10 +354,20 @@ internal static class InstructionTranslation
         };
     }
 
+    // Resolving the value rejects a field whose value extraction does not compute.
     static Operation StaticLoad(Instruction i, ModuleDefinition module, string architecture)
     {
-        var bytes = StaticValues.Resolve((FieldReference)i.Operand, module, architecture).Bytes;
-        return MemoryOperation.Of(i.OpCode.Code == Code.Ldsfld ? new StaticValue(bytes) : new StaticAddress(bytes));
+        StaticValues.Resolve((FieldReference)i.Operand, module, architecture);
+        return new StaticFieldInstruction(
+            i.OpCode.Code == Code.Ldsfld ? StaticFieldOpcode.Ldsfld : StaticFieldOpcode.Ldsflda, null);
+    }
+
+    // Validation rejects a field that is not a read-only data block with an initial value.
+    static Operation StaticDataAccess(Instruction i, ModuleDefinition module)
+    {
+        StaticData.Validate((FieldReference)i.Operand, module);
+        return new StaticFieldInstruction(
+            i.OpCode.Code == Code.Ldtoken ? StaticFieldOpcode.Ldtoken : StaticFieldOpcode.Ldsflda, null);
     }
 
     // An enumeration loads through its storage type, which is signed for the two narrow signed integers.

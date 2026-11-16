@@ -493,6 +493,21 @@ info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quo
 -/
 #guard_msgs in #print axioms store_from_static_fact
 
+open CIL.Safety in
+/-- A static load steps by a fact about `staticLoad`, which `staticLoad_initialized` gives from
+    the descriptor a `staticAt` fact binds to the pc. -/
+theorem static_load_from_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (field : CIL.Extraction.FieldRef) (value : CIL.Value) (memory : Memory)
+    (loaded : staticLoad body 0 memory = .ok (memory, .scalar value)) :
+    step body (.ldsfld field) 0 args frame [] memory =
+      .ok (.next 1 [.scalar value] frame memory) := by
+  cil_checked_step [loaded]
+
+/--
+info: 'Tests.Automation.static_load_from_fact' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms static_load_from_fact
+
 /-- Two vector stores; reached through a lookup hypothesis, so facts can name the body. -/
 def twoStoresMethod : CIL.Method := {
   code := [.memory .store256, .memory .store256, .ret], locals := [], returnsValue := false }

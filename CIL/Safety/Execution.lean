@@ -528,6 +528,14 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
 
   -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
   | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
+  -- Static fields resolve the descriptor extraction bound to their pc.
+  | .ldsfld _, _ =>
+    let (memory, value) ← staticLoad body pc m
+    return .next (pc + 1) (value :: stack) frame memory
+  | .ldsflda _, _ | .ldtoken (.field _), _ =>
+    let (memory, value) ← staticAddress body pc m
+    return .next (pc + 1) (value :: stack) frame memory
+  | .stsfld _, _ => .error (.unsupported "Static field store")
   -- A fresh array of the storage the layouts give its declared element type.
   | .newarr element, .scalar length :: rest =>
     let (array, memory) ← allocateElements (body.elementShape element) length m

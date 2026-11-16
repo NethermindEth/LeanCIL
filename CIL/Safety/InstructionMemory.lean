@@ -99,6 +99,8 @@ def observerCount : CIL.Instruction → Nat
   | .ldind _ | .skipInit | .initAggregate _ => 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .stind _ | .copyObject _ => 2
+  | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
+  | .stsfld _ => 1
   -- Method boundaries
   | .ret => 1
   | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc
@@ -895,8 +897,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
-  | .staticAddress _, _ | .staticValue _, _ =>
-    .error (.unsupported "Extraction-bound static field metadata")
   | _, _ => .error .invalidState
 
 /-- Constructs a one-element view over checked existing storage without reading its bytes. -/
@@ -1192,9 +1192,8 @@ def staticSpanInstruction (operation : CIL.MemoryOp) (stack : List Value) (memor
   | _, _ => .error .invalidState
 
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
-    Operands with unspecified bits are rejected first. The static-field operations need the
-    extracted descriptor at their pc, so `staticInstruction` runs them and they are
-    unsupported here; any other operand shape is `invalidState`. -/
+    Operands with unspecified bits are rejected first. The span constructors over static storage
+    run in `staticSpanInstruction`; any other operand shape is `invalidState`. -/
 def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   if unspecifiedOperands operation.argumentCount stack then

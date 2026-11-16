@@ -127,7 +127,8 @@ def undecoded : List Name := [
   ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
   ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
-  ``Instruction.unadmitted]
+  ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
+  ``Instruction.ldtoken]
 
 /-- What each named opcode decodes to. -/
 def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? ·.1)
@@ -248,7 +249,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 73, undecoded 26 of 99 constructors -/
+/-- info: decoded 73, undecoded 30 of 103 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

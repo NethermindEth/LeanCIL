@@ -34,12 +34,13 @@ def entryEvidenceFields (proof type : Expr) : MetaM (Array (Name × Expr × Expr
     let selected ← mkAppM (name ++ field) #[proof]
     return (field, selected, (← instantiateMVars (← inferType selected)).consumeMData)
 
-/-- Heads of the equations the loop tactics take from the context: checked steps, local and
-    memory loads and stores, span element, slice, validity, width and mode checks, array validity,
-    formed references and `Unsafe.Add` results. -/
+/-- Heads of the equations the loop tactics take from the context: checked steps, local, memory
+    and static field loads and stores, span element, slice, validity, width and mode checks, array
+    validity, formed references and `Unsafe.Add` results. -/
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
-    ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
+    ``CIL.Safety.staticInstruction, ``CIL.Safety.staticLoad, ``CIL.Safety.staticAddress,
+    ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
     ``CIL.Safety.loadValue, ``CIL.Safety.loadSlot, ``CIL.Safety.storeValue,
     ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,

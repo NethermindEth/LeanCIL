@@ -208,25 +208,7 @@ theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : C
     (h : staticInstruction body pc operation stack m = .ok (result, values)) :
     StaticInstructionContract body m result stack values := by
   unfold staticInstruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals repeat' first
-    | solve | exact .ordinary (memoryInstruction_contract _ _ _ _ _ (by assumption))
-    | solve |
-        refine StaticInstructionContract.of_effect ?_ ?_
-        · first | exact .ordinary (.unchanged _) | exact .reference (by assumption) (by assumption)
-        · intro retained
-          apply ValuesValid.cons
-          · first
-            | exact True.intro
-            | rfl
-            | exact retained.tail.head
-            | exact retained.head
-            | apply staticReference_reference_valid; assumption
-            | apply formValue_reference_valid; assumption
-            | apply staticLoadedValue_valid; assumption
-          · first | exact retained | exact retained.tail | exact retained.tail.tail
-    | cases h
-    | split at h
+  exact .ordinary (memoryInstruction_contract _ _ _ _ _ h)
 
 theorem staticInstruction_effect (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack values : List Value) (m result : Memory)
@@ -241,5 +223,101 @@ theorem staticInstruction_preserves_wellFormed (body : CIL.Method) (pc : Nat)
   exact (staticInstruction_effect _ _ _ _ _ _ _ h).wellFormed hm
 
 #print axioms staticInstruction_preserves_wellFormed
+
+/-- A descriptor `Method.staticAt` resolves is the one of the method's first site at that pc. -/
+theorem staticAt_site {body : CIL.Method} {pc : Nat} {descriptor : CIL.StaticDescriptor}
+    (resolved : body.staticAt pc = some descriptor) :
+    ∃ site, body.staticSites.find? (fun site => site.1 == pc) = some (site, descriptor) := by
+  unfold CIL.Method.staticAt at resolved
+  cases found : body.staticSites.find? (fun site => site.1 == pc) with
+  | none => simp [found] at resolved
+  | some entry =>
+    obtain ⟨site, other⟩ := entry
+    simp only [found, Option.map_some, Option.some.injEq] at resolved
+    exact ⟨site, by rw [resolved]⟩
+
+#print axioms staticAt_site
+
+/-- A successful `ldsfld` satisfies `StaticInstructionContract` for the value it pushes. -/
+theorem staticLoad_contract (body : CIL.Method) (pc : Nat) (stack : List Value)
+    (m result : Memory) (value : Value) (h : staticLoad body pc m = .ok (result, value)) :
+    StaticInstructionContract body m result stack (value :: stack) := by
+  unfold staticLoad at h
+  cases resolved : body.staticAt pc with
+  | none => simp only [resolved] at h; cases h
+  | some descriptor =>
+    obtain ⟨site, selected⟩ := staticAt_site resolved
+    simp only [resolved, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    repeat' first
+      | solve |
+          refine StaticInstructionContract.of_effect ?_ ?_
+          · first | exact .ordinary (.unchanged _) | exact .reference selected (by assumption)
+          · intro retained
+            apply ValuesValid.cons
+            · apply staticLoadedValue_valid; assumption
+            · exact retained
+      | cases h
+      | split at h
+
+#print axioms staticLoad_contract
+
+/-- A successful `ldsflda` or field `ldtoken` satisfies `StaticInstructionContract` for the
+    reference it pushes. -/
+theorem staticAddress_contract (body : CIL.Method) (pc : Nat) (stack : List Value)
+    (m result : Memory) (value : Value) (h : staticAddress body pc m = .ok (result, value)) :
+    StaticInstructionContract body m result stack (value :: stack) := by
+  unfold staticAddress at h
+  cases resolved : body.staticAt pc with
+  | none => simp only [resolved] at h; cases h
+  | some descriptor =>
+    obtain ⟨site, selected⟩ := staticAt_site resolved
+    simp only [resolved, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    split at h
+    · cases h
+    · rename_i resolution referenced
+      obtain ⟨memory, reference⟩ := resolution
+      cases h
+      refine StaticInstructionContract.of_effect (.reference selected referenced) ?_
+      intro retained
+      apply ValuesValid.cons
+      · apply staticReference_reference_valid; exact referenced
+      · exact retained
+
+#print axioms staticAddress_contract
+
+/-- `ldsfld` of a descriptor whose initializer was checked pushes the descriptor's value and
+    leaves memory unchanged. -/
+theorem staticLoad_initialized {body : CIL.Method} {pc : Nat} {descriptor : CIL.StaticDescriptor}
+    {memory : Memory} {value : CIL.Value} (site : body.staticAt pc = some descriptor)
+    (computed : descriptor.opaqueValue = false)
+    (initialized : descriptor.initializer.isSome = true)
+    (decoded : staticLoadedValue descriptor = some value) :
+    staticLoad body pc memory = .ok (memory, .scalar value) := by
+  simp only [staticLoad, site, computed, initialized, decoded, Bool.false_eq_true, ite_false,
+    ite_true]
+  rfl
+
+#print axioms staticLoad_initialized
+
+/-- `ldsflda` or a field `ldtoken` pushes the reference `staticReference` resolves for the
+    descriptor bound to its pc. -/
+theorem staticAddress_resolved {body : CIL.Method} {pc : Nat} {descriptor : CIL.StaticDescriptor}
+    {memory result : Memory} {reference : Reference} (site : body.staticAt pc = some descriptor)
+    (resolved : staticReference descriptor memory = .ok (result, reference)) :
+    staticAddress body pc memory = .ok (result, .reference (.address reference)) := by
+  simp only [staticAddress, site, resolved, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms staticAddress_resolved
+
+/-- With a descriptor bound to its pc, `staticAddress` resolves that descriptor's storage, so a
+    step can rewrite the read without evaluating the site table. -/
+theorem staticAddress_site {body : CIL.Method} {pc : Nat} {descriptor : CIL.StaticDescriptor}
+    {memory : Memory} (site : body.staticAt pc = some descriptor) :
+    staticAddress body pc memory = (do
+      let (memory, reference) ← staticReference descriptor memory
+      return (memory, .reference (.address reference))) := by
+  rw [staticAddress, site]
+
+#print axioms staticAddress_site
 
 end CIL.Safety

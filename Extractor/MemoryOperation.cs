@@ -151,16 +151,6 @@ internal sealed record ObserveView(ViewQuery Query) : MemoryOperation
     };
 }
 
-internal sealed record StaticValue(ValueList<byte> Bytes) : MemoryOperation
-{
-    internal override string ToLean() => $"(.staticValue {StaticData.LeanBytes(Bytes)})";
-}
-
-internal sealed record StaticAddress(ValueList<byte> Bytes) : MemoryOperation
-{
-    internal override string ToLean() => $"(.staticAddress {StaticData.LeanBytes(Bytes)})";
-}
-
 internal sealed record StringLiteral(string Text) : MemoryOperation
 {
     internal override string ToLean() => $"(.stringLiteral {JsonSerializer.Serialize(Text)})";

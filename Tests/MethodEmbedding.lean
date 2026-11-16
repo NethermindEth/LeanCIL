@@ -646,15 +646,20 @@ theorem update_rejected : ¬ Embeds viaUpdate moved [0, 1, 3, 4] :=
 def staticField : StaticDescriptor :=
   { identity := 1, fieldName := "Fixture::Value", bytes := List.replicate 8 0 }
 
+/-- The field operand of the static reads below. -/
+def staticFieldRef : CIL.Extraction.FieldRef :=
+  { owner := .atom "Fixture" "Fixture", index := 0, type := .atom "Fixture" "System.Int64",
+    name := name!"Value" }
+
 /-- What an extraction emits when a dead block puts a static read at pc 2. -/
 def staticMoved : Method := {
   code := [.br 2, .unadmitted 0,
-    .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+    .ldsflda staticFieldRef, .pop, .ret]
   locals := [], returnsValue := false, staticSites := [(2, staticField)] }
 
 /-- The body a proof uses, with its static read at pc 1; `withCode` leaves it no static sites. -/
 def staticWritten : Method :=
-  staticMoved.withCode [.br 1, .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+  staticMoved.withCode [.br 1, .ldsflda staticFieldRef, .pop, .ret]
 
 /-- Whether the first embedding failure of `expected` contains each of `phrases`. -/
 def failureMentions (expected : Method) (phrases : List String) : Bool :=

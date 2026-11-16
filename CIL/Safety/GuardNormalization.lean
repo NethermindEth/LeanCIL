@@ -145,6 +145,14 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_ldind (kind : CIL.NumericKind) : observerCount (.ldind kind) = 1 := rfl
 @[cil_guard] theorem guard_stind (kind : CIL.NumericKind) : observerCount (.stind kind) = 2 := rfl
 @[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
+@[cil_guard] theorem guard_ldsfld (field : CIL.Extraction.FieldRef) :
+    observerCount (.ldsfld field) = 0 := rfl
+@[cil_guard] theorem guard_ldsflda (field : CIL.Extraction.FieldRef) :
+    observerCount (.ldsflda field) = 0 := rfl
+@[cil_guard] theorem guard_ldtoken (operand : CIL.TokenOperand) :
+    observerCount (.ldtoken operand) = 0 := rfl
+@[cil_guard] theorem guard_stsfld (field : CIL.Extraction.FieldRef) :
+    observerCount (.stsfld field) = 1 := rfl
 
 -- Operand counts of memory instructions, which `observerCount` defers to.
 @[cil_guard] theorem guard_count_bigMul64 (signed : Bool) :
@@ -176,10 +184,6 @@ namespace CIL.Safety
     CIL.MemoryOp.bitcastByteBool.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_bitcastValue (source target : CIL.SnapshotShape) :
     (CIL.MemoryOp.bitcastValue source target).argumentCount = 1 := rfl
-@[cil_guard] theorem guard_count_staticAddress (bytes : List (BitVec 8)) :
-    (CIL.MemoryOp.staticAddress bytes).argumentCount = 0 := rfl
-@[cil_guard] theorem guard_count_staticValue (bytes : List (BitVec 8)) :
-    (CIL.MemoryOp.staticValue bytes).argumentCount = 0 := rfl
 @[cil_guard] theorem guard_count_createSpan (width : Nat) :
     (CIL.MemoryOp.createSpan width).argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_spanCreate : CIL.MemoryOp.spanCreate.argumentCount = 2 := rfl

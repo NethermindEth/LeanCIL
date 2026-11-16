@@ -14,12 +14,17 @@ private def appField : StaticDescriptor :=
 private def libField : StaticDescriptor :=
   { identity := 202, assemblyIdentity := "Lib", fieldName := "Lib::Table", bytes := numberBytes 17 8 }
 
+/-- The field of `owner`'s table, an eight-byte static. -/
+private def tableRef (owner : String) : Extraction.FieldRef :=
+  { owner := .atom owner (owner ++ ".Holder"), index := 0, type := .atom owner (owner ++ ".Table"),
+    name := name!"Table" }
+
 @[cil_code] def libBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, libField)],
-    code := [.memory (.staticAddress (numberBytes 17 8)), .ldind .i8, .ret] }
+    code := [.ldsflda (tableRef "Lib"), .ldind .i8, .ret] }
 @[cil_code] def appBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, appField)],
-    code := [.memory (.staticAddress (numberBytes 7 8)), .pop, .call 1 0, .ret] }
+    code := [.ldsflda (tableRef "App"), .pop, .call 1 0, .ret] }
 def library : Library := { entry := libBody }
 def linked : CIL.Program := link [appBody] [library]
 
@@ -77,19 +82,12 @@ private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellForm
     rw [same rfl] at readable
     simpa [libField, numberBytes] using readable
   have load := load_word64_of_read loaded
-  have addressed : staticInstruction libBody 0 (.staticAddress (numberBytes 17 8)) [] memory =
-      .ok (result, [.reference (.address reference)]) := by
-    change (do
-      let (updated, address) ← staticReference libField memory
-      pure (updated, [Safety.Value.reference (.address address)]) :
-      ExecutionResult (Safety.Memory × List Safety.Value)) = _
-    rw [resolved]
-    rfl
+  have addressed : staticAddress libBody 0 memory =
+      .ok (result, .reference (.address reference)) := staticAddress_resolved rfl resolved
   let frame : Frame := { activation := memory.nextIdentity, locals := [], owned := [] }
-  have first : step libBody (.memory (.staticAddress (numberBytes 17 8))) 0 [] frame [] memory =
+  have first : step libBody (.ldsflda (tableRef "Lib")) 0 [] frame [] memory =
       .ok (.next 1 [.reference (.address reference)] frame result) := by
-    rw [step_memory_eq, addressed]
-    rfl
+    rw [step_ldsflda_eq, addressed]
   have second : step libBody (.ldind .i8) 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
     rw [step_ldind_eq]

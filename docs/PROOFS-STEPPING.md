@@ -298,6 +298,17 @@ to `storeArgument` or `addressArgument`. Under a home, `step_ldarg_home_ldloc`,
 `step_starg_home_stloc` and `step_ldarga_home_ldloca` state each argument instruction as the
 local instruction of its slot.
 
+A `.ldsfld field` step pushes the value `staticLoad body pc memory` returns, and `.ldsflda field`
+or `.ldtoken (.field field)` the reference `staticAddress body pc memory` returns
+([StepComposition](../CIL/Safety/StepComposition.lean)); `.stsfld` faults. Both read the
+descriptor `body.staticAt pc` binds to the pc. `cil_resolution_facts` declares
+`methodN_staticAtPC : methodN.staticAt PC = some descriptor` for each static site. From it the
+stepping tactics state a load's result with `staticLoad_initialized` when extraction fixed the
+value, and an address's with `staticAddress_site`
+([StaticMemoryLemmas](../CIL/Safety/StaticMemoryLemmas.lean)), so no step evaluates the site
+table. A load of an opaque value read from the caller's memory takes its result from a fact,
+supplied or, for the loop tactics, in the context; a supplied fact on the read wins over the site.
+
 ### Consumer stepping regressions
 
 The public tactics handle store and load facts, branch conditions, memory operations, profile
@@ -661,7 +672,7 @@ type, so an unrelated context adds nothing to simp. It gathers:
 - the declarations in scope with the `cil_loop_unfold` simp attribute, which `bind_cutpoint`
   gives its state and `bind_entry` its frame and normalized result and memory;
 - equations, possibly quantified or conjoined, about `step`, `instruction`, `memoryInstruction`,
-  `staticInstruction`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue`, `form`, `add` and
+  `staticInstruction`, `staticLoad`, `staticAddress`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue`, `form`, `add` and
   the span `element`, `slice`, `validate`, `width` and `writable` checks;
 - for a [`CheckedSpan`](../CIL/Safety/SpanContents.lean), its `facts`, `length_nil` or
   `length_cons` when its values are `[]` or a cons, and, for each `LoopFrame` from its memory

@@ -151,7 +151,8 @@ pending.Flush();
 // The certificate recomputes the initializer: forged bytes in the extracted program fail translation_valid.
 var source = File.ReadAllText(Path.Combine(root, "One", "Extracted.lean"));
 var one = "bytes := [(BitVec.ofNat 8 1), ";
-if (!source.Contains(one) || !source.Contains(".staticValue [(BitVec.ofNat 8 1), "))
+// The load names its field; the bytes live only in the site's descriptor.
+if (!source.Contains(one) || !source.Contains(".ldsfld { owner := ") || !source.Contains("name := name!\"One\" }"))
     throw new InvalidOperationException("Missing One descriptor in the extraction");
 var forged = Path.Combine(root, "One-forged.lean");
 File.WriteAllText(forged, source.Replace("[(BitVec.ofNat 8 1), ", "[(BitVec.ofNat 8 2), "));

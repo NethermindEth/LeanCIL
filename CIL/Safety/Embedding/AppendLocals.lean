@@ -1284,6 +1284,51 @@ theorem step_appendLocals_memory (operation : MemoryOp) :
 
 #print axioms step_appendLocals_memory
 
+/-- `ldsfld` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldsfld (field : CIL.Extraction.FieldRef) :
+    StepAppendLocals (.ldsfld field) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_ldsfld
+
+/-- `ldsflda` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldsflda (field : CIL.Extraction.FieldRef) :
+    StepAppendLocals (.ldsflda field) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_ldsflda
+
+/-- `ldtoken` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldtoken (operand : CIL.TokenOperand) :
+    StepAppendLocals (.ldtoken operand) := by
+  cases operand
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_ldtoken
+
+/-- `stsfld` faults whatever the frame holds. -/
+theorem step_appendLocals_stsfld (field : CIL.Extraction.FieldRef) :
+    StepAppendLocals (.stsfld field) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_stsfld
+
 /-- `ret` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ret :
     StepAppendLocals .ret := by
@@ -1523,6 +1568,10 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_intrinsic operation argc
     case memory operation =>
       exact step_appendLocals_memory operation
+    case ldsfld field => exact step_appendLocals_ldsfld field
+    case ldsflda field => exact step_appendLocals_ldsflda field
+    case ldtoken operand => exact step_appendLocals_ldtoken operand
+    case stsfld field => exact step_appendLocals_stsfld field
     case ret =>
       exact step_appendLocals_ret
     case throw exception =>

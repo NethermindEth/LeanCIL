@@ -226,11 +226,12 @@ internal static class LeanEmitter
             {
                 var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                     scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
-                // An allocation and a class field access name the element or field their raw operand names.
+                // An allocation and a field access name the element or field their raw operand names.
                 return operation switch
                 {
                     NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, i) },
+                    StaticFieldInstruction access => access with { Field = genericEvidence.FieldReferenceOf(m, i) },
                     _ => operation
                 };
             }

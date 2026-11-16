@@ -37,7 +37,7 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
   /-- Each live expected instruction sits relabeled at its renamed pc with the same static
       descriptor and link, and an instruction that falls through keeps its successor adjacent. -/
   code : ∀ p op, expected.code[p]? = some op → op.live = true →
-    actual.code[r p]? = some (op.relabel r) ∧ staticAt actual (r p) = staticAt expected p ∧
+    actual.code[r p]? = some (op.relabel r) ∧ actual.staticAt (r p) = expected.staticAt p ∧
     actual.linkAt (r p) = expected.linkAt p ∧ (op.continues = true → r (p + 1) = r p + 1)
 
 /-- Every body refines itself under the identity renaming. -/

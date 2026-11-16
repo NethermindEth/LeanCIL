@@ -270,6 +270,42 @@ theorem findIdx?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
 
 #print axioms findIdx?_of_keysAscend
 
+/-- The entry at `position` of an ascending table is the one `find?` returns for its key. -/
+theorem find?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
+    {lower position key : Nat} {value : α} (ascending : keysAscend lower entries = true)
+    (placed : entries.drop position = (key, value) :: rest) :
+    entries.find? (fun entry => entry.1 == key) = some (key, value) := by
+  induction entries generalizing lower position with
+  | nil => rw [List.drop_nil] at placed; cases placed
+  | cons head tail ih =>
+    obtain ⟨first, other⟩ := head
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    cases position with
+    | zero =>
+      simp only [List.drop_zero, List.cons.injEq, Prod.mk.injEq] at placed
+      obtain ⟨⟨rfl, rfl⟩, -⟩ := placed
+      exact List.find?_cons_of_pos (decide_eq_true rfl)
+    | succ position =>
+      simp only [List.drop_succ_cons] at placed
+      have later := keysAscend_bound tail (first + 1) ascending.2 (key, value)
+        (List.mem_of_mem_drop (placed ▸ List.mem_cons_self))
+      exact (List.find?_cons_of_neg (p := fun (entry : Nat × α) => entry.1 == key)
+        fun found => Nat.ne_of_lt later (of_decide_eq_true found)).trans (ih ascending.2 placed)
+
+#print axioms find?_of_keysAscend
+
+/-- In a site table with ascending pcs, the site at `position` is the descriptor
+    `Method.staticAt` resolves for its pc. -/
+theorem _root_.CIL.Method.staticAt_of_keysAscend {body : CIL.Method}
+    {rest : List (Nat × CIL.StaticDescriptor)} {position pc : Nat}
+    {descriptor : CIL.StaticDescriptor}
+    (ascending : keysAscend 0 body.staticSites = true)
+    (placed : body.staticSites.drop position = (pc, descriptor) :: rest) :
+    body.staticAt pc = some descriptor := by
+  simp only [CIL.Method.staticAt, find?_of_keysAscend ascending placed, Option.map_some]
+
+#print axioms CIL.Method.staticAt_of_keysAscend
+
 /-- No entry of an ascending table has a key strictly between the key at `position` and the
     next one. -/
 theorem findIdx?_none_after {α : Type} {entries rest : List (Nat × α)}

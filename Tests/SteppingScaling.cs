@@ -66,7 +66,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("hypotheseslookup", [16, 64, 256], false), ("hypothesesdirect", [16, 256], false),
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
-    ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false)
+    ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -128,6 +128,7 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // target from the body's link table; the tablecalls body writes that table out, as a template does.
 // The objects body loads an int64 field of its object argument and pops it per cycle, so each `ldfld`
 // reads the field's shape fact and two memory facts of constant size.
+// The statics body loads one static field and pops it per cycle, with one static site per load.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
@@ -139,6 +140,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "loop" or "loopfacts" or "hypothesesloop" => ([".ldarg 0"], [".ldarg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".ldarg 0", $".stloc {slot}" })
         .ToArray(), [".ldloc 0", ".ret"]),
+    "statics" => ([], [".ldsfld staticField", ".pop"], [".ldsfld staticField", ".ret"]),
     "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
         ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
     "allocation" => ([], [".ldc_i4 2", $".newarr ({NodeType})", ".pop"], [".ldc_i4 0", ".ret"]),
@@ -206,6 +208,21 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "objects" => " environment := environment,",
         _ => ""
     };
+    var statics = workload == "statics";
+    var staticField = statics
+        ? "def staticField : CIL.Extraction.FieldRef :=\n" +
+            "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
+            "    name := name!\"Value\" }\n" +
+            "def staticValue : CIL.StaticDescriptor :=\n" +
+            "  { identity := 0, fieldName := \"Fixture::Value\", bytes := [7, 0, 0, 0],\n" +
+            "    initializer := some { method := 1, arguments := [] }, scalar := some true }\n"
+        : "";
+    // One site per load, so every step resolves its own pc among all the body's sites.
+    var sitesField = statics
+        ? " staticSites := [" + string.Join(", ", operations.Select((operation, pc) => (operation, pc))
+            .Where(entry => entry.operation.StartsWith(".ldsfld", StringComparison.Ordinal))
+            .Select(entry => $"({entry.pc}, staticValue)")) + "],"
+        : "";
     var linksField = workload == "tablecalls"
         ? " links := [" + string.Join(", ", Enumerable.Range(1, cycles).Select(pc => $"({pc}, .direct 1)")) + "],"
         : "";
@@ -242,7 +259,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         """ : $$"""
         /-- A synthetic body in the emitter's explicit instruction-list shape. -/
         def body : CIL.Method := {
-          locals := [], returnsValue := true,{{declaredField}}{{linksField}}
+          locals := [], returnsValue := true,{{declaredField}}{{linksField}}{{sitesField}}
           code := [{{string.Join(",\n    ", operations)}}] }
         cil_instruction_equations body
         """;
@@ -252,14 +269,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        {{fieldDefinitions}}{{bodyDefinition}}
+        {{fieldDefinitions}}{{staticField}}{{bodyDefinition}}
         """ + "\n" + (workload is "calls" or "tablecalls" ? """
         /-- The callee every call of the calls body enters; it returns its argument. -/
         def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
         cil_instruction_equations callee
-        """ + "\n" : "") + (workload is "arguments" or "homes" ? $$"""
+        """ + "\n" : "") + (workload is "arguments" or "homes" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
-        theorem body_declared : body.declared = {{signature}} := rfl
+        theorem body_declared : body.declared = {{(statics ? "{}" : signature)}} := rfl
         cil_resolution_facts body
         """ + "\n" : "");
     var incoming = string.Join(", ",
@@ -443,6 +460,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   [.scalar (.i64 left), .scalar (.i64 right)] memory =
                   .ok (memory, [.scalar (.i64 left)]) := by
               cil_checked_steps [divided, reduced, added, converted]
+            """,
+        "statics" => $$"""
+            /-- Every static load reads the descriptor its pc's site binds and leaves memory unchanged. -/
+            theorem checked (memory : Memory) :
+                invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+              cil_checked_steps
+              rfl
             """,
         "arguments" => $$"""
             /-- Each argument is read once and added to the running sum of the ones before it. -/
