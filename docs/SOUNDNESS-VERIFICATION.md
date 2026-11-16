@@ -81,13 +81,16 @@ kernel replay when proof checking. Certificate/theorem audits and extraction reg
 mandatory.
 
 A deep result is published only after its whole request succeeds. Its key binds the certified
-environment and extraction key, the prepared StrictBinding sources and toolchain, the compiled
-extraction, the generated sources with the image bytes they hold, and the pins and requests. A
-restored result skips build and kernel replay of the generated modules, since its publisher
-replayed those bytes in the same keyed environment; their theorem audit runs on every request.
-Under `--proof-root` the environment is the verifier, the certified library and the artifacts
-certified with StrictBinding. The compiled extraction imports `CIL` modules by name, so a package
-that shadows one replays a restored result and publishes none.
+environment and extraction key, the prepared StrictBinding sources and toolchain, the generated
+sources with the image bytes they hold, the pins and requests, and the content hash of every part
+of every compiled module the generated modules import, transitively, outside the Lean toolchain.
+The closure is read from compiled import headers and resolved in search-path order, as Lean
+resolves it; it holds the extraction, StrictBinding and `CIL` modules and no contract interface,
+`ExtractedImports` or proof module. A restored result skips build and kernel replay of the
+generated modules, since its publisher replayed those bytes against the same imported bytes;
+their theorem audit runs on every request. Under `--proof-root` the environment is the verifier
+and the certified library, and a package that shadows a `CIL` module replays a restored result
+and publishes none.
 
 The single-file verifier's support audit key binds the audit schema, verification policy,
 certified library identity, extraction identity digest, ordered support imports and support

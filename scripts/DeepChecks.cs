@@ -252,11 +252,14 @@ partial class Program
         WriteBindingSources(plan);
         sourcesReady?.Invoke();
         var sources = BindingSourceHashes(directory);
-        var resultKey = environment is null ? null : DeepResultKey(environment,
+        // Replay is the only kernel check of the generated modules, so a restored result must bind every import.
+        var imports = environment is null ? null : DeepImportClosure(session, leanPath, directory);
+        deepImports = imports;
+        var resultKey = environment is null || imports is null ? null : DeepResultKey(environment,
             bindingSourcesKey ?? throw new InvalidOperationException("StrictBinding has not been prepared"),
-            bindingPreparation?.Toolchain ?? throw new InvalidOperationException("StrictBinding has not been prepared"),
-            Relative(Path.GetDirectoryName(extractedOlean)!, extractedHashes), Relative(directory, sources),
-            pins, targets.Requests);
+            bindingPreparation?.Toolchain ??
+                throw new InvalidOperationException("StrictBinding has not been prepared"),
+            imports, Relative(directory, sources), pins, targets.Requests);
         var restored = resultKey is not null && RestoreSuccess(resultKey, session);
         Dictionary<string, string> failures = restored ? new(StringComparer.Ordinal)
             : BuildBindingModules(plan, leanPath);
@@ -285,11 +288,11 @@ partial class Program
 
     /// <summary>
     /// The key of a deep result: the certified environment and extraction it was checked in, the prepared
-    /// StrictBinding sources and toolchain, the extraction module's artifacts, and the generated sources, pins and
-    /// requests. The generated sources hold the image bytes, identities and page size.
+    /// StrictBinding sources and toolchain, the compiled modules the generated modules import transitively, and
+    /// the generated sources, pins and requests. The generated sources hold the image bytes, identities and page size.
     /// </summary>
     static string DeepResultKey(string environment, string bindingSources, string toolchain,
-        SortedDictionary<string, string> extracted, SortedDictionary<string, string> sources,
+        SortedDictionary<string, string> imports, SortedDictionary<string, string> sources,
         IReadOnlyList<BindingImagePin> pins, IReadOnlyList<BindingRequest> requests) =>
         ContentKey(JsonSerializer.Serialize(new
         {
@@ -297,7 +300,7 @@ partial class Program
             environment,
             bindingSources,
             toolchain,
-            extracted,
+            imports,
             sources,
             pins = pins.Select(pin => new { identity = pin.Identity, digest = pin.Digest.ToString() }),
             requests = requests.Select(request => new
@@ -310,17 +313,55 @@ partial class Program
         }));
 
     /// <summary>
-    /// The environment a consumer's deep modules build in, beyond the extraction artifacts their key binds: the
-    /// verifier, the certified library and every module artifact certified with the prepared StrictBinding.
+    /// The environment a consumer's deep modules build in, beyond the compiled imports their key binds: the
+    /// verifier and the certified library.
     /// </summary>
     string ConsumerDeepEnvironment() => ContentKey(JsonSerializer.Serialize(new
     {
-        format = "consumer-deep-environment-v1",
+        format = "consumer-deep-environment-v2",
         policy = VerificationPolicy,
-        library = libraryKey ?? throw new InvalidOperationException("The certified library is not selected"),
-        artifacts = (bindingPreparation ??
-            throw new InvalidOperationException("StrictBinding has not been prepared")).CertifiedArtifacts
+        library = libraryKey ?? throw new InvalidOperationException("The certified library is not selected")
     }));
+
+    /// <summary>The compiled import closure the key of the last keyed deep session bound.</summary>
+    SortedDictionary<string, string>? deepImports;
+
+    /// <summary>
+    /// The content hash of every compiled module part the modules generated below `directory` import,
+    /// transitively, by its name below its search root. Each import resolves as Lean resolves it: to the first
+    /// root of `leanPath` that holds it, then to the toolchain, whose modules the toolchain key binds.
+    /// </summary>
+    SortedDictionary<string, string> DeepImportClosure(string session, string leanPath, string directory)
+    {
+        var toolchain = Path.GetFullPath(Path.Combine(Toolchain, "lib", "lean"));
+        Dictionary<string, (string Root, string Path)> compiled = new(StringComparer.Ordinal);
+        foreach (var root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(Path.GetFullPath).Where(root => !LocationComparer.Equals(root, toolchain) && Directory.Exists(root)))
+            foreach (var path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
+                compiled.TryAdd(ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/')), (root, path));
+        SortedDictionary<string, string> generated = new(Directory
+            .EnumerateFiles(directory, "*.lean", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.ChangeExtension(Path.GetRelativePath(session, path), null)
+                .Replace(Path.DirectorySeparatorChar, '.'), File.ReadAllText), StringComparer.Ordinal);
+        var headers = ConsumerModuleImports(session, compiled.ToDictionary(pair => pair.Key, pair => pair.Value.Path));
+        var pending = new Queue<string>(ContractModuleImports(session, generated).Values
+            .SelectMany(imports => imports).Where(module => !generated.ContainsKey(module)));
+        HashSet<string> closure = new(StringComparer.Ordinal);
+        while (pending.TryDequeue(out var module))
+        {
+            if (!closure.Add(module)) continue;
+            if (compiled.ContainsKey(module)) foreach (var imported in headers[module]) pending.Enqueue(imported);
+            else if (!File.Exists(Path.Combine(toolchain, module.Replace('.', Path.DirectorySeparatorChar) + ".olean")))
+                throw new InvalidDataException("Deep-check import is not compiled: " + module);
+        }
+        Dictionary<string, string> roots = new(LocationComparer);
+        foreach (var (root, path) in closure.Where(compiled.ContainsKey).Select(module => compiled[module]))
+            roots[Path.GetDirectoryName(Path.GetFullPath(path))!] = root;
+        // Companion parts lie beside their module, so each part is named below its module's root.
+        return new(BindingArtifactHashes(closure.Where(compiled.ContainsKey).Select(module => compiled[module].Path))
+            .ToDictionary(pair => Path.GetRelativePath(roots[Path.GetDirectoryName(pair.Key)!], pair.Key)
+                .Replace('\\', '/'), pair => pair.Value), StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// Copies the generated modules a keyed deep contribution built into a new directory below
@@ -373,8 +414,8 @@ partial class Program
             .. pins.Select(pin => imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
                 ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
                     BindingStatus.Reconfirmed, theorem, null)
-                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned, BindingStatus.NotCovered,
-                    null,
+                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
+                    BindingStatus.NotCovered, null,
                     "no checked theorem states the digest of this image")),
             .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
                 new ImageResult(image.Path, image.Digest.ToString(), ImageRole.Unused, BindingStatus.NotCovered, null,

@@ -7,6 +7,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include MultiAssemblyFixture.cs
+#:include DeepImportChecks.cs
 
 using System.Security.Cryptography;
 using System.Text;
@@ -299,9 +300,9 @@ void CheckDeepResultKey()
     BindingImagePin[] pins = [new("Identity", inputs.Images[0].Digest, [])];
     var requests = BindingRequests(new("", pins, 1));
     string Key(string environment = "environment", string sources = "sources", string toolchain = "toolchain",
-        char extracted = 'a', char generated = 'b', BindingImagePin[]? pinned = null,
+        char imported = 'a', char generated = 'b', BindingImagePin[]? pinned = null,
         BindingRequest[]? requested = null) => DeepResultKey(environment, sources, toolchain,
-        new(StringComparer.Ordinal) { ["Extracted.olean"] = new string(extracted, 64) },
+        new(StringComparer.Ordinal) { ["Extracted.olean"] = new string(imported, 64) },
         new(StringComparer.Ordinal) { ["BindingAudit/Bodies.lean"] = new string(generated, 64) },
         pinned ?? pins, requested ?? requests);
     var copy = Path.Combine(fixture.Root, "BindingSources");
@@ -320,7 +321,7 @@ void CheckDeepResultKey()
     File.WriteAllBytes(edited, bytes);
     File.SetLastWriteTimeUtc(edited, written);
     string[] changed = [Key("other"), Key(sources: BindingSourcesKey(copy)), Key(toolchain: "other"),
-        Key(extracted: 'c'), Key(generated: 'c'), Key(pinned: [new("Other", inputs.Images[0].Digest, [])]),
+        Key(imported: 'c'), Key(generated: 'c'), Key(pinned: [new("Other", inputs.Images[0].Digest, [])]),
         Key(pinned: [new("Identity", Sha256Digest.Of([1]), [])]), Key(requested: requests[..^1])];
     if (Key() != Key() ||
         changed.Append(Key(sources: original)).Append(Key()).Distinct().Count() != changed.Length + 2)
@@ -339,12 +340,26 @@ void CheckDeepResultReuse()
         Require(cold.DeepHits == 0 && cold.AfterDeepChecks.Contains("kernel replay") &&
             cold.AfterDeepChecks.Contains("theorem audit") && SameFacts(cold.Report),
             "A first deep request in an empty cache did not build, replay and audit its modules");
+        RequireDeepImports(verification.deepImports, "standalone");
         var unchanged = DeepRun(image, selector, proof, output, inputs, check: true);
         Require(unchanged.DeepHits == 1 && unchanged.ProofHits == 1 &&
             unchanged.AfterDeepChecks.Contains("theorem audit") &&
             !unchanged.AfterDeepChecks.Contains("kernel replay") && SameFacts(unchanged.Report),
             "An unchanged deep request did not reuse its result under a fresh theorem audit");
         Console.WriteLine("PASS an unchanged deep request reuses its replayed modules and runs the theorem audit");
+
+        var hitsBeforeImport = verification.deepCacheHits;
+        ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+            stage: stage =>
+            {
+                if (stage != "deep-check sources") return;
+                var fresh = Directory.EnumerateDirectories(output, "proof-*").Single();
+                SameLengthChange(Path.Combine(fresh, "Extracted.olean"));
+            }), "Deep-check artifact changed");
+        Require(verification.deepCacheHits == hitsBeforeImport,
+            "A deep result was restored over a changed imported module");
+        RequireNoReport();
+        Console.WriteLine("PASS a same-length change to an imported module with its write time restored is not restored");
 
         var changedProof = Path.Combine(fixture.Root, "ChangedProof.lean");
         File.WriteAllText(changedProof, File.ReadAllText(proof) + "\n-- A changed proof input.\n");
@@ -382,11 +397,7 @@ void CheckDeepResultReuse()
         RequireNoReport();
         Console.WriteLine("PASS the theorem audit rejects an authenticated restored module that states another fact");
 
-        var written = File.GetLastWriteTimeUtc(cachedBodies);
-        var bytes = File.ReadAllBytes(cachedBodies);
-        bytes[^1] ^= 1;
-        File.WriteAllBytes(cachedBodies, bytes);
-        File.SetLastWriteTimeUtc(cachedBodies, written);
+        SameLengthChange(cachedBodies);
         var previousReplay = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY");
         (Report Report, string[] AfterDeepChecks, string Output, int DeepHits, int ProofHits) rebuilt;
         try

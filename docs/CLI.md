@@ -364,11 +364,12 @@ and have no binding payload. A failed attempt never reports a fact as trusted or
 The image decoder supports metadata tables through `0x2C`, without pointer or edit-and-continue
 tables, and the `#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams. Unsupported image structure
 rejects the request. A deep request reuses the generated modules of an earlier successful request
-in the same certified environment, with the same extraction, StrictBinding sources, toolchain,
-pins and generated sources, which hold the image bytes; it skips their build and kernel replay
-but still audits every deep theorem's type and axioms against the current extraction. Under
-`--proof-root` the key also binds the certified library and the prepared StrictBinding artifacts,
-and a package that shadows a `CIL` module replays a restored result and publishes none.
+in the same certified environment, with the same StrictBinding sources, toolchain, pins and
+generated sources, which hold the image bytes, and the same bytes of every compiled module they
+import, transitively, outside the Lean toolchain: the extraction, StrictBinding and `CIL`
+modules. It skips their build and kernel replay but still audits every deep theorem's type and
+axioms against the current extraction. Under `--proof-root` the key also binds the certified
+library, and a package that shadows a `CIL` module replays a restored result and publishes none.
 
 ## Start a proof
 

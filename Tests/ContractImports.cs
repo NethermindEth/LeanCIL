@@ -9,6 +9,7 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include GeneratedEvidence.cs
+#:include DeepImportChecks.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -208,6 +209,40 @@ void CheckInterfaceReuse()
         deepReport.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed)
         throw new InvalidOperationException("Consumer deep verification did not check the imported caller body.");
     Console.WriteLine("PASS consumer deep audit checks the caller with an independently audited published interface");
+    RequireDeepImports(deepConsumer.deepImports, "published-interface consumer");
+    // Neither module is in the deep import closure, so a restored result meets the change only in later guards.
+    foreach (var changedModule in new[] { "ExtractedImports", interfaceModule })
+    {
+        var changeToken = Guid.NewGuid().ToString("N");
+        File.AppendAllText(proof, "\n-- " + changeToken + "\n");
+        var beforeChange = Receipts();
+        var hits = deepConsumer.deepCacheHits;
+        bool changed = false;
+        string? diagnostic = null;
+        try
+        {
+            deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null,
+                stage =>
+                {
+                    if (stage != "deep checks" || changed) return;
+                    var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                        .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
+                            File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
+                                .Contains(changeToken, StringComparison.Ordinal));
+                    SameLengthChange(Path.Combine(session, ".lake/packages/leancil_generated/.lake/build/lib/lean",
+                        changedModule + ".olean"));
+                    changed = true;
+                }, deepInputs);
+        }
+        catch (Exception error) when (error is InvalidOperationException or InvalidDataException &&
+            error.Message.Contains("changed", StringComparison.Ordinal)) { diagnostic = error.Message; }
+        if (!changed || diagnostic is null || deepConsumer.deepCacheHits != hits + 1 ||
+            File.Exists(Path.Combine(selected.output, "verified.json")) || !Same(beforeChange, Receipts()))
+            throw new InvalidOperationException("A same-length change to " + changedModule +
+                " beside a restored deep result was not rejected without receipts: " + diagnostic);
+        Console.WriteLine("PASS a same-length " + changedModule + " change beside a restored deep result is " +
+            "rejected without receipts: " + diagnostic.Split('\n')[0]);
+    }
     var token = Guid.NewGuid().ToString("N");
     File.AppendAllText(proof, "\n-- " + token + "\n");
     SortedDictionary<string, string> Receipts() => Directory.Exists(SuccessCacheRoot)
