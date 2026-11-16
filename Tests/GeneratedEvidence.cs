@@ -53,7 +53,7 @@ partial class Program
     // An extraction's definition of method `method` from its decoder, with the field operand definitions it names.
     static Match DecodedDefinition(string source, int method) => new Regex(
         $@"(?m)^cil_decoded_method method{method}( \[[^\]\r\n]*\])? := Method\.ofRaw\? profile environment " +
-        $@"method{method}Original method{method}TypeArgumentsRaw(?=\r?$)").Match(source);
+        $@"method{method}Original method{method}TypeArgumentsRaw method{method}Links(?=\r?$)").Match(source);
 
     /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
@@ -94,15 +94,20 @@ partial class Program
     /// </summary>
     static string ForgeDecodedMethod(string source, int method, string update)
     {
+        // The definition writes a decoded method's links as the table constant its decoder is given.
+        if (update.Contains("links :=", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Forge method{method}Links, the decoder's input, to change its links");
         var call = DecodedDefinition(source, method);
         if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
         var forged = $"method{method}Forged";
         return source[..call.Index] +
             $"def {forged} (profile : FeatureProfile) (environment : LayoutEnvironment) " +
-            "(original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) : Option Method := " +
-            $"(Method.ofRaw? profile environment original arguments).map fun method => {{ method with {update} }}\n" +
+            "(original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) (links : List (Nat × Link)) : " +
+            "Option Method := (Method.ofRaw? profile environment original arguments links).map fun method => " +
+            $"{{ method with {update} }}\n" +
             $"cil_decoded_method method{method}{call.Groups[1].Value} := {forged} profile environment " +
-            $"method{method}Original method{method}TypeArgumentsRaw" + source[(call.Index + call.Length)..];
+            $"method{method}Original method{method}TypeArgumentsRaw method{method}Links" +
+            source[(call.Index + call.Length)..];
     }
 
     /// <summary>
@@ -119,6 +124,24 @@ partial class Program
         return ForgeDecodedMethod(source, method, "declared := { method.declared with returnType := " +
             returnType.Replace(atom, replacement, StringComparison.Ordinal) + " }");
     }
+
+    /// <summary>
+    /// `source` with the link of the call at `pc` of method `method` changed to `link`: the definition the method's
+    /// link table names, whether the method is decoded or kept as a literal.
+    /// </summary>
+    static string ForgeLink(string source, int method, int pc, string link)
+    {
+        var definition = Regex.Match(source, $@"(?m)^@\[cil_code\] def method{method}Link{pc} : Link := [^\r\n]*");
+        if (!definition.Success) throw new InvalidOperationException($"method{method} has no link at pc {pc}");
+        return source[..definition.Index] + $"@[cil_code] def method{method}Link{pc} : Link := {link}" +
+            source[(definition.Index + definition.Length)..];
+    }
+
+    /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
+    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. Regex.Matches(source,
+            $@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct {callee}\r?$")
+        .Select(match => (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))];
 
     // Keep emitted definitions intact and select one independent validator obligation.
     // Its unchanged form must also be compiled as a positive control by the caller.

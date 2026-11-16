@@ -92,7 +92,9 @@ partial class Program
             "opcode := 89,"));
         if (changedHelper.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2)
             throw new Exception("A changed helper did not invalidate exactly its checked component.");
-        var changedCall = SplitExtractionComponents(original.Replace(".call 1 1", ".call 0 1", StringComparison.Ordinal));
+        // The call's target is the link at its pc, so the forged connection is that link.
+        var entryCall = DirectLinks(original, 1).Single(call => call.Method == 0);
+        var changedCall = SplitExtractionComponents(ForgeLink(original, 0, entryCall.Pc, ".direct 0"));
         if (changedCall.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2 || changedCall.InputHash == first.InputHash)
             throw new Exception("A changed callee connection retained the caller component or input identity.");
         CheckCalleeIndexReuse(cli, assembly, directory);
@@ -206,12 +208,13 @@ partial class Program
                 shared.Length + " shared components.");
         // Wrapped is method 1 beside ViaWrapped and method 2 beside ViaBoth, and its callee Leaf moves from 2 to 3.
         var differing = CalleeIndexDifferences(texts[0], texts[1], "Methods::Wrapped(");
+        // A call names its callee's method, which does not move; only the link holds the callee's index.
         if (differing is not [("@[cil_code] def method#Link1 : Link := .direct 2",
-                "@[cil_code] def method#Link1 : Link := .direct 3"), (".call 2 1,", ".call 3 1,")])
-            throw new Exception("The helper's components must differ only in its call and its link, found:\n" +
+                "@[cil_code] def method#Link1 : Link := .direct 3")])
+            throw new Exception("The helper's components must differ only in its link, found:\n" +
                 string.Join("\n", differing.Select(pair => pair.First + "  |  " + pair.Second)));
         Console.WriteLine(
-            "PASS a helper whose callee moves differs only in its call and link and shares only the header");
+            "PASS a helper whose callee moves differs only in its link and shares only the header");
     }
 
     /// <summary>

@@ -82,7 +82,9 @@ string? Link(Instruction instruction)
     return (string?)operation.GetType().GetMethod("Link", BindingFlags.Instance | BindingFlags.NonPublic |
         BindingFlags.Public)!.Invoke(operation, [(Func<int, string>)(index => $"{index}")]);
 }
-if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
+// A call renders over its method operand, which the emitter supplies; the operation holds only the callee index.
+if (!((IEnumerable<int>)Property(Operation(call), "Methods")).SequenceEqual([1]))
+    throw new Exception("Incorrect call index");
 // The link is read from the same operation as the instruction, so the two cannot name different callees.
 if (Link(call) != ".direct 1") throw new Exception("Incorrect call link");
 methods.Remove(callee);
@@ -299,7 +301,7 @@ if (Loops(Body(nop, nop, backEdge)) != 1)
     throw new Exception("A conditional back edge is not found as a loop");
 if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
-    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
+    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0, false)))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
 if (Lean(Make("Arg", 1)) != ".ldarg 1")
     throw new Exception("An argument load no longer renders as the decoded ldarg");
@@ -310,10 +312,13 @@ if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
     throw new Exception("Scalar loads lost the spelling that tells the unaligned load from the aligned one");
 if (Lean(Make("AddOffset", ulong.MaxValue - 7, true)) != "(.add 18446744073709551608 true)")
     throw new Exception("A negative stride lost its two's complement spelling");
-var tail = Make("Call", Named("CallKind", "Tail"), 3, 0);
+var tail = Make("Call", Named("CallKind", "Tail"), 3, 0, false);
 var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
-if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) || Lean(renumbered) != ".tailCall 1 0")
-    throw new Exception("A tail call does not expose and renumber its callee");
+Assign(renumbered, "Site", "site");
+if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) ||
+    !((IEnumerable<int>)Property(renumbered, "Methods")).SequenceEqual([1]) ||
+    Lean(renumbered) != ".call (site) { tail := true }")
+    throw new Exception("A tail call does not expose and renumber its callee or render its prefix");
 try
 {
     Make("Constant", 32, -1L, true);
@@ -369,7 +374,7 @@ var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.G
     .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
 var constructors = RenderedLeanReaders.Constructors(sourceFiles["Extractor/Operation.cs"]);
-foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callInstance", "tailCall" })
+foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callInstance" })
     if (!constructors.Contains(rendered)) throw new Exception("Operation no longer renders ." + rendered);
 var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
 (string File, int Reads, string Reason)[] allowedReaders =

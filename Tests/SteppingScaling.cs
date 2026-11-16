@@ -125,13 +125,14 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // which reads its home. The allocation body allocates an array of two class references per cycle and
 // pops it, so each `newarr` resolves its element shape and reads one allocation fact. The calls body
 // passes its argument through one call per cycle to a callee that returns it, so each call reads its
-// target from the body's link table; the tablecalls body writes that table out, as a template does.
+// target from the body's link table, which it names as a tagged definition, as an extraction's decoded
+// method does; the tablecalls body writes that table out, as a template does.
 // The objects body loads an int64 field of its object argument and pops it per cycle, so each `ldfld`
 // reads the field's shape fact and two memory facts of constant size.
 // The statics body loads one static field and pops it per cycle, with one static site per load.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
-    "calls" or "tablecalls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
+    "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".stind .i8", ".ldarg 0", ".ldind .i8", ".pop"],
         [".ldarg 0", ".ldind .i8", ".ret"]),
     "reference" or "table" => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"]),
@@ -223,9 +224,22 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             .Where(entry => entry.operation.StartsWith(".ldsfld", StringComparison.Ordinal))
             .Select(entry => $"({entry.pc}, staticValue)")) + "],"
         : "";
-    var linksField = workload == "tablecalls"
-        ? " links := [" + string.Join(", ", Enumerable.Range(1, cycles).Select(pc => $"({pc}, .direct 1)")) + "],"
-        : "";
+    var linkTable = "[" + string.Join(", ", Enumerable.Range(1, cycles).Select(pc => $"({pc}, .direct 1)")) + "]";
+    var linksField = workload switch
+    {
+        "tablecalls" => $" links := {linkTable},",
+        "calls" => " links := callLinks,",
+        _ => ""
+    };
+    var callDefinitions = workload is "calls" or "tablecalls" ? $$"""
+        /-- The method every call names: one `int64` argument and an `int64` result. -/
+        def calleeMethod : CIL.Extraction.MethodRef :=
+          { owner := .atom "Tests" "Stepping", name := name!"Identity", hasThis := false, genericArity := 0,
+            returnType := {{Int64Type}}, parameters := [{{Int64Type}}] }
+        """ + "\n" + (workload == "calls" ? $$"""
+        /-- The body's link table, every call entering method 1. -/
+        @[cil_code] def callLinks : List (Nat × CIL.Link) := {{linkTable}}
+        """ + "\n" : "") : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -271,7 +285,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        {{fieldDefinitions}}{{staticField}}{{bodyDefinition}}
+        {{fieldDefinitions}}{{staticField}}{{callDefinitions}}{{bodyDefinition}}
         """ + "\n" + (workload is "calls" or "tablecalls" ? """
         /-- The callee every call of the calls body enters; it returns its argument. -/
         def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }

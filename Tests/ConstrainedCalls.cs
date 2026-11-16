@@ -95,15 +95,16 @@ foreach (var (name, type, expected) in new[]
         #print axioms constrained_result
         """);
 
-    var call = name == "DirectGeneric" ? ".call 1 2" : ".call 2 1";
-    if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
+    var calls = DirectLinks(source, name == "DirectGeneric" ? 1 : 2);
+    if (calls.Length != 1) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
     var narrowed = Narrowed(source, out var control);
     File.AppendAllText(proof, "\n" + control);
     evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
     if (!type.Contains('`') && !name.StartsWith("Closed", StringComparison.Ordinal))
     {
-        File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
+        // The link names another method than the one the constraint resolves.
+        File.WriteAllText(forged, ForgeLink(narrowed, calls[0].Method, calls[0].Pc, ".direct 0"));
         rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
     }
     if (type.Contains('`'))
@@ -304,20 +305,21 @@ if (!offCaller.Success || !offGetter.Success || !onGetter.Success)
     throw new Exception("Missing constant flag mutation targets");
 var (callerIndex, offIndex, onIndex) =
     (offCaller.Groups[1].Value, offGetter.Groups[1].Value, onGetter.Groups[1].Value);
-var offCall = $".call {offIndex} 0";
+var offCalls = DirectLinks(flags, int.Parse(offIndex, System.Globalization.CultureInfo.InvariantCulture))
+    .Where(call => call.Method.ToString(System.Globalization.CultureInfo.InvariantCulture) == callerIndex).ToArray();
 var callerStates = Regex.Match(flags, $@"(?m)^def method{callerIndex}FeatureStates : [^\r\n]+");
 var offBody = Regex.Match(flags, $@"(?m)^def method{offIndex}Closed : [^\r\n]+");
 var offStates = Regex.Match(flags, $@"(?m)^def method{offIndex}FeatureStates : [^\r\n]+");
 const string offWord = "stack := [some (BitVec.ofInt 32 (0))]";
 const string offLoad = "{ offset := 0, opcode := 22, operand := .none }";
-if (!flags.Contains(offCall, StringComparison.Ordinal) ||
+if (offCalls.Length != 1 ||
     !callerStates.Value.Contains(offWord, StringComparison.Ordinal) ||
     !offBody.Value.Contains(offLoad, StringComparison.Ordinal) ||
     !offStates.Value.Contains(offWord, StringComparison.Ordinal))
     throw new Exception("Missing constant flag mutation sites");
 foreach (var (mutation, forgedSource, obligation) in new[]
 {
-    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal), callerIndex),
+    ("swapped-callee", ForgeLink(flags, offCalls[0].Method, offCalls[0].Pc, $".direct {onIndex}"), callerIndex),
     ("forged-word", flags.Replace(callerStates.Value, new Regex(Regex.Escape(offWord)).Replace(
         callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal), callerIndex),
     ("callee-word", flags.Replace(offBody.Value, offBody.Value.Replace(offLoad,
@@ -433,12 +435,14 @@ var hiddenOverride = overrideSite.Success ? Regex.Match(spendOverride,
     @"overrides := \[\(" + overrideSite.Groups[1].Value + @", [^\r\n]+?DoublingAllowance"" \d+\)\)\]") : Match.Empty;
 var defaultBody = Regex.Match(spendDefault, @"def method(\d+)Original : Extraction.RawMethod := " +
     @"\{ token := \d+, owner := ""[^""]+::Examples.IAllowance\\u00601""");
-var defaultCalls = Regex.Matches(spendDefault, @"(?m)^  \.call " + defaultBody.Groups[1].Value + @" 1,\r?$");
-if (!defaultSite.Success || !hiddenOverride.Success || !defaultBody.Success || defaultCalls.Count != 1)
+var defaultCalls = defaultBody.Success
+    ? DirectLinks(spendDefault, int.Parse(defaultBody.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+    : [];
+if (!defaultSite.Success || !hiddenOverride.Success || !defaultBody.Success || defaultCalls.Length != 1)
     throw new Exception("Missing static virtual default mutation target");
 foreach (var (mutation, forgedSource) in new[]
 {
-    ("wrong-target", spendDefault.Replace(defaultCalls[0].Value, "  .call 0 1,", StringComparison.Ordinal)),
+    ("wrong-target", ForgeLink(spendDefault, defaultCalls[0].Method, defaultCalls[0].Pc, ".direct 0")),
     ("hidden-override", spendOverride.Replace(hiddenOverride.Value, "overrides := []", StringComparison.Ordinal)),
     ("method-argument", spendDefault.Replace(defaultSite.Value, defaultSite.Value.Replace(
         defaultSite.Groups[2].Value + ", ", defaultSite.Groups[3].Value + ", ", StringComparison.Ordinal),

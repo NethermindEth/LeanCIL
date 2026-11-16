@@ -104,8 +104,9 @@ theorem generic_argument_rejected :
   decide +kernel
 #print axioms generic_argument_rejected
 
-/-- A call operand that names another method with two parameters, so another argument count. -/
-def twoArguments : Method := { callCode with code := [.call (Tests.callee 2)] }
+/-- A call operand naming the method with a second parameter, so another argument count. -/
+def twoArguments : Method :=
+  { callCode with code := [.call { (callSite word).method with parameters := [.byref word, word] }] }
 
 /-- Structural proof construction rejects a call with an altered operand and argument count. -/
 theorem argument_count_rejected :
