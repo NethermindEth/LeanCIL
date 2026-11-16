@@ -210,6 +210,12 @@ void CheckInterfaceReuse()
         throw new InvalidOperationException("Consumer deep verification did not check the imported caller body.");
     Console.WriteLine("PASS consumer deep audit checks the caller with an independently audited published interface");
     RequireDeepImports(deepConsumer.deepImports, "published-interface consumer");
+    var reuseHits = deepConsumer.deepCacheHits;
+    deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null, null,
+        deepInputs);
+    if (deepConsumer.deepCacheHits != reuseHits + 1)
+        throw new InvalidOperationException("An unchanged published-interface deep request did not reuse its result.");
+    Console.WriteLine("PASS an unchanged published-interface deep request reuses its result");
     // Neither module is in the deep import closure, so a restored result meets the change only in later guards.
     foreach (var changedModule in new[] { "ExtractedImports", interfaceModule })
     {
@@ -224,7 +230,8 @@ void CheckInterfaceReuse()
             deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null,
                 stage =>
                 {
-                    if (stage != "deep checks" || changed) return;
+                    // The key is read after this stage, so the change meets the restore decision.
+                    if (stage != "deep-check sources" || changed) return;
                     var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
                         .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
                             File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
@@ -236,10 +243,17 @@ void CheckInterfaceReuse()
         }
         catch (Exception error) when (error is InvalidOperationException or InvalidDataException &&
             error.Message.Contains("changed", StringComparison.Ordinal)) { diagnostic = error.Message; }
+        var afterChange = Receipts();
+        string[] published = [.. afterChange.Where(pair => !beforeChange.TryGetValue(pair.Key, out var hash) ||
+            hash != pair.Value).Select(pair => pair.Key)];
         if (!changed || diagnostic is null || deepConsumer.deepCacheHits != hits + 1 ||
-            File.Exists(Path.Combine(selected.output, "verified.json")) || !Same(beforeChange, Receipts()))
+            File.Exists(Path.Combine(selected.output, "verified.json")) || published.Length != 0 ||
+            beforeChange.Count != afterChange.Count)
             throw new InvalidOperationException("A same-length change to " + changedModule +
-                " beside a restored deep result was not rejected without receipts: " + diagnostic);
+                " beside a restored deep result was not rejected without receipts: " + diagnostic + "; restored " +
+                (deepConsumer.deepCacheHits - hits) + ", report " +
+                File.Exists(Path.Combine(selected.output, "verified.json")) + ", receipts " +
+                string.Join(", ", published));
         Console.WriteLine("PASS a same-length " + changedModule + " change beside a restored deep result is " +
             "rejected without receipts: " + diagnostic.Split('\n')[0]);
     }
