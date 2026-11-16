@@ -573,19 +573,25 @@ static void CheckAssemblyCache()
             throw new InvalidOperationException("Distinct assembly rows aliased");
         if (AssemblyName.Of(references[2], image) is not null)
             throw new InvalidOperationException("Invalid token was admitted");
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        // A lookup that allocates does so in every sample; the runtime can allocate once on this thread during
+        // one sample (starting a tiering worker), so the check reads the least of three.
+        long allocated = long.MaxValue;
         var watch = Stopwatch.StartNew();
-        for (int repeat = 0; repeat < 4096; repeat++)
+        for (int sample = 0; sample < 3; sample++)
         {
-            if (!ReferenceEquals(first, AssemblyName.Of(references[0], image)) ||
-                !ReferenceEquals(second, AssemblyName.Of(references[1], image)) ||
-                AssemblyName.Of(references[2], image) is not null)
-                throw new InvalidOperationException("Assembly row result was not retained by its image");
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int repeat = 0; repeat < 4096; repeat++)
+            {
+                if (!ReferenceEquals(first, AssemblyName.Of(references[0], image)) ||
+                    !ReferenceEquals(second, AssemblyName.Of(references[1], image)) ||
+                    AssemblyName.Of(references[2], image) is not null)
+                    throw new InvalidOperationException("Assembly row result was not retained by its image");
+            }
+            allocated = Math.Min(allocated, GC.GetAllocatedBytesForCurrentThread() - before);
         }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         if (allocated > 4096)
             throw new InvalidOperationException($"Repeated assembly rows allocated {allocated} bytes");
-        Console.WriteLine($"PASS assembly key {keyBytes} bytes: 12288 lookups, {allocated} bytes, " +
+        Console.WriteLine($"PASS assembly key {keyBytes} bytes: 12288 lookups, {allocated} bytes minimum of 3, " +
             $"{watch.Elapsed.TotalMilliseconds:F3} ms");
         byte[] otherBytes = Create(keyBytes, "Other");
         using var otherPe = new PEReader(new MemoryStream(otherBytes));
