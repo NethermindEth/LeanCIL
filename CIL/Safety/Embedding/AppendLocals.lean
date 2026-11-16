@@ -1177,7 +1177,8 @@ theorem step_appendLocals_call (method : CIL.Extraction.MethodRef) (prefixes : C
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step modelStep observedCall runModel intrinsicCall referenceCompareCall
+    referenceSubtractCall featureCall typedTransferCall skipInitCall
   frame_natural
 
 #print axioms step_appendLocals_call

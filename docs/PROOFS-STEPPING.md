@@ -256,7 +256,10 @@ width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and 
   supplied fact. Every call-family step (`.call`, `.callInstance`, `.callVirtual`, `.newobj`
   and `.managed`) rewrites with its link fact, the generated one or else a supplied
   `body.linkAt pc = link`, in the same pass as its equation, so only the arm of the link's kind is
-  simplified.
+  simplified. A `.call` with no link runs its method's runtime model; `cil_runtime_models body`
+  states `body_model{pc} : runtimeModel body.environment .call method = some model` at each such
+  pc of a named body, which the stepper rewrites with beside the link fact, and the
+  `reduceRuntimeModel` simproc evaluates the lookup for a literal body.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies
@@ -783,7 +786,8 @@ for a direct call or construction, the dispatch table's bodies for a virtual cal
 authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and
 `step_newobj_aggregate_action`, which takes the `.aggregate` link of a `newobj`, separate a call from a
-construction. The module imports only the step
+construction; `step_call_action` also gives a call whose pc states no link, whose runtime model
+continues at `pc + 1` in the same frame. The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.
 

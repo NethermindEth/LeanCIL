@@ -292,6 +292,37 @@ theorem Memory.Equivalent.fieldStore {m n : Memory} (same : m.Equivalent n) (bod
   all_goals exact .error _
 #print axioms Memory.Equivalent.fieldStore
 
+/-- Equivalent memories give a call's runtime model equivalent results. -/
+theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
+    (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc : Nat) (frame : Frame)
+    (stack : List Value) :
+    ResultEquivalent FrameActionEquivalent (modelStep model body pc frame stack m)
+      (modelStep model body pc frame stack n) := by
+  unfold CIL.Safety.modelStep observedCall runModel intrinsicCall referenceCompareCall
+    referenceSubtractCall featureCall typedTransferCall skipInitCall
+  split
+  all_goals try split
+  all_goals try simp only [same.checkedValue, same.referenceEqual, same.referenceLess,
+    same.referenceSubtract, same.formValue]
+  all_goals repeat' first
+    | exact .error _
+    | exact .ok (.next same _ _ _)
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.memoryInstruction _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.instruction _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | split
+#print axioms Memory.Equivalent.modelStep
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -309,6 +340,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | exact same.managedStep _ _ _ _ _
     | unfold returnFrom
     | unfold localAllocation
+    | exact same.modelStep _ _ _ _ _
     | simp only [same.checkedValues]
     | (apply ResultEquivalent.bind (same.allocateElements _ _)
        intro left right related

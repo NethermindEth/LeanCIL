@@ -11,7 +11,7 @@ from model entries searched by the method's name code. At the leaf the entry's n
 owner head are compared, and the entry resolves the whole reference.
 `model_table%` writes a table as a literal balanced tree, so a lookup costs the depth of the tree
 and the comparison of one reference, never the size of the table. `ModelsAgree` requires that
-each live call site emits the model a catalog's table gives it. Modules that define entries import
+each live call site that does not keep its call emits the model a catalog's table gives it. Modules that define entries import
 this one; `CIL.Extraction.RuntimeModels` gathers them into the runtime table.
 -/
 
@@ -141,14 +141,16 @@ def callOpcode? : Nat → Option CallOpcode
   | 115 => some .newobj
   | _ => none
 
-/-- A raw instruction and its emission agree with `catalog`: at a `call` or `newobj` the
-    emission stands for exactly the model the table gives the site's method. -/
+/-- A raw instruction and its emission agree with `catalog`: at a `call` or `newobj` an
+    emission other than a call stands for exactly the model the table gives the site's method. A
+    call keeps its operand, and `ManagedCallsValid` decides whether a model or a link enters it. -/
 def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnvironment)
     (raw : RawInstruction) (emitted : Instruction) : Bool :=
-  match callOpcode? raw.opcode, raw.operand with
-  | some opcode, .call site =>
+  match callOpcode? raw.opcode, raw.operand, emitted with
+  | some _, .call _, .call .. => true
+  | some opcode, .call site, _ =>
     catalog.table.find environment opcode site.method == catalog.lowered emitted
-  | _, _ => true
+  | _, _, _ => true
 
 /-- Every live call site of `closed` emits in `code` the model `catalog` gives it, so a model
     emission is tied to the method it stands for and not only to its stack effect. -/

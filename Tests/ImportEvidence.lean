@@ -121,10 +121,10 @@ def caller : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .no
 def emitted : Method :=
   { returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .ldarg 2, emits site, .ret],
     links := [(3, .direct 1)] }
-example : ManagedCallsValid methods imports caller [true, true, true, true, true] emitted := by decide +kernel
-example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] caller [true, true, true, true, true] emitted := by decide +kernel
-example : ¬ ManagedCallsValid methods [] caller [true, true, true, true, true] emitted := by decide +kernel
-example : ManagedCallsValid methods [] caller [true, true, true, false, true] emitted := by decide +kernel
+example : ManagedCallsValid methods imports (fun _ => false) caller [true, true, true, true, true] emitted := by decide +kernel
+example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] (fun _ => false) caller [true, true, true, true, true] emitted := by decide +kernel
+example : ¬ ManagedCallsValid methods [] (fun _ => false) caller [true, true, true, true, true] emitted := by decide +kernel
+example : ManagedCallsValid methods [] (fun _ => false) caller [true, true, true, false, true] emitted := by decide +kernel
 
 /-- Two calls to the slot, at pcs 3 and 7, among nops. -/
 def callerTwice : RawMethod := { callee with code := [⟨0, 0, .none⟩, ⟨1, 0, .none⟩,
@@ -141,30 +141,30 @@ def liveTwice : List Bool := List.replicate 9 true
 def linkedTwice (links : List (Nat × Link)) : Method := { emittedTwice with links := links }
 
 -- A table is accepted when its keys ascend, sit at the call pcs and give each its call's link.
-example : ManagedCallsValid methods imports callerTwice liveTwice emittedTwice := by
+example : ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice emittedTwice := by
   decide +kernel
-example : ManagedCallsValid methods imports callerTwice liveTwice
+example : ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1), (7, .direct 1)]) := by decide +kernel
 -- A table that omits a call pc, even a dead one.
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1)]) := by decide +kernel
-example : ¬ ManagedCallsValid methods imports callerTwice (liveTwice.set 7 false)
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice (liveTwice.set 7 false)
     (linkedTwice [(3, .direct 1)]) := by decide +kernel
 -- A key at a pc that is not a call, or past the code.
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1), (5, .direct 1), (7, .direct 1)]) := by decide +kernel
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1), (7, .direct 1), (9, .direct 1)]) := by decide +kernel
 -- Keys out of order or repeated.
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(7, .direct 1), (3, .direct 1)]) := by decide +kernel
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1), (3, .direct 1), (7, .direct 1)]) := by decide +kernel
 -- Every key sits at a call pc with its call's link, but key 5 follows the larger key 7.
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1), (7, .direct 1), (5, .direct 1)]) := by decide +kernel
 -- A call pc linked to an extracted method instead of the slot its site names.
-example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+example : ¬ ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 0), (7, .direct 1)]) := by decide +kernel
 
 
@@ -176,7 +176,7 @@ example (raw : RawInstruction) (method : MethodRef) (prefixes : CallPrefixes) (t
 
 /-- Imported slot zero follows all extracted methods, even with a larger indexed table. -/
 theorem indexed_import_valid :
-    ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports
+    ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports (fun _ => false)
       { callee with code := [call site] } [true]
       { locals := [], returnsValue := false, code := [emits site],
         links := [(0, .direct 64)] } := by decide +kernel
@@ -184,7 +184,7 @@ theorem indexed_import_valid :
 
 /-- A target before the import table cannot borrow its slot zero by truncated subtraction. -/
 theorem indexed_import_underflow_rejected :
-    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports
+    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports (fun _ => false)
       { callee with code := [call site] } [true]
       { locals := [], returnsValue := false, code := [emits site],
         links := [(0, .direct 63)] } := by decide +kernel
@@ -192,7 +192,7 @@ theorem indexed_import_underflow_rejected :
 
 /-- A missing imported slot is rejected rather than replaced with a default descriptor. -/
 theorem indexed_import_missing_rejected :
-    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports
+    ¬ ManagedCallsValid (List.replicate 64 ⟨[], callee⟩) imports (fun _ => false)
       { callee with code := [call site] } [true]
       { locals := [], returnsValue := false, code := [emits site],
         links := [(0, .direct 65)] } := by decide +kernel

@@ -169,7 +169,7 @@ internal static class InstructionTranslation
         {
             var r = (MethodReference)i.Operand;
             if (i.OpCode.Code == Code.Call
-                && RuntimeModels.ObjectConstructor(r)) return new StackOperation(StackOpcode.Pop);
+                && RuntimeModels.ObjectConstructor(r)) return new ModelCall();
             if (RuntimeModel(r, profile) is { } modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);

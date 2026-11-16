@@ -1,18 +1,21 @@
 import CIL.Extraction.ModelTable
+import CIL.Extraction.ObjectConstruction
 
 /-!
 # Runtime model resolution
 
-`runtimeModel` resolves a call through the table of every modelled runtime method, and
-`RuntimeModelsAgree`, part of `MethodEvidenceValid`, requires each live call site of a method to
-emit the model its method reference stands for. A runtime method enters `modelEntries` together
-with the emissions its model stands for in `runtimeCatalog`.
+`runtimeModel` resolves a call through the table of every modelled runtime method. A call of a
+modelled method keeps its call and states no link (`callModelled`, which `ManagedCallsValid`
+reads), and the checked interpreter runs the model its operand names. `RuntimeModelsAgree`,
+part of `MethodEvidenceValid`, requires every other emission at a live call site to be the model
+its method reference stands for. A runtime method enters `modelEntries` together with the
+emissions its model stands for in `runtimeCatalog`.
 -/
 
 namespace CIL.Extraction
 
 /-- The runtime methods with a model. -/
-def modelEntries : List ModelEntry := []
+def modelEntries : List ModelEntry := [objectConstructorEntry]
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -22,12 +25,34 @@ def runtimeModel (environment : LayoutEnvironment) (opcode : CallOpcode) (method
     Option RuntimeModel :=
   runtimeModels.find environment opcode method
 
-/-- The runtime models with the emissions they account for. -/
+/-- Whether a runtime model stands for a `call` of `method` in `body`, which then states no
+    link. -/
+def callModelled (body : Method) (method : MethodRef) : Bool :=
+  (runtimeModel body.environment .call method).isSome
+
+/-- No model of the runtime table consults the profile, so `Instruction.ProfileAgreement` says
+    nothing of calls; an entry whose model does must extend it. -/
+theorem runtimeModel_readsProfile {environment : LayoutEnvironment} {opcode : CallOpcode}
+    {method : MethodRef} {model : RuntimeModel}
+    (found : runtimeModel environment opcode method = some model) :
+    model.readsProfile = false := by
+  revert found
+  simp only [runtimeModel, runtimeModels, ModelTable.find, SearchTree.find?]
+  split <;> simp [List.find?, objectConstructorEntry, ModelEntry.exact, Option.bind] <;>
+    grind [RuntimeModel.readsProfile]
+
+#print axioms runtimeModel_readsProfile
+
+/-- The runtime models with the emissions they account for: `pop` does what the
+    `System.Object` constructor's model does, so it stands for no other call. -/
 def runtimeCatalog : ModelCatalog where
   table := runtimeModels
-  lowered _ := none
+  lowered
+    | .pop => some .objectConstructor
+    | _ => none
 
-/-- Each live call site of a method emits the runtime model its method reference stands for. -/
+/-- Each live call site of a method keeps its call or emits the runtime model its method
+    reference stands for. -/
 def RuntimeModelsAgree (closed : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
   ModelsAgree runtimeCatalog method.environment closed reachable method.code
 

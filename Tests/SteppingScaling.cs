@@ -67,7 +67,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
     ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false),
-    ("constructions", [16, 64, 256], false)
+    ("constructions", [16, 64, 256], false), ("objectconstructors", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -133,6 +133,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // The statics body loads one static field and pops it per cycle, with one static site per load.
 // The constructions body constructs a class instance and pops it per cycle, so each `newobj` reads its
 // `.object` link from the body's table and one allocation fact and enters a constructor that returns.
+// The objectconstructors body calls the `System.Object` constructor on its object argument per cycle, so
+// each call reads that its pc has no link and the runtime model fact of its pc.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
@@ -152,6 +154,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "constructions" => ([], [$".newobj {{ owner := {NodeType}, name := name!\".ctor\", hasThis := true, " +
         "genericArity := 0, returnType := .void, parameters := [] }", ".pop"], [".ldc_i4 0", ".ret"]),
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
+    "objectconstructors" => ([], [".ldarg 0", ".call CIL.Extraction.objectConstructorMethod {}"],
+        [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -257,7 +261,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
         "allocation" or "constructions" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
-        "objects" =>
+        "objects" or "objectconstructors" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         _ => ""
     };
@@ -302,6 +306,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         /-- The constructor every construction of the constructions body enters; it returns at once. -/
         def constructor : CIL.Method := { locals := [], returnsValue := false, code := [.ret] }
         cil_instruction_equations constructor
+        """ + "\n" : "") + (workload == "objectconstructors" ? """
+        cil_runtime_models body
         """ + "\n" : "") + (workload is "arguments" or "homes" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{(statics ? "{}" : signature)}} := rfl
@@ -528,6 +534,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
                   .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [formed, located, loaded]
+            """,
+        "objectconstructors" => $$"""
+            /-- Every call of the `System.Object` constructor consumes the receiver and keeps the memory. -/
+            theorem checked (memory : Memory) (object : Reference)
+                (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+                invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [formed]
             """,
         "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/

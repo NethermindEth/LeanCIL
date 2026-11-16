@@ -36,7 +36,7 @@ def callCode (count : Nat) : Method :=
 /-- The original scan: positional table lookups and a scan of the link table at every pc. -/
 def managedOriginal (count : Nat) : Bool :=
   all3 (fun instruction (live, link) operation =>
-      validateLinkedCallWith count ((methods count)[·]?) (([] : List ImportSlot)[·]?)
+      validateLinkedCallWith (fun _ => false) count ((methods count)[·]?) (([] : List ImportSlot)[·]?)
         instruction live link operation)
     (calls count).code ((List.replicate count true).zip
       ((List.range count).map (callCode count).linkAt)) (callCode count).code
@@ -48,11 +48,11 @@ theorem constrainedNew128 : ConstrainedCallsValid [] [] (nops 128)
 /-- Original constrained validation. -/
 theorem constrainedOld128 : (List.range 128).all
     (constrainedSiteValid [] [] (nops 128)
-    (List.replicate 128 true) (List.replicate 128 .nop)) = true := by
+    (List.replicate 128 true) (emitted (List.replicate 128 .nop))) = true := by
   decide +kernel
 #print axioms constrainedOld128
 /-- Indexed managed calls. -/
-theorem managedNew128 : ManagedCallsValid (methods 128) [] (calls 128)
+theorem managedNew128 : ManagedCallsValid (methods 128) [] (fun _ => false) (calls 128)
     (List.replicate 128 true) (callCode 128) := by
   decide +kernel
 #print axioms managedNew128
@@ -69,11 +69,11 @@ theorem constrainedNew512 : ConstrainedCallsValid [] [] (nops 512)
 /-- Original constrained validation. -/
 theorem constrainedOld512 : (List.range 512).all
     (constrainedSiteValid [] [] (nops 512)
-    (List.replicate 512 true) (List.replicate 512 .nop)) = true := by
+    (List.replicate 512 true) (emitted (List.replicate 512 .nop))) = true := by
   decide +kernel
 #print axioms constrainedOld512
 /-- Indexed managed calls. -/
-theorem managedNew512 : ManagedCallsValid (methods 512) [] (calls 512)
+theorem managedNew512 : ManagedCallsValid (methods 512) [] (fun _ => false) (calls 512)
     (List.replicate 512 true) (callCode 512) := by
   decide +kernel
 #print axioms managedNew512

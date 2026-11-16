@@ -1949,4 +1949,25 @@ example : True := by
       throwError "cil_step equations about CIL.Safety.step proved by rfl: {rflEquations.toList}"
   trivial
 
+/-- A constructor whose explicit link table keys only its later call: the `System.Object`
+    constructor call at pc 1 states no link and runs its runtime model. -/
+def modelledConstructor : CIL.Method :=
+  { locals := [], returnsValue := true, links := [(3, .direct 1)],
+    code := [.ldarg 0, .call CIL.Extraction.objectConstructorMethod {}, .ldarg 1,
+      .call (Tests.callee 1) {}, .ret] }
+cil_instruction_equations modelledConstructor
+cil_runtime_models modelledConstructor
+/-- The method the linked call enters; it returns its argument. -/
+def passThrough : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
+cil_instruction_equations passThrough
+
+/-- The model call consumes the receiver and the linked call returns the second argument. -/
+theorem modelled_then_linked (memory : Memory) (object : Reference) (word : CIL.W64)
+    (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+    invoke [modelledConstructor, passThrough] 10 0
+      [.object (.address object), .scalar (.i64 word)] memory =
+      .ok (memory, [.scalar (.i64 word)]) := by
+  cil_checked_steps [formed]
+#print axioms modelled_then_linked
+
 end Tests.Automation

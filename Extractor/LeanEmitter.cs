@@ -284,13 +284,17 @@ internal static class LeanEmitter
             // A call names the method its raw operand names; a constrained one also the type the definition just
             // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)
-                if (ops[pc] is Call { Kind: not CallKind.Instance } call)
-                    ops[pc] = call with
+                ops[pc] = ops[pc] switch
+                {
+                    Call { Kind: not CallKind.Instance } call => call with
                     {
                         Site = genericEvidence.MethodReferenceOf(m, pc),
                         ConstrainedType = call.Constrained
                             ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
-                    };
+                    },
+                    ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
+                    var operation => operation
+                };
             if (collectTemplates)
                 templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // A class field access names its operand's definition, so stepping reads that operand's shape fact.
@@ -332,6 +336,8 @@ internal static class LeanEmitter
             // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
             // in time linear in the body, so a stepping proof reads a link without evaluating the table lookup.
             lean.AppendLine($"cil_instruction_equations method{n}");
+            // A modelled call's step reads its model from the fact the command states for its pc.
+            if (ops.Any(op => op is ModelCall)) lean.AppendLine($"cil_runtime_models method{n}");
             (string Field, string Value)[] facts =
             [
                 ("profile", "profile"), ("locals", $"[{frame.LocalsLean}]"),
@@ -366,7 +372,8 @@ internal static class LeanEmitter
                 $"method{n}, method{n}Reachable, method{n}DispatchTypes";
             var proof = callDefinitions[n] is null ? Decide : $"by cil_managed_calls [{facts}]";
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
-                $"specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
+                $"specializedMethods imports (Extraction.callModelled method{n}) " +
+                $"(Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
                 $"method{n}Closed) method{n}Reachable method{n} := {proof}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");

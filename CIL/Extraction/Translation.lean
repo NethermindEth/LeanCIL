@@ -335,7 +335,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
   FeatureFlowValid rawLayouts.toArray (evidenceConstants all) (linkIndex method) item.closed
     method.profile item.featureStates item.reachable method.code ∧
-  ManagedCallsValid (specializationTable all) imports
+  ManagedCallsValid (specializationTable all) imports (callModelled method)
     (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid item.closed method ∧

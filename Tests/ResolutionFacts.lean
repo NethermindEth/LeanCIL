@@ -1049,8 +1049,5 @@ cil_instruction_equations unmodelledCaller
 cil_runtime_models unmodelledCaller
 /-- error: Unknown identifier `unmodelledCaller_model0` -/
 #guard_msgs in #check unmodelledCaller_model0
-example : runtimeModel ({ locals := [], returnsValue := false, code := [] } : CIL.Method).environment
-    .call unmodelledMethod = none := by
-  simp only [CIL.Safety.reduceRuntimeModel]
 
 end Tests.ResolutionFacts

@@ -189,11 +189,13 @@ theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option
 end InstructionEquations
 
 /-- What a call taking `count` arguments does under the link `link` of its pc: enter a `.direct`
-    link's method, under `tail.` with the whole stack and retiring the frame; any other link
-    faults. A regular definition, so the kernel checks a rewrite of its arguments by comparing
-    them, where a `match` on the link would make it evaluate the table's read. -/
-def callStep (link : Option CIL.Link) (count : Nat) (tail : Bool) (stack : List Value)
-    (memory : Memory) : ExecutionResult FrameAction :=
+    link's method, under `tail.` with the whole stack and retiring the frame; without a link run
+    `unlinked`, the call's runtime model, unless under `tail.`; any other link faults. A regular definition, so the
+    kernel checks a rewrite of its arguments by comparing them, where a `match` on the link would
+    make it evaluate the table's read. -/
+def callStep (link : Option CIL.Link) (count : Nat) (tail : Bool)
+    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) (memory : Memory) :
+    ExecutionResult FrameAction :=
   match link with
   | some (.direct callee) =>
     if tail then
@@ -204,20 +206,24 @@ def callStep (link : Option CIL.Link) (count : Nat) (tail : Bool) (stack : List 
     else do
       let arguments ← (stack.take count).reverse.mapM (checkedValue memory)
       return FrameAction.call callee arguments (stack.drop count) memory
-  | _ => .error unlinkedCall
+  | none => if tail then .error unlinkedCall else unlinked ()
+  | some _ => .error unlinkedCall
 
 section InstructionEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
 /-- A call enters the method its link names, after checking the arguments its method takes,
-    deepest first, as `callStep` says. -/
+    deepest first, and a call without a link runs its method's runtime model, as `callStep`
+    says. -/
 @[cil_step] theorem step_call_eq (method : Extraction.MethodRef) (prefixes : CallPrefixes)
     (stack : List Value) :
     step body (.call method prefixes) pc args frame stack memory =
       if unspecifiedOperands method.argumentCount stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else callStep (body.linkAt pc) method.argumentCount prefixes.tail stack memory := by
+      else callStep (body.linkAt pc) method.argumentCount prefixes.tail
+        (fun _ => modelStep (Extraction.runtimeModel body.environment .call method) body pc frame
+          stack memory) stack memory := by
   simp only [step, observerCount, callStep]
   rfl
 
@@ -225,8 +231,9 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 /-- A plain call checks its arguments, deepest first, and leaves the rest of the stack for the
     caller's continuation. -/
-@[cil_step] theorem callStep_call (callee count : Nat) (stack : List Value) :
-    callStep (some (.direct callee)) count false stack memory =
+@[cil_step] theorem callStep_call (callee count : Nat)
+    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
+    callStep (some (.direct callee)) count false unlinked stack memory =
       if stack.length < count then .error .invalidState
       else do
         let arguments ← (stack.take count).reverse.mapM (checkedValue memory)
@@ -235,8 +242,9 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 #print axioms callStep_call
 
 /-- A call under `tail.` takes the whole stack as its arguments and retires the frame. -/
-@[cil_step] theorem callStep_tailCall (callee count : Nat) (stack : List Value) :
-    callStep (some (.direct callee)) count true stack memory =
+@[cil_step] theorem callStep_tailCall (callee count : Nat)
+    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
+    callStep (some (.direct callee)) count true unlinked stack memory =
       if stack.length != count then .error .invalidState
       else do
         return FrameAction.tailCall callee (← stack.reverse.mapM (checkedValue memory)) memory :=
@@ -244,16 +252,46 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 #print axioms callStep_tailCall
 
-/-- A call whose pc has no `.direct` link faults. -/
-@[cil_step] theorem callStep_unlinked (link : Option CIL.Link) (count : Nat) (tail : Bool)
-    (stack : List Value) (undirected : ∀ callee, link ≠ some (.direct callee)) :
-    callStep link count tail stack memory = .error unlinkedCall := by
+/-- A call whose pc has a link other than a `.direct` one faults. -/
+@[cil_step] theorem callStep_unlinked (link : CIL.Link) (count : Nat) (tail : Bool)
+    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value)
+    (undirected : ∀ callee, link ≠ .direct callee) :
+    callStep (some link) count tail unlinked stack memory = .error unlinkedCall := by
   unfold callStep
   split
-  · exact absurd rfl (undirected _)
+  · exact absurd (Option.some.inj ‹_›) (undirected _)
+  · contradiction
   · rfl
 
 #print axioms callStep_unlinked
+
+/-- A call whose pc states no link runs its runtime model. -/
+@[cil_step] theorem callStep_none (count : Nat)
+    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
+    callStep none count false unlinked stack memory = unlinked () := rfl
+
+#print axioms callStep_none
+
+/-- A `tail.` call whose pc states no link faults, since a model retires no frame. -/
+@[cil_step] theorem callStep_none_tail (count : Nat)
+    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
+    callStep none count true unlinked stack memory = .error unlinkedCall := rfl
+
+#print axioms callStep_none
+
+/-- A call without a link whose method has no runtime model faults. -/
+@[cil_step] theorem modelStep_none (stack : List Value) :
+    modelStep none body pc frame stack memory = .error unlinkedCall := rfl
+
+#print axioms modelStep_none
+
+/-- The `System.Object` constructor consumes its receiver and changes nothing else, as `pop`
+    does. -/
+@[cil_step] theorem modelStep_objectConstructor (receiver : Value) (rest : List Value) :
+    modelStep (some .objectConstructor) body pc frame (receiver :: rest) memory =
+      .ok (.next (pc + 1) rest frame memory) := rfl
+
+#print axioms modelStep_objectConstructor
 
 /-- `localloc` allocates frame storage, zeroed as the body's declared localsinit flag says. -/
 @[cil_step] theorem step_localloc_eq (stack : List Value) :
