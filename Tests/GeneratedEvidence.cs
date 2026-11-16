@@ -58,9 +58,10 @@ partial class Program
     /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
 
-    /// <summary>The numbers of the methods an extraction defines, by a literal or from the decoder, in order.</summary>
+    /// <summary>The numbers of the methods an extraction defines, by a literal or by its decoder.</summary>
     static int[] DefinedMethods(string source) => [.. Regex.Matches(source,
-            @"(?m)^(?:def method(?<number>\d+) : Method|cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?) :=")
+            @"(?m)^(?:def method(?<number>\d+) : Method|" +
+            @"cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?) :=")
         .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
 
     /// <summary>

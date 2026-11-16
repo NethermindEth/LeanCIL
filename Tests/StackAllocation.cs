@@ -90,7 +90,8 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
     if (!DecodedOriginal(source, 0).Contains("initLocals := false,", StringComparison.Ordinal))
         throw new Exception("Missing uninitialized allocation");
     var forged = Path.Combine(root, "forged-initialization.lean");
-    File.WriteAllText(forged, ForgeDecodedMethod(source, 0, "declared := { method.declared with initLocals := true }"));
+    File.WriteAllText(forged,
+        ForgeDecodedMethod(source, 0, "declared := { method.declared with initLocals := true }"));
     var rejected = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejected.Code == 0 || !rejected.Output.Contains("DeclaredValid", StringComparison.Ordinal))
         throw new Exception("Forged localsinit was not rejected by the Lean certificate: " + rejected.Output);
