@@ -119,6 +119,7 @@ BuildLeanTestLibraries("Certificate index, feature getter, layout and home index
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations
 // cost quadratic time, which this fixture reports as a per-instruction cost that grows with the method.
 const int ShortStatements = 125;
+const int MiddleStatements = 250;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
 const double AllowedGrowth = 1.15;
@@ -1408,7 +1409,7 @@ string Sparse(string name, int statements) =>
     string.Concat(Enumerable.Repeat("word = word * y + x; ", statements)) +
     "word = Step(word, y); return word; } ";
 File.WriteAllText(Path.Combine(source, "Lookups.cs"), "public static class Lookups { " +
-    Method("Short", ShortStatements) + Method("Long", LongStatements) +
+    Method("Short", ShortStatements) + Method("Middle", MiddleStatements) + Method("Long", LongStatements) +
     "public static ulong Step(ulong a, ulong b) { return a * b + a; } " +
     Calling("Few", FewCalls) + Calling("Many", ManyCalls) +
     Sparse("SparseShort", SparseShortStatements) + Sparse("SparseLong", SparseLongStatements) + "}");
@@ -1416,30 +1417,69 @@ Run(["dotnet", "build", Path.Combine(source, "Lookups.csproj"), "-c", "Release"]
 var assembly = Path.Combine(source, "bin/Lookups.dll");
 
 // The heartbeats `text` costs, imports included.
-long Heartbeats(string path, string text, bool equations = true)
+long Heartbeats(string path, string text, bool equations = true) => Reported(path, text, equations).Count;
+
+// The heartbeats `text` costs, imports included, and Lean's output.
+(long Count, string Output) Reported(string path, string text, bool equations = true)
 {
     var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
     if (equations && Regex.Matches(output, @"_instruction[0-9]+' depends on axioms: \[propext\]").Count != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
-    return count;
+    return (count, output);
 }
 
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement
 // stepping tactics rewrite with, depend on `propext` alone, and still be fetched by `cil_code`.
-long Checked(string path, string text, string binder, string method, string equation, int last)
+(long Count, string Output) Checked(string path, string text, string binder, string method, string equation,
+    int last)
 {
     var statement = $"example {binder}: {method}.code[{last}]? = some CIL.Instruction.ret";
-    return Heartbeats(path, text + $"""
+    return Reported(path, text + $"""
 
         {statement} := {equation}
         {statement} := by simp only [cil_code]
         """);
 }
 
+// The extraction with its call check and its method evidence theorem each reporting the heartbeats it costs alone.
+string WithEvidenceCosts(string extracted)
+{
+    const string Command = """
+        /-- Elaboration and kernel checking of one command, labelled in the report. -/
+        elab "#evidence_cost " label:str " in " command:command : command => do
+          let before <- IO.getNumHeartbeats
+          Lean.Elab.Command.elabCommand command
+          let after <- IO.getNumHeartbeats
+          Lean.logInfo m!"evidence {label.getString} {after - before} heartbeats"
+
+        """;
+    var namespaces = LookupPatterns.ExtractedNamespace().Matches(extracted).Count;
+    var calls = LookupPatterns.CallsTheorem().Matches(extracted).Count;
+    var evidence = LookupPatterns.EvidenceTheorem().Matches(extracted).Count;
+    if (namespaces != 1 || calls != 1 || evidence != 1)
+        throw new InvalidOperationException("Missing the namespace, call check or evidence theorem of method0.");
+    var labelled = LookupPatterns.ExtractedNamespace().Replace(extracted, match => Command + match.Value);
+    labelled = LookupPatterns.CallsTheorem().Replace(labelled,
+        match => "#evidence_cost \"calls\" in\n" + match.Value);
+    return LookupPatterns.EvidenceTheorem().Replace(labelled,
+        match => "#evidence_cost \"assembly\" in\n" + match.Value);
+}
+
+// The heartbeats of the call check and of the evidence theorem that `WithEvidenceCosts` reports.
+(long Calls, long Assembly) EvidenceCosts(string output)
+{
+    var costs = LookupPatterns.EvidenceCost().Matches(output).ToDictionary(match => match.Groups[1].Value,
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    return costs.Count == 2 && costs.TryGetValue("calls", out var calls) &&
+        costs.TryGetValue("assembly", out var assembled)
+        ? (calls, assembled)
+        : throw new InvalidOperationException("Missing the call check and evidence theorem costs:\n" + output);
+}
+
 // The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
 // hand-written body with a parameter, and the shared template of the extraction.
-(int Instructions, long[] Heartbeats) Measure(string name)
+(int Instructions, long[] Heartbeats, (long Calls, long Assembly) Evidence) Measure(string name)
 {
     var output = Path.Combine(directory, name);
     Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
@@ -1461,7 +1501,7 @@ long Checked(string path, string text, string binder, string method, string equa
     var instructions = definition.Groups[1].Captures.Count;
     var last = instructions - 1;
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
-        extracted + $"\n#print axioms Extracted.method0_instruction{last}\n",
+        WithEvidenceCosts(extracted) + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
     var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := " +
@@ -1481,7 +1521,7 @@ long Checked(string path, string text, string binder, string method, string equa
     var template = Checked(Path.Combine(shared, "Measured.lean"), templates,
         Binder, "(Templates.method0 profile environment)",
         $"Templates.method0_instruction{last} profile environment", last);
-    return (instructions, [extraction, command, template]);
+    return (instructions, [extraction.Count, command.Count, template.Count], EvidenceCosts(extraction.Output));
 }
 
 var imports = Path.Combine(directory, "Imports.lean");
@@ -1496,7 +1536,7 @@ Console.WriteLine($"PASS {extended.Instructions} instructions compile at the emi
 string[] producers = ["an extracted method", "a cil_instruction_equations body", "a generated template"];
 for (var producer = 0; producer < producers.Length; producer++)
 {
-    double Cost((int Instructions, long[] Heartbeats) run) =>
+    double Cost((int Instructions, long[] Heartbeats, (long, long) Evidence) run) =>
         (double)(run.Heartbeats[producer] - floor) / run.Instructions;
     var growth = Cost(extended) / Cost(brief);
     var measured = string.Create(CultureInfo.InvariantCulture,
@@ -1507,6 +1547,31 @@ for (var producer = 0; producer < producers.Length; producer++)
             $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
+
+// A body with no call at three lengths. Its call check reads every pc's link by one walk, so it costs the same per
+// instruction; its evidence theorem is assembled from the conjuncts' theorems and costs the same at every length.
+// A conjunct stated through another term than `MethodEvidenceValid` states makes the assembly reduce the whole body.
+var middleOutput = Path.Combine(directory, "Middle");
+Run(Extract("extract", assembly, "Lookups", "Lookups::Middle(ulong,ulong)", middleOutput));
+var middle = EvidenceCosts(Reported(Path.Combine(middleOutput, "Measured.lean"),
+    WithEvidenceCosts(File.ReadAllText(Path.Combine(middleOutput, "Extracted.lean"))), equations: false).Output);
+(int Statements, long Calls, long Assembly)[] evidenceSamples = [
+    (ShortStatements, brief.Evidence.Calls, brief.Evidence.Assembly),
+    (MiddleStatements, middle.Calls, middle.Assembly),
+    (LongStatements, extended.Evidence.Calls, extended.Evidence.Assembly)];
+var evidenceMeasured = string.Join("; ", evidenceSamples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+    $"{sample.Statements} statements = {(double)sample.Calls / sample.Statements:F0} per statement for the call " +
+    $"check and {sample.Assembly} for the evidence theorem")));
+if (evidenceSamples.Any(sample => sample.Calls < KernelDecisionFloor || sample.Assembly < KernelDecisionFloor) ||
+    evidenceSamples.Skip(1).Zip(evidenceSamples).Any(pair =>
+        (double)pair.First.Calls / pair.First.Statements >
+            (double)pair.Second.Calls / pair.Second.Statements * AllowedGrowth ||
+        pair.First.Assembly > pair.Second.Assembly * AllowedGrowth))
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Checking the evidence of a body with no call costs {evidenceMeasured} heartbeats; the limit is " +
+        $"{AllowedGrowth} times the cost per statement of the call check and the cost of the evidence theorem at " +
+        $"the length before."));
+Console.WriteLine($"PASS checking the evidence of a body with no call costs {evidenceMeasured} heartbeats");
 
 // The extraction of a body with many calls: its link table, key check, per-site facts and the checks that
 // tie them together must each cost the same per call site at four times the size.
@@ -2445,6 +2510,18 @@ enum LocalSlots
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
+    [GeneratedRegex(@"\bevidence (calls|assembly) ([0-9]+) heartbeats")]
+    internal static partial Regex EvidenceCost();
+
+    [GeneratedRegex(@"(?m)^namespace Extracted\r?$")]
+    internal static partial Regex ExtractedNamespace();
+
+    [GeneratedRegex(@"(?m)^theorem method0_calls_validated ")]
+    internal static partial Regex CallsTheorem();
+
+    [GeneratedRegex(@"(?m)^theorem method0_evidence_validated ")]
+    internal static partial Regex EvidenceTheorem();
+
     [GeneratedRegex(@"closed arguments [0-9]+ [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex ClosedArguments();
 

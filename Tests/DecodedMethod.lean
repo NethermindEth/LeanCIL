@@ -14,9 +14,11 @@ the bytes rather than the definition's. A stored argument takes a home. An instr
 the value family decodes to a hole carrying its opcode, which faults when stepped; a body the
 check refuses, or one with an argument instruction naming an undeclared argument, gives no
 method, and neither does a program with such a body. A method defined by `cil_decoded_method`
-is the decoder's method, written as literals its facts and stepping read. A call decodes to the
-method its operand names, with the target the supplied link table gives its pc, and the call
-check rejects a link that names another method.
+is the decoder's method, written as literals its facts and stepping read, with a zero-initialized
+struct local written as `List.replicate size 0` so frame entry gives the term a caller's
+hypothesis about making that local names. A call decodes to the method its operand names, with
+the target the supplied link table gives its pc, and the call check rejects a link that names
+another method.
 -/
 
 namespace Tests.DecodedMethod
@@ -424,5 +426,43 @@ theorem decoded_call_links :
       { callerMethod with links := [] } := by
   decide +kernel
 #print axioms decoded_call_links
+
+/-- `T::Word`, one `uint64`. -/
+private def wordLayout : RawLayout :=
+  { identity := "T::Word", explicit := false, packing := 0, declaredSize := 0,
+    fields := [{ type := .unsigned64 }] }
+
+/-- `T::Word` and the layout CoreCLR computes for it. -/
+@[cil_code] def wordEnvironment : LayoutEnvironment :=
+  { rawLayouts := [wordLayout],
+    layouts := #[⟨{ size := 8, fields := [{ offset := 0, width := 8 }] }, 8⟩] }
+
+/-- `ret` over one zero-initialized `T::Word` local. -/
+private def aggregateLocalRaw : RawMethod :=
+  method 8 true [.aggregate "T::Word" 0] [instr 0 0x2A]
+
+cil_decoded_method aggregateLocalMethod :=
+  Method.ofRaw? testProfile wordEnvironment [] aggregateLocalRaw []
+
+-- A zero-initialized struct local is written as an extraction's literal writes it, so a proof's
+-- hypothesis about making that local matches the goal frame entry leaves.
+/-- info: Tests.DecodedMethod.aggregateLocalMethod_locals :
+  aggregateLocalMethod.locals = [Value.aggregate (List.replicate 8 0)] -/
+#guard_msgs (whitespace := lax) in #check aggregateLocalMethod_locals
+
+open CIL.Safety in
+/-- Entering the decoded method's frame makes its struct local from `List.replicate 8 0`, the
+    term a caller's hypothesis about the local names. -/
+theorem aggregate_local_frame_entry (memory entered : Safety.Memory) (slot : Reference)
+    (made : makeLocal memory.nextIdentity (.aggregate 8) (.aggregate (List.replicate 8 0)) memory =
+      .ok (.bytes (.aggregate 8) slot, [slot.allocation], entered)) :
+    enterFrame aggregateLocalMethod [] memory =
+      .ok ({ activation := memory.nextIdentity, locals := [.bytes (.aggregate 8) slot],
+              owned := [slot.allocation] }, entered) := by
+  simp only [enterFrame, aggregateLocalMethod_opaqueVectorLocals, makeSelectedLocals,
+    List.isEmpty_nil, ite_true, aggregateLocalMethod_localKinds, aggregateLocalMethod_locals,
+    makeLocals, made, aggregateLocalMethod_parameterHomes, makeParameterHomes, List.map_nil,
+    Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
+#print axioms aggregate_local_frame_entry
 
 end Tests.DecodedMethod
