@@ -269,11 +269,15 @@ def address (field : WordField width) (object : Reference) : Reference :=
 def entry (field : WordField width) (object : Reference) : Reference × Nat :=
   (field.address object, width)
 
-/-- `op` loads or stores this field: a scalar field operation of its class, offset and width.
-    An extraction checks each field it names against an operation of its own code with this. -/
-def accessedBy (field : WordField width) : CIL.Instruction → Bool
-  | .memory (.objectField owner offset size _) | .memory (.setObjectField owner offset size) =>
-    owner == field.owner && offset == field.offset && size == width
+/-- `op` loads or stores this field: `ldfld` or `stfld` of a field of its class that `body`
+    resolves to a word slot of its width at its offset. An extraction checks each field it names
+    against an instruction of its own code with this. -/
+def accessedBy (field : WordField width) (body : CIL.Method) : CIL.Instruction → Bool
+  | .ldfld reference | .stfld reference =>
+    reference.owner == field.owner &&
+      match body.fieldShape reference with
+      | .classSlot offset (.word size _) => offset == field.offset && size == width
+      | _ => false
   | _ => false
 
 @[simp] theorem address_allocation (field : WordField width) (object : Reference) :
@@ -640,12 +644,15 @@ def address (field : ReferenceField) (object : Reference) : Reference :=
 def entry (field : ReferenceField) (object : Reference) : Reference × Nat :=
   (field.address object, objectFieldSlot)
 
-/-- `op` loads or stores this field: a reference field operation of its class and offset. An
-    extraction checks each field it names against an operation of its own code with this. -/
-def accessedBy (field : ReferenceField) : CIL.Instruction → Bool
-  | .memory (.objectReferenceField owner offset)
-  | .memory (.setObjectReferenceField owner offset) =>
-    owner == field.owner && offset == field.offset
+/-- `op` loads or stores this field: `ldfld` or `stfld` of a field of its class that `body`
+    resolves to a reference slot at its offset. An extraction checks each field it names against
+    an instruction of its own code with this. -/
+def accessedBy (field : ReferenceField) (body : CIL.Method) : CIL.Instruction → Bool
+  | .ldfld reference | .stfld reference =>
+    reference.owner == field.owner &&
+      match body.fieldShape reference with
+      | .classSlot offset .reference => offset == field.offset
+      | _ => false
   | _ => false
 
 @[simp] theorem address_allocation (field : ReferenceField) (object : Reference) :
@@ -987,11 +994,16 @@ def address (field : ArrayField element) (object : Reference) : Reference :=
 def entry (field : ArrayField element) (object : Reference) : Reference × Nat :=
   (field.address object, objectFieldSlot)
 
-/-- `op` loads or stores this field: a value-array field operation of its class, offset and
-    element. An extraction checks each field it names against an operation of its own code. -/
-def accessedBy (field : ArrayField element) : CIL.Instruction → Bool
-  | .memory (.arrayField owner offset held) | .memory (.setArrayField owner offset held) =>
-    owner == field.owner && offset == field.offset && held == element
+/-- `op` loads or stores this field: `ldfld` or `stfld` of a field of its class that `body`
+    resolves to a slot at its offset holding an array of its element, a struct element sized by
+    the checked layouts. An extraction checks each field it names against an instruction of its
+    own code. -/
+def accessedBy (field : ArrayField element) (body : CIL.Method) : CIL.Instruction → Bool
+  | .ldfld reference | .stfld reference =>
+    reference.owner == field.owner &&
+      match body.fieldShape reference with
+      | .classSlot offset (.array held) => offset == field.offset && held == element
+      | _ => false
   | _ => false
 
 /-- The element of the arrays the field holds, so a statement can name it through the field. -/

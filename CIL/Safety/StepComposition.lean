@@ -186,16 +186,19 @@ theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option
 
 #print axioms returnFrom_none_eq
 
-/-- A call checks its `argc` arguments, deepest first, and leaves the rest of the stack for the
-    caller's continuation. -/
-@[cil_step] theorem step_call_eq (callee argc : Nat) (stack : List Value) :
-    step body (.call callee argc) pc args frame stack memory =
+/-- A call enters the method its link names, after checking its `argc` arguments, deepest
+    first; the rest of the stack waits for the caller's continuation. -/
+@[cil_step] theorem step_call_eq (target argc : Nat) (stack : List Value) :
+    step body (.call target argc) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        return FrameAction.call callee arguments (stack.drop argc) memory := by
+      else match body.linkAt pc with
+        | some (.direct callee) =>
+          if stack.length < argc then .error .invalidState
+          else do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            return FrameAction.call callee arguments (stack.drop argc) memory
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
@@ -212,18 +215,63 @@ theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option
 
 #print axioms step_localloc_eq
 
+/-- `ldfld` reads the field as the body resolves it, behind the unspecified-bits guard.
+    Stepping uses this form only while the field's shape is unknown, and the equations of
+    `ObjectSteps` once it is known. -/
+theorem step_ldfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldfld field) pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, stack) ← fieldLoad body field stack memory
+        return .next (pc + 1) stack frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_ldfld_eq
+
+/-- `stfld` writes the field as the body resolves it, behind the unspecified-bits guard.
+    Stepping uses this form only while the field's shape is unknown. -/
+theorem step_stfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.stfld field) pc args frame stack memory =
+      if unspecifiedOperands 2 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, stack) ← fieldStore body field stack memory
+        return .next (pc + 1) stack frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_stfld_eq
+
+/-- `ldflda` faults as the body's resolution of the field says, behind the guard. Stepping
+    uses this form only while the field's shape is unknown. -/
+theorem step_ldflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldflda field) pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else .error (fieldAddressFault body field) := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_ldflda_eq
+
+attribute [cil_step] fieldLoad fieldStore fieldAddressFault
+
 attribute [cil_step] localAllocation
 
-/-- An indirect call through a method pointer enters the body `indirectTarget` selects; a fact
-    for that selection, which the kernel checks, decides it without comparing identities here. -/
+/-- An indirect call through a method pointer enters the body `indirectTarget` selects from the
+    catalog its link gives; a fact for that selection, which the kernel checks, decides it without
+    comparing identities here. -/
 @[cil_step] theorem step_managed_call_eq (signature : CIL.ManagedSignature)
-    (catalog : List CIL.ManagedTarget) (tail : Bool) (pointer : CIL.MethodPointer)
+    (stated : List CIL.ManagedTarget) (tail : Bool) (pointer : CIL.MethodPointer)
     (values : List Value) :
-    step body (.managed (.call signature catalog tail)) pc args frame
+    step body (.managed (.call signature stated tail)) pc args frame
         (.methodPointer pointer :: values) memory =
       if unspecifiedOperands (signature.parameters.length + 1) (.methodPointer pointer :: values)
       then .error (.unsupported "Instruction observes unspecified vector bits")
       else do
+        let some (.indirect catalog) := body.linkAt pc | .error unlinkedCall
         let some method := indirectTarget signature catalog pointer | .error .invalidState
         let count := signature.parameters.length
         if (if tail then values.length != count else values.length < count) then
@@ -231,7 +279,7 @@ attribute [cil_step] localAllocation
         let arguments ← (values.take count).reverse.mapM (checkedValue memory)
         if tail then return .tailCall method arguments memory
         else return .call method arguments (values.drop count) memory := by
-  simp only [step, observerCount, Bool.or_false, managedStep]
+  simp only [step, observerCount, managedStep]
   rfl
 
 #print axioms step_managed_call_eq

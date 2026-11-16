@@ -200,15 +200,19 @@ string Merge(string identity, object[] left, object[] right)
 object Scalar(string function, int width, bool signed, int result, int arguments) => Create("ScalarIntrinsic",
     Named(Model("ScalarFunction"), function), width, signed, result, arguments);
 object Named(Type type, string value) => Enum.Parse(type, value);
+object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!
+    .Invoke(null, ["value"])!;
 object ClassWord(bool store, int width, bool signed) => Create("ClassField", Create("ClassViews+FieldOperation",
-    store, "T", 0, Named(Model("ClassViews+FieldKind"), "Word"), width, signed, null));
+    store, "T", 0, Named(Model("ClassViews+FieldKind"), "Word"), width, signed, null),
+    Create("FieldRef", "T", 0, "U", ValueName()));
 var merged = new (string Identity, object Left, object Right, string Expected)[]
 {
     ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
         ".intrinsic (.scalar (.bigMul32 true)) 2"),
     ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
         ".intrinsic (.scalar (.popCount 32 .word32)) 1"),
-    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false), ".memory (.setObjectField (T) 0 4)")
+    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false),
+        ".stfld ({ owner := T, index := 0, type := U, name := name!\"value\" })")
 };
 foreach (var (identity, left, right, spelling) in merged)
     if (!Merge(identity, [left, ".ret"], [right, ".ret"]).Contains(spelling, StringComparison.Ordinal))

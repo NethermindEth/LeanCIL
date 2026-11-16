@@ -10,6 +10,14 @@ open CIL CIL.Safety
 
 private def node : RuntimeType := ⟨.object "Examples" "Examples.Node", []⟩
 
+/-- `Node.values`, the `int[]` field 1, in the slot at model offset 8. -/
+private def valuesField : Extraction.FieldRef :=
+  { owner := node.identity, index := 1,
+    type := .array (.atom Extraction.runtimeScope "System.Int32"), name := name!"values" }
+
+/-- A method whose class field accesses need no layouts. -/
+private def body : CIL.Method := { returnsValue := false, locals := [], code := [] }
+
 /-- Allocation 0 is a 16-byte node, 1 a read-only node, 2 an array of three `int` values and 3 a
     caller stack buffer. -/
 private def holding : CIL.Safety.Memory :=
@@ -31,12 +39,11 @@ private def numbers : ArrayView := ⟨.address ⟨2, 0⟩, 3, .signed32⟩
 
 /-- `stfld` of `array` into the field at offset 8 of `object`. -/
 private def store (array : ArrayView) (object : ManagedReference) :=
-  objectFieldInstruction (.setArrayField node.identity 8 .signed32) [.array array, .object object]
-    holding
+  fieldStore body valuesField [.array array, .object object] holding
 
 /-- `ldfld` of the field at offset 8 of `object` in `memory`. -/
 private def load (memory : CIL.Safety.Memory) (object : ManagedReference) :=
-  objectFieldInstruction (.arrayField node.identity 8 .signed32) [.object object] memory
+  fieldLoad body valuesField [.object object] memory
 
 /-- A stored array loads back whole, and only the field's slot changes, not its bytes. -/
 theorem field_reads_back :

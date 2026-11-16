@@ -381,7 +381,7 @@ set_option pp.mvars false in
 /--
 CIL.Instruction.add, CIL.Instruction.ret][2]?
 is not definitionally equal to the right-hand side
-  some (CIL.Instruction.newAggregate 2 ?_ 8)
+  some (CIL.Instruction.newAggregate ?_ ?_ 8)
 -/
 #guard_msgs (substring := true) in
 /-- The tactic refuses an 8-byte constructor contract at the 16-byte `newobj` site. -/

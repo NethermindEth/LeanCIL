@@ -137,14 +137,15 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
 /-- Construct at a fetched `newobj` from its constructor's contract alone; `input` names the
     fresh storage `newobj` zeroes. -/
 theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee argc : Nat} {size : Fin (2^64)} {body : CIL.Method}
-    {args stack arguments : List Value} {frame : Frame} {memory : Memory}
+    {program : CIL.Program} {method pc target callee argc : Nat} {size : Fin (2^64)}
+    {body : CIL.Method} {args stack arguments : List Value} {frame : Frame} {memory : Memory}
     {this : Input → Reference} {value : Input → Output → List (BitVec 8)}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (constructs : c.Constructs size this value)
     (input : Reference → Input)
     (methodFound : program[method]? = some body)
-    (instructionFound : body.code[pc]? = some (.newAggregate callee argc size))
+    (instructionFound : body.code[pc]? = some (.newAggregate target argc size))
+    (linked : body.linkAt pc = some (.aggregate callee size))
     (positive : 0 < size.val) (formed : memory.WellFormed) (enough : argc ≤ stack.length)
     (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
     (located : ∀ temporary, this (input temporary) = temporary)
@@ -172,7 +173,8 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
     rw [same, List.reverse_reverse, List.take_append_drop]
   rw [same] at checked
   obtain ⟨temporary, updated, stepped, zeroed, writable, preserved, fresh⟩ :=
-    step_newAggregate (body := body) (pc := pc) (callee := callee) size positive args arguments
+    step_newAggregate (body := body) (pc := pc) (target := target) size positive linked args
+      arguments
       (stack.drop argc) frame memory formed (by rw [same]; exact checked) known
   rw [length, split] at stepped
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed
@@ -201,6 +203,7 @@ macro_rules
     refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
+      (by first | rfl | simp only [cil_code, cil_step, $[$facts:term],*])
       (by decide) ?wellFormed (by simp)
       (by first | rfl | (simp [CIL.Safety.checkedValue, CIL.Safety.numericValue,
           $[$facts:term],*] <;>

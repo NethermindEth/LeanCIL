@@ -248,11 +248,12 @@ locals and parameters are roots without bytes and have no address.
 bytes in the object's allocation (`objectFieldAddress`). The model chooses the layout
 independently of CoreCLR: one 8-byte slot per instance field, the fields of the furthest base
 first and each class's own in declaration order after its base's (`objectFieldOffset`), so a
-field keeps its offset in every derived instance. Lean rechecks the offset against each
-instruction's raw field index and type; that the raw index counts the fields of the declaring
-class's bases first is metadata the extractor decodes. The model's layout needs no
-correspondence with CoreCLR's layout because code cannot observe it: `ldflda` on a class is
-rejected, and object references have no integer form. Each access checks that the field's
+field keeps its offset in every derived instance. Each `ldfld` and `stfld` carries the field
+reference its raw operand names, and its step resolves the slot from the field's index and type
+(`Method.fieldShape`); that the raw index counts the fields of the declaring class's bases first
+is metadata the extractor decodes. The model's layout needs no correspondence with CoreCLR's
+layout because code cannot observe it: `ldflda` on a class faults when stepped, and object
+references have no integer form. Each access checks that the field's
 declaring class is in the allocation's lineage, so a field of a base class is reached on every
 derived instance and a field of an unrelated class on none, and a null receiver throws
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
@@ -309,8 +310,8 @@ held reference to name an identity already issued, so a later allocation can nev
 dangling reference live; `Confined`, `MemoryBelow`, `Memory.Equivalent` and `Memory.Renamed`
 each relate field references alongside bytes, the last through the allocation map.
 
-`ldfld` and `stfld` of a field whose type is an admitted class (`.objectReferenceField`,
-`.setObjectReferenceField`) locate the field like a scalar one, so a null receiver throws
+`ldfld` and `stfld` of a field whose type is an admitted class (a `.reference` slot) locate the
+field like a scalar one, so a null receiver throws
 `NullReferenceException` and the owner is checked against the runtime type, then check the
 field's 8-byte slot for read or write authority inside the object. A load pushes the reference
 the slot holds once it forms again (`loadSlot`); a store requires the value to form, that is to
@@ -429,7 +430,7 @@ index, then type.
 
 ## Value-array fields
 
-A class field typed as an array of a value element `E` (`.arrayField`, `.setArrayField`) holds
+A class field typed as an array of a value element `E` (an `.array` slot) holds
 the array's reference in the object's slot for that field, as a class-typed field does; the
 array's bytes stay in their own allocation. The field is located like any other, so a null
 receiver throws `NullReferenceException`, and the slot needs read or write authority. A store
