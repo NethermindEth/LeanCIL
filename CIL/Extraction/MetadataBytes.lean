@@ -45,6 +45,9 @@ inductive MetadataError where
   | scopeMismatch (token : Nat)
   | genericMismatch (token : Nat)
   | fieldIndexMismatch (token stated computed : Nat)
+  /-- An instance field whose owner no carried slice defines, other than an item of the platform
+      pair: no carried metadata gives its position among the owner's fields. -/
+  | unboundInstanceField (token : Nat)
   | localMismatch (index : Nat)
   | methodMismatch (token : Nat)
   | identityMismatch

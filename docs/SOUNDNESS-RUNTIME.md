@@ -414,8 +414,8 @@ does not lay out, and a short budget is the model's `allocationFailure`. The len
 `newarr` decodes it for value arrays: a negative `int32` or native length throws
 `System.OverflowException`, and one above `0x7fffffc7` is unsupported.
 
-`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (`.referenceArrayLength`,
-`.referenceArrayLoad`, `.referenceArrayStore`) locate it with `referenceArrayOf`: a null array
+`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (the object arms of `elementInstruction`)
+locate it with `referenceArrayOf`: a null array
 throws `NullReferenceException`, and a reference to anything but offset 0 of a live array of
 class references is an ill-typed state. An index read unsigned at or past the length then
 throws `IndexOutOfRangeException` (`referenceArraySlot`), so a negative int32 index is out of
@@ -459,13 +459,15 @@ from its layout: the raw body names the field access as a layout use of the stru
 computes for that layout, as for any other array of the struct
 ([TilePairs](../Examples/Proofs/TilePairs.lean)).
 
-The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
-outside the model other than `System.Object`, such as `string`, as a parameter, local, return or
-`newarr` type, typed as an object on the evaluation stack. An array of such a static type holds
-elements of a class derived from it at run time, so its element type is a class, as the
-covariance check needs; an array typed by an interface or `object` may be an interface array and
-is rejected. An element of an array of a class outside the model is an opaque reference, which
-is loaded, stored, compared and tested for null but never read through. The extractor names the
+The extractor admits a single-dimensional array of an admitted class or of `string` as a
+parameter, local, return or `newarr` type, typed as an object on the evaluation stack. An array of
+such a static type holds elements of a class derived from it at run time, so its element type is
+a class, as the covariance check needs. Lean binds a type named as an object, outside the type a
+class instance field holds, only to a class of a pinned assembly or to `string`
+(`objectNamed`), so no signature, local, type operand or generic argument names an array of an
+interface, of `object` or of another class outside the pins, any of which may type an interface
+array. An element of a `string` array is an opaque reference, which is loaded, stored, compared
+and tested for null but never read through. The extractor names the
 element class as an object in the raw array type and the `newarr` token, and Lean requires each
 `newarr` to carry that token and rechecks `ldlen`, `ldelem.ref` and `stelem.ref` against their raw
 opcode and operand kinds. An
@@ -473,8 +475,9 @@ element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rej
 since a byref to a reference slot is outside the model, as is the address of an argument or
 local holding such an array. A class field typed as such an array holds the array's reference
 in its slot and is read and written as a class-typed field is, the raw field type rechecked as
-an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, generic
-instantiations or value types other than the admitted value arrays are rejected.
+an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, classes outside
+the model other than `string`, generic instantiations or value types other than the admitted
+value arrays are rejected.
 
 ## String literals
 

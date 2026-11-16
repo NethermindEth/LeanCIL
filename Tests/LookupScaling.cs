@@ -67,6 +67,11 @@ if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
     DecodedDefinitionCosts();
     return;
 }
+if (args.Contains("--decoded-program-only", StringComparer.Ordinal))
+{
+    DecodedProgramCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -108,6 +113,7 @@ DecodeCosts();
 MethodDecodeCosts();
 StaticFactCosts();
 DecodedDefinitionCosts();
+DecodedProgramCosts();
 ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -119,6 +125,7 @@ BuildLeanTestLibraries("Certificate index, feature getter, layout and home index
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations
 // cost quadratic time, which this fixture reports as a per-instruction cost that grows with the method.
 const int ShortStatements = 125;
+const int MiddleStatements = 250;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
 const double AllowedGrowth = 1.15;
@@ -1048,6 +1055,65 @@ void DecodedDefinitionCosts()
     Console.WriteLine($"PASS defining a decoded method costs {measured} heartbeats per instruction");
 }
 
+// The heartbeats `decodedProgram?_eq_some` costs to state and prove that 8, 32 and 128 records decode to their
+// methods, given one decoding fact per record. Each record adds one constructor, so four times the records may cost
+// at most `AllowedLocalGrowth` more per record.
+void DecodedProgramCosts()
+{
+    var programDirectory = At("artifacts/LookupScaling/DecodedProgram");
+    Directory.CreateDirectory(programDirectory);
+    var samples = new List<(int Records, long Cost)>();
+    foreach (var records in new[] { 8, 32, 128 })
+    {
+        var indexes = Enumerable.Range(0, records).ToArray();
+        var items = string.Join(" ", indexes.Select(index => $"item{index}"));
+        var methods = string.Join(" ", indexes.Select(index => $"method{index}"));
+        var facts = string.Join("\n", indexes.Select(index =>
+            $"    (decodes{index} : Decodes profile environment item{index} method{index})"));
+        var bodies = string.Concat(indexes.Select(index => $"(.cons decodes{index} ")) + ".nil" +
+            new string(')', records);
+        var path = Path.Combine(programDirectory, $"Records{records}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Safety.DecodedSummary
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction CIL.Safety Lean Elab Command
+            /-- Logs the heartbeats elaborating `body` costs, its kernel checks included. -/
+            elab "#command_cost " label:str body:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand body
+              let after <- IO.getNumHeartbeats
+              logInfo m!"{label.getString} {after - before} heartbeats"
+            namespace DecodedProgramCost
+            variable (profile : FeatureProfile) (environment : LayoutEnvironment)
+            /-- The pinned body bytes of `item` decode to `method`. -/
+            abbrev Decodes (item : MethodEvidence) (method : CIL.Method) : Prop :=
+              Method.ofBody? profile environment item.links item.body item.original item.arguments =
+                some method
+            #command_cost "decoded program {{records}}"
+              theorem decoded ({{items}} : MethodEvidence) ({{methods}} : CIL.Method)
+            {{facts}} :
+                  decodedProgram? profile environment [{{items.Replace(" ", ", ")}}] =
+                    some [{{methods.Replace(" ", ", ")}}] :=
+                decodedProgram?_eq_some {{bodies}}
+            end DecodedProgramCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.DecodedProgram().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the decoded program cost:\n{output}");
+        samples.Add((records, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perRecord = samples.Select(sample => (double)sample.Cost / sample.Records).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Records:F0} at {sample.Records}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perRecord.Skip(1).Zip(perRecord).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Proving a decoded program costs {measured} heartbeats per record; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per record at the size before.");
+    Console.WriteLine($"PASS proving a decoded program costs {measured} heartbeats per record");
+}
+
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
 void ClosedArgumentsCosts()
 {
@@ -1407,7 +1473,7 @@ string Sparse(string name, int statements) =>
     string.Concat(Enumerable.Repeat("word = word * y + x; ", statements)) +
     "word = Step(word, y); return word; } ";
 File.WriteAllText(Path.Combine(source, "Lookups.cs"), "public static class Lookups { " +
-    Method("Short", ShortStatements) + Method("Long", LongStatements) +
+    Method("Short", ShortStatements) + Method("Middle", MiddleStatements) + Method("Long", LongStatements) +
     "public static ulong Step(ulong a, ulong b) { return a * b + a; } " +
     Calling("Few", FewCalls) + Calling("Many", ManyCalls) +
     Sparse("SparseShort", SparseShortStatements) + Sparse("SparseLong", SparseLongStatements) + "}");
@@ -1415,30 +1481,69 @@ Run(["dotnet", "build", Path.Combine(source, "Lookups.csproj"), "-c", "Release"]
 var assembly = Path.Combine(source, "bin/Lookups.dll");
 
 // The heartbeats `text` costs, imports included.
-long Heartbeats(string path, string text, bool equations = true)
+long Heartbeats(string path, string text, bool equations = true) => Reported(path, text, equations).Count;
+
+// The heartbeats `text` costs, imports included, and Lean's output.
+(long Count, string Output) Reported(string path, string text, bool equations = true)
 {
     var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
     if (equations && Regex.Matches(output, @"_instruction[0-9]+' depends on axioms: \[propext\]").Count != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
-    return count;
+    return (count, output);
 }
 
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement
 // stepping tactics rewrite with, depend on `propext` alone, and still be fetched by `cil_code`.
-long Checked(string path, string text, string binder, string method, string equation, int last)
+(long Count, string Output) Checked(string path, string text, string binder, string method, string equation,
+    int last)
 {
     var statement = $"example {binder}: {method}.code[{last}]? = some CIL.Instruction.ret";
-    return Heartbeats(path, text + $"""
+    return Reported(path, text + $"""
 
         {statement} := {equation}
         {statement} := by simp only [cil_code]
         """);
 }
 
+// The extraction with its call check and its method evidence theorem each reporting the heartbeats it costs alone.
+string WithEvidenceCosts(string extracted)
+{
+    const string Command = """
+        /-- Elaboration and kernel checking of one command, labelled in the report. -/
+        elab "#evidence_cost " label:str " in " command:command : command => do
+          let before <- IO.getNumHeartbeats
+          Lean.Elab.Command.elabCommand command
+          let after <- IO.getNumHeartbeats
+          Lean.logInfo m!"evidence {label.getString} {after - before} heartbeats"
+
+        """;
+    var namespaces = LookupPatterns.ExtractedNamespace().Matches(extracted).Count;
+    var calls = LookupPatterns.CallsTheorem().Matches(extracted).Count;
+    var evidence = LookupPatterns.EvidenceTheorem().Matches(extracted).Count;
+    if (namespaces != 1 || calls != 1 || evidence != 1)
+        throw new InvalidOperationException("Missing the namespace, call check or evidence theorem of method0.");
+    var labelled = LookupPatterns.ExtractedNamespace().Replace(extracted, match => Command + match.Value);
+    labelled = LookupPatterns.CallsTheorem().Replace(labelled,
+        match => "#evidence_cost \"calls\" in\n" + match.Value);
+    return LookupPatterns.EvidenceTheorem().Replace(labelled,
+        match => "#evidence_cost \"assembly\" in\n" + match.Value);
+}
+
+// The heartbeats of the call check and of the evidence theorem that `WithEvidenceCosts` reports.
+(long Calls, long Assembly) EvidenceCosts(string output)
+{
+    var costs = LookupPatterns.EvidenceCost().Matches(output).ToDictionary(match => match.Groups[1].Value,
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    return costs.Count == 2 && costs.TryGetValue("calls", out var calls) &&
+        costs.TryGetValue("assembly", out var assembled)
+        ? (calls, assembled)
+        : throw new InvalidOperationException("Missing the call check and evidence theorem costs:\n" + output);
+}
+
 // The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
 // hand-written body with a parameter, and the shared template of the extraction.
-(int Instructions, long[] Heartbeats) Measure(string name)
+(int Instructions, long[] Heartbeats, (long Calls, long Assembly) Evidence) Measure(string name)
 {
     var output = Path.Combine(directory, name);
     Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
@@ -1460,7 +1565,7 @@ long Checked(string path, string text, string binder, string method, string equa
     var instructions = definition.Groups[1].Captures.Count;
     var last = instructions - 1;
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
-        extracted + $"\n#print axioms Extracted.method0_instruction{last}\n",
+        WithEvidenceCosts(extracted) + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
     var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := " +
@@ -1480,7 +1585,7 @@ long Checked(string path, string text, string binder, string method, string equa
     var template = Checked(Path.Combine(shared, "Measured.lean"), templates,
         Binder, "(Templates.method0 profile environment)",
         $"Templates.method0_instruction{last} profile environment", last);
-    return (instructions, [extraction, command, template]);
+    return (instructions, [extraction.Count, command.Count, template.Count], EvidenceCosts(extraction.Output));
 }
 
 var imports = Path.Combine(directory, "Imports.lean");
@@ -1495,7 +1600,7 @@ Console.WriteLine($"PASS {extended.Instructions} instructions compile at the emi
 string[] producers = ["an extracted method", "a cil_instruction_equations body", "a generated template"];
 for (var producer = 0; producer < producers.Length; producer++)
 {
-    double Cost((int Instructions, long[] Heartbeats) run) =>
+    double Cost((int Instructions, long[] Heartbeats, (long, long) Evidence) run) =>
         (double)(run.Heartbeats[producer] - floor) / run.Instructions;
     var growth = Cost(extended) / Cost(brief);
     var measured = string.Create(CultureInfo.InvariantCulture,
@@ -1506,6 +1611,31 @@ for (var producer = 0; producer < producers.Length; producer++)
             $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
+
+// A body with no call at three lengths. Its call check reads every pc's link by one walk, so it costs the same per
+// instruction; its evidence theorem is assembled from the conjuncts' theorems and costs the same at every length.
+// A conjunct stated through another term than `MethodEvidenceValid` states makes the assembly reduce the whole body.
+var middleOutput = Path.Combine(directory, "Middle");
+Run(Extract("extract", assembly, "Lookups", "Lookups::Middle(ulong,ulong)", middleOutput));
+var middle = EvidenceCosts(Reported(Path.Combine(middleOutput, "Measured.lean"),
+    WithEvidenceCosts(File.ReadAllText(Path.Combine(middleOutput, "Extracted.lean"))), equations: false).Output);
+(int Statements, long Calls, long Assembly)[] evidenceSamples = [
+    (ShortStatements, brief.Evidence.Calls, brief.Evidence.Assembly),
+    (MiddleStatements, middle.Calls, middle.Assembly),
+    (LongStatements, extended.Evidence.Calls, extended.Evidence.Assembly)];
+var evidenceMeasured = string.Join("; ", evidenceSamples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+    $"{sample.Statements} statements = {(double)sample.Calls / sample.Statements:F0} per statement for the call " +
+    $"check and {sample.Assembly} for the evidence theorem")));
+if (evidenceSamples.Any(sample => sample.Calls < KernelDecisionFloor || sample.Assembly < KernelDecisionFloor) ||
+    evidenceSamples.Skip(1).Zip(evidenceSamples).Any(pair =>
+        (double)pair.First.Calls / pair.First.Statements >
+            (double)pair.Second.Calls / pair.Second.Statements * AllowedGrowth ||
+        pair.First.Assembly > pair.Second.Assembly * AllowedGrowth))
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Checking the evidence of a body with no call costs {evidenceMeasured} heartbeats; the limit is " +
+        $"{AllowedGrowth} times the cost per statement of the call check and the cost of the evidence theorem at " +
+        $"the length before."));
+Console.WriteLine($"PASS checking the evidence of a body with no call costs {evidenceMeasured} heartbeats");
 
 // The extraction of a body with many calls: its link table, key check, per-site facts and the checks that
 // tie them together must each cost the same per call site at four times the size.
@@ -1740,7 +1870,9 @@ File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
     CallMethod(FewCalledMethods, "CallsFew") + CallMethod(ManyCalledMethods, "CallsMany") + "}");
 Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
 var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
-double TokenCost(string name, string selector, int count, string distinctPattern)
+// The heartbeats per token of the whole extraction, less the imports, and of its call check alone. A call check that
+// reads each pc's link by a scan of the link table grows with the tokens that each carry a link.
+(double Total, double Calls) TokenCost(string name, string selector, int count, string distinctPattern)
 {
     var output = Path.Combine(directory, "Tokens" + name);
     Run(Extract("extract", tokenAssembly, "Tokens", selector, output));
@@ -1748,7 +1880,8 @@ double TokenCost(string name, string selector, int count, string distinctPattern
     var distinct = Regex.Matches(extracted, distinctPattern).Count;
     if (distinct < count)
         throw new InvalidOperationException($"Expected {count} distinct tokens in {name}; found {distinct}.");
-    return (double)(Heartbeats(Path.Combine(output, "Measured.lean"), extracted, equations: false) - floor) / count;
+    var report = Reported(Path.Combine(output, "Measured.lean"), WithEvidenceCosts(extracted), equations: false);
+    return ((double)(report.Count - floor) / count, (double)EvidenceCosts(report.Output).Calls / count);
 }
 foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
 {
@@ -1760,15 +1893,18 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
         ManyCalledMethods)
 })
 {
-    var tokenGrowth = TokenCost(kind + "Many", many, manyCount, pattern) /
-        TokenCost(kind + "Few", few, fewCount, pattern);
-    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-        $"PASS metadata check of {fewCount} and {manyCount} distinct {kind.ToLowerInvariant()} tokens: " +
-        $"{tokenGrowth:F2} times the cost per token"));
-    if (tokenGrowth > AllowedGrowth)
+    var manyTokens = TokenCost(kind + "Many", many, manyCount, pattern);
+    var fewTokens = TokenCost(kind + "Few", few, fewCount, pattern);
+    var tokenGrowth = manyTokens.Total / fewTokens.Total;
+    var callCheckGrowth = manyTokens.Calls / fewTokens.Calls;
+    var tokensMeasured = string.Create(CultureInfo.InvariantCulture,
+        $"{tokenGrowth:F2} times as much per token as {fewCount}, and {callCheckGrowth:F2} times for the call check");
+    if (tokenGrowth > AllowedGrowth || callCheckGrowth > AllowedGrowth)
         throw new Exception(string.Create(CultureInfo.InvariantCulture,
-            $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokenGrowth:F2} times as much per token " +
-            $"as {fewCount}; the limit is {AllowedGrowth}."));
+            $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokensMeasured}; the limit is " +
+            $"{AllowedGrowth}."));
+    Console.WriteLine(
+        $"PASS metadata check of {manyCount} distinct {kind.ToLowerInvariant()} tokens costs {tokensMeasured}");
 }
 
 // One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
@@ -2120,7 +2256,7 @@ void IndirectAccessCosts()
             def code (prefixed : Bool) (sites : Nat) : List Instruction :=
               (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
             """ + "\n";
-        var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {flag} {sites}) .scalar " +
+        var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {flag} {sites}) .scalar " +
             $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
             $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
             $"(code {flag} {sites})";
@@ -2181,8 +2317,8 @@ long LocalAccessCost(int accesses)
             .ldloca ((index + 2) % localCount), .pop]
         def code (cycles : Nat) : List Instruction := (List.range cycles).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {cycles}) .scalar (features {cycles}) " +
-        $"(List.replicate {accesses + 1} true) (code {cycles})";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {cycles}) .scalar " +
+        $"(features {cycles}) (List.replicate {accesses + 1} true) (code {cycles})";
     var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalAccesses\n", equations: false);
     var decided = Heartbeats(path, header + $"""
@@ -2318,7 +2454,7 @@ long FeatureLocalCost(int count)
             .ldloca ((index + 2) % localCount), .pop, .ldarga 0, .pop, .ldc_i4 0, .starg 0]
         def code (segments : Nat) : List Instruction := (List.range segments).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
         $"(features {FeatureLocalSegments}) (List.replicate {FeatureLocalInstructions} true) " +
         $"(code {FeatureLocalSegments})";
     var path = Path.Combine(directory, $"FeatureLocals{count}.lean");
@@ -2400,7 +2536,7 @@ long KnownFactCost(int facts, int rounds)
               [.ldc_i4 (BitVec.ofNat 32 (round + 1)), .stloc (round % facts), .ldloc (round % facts), .pop]) ++
             [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) raw .scalar features " +
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) raw .scalar features " +
         $"(List.replicate {2 * facts + 4 * rounds + 1} true) code";
     var path = Path.Combine(directory, $"KnownFacts{facts}-{rounds}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend KnownFacts\n", equations: false);
@@ -2444,6 +2580,18 @@ enum LocalSlots
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
+    [GeneratedRegex(@"\bevidence (calls|assembly) ([0-9]+) heartbeats")]
+    internal static partial Regex EvidenceCost();
+
+    [GeneratedRegex(@"(?m)^namespace Extracted\r?$")]
+    internal static partial Regex ExtractedNamespace();
+
+    [GeneratedRegex(@"(?m)^theorem method0_calls_validated ")]
+    internal static partial Regex CallsTheorem();
+
+    [GeneratedRegex(@"(?m)^theorem method0_evidence_validated ")]
+    internal static partial Regex EvidenceTheorem();
+
     [GeneratedRegex(@"closed arguments [0-9]+ [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex ClosedArguments();
 
@@ -2494,4 +2642,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedDefinition();
+
+    [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex DecodedProgram();
 }

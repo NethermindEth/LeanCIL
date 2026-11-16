@@ -58,6 +58,9 @@ name = "Tests.MetadataWorld"
 name = "Tests.MetadataBinding"
 
 [[lean_lib]]
+name = "Tests.ImportedFieldIndex"
+
+[[lean_lib]]
 name = "Tests.GenericOwnerScaling"
 
 [[lean_lib]]
@@ -74,6 +77,9 @@ name = "Tests.ValueDecoding"
 
 [[lean_lib]]
 name = "Tests.DecodedMethod"
+
+[[lean_lib]]
+name = "Tests.DecodedSummary"
 
 [[lean_lib]]
 name = "Tests.FieldRef"

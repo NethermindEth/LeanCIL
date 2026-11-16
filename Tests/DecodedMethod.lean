@@ -14,9 +14,11 @@ the bytes rather than the definition's. A stored argument takes a home. An instr
 the value family decodes to a hole carrying its opcode, which faults when stepped; a body the
 check refuses, or one with an argument instruction naming an undeclared argument, gives no
 method, and neither does a program with such a body. A method defined by `cil_decoded_method`
-is the decoder's method, written as literals its facts and stepping read. A call decodes to the
-method its operand names, with the target the supplied link table gives its pc, and the call
-check rejects a link that names another method.
+is the decoder's method, written as literals its facts and stepping read, with a zero-initialized
+struct local written as `List.replicate size 0` so frame entry gives the term a caller's
+hypothesis about making that local names. A call decodes to the method its operand names, with
+the target the supplied link table gives its pc, and the call check rejects a link that names
+another method.
 -/
 
 namespace Tests.DecodedMethod
@@ -68,7 +70,7 @@ theorem code_read_from_bytes :
 #print axioms code_read_from_bytes
 
 /-- `ldarg.0; ldarg.1; add; ret` over two `uint64` parameters, returning `uint64`. -/
-private def addArgumentsRaw : RawMethod :=
+def addArgumentsRaw : RawMethod :=
   { method 8 false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A] with
     parameters := [uint64, uint64], returnType := uint64 }
 
@@ -173,33 +175,33 @@ theorem generic_cast_tests_its_argument :
   cil_kernel_rfl
 #print axioms generic_cast_tests_its_argument
 
-/-- `ldc.i4.1; newarr object; pop; ret`, with the type token of the world's `System.Object`. -/
-private def newarrBytes : List Nat :=
-  [0x22, 0x17, 0x8D] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]
+/-- `ldnull; unbox.any object; pop; ret`, with the type token of the world's `System.Object`. -/
+private def unboxBytes : List Nat :=
+  [0x22, 0x14, 0xA5] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]
 
-/-- The definition `newarrBytes` decode to. -/
-private def newarrRaw : RawMethod :=
-  method 8 false [] [instr 0 0x17, instr 1 0x8D (.type objectType), instr 6 0x26, instr 7 0x2A]
+/-- The definition `unboxBytes` decode to. -/
+private def unboxRaw : RawMethod :=
+  method 8 false [] [instr 0 0x14, instr 1 0xA5 (.type objectType), instr 6 0x26, instr 7 0x2A]
 
-/-- `newarrBytes` with its token table and the world's metadata. -/
-private def newarrBody : BodyEvidence :=
-  evidenceOf newarrBytes [(tokens.objectRef, .type objectType)] { own := own.1, others := [lib] }
-    newarrRaw
+/-- `unboxBytes` with its token table and the world's metadata. -/
+private def unboxBody : BodyEvidence :=
+  evidenceOf unboxBytes [(tokens.objectRef, .type objectType)] { own := own.1, others := [lib] }
+    unboxRaw
 
-/-- The newarr body passes the body check and decodes with a hole at pc 1 carrying `newarr`'s
-    opcode 0x8D, since no family admits a type operand yet. -/
-theorem newarr_decodes_to_a_hole :
-    (checkBody newarrBody newarrRaw []).toBool = true ∧
-      (Method.ofBody? .scalar {} [] newarrBody newarrRaw []).map (·.code) =
-        some [.ldc_i4 1, .unadmitted 0x8D, .pop, .ret] := by
+/-- The unbox body passes the body check and decodes with a hole at pc 1 carrying `unbox.any`'s
+    opcode 0xA5, since no family admits `unbox.any`. -/
+theorem unbox_decodes_to_a_hole :
+    (checkBody unboxBody unboxRaw []).toBool = true ∧
+      (Method.ofBody? .scalar {} [] unboxBody unboxRaw []).map (·.code) =
+        some [.ldnull, .unadmitted 0xA5, .pop, .ret] := by
   constructor
   · decide +kernel
   · cil_kernel_rfl
-#print axioms newarr_decodes_to_a_hole
+#print axioms unbox_decodes_to_a_hole
 
-/-- The method decoded from the newarr bytes loads its constant and faults at the hole's pc. -/
+/-- The method decoded from the unbox bytes pushes its null and faults at the hole's pc. -/
 theorem decoded_hole_faults :
-    (Method.ofBody? .scalar {} [] newarrBody newarrRaw []).map (fun method =>
+    (Method.ofBody? .scalar {} [] unboxBody unboxRaw []).map (fun method =>
       Safety.invoke [method] 4 0 [] Safety.Memory.empty) =
         some (.error ⟨0, 1, .unsupported "Opcode not admitted"⟩) := by
   cil_kernel_rfl
@@ -207,16 +209,16 @@ theorem decoded_hole_faults :
 
 /-- An evidence record whose only fields `decodedProgram?` reads are `original`, `body` and
     `arguments`. -/
-private def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
+def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
   { original := original, body := body, arguments := [], closed := original,
     parameterInput := ⟨[], [], []⟩, reachable := [], featureStates := [], scalarStates := [],
     layoutUses := [] }
 
-/-- A body with a hole still gives its method, so the add and newarr program decodes in full,
+/-- A body with a hole still gives its method, so the add and unbox program decodes in full,
     while one refused body leaves the program without one. -/
 theorem program_needs_every_body :
     ((encodeBody pin addRaw).bind fun addBody =>
-      (decodedProgram? .scalar {} [item addRaw addBody, item newarrRaw newarrBody]).map
+      (decodedProgram? .scalar {} [item addRaw addBody, item unboxRaw unboxBody]).map
         List.length) = some 2 ∧
       ((encodeBody pin addRaw).bind fun addBody =>
         decodedProgram? .scalar {}
@@ -269,12 +271,12 @@ example : sumMethod =
 #guard_msgs in #check sumMethod_profile
 
 -- An instruction outside the value family is defined as the hole carrying its opcode.
-cil_decoded_method newarrMethod := Method.ofRaw? testProfile testEnvironment [] newarrRaw []
-cil_instruction_equations newarrMethod
+cil_decoded_method unboxMethod := Method.ofRaw? testProfile testEnvironment [] unboxRaw []
+cil_instruction_equations unboxMethod
 
-/-- info: Tests.DecodedMethod.newarrMethod_instruction1 :
-  newarrMethod.code[1]? = some (Instruction.unadmitted 141) -/
-#guard_msgs (whitespace := lax) in #check newarrMethod_instruction1
+/-- info: Tests.DecodedMethod.unboxMethod_instruction1 :
+  unboxMethod.code[1]? = some (Instruction.unadmitted 165) -/
+#guard_msgs (whitespace := lax) in #check unboxMethod_instruction1
 
 /-- The `uint32` field of `Dog` the decoded definition below names. -/
 def ageField : FieldRef := { owner := dogClass, index := 0, type := uint32, name := name!"Age" }
@@ -423,5 +425,49 @@ theorem decoded_call_links :
       { callerMethod with links := [] } := by
   decide +kernel
 #print axioms decoded_call_links
+
+/-- `T::Word`, one `uint64`. -/
+private def wordLayout : RawLayout :=
+  { identity := "T::Word", explicit := false, packing := 0, declaredSize := 0,
+    fields := [{ type := .unsigned64 }] }
+
+/-- `T::Word` and the layout CoreCLR computes for it. -/
+@[cil_code] def wordEnvironment : LayoutEnvironment :=
+  { rawLayouts := [wordLayout],
+    layouts := #[⟨{ size := 8, fields := [{ offset := 0, width := 8 }] }, 8⟩] }
+
+/-- `ret` over one zero-initialized `T::Word` local. -/
+private def aggregateLocalRaw : RawMethod :=
+  method 8 true [.aggregate "T::Word" 0] [instr 0 0x2A]
+
+cil_decoded_method aggregateLocalMethod :=
+  Method.ofRaw? testProfile wordEnvironment [] aggregateLocalRaw []
+
+-- A zero-initialized struct local is written as an extraction's literal writes it, so a proof's
+-- hypothesis about making that local matches the goal frame entry leaves.
+/-- info: Tests.DecodedMethod.aggregateLocalMethod_locals :
+  aggregateLocalMethod.locals = [Value.aggregate (List.replicate 8 0)] -/
+#guard_msgs (whitespace := lax) in #check aggregateLocalMethod_locals
+
+open CIL.Safety in
+/-- Entering the decoded method's frame makes its struct local from `List.replicate 8 0`, the
+    term a caller's hypothesis about the local names. -/
+theorem aggregate_local_frame_entry (memory entered : Safety.Memory) (slot : Reference)
+    (made : makeLocal memory.nextIdentity (.aggregate 8) (.aggregate (List.replicate 8 0)) memory =
+      .ok (.bytes (.aggregate 8) slot, [slot.allocation], entered)) :
+    enterFrame aggregateLocalMethod [] memory =
+      .ok ({ activation := memory.nextIdentity, locals := [.bytes (.aggregate 8) slot],
+              owned := [slot.allocation] }, entered) := by
+  simp only [enterFrame, aggregateLocalMethod_opaqueVectorLocals, makeSelectedLocals,
+    List.isEmpty_nil, ite_true, aggregateLocalMethod_localKinds, aggregateLocalMethod_locals,
+    makeLocals, made, aggregateLocalMethod_parameterHomes, makeParameterHomes, List.map_nil,
+    Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
+#print axioms aggregate_local_frame_entry
+
+/-- `simp` unfolds a decoded method in the module that defines it, as a batch that inlines an
+    extraction beside its proof does. -/
+theorem aggregate_local_unfolds : aggregateLocalMethod.code = [CIL.Instruction.ret] := by
+  simp only [aggregateLocalMethod]
+#print axioms aggregate_local_unfolds
 
 end Tests.DecodedMethod

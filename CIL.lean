@@ -73,6 +73,7 @@ import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.ConstructComposition
 import CIL.Safety.ConstructContract
 import CIL.Safety.ConstructSetup
+import CIL.Safety.DecodedSummary
 import CIL.Safety.Equations
 import CIL.Safety.Execution
 import CIL.Safety.ExecutionTrace

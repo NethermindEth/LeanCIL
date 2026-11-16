@@ -55,6 +55,14 @@ extraction and about 3.7 for the body. A ratio that rises toward 1.15 means some
 elaboration step walks the code list again. The suite also fails when a `cil_lookup` at a
 computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
 
+The same method at 125, 250 and 500 statements also reports, from its extraction, the heartbeats
+of `Extracted.method0_calls_validated` and of `Extracted.method0_evidence_validated` alone. The
+suite fails when the call check costs more than 1.15 times as much per statement as at the length
+before, or when the evidence theorem costs more than 1.15 times as much in total. The evidence
+theorem only assembles the conjuncts' theorems, so it costs about 260,000 heartbeats at every
+length; a conjunct stated through another term than `CIL.Extraction.MethodEvidenceValid` states
+makes the elaborator reduce the whole decoded body, about 390,000 heartbeats per instruction.
+
 The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
 characters long and differ only in their last character, less the same statement closed with
 `sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and
@@ -228,6 +236,12 @@ next. The check reads each pc's link by one walk beside the code and costs about
 9,100 heartbeats per call site; a scan of the table at each pc costs 41,500 and 133,900 at 64 and
 256 sites and exhausts a 16 GB memory limit at 1,024. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --call-check-only`.
+
+The suite states and proves with `decodedProgram?_eq_some` that 8, 32 and 128 evidence records
+decode to their methods, given one decoding fact per record, and reads the heartbeats of that one
+command. It fails when the heartbeats per record grow more than 1.25 times from one size to the
+next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
+with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
 
 ## Reference figures
 

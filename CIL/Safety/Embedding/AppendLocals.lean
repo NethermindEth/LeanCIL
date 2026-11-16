@@ -949,6 +949,66 @@ theorem step_appendLocals_stind (kind : CIL.NumericKind) :
 
 #print axioms step_appendLocals_stind
 
+/-- `ldlen` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldlen :
+    StepAppendLocals .ldlen := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile .ldlen pc stack frame extra memory
+
+#print axioms step_appendLocals_ldlen
+
+/-- `ldelem` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldelem (kind : CIL.NumericKind) :
+    StepAppendLocals (.ldelem kind) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile (.ldelem kind) pc stack frame extra memory
+
+#print axioms step_appendLocals_ldelem
+
+/-- `ldelem.ref` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldelem_ref :
+    StepAppendLocals .ldelem_ref := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile .ldelem_ref pc stack frame extra memory
+
+#print axioms step_appendLocals_ldelem_ref
+
+/-- `stelem` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stelem (kind : CIL.NumericKind) :
+    StepAppendLocals (.stelem kind) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile (.stelem kind) pc stack frame extra memory
+
+#print axioms step_appendLocals_stelem
+
+/-- `stelem.ref` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stelem_ref :
+    StepAppendLocals .stelem_ref := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile .stelem_ref pc stack frame extra memory
+
+#print axioms step_appendLocals_stelem_ref
+
 /-- `dup` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_dup :
     StepAppendLocals .dup := by
@@ -1284,6 +1344,28 @@ theorem step_appendLocals_ldsflda (field : CIL.Extraction.FieldRef) :
 
 #print axioms step_appendLocals_ldsflda
 
+/-- A typed `ldelem` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldelem_any (element : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.ldelem_any element) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_ldelem_any
+
+/-- A typed `stelem` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stelem_any (element : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.stelem_any element) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_stelem_any
+
 /-- `ldtoken` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldtoken (operand : CIL.TokenOperand) :
     StepAppendLocals (.ldtoken operand) := by
@@ -1349,7 +1431,7 @@ theorem step_appendLocals_unadmitted (opcode : Nat) :
 
 #print axioms step_appendLocals_unadmitted
 
-/-- Managed pointers and tables never inspect the unused trailing frame slots. -/
+/-- Managed pointers never inspect the unused trailing frame slots. -/
 theorem step_appendLocals_managed (operation : ManagedOp) :
     StepAppendLocals (.managed operation) := by
   intro body pc args frame extra stack memory outcome stepped kept
@@ -1357,7 +1439,7 @@ theorem step_appendLocals_managed (operation : ManagedOp) :
   clear kept
   unfold step
   apply observed_appendLocals
-  unfold managedStep methodTableLength methodTableElement
+  unfold managedStep
   split
   all_goals repeat' first
     | rfl
@@ -1387,6 +1469,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case localloc =>
       exact step_appendLocals_localloc
     case newarr element => exact step_appendLocals_newarr element
+    case ldelem_any element => exact step_appendLocals_ldelem_any element
+    case stelem_any element => exact step_appendLocals_stelem_any element
     case nop =>
       exact step_appendLocals_nop
     case neg =>
@@ -1493,6 +1577,16 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ldind kind
     case stind kind =>
       exact step_appendLocals_stind kind
+    case ldlen =>
+      exact step_appendLocals_ldlen
+    case ldelem kind =>
+      exact step_appendLocals_ldelem kind
+    case ldelem_ref =>
+      exact step_appendLocals_ldelem_ref
+    case stelem kind =>
+      exact step_appendLocals_stelem kind
+    case stelem_ref =>
+      exact step_appendLocals_stelem_ref
     case dup =>
       exact step_appendLocals_dup
     case pop =>

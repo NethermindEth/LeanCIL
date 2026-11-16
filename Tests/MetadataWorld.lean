@@ -6,7 +6,7 @@ import Tests.MetadataBuilder
 `T` carries the operands under test: references to `System.Runtime`, calls into `Lib`, instance
 and static fields, fields of generic instances, a generic method specification, a string, a
 locals signature and a standalone call signature. `Lib` defines the class `Lib.Box`, the struct
-`Lib.Pair` and the generic class `Lib.Holder<T>` that `T` uses. Tests
+`Lib.Pair`, the generic class `Lib.Holder<T>` and the interface `Lib.IShape` that `T` uses. Tests
 check each operand against the slices, then change one fact and assert the exact error.
 -/
 
@@ -59,6 +59,9 @@ def libWorld : Step Unit := do
   let parameter ← row Table.genericParam [0, 0, (holder - 0x02000000) * 2, parameterName]
   link linkDeclaring holderValue 1 holder
   link linkGenericParams holder 1 parameter
+  -- The interface `Lib.IShape`, which extends no type.
+  let shapeName ← string "IShape"
+  let _ ← row Table.typeDef [0xA1, shapeName, libName, 0, 4, 3]
 
 /-- The tokens of the `T` world that the tests name. -/
 structure OwnTokens where
@@ -87,6 +90,9 @@ structure OwnTokens where
       external one, as a generic method reads them. -/
   holderValueRef : Nat
   lazyValueRef : Nat
+  /-- The references to the interface `Lib.IShape` and to `System.String`. -/
+  shapeRef : Nat
+  stringRef : Nat
 
 /-- The `T` assembly: the references and members its operands name. -/
 def ownWorld : Step OwnTokens := do
@@ -166,7 +172,13 @@ def ownWorld : Step OwnTokens := do
   let lazyValueRef ←
     row Table.memberRef [(lazySpec - 0x1B000000) * 8 + 4, valueName, parameterField]
   link linkDefinition holderValueRef 1 (tokenOf Table.field 3)
-  pure { pairRef := pairRef, secondField := secondField, firstRef := firstRef, sumRef := sumRef,
+  let shapeName ← string "IShape"
+  let stringName ← string "String"
+  let shapeRef ← row Table.typeRef [2 * 4 + 2, shapeName, libName]
+  link linkDefinition shapeRef 1 (tokenOf Table.typeDef 5)
+  let stringRef ← row Table.typeRef [1 * 4 + 2, stringName, systemName]
+  pure { shapeRef := shapeRef, stringRef := stringRef,
+         pairRef := pairRef, secondField := secondField, firstRef := firstRef, sumRef := sumRef,
          objectRef := objectRef, consoleRef := consoleRef, boxRef := boxRef,
          holderValueRef := holderValueRef,
          lazyValueRef := lazyValueRef, writeLine := writeLine, getRef := getRef, idRef := idRef,

@@ -202,34 +202,40 @@ def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classO
 
 /-- The index a field operand must carry, and the type it must hold. A field signature's `!n`
     names the declaring type's parameter, so the held type reads it as the declaring instance's
-    argument, which may itself be a parameter of the reading method or its owner. -/
+    argument, which may itself be a parameter of the reading method or its owner. An instance
+    field of an owner no carried slice defines has a position only as an item of the platform
+    pair; any other is refused, as is any other member of the pair. -/
 def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSite)
-    (classOwner : Bool) : Except MetadataError (Nat × ResolvedType × Option Bool) := do
+    (classOwner isStatic : Bool) : Except MetadataError (Nat × ResolvedType × Option Bool) := do
   let some held := substituteResolved none site.owner.arguments resolveFuel site.declared
     | throw (.operandMismatch token)
   match site.definition with
   | some (position, definition) =>
     let index ← env.slice position definition
     let row ← index.field definition
-    let isStatic := row.flags / 0x10 % 2 == 1
-    if isStatic then
+    let declaredStatic := row.flags / 0x10 % 2 == 1
+    if declaredStatic then
       let owner ← env.declaringType position definition
       let (start, _) ← index.fieldRange owner
       .ok (tokenRow definition - start, held, some true)
     else .ok (← env.instanceIndex position definition classOwner, held, some false)
   | none =>
     -- The pair is known by its own reference, never by the slice's `corlib` number.
-    match site.owner with
-    | .genericInst head arguments =>
-      match arguments.toList with
-      | [first, second] =>
-        if isCorlibScope head.scope && head.parts == [systemNamespace, valueTuplePairName] then
-          if site.name == firstItemName then .ok (0, first, none)
-          else if site.name == secondItemName then .ok (1, second, none)
-          else .ok (0, held, none)
-        else .ok (0, held, none)
-      | _ => .ok (0, held, none)
-    | _ => .ok (0, held, none)
+    let pair := match site.owner with
+      | .genericInst head arguments =>
+        match arguments.toList with
+        | [first, second] =>
+          if isCorlibScope head.scope && head.parts == [systemNamespace, valueTuplePairName] then
+            some (first, second)
+          else none
+        | _ => none
+      | _ => none
+    match pair with
+    | some (first, second) =>
+      if site.name == firstItemName then .ok (0, first, none)
+      else if site.name == secondItemName then .ok (1, second, none)
+      else throw (.unboundInstanceField token)
+    | none => if isStatic then .ok (0, held, none) else throw (.unboundInstanceField token)
 
 /-- Check a `.field` operand: the owner, the field's model index, the type it holds and the
     name, which must spell the name of the row the token names. -/
@@ -243,11 +249,13 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
   let classOwner := match owner with
     | .object .. => true
     | _ => false
-  let (expected, held, isStaticFact) ← env.expectedField token site classOwner
+  let (expected, held, isStaticFact) ← env.expectedField token site classOwner isStatic
   if isStaticFact.any (· != isStatic) then throw (.operandMismatch token)
   if !(frame.admits site.owner owner) then throw (.operandMismatch token)
   if index != expected then throw (.fieldIndexMismatch token index expected)
-  if !(frame.admits held fieldType) then throw (.operandMismatch token)
+  let heldAdmitted := if classOwner && !isStatic then frame.admitsHeld held fieldType
+    else frame.admits held fieldType
+  if !heldAdmitted then throw (.operandMismatch token)
   .ok { staticField := isStaticFact }
 
 /-! ## Methods and calls -/

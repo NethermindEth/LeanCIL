@@ -15,8 +15,16 @@ var module = "Tests.PreparedFixture" + Guid.NewGuid().ToString("N");
 var source = At(module.Replace('.', '/') + ".lean");
 const string fixture = "import CIL\ntheorem fixture : (1 : Nat) = 1 := rfl\n#print axioms fixture\n";
 File.WriteAllText(source, fixture);
+// A fixture that imports another test module, which the prepared list does not name.
+var dependent = "Tests.PreparedDependent" + Guid.NewGuid().ToString("N");
+var dependentSource = At(dependent.Replace('.', '/') + ".lean");
+File.WriteAllText(dependentSource,
+    $"import CIL\nimport {module}\ntheorem dependent : (1 : Nat) = 1 := fixture\n#print axioms dependent\n");
 try
 {
+    verification.PrepareLeanFixtures(dependent);
+    // The import is compiled before its importer and bound to its source like a listed fixture.
+    RequireLeanFixtures(dependent, module);
     verification.PrepareLeanFixtures(module);
     RequireLeanFixtures("CIL.Extraction.Translation", module);
     CheckLeanFixture(module);
@@ -34,8 +42,10 @@ try
 finally
 {
     File.Delete(source);
+    File.Delete(dependentSource);
 }
-Console.WriteLine("PASS fresh fixture compilation, source/output binding and missing-module rejection");
+Console.WriteLine("PASS fresh fixture compilation, imported fixtures, source/output binding and " +
+    "missing-module rejection");
 
 void Reject(string name, Action action)
 {

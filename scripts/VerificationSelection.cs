@@ -129,7 +129,7 @@ internal static class VerificationSelection
             "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean",
             "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
             "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
-            "Tests/VerificationReuse.cs", "Tests/SupportExtractionCache.cs",
+            "Tests/VerificationReuse.cs", "Tests/SupportExtractionCache.cs", "Tests/SummaryCalls.cs",
             "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
             "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean",
             "Tests/SegmentContract.lean",
@@ -137,15 +137,16 @@ internal static class VerificationSelection
             "Tests/OperationFactAdapters.lean", "Tests/AggregateMemorySteps.lean", "Tests/BodyDecoding.lean",
             "Tests/Identity.lean", "Tests/MetadataDecoding.lean",
             "Tests/MetadataBinding.lean", "Tests/MetadataBuilder.lean", "Tests/ResolutionFacts.lean",
-            "Tests/ValueDecoding.lean", "Tests/DecodedMethod.lean",
+            "Tests/ValueDecoding.lean", "Tests/DecodedMethod.lean", "Tests/DecodedSummary.lean",
             "Tests/ReplayDiagnostics.lean", "Tests/BodyLiteral.lean", "Tests/ReturnOpcode.lean",
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
             "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean"
         };
-        inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "Alias", "Struct",
-            "StructCopy", "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }
+        inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "CallsSummary",
+            "IdentitySummary", "RepeatedSummary", "Alias", "Struct", "StructCopy", "LargeStruct", "PastEnd",
+            "WrongAdd", "Escape", "Hardware", "StaticData" }
             .Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
         inputs["docs"].UnionWith(WalkthroughInputs(root));

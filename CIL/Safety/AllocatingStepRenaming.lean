@@ -3,6 +3,7 @@ import CIL.Safety.StepComposition
 import CIL.Safety.StaticInstructionRenaming
 import CIL.Safety.StackAllocationRenaming
 import CIL.Safety.ArrayAllocationRenaming
+import CIL.Safety.InstructionRenaming
 
 /-!
 # Checked allocating instruction steps
@@ -53,6 +54,89 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
     rcases result with ⟨memories, rfl⟩
     exact .ok (.next memories (frames.extend extension (fun _ _ scope => scope)))
 #print axioms Memory.Renamed.stepMemory
+
+/-- A typed element access after its operand check touches the mapped element and keeps the
+    allocation map: both bodies give the element the same shape. -/
+private theorem Memory.Renamed.typedElementStep {indices : LocalIndexMap}
+    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
+    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed) (sourceBody targetBody : CIL.Method)
+    (metadata : StepMetadata sourceBody targetBody) (element : CIL.Extraction.TypeExpr)
+    (store : Bool) (pc : Nat) (stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (do
+      let (memory, values) ←
+        typedElementInstruction (sourceBody.elementShape element) store stack source
+      return FrameAction.next (pc + 1) values sourceFrame memory)) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (do
+        let (memory, values) ←
+          typedElementInstruction (sourceBody.elementShape element) store stack source
+        return FrameAction.next (pc + 1) values sourceFrame memory)
+      (do
+        let (memory, values) ← typedElementInstruction (targetBody.elementShape element) store
+          (stack.map mapping.value) target
+        return FrameAction.next (pc + 1) values targetFrame memory) := by
+  have shaped : targetBody.elementShape element = sourceBody.elementShape element := by
+    simp only [CIL.Method.elementShape, metadata.environment]
+  rw [shaped]
+  apply (related.typedElementInstructionResult _ store sourceFormed stack bounds
+    observable.bind_left).bind
+  intro first second result
+  rcases first with ⟨sourceAfter, values⟩
+  rcases second with ⟨targetAfter, targetValues⟩
+  rcases result with ⟨memories, rfl⟩
+  exact .ok (.next memories frames)
+#print axioms Memory.Renamed.typedElementStep
+
+/-- A checked typed `ldelem` step keeps the allocation map. -/
+theorem Memory.Renamed.stepLdelemAny {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed) (sourceBody targetBody : CIL.Method)
+    (metadata : StepMetadata sourceBody targetBody) (element : CIL.Extraction.TypeExpr)
+    (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.ldelem_any element) pc arguments sourceFrame stack source)) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.ldelem_any element) pc arguments sourceFrame stack source)
+      (step targetBody (.ldelem_any element) pc (arguments.map mapping.value)
+        targetFrame (stack.map mapping.value) target) := by
+  simp only [step_ldelem_any_eq, mapping.unspecifiedOperands] at observable ⊢
+  split at observable
+  · cases observable
+  · rename_i guard
+    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    exact related.typedElementStep frames sourceFormed sourceBody targetBody metadata element
+      false pc stack bounds observable
+#print axioms Memory.Renamed.stepLdelemAny
+
+/-- A checked typed `stelem` step keeps the allocation map. -/
+theorem Memory.Renamed.stepStelemAny {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed) (sourceBody targetBody : CIL.Method)
+    (metadata : StepMetadata sourceBody targetBody) (element : CIL.Extraction.TypeExpr)
+    (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.stelem_any element) pc arguments sourceFrame stack source)) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.stelem_any element) pc arguments sourceFrame stack source)
+      (step targetBody (.stelem_any element) pc (arguments.map mapping.value)
+        targetFrame (stack.map mapping.value) target) := by
+  simp only [step_stelem_any_eq, mapping.unspecifiedOperands] at observable ⊢
+  split at observable
+  · cases observable
+  · rename_i guard
+    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    exact related.typedElementStep frames sourceFormed sourceBody targetBody metadata element
+      true pc stack bounds observable
+#print axioms Memory.Renamed.stepStelemAny
 
 /-- `ldsfld` reads the descriptor bound to its pc, which a step renaming keeps. -/
 theorem staticLoad_metadata {sourceBody targetBody : CIL.Method}
