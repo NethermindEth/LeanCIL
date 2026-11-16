@@ -1138,4 +1138,13 @@ theorem factListTraversal (_tail : List (Option Nat)) : True := by
 
 #print axioms factListTraversal
 
+-- A failure record prints an unassigned metavariable as `?_`, so the record a run logs does not
+-- depend on how many metavariables the run created before it.
+run_meta do
+  let hole ← Lean.Meta.mkFreshExprMVar (Lean.mkConst ``Nat)
+  let record : FailureRecord := { tactic := "probe", residual := #[hole] }
+  let rendered ← record.render
+  unless (rendered.splitOn "\"residual\":[\"?_\"]").length == 2 do
+    throwError "the failure record printed a metavariable by its number: {rendered}"
+
 end Tests.LoopDiagnostics
