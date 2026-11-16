@@ -4,6 +4,7 @@ import CIL.Safety.Embedding.Simulation
 import CIL.Safety.Embedding.Contracts
 import CIL.Safety.SymbolicExecution
 import Tests.MulScalarFixture
+import Tests.Support
 
 namespace Tests.MethodEmbedding
 
@@ -173,10 +174,9 @@ theorem mulscalar_embeds : MethodEmbeds mulScalar 0 expected := by cil_embed
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
-expected pc 188 maps to actual pc 200
-  expected: CIL.Instruction.call 8 5
-  actual:   CIL.Instruction.call 7 5
-  the instructions differ
+expected pc 188 (actual pc 200) has a different call link
+  expected: some (CIL.Link.direct 8)
+  actual:   some (CIL.Link.direct 7)
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbeds mulScalar 0 (fullBody profile 9 5 8) := by cil_embed
@@ -510,21 +510,23 @@ open CIL
 
 /-- Calls method 1 at pc 1 and enters a virtual table at pc 3. -/
 def caller : Method := {
-  code := [.ldarg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .ret]
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callVirtual [(.void, 2)] 1, .ret]
+  links := [(1, .direct 1), (3, .virtual [(.void, 2)])]
   locals := [], returnsValue := false }
 
 /-- The pc map of a body onto itself. -/
 private def identityMap : List Nat := [0, 1, 2, 3, 4]
 
+/-- The code implies the virtual table's link but not the call's, which only the table states. -/
 theorem caller_links :
-    linksOfCode caller.code = [(1, .direct 1), (3, .virtual [(.void, 2)])] := rfl
+    linksOfCode caller.code = [(3, .virtual [(.void, 2)])] := rfl
 
 #print axioms caller_links
 
-/-- Only instructions that imply a link have entries, keyed by their pc; a construction's link
-    is stated by its table, not implied by its operand. -/
-example : linksOfCode [.nop, .call 1 2, .ldarg 0, .newobj (.arity 0), .ret] = [(1, .direct 1)] :=
-  rfl
+/-- Only instructions that imply a link have entries, keyed by their pc; a call's and a
+    construction's links are stated by their table, not implied by their operands. -/
+example : linksOfCode [.nop, .call (Tests.callee 2), .newobj (.arity 0), .callInstance 4 1, .ret] =
+    [(3, .direct 4)] := rfl
 
 /-- A table written out in a literal wins over the default. -/
 example : ({ caller with links := [] } : Method).linkAt 1 = none := rfl
@@ -613,14 +615,16 @@ example : (MethodBinding.methodDifferences caller otherLink).head?.map
 
 /-- What an extraction emits when a dead block puts the call at pc 3. -/
 def moved : Method := {
-  code := [.ldarg 0, .br 3, .unadmitted 0, .call 1 1, .ret]
+  code := [.ldarg 0, .br 3, .unadmitted 0, .call (Tests.callee 1) {}, .ret]
+  links := [(3, .direct 1)]
   locals := [], returnsValue := true }
 
-/-- The body a proof uses, with its call at pc 2. `withCode` gives it that pc's link. -/
-def viaWithCode : Method := moved.withCode [.ldarg 0, .br 2, .call 1 1, .ret]
+/-- The body a proof uses, with its call at pc 2: `withCode` and that pc's link. -/
+def viaWithCode : Method :=
+  { moved.withCode [.ldarg 0, .br 2, .call (Tests.callee 1), .ret] with links := [(2, .direct 1)] }
 
 /-- The same code through a structure update, which keeps the link table of the call at pc 3. -/
-def viaUpdate : Method := { moved with code := [.ldarg 0, .br 2, .call 1 1, .ret] }
+def viaUpdate : Method := { moved with code := [.ldarg 0, .br 2, .call (Tests.callee 1), .ret] }
 
 theorem with_code_embeds : MethodEmbeds [moved] 0 viaWithCode := by cil_embed
 
@@ -715,13 +719,16 @@ example : Extraction.linkWalk evenTable evenTable 0 (List.range 42).reverse =
 
 /-- An extraction that places the block the head branches to before the block after the head. -/
 def reorderedExtraction : Method := {
-  code := [.br 1, .ldarg 1, .call 2 1, .pop, .ret, .ldarg 0, .call 1 1, .pop, .ret]
+  code := [.br 1, .ldarg 1, .call (Tests.callee 1) {}, .pop, .ret, .ldarg 0,
+    .call (Tests.callee 1) {}, .pop, .ret]
+  links := [(2, .direct 2), (6, .direct 1)]
   locals := [], returnsValue := false }
 
 /-- The body a proof uses, with the blocks in source order. -/
 def reorderedWritten : Method :=
-  reorderedExtraction.withCode
-    [.br 5, .ldarg 0, .call 1 1, .pop, .ret, .ldarg 1, .call 2 1, .pop, .ret]
+  { reorderedExtraction.withCode [.br 5, .ldarg 0, .call (Tests.callee 1), .pop, .ret, .ldarg 1,
+      .call (Tests.callee 1), .pop, .ret] with
+    links := [(2, .direct 1), (6, .direct 2)] }
 
 -- The map sends the second block back to pc 1, so the link reads descend once.
 #guard MethodBinding.alignLive reorderedWritten.code.toArray reorderedExtraction.code.toArray ==

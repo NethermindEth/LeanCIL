@@ -1,6 +1,7 @@
 import CIL.Safety.LoopScaffold
 import CIL.Safety.Execution
 import CIL.Observe
+import Tests.Support
 
 /-! Loop stepping over a struct local, and over an int local and a call through a contract with
 a footprint in a caller buffer, with the facts gathered by default, and the failures that name
@@ -21,8 +22,9 @@ theorem layout_valid : layout.Valid := by decide +kernel
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
   code := [.ldloca 0, .initAggregate 8, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
-    .call 1 1, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
-    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .ldarg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret] }
+    .call (Tests.callee 1) {}, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
+    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .ldarg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret]
+  links := [(6, .direct 1)] }
 
 /-- `return x + 2;` -/
 @[cil_code] def addTwo : CIL.Method := {
@@ -176,7 +178,8 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_call addTwo_holds sum
 
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.
-/-- error: cil_loop_steps: pc 6 is a call (CIL.Instruction.call 1 1); cross it with `cil_loop_call` -/
+/-- error: cil_loop_steps: pc 6 is a call (CIL.Instruction.call (callee 1)); cross it with
+`cil_loop_call` -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
     (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
@@ -431,8 +434,9 @@ open Lean in
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
   code := [.ldc_i4 0, .stloc 0, .br 12, .ldarg 1, .ldloc 0, .memory (.add 4 true),
-    .ldloc 0, .call 1 2, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .ldarg 0, .bne_un 3,
-    .ldloc 0, .ret] }
+    .ldloc 0, .call (Tests.callee
+      2) {}, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .ldarg 0, .bne_un 3,
+    .ldloc 0, .ret], links := [(7, .direct 1)] }
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
@@ -654,8 +658,8 @@ example (memory current : Memory) (count index : W32) (buffer home slotted : Ref
 
 -- A call whose address argument has no `form` fact does not step, and the failure names the
 -- check and the fact it needs.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call 1 2) does not step: its argument checks
-reduce to -/
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call (callee 2)) does not step: its
+argument checks reduce to -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (home slotted : Reference)
     (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
@@ -683,8 +687,8 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
   case postcondition.part3 => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call 1 2) does not take the contract's
-arguments for this input, or is not the named site. -/
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call (callee 2)) does not take the
+contract's arguments for this input, or is not the named site. -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)

@@ -8,6 +8,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include GeneratedEvidence.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -287,7 +288,7 @@ Reject([.. cli, "check", output], "Unsupported extraction manifest schema; run l
 File.WriteAllText(identityPath, currentIdentity);
 string generated = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (identity.GetProperty("schema").GetInt32() != 3 || identity.GetProperty("imports").GetArrayLength() != 1 ||
-    !generated.Contains(".call 1 1", StringComparison.Ordinal) || generated.Contains(expectedHash, StringComparison.Ordinal) ||
+    DirectLinks(generated, 1).Length == 0 || generated.Contains(expectedHash, StringComparison.Ordinal) ||
     !File.ReadAllText(Path.Combine(output, "ExtractedImports.lean")).Contains("@_root_.CIL.Safety.MethodContract.Holds _ _ _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Import slot, conditional contract or implementation-independent extraction missing.");
 string deletedProofs = Path.Combine(directory, "deleted-library-proofs");

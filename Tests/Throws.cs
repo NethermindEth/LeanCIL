@@ -64,8 +64,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             File.WriteAllText(forgedOperand, source.Replace(before,
                 $"opcode := {opcode}, operand := .integer 0", StringComparison.Ordinal));
             rejected.Add(forgedOperand, "PASS null-throw operand forgery rejected: " + opcode,
-                $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                    $"method{method}Closed", "is false");
+                "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
         }
     }
 
@@ -92,8 +91,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
-        $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-            $"method{method}Closed", "is false");
+        "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
     if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
     {
         var nonNull = Path.Combine(root, name + "-non-null.lean");
@@ -103,8 +101,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         File.WriteAllText(nonNull, source.Replace(nullLoad,
             "opcode := 114, operand := .text \"not null\"", StringComparison.Ordinal));
         rejected.Add(nonNull, $"PASS {name}: non-null constructor operand rejected",
-            $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                $"method{method}Closed", "is false");
+            "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
     }
 }
 

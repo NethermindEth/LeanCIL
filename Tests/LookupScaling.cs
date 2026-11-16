@@ -729,7 +729,7 @@ void CallCheckCosts()
     {
         var pcs = Enumerable.Range(0, sites).Select(site => 2 * site).ToArray();
         var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
-        var code = string.Join(", ", pcs.Select(_ => ".call 0 0, .nop"));
+        var code = string.Join(", ", pcs.Select(_ => ".call callMethod, .nop"));
         var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
         var statement = $"ManagedCallsValid [⟨[], callee⟩] [] raw (List.replicate {2 * sites} true) body";
         var source = $$"""
@@ -748,11 +748,12 @@ void CallCheckCosts()
               callingConvention := 0, attributes := 0, implementation := 0,
               returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
               genericParameters := [], code := [] }
+            def callMethod : MethodRef := {
+              owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
+              returnType := .void, parameters := [] }
             def site : RawInstruction := ⟨0, 40, .call {
-              method := {
-                owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
-                returnType := .void, parameters := [] },
-              target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }⟩
+              method := callMethod, target := .managed 1, typeArguments := [], parameterCount := 0,
+              returnsValue := false }⟩
             def raw : RawMethod := { callee with code := [{{raw}}] }
             def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
             #call_check_cost
@@ -1564,38 +1565,55 @@ long EmbeddingCost(string name, string definitions)
     return long.Parse(cost.Groups[2].Value, CultureInfo.InvariantCulture);
 }
 
+// The method every embedded call names; the link at its pc chooses the body it enters.
+const string EmbeddedCallees = """
+/-- A one-argument method whose result each segment pops. -/
+def callee : Extraction.MethodRef :=
+  { owner := .atom "Tests" "Embedded", name := name!"Callee", hasThis := false, genericArity := 0,
+    returnType := .atom "Tests" "Word", parameters := [.atom "Tests" "Word"] }
+""";
+
 // A hand-written body embedded into an extraction with a dead block after each return.
 string DeadBlocks(int calls) => $$"""
+{{EmbeddedCallees}}
 /-- What an extraction emits for one call followed by a dead block. -/
 def extractedSegment : List Instruction :=
-  [.ldarg 0, .call 1 1, .pop, .ret, .unadmitted 0]
+  [.ldarg 0, .call callee, .pop, .ret, .unadmitted 0]
 /-- The hand-written segment without the dead block. -/
-def writtenSegment : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
-/-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
+def writtenSegment : List Instruction := [.ldarg 0, .call callee, .pop, .ret]
+/-- The extraction, whose calls sit at pcs 1, 6, 11 and so on, each linked to method 1. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
-    code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret] }
-/-- The proof's body, built with the links its own code implies, with calls at pcs 1, 5, 9. -/
+    code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret],
+    links := (List.range {{calls}}).map fun index => (5 * index + 1, .direct 1) }
+/-- The proof's body, with calls at pcs 1, 5, 9 and so on, each linked to method 1. -/
 def written : Method :=
-  extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret])
+  { extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret]) with
+    links := (List.range {{calls}}).map fun index => (4 * index + 1, .direct 1) }
 """;
 
 // A body whose head branches over its first block to its second, embedded into an extraction that places the
 // second block first, so the pc map descends once at every size.
 string Reordered(int segments) => $$"""
-/-- The block after the head. -/
-def first : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
-/-- The block the head branches to. -/
-def second : List Instruction := [.ldarg 1, .call 2 1, .pop, .ret]
+{{EmbeddedCallees}}
+/-- The block after the head, whose call is linked to method 1. -/
+def first : List Instruction := [.ldarg 0, .call callee, .pop, .ret]
+/-- The block the head branches to, whose call is linked to method 2. -/
+def second : List Instruction := [.ldarg 1, .call callee, .pop, .ret]
+/-- The links of `count` copies of a block starting at `start`, each call linked to `target`. -/
+def blockLinks (start count target : Nat) : List (Nat × Link) :=
+  (List.range count).map fun index => (start + 4 * index + 1, .direct target)
 /-- The extraction, with the second block first. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
     code := [.br 1] ++ (List.replicate {{segments}} second).flatten ++
-      (List.replicate {{segments}} first).flatten ++ [.ret] }
+      (List.replicate {{segments}} first).flatten ++ [.ret],
+    links := blockLinks 1 {{segments}} 2 ++ blockLinks {{1 + 4 * segments}} {{segments}} 1 }
 /-- The proof's body, with the blocks in source order. -/
 def written : Method :=
-  extraction.withCode ([.br {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
-    (List.replicate {{segments}} second).flatten ++ [.ret])
+  { extraction.withCode ([.br {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
+      (List.replicate {{segments}} second).flatten ++ [.ret]) with
+    links := blockLinks 1 {{segments}} 1 ++ blockLinks {{1 + 4 * segments}} {{segments}} 2 }
 #guard let map := (MethodBinding.alignLive written.code.toArray extraction.code.toArray).toList
   (map.zip map.tail).countP (fun (left, right) => right < left) == 1
 """;

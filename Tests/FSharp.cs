@@ -63,7 +63,8 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
     queue.Add(new($"Arithmetic::{name}({parameters})", proof, output), () =>
     {
         var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-        if (name is "Calls" or "Mutate" && !extracted.Contains(".call "))
+        // A compiled call's target is the direct link at its pc.
+        if (name is "Calls" or "Mutate" && !extracted.Contains(" : Link := .direct ", StringComparison.Ordinal))
             throw new InvalidOperationException($"{name} no longer exercises compiled method calls");
         if (name == "Mutate" && !extracted.Contains(": Link := .aggregate "))
             throw new InvalidOperationException("Mutate no longer exercises struct construction");

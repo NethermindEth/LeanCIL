@@ -156,8 +156,8 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
-        ["assemblies", "blocks", "core", "dispatch", "enums", "evidence", "excluded", "generics", "intrinsics",
-            "lookups", "scaling", "unsafe"]);
+        ["assemblies", "blocks", "core", "dispatch", "enums", "evidence", "excluded", "generics", "imports",
+            "intrinsics", "lookups", "scaling", "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies", "cli"]);

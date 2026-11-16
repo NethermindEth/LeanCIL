@@ -125,8 +125,6 @@ def unary (op : Instruction) (value : Value) : Option Value :=
 inductive Action where
   /-- Continue at `pc` with the new stack and memory. -/
   | next (pc : Nat) (stack : List Value) (memory : Memory)
-  /-- Call `callee` with `args`; its results are pushed onto `rest`. -/
-  | call (callee : Nat) (args rest : List Value) (memory : Memory)
   /-- The method returned `result`. -/
   | returned (result : List Value) (memory : Memory)
 
@@ -229,10 +227,6 @@ def step (op : Instruction) (returns : Bool)
     return .next (if b ≤ a then target else pc + 1) rest memory
   | .bge_un target, .i64 b :: .i64 a :: rest =>
     return .next (if b ≤ a then target else pc + 1) rest memory
-  -- Calls; every argument must be initialized.
-  | .call callee argc, _ =>
-    if stack.length < argc || (stack.take argc).any (! ·.initialized) then none else
-      return .call callee (stack.take argc).reverse (stack.drop argc) memory
   -- Hardware features, intrinsics and memory operations.
   | .feature id, _ =>
     return .next (pc + 1) (.i32 (if profile.evaluate id then 1 else 0) :: stack) memory

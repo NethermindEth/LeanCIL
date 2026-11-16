@@ -14,7 +14,9 @@ the bytes rather than the definition's. A stored argument takes a home. An instr
 the value family decodes to a hole carrying its opcode, which faults when stepped; a body the
 check refuses, or one with an argument instruction naming an undeclared argument, gives no
 method, and neither does a program with such a body. A method defined by `cil_decoded_method`
-is the decoder's method, written as literals its facts and stepping read.
+is the decoder's method, written as literals its facts and stepping read. A call decodes to the
+method its operand names, with the target the supplied link table gives its pc, and the call
+check rejects a link that names another method.
 -/
 
 namespace Tests.DecodedMethod
@@ -367,5 +369,59 @@ theorem sum_returns (memory : Safety.Memory) (left right : W32) :
       .ok (memory, [.scalar (.i32 (left + right + 0xFFFFFFFF))]) := by
   cil_checked_steps
 #print axioms sum_returns
+
+/-- `sumRaw` as the definition with its own token, the callee of `callerRaw`. -/
+private def summingRaw : RawMethod := { sumRaw with token := tokens.main + 1 }
+
+/-- The call site of `summingRaw`, a static method of the world's `Program` class. -/
+private def sumSite : CallSite := {
+  method := {
+    owner := .object ownIdentity "Program", name := name!"Sum", hasThis := false,
+    genericArity := 0, returnType := uint32, parameters := [uint32, uint32] },
+  name := "Sum", target := .managed summingRaw.token, typeArguments := [], parameterCount := 2,
+  returnsValue := true }
+
+/-- `ldarg.0; ldarg.1; call Sum(uint32, uint32); ret` over two `uint32` parameters. -/
+private def callerRaw : RawMethod :=
+  { method 8 false [] [instr 0 2, instr 1 3, instr 2 0x28 (.call sumSite), instr 7 0x2A] with
+    parameters := [uint32, uint32], returnType := uint32 }
+
+-- The bytes name the callee's token; the program index of `summingRaw`, 1, is the link at pc 2.
+cil_decoded_method callerMethod :=
+  Method.ofRaw? testProfile testEnvironment [(2, .direct 1)] callerRaw []
+cil_instruction_equations callerMethod
+cil_resolution_facts callerMethod
+
+/-- The call decodes to the method its operand names, and its target is the link the decoder
+    was given. -/
+example : callerMethod.code[2]? = some (.call sumSite.method) ∧
+    callerMethod.linkAt 2 = some (.direct 1) := ⟨rfl, rfl⟩
+
+/-- The decoded caller returns what the decoded callee its link names returns. -/
+theorem caller_returns (memory : Safety.Memory) (left right : W32) :
+    ∃ fuel, Safety.invoke [callerMethod, sumMethod] fuel 0
+        [.scalar (.i32 left), .scalar (.i32 right)] memory =
+      .ok (memory, [.scalar (.i32 (left + right + 0xFFFFFFFF))]) := by
+  cil_checked_steps
+#print axioms caller_returns
+
+/-- The table `callerMethod`'s link indexes: the caller at 0 and its callee at 1. -/
+private def callTable : List SpecializedMethod := [⟨[], callerRaw⟩, ⟨[], summingRaw⟩]
+
+/-- The call check accepts the link the decoder was given and rejects a forged one: another
+    method with the same signature but another token, an index past the table, or a link of
+    another kind. -/
+theorem decoded_call_links :
+    ManagedCallsValid callTable [] callerRaw [true, true, true, true] callerMethod ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [(2, .direct 0)] } ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [(2, .direct 2)] } ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [(2, .virtual [(uint32, 1)])] } ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [] } := by
+  decide +kernel
+#print axioms decoded_call_links
 
 end Tests.DecodedMethod

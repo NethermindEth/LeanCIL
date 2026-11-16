@@ -1,4 +1,5 @@
 import CIL
+import Tests.Support
 
 /-!
 # Consumer proof surface
@@ -20,7 +21,8 @@ def successor : MethodContract CIL.W32 CIL.W32 where
 
 /-- The caller forwards one checked scalar and returns the helper's output. -/
 @[cil_code] def forwarding : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.call 1 1, .ret] }
+  { locals := [], returnsValue := true, code := [.call (Tests.callee 1) {}, .ret],
+    links := [(0, .direct 1)] }
 
 /-- A call continuation selects postcondition and preservation facts by their names. -/
 theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value : CIL.W32)

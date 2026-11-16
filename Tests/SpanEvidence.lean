@@ -104,13 +104,16 @@ theorem item_receiver_roles : foldRoles [words] itemCode = List.replicate 7 none
   decide +kernel
 #print axioms item_receiver_roles
 
-example : FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [words] itemCode) .scalar
+    itemStates
     (List.replicate 7 true) itemOps := by decide
 -- Erasing either receiver instruction fails its raw opcode check.
-example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
+example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [words] itemCode) .scalar
+    itemStates
     (List.replicate 7 true)
     (itemOps.set 1 .nop) := by decide
-example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
+example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [words] itemCode) .scalar
+    itemStates
     (List.replicate 7 true)
     (itemOps.set 2 .nop) := by decide
 
@@ -118,9 +121,11 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar
 private def loadCode := [i 2, i 10, i 6, i 42]
 private def loadOps : List Instruction := [.ldarg 0, .stloc 0, .ldloc 0, .ret]
 private def loadStates : FeatureCertificate := [state [], state [none], state [], state [none]]
-example : FeatureFlowValid #[] (fun _ => none) (raw [intType] loadCode) .scalar loadStates
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [intType] loadCode) .scalar
+    loadStates
     (List.replicate 4 true) loadOps := by decide
-example : FeatureFlowValid #[] (fun _ => none) (raw [words] loadCode) .scalar loadStates
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [words] loadCode) .scalar
+    loadStates
     (List.replicate 4 true) loadOps := by decide
 
 -- `ldtoken` of a field is static data; only a type handle belongs to a type test.

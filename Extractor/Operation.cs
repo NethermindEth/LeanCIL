@@ -277,21 +277,41 @@ internal sealed record Constant : Operation
 
 internal enum CallKind { Static, Instance, Tail }
 
-/// <summary>A call of the method at index <paramref name="Method"/> with the given operand count.</summary>
-internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operation
+/// <summary>
+/// A call of the method at index <paramref name="Method"/> with the given operand count. A static or tail call
+/// names the method its raw operand names, <see cref="Site"/>, and takes its target from its link; a constrained
+/// one also names the type its prefix resolves the method on, <see cref="ConstrainedType"/>.
+/// </summary>
+internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Constrained = false) : Operation
 {
+    /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
+    internal MethodRef? Site { get; init; }
+
+    /// <summary>The type term of the <c>constrained.</c> prefix's closed operand.</summary>
+    internal string? ConstrainedType { get; init; }
+
     internal override IEnumerable<int> Methods => [Method];
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 
     internal override string? Link(Func<int, string> calleeName) => $".direct {calleeName(Method)}";
 
-    internal override string Render(Func<int, string> calleeName) => $"{Name} {calleeName(Method)} {Arguments}";
-
-    string Name => Kind switch
+    internal override string Render(Func<int, string> calleeName) => Kind switch
     {
-        CallKind.Static => ".call", CallKind.Instance => ".callInstance", CallKind.Tail => ".tailCall",
+        CallKind.Instance => $".callInstance {calleeName(Method)} {Arguments}",
+        CallKind.Static or CallKind.Tail =>
+            $".call ({Site?.ToLean() ?? throw new InvalidOperationException("A call has no method operand.")}) " +
+            Prefixes,
         _ => throw new ArgumentOutOfRangeException(nameof(Kind))
+    };
+
+    string Prefixes => (Kind, Constrained) switch
+    {
+        (CallKind.Tail, false) => "{ tail := true }",
+        (CallKind.Static, true) => $"{{ constrained := some ({ConstrainedType ??
+            throw new InvalidOperationException("A constrained call has no constraint type.")}) }}",
+        (CallKind.Static, false) => "{}",
+        _ => throw new InvalidOperationException("A tail call carries no constrained prefix.")
     };
 }
 

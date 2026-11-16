@@ -184,8 +184,8 @@ private theorem step_relinked {body : CIL.Method} (links : List (Nat × CIL.Link
   -- A matcher stuck on the stack carries the call arms, which read the table; split the
   -- stack as deep as the patterns look so the matcher selects this instruction's arm.
   cases op <;> simp only [CIL.Instruction.readsLink, CIL.Instruction.link?,
-    CIL.Instruction.constructs, CIL.Instruction.constructor?, Option.isSome_none,
-    Option.isSome_some, Bool.or_false, Bool.or_true, reduceCtorEq] at unlinked
+    CIL.Instruction.statesLink, Option.isSome_none, Option.isSome_some, Bool.or_false,
+    Bool.or_true, reduceCtorEq] at unlinked
   case managed operation =>
     cases operation <;> simp only [Option.isSome_none, Option.isSome_some,
       Bool.true_eq_false] at unlinked
@@ -221,8 +221,8 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
       simp only [Except.map, FrameAction.relocate_of_callee_none f action none]
   | true =>
     cases op <;> simp only [CIL.Instruction.readsLink, CIL.Instruction.link?,
-      CIL.Instruction.constructs, CIL.Instruction.constructor?, Option.isSome_none,
-      Option.isSome_some, Bool.or_false, Bool.or_true, Bool.false_eq_true] at linked
+      CIL.Instruction.statesLink, Option.isSome_none, Option.isSome_some, Bool.or_false,
+      Bool.or_true, Bool.false_eq_true] at linked
     case managed operation =>
       cases operation <;> simp only [Option.isSome_none, Option.isSome_some,
         Bool.false_eq_true] at linked

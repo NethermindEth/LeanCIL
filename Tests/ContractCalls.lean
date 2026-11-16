@@ -1,5 +1,6 @@
 import CIL.Safety.MethodContract
 import CIL.Safety.Certificate
+import Tests.Support
 
 /-! Contract stepping composes opaque child invocations with independent fuel. -/
 namespace Tests.ContractCalls
@@ -7,7 +8,8 @@ open CIL CIL.Safety
 
 /-- The caller has no access to the helper body. -/
 @[cil_code] def caller : Method := {
-  returnsValue := true, locals := [], code := [.call 1 0, .ret] }
+  returnsValue := true, locals := [], code := [.call (Tests.callee 0) {},
+    .ret], links := [(0, .direct 1)] }
 
 /-- A separately proved child run supplies the result without unfolding the helper. -/
 theorem child_exists (program : Program) (memory final : Safety.Memory) (value : W32)
@@ -98,7 +100,8 @@ theorem supplied_contract (program : Program) (memory : Safety.Memory)
 
 /-- A caller that passes its argument to the helper and returns the helper's result. -/
 @[cil_code] def forwarder : Method := {
-  returnsValue := true, locals := [], code := [.ldarg 0, .call 1 1, .ret] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {},
+    .ret], links := [(1, .direct 1)] }
 
 /-- A helper over one word, which returns its successor. -/
 def successor : MethodContract W32 W32 where
@@ -213,7 +216,8 @@ theorem checked_child_concrete (memory final : Safety.Memory) (value : W32)
 
 /-- A caller forwards two scalar arguments to a separately contracted helper. -/
 @[cil_code] def pairCaller : Method := {
-  returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .call 1 2, .ret] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .call (Tests.callee 2) {},
+    .ret], links := [(2, .direct 1)] }
 
 /-- A tuple input exposes both argument inference and a nontrivial precondition. -/
 def orderedPair : MethodContract (W32 × W32) W32 where

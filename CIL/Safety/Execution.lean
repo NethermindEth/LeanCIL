@@ -555,6 +555,15 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .newarr element, .scalar length :: rest =>
     let (array, memory) ← allocateElements (body.elementShape element) length m
     return .next (pc + 1) (array :: rest) frame memory
+  -- A call enters the body its pc links to; its operand gives only the argument count.
+  | .call method prefixes, _ =>
+    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
+    if prefixes.tail then
+      if stack.length != method.argumentCount then .error .invalidState else
+        return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
+    else if stack.length < method.argumentCount then .error .invalidState else
+      let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
+      return .call callee arguments (stack.drop method.argumentCount) m
   -- A construction allocates what the link at its pc states and enters the constructor it names.
   | .newobj constructor, _ =>
     newobjStep (body.linkAt pc) constructor.owner constructor.parameters.length frame stack m
@@ -656,16 +665,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value :: rest := values | .error .invalidState
     let (slot, memory) ← storeLocal memory slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
-  -- Each call reads the method it enters from the link table at its pc, not from its operand.
-  | .tailCall _ argc, _ =>
-    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
-    if stack.length != argc then .error .invalidState else
-      return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
-  | .call _ argc, _ =>
-    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
-    if stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      return .call callee arguments (stack.drop argc) m
+  -- Each receiver call and construction reads the method it enters from the link of its pc.
   | .callInstance _ argc, _ =>
     let some (.direct callee) := body.linkAt pc | .error unlinkedCall
     if stack.length < argc then .error .invalidState else

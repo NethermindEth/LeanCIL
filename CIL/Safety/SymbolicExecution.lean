@@ -812,8 +812,8 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
-/-- `cil_checked_step_by_equations` for a step whose equation matches on the link at its pc:
-    `links`, the link facts, rewrite with the step equations, so only the linked arm is
+/-- `cil_checked_step_by_equations` for a call-family step, whose equation reads the link at
+    its pc: `links`, the link facts, rewrite with the step equations, so only the linked arm is
     simplified; `facts` apply after them as they do for any step. -/
 macro "cil_checked_linked_step_by_equations " "[" links:term,* "]" "[" facts:term,* "]" :
     tactic =>
@@ -1131,8 +1131,8 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
 
 /-- Opcodes whose step reads the body's link at the step's pc. -/
 def linkedOpcodes : List Lean.Name :=
-  [``CIL.Instruction.call, ``CIL.Instruction.tailCall, ``CIL.Instruction.callInstance,
-    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
+  [``CIL.Instruction.call, ``CIL.Instruction.callInstance, ``CIL.Instruction.callVirtual,
+    ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
@@ -1322,7 +1322,10 @@ elab_rules : tactic
             (← inferType proof) proof).intro1P
           replaceMainGoal [goal]
           pure #[← goal.withContext (Term.exprToSyntax (mkFVar link))]
-        | none => pure #[]
+        -- Without a generated fact, a supplied one states the read, so it rewrites first too.
+        | none => facts.getElems.filterM fun fact => suppliedFactSatisfies fact fun type => do
+            let some (_, read, _) := type.consumeMData.eq? | return false
+            return read.consumeMData.isAppOfArity ``CIL.Method.linkAt 2
       else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
@@ -1344,7 +1347,7 @@ elab_rules : tactic
       -- equation rewrites past it.
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
-      else if operation == ``CIL.Instruction.newobj then
+      else if linkedOpcodes.contains operation then
         `(tactic| cil_strict
           (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
       else
@@ -1859,7 +1862,8 @@ elab_rules : tactic
        · cil_checked_side [$facts,*]
        · cil_checked_side [$facts,*])))
 
-/-- Whether an opcode steps to a call action: `call`, or `callvirt` with a non-null receiver. -/
+/-- Whether an opcode steps to a call action: `call` without `tail.`, or `callvirt` with a
+    non-null receiver. The driver has no tail-transfer step, so a tail call fails here. -/
 def callsCallee (operation : Lean.Name) : Bool :=
   operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.callInstance ||
     operation == ``CIL.Instruction.callVirtual

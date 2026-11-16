@@ -93,7 +93,8 @@ internal static class InstructionTranslation
                 .Find(ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture));
             var index = methods.GetValueOrDefault(resolved, -1);
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
-            return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
+            return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0),
+                Constrained: true);
         }
         if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         var spans = Spans.Analyze(m, profile);

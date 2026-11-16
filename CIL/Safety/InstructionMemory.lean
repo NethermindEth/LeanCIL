@@ -106,7 +106,8 @@ def observerCount : CIL.Instruction → Nat
   | .stsfld _ => 1
   -- Method boundaries
   | .ret => 1
-  | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc => argc
+  | .call method _ => method.argumentCount
+  | .callInstance _ argc | .callVirtual _ argc => argc
   | .newobj constructor => constructor.parameters.length
   | .managed (.call signature _ _) => signature.parameters.length + 1
   | .managed (.tableElement _) => 2

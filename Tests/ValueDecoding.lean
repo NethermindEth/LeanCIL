@@ -25,6 +25,14 @@ def classField : FieldRef :=
 /-- The class the type test rows name. -/
 private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 
+/-- A static call site of `T.Account::Deposit(int32)`. -/
+private def callSite : CallSite := {
+  method := {
+    owner := .object "T" "T.Account", name := name!"Deposit", hasThis := false,
+    genericArity := 0, returnType := .void, parameters := [.atom runtimeScope "System.Int32"] },
+  name := "Deposit", target := .managed 0x06000001, typeArguments := [], parameterCount := 1,
+  returnsValue := false }
+
 /-- A managed site of the `int32` constructor of `T.Account`. -/
 private def accountConstruction : CallSite := {
   method := {
@@ -129,7 +137,8 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 65039, .none⟩, .localloc),
   -- Class type tests.
   (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog),
-  -- Construction.
+  -- Calls and constructions, whose target the link at their pc gives.
+  (⟨0, 40, .call callSite⟩, .call callSite.method),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
@@ -139,8 +148,7 @@ def undecoded : List Name := [
   ``Instruction.initAggregate, ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
-  ``Instruction.initializeSpanLocal, ``Instruction.tailCall, ``Instruction.managed,
-  ``Instruction.call, ``Instruction.callInstance,
+  ``Instruction.initializeSpanLocal, ``Instruction.managed, ``Instruction.callInstance,
   ``Instruction.callVirtual, ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
@@ -150,12 +158,13 @@ def undecoded : List Name := [
 def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? ·.1)
 
 /-- Raw instructions over every one-byte and two-byte opcode with each operand kind the value
-    family reads, plus text, a type and a class field; `ofRaw?` must give `none` for every
-    opcode outside `Instruction.valueOpcode`. -/
+    family reads, plus text, a type, a class field and a call site; `ofRaw?` must give `none`
+    for every opcode outside `Instruction.valueOpcode`. -/
 def probes : List RawInstruction :=
   ((List.range 256 ++ (List.range 32).map (65024 + ·)).flatMap fun opcode =>
     ([.none, .integer 1, .argument 1, .local 1, .target 1, .targets [1], .text "",
-      .type (.atom runtimeScope "System.Int32"), classOperand] : List RawOperand).map
+      .type (.atom runtimeScope
+        "System.Int32"), classOperand, .call callSite] : List RawOperand).map
       fun operand => { offset := 0, opcode, operand })
 
 /-- `ofRaw?` decodes only value opcodes, every value opcode is named, and every named form
@@ -218,7 +227,13 @@ def mutations : List (RawInstruction × Instruction) := [
     name!"balance" true⟩, .ldfld classField),
   (⟨0, 123, .field (.aggregate "T::Pair" 0) 1 (.atom runtimeScope "System.Int32")
     name!"balance" false⟩, .ldfld { classField with owner := .aggregate "T::Pair" 0 }),
-  -- Another constructor than the site names, or a call opcode.
+  -- Another method or constructor than the site names, a prefix the bytes do not hold, or a call
+  -- operand under another opcode.
+  (⟨0, 40, .call callSite⟩, .call { callSite.method with name := name!"Withdraw" }),
+  (⟨0, 40, .call callSite⟩, .call callSite.method { tail := true }),
+  (⟨0, 40, .call callSite⟩, .call callSite.method { constrained := some dog }),
+  (⟨0, 40, .none⟩, .call callSite.method),
+  (⟨0, 111, .call callSite⟩, .call callSite.method),
   (⟨0, 115, .call accountConstruction⟩,
     .newobj { accountConstruction.method with parameters := [] }),
   (⟨0, 115, .call accountConstruction⟩,
@@ -321,7 +336,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 79, undecoded 28 of 107 constructors -/
+/-- info: decoded 80, undecoded 26 of 106 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

@@ -269,8 +269,6 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
-            if (collectTemplates)
-                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)
@@ -283,6 +281,18 @@ internal static class LeanEmitter
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
+            // A call names the method its raw operand names; a constrained one also the type the definition just
+            // written spells for its prefix.
+            for (var pc = 0; pc < ops.Count; pc++)
+                if (ops[pc] is Call { Kind: not CallKind.Instance } call)
+                    ops[pc] = call with
+                    {
+                        Site = genericEvidence.MethodReferenceOf(m, pc),
+                        ConstrainedType = call.Constrained
+                            ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
+                    };
+            if (collectTemplates)
+                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // A class field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);

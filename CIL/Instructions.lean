@@ -141,6 +141,13 @@ inductive TokenOperand where
   | field (field : Extraction.FieldRef)
   deriving DecidableEq, Repr
 
+/-- The prefixes of a `call`: `tail.` retires the caller's frame before the transfer, and
+    `constrained.` names the type on which the called member is resolved to an implementation. -/
+structure CallPrefixes where
+  tail : Bool := false
+  constrained : Option Extraction.TypeExpr := none
+  deriving DecidableEq, Repr
+
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
@@ -201,8 +208,6 @@ inductive Instruction where
   | ldloca (index : Nat)
   | stloc (index : Nat)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
-  /-- Transfer to a managed method after retiring the current activation. -/
-  | tailCall (callee argc : Nat)
   /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
   | managed (operation : ManagedOp)
   -- Constants, conversions, arithmetic and stack shuffling.
@@ -226,8 +231,11 @@ inductive Instruction where
   | blt (target : Nat)
   | beq (target : Nat)
   | bne_un (target : Nat)
-  -- Calls and constructors; `argc` values are popped as arguments.
-  | call (method : Nat) (argc : Nat)
+  /-- `call` of `method`: it enters the body its pc links to with `method.argumentCount`
+      popped values as arguments. Under `tail.` those are the whole stack and the caller's
+      frame retires before the transfer. -/
+  | call (method : Extraction.MethodRef) (prefixes : CallPrefixes := {})
+  -- Constructors and receiver calls; `argc` values are popped as arguments.
   /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the
       `argc` arguments, throws `System.NullReferenceException` before the call. -/
   | callInstance (method : Nat) (argc : Nat)
@@ -382,14 +390,13 @@ def Link.callees : Link → List Nat
   | .indirect catalog => catalog.map ManagedTarget.method
 
 /-- The link that an instruction's own program index implies; `none` for instructions that
-    enter no method. -/
+    enter no method and for `call` and `newobj`, whose operands name a method rather than a
+    program index. -/
 def Instruction.link? (op : Instruction) : Option Link := by
   -- Built by cases: a catch-all `match` on this type elaborates to a sparse recursor that
   -- depends on `propext`, and every method literal's default link table would inherit it.
   cases op
-  case call method _ => exact some (.direct method)
   case callInstance method _ => exact some (.direct method)
-  case tailCall method _ => exact some (.direct method)
   case callVirtual targets _ => exact some (.virtual targets)
   case managed operation =>
     cases operation
@@ -415,9 +422,17 @@ theorem Instruction.eq_newobj_of_constructor? {op : Instruction}
 
 #print axioms Instruction.eq_newobj_of_constructor?
 
-/-- The instruction reads the link at its pc when it steps: it implies one, or it constructs. -/
+/-- The instruction's operand names a method without implying its program index, so the link
+    table states the link it reads: a `call` or a `newobj`. -/
+def Instruction.statesLink (op : Instruction) : Bool := by
+  cases op
+  case call | newobj => exact true
+  all_goals exact false
+
+/-- The instruction reads the link at its pc when it steps: it implies one, or its table states
+    one. A body that gives such a pc no link of the right kind faults the step. -/
 def Instruction.readsLink (op : Instruction) : Bool :=
-  op.link?.isSome || op.constructs
+  op.link?.isSome || op.statesLink
 
 /-- The link table a code list implies: each linking instruction's pc with its link. The pcs come
     from `List.range`, which the kernel reduces to literals. Numbered by `zipIdx`, each pc would be
@@ -465,8 +480,9 @@ def Method.staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
 
 /-- `method` with new code and the link table that code implies. Static sites are keyed by pc like
     the links, so they are reset to none; a body that reads statics supplies its own after the
-    call, and so does a body that constructs, since `newobj` implies no link. The declared
-    signature, the environment and the other fields are kept. A plain
+    call, and so does a body with a pc whose instruction `statesLink`, a `call` or `newobj`,
+    since it implies none. The declared signature, the environment and the other fields are
+    kept. A plain
     `{ method with code := ... }` keeps the old table and sites, whose pcs are those of the old
     code. -/
 def Method.withCode (method : Method) (code : List Instruction) : Method :=

@@ -179,10 +179,10 @@ Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
 const string decisionFailed = "proved that the proposition";
 // A theorem proved by `rfl` prints this text when its two sides differ.
 const string rflRefused = "not definitionally equal";
-// The link moves with the call, so only the binding check can reject the changed target.
-Reject(0, "wrong-managed-target", source => ChangeDefinition(Replaced(source, ".call 1 1", ".call 0 1"),
-    "method0Link1", line => Replaced(line, ".direct 1", ".direct 0")), "method0_calls_validated",
-    decisionFailed);
+// A call names the method its raw operand names, so the binding check rejects a call naming another method.
+Reject(0, "wrong-call-operand", source => ForgeDecodedMethod(source, 0, "code := method.code.map fun " +
+    "| .call callee prefixes => .call { callee with name := name!\"Other\" } prefixes | other => other"),
+    "method0_calls_validated", decisionFailed);
 Console.WriteLine("PASS original-metadata generic substitution, complete managed-call binding and malformed evidence rejection");
 // Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
 // the unmutated obligation is checked as the positive control.
@@ -301,14 +301,13 @@ void ReturnMutations()
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
-RejectDeclared(0, "wrong-declared-parameter", 0, source => ChangeDefinition(source, "method0", line =>
-    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]")));
-// The declared signature's own return type, whatever fields follow it.
-RejectDeclared(0, "wrong-declared-return", 0, source => ChangeDefinition(source, "method0", line => Regex.Replace(line,
-    $$"""(declared := {[^}]*returnType := .atom ){{Regex.Escape(word)}}""",
-    match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None)));
-RejectDeclared(0, "wrong-declared-init-flag", 0, source => ChangeDefinition(source, "method0",
-    line => line.Replace(", initLocals := false }", " }")));
+// The caller is defined from its decoder, so each forged declared signature is the value of a forged decoder.
+RejectDeclared(0, "wrong-declared-parameter", 0, source => ForgeDecodedMethod(source, 0,
+    $"declared := {{ method.declared with parameters := [.atom {word.Replace("UInt64", "UInt32")}] }}"));
+RejectDeclared(0, "wrong-declared-return", 0, source => ForgeDecodedMethod(source, 0,
+    $"declared := {{ method.declared with returnType := .atom {word.Replace("UInt64", "UInt32")} }}"));
+RejectDeclared(0, "wrong-declared-init-flag", 0, source => ForgeDecodedMethod(source, 0,
+    "declared := { method.declared with initLocals := true }"));
 // The instance method is defined from its decoder, so its forged receiver is the value of a forged decoder.
 RejectDeclared(14, "missing-declared-receiver", 1,
     source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := none }"));
@@ -316,13 +315,15 @@ RejectDeclared(14, "wrong-declared-receiver-kind", 1,
     source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := some .object }"));
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
+// A decoded method's links are the table its decoder is given, so a forged table is a forged decoder input.
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0Links", line =>
-    line.Replace(":= [(1, method0Link1)]", ":= []")), "method0_calls_validated", decisionFailed);
+    Replaced(line, "[(1, method0Link1)]", "[]")), "method0_calls_validated", decisionFailed);
 Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0Links", line =>
-    line.Replace(":= [(1, method0Link1)]", ":= [(0, method0Link1)]")), "method0_calls_validated",
-    decisionFailed);
+    Replaced(line, "[(1, method0Link1)]", "[(0, method0Link1)]")),
+    "method0_calls_validated", decisionFailed);
 Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1Links", line =>
-    line.Replace(":= []", ":= [(0, method0Link1)]")), "method1_calls_validated", decisionFailed);
+    Replaced(line, ":= []", ":= [(0, method0Link1)]")),
+    "method1_calls_validated", decisionFailed);
 Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
     line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
     rflRefused);

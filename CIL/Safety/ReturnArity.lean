@@ -124,9 +124,10 @@ theorem invoke_return_known {program : CIL.Program} {fuel method : Nat}
 #print axioms invoke_return_known
 
 /-- A successful ordinary call exposes only fully specified arguments. -/
-theorem step_call_known {body : CIL.Method} {target callee argc pc : Nat}
+theorem step_call_known {body : CIL.Method} {method : Extraction.MethodRef}
+    {prefixes : CallPrefixes} {callee pc : Nat}
     {args stack arguments rest : List Value} {frame : Frame} {memory final : Memory}
-    (executed : step body (.call target argc) pc args frame stack memory =
+    (executed : step body (.call method prefixes) pc args frame stack memory =
       .ok (.call callee arguments rest final)) :
     arguments.any Value.hasUnspecified = false := by
   simp only [step] at executed
@@ -135,8 +136,13 @@ theorem step_call_known {body : CIL.Method} {target callee argc pc : Nat}
   · rename_i known
     split at executed <;> try (cases executed; done)
     split at executed
+    · split at executed
+      · cases executed
+      · cases checked : stack.reverse.mapM (checkedValue memory) <;>
+          simp [checked, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+    split at executed
     · cases executed
-    · cases checked : (stack.take argc).reverse.mapM (checkedValue memory) with
+    · cases checked : (stack.take method.argumentCount).reverse.mapM (checkedValue memory) with
       | error fault => simp [checked, Bind.bind, Except.bind] at executed
       | ok checkedArgs =>
         simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure,

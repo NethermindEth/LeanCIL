@@ -12,18 +12,20 @@ the helper's complete contract and the actual checked write reach the continuati
 namespace CIL.Safety
 
 /-- Load two input words, call a binary scalar helper, and store its result to the output. -/
-def loadCallStoreCode (callee : Nat) : List CIL.Instruction :=
-  [.ldarg 2, .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .call callee 2, .stind .i8]
+def loadCallStoreCode (helper : CIL.Extraction.MethodRef) : List CIL.Instruction :=
+  [.ldarg 2, .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .call helper {}, .stind .i8]
 
 /-- Compose a load/call/store segment once for any proved helper with scalar encodings.
     The continuation receives the real call result and checked write, not an assumed summary. -/
 theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {method start callee : Nat} {body : CIL.Method}
+    {helper : CIL.Extraction.MethodRef}
     {frame : Frame} {memory : Memory} {post : (Memory × List Value) → Prop}
     (holds : contract.Holds program callee) (input : Input) (decode : Output → CIL.W64)
     (left right output : Reference)
     (found : program[method]? = some body)
-    (placed : CodeAt body start (loadCallStoreCode callee))
+    (placed : CodeAt body start (loadCallStoreCode helper))
+    (arity : helper.argumentCount = 2)
     (linked : body.linkAt (start + 5) = some (.direct callee))
     (plainArguments : ∀ index, index < 3 → body.argumentAccess index = .value none)
     (call : ValidCall memory [⟨left, 8⟩, ⟨right, 8⟩] [⟨output, 8⟩])
@@ -46,7 +48,7 @@ theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Inpu
   have rightAccess := plainArguments 1 (by decide)
   cil_contract_steps [found, placed, outputAccess, leftAccess, rightAccess]
   apply run_call_of_contract holds input found
-    (by cil_lookup [placed]) (by cil_checked_step [linked]) encoded.symm permitted
+    (by cil_lookup [placed]) (by cil_checked_step [linked, arity]) encoded.symm permitted
   intro middle value result
   have writable : access middle output 8 1 true = .ok () :=
     (result.framed.access_write output

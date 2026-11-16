@@ -31,11 +31,11 @@ def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Pro
 /-- An instruction that reads its link, other than a tail call, falls through to the next pc. -/
 theorem Instruction.continues_of_linked {op : CIL.Instruction}
     (linked : op.readsLink = true)
-    (notTail : ∀ target argc, op ≠ .tailCall target argc)
+    (notTail : ∀ method prefixes, op = .call method prefixes → prefixes.tail = false)
     (notManagedTail : ∀ signature catalog, op ≠ .managed (.call signature catalog true)) :
     op.continues = true := by
   cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.link?,
-    CIL.Instruction.constructs, CIL.Instruction.constructor?, CIL.Instruction.continues]
+    CIL.Instruction.statesLink, CIL.Instruction.continues]
 
 #print axioms Instruction.continues_of_linked
 
@@ -93,10 +93,14 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           obtain ⟨linked, entered⟩ := step_callee hs rfl
           have child := callees callee entered
           have resume := continues (Instruction.continues_of_linked linked (by
-            intro target argc equal
+            intro method prefixes equal
             subst op
-            obtain ⟨_, _, _, _, impossible⟩ := step_tailCall_action hs
-            cases impossible) (by
+            obtain ⟨_, _, chosen⟩ := step_call_action hs
+            cases tail : prefixes.tail
+            · rfl
+            · simp only [tail, ite_true] at chosen
+              obtain ⟨_, _, impossible⟩ := chosen
+              cases impossible) (by
             intro signature catalog equal
             subst op
             obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs
@@ -136,10 +140,14 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           obtain ⟨linked, entered⟩ := step_callee hs rfl
           have child := callees callee entered
           have resume := continues (Instruction.continues_of_linked linked (by
-            intro target argc equal
+            intro method prefixes equal
             subst op
-            obtain ⟨_, _, _, _, impossible⟩ := step_tailCall_action hs
-            cases impossible) (by
+            obtain ⟨_, _, chosen⟩ := step_call_action hs
+            cases tail : prefixes.tail
+            · rfl
+            · simp only [tail, ite_true] at chosen
+              obtain ⟨_, _, impossible⟩ := chosen
+              cases impossible) (by
             intro signature catalog equal
             subst op
             obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs

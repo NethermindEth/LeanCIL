@@ -5,6 +5,7 @@ import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
 import CIL.Safety.Segment
+import Tests.Support
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
     `Root(ref r, in b) { AddTo(in r, in b, out r); r = Mix(r, b); }`. -/
@@ -16,8 +17,9 @@ def method0Signature : String := "System.Void Contracts.Calls::Root(System.UInt6
 def method1Signature : String := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)"
 def method2Signature : String := "System.Void Contracts.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
 @[cil_code] def method0 : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 0, .ldarg 1, .ldarg 0, .call 2 3, .ldarg 0, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8,
-      .call 1 2, .stind .i8, .ret] }
+  [.ldarg 0, .ldarg 1, .ldarg 0, .call (Tests.callee 3) {}, .ldarg 0, .ldarg 0, .ldind .i8, .ldarg
+    1, .ldind .i8,
+      .call (Tests.callee 2) {}, .stind .i8, .ret], links := [(3, .direct 2), (9, .direct 1)] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 3, .conv_i8, .mul, .ldarg 1, .add, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
@@ -410,7 +412,8 @@ theorem ordered_widening_returns (signed scalarFirst reversed : Bool)
 theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CIL.W32)
     (formed : memory.WellFormed)
     (found : program[0]? = some
-      { locals := [], returnsValue := true, code := [.call 1 0, .ret] })
+      { locals := [], returnsValue := true, code := [.call (Tests.callee 0) {}, .ret],
+        links := [(0, .direct 1)] })
     (helper : WP (Execution (fun fuel => invoke program fuel 1 [] memory))
       (fun result => result.2 = [.scalar (.i32 value)])) :
     WP (Execution (fun fuel => run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory))

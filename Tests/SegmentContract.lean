@@ -1,4 +1,5 @@
 import CIL
+import Tests.Support
 
 /-! Checked segment contracts bind placed opcodes and preserve interpreter outcomes. -/
 
@@ -140,7 +141,8 @@ namespace DistinctArguments
 
 /-- The caller increments the result of a two-argument call. -/
 def caller : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.call 1 2, .ldc_i4 1, .add, .ret] }
+  { returnsValue := true, locals := [], code := [.call (Tests.callee 2) {}, .ldc_i4 1, .add, .ret],
+    links := [(0, .direct 1)] }
 
 /-- Subtraction distinguishes the callee's argument order. -/
 def callee : CIL.Method :=
@@ -161,7 +163,7 @@ theorem call_region (arguments : List Value) (frame : Frame) (memory : Memory) :
   have reached : ReachesRun [caller, callee] 0 0 1 1 actual
       (before frame memory) (scalarState frame memory 5) := by
     refine ReachesRun.call (program := [caller, callee]) (method := 0) (pc := 0) (callee := 1)
-      (body := caller) (child := callee) (op := .call 1 2)
+      (body := caller) (child := callee) (op := .call (Tests.callee 2))
       (values := [.scalar (.i32 7), .scalar (.i32 2)]) (results := [.scalar (.i32 5)])
       (rest := []) (childFrame := { activation := memory.nextIdentity, locals := [], owned := [] })
       (updated := memory) (entered := memory) (calleeFuel := 4) ?_ ?_ ?_ ?_ ?_ ?_

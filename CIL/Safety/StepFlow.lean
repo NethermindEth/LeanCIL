@@ -127,30 +127,20 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
   have : r target = target + 1 := ite_eq_left rfl
   omega
 
-/-- A call instruction only ever enters the method its link names, as a call, never as a
-    construction. -/
-theorem step_call_action {body : CIL.Method} {target argc pc : Nat} {args : List Value}
+/-- A `call` only ever enters the method its link names, never as a construction: under a `tail.`
+    prefix it retires the frame, and otherwise it calls and continues. -/
+theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
+    {prefixes : CIL.CallPrefixes} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.call target argc) pc args frame stack m = .ok action) :
-    ∃ callee arguments rest m', body.linkAt pc = some (.direct callee) ∧
-      action = .call callee arguments rest m' := by
+    (h : step body (.call method prefixes) pc args frame stack m = .ok action) :
+    ∃ callee, body.linkAt pc = some (.direct callee) ∧
+      if prefixes.tail then ∃ arguments updated, action = .tailCall callee arguments updated
+      else ∃ arguments rest m', action = .call callee arguments rest m' := by
   unfold step at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, _, by assumption, rfl⟩)
+  all_goals (cases h; refine ⟨_, by assumption, ?_⟩; simp_all)
 #print axioms step_call_action
-
-/-- A tail-call instruction requests frame retirement and exactly the callee its link names. -/
-theorem step_tailCall_action {body : CIL.Method} {target argc pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.tailCall target argc) pc args frame stack m = .ok action) :
-    ∃ callee arguments updated, body.linkAt pc = some (.direct callee) ∧
-      action = .tailCall callee arguments updated := by
-  unfold step at h
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, by assumption, rfl⟩)
-#print axioms step_tailCall_action
 
 /-- A construction under an `.aggregate` link enters the constructor the link names with a
     temporary, never as a plain call. -/

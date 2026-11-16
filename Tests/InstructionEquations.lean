@@ -1,5 +1,6 @@
 import CIL.InstructionEquations
 import CIL.Safety.SymbolicExecution
+import Tests.Support
 
 /-!
 # Instruction equations for a parametric body
@@ -19,23 +20,24 @@ abbrev unreachable : CIL.Instruction := .unadmitted 0
 /-- `if (Avx2.IsSupported) return Callee(a, b); return Sse42.IsSupported ? b : a;` with the
     paths of the other profile padded as `unreachable`, so every profile has the same pcs. -/
 def dispatchBody (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
-  { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
+  { profile := { sse42, avx2 }, returnsValue := true, locals := [], links := [(4, .direct callee)],
+    code := [
     .feature .avx2,
     .brfalse 6,
     if avx2 then .ldarg 0 else unreachable,
     if avx2 then .ldarg 1 else unreachable,
-    if avx2 then .call callee 2 else unreachable,
+    if avx2 then .call (Tests.callee 2) else unreachable,
     if avx2 then .ret else unreachable,
     if avx2 then unreachable else if sse42 then .ldarg 1 else .ldarg 0,
     if avx2 then unreachable else .ret] }
 
 cil_instruction_equations dispatchBody
 
--- The statement keeps the feature test and the callee parameter as the body writes them.
+-- The statement keeps the feature test and the called method as the body writes them.
 /--
 info: Tests.InstructionEquations.dispatchBody_instruction4 (sse42 avx2 : Bool) (callee : Nat) :
   (dispatchBody sse42 avx2 callee).code[4]? =
-    some (if avx2 = true then CIL.Instruction.call callee 2 else unreachable)
+    some (if avx2 = true then CIL.Instruction.call (Tests.callee 2) else unreachable)
 -/
 #guard_msgs (whitespace := lax) in #check dispatchBody_instruction4
 
@@ -73,7 +75,7 @@ example (sse42 avx2 : Bool) (callee : Nat) :
 
 -- Symbolic flags: a fact about each flag decides the fetched instruction's feature test.
 example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
-    ∃ op, (dispatchBody sse42 avx2 callee).code[4]? = some op ∧ op = .call callee 2 :=
+    ∃ op, (dispatchBody sse42 avx2 callee).code[4]? = some op ∧ op = .call (Tests.callee 2) :=
   ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
 
 example (sse42 avx2 : Bool) (callee : Nat) (scalar : avx2 = false) (narrow : sse42 = true) :
@@ -87,7 +89,7 @@ example : ∃ op, (dispatchBody true false 3).code[6]? = some op ∧ op = .ldarg
 example : ∃ op, (dispatchBody false false 3).code[6]? = some op ∧ op = .ldarg 0 :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
-example : ∃ op, (dispatchBody false true 3).code[4]? = some op ∧ op = .call 3 2 :=
+example : ∃ op, (dispatchBody false true 3).code[4]? = some op ∧ op = .call (Tests.callee 2) :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 end Sealed
@@ -129,10 +131,11 @@ example (memory : CIL.Safety.Memory) (left right : CIL.W32) :
       .ok (memory, [.scalar (.i32 right)]) :=
   scalar_returns _ 0 0 true false rfl rfl memory left right
 
-/-- `return Callee(a);` with the callee index as a parameter: its call site's link is
-    determined by its instruction, so the command states it. -/
+/-- `return Callee(a);` with the callee index as a parameter: its call site's link is a table
+    entry, so the command states it. -/
 def callingBody (callee : Nat) : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.ldarg 0, .call callee 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {}, .ret],
+    links := [(1, .direct callee)] }
 
 cil_instruction_equations callingBody
 
@@ -142,11 +145,13 @@ info: Tests.InstructionEquations.callingBody_link1 (callee : Nat) :
 -/
 #guard_msgs (whitespace := lax) in #check callingBody_link1
 
--- A pc that is not a call site, and a call a feature flag decides, get no link fact.
+-- A pc that is not a call site gets no link fact; a call a feature flag decides gets the one its
+-- table entry states.
 /-- error: Unknown identifier `callingBody_link0` -/
 #guard_msgs in #check callingBody_link0
-/-- error: Unknown identifier `dispatchBody_link4` -/
-#guard_msgs in #check dispatchBody_link4
+example (sse42 avx2 : Bool) (callee : Nat) :
+    (dispatchBody sse42 avx2 callee).linkAt 4 = some (.direct callee) :=
+  dispatchBody_link4 sse42 avx2 callee
 
 section SealedCall
 
@@ -155,7 +160,7 @@ attribute [local irreducible] callingBody
 /-- With the body sealed, the call enters its parameter callee by the link fact alone. -/
 theorem sealed_call (callee : Nat) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (argument : CIL.W64) :
-    CIL.Safety.step (callingBody callee) (.call callee 1) 1 args frame
+    CIL.Safety.step (callingBody callee) (.call (Tests.callee 1)) 1 args frame
         [.scalar (.i64 argument)] memory =
       .ok (.call callee [.scalar (.i64 argument)] [] memory) := by
   cil_checked_step []
@@ -175,7 +180,7 @@ section ExtractedLinks
 /-- An extracted body: an explicit table and one generated fact per call site. -/
 def linkedBody : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.ldarg 0, .call 1 1, .newobj (.arity 0), .ret],
+    code := [.ldarg 0, .call (Tests.callee 1) {}, .newobj (.arity 0), .ret],
     links := [(1, namedDirect), (2, namedAggregate)] }
 
 @[cil_code] theorem linkedBody_link1 : linkedBody.linkAt 1 = some namedDirect := rfl
@@ -187,14 +192,16 @@ attribute [local irreducible] linkedBody
 /-- A call enters the method its site's fact and tagged link name. -/
 theorem linked_call (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (argument : CIL.W64) :
-    CIL.Safety.step linkedBody (.call 1 1) 1 args frame [.scalar (.i64 argument)] memory =
+    CIL.Safety.step linkedBody (.call (Tests.callee 1)) 1 args frame [.scalar (.i64 argument)]
+      memory =
       .ok (.call 1 [.scalar (.i64 argument)] [] memory) := by
   cil_checked_step []
 
 /-- A call at a site linked to a constructor faults, which needs the link's constructor form. -/
 theorem constructor_link_faults (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (argument : CIL.W64) :
-    CIL.Safety.step linkedBody (.call 1 1) 2 args frame [.scalar (.i64 argument)] memory =
+    CIL.Safety.step linkedBody (.call (Tests.callee 1)) 2 args frame [.scalar (.i64 argument)]
+      memory =
       .error CIL.Safety.unlinkedCall := by
   cil_checked_step []
 
@@ -209,7 +216,8 @@ end ExtractedLinks
 
 /-- A call site its table omits. -/
 def unlinkedBody : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.ldarg 0, .call 0 1, .ret], links := [] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {}, .ret],
+    links := [] }
 
 cil_instruction_equations unlinkedBody
 

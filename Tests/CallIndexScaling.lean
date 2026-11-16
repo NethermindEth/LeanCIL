@@ -17,18 +17,29 @@ def nops (count : Nat) := raw (List.replicate count ⟨0, 0, .none⟩)
 /-- A minimal emitted method. -/
 def emitted (code : List Instruction) : Method :=
   { locals := [], returnsValue := false, code := code }
-/-- A managed call to the identical scalar-free signature at a chosen table index. -/
-def call : RawInstruction := ⟨0, 40, .call {
+/-- A managed call site of the scalar-free signature every table position holds. -/
+def site : CallSite := {
   method := {
     owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
     returnType := .void, parameters := [] },
-  target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }⟩
+  target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }
+/-- A managed call of `site`; the emitted link chooses the table index. -/
+def call : RawInstruction := ⟨0, 40, .call site⟩
 /-- Each instruction calls a distinct table position. -/
 def calls (count : Nat) := raw (List.replicate count call)
 /-- Equal signatures at distinct positions isolate positional lookup costs. -/
 def methods (count : Nat) : List SpecializedMethod := List.replicate count ⟨[], raw []⟩
-/-- Every table position is exercised once. -/
-def callCode (count : Nat) := emitted ((List.range count).map fun index => .call index 0)
+/-- Every table position is exercised once, through the link at the pc of the same index. -/
+def callCode (count : Nat) : Method :=
+  { emitted (List.replicate count (.call site.method)) with
+    links := (List.range count).map fun index => (index, .direct index) }
+/-- The original scan: positional table lookups and a scan of the link table at every pc. -/
+def managedOriginal (count : Nat) : Bool :=
+  all3 (fun instruction (live, link) operation =>
+      validateLinkedCallWith count ((methods count)[·]?) (([] : List ImportSlot)[·]?)
+        instruction live link operation)
+    (calls count).code ((List.replicate count true).zip
+      ((List.range count).map (callCode count).linkAt)) (callCode count).code
 /-- Indexed constrained validation. -/
 theorem constrainedNew128 : ConstrainedCallsValid [] [] (nops 128)
     (List.replicate 128 true) (emitted (List.replicate 128 .nop)) := by
@@ -46,8 +57,7 @@ theorem managedNew128 : ManagedCallsValid (methods 128) [] (calls 128)
   decide +kernel
 #print axioms managedNew128
 /-- Original managed calls. -/
-theorem managedOld128 : all3 (validateManagedCall (methods 128) []) (calls 128).code
-    (List.replicate 128 true) (callCode 128).code = true := by
+theorem managedOld128 : managedOriginal 128 = true := by
   decide +kernel
 #print axioms managedOld128
 
@@ -68,8 +78,7 @@ theorem managedNew512 : ManagedCallsValid (methods 512) [] (calls 512)
   decide +kernel
 #print axioms managedNew512
 /-- Original managed calls. -/
-theorem managedOld512 : all3 (validateManagedCall (methods 512) []) (calls 512).code
-    (List.replicate 512 true) (callCode 512).code = true := by
+theorem managedOld512 : managedOriginal 512 = true := by
   decide +kernel
 #print axioms managedOld512
 

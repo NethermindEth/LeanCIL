@@ -42,6 +42,70 @@ theorem links_of_relocated_suffix {expected actual : Method} {lower start : Nat}
 
 #print axioms links_of_relocated_suffix
 
+/-- A table whose keys all lie below `query` gives it no link, so a lookup skips it. -/
+theorem linkLookup_append_of_below {before after : List (Nat × Link)} {query : Nat}
+    (below : ∀ entry ∈ before, entry.1 < query) :
+    linkLookup (before ++ after) query = linkLookup after query := by
+  induction before with
+  | nil => rfl
+  | cons head rest ih =>
+    have differs : (head.1 == query) = false := by
+      have := below head (List.mem_cons_self ..)
+      simp only [beq_eq_false_iff_ne]
+      omega
+    have restBelow : ∀ entry ∈ rest, entry.1 < query :=
+      fun entry member => below entry (List.mem_cons_of_mem _ member)
+    simpa only [linkLookup, List.cons_append, List.find?_cons, differs] using ih restBelow
+
+#print axioms linkLookup_append_of_below
+
+/-- Moving every key of a table at or after `lower` to `key - lower + start` moves each lookup
+    at or after `lower` the same way. -/
+theorem linkLookup_shift {links : List (Nat × Link)} {lower start query : Nat}
+    (above : ∀ entry ∈ links, lower ≤ entry.1) (after : lower ≤ query) :
+    linkLookup (links.map fun entry => (entry.1 - lower + start, entry.2))
+      (query - lower + start) = linkLookup links query := by
+  induction links with
+  | nil => rfl
+  | cons head rest ih =>
+    obtain ⟨key, link⟩ := head
+    have keyAbove := above (key, link) (List.mem_cons_self ..)
+    have restAbove : ∀ entry ∈ rest, lower ≤ entry.1 :=
+      fun entry member => above entry (List.mem_cons_of_mem _ member)
+    by_cases same : key = query
+    · subst same
+      simp [linkLookup]
+    · have shiftedDiffers : key - lower + start ≠ query - lower + start := by
+        simp only at keyAbove
+        omega
+      have differs : (key == query) = false := by simpa using same
+      have movedDiffers : (key - lower + start == query - lower + start) = false := by
+        simpa using shiftedDiffers
+      simpa only [linkLookup, List.map_cons, List.find?_cons, movedDiffers, differs]
+        using ih restAbove
+
+#print axioms linkLookup_shift
+
+/-- Explicit tables, as a body with `call` sites has: the expected table's entries from `lower` on,
+    moved to `start`, follow entries of the actual table below `start`, and the expected table's
+    other entries lie below `lower`; then each moved pc has the link of its original. -/
+theorem links_of_shifted_table {expected actual : Method} {lower start : Nat}
+    {expectedBefore expectedAfter actualBefore : List (Nat × Link)}
+    (expectedLinks : expected.links = expectedBefore ++ expectedAfter)
+    (actualLinks : actual.links =
+      actualBefore ++ expectedAfter.map fun entry => (entry.1 - lower + start, entry.2))
+    (expectedBelow : ∀ entry ∈ expectedBefore, entry.1 < lower)
+    (actualBelow : ∀ entry ∈ actualBefore, entry.1 < start)
+    (above : ∀ entry ∈ expectedAfter, lower ≤ entry.1) :
+    ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc := by
+  intro pc after
+  simp only [Method.linkAt, expectedLinks, actualLinks]
+  rw [linkLookup_append_of_below (fun entry member => by have := actualBelow entry member; omega),
+    linkLookup_append_of_below (fun entry member => by have := expectedBelow entry member; omega)]
+  exact linkLookup_shift above after
+
+#print axioms links_of_shifted_table
+
 /-- The expected code from `lower` on, relabeled and placed at `start` in `actual`, makes
     `actual` refine `expected` under `suffixRename lower start`. Static sites and link tables
     may differ, as long as each moved pc resolves the same descriptor and link. -/

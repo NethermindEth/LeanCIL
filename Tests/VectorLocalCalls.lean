@@ -1,6 +1,7 @@
 import CIL.Safety.LocalCalls
 import CIL.Safety.LoopScaffold
 import CIL.SIMD.Evaluation256Lemmas
+import Tests.Support
 
 /-!
 # Vector helper output in mixed private storage
@@ -56,7 +57,8 @@ theorem helper_holds {program : CIL.Program} {callee : Nat}
 @[cil_code] def caller : CIL.Method :=
   { locals := [.i64 42, .unmodeled], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.ldarg 0, .ldarg 1, .ldloca 1, .call 1 3, .ldloc 1, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldloca 1, .call (Tests.callee 3) {}, .ldloc 1,
+      .ret], links := [(3, .direct 1)] }
 
 bind_entry entry (memory : Memory) (left right : BitVec 256)
     (formed : memory.WellFormed) := caller

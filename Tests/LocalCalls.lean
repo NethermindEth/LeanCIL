@@ -1,6 +1,7 @@
 import CIL.Safety.LocalCalls
 import CIL.Safety.WideMultiply
 import Tests.LoopFrames
+import Tests.Support
 
 /-!
 # Private outputs of checked helpers
@@ -77,7 +78,8 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
 @[cil_code] def callerBody : CIL.Method :=
   { locals := [.unmodeled, .v256 42], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.ldarg 0, .ldarg 1, .ldloca 0, .call 1 3, .pop, .ldloc 0, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldloca 0, .call (Tests.callee 3) {}, .pop, .ldloc 0, .ret],
+    links := [(3, .direct 1)] }
 
 bind_entry callerEntry (memory : Memory) (left right : CIL.W64)
     (formed : memory.WellFormed) := callerBody
@@ -143,9 +145,9 @@ theorem escaped_home_rejected :
 
 #print axioms escaped_home_rejected
 
-/-- Changing the selected helper to a missing method fails at the actual call instruction. -/
+/-- Linking the call to a missing method fails at the actual call instruction. -/
 theorem wrong_helper_rejected :
-    invoke [callerBody.withCode (callerBody.code.set 3 (.call 2 3)), multiplyBody]
+    invoke [{ callerBody with links := [(3, .direct 2)] }, multiplyBody]
       4 0 [.scalar (.i64 2), .scalar (.i64 3)] Memory.empty =
       .error ⟨0, 3, .invalidState⟩ := by
   rfl

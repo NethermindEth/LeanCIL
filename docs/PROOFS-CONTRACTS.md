@@ -1025,7 +1025,7 @@ yields a normal-only contract. Both `Refines` are reflexive and transitive.
 
 ## Inherit a callee's contract in a forwarder
 
-Overload forwarders and instance-to-static wrappers compile to `ldarg*; call k; ret`.
+Overload forwarders and instance-to-static wrappers compile to `ldarg*; call m; ret`.
 `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`) gives such a method its callee's contract
 with the forwarder's own argument encoding, `contract.withArgs forwarded`, without stepping either
 body. Given `add_holds : addContract.Holds Extracted.program addTo`:
@@ -1033,14 +1033,14 @@ body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 ```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_holds.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
-`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee`, its
-call linked to `callee` (`linked`), with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
+`Forwards body calleeBody loads method callee narrow` fixes the body to `forwarderCode loads method`,
+a `call` of `method` taking one argument per load (`arity`) and linked to `callee` (`linked`), with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
 are data: each is an argument index, read as `Method.argumentAccess` says, which narrows `bool`,
 `char`, `byte`, `sbyte`, `short` and `ushort` parameters, and enums over them, to their declared

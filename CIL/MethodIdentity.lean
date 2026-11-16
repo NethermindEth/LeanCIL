@@ -77,18 +77,41 @@ syntax (name := methodNamed) "method_named " str : term
   let some signature := stx[1].isStrLit? | throwUnsupportedSyntax
   return mkNatLit (← resolve signature)
 
+/-- Elaborates `fact`, a `code[pc]? = ...` fact proved by `rfl`; unfolding the index
+needs recursion depth linear in `pc`, beyond the default for long extracted bodies. -/
+def elabAtPc (pc : Nat) (fact : Command) : CommandElabM Unit := do
+  elabCommand
+    (← `(command| set_option maxRecDepth $(Syntax.mkNumLit (toString (512 + 4 * pc))) in $fact))
+
 /-- A call instruction found in a method body: `CIL.Instruction.call` or the receiver-checked
-    `CIL.Instruction.callInstance`, with its pc, callee index and argument count. -/
+    `CIL.Instruction.callInstance`, with its pc, callee index, argument count and the
+    instruction term as the body writes it. -/
 structure CallAt where
   pc : Nat
   callee : Nat
   argc : Nat
   opcode : Name
+  instruction : Expr
   deriving Inhabited
 
-/-- The instruction a call site holds, as syntax with `index` for its callee. -/
-def CallAt.instruction (site : CallAt) (index : Term) : MacroM Term :=
-  `($(mkCIdent site.opcode) $index $(quote site.argc))
+/-- Declares `name : parent.code[pc]? = some op` for the call `site` of the closed body
+    `parent`, checked by `rfl`; a `callInstance` is stated with `index` for its callee, a
+    `call` with the method its body names. -/
+def emitCallFact (name : Ident) (parent : Term) (site : CallAt) (index : Term) :
+    CommandElabM Unit := do
+  if site.opcode == ``CIL.Instruction.callInstance then
+    elabAtPc site.pc (← `(@[cil_code] theorem $name :
+      ($parent).code[$(quote site.pc)]? = some (.callInstance $index $(quote site.argc)) := rfl))
+  else
+    liftTermElabM do
+      let body ← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method)))
+      let lookup ← mkAppM ``GetElem?.getElem?
+        #[mkApp (mkConst ``CIL.Method.code) body, mkNatLit site.pc]
+      let type ← mkEq lookup (← mkAppM ``Option.some #[site.instruction])
+      let declaration := (← getCurrNamespace) ++ name.getId
+      let value ← mkEqRefl lookup
+      addDecl (.thmDecl { name := declaration, levelParams := [], type, value })
+    elabCommand (← `(attribute [cil_code] $name))
 
 /-- The callee of each direct link in a method's table, keyed by pc; the first entry for a pc
 wins, as in `Method.linkAt`. One cell is reduced at a time, so the cost is linear in the table. -/
@@ -117,17 +140,24 @@ def calls (method : Expr) : MetaM (Array CallAt) := do
   repeat
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, op, tail]) =>
-      if let (opcode, #[_, argc]) := (← whnf op).getAppFnArgs then
-        if opcode == ``CIL.Instruction.call || opcode == ``CIL.Instruction.callInstance then
-          if let some argc ← (evalNat argc).run then sites := sites.push (pc, argc, opcode)
+      let instruction ← whnf op
+      match instruction.getAppFnArgs with
+      | (``CIL.Instruction.call, #[method, _]) =>
+        let count ← reduce (mkApp (mkConst ``CIL.Extraction.MethodRef.argumentCount) method)
+        if let some argc ← (evalNat count).run then
+          sites := sites.push (pc, argc, ``CIL.Instruction.call, instruction)
+      | (``CIL.Instruction.callInstance, #[_, argc]) =>
+        if let some argc ← (evalNat argc).run then
+          sites := sites.push (pc, argc, ``CIL.Instruction.callInstance, instruction)
+      | _ => pure ()
       cell := tail
       pc := pc + 1
     | _ => break
   -- A table the code implies reduces past every pc before a call, so its depth grows with the pc.
   let linked ← withTheReader Core.Context (fun context =>
       { context with maxRecDepth := context.maxRecDepth + 4 * pc }) (directLinks method)
-  return sites.filterMap fun (pc, argc, opcode) =>
-    linked[pc]?.map fun callee => { pc, callee, argc, opcode }
+  return sites.filterMap fun (pc, argc, opcode, instruction) =>
+    linked[pc]?.map fun callee => { pc, callee, argc, opcode, instruction }
 
 /-- The candidate selected by `[occurrence]`, or the only one; never the first of several. -/
 def choose (subject : MessageData) (candidates : Array String) (occurrence : Option Nat) :
@@ -140,12 +170,6 @@ def choose (subject : MessageData) (candidates : Array String) (occurrence : Opt
   | none =>
     if candidates.size == 1 then return 0
     else throwError "{subject}; select one with [i]:\n{listing}"
-
-/-- Elaborates `fact`, a `code[pc]? = ...` fact proved by `rfl`; unfolding the index
-needs recursion depth linear in `pc`, beyond the default for long extracted bodies. -/
-def elabAtPc (pc : Nat) (fact : Command) : CommandElabM Unit := do
-  elabCommand
-    (← `(command| set_option maxRecDepth $(Syntax.mkNumLit (toString (512 + 4 * pc))) in $fact))
 
 /-- Defines `index` and `body` for extraction method `method` and proves by `rfl` that the
     signature table and the program agree with them. -/
@@ -199,9 +223,8 @@ def callSite (parent : Term) (method : Nat) (callee : String) (occurrence : Opti
 
 /-- `bind_callee index body := "signature" from parent` binds as `bind_method` does and
 also requires `parent` to call that method, by the link of the call site; `index.call` states
-the instruction at the site, `index.link` its link, and `[k]` selects one of several. Expected
-bodies take `index` as a parameter, `.call index argc`, so a renumbered extraction never
-changes them. -/
+the instruction at the site, `index.link` its link, and `[k]` selects one of several. The link
+names `index`, so a renumbered extraction never changes a proof that reads the callee from it. -/
 syntax (name := bindCallee)
   (docComment)? "bind_callee " ident ppSpace ident " := " str " from " term:max (" [" num "]")? :
     command
@@ -214,9 +237,7 @@ elab_rules : command
       return (method, ← callSite parent method signature.getString (occurrence.map (·.getNat)))
     emit index body signature method
     documentBinding doc index
-    let instruction ← liftMacroM (site.instruction index)
-    elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
-      ($parent).code[$(quote site.pc)]? = some $instruction := rfl))
+    emitCallFact (mkIdent (index.getId ++ `call)) parent site index
     emitLink (mkIdent (index.getId ++ `link)) parent site.pc index
 
 /-- `bind_callee index body := call argc from parent` binds the method `parent` calls with
@@ -247,9 +268,7 @@ elab_rules : command
       return (site, table[site.callee]?.getD "")
     emit index body (Syntax.mkStrLit signature) site.callee
     documentBinding doc index
-    let instruction ← liftMacroM (site.instruction index)
-    elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (index.getId ++ `call)) :
-      ($parent).code[$(quote site.pc)]? = some $instruction := rfl))
+    emitCallFact (mkIdent (index.getId ++ `call)) parent site index
     emitLink (mkIdent (index.getId ++ `link)) parent site.pc index
 
 /-- The number of cells in a closed list, reduced one cell at a time without normalizing its

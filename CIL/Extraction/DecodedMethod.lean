@@ -6,8 +6,8 @@ import CIL.Extraction.Translation
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
 instruction of the instantiated definition as `Instruction.ofRaw` decodes it, a hole where no
-family admits the opcode yet, a type test naming the type argument and a field access naming the
-instantiated field, a construction naming the instantiated constructor, the frame, homes and
+family admits the opcode yet, a type test naming the type argument, a field access naming the
+instantiated field, a call or construction naming the instantiated method, the frame, homes and
 signature from the same definition, and the link table the extraction states, which the call
 check ties to each raw site.
 `Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
@@ -45,8 +45,8 @@ def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnv
     parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
     environment := environment, links := links, returnsValue := closed.returnType != .void }
 
-/-- The method pinned body bytes denote: `checkBody` checks the definition's metadata, and the
-    code and init flag are the ones decoded from the bytes. -/
+/-- The method pinned body bytes denote with link table `links`: `checkBody` checks the
+    definition's metadata, and the code and init flag are the ones decoded from the bytes. -/
 def _root_.CIL.Method.ofBody? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (body : BodyEvidence) (original : RawMethod)
     (arguments : List TypeExpr) : Option Method := do

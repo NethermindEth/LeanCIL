@@ -45,14 +45,14 @@ string Proof(string name, string bindings, string count, string countLatch, stri
     bind_method root rootBody := "System.UInt32 Labels.Calls::Root(System.UInt32,System.UInt32)"
     {{bindings}}
 
-    -- Each loop body and back edge, and the final call, stated at its label.
+    -- Each loop body and back edge, and the final call's target and return, stated at its label.
     theorem correctness :
         (rootBody.code.drop {{count}}).take 4 = [.ldarg 1, .ldc_i4 1, .sub, .starg 1] ∧
         rootBody.code[{{countLatch}}]? = some (.brtrue {{count}}) ∧
         (rootBody.code.drop {{reduce}}).take 4 = [.ldarg 0, .ldc_i4 3, .sub, .starg 0] ∧
         rootBody.code[{{reduceLatch}}]? = some (.bgt_un {{reduce}}) ∧
-        (rootBody.code.drop {{after}}).take 2 = [.call {{callee}} 1, .ret] :=
-      ⟨rfl, rfl, rfl, rfl, rfl⟩
+        rootBody.linkAt {{after}} = some (.direct {{callee}}) ∧ rootBody.code[{{after}} + 1]? = some .ret :=
+      ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
     end ExampleProof
     """);
