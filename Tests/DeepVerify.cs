@@ -359,7 +359,7 @@ void CheckDeepResultReuse()
         Require(verification.deepCacheHits == hitsBeforeImport,
             "A deep result was restored over a changed imported module");
         RequireNoReport();
-        Console.WriteLine("PASS a same-length change to an imported module with its write time restored is not restored");
+        Console.WriteLine("PASS a same-length imported module change with its write time restored is not restored");
 
         var changedProof = Path.Combine(fixture.Root, "ChangedProof.lean");
         File.WriteAllText(changedProof, File.ReadAllText(proof) + "\n-- A changed proof input.\n");

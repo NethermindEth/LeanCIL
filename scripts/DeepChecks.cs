@@ -336,7 +336,8 @@ partial class Program
         var toolchain = Path.GetFullPath(Path.Combine(Toolchain, "lib", "lean"));
         Dictionary<string, (string Root, string Path)> compiled = new(StringComparer.Ordinal);
         foreach (var root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(Path.GetFullPath).Where(root => !LocationComparer.Equals(root, toolchain) && Directory.Exists(root)))
+            .Select(Path.GetFullPath)
+            .Where(root => !LocationComparer.Equals(root, toolchain) && Directory.Exists(root)))
             foreach (var path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
                 compiled.TryAdd(ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/')), (root, path));
         SortedDictionary<string, string> generated = new(Directory
@@ -351,7 +352,8 @@ partial class Program
         {
             if (!closure.Add(module)) continue;
             if (compiled.ContainsKey(module)) foreach (var imported in headers[module]) pending.Enqueue(imported);
-            else if (!File.Exists(Path.Combine(toolchain, module.Replace('.', Path.DirectorySeparatorChar) + ".olean")))
+            else if (!File.Exists(Path.Combine(toolchain,
+                module.Replace('.', Path.DirectorySeparatorChar) + ".olean")))
                 throw new InvalidDataException("Deep-check import is not compiled: " + module);
         }
         Dictionary<string, string> roots = new(LocationComparer);
