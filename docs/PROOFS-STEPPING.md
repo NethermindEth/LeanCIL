@@ -779,7 +779,7 @@ that the callee is among `body.calleesAt pc`, the callees of the link at the ste
 for a direct call or construction, the dispatch table's bodies for a virtual call, or all
 authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and
-`step_newAggregate_action`, which takes the `.aggregate` link of a `newobj`, separate a call from a
+`step_newobj_aggregate_action`, which takes the `.aggregate` link of a `newobj`, separate a call from a
 construction. The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.

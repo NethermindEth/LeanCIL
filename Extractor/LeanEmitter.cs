@@ -237,7 +237,8 @@ internal static class LeanEmitter
                     NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                     StaticFieldInstruction access => access with { Field = genericEvidence.FieldReferenceOf(m, pc) },
-                    Newobj construction => construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
+                    Newobj construction =>
+                        construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
                     _ => operation
                 };
             }

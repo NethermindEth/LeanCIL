@@ -308,8 +308,8 @@ internal abstract record Allocation
 
 /// <summary>
 /// <c>newobj</c> entering the constructor at method index <paramref name="Method"/> with a fresh
-/// <paramref name="Allocated"/>. <paramref name="Constructor"/> is the typed reference its raw operand names, which the
-/// extraction sets; rendering the instruction before it is set fails.
+/// <paramref name="Allocated"/>. <paramref name="Constructor"/> is the typed reference its raw operand names,
+/// which the extraction sets; rendering the instruction before it is set fails.
 /// </summary>
 internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Constructor) : Operation
 {
@@ -326,7 +326,8 @@ internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Const
     };
 
     internal override string Render(Func<int, string> calleeName) => $".newobj ({(Constructor ??
-        throw new InvalidOperationException("A construction is rendered before its constructor is named.")).ToLean()})";
+        throw new InvalidOperationException("A construction is rendered before its constructor is named."))
+        .ToLean()})";
 }
 
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>

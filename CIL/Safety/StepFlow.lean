@@ -154,7 +154,7 @@ theorem step_tailCall_action {body : CIL.Method} {target argc pc : Nat} {args : 
 
 /-- A construction under an `.aggregate` link enters the constructor the link names with a
     temporary, never as a plain call. -/
-theorem step_newAggregate_action {body : CIL.Method} {constructor : CIL.Extraction.MethodRef}
+theorem step_newobj_aggregate_action {body : CIL.Method} {constructor : CIL.Extraction.MethodRef}
     {callee pc : Nat} {size : Fin (2^64)} {args : List Value} {frame : Frame}
     {stack : List Value} {m : Memory} {action : FrameAction}
     (linked : body.linkAt pc = some (.aggregate callee size))
@@ -165,6 +165,6 @@ theorem step_newAggregate_action {body : CIL.Method} {constructor : CIL.Extracti
   simp only [linked, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
   all_goals (cases h; exact ⟨_, _, _, _, _, _, rfl⟩)
-#print axioms step_newAggregate_action
+#print axioms step_newobj_aggregate_action
 
 end CIL.Safety

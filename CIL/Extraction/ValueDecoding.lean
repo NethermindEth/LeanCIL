@@ -8,11 +8,11 @@ shuffling, return, constants, `ldnull`, arguments, locals, branches, integer ari
 conversions, comparisons, integer indirect loads and stores, dynamic frame storage, the class
 type tests `castclass` and `isinst` and the class instance field accesses `ldfld`, `ldflda` and
 `stfld` and the construction `newobj`, with every short and macro form folded into its
-constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction, and
-`Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
-Instantiation changes a decoded instruction only in the type a type test names, the constructor a
-construction names, or through a field operand (`Instruction.ofRaw?_substitute`), so a closed
-generic body decodes like its original with each type test at the instantiated type, each
+constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that
+decoded instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for
+some operand. Instantiation changes a decoded instruction only in the type a type test names,
+the constructor a construction names, or through a field operand
+(`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original with each type test at the instantiated type, each
 construction of the instantiated constructor, and each class field access at the same owner with
 its held type instantiated (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is
 the total decoding: it writes a hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?`

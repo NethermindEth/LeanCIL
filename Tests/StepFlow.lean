@@ -47,7 +47,7 @@ example {constructor : CIL.Extraction.MethodRef} {size}
     (h : step body (.newobj constructor) pc args frame stack m =
       .ok (.call 2 args stack m')) :
     False := by
-  obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newAggregate_action linked h
+  obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newobj_aggregate_action linked h
   cases contradiction
 
 /-- A call whose operand names method 1 at a pc whose link names method 2. -/
@@ -86,7 +86,7 @@ theorem miskinded_construction :
 #print axioms miskinded_construction
 #print axioms step_next_target
 #print axioms step_call_action
-#print axioms step_newAggregate_action
+#print axioms step_newobj_aggregate_action
 #print axioms step_callee
 
 end Tests.StepFlow

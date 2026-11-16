@@ -8,7 +8,7 @@ import CIL.Safety.ConstructComposition
 Applies a constructor's `MethodContract` at a fetched `newobj` without stepping through the
 constructor body. `MethodContract.Constructs` says what the contract must promise about the
 constructed bytes, `ConstructStorage` is what `newobj` guarantees about the storage it hands
-over, and the `cil_contract_construct` tactic applies `run_newAggregate_of_contract` in a
+over, and the `cil_contract_construct` tactic applies `run_newobj_aggregate_of_contract` in a
 consumer proof.
 -/
 
@@ -136,7 +136,7 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
 
 /-- Construct at a fetched `newobj` under an `.aggregate` link from its constructor's contract
     alone; `input` names the fresh storage `newobj` zeroes. -/
-theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract Input Output}
+theorem run_newobj_aggregate_of_contract {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {constructor : CIL.Extraction.MethodRef}
     {size : Fin (2^64)}
     {body : CIL.Method} {args stack arguments : List Value} {frame : Frame} {memory : Memory}
@@ -177,8 +177,8 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
     rw [same, List.reverse_reverse, List.take_append_drop]
   rw [same] at checked
   obtain ⟨temporary, updated, stepped, zeroed, writable, preserved, fresh⟩ :=
-    step_newAggregate (body := body) (pc := pc) (constructor := constructor) size positive linked
-      args arguments (stack.drop constructor.parameters.length) frame memory formed length.symm
+    step_newobj_aggregate (body := body) (pc := pc) (constructor := constructor) size positive
+      linked args arguments (stack.drop constructor.parameters.length) frame memory formed length.symm
       (by rw [same]; exact checked) known
   rw [split] at stepped
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed
@@ -194,7 +194,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
 #print axioms run_construct_of_contract
 #print axioms construct_frame_invariants
 #print axioms run_construct_of_contract_formed
-#print axioms run_newAggregate_of_contract
+#print axioms run_newobj_aggregate_of_contract
 
 /-- Apply a constructor contract at the fetched `newobj`, leaving `wellFormed`, the
     `precondition` and the continuation. -/
@@ -204,7 +204,7 @@ macro_rules
   | `(tactic| cil_contract_construct $holds $constructs $input [$facts:term,*]) =>
   `(tactic| (
     try apply CIL.Safety.WP.adequate.mpr
-    refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
+    refine CIL.Safety.run_newobj_aggregate_of_contract $holds $constructs $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
       (by first | rfl | simp only [cil_code, cil_step, $[$facts:term],*])

@@ -14,9 +14,9 @@ literals to `cil_instruction_equations`, `cil_resolution_facts` and stepping, an
 extractor writes supplies any part of the method. A field whose type is that of a constant
 passed to the decoder, such as an extraction's `profile`, `environment` and link table, is written
 as that constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand
-equal to a listed `FieldRef` constant as that constant, as an extraction's literal names it, so the facts
-`cil_field_shape` states about the constant apply. Neither the compiled evaluation nor that
-choice is trusted: the kernel checks `name_decoded` and every fact.
+equal to a listed `FieldRef` constant as that constant, as an extraction's literal names it, so
+the facts `cil_field_shape` states about the constant apply. Neither the compiled evaluation nor
+that choice is trusted: the kernel checks `name_decoded` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition

@@ -154,8 +154,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     /// <summary>
-    /// The typed constructor or method the call operand at <paramref name="pc"/> in <paramref name="method"/> names, as
-    /// its raw operand states it; the executed instruction must carry the same reference.
+    /// The typed constructor or method the call operand at <paramref name="pc"/> in <paramref name="method"/> names,
+    /// as its raw operand states it; the executed instruction must carry the same reference.
     /// </summary>
     internal MethodRef MethodReferenceOf(MethodDefinition method, int pc)
     {

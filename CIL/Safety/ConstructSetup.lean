@@ -20,7 +20,7 @@ macro "cil_known_arguments" : tactic =>
 /-- Unmanaged constructors receive fresh initialized aggregate storage of the positive
     representable width the call site's link states; the constructor is the one the link names, and
     it takes the constructor's parameters. -/
-theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
+theorem step_newobj_aggregate {body : CIL.Method} {pc callee : Nat}
     {constructor : CIL.Extraction.MethodRef} (size : Fin (2^64)) (positive : 0 < size.val)
     (linked : body.linkAt pc = some (.aggregate callee size))
     (args arguments rest : List Value) (frame : Frame) (memory : Memory)
@@ -50,6 +50,6 @@ theorem step_newAggregate {body : CIL.Method} {pc callee : Nat}
   simp only [Nat.reducePow, BitVec.ofNat_eq_ofNat] at stored
   rw [stored]
 
-#print axioms step_newAggregate
+#print axioms step_newobj_aggregate
 
 end CIL.Safety
