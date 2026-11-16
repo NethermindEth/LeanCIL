@@ -74,7 +74,6 @@ private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bo
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .ldc_i4 bits => bits.toNat == size
-  | .construct, .newAggregate _ _ width => width.val == size
   | .spanElement, .memory (.spanEmpty width _)
   | .spanElement, .initializeSpanLocal _ (.empty width _)
   | .spanElement, .memory (.spanItem width)
@@ -105,6 +104,11 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
       if access = SizeAccess.arrayElement ∧ metadata.byRefLike = true then none else pure ()
       let layout ← layouts[type]?
       let operation ← method.code[pc]?
+      -- A construction allocates the size its link states; its operand states none.
+      if access = SizeAccess.construct then
+        return operation.constructs && match method.linkAt pc with
+          | some (.aggregate _ width) => width.val == layout.layout.size
+          | _ => false
       return checkSize layout.layout.size layout.alignment access operation).getD false
   | .local slot type => (do
       let layout ← layouts[type]?

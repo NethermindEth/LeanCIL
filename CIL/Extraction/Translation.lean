@@ -51,6 +51,9 @@ structure MethodEvidence where
   /-- The string a proof selects the method by: an extraction's `signatures` table lists these,
       and `BodyDecodes` equates each with Cecil's full name of the method its row defines. -/
   signature : String := ""
+  /-- The link table the extraction states for the method's call sites and constructions; the
+      call check ties each entry to its raw site. -/
+  links : List (Nat × Link) := []
 
 /-- The pin and owner identity of every original and closed body, for attribution checks. -/
 def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=

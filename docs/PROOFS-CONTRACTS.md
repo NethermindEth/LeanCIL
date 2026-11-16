@@ -876,8 +876,9 @@ theorem pair_constructs :
 ```
 
 The storage does not exist before the step, so a caller names the contract input as a function of
-it. `cil_contract_construct holds constructs input [facts]` applies `run_newAggregate_of_contract`
-at the fetched `newobj`, whose link gives the constructor and the size of the storage, and leaves:
+it. `cil_contract_construct holds constructs input [facts]` applies `run_newobj_aggregate_of_contract`
+at the fetched `newobj`, whose `.aggregate` link gives the constructor and the size of the storage,
+and leaves:
 
 - the caller memory's `WellFormed`;
 - the precondition over the fresh storage;

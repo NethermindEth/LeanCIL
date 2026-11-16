@@ -28,13 +28,14 @@ def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Pro
       ∃ body', other[method]? = some body' ∧ body' = { body with code := body'.code } ∧
         body'.code[pc]? = body.code[pc]?
 
-/-- A call-family instruction other than a tail call falls through to the next pc. -/
+/-- An instruction that reads its link, other than a tail call, falls through to the next pc. -/
 theorem Instruction.continues_of_linked {op : CIL.Instruction}
-    (linked : op.link?.isSome = true)
+    (linked : op.readsLink = true)
     (notTail : ∀ target argc, op ≠ .tailCall target argc)
     (notManagedTail : ∀ signature catalog, op ≠ .managed (.call signature catalog true)) :
     op.continues = true := by
-  cases op <;> simp_all [CIL.Instruction.link?, CIL.Instruction.continues]
+  cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.link?,
+    CIL.Instruction.constructs, CIL.Instruction.constructor?, CIL.Instruction.continues]
 
 #print axioms Instruction.continues_of_linked
 

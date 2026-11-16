@@ -8,7 +8,7 @@ import CIL.Safety.ConstructComposition
 Applies a constructor's `MethodContract` at a fetched `newobj` without stepping through the
 constructor body. `MethodContract.Constructs` says what the contract must promise about the
 constructed bytes, `ConstructStorage` is what `newobj` guarantees about the storage it hands
-over, and the `cil_contract_construct` tactic applies `run_newAggregate_of_contract` in a
+over, and the `cil_contract_construct` tactic applies `run_newobj_aggregate_of_contract` in a
 consumer proof.
 -/
 
@@ -134,20 +134,23 @@ theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContra
       continuation final out call
         (construct_frame_invariants methodFound instructionFound stepped formed invoked)
 
-/-- Construct at a fetched `newobj` from its constructor's contract alone; `input` names the
-    fresh storage `newobj` zeroes. -/
-theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc target callee argc : Nat} {size : Fin (2^64)}
+/-- Construct at a fetched `newobj` under an `.aggregate` link from its constructor's contract
+    alone; `input` names the fresh storage `newobj` zeroes. -/
+theorem run_newobj_aggregate_of_contract {Input Output : Type} {c : MethodContract Input Output}
+    {program : CIL.Program} {method pc callee : Nat} {constructor : CIL.Extraction.MethodRef}
+    {size : Fin (2^64)}
     {body : CIL.Method} {args stack arguments : List Value} {frame : Frame} {memory : Memory}
     {this : Input → Reference} {value : Input → Output → List (BitVec 8)}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (constructs : c.Constructs size this value)
     (input : Reference → Input)
     (methodFound : program[method]? = some body)
-    (instructionFound : body.code[pc]? = some (.newAggregate target argc size))
+    (instructionFound : body.code[pc]? = some (.newobj constructor))
     (linked : body.linkAt pc = some (.aggregate callee size))
-    (positive : 0 < size.val) (formed : memory.WellFormed) (enough : argc ≤ stack.length)
-    (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
+    (positive : 0 < size.val) (formed : memory.WellFormed)
+    (enough : constructor.parameters.length ≤ stack.length)
+    (checked : (stack.take constructor.parameters.length).reverse.mapM (checkedValue memory) =
+      .ok arguments)
     (located : ∀ temporary, this (input temporary) = temporary)
     (encoded : ∀ temporary,
       c.args (input temporary) = .reference (.address temporary) :: arguments)
@@ -159,7 +162,8 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
       ∃ fuel result returned,
         run program fuel method (pc + 1) args
           { frame with owned := temporary.allocation :: frame.owned }
-          (.scalar (.aggregate (value (input temporary) out)) :: stack.drop argc) final =
+          (.scalar (.aggregate (value (input temporary) out)) ::
+            stack.drop constructor.parameters.length) final =
             .ok (result, returned) ∧
         post result returned)
     (known : arguments.any Value.hasUnspecified = false := by cil_known_arguments) :
@@ -167,16 +171,16 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
       run program fuel method pc args frame stack memory = .ok (result, returned) ∧
         post result returned := by
   have same := (checkedValues_valid _ _ _ checked).1
-  have length : arguments.length = argc := by
+  have length : arguments.length = constructor.parameters.length := by
     rw [same, List.length_reverse, List.length_take, Nat.min_eq_left enough]
-  have split : arguments.reverse ++ stack.drop argc = stack := by
+  have split : arguments.reverse ++ stack.drop constructor.parameters.length = stack := by
     rw [same, List.reverse_reverse, List.take_append_drop]
   rw [same] at checked
   obtain ⟨temporary, updated, stepped, zeroed, writable, preserved, fresh⟩ :=
-    step_newAggregate (body := body) (pc := pc) (target := target) size positive linked args
-      arguments
-      (stack.drop argc) frame memory formed (by rw [same]; exact checked) known
-  rw [length, split] at stepped
+    step_newobj_aggregate (body := body) (pc := pc) (constructor := constructor) size positive
+      linked args arguments (stack.drop constructor.parameters.length) frame memory formed
+      length.symm (by rw [same]; exact checked) known
+  rw [split] at stepped
   have entered : updated.WellFormed := programStep_preserves_wellFormed _ _ _ _ _ _ _ _ formed
     ⟨body, _, methodFound, instructionFound, stepped⟩
   have storage : ConstructStorage memory updated temporary size :=
@@ -190,7 +194,7 @@ theorem run_newAggregate_of_contract {Input Output : Type} {c : MethodContract I
 #print axioms run_construct_of_contract
 #print axioms construct_frame_invariants
 #print axioms run_construct_of_contract_formed
-#print axioms run_newAggregate_of_contract
+#print axioms run_newobj_aggregate_of_contract
 
 /-- Apply a constructor contract at the fetched `newobj`, leaving `wellFormed`, the
     `precondition` and the continuation. -/
@@ -200,7 +204,7 @@ macro_rules
   | `(tactic| cil_contract_construct $holds $constructs $input [$facts:term,*]) =>
   `(tactic| (
     try apply CIL.Safety.WP.adequate.mpr
-    refine CIL.Safety.run_newAggregate_of_contract $holds $constructs $input
+    refine CIL.Safety.run_newobj_aggregate_of_contract $holds $constructs $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
       (by first | rfl | simp only [cil_code, cil_step, $[$facts:term],*])

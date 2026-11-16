@@ -812,6 +812,17 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
+/-- `cil_checked_step_by_equations` for a step whose equation matches on the link at its pc:
+    `links`, the link facts, rewrite with the step equations, so only the linked arm is
+    simplified; `facts` apply after them as they do for any step. -/
+macro "cil_checked_linked_step_by_equations " "[" links:term,* "]" "[" facts:term,* "]" :
+    tactic =>
+  `(tactic| (
+       cil_simp_only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
+         $[$links:term],*]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
 /-- A matching instruction fact closes a step through its generic `@[cil_step]` equation.
     Keeping the step at `instruction` lets the supplied fact apply before a per-shape equation
     rewrites past it; the opcode need not have a per-shape `@[cil_instruction_step]` equation. -/
@@ -1121,8 +1132,7 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
 /-- Opcodes whose step reads the body's link at the step's pc. -/
 def linkedOpcodes : List Lean.Name :=
   [``CIL.Instruction.call, ``CIL.Instruction.tailCall, ``CIL.Instruction.callInstance,
-    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newAggregate, ``CIL.Instruction.newObject,
-    ``CIL.Instruction.managed]
+    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
@@ -1304,16 +1314,17 @@ elab_rules : tactic
     -- A call-family step's arm matches on its link; the read's fact lets that match reduce. It
     -- enters as a hypothesis, so the run's record, whose simp contexts are keyed by fact text and
     -- would hand a later pc this pc's fact, is not consulted for this step.
-    let stepFacts ← if linkedOpcodes.contains operation then
+    let linkFacts : Array Term ← if linkedOpcodes.contains operation then
         match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
             (← entryAt "cil_checked_step_normalized" args 2)) with
         | some proof =>
           let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
             (← inferType proof) proof).intro1P
           replaceMainGoal [goal]
-          pure (facts.getElems.push (← goal.withContext (Term.exprToSyntax (mkFVar link))))
-        | none => pure facts.getElems
-      else pure facts.getElems
+          pure #[← goal.withContext (Term.exprToSyntax (mkFVar link))]
+        | none => pure #[]
+      else pure #[]
+    let stepFacts := facts.getElems ++ linkFacts
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
       else if operation == ``CIL.Instruction.memory then
@@ -1333,6 +1344,9 @@ elab_rules : tactic
       -- equation rewrites past it.
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
+      else if operation == ``CIL.Instruction.newobj then
+        `(tactic| cil_strict
+          (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
       else
         `(tactic| cil_checked_step_equations [$[$stepFacts:term],*])
     evalTactic strategy
@@ -1872,15 +1886,20 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
     | none => pure false
   let (methodSyntax, instructionSyntax, operation) ←
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
-  -- An object construction runs its constructor as a call before continuing in the caller.
-  let constructs := operation == ``CIL.Instruction.newObject
+  -- A construction under an `.object` link runs its constructor as a call before continuing in
+  -- the caller; under an `.aggregate` link it steps on as any other instruction does.
+  let constructs := operation == ``CIL.Instruction.newobj
   -- These fault before their callee runs: a call site the link table omits, a short heap
   -- budget, a null receiver, or a receiver whose class a dispatch table omits.
   let faultsFirst := constructs || callsCallee operation
   evalTactic (← if operation == ``CIL.Instruction.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
     else if callsCallee operation || constructs then
-      let call ← `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
+      let call ← if constructs then
+          `(tactic| first
+            | cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*]
+            | cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*])
+        else `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
       if faulting && faultsFirst then
         `(tactic| first
           | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]

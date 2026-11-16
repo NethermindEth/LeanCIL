@@ -175,7 +175,7 @@ section ExtractedLinks
 /-- An extracted body: an explicit table and one generated fact per call site. -/
 def linkedBody : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.ldarg 0, .call 1 1, .newAggregate 1 0 8, .ret],
+    code := [.ldarg 0, .call 1 1, .newobj (.arity 0), .ret],
     links := [(1, namedDirect), (2, namedAggregate)] }
 
 @[cil_code] theorem linkedBody_link1 : linkedBody.linkAt 1 = some namedDirect := rfl

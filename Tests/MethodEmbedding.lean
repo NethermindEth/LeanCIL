@@ -521,9 +521,10 @@ theorem caller_links :
 
 #print axioms caller_links
 
-/-- Only linking instructions have entries, keyed by their pc. -/
-example : linksOfCode [.nop, .call 1 2, .ldarg 0, .newAggregate 4 0 8, .ret] =
-    [(1, .direct 1), (3, .aggregate 4 8)] := rfl
+/-- Only instructions that imply a link have entries, keyed by their pc; a construction's link
+    is stated by its table, not implied by its operand. -/
+example : linksOfCode [.nop, .call 1 2, .ldarg 0, .newobj (.arity 0), .ret] = [(1, .direct 1)] :=
+  rfl
 
 /-- A table written out in a literal wins over the default. -/
 example : ({ caller with links := [] } : Method).linkAt 1 = none := rfl

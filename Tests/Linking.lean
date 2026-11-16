@@ -160,8 +160,9 @@ namespace Tests.Linking.Links
 open CIL
 
 def body : Method := {
-  code := [.ldarg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .newAggregate 3 0 8, .ret]
-  locals := [], returnsValue := false }
+  code := [.ldarg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .newobj (.arity 0), .ret]
+  locals := [], returnsValue := false,
+  links := [(1, .direct 1), (3, .virtual [(.void, 2)]), (4, .aggregate 3 8)] }
 
 /-- Direct, virtual and aggregate entries all move by the renaming. -/
 example : (body.relocate (· + 10)).links =

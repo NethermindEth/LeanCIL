@@ -236,7 +236,10 @@ Do not write `{ Extracted.method1 with code := ... }`: a structure update copies
 link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
 new code only where no call or static access moved. A body that reads statics sets the sites after
 `withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`, one entry per
-static access at the body's pc with the extraction's descriptor for it. `withCode` is also the
+static access at the body's pc with the extraction's descriptor for it. A `newobj` implies no link,
+since its operand names the constructor's metadata and not the method index or allocation, so a body
+that constructs states its whole table after `withCode`, in pc order, as in
+`{ body with links := [(pc, link), ...] }`, with the extraction's link at each call and construction. `withCode` is also the
 form for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
 
 ```lean
@@ -263,11 +266,11 @@ that `withCode` resets the sites and what entries to supply after it. `cil_embed
 text when the static descriptor lists differ or a moved pc resolves another descriptor. The
 `declared` and `environment` lines name no remedy: take both from the extraction's method.
 
-A proof that steps through a call reads the link at the call's pc. `cil_instruction_equations`
-states that read as `body_link{pc} : body.linkAt pc = some link` for each call site, so no proof
-walks the table. For a body that keeps the table its code implies, the fact comes from the
-instruction equation of its pc through `Method.linkAt_of_instruction`, whatever the callee of a
-template is. For an explicit table, as an extraction or a template writes, the command checks once
+A proof that steps through a call or a construction reads the link at its pc.
+`cil_instruction_equations` states that read as `body_link{pc} : body.linkAt pc = some link` for
+each call site, so no proof walks the table. For a body that keeps the table its code implies, the
+fact comes from the instruction equation of its pc through `Method.linkAt_of_instruction`, whatever
+the callee of a template is; such a table has no entry at a `newobj`, which then faults. For an explicit table, as an extraction or a template writes, the command checks once
 that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
 table's entry
 (`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
@@ -704,9 +707,12 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
 method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? profile environment
-original typeArguments`, gives. Compiled code evaluates the decoder, and the command writes the
-result as constructors over numerals, except that a field whose type is that of a constant passed
-to the decoder, such as the profile and the environment, is written as that constant. The kernel
+links original typeArguments`, gives. The decoder takes the link table as given: the code implies
+each call's link, but a `newobj` names its constructor's metadata, and the table states the method
+index and allocation it enters, which `Extraction.ManagedCallsValid` checks against the raw site.
+Compiled code evaluates the decoder, and the command writes the result as constructors over
+numerals, except that a field whose type is that of a constant passed to the decoder, such as the
+profile, the environment and the link table, is written as that constant. The kernel
 then checks by reduction the theorem, named with the suffix `_decoded`, that
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
@@ -724,7 +730,8 @@ keeps its literal, whose `.unadmitted` hole at that pc the feature check require
 `Extracted.lean` then states the method as
 
 ```text
-cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw
+cil_decoded_method method0 := Method.ofRaw? profile environment method0Links method0Original
+  method0TypeArgumentsRaw
 ```
 
 in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when

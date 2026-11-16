@@ -323,7 +323,7 @@ theorem defined_vector_return (memory : Safety.Memory) (frame : Safety.Frame) (b
 #print axioms defined_vector_return
 
 theorem unspecified_constructor (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
-    Safety.step body (.newAggregate 1 1 16) 0 [] frame [.scalar (.v128Low64 7)] memory =
+    Safety.step body (.newobj (.arity 1)) 0 [] frame [.scalar (.v128Low64 7)] memory =
       .error (.unsupported "Instruction observes unspecified vector bits") := rfl
 #print axioms unspecified_constructor
 

@@ -53,7 +53,7 @@ partial class Program
     // An extraction's definition of method `method` from its decoder, with the field operand definitions it names.
     static Match DecodedDefinition(string source, int method) => new Regex(
         $@"(?m)^cil_decoded_method method{method}( \[[^\]\r\n]*\])? := Method\.ofRaw\? profile environment " +
-        $@"method{method}Original method{method}TypeArgumentsRaw(?=\r?$)").Match(source);
+        $@"method{method}Links method{method}Original method{method}TypeArgumentsRaw(?=\r?$)").Match(source);
 
     /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
@@ -99,10 +99,12 @@ partial class Program
         var forged = $"method{method}Forged";
         return source[..call.Index] +
             $"def {forged} (profile : FeatureProfile) (environment : LayoutEnvironment) " +
-            "(original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) : Option Method := " +
-            $"(Method.ofRaw? profile environment original arguments).map fun method => {{ method with {update} }}\n" +
+            "(links : List (Nat × Link)) (original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) : " +
+            "Option Method := (Method.ofRaw? profile environment links original arguments).map fun method => " +
+            $"{{ method with {update} }}\n" +
             $"cil_decoded_method method{method}{call.Groups[1].Value} := {forged} profile environment " +
-            $"method{method}Original method{method}TypeArgumentsRaw" + source[(call.Index + call.Length)..];
+            $"method{method}Links method{method}Original method{method}TypeArgumentsRaw" +
+            source[(call.Index + call.Length)..];
     }
 
     /// <summary>

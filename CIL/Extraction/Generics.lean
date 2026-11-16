@@ -405,24 +405,69 @@ structure SpecializedMethod where
   deriving DecidableEq, Repr
 
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
-    opcode: `call` (40) for `.call`, `callvirt` (111) for a receiver-checked call, `newobj`
-    (115) for a construction. -/
+    opcode: `call` (40) for `.call`, `callvirt` (111) for a receiver-checked call. -/
 private def managedCallTarget (opcode : Nat) : Instruction → Option (Nat × Nat)
   | .call target count | .tailCall target count =>
     if opcode = 40 then some (target, count) else none
   | .callInstance target count => if opcode = 111 then some (target, count) else none
-  | .newAggregate target count _ | .newObject target count .. =>
-    if opcode = 115 then some (target, count) else none
   | _ => none
 
-/-- A class construction allocates an instance of the call site's declaring class, with that
-    class's bases and one slot per instance field, whose constructor takes that instance as its
-    object receiver. -/
-def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Instruction → Bool
-  | .newObject _ _ owner bases size => owner == site.declaringType && callee.objectReceiver &&
-    bases == callee.objectBases && size == objectFieldOffset callee.objectFieldCount &&
-    match owner with | .object .. => true | _ => false
-  | _ => true
+/-- Split a scoped declaring type from its ordered generic arguments. -/
+def managedOwner : TypeExpr → Option (String × List TypeExpr)
+  | .atom scope name | .constructor scope name | .object scope name =>
+    some (scope ++ "::" ++ name, [])
+  | .aggregate identity _ => some (identity, [])
+  | .apply owner argument => do
+    let (identity, arguments) ← managedOwner owner
+    return (identity, arguments ++ [argument])
+  | _ => none
+
+/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
+def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
+  match managedOwner site.declaringType with
+  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
+    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
+    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
+  | none => false
+
+/-- `callee` is the extracted method a managed site with metadata token `token` names: the same
+    owner with its type arguments, token, method type arguments and declared signature. -/
+def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMethod) : Bool :=
+  managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
+  callee.closed.token == token && callee.arguments == site.typeArguments &&
+  callee.closed.parameters.length == site.parameterCount &&
+  callee.closed.hasThis == site.hasThis &&
+  (callee.closed.returnType != .void) == site.returnsValue &&
+  callee.closed.returnType == site.returnType &&
+  callee.closed.parameters == site.parameterTypes
+
+/-- What a live `newobj` of `constructor` may be linked to. Its raw instruction is `newobj` (115)
+    of a managed site naming `constructor`, and the linked method is the one the site names. A
+    value-type constructor, whose owner is no class and whose receiver is no object, is linked
+    `.aggregate`; a class constructor taking its instance as object receiver is linked `.object`
+    with the class's bases and one slot per instance field. A dead site passes. -/
+def validateConstructionWith (methods : Nat → Option SpecializedMethod) (raw : RawInstruction)
+    (live : Bool) (link : Option Link) (constructor : MethodRef) : Bool :=
+  if !live then true else
+  match link with
+  | none => false
+  | some link =>
+    let isClass := match constructor.owner with | .object .. => true | _ => false
+    raw.opcode == 115 && match raw.operand with
+    | .call site => site.method == constructor && match site.target with
+      | .managed token => match link with
+        | .aggregate index _ => match methods index with
+          | some callee => calleeMatchesSite site token callee && !isClass &&
+            !callee.closed.objectReceiver
+          | none => false
+        | .object index bases size => match methods index with
+          | some callee => calleeMatchesSite site token callee && isClass &&
+            callee.closed.objectReceiver && bases == callee.closed.objectBases &&
+            size == objectFieldOffset callee.closed.objectFieldCount
+          | none => false
+        | _ => false
+      | .external _ => false
+    | _ => false
 
 /-- The `Virtual` flag of a method's metadata attributes (ECMA-335 II.23.1.10). -/
 def virtualMethodAttribute : Nat := 0x40
@@ -475,24 +520,6 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
     callableType callee.closed.returnType == signature.result &&
     callee.closed.parameters.map callableType == signature.parameters &&
     managedSignature signature.typeExpr == some signature
-
-/-- Split a scoped declaring type from its ordered generic arguments. -/
-def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name | .object scope name =>
-    some (scope ++ "::" ++ name, [])
-  | .aggregate identity _ => some (identity, [])
-  | .apply owner argument => do
-    let (identity, arguments) ← managedOwner owner
-    return (identity, arguments ++ [argument])
-  | _ => none
-
-/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
-def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
-  match managedOwner site.declaringType with
-  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
-    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
-    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
-  | none => false
 
 /-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
 def managedAddressMatches (methods : Nat → Option SpecializedMethod)
@@ -548,6 +575,9 @@ def validateManagedCallWith (methodCount : Nat)
           callee.closed.returnType == site.returnType
         | none => false
     | _ => false
+  -- A live construction is checked with its link by `validateConstructionWith`; without the link
+  -- it passes nothing.
+  | .newobj _ => false
   | _ =>
   match raw.operand with
   | .call site => match site.target with
@@ -556,34 +586,30 @@ def validateManagedCallWith (methodCount : Nat)
       | some (target, count) => match methods target with
         | none => false
         | some callee =>
-          managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
-          callee.closed.token == token && callee.arguments == site.typeArguments &&
-          callee.closed.parameters.length == site.parameterCount &&
-          callee.closed.hasThis == site.hasThis &&
-          (callee.closed.returnType != .void) == site.returnsValue &&
-          callee.closed.returnType == site.returnType &&
-          callee.closed.parameters == site.parameterTypes &&
-          count == site.parameterCount + (if raw.opcode != 115 && site.hasThis then 1 else 0) &&
-          constructedOwnerMatches site callee.closed emitted &&
+          calleeMatchesSite site token callee &&
+          count == site.parameterCount + (if site.hasThis then 1 else 0) &&
           checkedReceiverMatches callee.closed emitted
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. =>
-        false
+      | .callInstance .. | .tailCall .. => false
       | _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. => false
+    | .call .. | .callInstance .. | .tailCall .. => false
     | _ => true
 
-/-- `link` is what the method's link table gives this pc. It must be the link the instruction
-    implies, live or not, so a key sits only at a call-family pc and each call-family pc has one,
-    and the instruction must pass `validateManagedCallWith`. -/
+/-- `link` is what the method's link table gives this pc. A construction is checked with it by
+    `validateConstructionWith`. Any other instruction must have the link it implies, live or not,
+    so a key sits only at a pc that reads one and each call-family pc has one, and must pass
+    `validateManagedCallWith`. -/
 def validateLinkedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
-  link == emitted.link? && validateManagedCallWith methodCount methods imports raw live emitted
+  match emitted.constructor? with
+  | some constructor => validateConstructionWith methods raw live link constructor
+  | none =>
+    link == emitted.link? && validateManagedCallWith methodCount methods imports raw live emitted
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -595,11 +621,17 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
     (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
+/-- The linked call rule stated against the original lists. -/
+def validateLinkedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
+  validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
+
 /-- The emitted link table's keys ascend and are pcs of the emitted code, and each pc is checked
     with the link the table gives it, read by one walk beside the code; so the table gives every
-    call-family pc the link its instruction implies and has no other key. Every call emitted at a
-    live call site of `raw` binds to the method table or an import slot, and no other instruction
-    emits a call. An external site may instead emit a non-call translation, which other
+    call-family pc the link its instruction implies, every live construction a link
+    `validateConstructionWith` accepts, and has no key at a pc that reads none. Every call emitted
+    at a live call site of `raw` binds to the method table or an import slot, and no other
+    instruction emits a call. An external site may instead emit a non-call translation, which other
     validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
@@ -611,68 +643,113 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
     raw.code (reachable.zip (linkWalk emitted.links emitted.links 0
       (List.range emitted.code.length))) emitted.code = true
 
-/-- The check accepts exactly the bodies whose table is the one their code implies and whose
-    instructions pass the list-indexed rules with those links: indexed lookups and links read
-    beside the code lose no evidence the table equality accepted and admit none it rejected. -/
-theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
-    (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
-    ManagedCallsValid methods imports raw reachable emitted ↔
-      emitted.links = linksOfCode emitted.code ∧
-      raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-        all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
+/-- Reading a link list built from the code's own links gives each instruction the link it
+    implies, so a check of instruction and link reads only the instruction. -/
+private theorem all3_implied {α β : Type} (check : α → β → Option Link → Instruction → Bool) :
+    ∀ (raw : List α) (states : List β) (code : List Instruction),
+      raw.length = states.length → raw.length = code.length →
+      all3 (fun first (second, link) op => check first second link op) raw
+          (states.zip (code.map Instruction.link?)) code =
+        all3 (fun first second op => check first second op.link? op) raw states code := by
+  intro raw
+  induction raw with
+  | nil =>
+    intro states code statesLength codeLength
+    cases states <;> cases code <;> simp_all [all3]
+  | cons first rest ih =>
+    intro states code statesLength codeLength
+    cases states with
+    | nil => simp at statesLength
+    | cons second states =>
+      cases code with
+      | nil => simp at codeLength
+      | cons op code =>
+        simp only [List.map_cons, List.zip_cons_cons, all3]
+        rw [ih states code (by simpa using statesLength) (by simpa using codeLength)]
+
+/-- A passing check reads, at every pc, the link the table gives it beside the raw and emitted
+    instructions: the walk and the indexed tables lose no evidence the list-indexed rules use. -/
+theorem ManagedCallsValid.reads {methods : List SpecializedMethod} {imports : List ImportSlot}
+    {raw : RawMethod} {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports raw reachable emitted) :
+    raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
+      all3 (fun instruction (live, link) op =>
+          validateLinkedCall methods imports instruction live link op) raw.code
+        (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))
+        emitted.code = true := by
   have index {α : Type} (values : List α) :
       (FlowIndex.ofList values).get? = (values[·]?) := by
     funext target
     exact FlowIndex.get?_ofList values target
-  have compares : ∀ instruction live link op,
-      validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) instruction live link op =
-        (link == op.link? && validateLinkedCallWith methods.length (methods[·]?) (imports[·]?)
-          instruction live op.link? op) := by
-    intro instruction live link op
-    simp only [validateLinkedCallWith, beq_self_eq_true, Bool.true_and]
+  obtain ⟨ascending, _, statesLength, codeLength, checked⟩ := valid
+  rw [index, index, linkWalk_eq _ ascending _ _ 0 (dropBelow_zero _).symm] at checked
+  exact ⟨statesLength, codeLength, checked⟩
+
+#print axioms ManagedCallsValid.reads
+
+/-- A body whose table is the one its code implies passes when its instructions pass the
+    list-indexed rules without links. Such a body has no live construction, which needs a link
+    its code does not imply. -/
+theorem ManagedCallsValid_of_implied {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
+    (implied : emitted.links = linksOfCode emitted.code)
+    (statesLength : raw.code.length = reachable.length)
+    (codeLength : raw.code.length = emitted.code.length)
+    (valid : all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true) :
+    ManagedCallsValid methods imports raw reachable emitted := by
+  have index {α : Type} (values : List α) :
+      (FlowIndex.ofList values).get? = (values[·]?) := by
+    funext target
+    exact FlowIndex.get?_ofList values target
   have unlinked : ∀ instruction live op,
       validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) instruction live
         op.link? op = validateManagedCall methods imports instruction live op := by
     intro instruction live op
-    simp only [validateLinkedCallWith, validateManagedCall, beq_self_eq_true, Bool.true_and]
-  have reads (ascending : keysAscend 0 emitted.links = true) :
-      linkWalk emitted.links emitted.links 0 (List.range emitted.code.length) =
-        (List.range' 0 emitted.code.length).map (linkLookup emitted.links) := by
-    rw [linkWalk_eq _ ascending _ _ 0 (dropBelow_zero _).symm, List.range_eq_range']
-  unfold ManagedCallsValid
-  rw [index, index]
-  constructor
-  · rintro ⟨ascending, bounded, statesLength, codeLength, valid⟩
-    rw [reads ascending] at valid
-    obtain ⟨implied, valid⟩ :=
-      (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mp valid
-    rw [← List.range_eq_range', eq_linksOfCode_iff _ _ ascending bounded] at implied
-    exact ⟨implied, statesLength, codeLength, by simpa only [unlinked] using valid⟩
-  · rintro ⟨implied, statesLength, codeLength, valid⟩
-    have ascending : keysAscend 0 emitted.links = true := by
-      rw [implied]
-      exact keysAscend_linksOfCode _
-    have bounded : emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) =
-        true := by
-      rw [implied]
-      exact linksOfCode_keys _
-    refine ⟨ascending, bounded, statesLength, codeLength, ?_⟩
-    rw [reads ascending]
-    refine (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mpr
-      ⟨?_, by simpa only [unlinked] using valid⟩
-    rw [← List.range_eq_range', eq_linksOfCode_iff _ _ ascending bounded]
-    exact implied
+    cases named : op.constructor? with
+    | none =>
+      simp only [validateLinkedCallWith, named, validateManagedCall, beq_self_eq_true,
+        Bool.true_and]
+    | some constructor =>
+      cases Instruction.eq_newobj_of_constructor? named
+      cases live <;> rfl
+  have ascending : keysAscend 0 emitted.links = true := by
+    rw [implied]
+    exact keysAscend_linksOfCode _
+  have bounded : emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) =
+      true := by
+    rw [implied]
+    exact linksOfCode_keys _
+  refine ⟨ascending, bounded, statesLength, codeLength, ?_⟩
+  rw [index, index, linkWalk_eq _ ascending _ _ 0 (dropBelow_zero _).symm,
+    (eq_linksOfCode_iff _ _ ascending bounded).mpr implied,
+    all3_implied (validateLinkedCallWith methods.length (methods[·]?) (imports[·]?)) _ _ _
+      statesLength codeLength]
+  simpa only [unlinked] using valid
 
-#print axioms ManagedCallsValid_iff_original
+#print axioms ManagedCallsValid_of_implied
 
-/-- An admitted body gives every pc the link its own instruction states. Each call arm of `step`
-    matches the constructor that `link?` gives its instruction, so a step of an admitted body
-    never takes the `unlinkedCall` branch. -/
+/-- An admitted body gives every pc of an instruction other than a construction the link that
+    instruction states. Each call arm of `step` matches the constructor that `link?` gives its
+    instruction, so a step of such an instruction never takes the `unlinkedCall` branch. -/
 theorem ManagedCallsValid.linkAt_eq {methods : List SpecializedMethod}
     {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) {pc : Nat}
-    {op : Instruction} (found : emitted.code[pc]? = some op) : emitted.linkAt pc = op.link? :=
-  Method.linkAt_of_instruction ((ManagedCallsValid_iff_original _ _ _ _ _).mp valid).1 found
+    {op : Instruction} (found : emitted.code[pc]? = some op) (implied : op.constructs = false) :
+    emitted.linkAt pc = op.link? := by
+  obtain ⟨statesLength, codeLength, checked⟩ := valid.reads
+  have present : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
+  have live : pc < reachable.length := statesLength ▸ codeLength ▸ present
+  have read : ((List.range emitted.code.length).map emitted.linkAt)[pc]? =
+      some (emitted.linkAt pc) := by
+    simp [present]
+  have pass := all3_at checked (List.getElem?_eq_getElem (codeLength ▸ present))
+    ((List.getElem?_zip_eq_some (z := (_, emitted.linkAt pc))).mpr
+      ⟨List.getElem?_eq_getElem live, read⟩) found
+  have unnamed : op.constructor? = none := by
+    simpa [Instruction.constructs] using implied
+  simp only [validateLinkedCall, validateLinkedCallWith, unnamed, Bool.and_eq_true,
+    beq_iff_eq] at pass
+  exact pass.1
 
 #print axioms ManagedCallsValid.linkAt_eq
 
@@ -681,32 +758,40 @@ instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : R
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
-/-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
-    Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
+/-- Checks generated call bindings structurally when the table is the one the code implies,
+    retaining kernel decision for residual checks and for bodies that construct, whose links the
+    code does not imply. Reflexive metadata comparisons use equality proofs instead of
+    re-evaluating strings. -/
 macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
   `(tactic| first
-    | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_, ?_⟩
+    | (apply ManagedCallsValid_of_implied
        · decide +kernel
        · rfl
        · rfl
        · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
-           constructedOwnerMatches,
+           calleeMatchesSite,
            $[$facts:term],*] <;>
            decide +kernel)
     | decide +kernel)
 
+/-- Every live pc passes the linked call rule with the link the table gives it. -/
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
     {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
-    validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
+    validateLinkedCall methods imports raw.code[pc] reachable[pc.val]! (emitted.linkAt pc.val)
       (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
-  have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
-  have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
-  have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt
+  obtain ⟨statesLength, codeLength, checked⟩ := valid.reads
+  have live : pc.val < reachable.length := statesLength ▸ pc.isLt
+  have present : pc.val < emitted.code.length := codeLength ▸ pc.isLt
+  have read : ((List.range emitted.code.length).map emitted.linkAt)[pc.val]? =
+      some (emitted.linkAt pc.val) := by
+    simp [present]
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
-  exact all3_at valid.2.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+  have pass := all3_at checked (List.getElem?_eq_getElem pc.isLt)
+    ((List.getElem?_zip_eq_some (z := (_, emitted.linkAt pc.val))).mpr
+      ⟨List.getElem?_eq_getElem live, read⟩)
     (List.getElem?_eq_getElem present)
+  exact pass
 
 /-- An accepted live `call` past every extracted method is an external site calling a slot
     with its identity and arity. -/

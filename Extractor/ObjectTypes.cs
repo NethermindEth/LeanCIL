@@ -176,7 +176,8 @@ internal static class ObjectTypes
     /// <summary>
     /// The checked operation for <c>newobj</c> of an admitted class: a fresh instance of its runtime type, with
     /// one 8-byte slot per instance field including its bases', passed to <paramref name="constructor"/> at
-    /// method index <paramref name="index"/>. An abstract class has no instances of its own.
+    /// method index <paramref name="index"/>; the extraction names the constructor. An abstract class has no instances
+    /// of its own.
     /// </summary>
     internal static Operation Construction(MethodDefinition constructor, int index)
     {
@@ -185,9 +186,8 @@ internal static class ObjectTypes
             throw new InvalidDataException("Unsupported construction of an abstract class: " + owner.FullName +
                 "\n  newobj of an abstract class fails at run time; only its derived classes have instances.");
         var size = FieldSlot * Fields(owner).Length;
-        var type = GenericEvidence.ObjectType(owner);
-        return new NewObject(index, constructor.Parameters.Count, type,
-            [.. Bases(owner).Select(GenericEvidence.ObjectType)], size);
+        return new Newobj(index, new Allocation.Instance([.. Bases(owner).Select(GenericEvidence.ObjectType)], size),
+            null);
     }
 
     /// <summary>

@@ -84,7 +84,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   -- Calls, construction, intrinsics and memory operations.
   | .call _ count | .callInstance _ count | .callVirtual _ count | .tailCall _ count =>
     some (count, if returnsValue then 1 else 0)
-  | .newAggregate _ count _ | .newObject _ count .. => some (count, 1)
+  | .newobj constructor => some (constructor.parameters.length, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => some (0, 1)

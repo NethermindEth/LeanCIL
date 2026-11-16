@@ -570,6 +570,20 @@ internal sealed record FieldRef(string Owner, int Index, string Type, MetadataNa
         $"{{ owner := {Owner}, index := {Index}, type := {Type}, name := {Name.ToLean()} }}");
 }
 
+/// <summary>A method by declaring type, name and declared signature, with the type arguments of a generic method
+/// instance (<c>CIL.Extraction.MethodRef</c>). Types are <c>CIL.Extraction.TypeExpr</c> terms in the closed form the
+/// call site states.</summary>
+internal sealed record MethodRef(string Owner, MetadataName Name, bool HasThis, int GenericArity, string ReturnType,
+    ValueList<string> Parameters, ValueList<string> MethodArguments)
+{
+    /// <summary>The structure literal of the reference.</summary>
+    internal string ToLean() => string.Create(CultureInfo.InvariantCulture,
+        $"{{ owner := {Owner}, name := {Name.ToLean()}, hasThis := {LeanText.Bool(HasThis)}, " +
+        $"genericArity := {GenericArity}, returnType := {ReturnType}, " +
+        $"parameters := [{string.Join(", ", Parameters)}], " +
+        $"methodArguments := [{string.Join(", ", MethodArguments)}] }}");
+}
+
 /// <summary>The assemblies of the .NET 11 platform the extractor models, as <c>AssemblyRef</c> rows name them.
 /// System.Runtime forwards its types to System.Private.CoreLib, which holds their <c>TypeDef</c> rows.</summary>
 internal static class PlatformAssemblies
