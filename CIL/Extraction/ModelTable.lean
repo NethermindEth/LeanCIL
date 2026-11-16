@@ -168,7 +168,7 @@ def ModelEntry.Yields (entry : ModelEntry) (property : RuntimeModel → Prop) : 
 #print axioms ModelEntry.exact_yields
 
 /-- A model a table gives has every property each of its entries' models has, so a proof about
-    the models of a table covers an entry added to it once that entry's models have the property. -/
+    the models of a table covers an added entry once that entry's models have the property. -/
 theorem ModelTable.find_yields {table : ModelTable} {property : RuntimeModel → Prop}
     (every : ∀ group ∈ table.toList, ∀ entry ∈ group.2, entry.Yields property)
     {environment : LayoutEnvironment} {opcode : CallOpcode} {method : MethodRef}
