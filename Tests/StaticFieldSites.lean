@@ -249,6 +249,16 @@ private def endianEvidence : MethodEvidence :=
     scalarStates := [some [], some [.word32]], layoutUses := [], assembly := pin,
     signature := (spelled? decoded.names.signature).getD "" }
 
+/-- The same body emitted as the profile's endianness constant, the form the feature check
+    admits, is a valid translation. -/
+theorem endian_field_as_constant_accepted :
+    TranslationValid [] #[] [] [endianEvidence] []
+      [{ locals := [], returnsValue := true,
+         declared := DeclaredSignature.ofRaw endianEvidence.original,
+         code := [.ldc_i4 1, .ret] }] := by
+  decide +kernel
+#print axioms endian_field_as_constant_accepted
+
 /-- A descriptor of `IsLittleEndian` whose constructor stores 0. -/
 private def endianDescriptor : StaticDescriptor :=
   { identity := 3, field := littleEndianField, bytes := [0], scalar := some false,

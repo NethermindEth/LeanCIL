@@ -321,7 +321,8 @@ var staticPath = staticOutputs[0] + Path.PathSeparator + library;
 var changedStatic = Path.Combine(directory, "ChangedStatic");
 Directory.CreateDirectory(changedStatic);
 File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
-    staticTemplate.Replace("StaticDispatch::Bias", "StaticDispatch::Changed", StringComparison.Ordinal));
+    staticTemplate.Replace("name := name!\"Bias\" }, bytes", "name := name!\"Changed\" }, bytes",
+        StringComparison.Ordinal));
 Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
 RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
 var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
