@@ -20,6 +20,7 @@ const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
 const string Int32Type = ".atom CIL.Extraction.runtimeScope \"System.Int32\"";
+const string Int64Type = ".atom CIL.Extraction.runtimeScope \"System.Int64\"";
 const string NodeType = ".object \"Examples\" \"Examples.Node\"";
 var localSlots = string.Join(", ", Enumerable.Repeat(".root (some target)", LocalCount));
 
@@ -65,7 +66,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("hypotheseslookup", [16, 64, 256], false), ("hypothesesdirect", [16, 256], false),
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
-    ("tablecalls", [16, 64, 256], true)
+    ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -125,6 +126,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // pops it, so each `newarr` resolves its element shape and reads one allocation fact. The calls body
 // passes its argument through one call per cycle to a callee that returns it, so each call reads its
 // target from the body's link table; the tablecalls body writes that table out, as a template does.
+// The objects body loads an int64 field of its object argument and pops it per cycle, so each `ldfld`
+// reads the field's shape fact and two memory facts of constant size.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
@@ -139,6 +142,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
         ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
     "allocation" => ([], [".ldc_i4 2", $".newarr ({NodeType})", ".pop"], [".ldc_i4 0", ".ret"]),
+    "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -199,6 +203,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     {
         "arguments" => $" declared := {signature},",
         "homes" => $" declared := {signature}, parameterHomes := [{homes}],",
+        "objects" => " environment := environment,",
         _ => ""
     };
     var linksField = workload == "tablecalls"
@@ -213,8 +218,18 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
         "allocation" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
+        "objects" =>
+            "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         _ => ""
     };
+    // The objects body reads field 1 of a class, an int64 in the slot at model offset 8.
+    var fieldDefinitions = workload == "objects" ? $$"""
+        @[cil_code] def environment : CIL.LayoutEnvironment := {}
+        /-- The `int64` field 1 of a class. -/
+        def counter : CIL.Extraction.FieldRef :=
+          { owner := {{NodeType}}, index := 1, type := {{Int64Type}}, name := name!"count" }
+        cil_field_shape environment counter
+        """ + "\n" : "";
     var localKinds = string.Join(", ", Enumerable.Repeat(".word64", SnapshotLocalCount));
     var localValues = string.Join(", ", Enumerable.Repeat(".i64 0", SnapshotLocalCount));
     var bodyDefinition = snapshots ? $$"""
@@ -237,7 +252,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        {{bodyDefinition}}
+        {{fieldDefinitions}}{{bodyDefinition}}
         """ + "\n" + (workload is "calls" or "tablecalls" ? """
         /-- The callee every call of the calls body enters; it returns its argument. -/
         def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
@@ -442,6 +457,16 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 (allocated : newReferenceArray memory ({{NodeType}}) (.i32 2) = .ok (array, memory)) :
                 invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [allocated]
+            """,
+        "objects" => $$"""
+            /-- Every `ldfld` reads its slot from the field's shape fact and two memory facts of its object. -/
+            theorem checked (memory : Memory) (object field : Reference) (word : CIL.W64)
+                (formed : formObject memory (.address object) = .ok (.object (.address object)))
+                (located : objectFieldAddress memory (.address object) ({{NodeType}}) 8 = .ok field)
+                (loaded : loadValue memory (.address field) 8 false = .ok (.i64 word)) :
+                invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [formed, located, loaded]
             """,
         "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/

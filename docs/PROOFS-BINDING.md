@@ -679,7 +679,10 @@ An extraction states once how its methods resolve each distinct operand of a rea
 `Extracted.valueType{k}_shape`, which give `CIL.Method.fieldShape` or `CIL.Method.valueShape` of
 the operand for every method whose environment is `Extracted.environment`. Each fact costs one
 kernel check, however many sites and methods use the operand, and the `cil_code` simprocs
-`reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it.
+`reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it. The
+`cil_step` simprocs `reduceFieldLoad`, `reduceFieldStore` and `reduceFieldAddress` step a class
+field access by the equation for its slot, with the owner shown as the operand writes it; a
+closed method and operand without a fact resolve by evaluation, which the kernel checks again.
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared type, and a class instance
 field to the model slot of its index; `valueShape` gives a vector, including a floating-point

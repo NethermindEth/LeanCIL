@@ -614,8 +614,8 @@ fields instead of offsets. For every field of an admitted class that its methods
 extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
 WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
 the class and the model offset the extractor validated. Each comes with a theorem, checked by
-`decide`, that the descriptor matches the operands of an instruction it names
-(`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
+`decide`, that the method's `Method.fieldShape` of the field an instruction it names accesses is
+the descriptor's slot (`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
 element are relied on.
 
 `CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
@@ -714,7 +714,7 @@ or references it may change.
 | --- | --- |
 | Confine a store to that entry | `Confined.setSlot`, `Confined.storeSlot` |
 | Keep the reference a field of a different, older object holds | `Confined.objectSlot_of_ne` |
-| Step the field accesses | `step_objectReferenceField_eq`, `step_setObjectReferenceField_eq` |
+| Step the field accesses | the `cil_step` simprocs, by `step_ldfld_reference_eq` and `step_stfld_reference_eq` |
 | Reduce them, given the slot's access check, to the held reference and to `setSlot` | `loadSlot_of_access`, `storeSlot_of_access` |
 | Read `setSlot` back | `setSlot_slots_same`, `setSlot_slots_of_ne` |
 | `setSlot` leaves bytes, authority and field locations unchanged | `read_setSlot`, `access_setSlot`, `objectFieldAddress_setSlot` |
@@ -826,7 +826,7 @@ one, whose view validates.
 | Keep an array whole across the same changes, whatever its elements then hold | `WholeArray.after_confined`, `after_below`, `after_kept` |
 | Pass a whole array as a call argument, from its view's `valid` | `checkedValue_array` |
 | Move it through a local, from its view's `valid` | `storeLocal_array`, `loadLocal_array` |
-| Step `ldfld` and `stfld` | `step_arrayField_eq`, `step_setArrayField_eq` |
+| Step `ldfld` and `stfld` | the `cil_step` simprocs, by `step_ldfld_array_eq` and `step_stfld_array_eq` |
 | Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_memory_arrayLength_address_eq` |
 | Step `ldlen` of the null array to its throw | `step_memory_arrayLength_null_eq` |
 

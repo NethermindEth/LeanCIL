@@ -270,6 +270,28 @@ theorem Memory.Equivalent.addressArgument {m n : Memory} (same : m.Equivalent n)
   simp only [CIL.Safety.addressArgument, same.localAddress]
 #print axioms Memory.Equivalent.addressArgument
 
+/-- Equivalent memories give an instance field load equivalent results. -/
+theorem Memory.Equivalent.fieldLoad {m n : Memory} (same : m.Equivalent n) (body : CIL.Method)
+    (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (fieldLoad body field stack m)
+      (fieldLoad body field stack n) := by
+  unfold CIL.Safety.fieldLoad
+  split
+  · exact same.classFieldLoad _ _ _ _
+  all_goals exact .error _
+#print axioms Memory.Equivalent.fieldLoad
+
+/-- Equivalent memories give an instance field store equivalent results. -/
+theorem Memory.Equivalent.fieldStore {m n : Memory} (same : m.Equivalent n) (body : CIL.Method)
+    (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (fieldStore body field stack m)
+      (fieldStore body field stack n) := by
+  unfold CIL.Safety.fieldStore
+  split
+  · exact same.classFieldStore _ _ _ _
+  all_goals exact .error _
+#print axioms Memory.Equivalent.fieldStore
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -351,6 +373,18 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.instruction _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.fieldLoad _ _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.fieldStore _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
        obtain ⟨otherMemory, otherValues⟩ := right

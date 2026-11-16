@@ -226,8 +226,13 @@ internal static class LeanEmitter
             {
                 var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                     scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
-                return operation is NewArray allocation
-                    ? allocation with { Element = genericEvidence.ArrayElementOf(m, i) } : operation;
+                // An allocation and a class field access name the element or field their raw operand names.
+                return operation switch
+                {
+                    NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
+                    ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, i) },
+                    _ => operation
+                };
             }
             List<Operation> ops = [];
             foreach (Instruction i in m.Body.Instructions)
@@ -267,11 +272,14 @@ internal static class LeanEmitter
             // Links stay out of the frame: templates share it across profiles, but call indices differ.
             lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
                 $"links := {linkTable}, code := [");
-            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op.ToLean())) + "] }");
+            // A class field access names its operand's definition, so stepping reads that operand's shape fact.
+            operandShapes.Add(m, reachable, genericEvidence);
+            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
+                (op is ClassField { Reference: { } field } access
+                    ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
-            operandShapes.Add(m, reachable, genericEvidence);
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
             lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
                 $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
@@ -417,6 +425,9 @@ internal static class LeanEmitter
                 }
             }
         }
+
+        /// <summary>The definition that names the recorded field operand <paramref name="field"/>.</summary>
+        internal string FieldName(FieldRef field) => $"fieldRef{fields[field]}";
 
         /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
         internal string Lean() => text.ToString();
