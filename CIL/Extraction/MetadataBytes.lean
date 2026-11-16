@@ -48,6 +48,12 @@ inductive MetadataError where
   /-- An instance field whose owner no carried slice defines, other than an item of the platform
       pair: no carried metadata gives its position among the owner's fields. -/
   | unboundInstanceField (token : Nat)
+  /-- A static field whose owner no carried slice defines, other than the platform constant
+      field: no carried row is the field the static site at its use stands for. -/
+  | unboundStaticField (token : Nat)
+  /-- A static field named through a generic instantiation of its owner: each closed
+      instantiation has its own storage, and the model keeps one per field. -/
+  | instantiatedStaticField (token : Nat)
   | localMismatch (index : Nat)
   | methodMismatch (token : Nat)
   | identityMismatch

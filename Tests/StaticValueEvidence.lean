@@ -12,13 +12,14 @@ private def initializer : Method := {
   code := [.ldloc 0, .ret], locals := [.aggregate zeros], localKinds := [.aggregate 2],
   returnsValue := true }
 
-private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitializer) : StaticDescriptor :=
-  { identity := 0, fieldName := "Fixture::Zero", bytes, initializer := init }
-
 /-- The static field the fixtures load, as the raw operand of `rawStatic` names it. -/
 private def field : FieldRef :=
   { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair",
     name := name!"Zero" }
+
+private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitializer) :
+    StaticDescriptor :=
+  { identity := 0, field, bytes, initializer := init }
 
 /-- A second field of the same holder and type. -/
 private def otherField : FieldRef := { field with index := 1, name := name!"One" }

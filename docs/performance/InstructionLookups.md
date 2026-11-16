@@ -189,7 +189,12 @@ size.
 The suite also declares `cil_resolution_facts` for methods of 8, 32 and 128 static sites at even
 pcs and reads every site's `Method.staticAt` through the facts, under the same 1.35 limit per
 site. The facts cost about 5,500, 7,000 and 7,000 heartbeats per site, lower at 8 for the same
-reason, and the reads 22,100 to 23,500 heartbeats per site at every size.
+reason, and the reads 22,400 to 23,800 heartbeats per site at every size.
+
+The suite also decides `StaticIdentitiesValid` for one method of 8, 32 and 128 static sites, each
+of its own field and identity, under the same 1.35 limit per site. The check walks the recorded
+accesses beside the sites once and sorts the pairs of identity and field both ways, and costs
+about 22,900, 21,000 and 22,700 heartbeats per site.
 
 The suite also declares `cil_resolution_facts` for a method whose raw method names one struct
 element type per layout, at 8, 32 and 128 layouts, and reads every element's

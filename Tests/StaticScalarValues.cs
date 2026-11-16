@@ -140,7 +140,7 @@ if (!seededReport.SequenceEqual(seedFields))
 Console.WriteLine("PASS hash proved for every seed; a fixed seed is refuted and unbound seeds fault");
 
 var mixSource = File.ReadAllText(Path.Combine(mix, "Extracted.lean"));
-const string seedBytes = "SeededHash::Seed0\", bytes := [(BitVec.ofNat 8 0)";
+const string seedBytes = "name := name!\"Seed0\" }, bytes := [(BitVec.ofNat 8 0)";
 if (!mixSource.Contains(seedBytes, StringComparison.Ordinal)) throw new Exception("Missing unknown seed descriptor");
 var guessedProof = Path.Combine(root, "Opaque-guessed.lean");
 // A load from the zero placeholder faults unless the caller supplies a binding.

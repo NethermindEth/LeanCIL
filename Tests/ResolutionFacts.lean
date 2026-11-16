@@ -625,9 +625,12 @@ cil_resolution_facts noParameters
 /-- error: Unknown identifier `noParameters_sitesAscend` -/
 #guard_msgs in #check noParameters_sitesAscend
 
-/-- The descriptor of the static site with index `k`. -/
+/-- The descriptor of the static site with index `k`, for the `k`th static field of `Fixture`. -/
 def siteDescriptor (k : Nat) : StaticDescriptor :=
-  { identity := k, fieldName := "Fixture::Field", bytes := [BitVec.ofNat 8 k] }
+  let field : Extraction.FieldRef :=
+    { owner := .atom "Fixture" "Fixture", index := k,
+      type := .atom Extraction.runtimeScope "System.Byte", name := name!"Field" }
+  { identity := k, field, bytes := [BitVec.ofNat 8 k] }
 
 /-- A method with eighteen static sites at the even pcs, so its facts cross a suffix block. -/
 def staticReads : Method :=

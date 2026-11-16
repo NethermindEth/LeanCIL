@@ -60,6 +60,7 @@ if (args.Contains("--method-decode-only", StringComparer.Ordinal))
 if (args.Contains("--static-facts-only", StringComparer.Ordinal))
 {
     StaticFactCosts();
+    StaticIdentityCosts();
     return;
 }
 if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
@@ -112,6 +113,7 @@ CallCheckCosts();
 DecodeCosts();
 MethodDecodeCosts();
 StaticFactCosts();
+StaticIdentityCosts();
 DecodedDefinitionCosts();
 DecodedProgramCosts();
 ClosedArgumentsCosts();
@@ -391,7 +393,7 @@ void StaticFactCosts()
     foreach (var size in new[] { 8, 32, 128 })
     {
         string Descriptor(int index) => string.Create(CultureInfo.InvariantCulture,
-            $"{{ identity := {index}, fieldName := \"Fixture::Field\", bytes := [{index % 256}] }}");
+            $"{{ identity := {index}, field := field, bytes := [{index % 256}] }}");
         var code = string.Join(", ", Enumerable.Repeat(".ldsfld field, .pop", size)) + ", .ret";
         var sites = string.Join(", ",
             Enumerable.Range(0, size).Select(index => $"({2 * index}, {Descriptor(index)})"));
@@ -443,6 +445,63 @@ void StaticFactCosts()
                 $"{AllowedSiteGrowth} times the cost per site at the size before.");
         Console.WriteLine($"PASS static site {name}: {measured} heartbeats per site");
     }
+}
+
+// `StaticIdentitiesValid` reads each site's recorded token from one index of the body and inserts the site into two
+// ordered maps, so deciding it at 8, 32 and 128 sites of distinct fields and identities costs at most
+// AllowedIdentityGrowth times more per site than at the size before; comparing each site with every other would not.
+void StaticIdentityCosts()
+{
+    const double AllowedIdentityGrowth = 1.35;
+    var identityDirectory = At("artifacts/LookupScaling/StaticIdentities");
+    Directory.CreateDirectory(identityDirectory);
+    var samples = new List<(int Size, long Cost)>();
+    foreach (var size in new[] { 8, 32, 128 })
+    {
+        var code = string.Join(", ", Enumerable.Repeat(".ldsfld field, .pop", size)) + ", .ret";
+        var sites = string.Join(", ", Enumerable.Range(0, size).Select(index => string.Create(
+            CultureInfo.InvariantCulture, $"({2 * index}, {{ identity := {index}, field := field, bytes := [0] }})")));
+        var statics = string.Join(", ", Enumerable.Range(0, size).Select(index => string.Create(
+            CultureInfo.InvariantCulture, $"({2 * index}, {0x04000001 + index})")));
+        var source = $$"""
+            import CIL.Extraction.StaticIdentities
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 8192
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#identity_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"static identities {after - before} heartbeats"
+            def field : FieldRef :=
+              { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair", name := name!"Field" }
+            def body : Method := {
+              code := [{{code}}], locals := [], returnsValue := false, declared := {},
+              staticSites := [{{sites}}] }
+            def evidence : BodyEvidence :=
+              { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [bytesOf "Fixture"],
+                tables := [], names := {}, pinned := PinnedIndex.ofIdentities [], statics := [{{statics}}] }
+            #identity_cost
+            theorem identities_valid : StaticIdentitiesValid [body] [evidence] := by decide +kernel
+            #print axioms identities_valid
+            """ + "\n";
+        var path = Path.Combine(identityDirectory, $"Sites{size}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("The static identity check introduced an unproved theorem.");
+        var cost = LookupPatterns.StaticIdentities().Match(output);
+        if (!cost.Success) throw new InvalidOperationException("Missing static identity cost: " + output);
+        samples.Add((size, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perSite = samples.Select(sample => (double)sample.Cost / sample.Size).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{sample.Size} = {(double)sample.Cost / sample.Size:F0}")));
+    if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedIdentityGrowth))
+        throw new InvalidOperationException(
+            $"Static identities cost {measured} heartbeats per site; the limit is " +
+            $"{AllowedIdentityGrowth} times the cost per site at the size before.");
+    Console.WriteLine($"PASS static identities: {measured} heartbeats per site");
 }
 
 // Fails when element shape facts or reads cost over 1.35 times more per element type as types and layouts grow
@@ -2597,6 +2656,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution();
+
+    [GeneratedRegex(@"static identities ([0-9]+) heartbeats")]
+    internal static partial Regex StaticIdentities();
 
     [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
     internal static partial Regex CallCheck();
