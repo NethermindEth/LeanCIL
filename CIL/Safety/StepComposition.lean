@@ -277,7 +277,37 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
     callStep none count true unlinked stack memory = .error unlinkedCall := rfl
 
-#print axioms callStep_none
+#print axioms callStep_none_tail
+
+/-- A call whose pc states no link, outside `tail.`, runs the runtime model `found` gives its
+    method after checking the arguments that method takes. Stepping selects it once the link and
+    model facts are known, so the kernel checks one application instead of rewriting `callStep`. -/
+theorem step_call_model {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {model : CIL.RuntimeModel} (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method = some model)
+    (direct : prefixes.tail = false) (stack : List Value) :
+    step body (.call method prefixes) pc args frame stack memory =
+      if unspecifiedOperands method.argumentCount stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else modelStep (some model) body pc frame stack memory := by
+  rw [step_call_eq, link, direct, found]
+  rfl
+
+#print axioms step_call_model
+
+/-- A call whose pc links `callee` directly enters it, as `callStep` says; the model it would
+    run without a link is never read. Stepping selects it once the link fact is known. -/
+theorem step_call_direct {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {callee : Nat} (link : body.linkAt pc = some (.direct callee)) (stack : List Value) :
+    step body (.call method prefixes) pc args frame stack memory =
+      if unspecifiedOperands method.argumentCount stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else callStep (some (.direct callee)) method.argumentCount prefixes.tail
+        (fun _ => .error unlinkedCall) stack memory := by
+  rw [step_call_eq, link]
+  rfl
+
+#print axioms step_call_direct
 
 /-- A call without a link whose method has no runtime model faults. -/
 @[cil_step] theorem modelStep_none (stack : List Value) :

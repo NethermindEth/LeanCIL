@@ -1376,6 +1376,18 @@ elab_rules : tactic
       -- equation rewrites past it.
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
+      else if let #[link, model] := linkFacts then
+        -- A modelled call rewrites by one equation and leaves a step the kernel evaluates.
+        `(tactic| cil_strict (first
+          | (refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
+             rfl)
+          | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
+      else if let (true, #[link]) := (operation == ``CIL.Instruction.call, linkFacts) then
+        -- A directly linked call rewrites by one equation that never mentions the model.
+        `(tactic| cil_strict (first
+          | (refine Eq.trans (CIL.Safety.step_call_direct _ _ _ _ _ $link _) ?_
+             cil_checked_linked_step_by_equations [] [$[$stepFacts:term],*])
+          | cil_checked_linked_step_by_equations [$link] [$[$stepFacts:term],*]))
       else if linkedOpcodes.contains operation then
         `(tactic| cil_strict
           (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
@@ -1898,6 +1910,18 @@ def callsCallee (operation : Lean.Name) : Bool :=
     operation == ``CIL.Instruction.callVirtual
 
 open Lean Elab Tactic Meta in
+/-- Whether the `run` goal's pc has no link in the body `methodFound` fetched, so a `call` there
+    runs its runtime model and continues in the same method. -/
+def unlinkedRunPc (methodFound : Term) (target : Expr) : TacticM Bool := withMainContext do
+  let some (_, current, _) := target.eq? | return false
+  let some #[_, _, _, pc, _, _, _, _] := argumentsOf? current ``CIL.Safety.run 8 | return false
+  let found ← instantiateMVars (← inferType (← Term.elabTerm methodFound none))
+  let some (_, _, fetched) := found.consumeMData.eq? | return false
+  let some #[_, body] := argumentsOf? fetched ``Option.some 2 | return false
+  let some fact ← stepLinkFact? body pc | return false
+  return ((← inferType fact).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
+
+open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
     composition lemma for the fetched opcode. A call proves its callee and leaves the caller's
     continuation as the goal. Toward a stated fault, a step that raises it ends the run. -/
@@ -1920,16 +1944,17 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
   let (methodSyntax, instructionSyntax, operation) ←
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
   -- A construction under an `.object` link runs its constructor as a call before continuing in
-  -- the caller; under an `.aggregate` link it steps on as any other instruction does. A `call`
-  -- at a pc without a link runs its runtime model and steps on likewise.
-  let constructs := operation == ``CIL.Instruction.newobj ||
-    operation == ``CIL.Instruction.call
+  -- the caller; under an `.aggregate` link it steps on as any other instruction does.
+  let constructs := operation == ``CIL.Instruction.newobj
+  -- A `call` at a pc without a link runs its runtime model and steps on in the same method.
+  let modelled ← if operation == ``CIL.Instruction.call then unlinkedRunPc methodSyntax target
+    else pure false
   -- These fault before their callee runs: a call site the link table omits, a short heap
   -- budget, a null receiver, or a receiver whose class a dispatch table omits.
   let faultsFirst := constructs || callsCallee operation
   evalTactic (← if operation == ``CIL.Instruction.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
-    else if callsCallee operation || constructs then
+    else if (callsCallee operation && !modelled) || constructs then
       let call ← if constructs then
           `(tactic| first
             | cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*]
