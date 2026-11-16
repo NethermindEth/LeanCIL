@@ -6,7 +6,8 @@ import CIL.Safety.GuardNormalization
 
 One `@[cil_step]` equation per `memoryInstruction` arm and operand shape, so a `.memory` step
 rewrites to that arm's body and never unfolds `staticInstruction` or `memoryInstruction`.
-The span constructors over static storage keep `step_memory_eq`, which these outrank.
+The span constructors over static storage keep `step_memory_eq`, which these outrank. `ldlen` of a
+value array has its equations here beside the view checks it shares with them.
 -/
 
 namespace CIL.Safety
@@ -20,8 +21,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
-    vector128UnsafeInstruction, arrayLength,
-    displaceReference, observerCount,
+    vector128UnsafeInstruction, displaceReference, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
     bind_assoc, pure_bind]
@@ -604,44 +604,39 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 -- Array length: `ldlen` validates the array's view first, then faults on the null array.
 /-- `ldlen` of an array validates its view, then throws on the null array and pushes the length
     of any other as a native integer. -/
-theorem step_memory_arrayLength_eq (view : ArrayView) (rest : List Value) :
-    step body (.memory .arrayLength) pc args frame (.array view :: rest) memory = do
+theorem step_ldlen_array_eq (view : ArrayView) (rest : List Value) :
+    step body .ldlen pc args frame (.array view :: rest) memory = do
       let _ ← checkedAt view.reference 0 (view.validate memory)
       if view.reference == .null then .error (.thrown .nullReference) else
         return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 view.length)) :: rest) frame
           memory := by
-  memory_step_proof
-#print axioms step_memory_arrayLength_eq
+  rw [step_ldlen_eq]
+  simp only [instructionStep, instruction, elementInstruction, cil_guard, unspecifiedOperands,
+    List.take, List.any, Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false,
+    bind_assoc, bind_ite, pure_bind]
+  all_goals first | rfl | (split <;> rfl)
+#print axioms step_ldlen_array_eq
 
 /-- `ldlen` of a non-null array pushes its length as a native integer once its view validates. -/
-@[cil_step high] theorem step_memory_arrayLength_address_eq (array : Reference) (length : Nat)
+@[cil_step high] theorem step_ldlen_address_eq (array : Reference) (length : Nat)
     (element : CIL.ArrayElement) (rest : List Value) :
-    step body (.memory .arrayLength) pc args frame
-      (.array ⟨.address array, length, element⟩ :: rest) memory = do
+    step body .ldlen pc args frame (.array ⟨.address array, length, element⟩ :: rest) memory = do
       let _ ← checkedAt (.address array) 0
         (ArrayView.validate ⟨.address array, length, element⟩ memory)
       return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 length)) :: rest) frame memory := by
-  rw [step_memory_arrayLength_eq]
+  rw [step_ldlen_array_eq]
   rfl
-#print axioms step_memory_arrayLength_address_eq
+#print axioms step_ldlen_address_eq
 
 /-- `ldlen` of the null array throws `NullReferenceException` once its view validates. -/
-@[cil_step high] theorem step_memory_arrayLength_null_eq (length : Nat)
-    (element : CIL.ArrayElement) (rest : List Value) :
-    step body (.memory .arrayLength) pc args frame
-        (.array ⟨.null, length, element⟩ :: rest) memory =
+@[cil_step high] theorem step_ldlen_null_eq (length : Nat) (element : CIL.ArrayElement)
+    (rest : List Value) :
+    step body .ldlen pc args frame (.array ⟨.null, length, element⟩ :: rest) memory =
       checkedAt .null 0 (ArrayView.validate ⟨.null, length, element⟩ memory) >>= fun _ =>
         .error (.thrown .nullReference) := by
-  rw [step_memory_arrayLength_eq]
+  rw [step_ldlen_array_eq]
   rfl
-#print axioms step_memory_arrayLength_null_eq
-
-/-- `ldlen` of a null object reference, as `ldnull` pushes it, throws `NullReferenceException`. -/
-@[cil_step high] theorem step_memory_arrayLength_object_null_eq (rest : List Value) :
-    step body (.memory .arrayLength) pc args frame (.object .null :: rest) memory =
-      .error (.thrown .nullReference) := by
-  memory_step_proof
-#print axioms step_memory_arrayLength_object_null_eq
+#print axioms step_ldlen_null_eq
 
 -- Null references; `isNullRef` makes no access, so it answers for expired references too.
 @[cil_step high] theorem step_memory_nullRef_eq (stack : List Value) :

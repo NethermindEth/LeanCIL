@@ -127,15 +127,15 @@ theorem missing_argument_refutes_contract :
 
 #print axioms missing_argument_refutes_contract
 
-/-- `ldc.i4.1; newarr object; pop; ret` as the decoder gives it: `newarr` is a hole. On the CLR
-    the method returns normally, so it meets `returnContract`. -/
-@[cil_code] def newarrHole : CIL.Method :=
-  { locals := [], code := [.ldc_i4 1, .unadmitted 0x8D, .pop, .ret], returnsValue := false }
+/-- `ldnull; unbox.any object; pop; ret` as the decoder gives it: `unbox.any` is a hole. On the
+    CLR the method returns normally, so it meets `returnContract`. -/
+@[cil_code] def unboxHole : CIL.Method :=
+  { locals := [], code := [.ldnull, .unadmitted 0xA5, .pop, .ret], returnsValue := false }
 
 /-- The run faults at the hole, and that fault is not definite, so `not_holds_of_fault` cannot
     refute `returnContract` from it. -/
 theorem hole_not_definite :
-    invoke [newarrHole] 4 0 [] Memory.empty = .error ⟨0, 1, .unsupported "Opcode not admitted"⟩ ∧
+    invoke [unboxHole] 4 0 [] Memory.empty = .error ⟨0, 1, .unsupported "Opcode not admitted"⟩ ∧
       (ExecutionFault.unsupported "Opcode not admitted").definite = false :=
   ⟨rfl, rfl⟩
 
@@ -144,14 +144,14 @@ theorem hole_not_definite :
 -- So the refutation that works for the missing argument fails at its `definite` hypothesis here.
 /-- error: Tactic `decide` proved that the proposition -/
 #guard_msgs (substring := true) in
-example : ¬ returnContract.Holds [newarrHole] 0 :=
+example : ¬ returnContract.Holds [unboxHole] 0 :=
   returnContract.not_holds_of_fault (input := ()) (initial := Memory.empty) (observed := 4)
     (fault := ⟨0, 1, .unsupported "Opcode not admitted"⟩) trivial (by decide) rfl
 
 -- Stepping stops at pc 1, the hole, so no proof that the method returns goes through either.
-/-- run [newarrHole] fuel 0 1 [] -/
+/-- run [unboxHole] fuel 0 1 [] -/
 #guard_msgs (substring := true) in
-example : returnContract.Holds [newarrHole] 0 := by
+example : returnContract.Holds [unboxHole] 0 := by
   intro _ initial _
   cil_contract_steps []
 

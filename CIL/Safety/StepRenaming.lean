@@ -52,6 +52,12 @@ theorem stepTransport : StepTransport := by
     case newobj.refl constructor =>
       exact memories.stepNewobj frames sourceFormed targetFormed staticBounds sourceBody
         targetBody constructor pc (metadata.linkAt pc) arguments stack bounds observable
+    case ldelem_any.refl element =>
+      exact ⟨mapping, .refl mapping, memories.stepLdelemAny frames sourceFormed sourceBody
+        targetBody metadata element pc arguments stack bounds observable⟩
+    case stelem_any.refl element =>
+      exact ⟨mapping, .refl mapping, memories.stepStelemAny frames sourceFormed sourceBody
+        targetBody metadata element pc arguments stack bounds observable⟩
     case ldsfld.refl field =>
       exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
         targetBody metadata field pc arguments stack⟩

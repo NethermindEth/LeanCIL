@@ -92,18 +92,23 @@ index below `elements.length` is in bounds of a non-null array.
 [`SpanContents.array_load`](../CIL/Safety/ArrayContents.lean), applied as
 contents.array_load valid scalar bound, gives the element's address
 `arrayElement memory values index width = .ok item` and its load, the element's value.
-`step_arrayLoad_of_element` steps `ldelem` from those two facts and `step_arrayAddress_of_element`
-steps `ldelema` from the address; `arrayElement_formed` forms that address, so a helper may return
-it. An index outside the array throws, which a precondition bounding the index rules out.
+`step_ldelem_of_element` steps an integer `ldelem.*` from those two facts. A typed `ldelem` of
+an integer, enum, `bool` or `char` element steps to `arrayLoad` at the width its element type's
+shape gives, which `arrayLoad_of_element` rewrites from the same two facts, and
+`step_arrayAddress_of_element` steps `ldelema` from the address; `arrayElement_formed` forms
+that address, so a helper may return it. An index outside the array throws, which a
+precondition bounding the index rules out.
 
 A loop indexing the array reads it the way a span loop does, through the storage span: the caller's
 `CheckedSpan initial values.storage width true elements` carries into each iteration's frame by
 `CheckedSpan.within`, and `array_load` of its contents names the element. A loop storing into the
 array holds `SpanWritable` authority over `values.storage` instead; with the array addressed at
 `base`, `arrayElement_of_access` turns write authority over `base.element width index` and the
-bound into the element `arrayElement` returns, and `step_arrayStore_of_write` steps `stelem` to the
-written memory. The bound test compares the index with `values.Length` as signed words;
-`SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
+bound into the element `arrayElement` returns. `step_stelem_narrow_of_write` steps a one-, two- or
+four-byte `stelem.*` to the written memory, `step_stelem_wide_of_write` steps `stelem.i8` and
+`stelem.i`, and a typed `stelem` steps to `arrayStore`, which `arrayStore_of_write` and
+`arrayStore_i64_of_write` rewrite. The bound test compares the index with `values.Length` as
+signed words; `SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
 `toInt_ofNat_of_lt`, which `cil_loop_obligation` applies, reads that comparison as unsigned.
 
 Converting the whole array to a span, as `ReadOnlySpan<T> rest = values` does, pushes

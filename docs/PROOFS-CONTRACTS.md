@@ -799,7 +799,7 @@ predicates in the `ReferenceArray` namespace:
 | Carry a covariance check across an allocation from well-formed memory | `storableIn_of_confined` |
 | Let `Confined.forget_fresh` drop the elements of an array the method allocated | `entries_young` |
 | A fresh array from `newReferenceArray_ok`, live with every element owned and null | `ReferenceArray.fresh` |
-| Step the three instructions | `step_referenceArrayLength_eq`, `step_referenceArrayLoad_eq`, `step_referenceArrayStore_eq` |
+| Step the three instructions | `step_ldlen_object_eq`, `step_ldelem_ref_i32_eq`, `step_stelem_ref_i32_eq` |
 
 | Example | Shows |
 | --- | --- |
@@ -827,8 +827,8 @@ one, whose view validates.
 | Pass a whole array as a call argument, from its view's `valid` | `checkedValue_array` |
 | Move it through a local, from its view's `valid` | `storeLocal_array`, `loadLocal_array` |
 | Step `ldfld` and `stfld` | the `cil_step` simprocs, by `step_ldfld_array_eq` and `step_stfld_array_eq` |
-| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_memory_arrayLength_address_eq` |
-| Step `ldlen` of the null array to its throw | `step_memory_arrayLength_null_eq` |
+| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_ldlen_address_eq` |
+| Step `ldlen` of the null array to its throw | `step_ldlen_null_eq` |
 
 | Example | Shows |
 | --- | --- |

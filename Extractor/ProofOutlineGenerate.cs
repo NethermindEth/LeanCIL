@@ -172,8 +172,8 @@ internal static partial class ProofOutline
     static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Operation[] ops, int loops)
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
-        if (loops == 0 || arrays.Length == 0 || !ops.Any(op => op is Memory
-            { Operation: ArrayStore or ArraySpan { Element.Compound: false, Writable: true } })) return parameters;
+        if (loops == 0 || arrays.Length == 0 || !ops.Any(op => Arrays.Numeric(op) is { Store: true } ||
+            op is Memory { Operation: ArraySpan { Element.Compound: false, Writable: true } })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
                 "new-proof follows a loop's stores into a method's one array argument");

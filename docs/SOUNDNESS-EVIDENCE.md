@@ -34,7 +34,10 @@ feature-bound type-test words and size constants bound to exact primitive/vector
 validated layouts.
 
 Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
-`ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes. Each `ldobj`
+`ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes, and so must
+each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `stelem`, `ldelem.ref` and
+`stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed access takes its
+element's width from the element shape of the method's checked layouts. Each `ldobj`
 and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
 the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`

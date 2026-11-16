@@ -27,11 +27,6 @@ internal sealed record OtherMemory : MemoryOperation
     internal override string ToLean() => lean;
 }
 
-internal sealed record ArrayLength : MemoryOperation
-{
-    internal override string ToLean() => ".arrayLength";
-}
-
 /// <summary>
 /// The address of an array element. <paramref name="ReadOnly"/> says the address follows a readonly prefix, which
 /// the term spells with a trailing flag.
@@ -39,34 +34,6 @@ internal sealed record ArrayLength : MemoryOperation
 internal sealed record ArrayAddress(Arrays.Element Element, bool ReadOnly) : MemoryOperation
 {
     internal override string ToLean() => $"(.arrayAddress {Element.Expression}" + (ReadOnly ? " false)" : ")");
-}
-
-internal sealed record ArrayLoad(int Width, bool Signed) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayLoad {Width} {LeanText.Bool(Signed)})";
-}
-
-internal sealed record ArrayStore(int Width) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayStore {Width})";
-}
-
-/// <summary>A load or store of a composite array element through a transfer of the whole element.</summary>
-internal sealed record ArrayTransfer(Arrays.Element Element, bool Store) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayTransfer {Element.Expression} {LeanText.Bool(Store)})";
-}
-
-internal enum ReferenceArrayAccess { Length, Load, Store }
-
-internal sealed record ReferenceArrayOperation(ReferenceArrayAccess Access) : MemoryOperation
-{
-    internal override string ToLean() => Access switch
-    {
-        ReferenceArrayAccess.Length => ".referenceArrayLength",
-        ReferenceArrayAccess.Load => ".referenceArrayLoad",
-        _ => ".referenceArrayStore"
-    };
 }
 
 /// <summary>

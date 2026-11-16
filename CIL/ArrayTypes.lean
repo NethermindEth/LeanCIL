@@ -54,7 +54,15 @@ def ArrayElement.allocationSupported (element : ArrayElement) : Bool :=
 def ArrayElement.signed : ArrayElement → Bool
   | .signed8 | .signed16 => true
   | .enumeration _ storage => storage.signed
-  | _ => false
+  | .unsigned8 | .unsigned16 | .signed32 | .unsigned32 | .signed64 | .unsigned64 | .nativeInt
+  | .nativeUInt | .boolean | .character | .aggregate .. | .vector .. => false
+
+/-- Struct and vector elements, which typed element accesses move as checked snapshots rather
+    than as one numeric word. -/
+def ArrayElement.composite : ArrayElement → Bool
+  | .aggregate .. | .vector .. => true
+  | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32 | .signed64
+  | .unsigned64 | .nativeInt | .nativeUInt | .boolean | .character | .enumeration .. => false
 
 /-- Native elements keep their stack kind distinct from fixed-width int64 elements. -/
 def ArrayElement.native : ArrayElement → Bool

@@ -1578,7 +1578,7 @@ internal static partial class ProofOutline
                 PendingHead(state, element.Component, span);
                 stack.Add(new Number(span.Head!, components[element.Component].Width));
             }
-            else if (op is Memory { Operation: ArrayLength })
+            else if (op is ArrayLength)
             {
                 if (Pop() is not WordArrayArgument array)
                     return Stop("the length of an array the outline does not follow");
@@ -1594,7 +1594,7 @@ internal static partial class ProofOutline
                 stack.Add(new Number($"(BitVec.ofNat 32 {count})", 4,
                     Stacked: $".scalar (.i32 ((BitVec.ofNat 64 {count}).setWidth 32))"));
             }
-            else if (op is Memory { Operation: ArrayLoad { Signed: false } arrayLoad } &&
+            else if (Arrays.Numeric(op) is { Store: false, Signed: false } arrayLoad &&
                 stack.Count >= 2 && stack[^2] is WordArrayArgument read)
             {
                 if (stack[^1] is not Number { Width: 4, Narrow: false } index || current is null ||
@@ -1605,9 +1605,10 @@ internal static partial class ProofOutline
                 if (state.Moved || state.Called || !state.Obtained.Add(read.Array.Name + "Found"))
                     return Stop("an array read after a store, a call or another read of the iteration");
                 stack.RemoveRange(stack.Count - 2, 2);
-                stack.Add(new Number(ElementRead(read.Array, index.Term, state.Facts), read.Array.Width));
+                stack.Add(new Number(ElementRead(read.Array, arrayLoad, index.Term, state.Facts),
+                    read.Array.Width));
             }
-            else if (op is Memory { Operation: ArrayStore arrayStore } &&
+            else if (Arrays.Numeric(op) is { Store: true } arrayStore &&
                 stack.Count >= 3 && stack[^3] is WordArrayArgument stores)
             {
                 var width = arrayStore.Width;
@@ -1618,7 +1619,7 @@ internal static partial class ProofOutline
                     return Stop("an array store after another store or a call of the iteration, whose memory the " +
                         "array's checks are not carried to");
                 stack.RemoveRange(stack.Count - 3, 3);
-                state.Facts.Add(ElementStore(stores.Array, index.Term, stored.Term));
+                state.Facts.Add(ElementStore(stores.Array, arrayStore, index.Term, stored.Term));
                 state.Moved = true;
             }
             else if (op.IsNop) { }
@@ -1724,7 +1725,7 @@ internal static partial class ProofOutline
         /// <summary>Load element `index` of a read-only array at the iteration's first memory, its bound left to
         /// the author's definitions; adds the facts that step `ldelem` to `facts` and returns the loaded term.
         /// </summary>
-        string ElementRead(Parameter array, string index, List<string> facts)
+        string ElementRead(Parameter array, Arrays.NumericAccess load, string index, List<string> facts)
         {
             var name = array.Name;
             var position = IndexTerm(index);
@@ -1744,7 +1745,7 @@ internal static partial class ProofOutline
             lean.Line($"{indent}  ({name}Checked.within wellFormed frame{apart}).contents.array_load");
             lean.Line($"{indent}    (frame.caller_array_valid wellFormed {name}Valid) (by decide) {name}Bound");
             lean.Line($"{indent}have {name}Step :=");
-            lean.Line($"{indent}  step_arrayLoad_of_element (index := .i32 {index}) rfl {name}Found {name}Loaded");
+            lean.Line($"{indent}  {load.LoadLemma} (index := .i32 {index}) rfl {name}Found {name}Loaded");
             // The step pushes the element through `numericOfWidth`, which these unfold to the element itself.
             facts.AddRange(new[] { name + "Step", "numericOfWidth", "BitVec.ofNat_toNat" }
                 .Where(fact => !facts.Contains(fact)));
@@ -1754,7 +1755,7 @@ internal static partial class ProofOutline
         /// <summary>Store `value` into element `index` of the written array at the iteration's first memory,
         /// its bound, authority and footprint left to the author's definitions; returns the fact that steps
         /// `stelem`.</summary>
-        string ElementStore(Parameter array, string index, string value)
+        string ElementStore(Parameter array, Arrays.NumericAccess store, string index, string value)
         {
             var name = array.Name;
             var width = array.Width;
@@ -1777,9 +1778,8 @@ internal static partial class ProofOutline
             lean.Line($"{indent}have {name}Frame := frame.write {name}Wrote");
             lean.Line($"{indent}  (by simpa [numberBytes_length] using {name}Within)");
             lean.Line($"{indent}  (by simpa [Reference.element_allocation] using {name}Below)");
-            var lemma = width == 8 ? "step_arrayStore_i64_of_write" : "step_arrayStore_of_write";
             lean.Line($"{indent}have {name}Step :=");
-            lean.Line($"{indent}  {lemma} (index := .i32 {index}) rfl {name}Element {name}Wrote");
+            lean.Line($"{indent}  {store.StoreLemma} (index := .i32 {index}) rfl {name}Element {name}Wrote");
             return name + "Step";
         }
 
