@@ -108,7 +108,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
       viewObservationMatches instruction emitted &&
       binaryTransferMatches instruction emitted &&
       unsafeElementOffsetMatches layouts instruction emitted &&
-      objectConstructorMatches instruction emitted &&
+      callEmitsNoPop instruction emitted &&
       guardCallMatches instruction emitted &&
       if unsafeReferenceRequired instruction emitted then
         match unsafeReferenceHelper instruction, instruction.operand with

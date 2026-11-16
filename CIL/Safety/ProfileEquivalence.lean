@@ -16,6 +16,20 @@ theorem enterFrame_profile (body : CIL.Method) (profile : CIL.FeatureProfile)
     (args : List Value) (memory : Memory) :
     enterFrame { body with profile } args memory = enterFrame body args memory := rfl
 
+/-- A call without a link runs the same under any two profiles, since no model of the runtime
+    table consults the profile. -/
+theorem modelStep_profile_eq (body : CIL.Method) (method : Extraction.MethodRef)
+    (p q : CIL.FeatureProfile) (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    modelStep (Extraction.runtimeModel body.environment .call method) { body with profile := p }
+        pc frame stack memory =
+      modelStep (Extraction.runtimeModel body.environment .call method)
+        { body with profile := q } pc frame stack memory := by
+  cases found : Extraction.runtimeModel body.environment .call method with
+  | none => rfl
+  | some model =>
+    have free := Extraction.runtimeModel_readsProfile found
+    cases model <;> first | rfl | simp [RuntimeModel.readsProfile] at free
+
 /-- A checked step does not depend on the method's profile when the instruction agrees on
     both profiles. -/
 theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.FeatureProfile)
@@ -23,10 +37,15 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
     (frame : Frame) (stack : List Value) (memory : Memory) :
     step { body with profile := p } op pc args frame stack memory =
       step { body with profile := q } op pc args frame stack memory := by
+  have reprofiled : ∀ profile, ({ body with profile } : CIL.Method).linkAt pc = body.linkAt pc :=
+    fun _ => rfl
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall
+  simp only [reprofiled]
   split <;> try rfl
   all_goals split <;> try rfl
   all_goals split <;> try rfl
+  all_goals try exact modelStep_profile_eq ..
+  all_goals try (split <;> first | rfl | exact modelStep_profile_eq ..)
   all_goals simp only [CIL.Instruction.ProfileAgreement] at agreement
   all_goals try simp only [agreement]
   all_goals simp only [CIL.step_profile_eq op p q agreement]
@@ -108,4 +127,5 @@ theorem invoke_uniform_reprofile_eq (program : CIL.Program) (p q : CIL.FeaturePr
 #print axioms run_reprofile_eq
 #print axioms enterFrame_profile
 #print axioms step_profile_eq
+#print axioms modelStep_profile_eq
 end CIL.Safety

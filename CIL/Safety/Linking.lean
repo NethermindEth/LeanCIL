@@ -93,6 +93,21 @@ def FrameAction.relocate (f : Nat → Nat) : FrameAction → FrameAction
     .construct (f callee) arguments rest frame temporary kind memory
   | action => action
 
+/-- A call's runtime model enters no callee, so relocating the body's links changes nothing it
+    does. -/
+theorem modelStep_relocate (f : Nat → Nat) (model : Option CIL.RuntimeModel) (body : Method)
+    (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    modelStep model (body.relocate f) pc frame stack memory =
+      (modelStep model body pc frame stack memory).map (FrameAction.relocate f) := by
+  rw [modelStep_profile_congr (moved := body.relocate f) (body := body) rfl]
+  cases executed : modelStep model body pc frame stack memory with
+  | error => rfl
+  | ok action =>
+    obtain ⟨_, _, rfl⟩ := modelStep_next executed
+    rfl
+
+#print axioms modelStep_relocate
+
 theorem FrameAction.relocate_of_callee_none (f : Nat → Nat) (action : FrameAction)
     (none : action.callee = .none) : action.relocate f = action := by
   cases action <;> simp_all [FrameAction.relocate, FrameAction.callee]
@@ -256,7 +271,11 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
       rw [apply_ite (Except.map (FrameAction.relocate f))]
       refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
       rcases body.linkAt pc with _ | link
-      · rfl
+      · first
+        | rfl
+        | (dsimp only
+           rw [apply_ite (Except.map (FrameAction.relocate f))]
+           exact ite_congr rfl (fun _ => rfl) (fun _ => modelStep_relocate ..))
       cases link <;> try rfl
       all_goals simp only [Option.map_some, CIL.Link.relocate, newobjStep, constructAggregate,
         constructObject]

@@ -1,6 +1,7 @@
 import CIL.Resolution
 import CIL.InstructionEquations
 import CIL.Extraction.Generics
+import CIL.Extraction.RuntimeModels
 
 /-!
 # Return, argument, static site and array element metadata facts
@@ -26,13 +27,16 @@ of each layout list, read through suffixes of the lists named by the environment
 so an extraction's facts cost time linear in its layouts and distinct operands. The `cil_code`
 simprocs `reduceFieldShape` and `reduceValueShape` read a method's shape of an operand from its
 fact.
+
+`cil_runtime_models` declares the runtime model of each modelled call site of a method, read
+from the operand alone, so stepping such a call rewrites with one fact per site.
 -/
 
 namespace CIL.Safety.ResolutionFacts
 
 open Lean Meta Elab Command
 open CIL.InstructionEquations
-  (Body listElements declareSuffixes suffixBlock suffixFrom foundAt)
+  (Body instructions listElements declareSuffixes suffixBlock suffixFrom foundAt)
 
 /-- A recognized runtime primitive, checked by its complete scope and type name. -/
 def primitive? (type : Expr) : Option Name := do
@@ -629,6 +633,42 @@ elab_rules : command
       declareArgumentFacts body simpSet
       declareStaticFacts body simpSet
       declareElementFacts body simpSet
+
+/-! ## Runtime models -/
+
+/-- Declares `body_model{pc} : ∀ xs, runtimeModel (body xs).environment .call method = some model`
+    at each pc whose instruction is a call the runtime model table models, checked by the kernel,
+    and adds each to `cil_code`, so a step reads a call's model without evaluating the table. -/
+syntax "cil_runtime_models " ident : command
+
+elab_rules : command
+  | `(cil_runtime_models $methodSyntax:ident) => liftTermElabM do
+    let name ← realizeGlobalConstNoOverloadWithInfo methodSyntax
+    let info ← getConstInfo name
+    let some simpSet ← getSimpExtension? `cil_code
+      | throwError "cil_runtime_models: cil_code is not registered"
+    forallTelescope info.type fun parameters result => do
+      unless ← isDefEq result (mkConst ``CIL.Method) do
+        throwError "cil_runtime_models: {name} does not define a CIL.Method"
+      let body : Body :=
+        { name, levelParams := info.levelParams, parameters, syntaxRef := methodSyntax }
+      let method := body.constant ""
+      let environment := mkApp (mkConst ``CIL.Method.environment) method
+      let ops ← instructions name (mkApp (mkConst ``CIL.Method.code) method)
+      for h : pc in [0:ops.size] do
+        let op ← whnfR ops[pc]
+        let_expr CIL.Instruction.call target _ := op | continue
+        let read := mkApp3 (mkConst ``CIL.Extraction.runtimeModel) environment
+          (mkConst ``CIL.CallOpcode.call) target
+        let resolved ← withDefault <| whnf read
+        let_expr Option.some _ model := resolved | continue
+        let model ← withDefault <| reduce model
+        -- A window per fact, so the facts of many model sites do not exhaust the command's.
+        withCurrHeartbeats do
+          body.prove s!"_model{pc}" s!"The runtime model of the call at pc {pc} of `{name}`."
+            (← mkEq read (← mkAppM ``Option.some #[model])) (← mkEqRefl read)
+          addSimpTheorem simpSet (name.appendAfter s!"_model{pc}") (post := false)
+            (inv := false) .global (eval_prio default)
 
 /-! ## Field and value shapes -/
 
