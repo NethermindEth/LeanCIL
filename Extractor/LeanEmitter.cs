@@ -222,7 +222,7 @@ internal static class LeanEmitter
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
-            Operation Translated(Instruction i)
+            Operation Translated(Instruction i, int pc)
             {
                 var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                     scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
@@ -230,13 +230,13 @@ internal static class LeanEmitter
                 return operation switch
                 {
                     NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
-                    ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, i) },
+                    ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                     _ => operation
                 };
             }
             List<Operation> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i) ? Translated(i) : Unadmitted.At(i));
+                ops.Add(reachable.Contains(i) ? Translated(i, ops.Count) : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
@@ -403,12 +403,13 @@ internal static class LeanEmitter
         /// </summary>
         internal void Add(MethodDefinition method, IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
         {
-            foreach (var instruction in method.Body.Instructions)
+            for (var pc = 0; pc < method.Body.Instructions.Count; pc++)
             {
+                var instruction = method.Body.Instructions[pc];
                 if (!reachable.Contains(instruction)) continue;
                 if (instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld)
                 {
-                    var field = evidence.FieldReferenceOf(method, instruction);
+                    var field = evidence.FieldReferenceOf(method, pc);
                     if (!fields.TryAdd(field, fields.Count)) continue;
                     var name = $"fieldRef{fields[field]}";
                     text.AppendLine($"def {name} : Extraction.FieldRef := {field.ToLean()}");

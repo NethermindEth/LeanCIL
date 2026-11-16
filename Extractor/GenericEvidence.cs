@@ -203,20 +203,22 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     /// <summary>
-    /// The typed reference of the field operand of <paramref name="instruction"/> in <paramref name="method"/>, the
-    /// owner, index and held type its raw operand states and its name.
+    /// The typed reference of the field operand at <paramref name="pc"/> in <paramref name="method"/>, the owner,
+    /// index and held type its raw operand states and the name of the row the original body's token names.
     /// </summary>
-    internal FieldRef FieldReferenceOf(MethodDefinition method, Instruction instruction)
+    internal FieldRef FieldReferenceOf(MethodDefinition method, int pc)
     {
         methodParameterCount = method.GenericParameters.Count;
-        var field = (FieldReference)instruction.Operand;
-        var (owner, index, held, _) = FieldOperand(instruction, field);
-        return new(owner, index, held, FieldName(method, field));
+        var instruction = method.Body.Instructions[pc];
+        var (owner, index, held, _) = FieldOperand(instruction, (FieldReference)instruction.Operand);
+        // A specialization's operands are references without a token; its definition's body holds the token.
+        var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
+        return new(owner, index, held, FieldName(original, (FieldReference)original.Body.Instructions[pc].Operand));
     }
 
     /// <summary>
-    /// The name of the Field or MemberRef row the field operand's token names in <paramref name="method"/>'s image,
-    /// the bytes the metadata check spells the operand's name against.
+    /// The name of the Field or MemberRef row the field operand's token names in the image of
+    /// <paramref name="method"/>, an original body; the metadata check spells the operand's name against it.
     /// </summary>
     MetadataName FieldName(MethodDefinition method, FieldReference field)
     {
