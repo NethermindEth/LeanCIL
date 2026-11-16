@@ -287,6 +287,8 @@ elab_rules : command
     addAndCompile <| .defnDecl {
       name, levelParams := [], type := methodType, value,
       hints := .regular (getMaxHeight (← getEnv) value + 1), safety := .safe }
+    -- Without it, unfolding the method in the module that defines it, as a batch does, fails.
+    enableRealizationsForConst name
     addDeclarationRangesFromSyntax name (← getRef) nameSyntax
     addDocStringCore name s!"The method `{decoderSyntax}` decodes to."
     let method := mkConst name

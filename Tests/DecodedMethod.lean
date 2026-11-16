@@ -464,4 +464,10 @@ theorem aggregate_local_frame_entry (memory entered : Safety.Memory) (slot : Ref
     Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
 #print axioms aggregate_local_frame_entry
 
+/-- `simp` unfolds a decoded method in the module that defines it, as a batch that inlines an
+    extraction beside its proof does. -/
+theorem aggregate_local_unfolds : aggregateLocalMethod.code = [CIL.Instruction.ret] := by
+  simp only [aggregateLocalMethod]
+#print axioms aggregate_local_unfolds
+
 end Tests.DecodedMethod
