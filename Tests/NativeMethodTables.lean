@@ -1,7 +1,8 @@
 import CIL.Safety.MemorySteps
 import CIL.Extraction.Scalars
 
-/-! Native handler tables preserve opaque identities across checked backing-memory accesses. -/
+/-! Native handler tables preserve opaque identities across checked backing-memory accesses, and
+the scalar transfer admits a managed table only to `ldlen` and its pointer-typed element reads. -/
 
 namespace Tests.NativeMethodTables
 
@@ -271,6 +272,80 @@ theorem native_load_admission :
 #print axioms native_load_admission
 
 end Admission
+
+section TableTransfer
+
+open CIL.Extraction
+
+/-- A static method without arguments; the transfers below read none of its fields. -/
+private def holder : RawMethod := {
+  token := 0x06000001, owner := "Scope::Fixture", hasThis := false, explicitThis := false,
+  callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+  parameters := [], locals := [], initLocals := true, maxStack := 3, genericParameters := [],
+  code := [] }
+
+/-- The extraction stack kind of a managed handler table of `signature`. -/
+private def tableKind : ScalarKind := .methodTable signature
+
+/-- The stack kinds the raw instruction `opcode` with `operand` leaves on `stack`. -/
+private def transfer (opcode : Nat) (operand : RawOperand) (stack : List ScalarKind) :
+    Option (List ScalarKind) :=
+  scalarTransfer holder ⟨0, opcode, operand⟩ stack
+
+/-- `ldlen` of a handler table gives a native int, and `ldelem.i` or `ldelem` of the table's
+    own pointer type at an int32 or native index gives a pointer of the table's signature. -/
+theorem table_reads_admitted :
+    transfer 142 .none [tableKind] = some [.native] ∧
+    transfer 151 .none [.word32, tableKind] = some [.methodPointer signature] ∧
+    transfer 151 .none [.native, tableKind] = some [.methodPointer signature] ∧
+    transfer 163 (.type signature.typeExpr) [.word32, tableKind] =
+      some [.methodPointer signature] ∧
+    transfer 163 (.type signature.typeExpr) [.native, tableKind] =
+      some [.methodPointer signature] := by
+  decide +kernel
+#print axioms table_reads_admitted
+
+/-- An element read at an index that is not an int32 or native int is refused. -/
+theorem table_index_kinds_refused :
+    [ScalarKind.word64, .other, .reference, .object, .nullObject, .methodPointer signature,
+        tableKind].all (fun index =>
+      transfer 151 .none [index, tableKind] == none &&
+        transfer 163 (.type signature.typeExpr) [index, tableKind] == none) = true := by
+  decide +kernel
+#print axioms table_index_kinds_refused
+
+/-- `ldelem` must name the table's own pointer type: another signature, a non-pointer type and a
+    missing type operand are refused. -/
+theorem table_element_type_refused :
+    transfer 163 (.type otherSignature.typeExpr) [.word32, tableKind] = none ∧
+    transfer 163 (.type (.atom runtimeScope "System.IntPtr")) [.word32, tableKind] = none ∧
+    transfer 163 .none [.word32, tableKind] = none := by
+  decide +kernel
+#print axioms table_element_type_refused
+
+/-- No other array opcode reads or writes a handler table: the sized loads, `ldelem.ref`,
+    `ldelema` and every store are refused. -/
+theorem table_other_array_opcodes_refused :
+    ([144, 145, 146, 147, 148, 149, 150, 154].all (fun opcode =>
+      transfer opcode .none [.word32, tableKind] == none) &&
+    transfer 143 (.type signature.typeExpr) [.word32, tableKind] == none &&
+    [155, 156, 157, 158, 159, 162].all (fun opcode =>
+      [ScalarKind.native, .word32, .word64, .methodPointer signature].all (fun value =>
+        transfer opcode .none [value, .word32, tableKind] == none)) &&
+    transfer 164 (.type signature.typeExpr) [.methodPointer signature, .word32, tableKind] ==
+      none) = true := by
+  decide +kernel
+#print axioms table_other_array_opcodes_refused
+
+/-- A native table cursor is no managed table: `ldlen` and the element reads refuse it. -/
+theorem native_cursor_table_reads_refused :
+    transfer 142 .none [nativeKind] = none ∧
+    transfer 151 .none [.word32, nativeKind] = none ∧
+    transfer 163 (.type signature.typeExpr) [.word32, nativeKind] = none := by
+  decide +kernel
+#print axioms native_cursor_table_reads_refused
+
+end TableTransfer
 
 section EntryCount
 
