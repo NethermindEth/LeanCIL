@@ -156,6 +156,16 @@ theorem LocalSnapshots.read_at {memory : Memory} {slots : List LocalSlot}
   cases located
   exact ⟨stored, number, fits, result, loaded⟩
 
+/-- A remembered 64-bit word reads back as its eight bytes. -/
+theorem LocalSnapshots.read_word64 {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    {index : Nat} {home : Reference} {word : CIL.W64}
+    (specified : known index = some (.i64 word))
+    (slot : slots[index]? = some (.bytes .word64 home)) :
+    read memory home 8 1 = .ok (numberBytes word.toNat 8) := by
+  obtain ⟨stored, number, fits, result, loaded⟩ := snapshots.read_at specified slot
+  cases stored <;> simp_all [localResult, localNumber, CIL.Value.hasUnspecified, localWidth]
+
 /-- A remembered 128-bit vector reads back as its sixteen bytes. -/
 theorem LocalSnapshots.read_vector128 {memory : Memory} {slots : List LocalSlot}
     {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
@@ -328,6 +338,7 @@ theorem NumericHomes.snapshots {memory : Memory} {lower : Nat} {specs slots}
 #print axioms LocalSnapshots.after_write
 #print axioms LocalSnapshots.load
 #print axioms LocalSnapshots.read_at
+#print axioms LocalSnapshots.read_word64
 #print axioms LocalSnapshots.read_vector128
 #print axioms LocalSnapshots.read_vector256
 #print axioms LocalSnapshots.read_vector512

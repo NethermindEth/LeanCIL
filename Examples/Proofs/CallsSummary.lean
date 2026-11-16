@@ -126,12 +126,9 @@ theorem correctness (memory : Safety.Memory) (x : W64) (wellFormed : memory.Well
     with middle value incremented
   obtain ⟨rfl, rfl⟩ := incremented.post
   obtain ⟨stored, store, frame, -⟩ := (enter.frame []).store 0 (.i64 (x + 1)) rfl
-  have permitted : mutateContract.pre (reference, x + 1) stored := by
-    obtain ⟨value, number, fits, result, loaded⟩ := frame.snapshots.read_at (index := 0) rfl rfl
-    refine ⟨frame.homes.writable_at (kind := .word64) (home := reference) (index := 0) rfl, ?_⟩
-    cases value <;> simp [localNumber, localResult, CIL.Value.hasUnspecified] at fits result
-    subst fits result
-    exact loaded
+  have permitted : mutateContract.pre (reference, x + 1) stored :=
+    ⟨frame.homes.writable_at (kind := .word64) (home := reference) (index := 0) rfl,
+      frame.snapshots.read_word64 (index := 0) rfl rfl⟩
   cil_contract_steps [store, localAddress, frame.form_home 0]
   apply WP.exists_execution
   apply WP.local_call frame mutateSummary.holds (reference, x + 1) (by rfl) (by rfl)

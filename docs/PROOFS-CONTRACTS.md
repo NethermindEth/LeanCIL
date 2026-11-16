@@ -108,7 +108,7 @@ local pushes, or `none`.
 | Keep snapshots across a call confined apart from the homes | `LocalSnapshots.after_confined` |
 | Keep snapshots across a write, or memory that keeps old allocations | `after_write_apart`, `after_below` |
 | The typed read of a remembered local whose slot is known | `snapshots.read_at specified slot` |
-| That read for a vector | `read_vector128`, `read_vector256`, `read_vector512` |
+| That read for a 64-bit word or a vector | `read_word64`, `read_vector128`, `read_vector256`, `read_vector512` |
 
 The vector reads are stated as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its
 wider forms. A snapshot that overlaps a callee's footprint is not kept: restate it from the

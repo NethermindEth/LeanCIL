@@ -42,7 +42,7 @@ foreach (var calls in sizes)
 var mutate1 = File.ReadAllText(Path.Combine(proofs, "Mutate1.lean"));
 RejectedProof("Footprint", Changed(mutate1, "  footprint := fun (place, _) => [(place, 8)]", "  footprint _ := []"),
     "mutate_holds");
-RejectedProof("Precondition", Changed(mutate1, "    subst fits result\n    exact loaded\n", "    subst fits result\n"),
+RejectedProof("Precondition", Changed(mutate1, "frame0.snapshots.read_word64 (index := 0) rfl rfl⟩", "?_⟩"),
     "correctness");
 
 // With the original of Mutate forged to subtract, the body check refuses the record and Mutate's contract no
@@ -178,12 +178,9 @@ static string SummaryProof(int calls)
         "  obtain ⟨reference, entered, enter⟩ := entry.checked memory x wellFormed",
         "  apply WP.enter (by rfl) (by rfl) enter.setup",
         "  obtain ⟨initial, firstStore, frame0, -⟩ := (enter.frame []).store 0 (.i64 x) rfl",
-        "  have permitted1 : mutateContract.pre (reference, x) initial := by",
-        "    obtain ⟨value, number, fits, result, loaded⟩ := frame0.snapshots.read_at (index := 0) rfl rfl",
-        "    refine ⟨frame0.homes.writable_at (kind := .word64) (home := reference) (index := 0) rfl, ?_⟩",
-        "    cases value <;> simp [localNumber, localResult, CIL.Value.hasUnspecified] at fits result",
-        "    subst fits result",
-        "    exact loaded"
+        "  have permitted1 : mutateContract.pre (reference, x) initial :=",
+        "    ⟨frame0.homes.writable_at (kind := .word64) (home := reference) (index := 0) rfl,",
+        "      frame0.snapshots.read_word64 (index := 0) rfl rfl⟩"
     };
     for (var call = 1; call <= calls; call++)
     {
