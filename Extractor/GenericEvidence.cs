@@ -436,7 +436,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// decoded instruction there fails the feature check, or an opcode `Method.ofRaw?` writes as a hole.</summary>
     internal enum RefusalKind { UnreachablePc, Hole }
 
-    /// <summary>The part of the model an opcode outside <see cref="DecodedOpcodes"/> needs before it decodes.</summary>
+    /// <summary>The part of the model that an opcode outside <see cref="DecodedOpcodes"/> needs before it
+    /// decodes.</summary>
     internal enum HoleFamily
     {
         Calls, Fields, Arrays, Objects, Tokens, FloatingPoint, ReferenceIndirection, Exceptions, Prefixes, Other
