@@ -161,10 +161,16 @@ example : ∃ fuel result values, invoke linked fuel 1 [] afterApp = .ok (result
 private def collision : Library :=
   { entry := { libBody with staticSites := [(0, { libField with identity := 101 })] } }
 
+/-- The application's table and the library's under its identity collide, in that order. -/
+theorem colliding_identity_rejected :
+    linkChecked [appBody] [collision] =
+      .error { left := appField, right := { libField with identity := 101 } } :=
+  linkChecked_of_collision (by decide +kernel)
+
 -- The report names both fields; the interpreter checks it, as the kernel does not reduce `repr`.
 #guard match linkChecked [appBody] [collision] with
-  | .error message => message == "Static identity collision 101: " ++ reprStr (tableRef "App") ++
-    " and " ++ reprStr (tableRef "Lib")
+  | .error collision => collision.message == "Static identity collision 101: " ++
+    reprStr (tableRef "App") ++ " and " ++ reprStr (tableRef "Lib")
   | .ok _ => false
 
 /-- `library` with the table's bytes changed under the same identity and field. -/
@@ -176,18 +182,16 @@ theorem shared_table_links :
     linkChecked [appBody] [library, library] = .ok (link [appBody] [library, library]) :=
   linkChecked_of_compatible (by decide +kernel)
 
-/-- Reusing an identity with different table bytes prevents checked linking. -/
+/-- Reusing an identity with different table bytes prevents checked linking, and the collision
+    is the library's descriptor beside the changed one. -/
 theorem changed_shared_table_rejected :
-    ∃ message, linkChecked [appBody] [library, changedTable] = .error message := by
-  have incompatible : ¬ StaticDescriptorsCompatible
-      (programStaticDescriptors (link [appBody] [library, changedTable])) := by decide +kernel
-  unfold linkChecked
-  rw [ite_eq_right incompatible]
-  exact ⟨_, rfl⟩
+    linkChecked [appBody] [library, changedTable] =
+      .error { left := libField, right := { libField with bytes := numberBytes 18 8 } } :=
+  linkChecked_of_collision (by decide +kernel)
 
 #guard match linkChecked [appBody] [library, changedTable] with
-  | .error message => message == "Static identity collision 202: " ++ reprStr (tableRef "Lib") ++
-    " and " ++ reprStr (tableRef "Lib")
+  | .error collision => collision.message == "Static identity collision 202: " ++
+    reprStr (tableRef "Lib") ++ " and " ++ reprStr (tableRef "Lib")
   | .ok _ => false
 
 /-- A loaded table with different bytes cannot satisfy a contract's static-world premise. -/
@@ -204,6 +208,7 @@ theorem changed_loaded_table_not_valid :
   exact incompatible (Except.ok.inj (actual.symm.trans readable))
 
 #print axioms shared_table_links
+#print axioms colliding_identity_rejected
 #print axioms changed_shared_table_rejected
 #print axioms changed_loaded_table_not_valid
 #print axioms readTable_holds
