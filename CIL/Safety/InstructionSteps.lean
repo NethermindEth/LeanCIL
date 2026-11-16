@@ -6,11 +6,11 @@ import CIL.Safety.GuardNormalization
 
 One `@[cil_instruction_step]` equation per `instruction` arm and operand shape for the indirect
 integer, handler-table, scalar-store, field, reference and aggregate-initialization opcodes, so a
-step rewrites to that arm's body at the level of `loadValue`, `storeValue`, `add`, `write` and `formValue`,
-where callers state their memory facts, and never unfolds `instruction`. Other operand shapes
-keep the generic `instructionStep` equations in `StepComposition`, which these outrank. The
-stepping tactics use this set alongside `cil_step`, and `cil_instruction_step_goal` lists its
-opcodes; a hand-written `simp only [cil_step]` does not use it.
+step rewrites to that arm's body at the level of `loadValue`, `storeValue`, `add`, `write` and
+`formValue`, where callers state their memory facts, and never unfolds `instruction`. Other
+operand shapes keep the generic `instructionStep` equations in `StepComposition`, which these
+outrank. The stepping tactics use this set alongside `cil_step`, and `cil_instruction_step_goal`
+lists its opcodes; a hand-written `simp only [cil_step]` does not use it.
 -/
 
 namespace CIL.Safety
