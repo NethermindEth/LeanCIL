@@ -17,7 +17,6 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (formed : source.WellFormed)
     (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow (managedStep operation link pc sourceFrame stack source)) :
@@ -37,14 +36,6 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
     | exact .ok (.tailCall related)
     | (simp only [Bool.false_eq_true, Bool.true_eq, ite_false, ite_true] at observable ⊢)
     | contradiction
-    | (apply (methodTableLength_renamed mapping _).bind
-       intro first second same
-       subst second)
-    | (apply related.methodTableElement_bind formed _ _ _ _ observable
-       intro pointer observable)
-    | (apply checkedNative_bind _ _ _ _
-        (fun value proof => related.loadNativeTable_success formed _ value proof) observable
-       intro value found observable)
     | (apply (related.checkedValues _ (by
         intro value member
         exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
@@ -450,7 +441,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       exact .error (.unsupported "Instruction observes unspecified vector bits")
     · simp only [guarded, Bool.false_eq_true, ite_false] at observable ⊢
       rw [metadata.linkAt pc]
-      exact related.managedStep frames formed native _ pc stack bounds observable
+      exact related.managedStep frames native _ pc stack bounds observable
   by_cases direct : ∃ method prefixes, operation = .call method prefixes
   · rcases direct with ⟨method, prefixes, rfl⟩
     exact related.stepCall sourceBody targetBody method prefixes pc (metadata.linkAt pc)

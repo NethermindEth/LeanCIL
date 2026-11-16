@@ -646,11 +646,6 @@ internal abstract record ManagedPointer : Operation
     internal sealed override string Render(Func<int, string> calleeName) => ".managed " + Body(calleeName);
 }
 
-internal sealed record TableLength : ManagedPointer
-{
-    protected override string Body(Func<int, string> calleeName) => ".tableLength";
-}
-
 /// <summary>An indirect call through a callable pointer of the given signature and target catalog.</summary>
 internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> Catalog, bool Tail) : ManagedPointer
 {

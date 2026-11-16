@@ -774,14 +774,13 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     cases operation
     all_goals plain_cases
     all_goals rw [context.link]
-    all_goals simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
+    all_goals simp only [managedStep] at h ⊢
     all_goals repeat' first
       | contradiction
-      | solve | simp only [FrameAction.relabel, context.next rfl]
+      | solve | simp only [FrameAction.relabel]
       | solve | lockstep
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
-          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
+      | (split at h <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
     rw [context.declared]
@@ -1384,13 +1383,12 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case managed operation =>
     plain_cases
     rw [context.link]
-    simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
+    simp only [managedStep] at h ⊢
     repeat' first
       | solve | raise_lockstep
       | solve | simp [unlinkedCall] at h
       | cases h
-      | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
-          Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
+      | (split at h <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
   case localloc =>
     plain_cases
     rw [context.declared]

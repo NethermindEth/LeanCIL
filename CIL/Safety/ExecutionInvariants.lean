@@ -397,7 +397,7 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
     (executed : managedStep operation link pc frame stack memory = .ok action) :
     StepContract body pc dispatched frame stack memory action := by
-  unfold managedStep methodTableElement at executed
+  unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |
@@ -411,8 +411,6 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
         | exact retained.tail.drop _
         | exact (checkedValues_valid _ _ _ (by assumption)).2
         | (apply ValuesValid.cons; first | trivial | exact retained | exact retained.tail.tail)
-        | (refine ValuesValid.cons ?_ retained.tail
-           exact methodTableLength_numeric (by assumption))
         | constructor
     | cases executed
     | split at executed

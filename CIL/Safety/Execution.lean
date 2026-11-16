@@ -157,17 +157,8 @@ theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CI
 def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   match operation, stack with
-  | .tableLength, .object .null :: _
-  | .tableElement _, .scalar _ :: .object .null :: _ =>
-    .error (.thrown .nullReference)
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
-  | .tableLength, .methodTable table :: rest =>
-    return .next (pc + 1) (.scalar (← methodTableLength table) :: rest) frame memory
-  | .tableElement signature, .scalar index :: .methodTable table :: rest =>
-    if table.signature != signature then .error .invalidState else pure ()
-    let pointer ← methodTableElement table index memory
-    return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature _ tail, .methodPointer pointer :: values =>
     let some (.indirect catalog) := link | .error unlinkedCall
     let some method := indirectTarget signature catalog pointer | .error .invalidState

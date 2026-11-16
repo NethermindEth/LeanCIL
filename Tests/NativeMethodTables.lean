@@ -345,13 +345,12 @@ theorem native_cursor_table_reads_refused :
 #print axioms native_cursor_table_reads_refused
 
 /-- `ldlen`, `ldelem.i` and `ldelem` of a handler table emit their decoded instructions, not
-    the managed table length or another instruction's decoding. -/
+    another instruction's decoding. -/
 theorem table_reads_emit_decoded :
     scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [tableKind] .ldlen = true ∧
     scalarEmissionMatches #[] none ⟨0, 151, .none⟩ [.word32, tableKind] (.ldelem .i) = true ∧
     scalarEmissionMatches #[] none ⟨0, 163, .type signature.typeExpr⟩ [.word32, tableKind]
       (.ldelem_any signature.typeExpr) = true ∧
-    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [tableKind] (.managed .tableLength) = false ∧
     scalarEmissionMatches #[] none ⟨0, 151, .none⟩ [.word32, tableKind]
       (.ldelem_any signature.typeExpr) = false ∧
     scalarEmissionMatches #[] none ⟨0, 163, .type signature.typeExpr⟩ [.word32, tableKind]

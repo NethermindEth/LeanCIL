@@ -110,8 +110,6 @@ def observerCount : CIL.Instruction → Nat
   | .callInstance _ argc | .callVirtual _ argc => argc
   | .newobj constructor => constructor.parameters.length
   | .managed (.call signature _ _) => signature.parameters.length + 1
-  | .managed (.tableElement _) => 2
-  | .managed .tableLength => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount

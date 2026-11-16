@@ -277,7 +277,6 @@ theorem element_emission_exact :
     scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem_any int32) = false ∧
     scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words]
       (.stelem_any int32) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.managed .tableLength) = false ∧
     scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
     scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
     scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem .i4) = false ∧

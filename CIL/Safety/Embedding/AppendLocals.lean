@@ -1431,7 +1431,7 @@ theorem step_appendLocals_unadmitted (opcode : Nat) :
 
 #print axioms step_appendLocals_unadmitted
 
-/-- Managed pointers and tables never inspect the unused trailing frame slots. -/
+/-- Managed pointers never inspect the unused trailing frame slots. -/
 theorem step_appendLocals_managed (operation : ManagedOp) :
     StepAppendLocals (.managed operation) := by
   intro body pc args frame extra stack memory outcome stepped kept
@@ -1439,7 +1439,7 @@ theorem step_appendLocals_managed (operation : ManagedOp) :
   clear kept
   unfold step
   apply observed_appendLocals
-  unfold managedStep methodTableLength methodTableElement
+  unfold managedStep
   split
   all_goals repeat' first
     | rfl

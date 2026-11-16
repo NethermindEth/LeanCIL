@@ -444,10 +444,9 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     | offset :: .nativeMethodTable _ :: _, .add
     | .nativeMethodTable _ :: offset :: _, .add => offset ∈ [.word32, .native]
     | _, _ => false
-  else if let .managed operation := emitted then match operation, stack with
-    | .address .., _ => instruction.opcode == 65030
-    | .call .., _ => instruction.opcode == 41
-    | _, _ => false
+  else if let .managed operation := emitted then match operation with
+    | .address .. => instruction.opcode == 65030
+    | .call .. => instruction.opcode == 41
   else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches instruction stack emitted
   else if instruction.opcode == 114 ||
