@@ -1,4 +1,5 @@
 import CIL.Safety.StepFlow
+import Tests.Support
 
 /-! The pc a step resumes at and the action shape it produces, read off the instruction alone. -/
 namespace Tests.StepFlow
@@ -37,9 +38,13 @@ example : step body (.bge 7) 3 args frame [.scalar (.i32 0), .scalar (.i32 1)] m
 example : step body (.bge 7) 3 args frame [.scalar (.i32 1), .scalar (.i32 0)] m = .ok (.next 4 [] frame m) := by
   rfl
 
-example {r : Reference} (h : step body (.call 2 1) pc args frame stack m = .ok (.construct 2 args stack frame' r .word64 m')) :
+example {r : Reference}
+    (h : step body (.call (Tests.callee 1)) pc args frame stack m =
+      .ok (.construct 2 args stack frame' r .word64 m')) :
     False := by
-  obtain ⟨_, _, _, _, _, contradiction⟩ := step_call_action h
+  obtain ⟨_, _, plain⟩ := step_call_action h
+  rw [if_neg (by decide)] at plain
+  obtain ⟨_, _, _, contradiction⟩ := plain
   cases contradiction
 
 example {constructor : CIL.Extraction.MethodRef} {size}
@@ -50,22 +55,27 @@ example {constructor : CIL.Extraction.MethodRef} {size}
   obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newobj_aggregate_action linked h
   cases contradiction
 
-/-- A call whose operand names method 1 at a pc whose link names method 2. -/
+/-- A parameterless call at a pc whose link names method 2. -/
 def relinked : Method :=
-  { code := [.call 1 0, .ret], locals := [], returnsValue := false, links := [(0, .direct 2)] }
+  { code := [.call (Tests.callee 0) {}, .ret], locals := [], returnsValue := false,
+    links := [(0, .direct 2)] }
 
-/-- The call enters the method its link names, not the one its operand names. -/
-theorem relinked_call : step relinked (.call 1 0) 0 args frame [] m = .ok (.call 2 [] [] m) := rfl
+/-- The call enters the method its link names. -/
+theorem relinked_call :
+    step relinked (.call (Tests.callee 0)) 0 args frame [] m = .ok (.call 2 [] [] m) := rfl
 
-/-- A call site the table gives no link faults instead of entering its operand. -/
+/-- A call site the table gives no link faults instead of entering any method. -/
 theorem unlinked_call :
-    step { relinked with links := [] } (.call 1 0) 0 args frame [] m = .error unlinkedCall := rfl
+    step { relinked with links := [] } (.call (Tests.callee 0)) 0 args frame [] m =
+      .error unlinkedCall := rfl
 
 /-- A tail call the table gives no link faults before its stack check, which an empty stack under
     one argument would fail with `invalidState`. -/
 theorem unlinked_tail_call :
-    step { code := [.tailCall 1 1], locals := [], returnsValue := false, links := [] }
-      (.tailCall 1 1) 0 args frame [] m = .error unlinkedCall := rfl
+    step {
+        code := [.call (Tests.callee 1) { tail := true }], locals := [], returnsValue := false,
+        links := [] }
+      (.call (Tests.callee 1) { tail := true }) 0 args frame [] m = .error unlinkedCall := rfl
 
 /-- A construction the table gives no link faults before its size check, which size 0 would fail
     with `invalidState`. -/

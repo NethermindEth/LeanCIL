@@ -94,6 +94,10 @@ partial class Program
     /// </summary>
     static string ForgeDecodedMethod(string source, int method, string update)
     {
+        // The definition writes a decoded method's links as the table constant its decoder is given.
+        if (update.Contains("links :=", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Forge method{method}Links, the decoder's input, to change its links");
         var call = DecodedDefinition(source, method);
         if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
         var forged = $"method{method}Forged";
@@ -121,6 +125,31 @@ partial class Program
         return ForgeDecodedMethod(source, method, "declared := { method.declared with returnType := " +
             returnType.Replace(atom, replacement, StringComparison.Ordinal) + " }");
     }
+
+    /// <summary>
+    /// `source` with the link of the call at `pc` of method `method` changed to `link`: the definition the method's
+    /// link table names, whether the method is decoded or kept as a literal.
+    /// </summary>
+    static string ForgeLink(string source, int method, int pc, string link)
+    {
+        var definition = Regex.Match(source, $@"(?m)^@\[cil_code\] def method{method}Link{pc} : Link := [^\r\n]*");
+        if (!definition.Success) throw new InvalidOperationException($"method{method} has no link at pc {pc}");
+        return source[..definition.Index] + $"@[cil_code] def method{method}Link{pc} : Link := {link}" +
+            source[(definition.Index + definition.Length)..];
+    }
+
+    /// <summary>
+    /// The arguments of method `method`'s feature-flow obligation that a decided-false report prints on one line,
+    /// naming that method's raw definition and certificate.
+    /// </summary>
+    static string FeatureObligation(object method) =>
+        $"method{method}Closed profile method{method}FeatureStates method{method}Reachable";
+
+    /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
+    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. Regex.Matches(source,
+            $@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct {callee}\r?$")
+        .Select(match => (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))];
 
     // Keep emitted definitions intact and select one independent validator obligation.
     // Its unchanged form must also be compiled as a positive control by the caller.

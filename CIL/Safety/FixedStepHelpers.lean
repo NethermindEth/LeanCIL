@@ -144,8 +144,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callInstance .. | .callVirtual ..
-  | .castclass _ | .isinst _ | .tailCall ..
-  | .throw _ | .ret => .boundary
+  | .castclass _ | .isinst _ | .throw _ | .ret => .boundary
   | _ => .other
 
 /-- The finite reference-operation family exposes only the cases that can observe references. -/
@@ -273,13 +272,14 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
-    -- ones; `fixed_fallback` reads the hole and table-offset exclusions, the others are cleared.
+    -- ones; `fixed_fallback` reads the hole and table-offset exclusions and the boundary arm the
+    -- call exclusion, and the others are cleared.
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
       rename_i loadsField addressesField storesField addressHome localAllocation loadsStatic
-        addressesStatic tokensStatic storesStatic constructs unadmitted offsetBeforeTable
-        tableBeforeOffset
-        addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn
+        addressesStatic tokensStatic storesStatic calls constructs unadmitted offsetBeforeTable
+        tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
+        convOvf convOvfUn
         objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse
         objectBranchTrue castClass isInst storeHome allocatedArray
       guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
@@ -292,6 +292,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       guard_hyp addressesStatic : ∀ field, operation = .ldsflda field → False
       guard_hyp tokensStatic : ∀ field, operation = .ldtoken (.field field) → False
       guard_hyp storesStatic : ∀ field, operation = .stsfld field → False
+      guard_hyp calls : ∀ method prefixes, operation = .call method prefixes → False
       guard_hyp constructs : ∀ constructor, operation = .newobj constructor → False
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
       guard_hyp storeHome : ∀ (index : Nat) (value : Value) (rest : List Value),
@@ -330,15 +331,14 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption
          have noArgument : ∀ position, operation = .ldarg position → False := by assumption
-         have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
-         have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
+         have noCall : ∀ method prefixes, operation = .call method prefixes → False := by
+           assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
          have noReturn : operation = .ret → False := by assumption
          cases operation <;> try cases boundary
          all_goals try exact False.elim (noManaged _ rfl)
          all_goals try exact False.elim (noArgument _ rfl)
          all_goals try exact False.elim (noCall _ _ rfl)
-         all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)
          all_goals try exact False.elim (noReturn rfl)
          all_goals simp only [pureArity, CIL.Safety.instruction] at observable

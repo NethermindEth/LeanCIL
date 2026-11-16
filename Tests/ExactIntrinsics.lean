@@ -2,6 +2,7 @@ import Lean
 import CIL.Extraction.Translation
 import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
+import Tests.Support
 
 open CIL CIL.Extraction
 
@@ -307,12 +308,14 @@ theorem unspecified_return (body : Method) (memory : Safety.Memory) (frame : Saf
 #print axioms unspecified_return
 
 theorem unspecified_call (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
-    Safety.step body (.call 1 2) 0 [] frame [.scalar (.i64 0), .scalar (.v128Low64 7)] memory =
+    Safety.step body (.call (Tests.callee 2)) 0 [] frame [.scalar (.i64 0), .scalar (.v128Low64 7)]
+      memory =
       .error (.unsupported "Instruction observes unspecified vector bits") := rfl
 #print axioms unspecified_call
 
 theorem unspecified_call_rest (memory : Safety.Memory) (frame : Safety.Frame) :
-    Safety.step (body [.call 1 1]) (.call 1 1) 0 [] frame
+    Safety.step { body [.call (Tests.callee 1)] with links := [(0, .direct 1)] }
+      (.call (Tests.callee 1)) 0 [] frame
       [.scalar (.i64 3), .scalar (.v128Low64 7)] memory =
       .ok (.call 1 [.scalar (.i64 3)] [.scalar (.v128Low64 7)] memory) := rfl
 #print axioms unspecified_call_rest

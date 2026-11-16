@@ -1,5 +1,6 @@
 import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.Outcomes
+import Tests.Support
 
 /-!
 # Retaining dead numeric declarations during embedding
@@ -25,14 +26,15 @@ def expected : Method := {
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
   code := [.br 3, .unadmitted 0, .unadmitted 0,
-    .ldloc 1, .pop, .call 1 0, .ret] }
+    .ldloc 1, .pop, .call (Tests.callee 0) {}, .ret], links := [(5, .direct 1)] }
 
 /-- A separately specified body moves the live block past extra unreachable instructions. -/
 def actual : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.br 4, .ldc_i4 9, .pop, .nop, .ldloc 1, .pop, .call 1 0, .ret] }
+  code := [.br 4, .ldc_i4 9, .pop, .nop, .ldloc 1, .pop, .call (Tests.callee 0) {},
+    .ret], links := [(6, .direct 1)] }
 
 /-- The child allocates its own numeric home after the parent's retained dead homes. -/
 def child : Method := {
@@ -72,7 +74,7 @@ def removed : Method := {
   localKinds := [.reference, .word64]
   returnsValue := true
   code := [.br 3, .unadmitted 0, .unadmitted 0,
-    .ldloc 0, .pop, .call 1 0, .ret] }
+    .ldloc 0, .pop, .call (Tests.callee 0) {}, .ret], links := [(5, .direct 1)] }
 
 /-- Deleting a dead numeric local changes later allocation identities despite equal scalars. -/
 theorem removed_allocations :

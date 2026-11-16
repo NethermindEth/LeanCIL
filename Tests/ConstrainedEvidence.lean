@@ -1,4 +1,5 @@
 import CIL.Extraction.Constrained
+import Tests.Support
 
 /-! # Independently tampered constrained-call metadata and translations -/
 namespace Tests.ConstrainedEvidence
@@ -51,22 +52,42 @@ private def target : SpecializedMethod := ⟨[], { raw with
   token := 21, owner := "Fixture::Counter", hasThis := true, parameters := [],
   code := [⟨0, 23, .none⟩, ⟨1, 42, .none⟩] }⟩
 private def methods := [⟨[], raw⟩, target]
-private def emitted : Method := {
-  locals := [], returnsValue := true, code := [.ldarg 0, .nop, .call 1 1, .ret] }
+/-- The receiver load, the dropped prefix and `call` with its prefix, linked to the target. -/
+private def constrainedEmitted (receiver : TypeExpr) (site : CallSite) : Method := {
+  locals := [], returnsValue := true,
+  code := [.ldarg 0, .nop, .call site.method { constrained := some receiver }, .ret],
+  links := [(2, .direct 1)] }
+private def emitted : Method := constrainedEmitted receiver site
+/-- `emitted` with `op` in place of its call. -/
+private def callAs (op : Instruction) : Method := { emitted with code := emitted.code.set 2 op }
 
 theorem concrete_call_valid :
     ConstrainedCallsValid types methods raw [true, true, true, true] emitted := by decide +kernel
 #print axioms concrete_call_valid
 
+/-- A link to any body but the resolved implementation, or no direct link, is rejected. -/
 theorem changed_target_rejected :
     ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
-      { emitted with code := emitted.code.set 2 (.call 0 1) } := by decide +kernel
+      { emitted with links := [(2, .direct 0)] } ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      { emitted with links := [] } ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      { emitted with links := [(2, .virtual [(receiver, 1)])] } := by decide +kernel
 #print axioms changed_target_rejected
 
-theorem changed_arity_rejected :
+/-- The emitted call names the site's method, carries the site's receiver as its prefix and is
+    no tail call. -/
+theorem changed_call_rejected :
     ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
-      { emitted with code := emitted.code.set 2 (.call 1 0) } := by decide +kernel
-#print axioms changed_arity_rejected
+      (callAs (.call { site.method with hasThis := false } { constrained := some receiver })) ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      (callAs (.call site.method)) ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      (callAs (.call site.method { constrained := some interface })) ∧
+    ¬ ConstrainedCallsValid types methods raw [true, true, true, true]
+      (callAs (.call site.method { tail := true, constrained := some receiver })) := by
+  decide +kernel
+#print axioms changed_call_rejected
 
 theorem prefix_bypass_rejected :
     ¬ ConstrainedCallsValid types methods
@@ -112,8 +133,15 @@ private def staticTarget : SpecializedMethod := ⟨[], { raw with
   token := 31, owner := "Fixture::Counter", parameters := [],
   code := [⟨0, 22, .none⟩, ⟨1, 42, .none⟩] }⟩
 private def staticMethods := [⟨[], staticRaw⟩, staticTarget]
-private def staticEmitted : Method := {
-  locals := [], returnsValue := true, code := [.nop, .call 1 0, .ret] }
+/-- The dropped prefix and the prefixed static `call` of `site` on `receiver`. -/
+private def staticCall (receiver : TypeExpr) (site : CallSite) : Method := {
+  locals := [], returnsValue := true,
+  code := [.nop, .call site.method { constrained := some receiver }, .ret],
+  links := [(1, .direct 1)] }
+private def staticEmitted : Method := staticCall receiver staticSite
+/-- The static slot's call with a receiver argument added. -/
+private def receiverCall : Instruction :=
+  .call { staticSite.method with hasThis := true } { constrained := some receiver }
 
 /-- A static interface slot (`constrained. T; call`) resolves to the receiver's static
     implementation, called without a receiver argument. -/
@@ -124,7 +152,7 @@ theorem static_call_valid :
 
 theorem static_call_with_receiver_rejected :
     ¬ ConstrainedCallsValid staticTypes staticMethods staticRaw [true, true, true]
-      { staticEmitted with code := staticEmitted.code.set 1 (.call 1 1) } := by decide +kernel
+      { staticEmitted with code := staticEmitted.code.set 1 receiverCall } := by decide +kernel
 #print axioms static_call_with_receiver_rejected
 
 /-- `callvirt` never dispatches a static slot, and `call` never dispatches an instance slot. -/
@@ -198,8 +226,7 @@ private def defaultTarget : SpecializedMethod := ⟨[price, allowance], { raw wi
 /-- The recorded override instantiated at `TPrice := Price`. -/
 private def overrideTarget : SpecializedMethod := ⟨[price], { defaultTarget.closed with
   token := 41, owner := "Fixture::Allowance", ownerArgumentCount := 0 }⟩
-private def defaultEmitted : Method := {
-  locals := [], returnsValue := true, code := [.ldarg 0, .nop, .call 1 1, .ret] }
+private def defaultEmitted : Method := constrainedEmitted allowance defaultSite
 
 /-- Without an implementation on the receiver, a generic static virtual slot runs its own body,
     instantiated at the site's method and interface arguments. -/
@@ -339,6 +366,7 @@ private def scaleRaw : RawMethod := { staticRaw with
 private def scaleProgram (token : Nat) (owner : String) : SpecializedMethod :=
   ⟨[], { staticTarget.closed with token, owner }⟩
 private def scaleChain := [scaledEntry [moreInterface, scaleInterface], scaleEntry, moreEntry]
+private def scaleEmitted : Method := staticCall scaled scaleSite
 
 /-- A derived interface's override of a static virtual slot runs instead of the default, and
     only its own program body may be emitted for the call. -/
@@ -347,13 +375,13 @@ theorem derived_override_valid :
       some (.interfaceBody moreInterface (scaleBody 61)) ∧
     ConstrainedCallsValid scaleChain
       [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScaleMore"] scaleRaw [true, true, true]
-      staticEmitted ∧
+      scaleEmitted ∧
     ¬ ConstrainedCallsValid scaleChain
       [⟨[], scaleRaw⟩, scaleProgram 60 "Fixture::IScale"] scaleRaw [true, true, true]
-      staticEmitted ∧
+      scaleEmitted ∧
     ¬ ConstrainedCallsValid scaleChain
       [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScale"] scaleRaw [true, true, true]
-      staticEmitted := by decide +kernel
+      scaleEmitted := by decide +kernel
 #print axioms derived_override_valid
 
 /-- A derived interface supplies the body of a base `static abstract` slot. -/
@@ -374,7 +402,7 @@ theorem most_derived_body_valid :
       [scaledEntry [mostInterface, moreInterface, scaleInterface], scaleEntry, moreEntry,
         mostEntry]
       [⟨[], scaleRaw⟩, scaleProgram 61 "Fixture::IScaleMore"] scaleRaw [true, true, true]
-      staticEmitted := by decide +kernel
+      scaleEmitted := by decide +kernel
 #print axioms most_derived_body_valid
 
 /-- Two unrelated interfaces overriding the slot leave no most specific body, so the call is
@@ -387,7 +415,7 @@ theorem diamond_rejected :
       [scaledEntry [moreInterface, sideInterface, scaleInterface], scaleEntry, moreEntry,
         sideEntry]
       [⟨[], scaleRaw⟩, scaleProgram 60 "Fixture::IScale"] scaleRaw [true, true, true]
-      staticEmitted ∧
+      scaleEmitted ∧
     resolveConstrained [scaledEntry [moreInterface, scaleInterface], scaleEntry,
         { moreEntry with methods := [scaleBody 61, scaleBody 64] }] scaled scaleSite = none := by
   decide +kernel
@@ -426,14 +454,15 @@ private def appRaw : RawMethod := { staticRaw with
   code := [⟨0, 65046, .type appReceiver⟩, ⟨6, 40, .call staticSite⟩, ⟨11, 42, .none⟩] }
 private def appTarget : SpecializedMethod :=
   ⟨[], { staticTarget.closed with owner := "App::Mine" }⟩
+private def appEmitted : Method := staticCall appReceiver staticSite
 
 /-- A struct of one pinned assembly implements a slot of another pinned assembly's interface, and
     the emitted body must carry the struct's own scope. -/
 theorem cross_pin_implementation_valid :
     ConstrainedCallsValid appTypes [⟨[], appRaw⟩, appTarget] appRaw [true, true, true]
-      staticEmitted ∧
+      appEmitted ∧
     ¬ ConstrainedCallsValid appTypes [⟨[], appRaw⟩, staticTarget] appRaw [true, true, true]
-      staticEmitted := by decide +kernel
+      appEmitted := by decide +kernel
 #print axioms cross_pin_implementation_valid
 
 /-- Every catalog entry dispatch reads must name a valid pin scoping its type: a receiver, slot
@@ -560,25 +589,26 @@ private def genericRaw : RawMethod := { raw with
   code := raw.code.set 1 ⟨1, 65046, .type genericReceiver⟩ }
 private def genericTarget : SpecializedMethod := ⟨[integer], {
   target.closed with owner := "Fixture::Counter`1", ownerArgumentCount := 1 }⟩
+private def genericEmitted : Method := constrainedEmitted genericReceiver site
 
 /-- Closed owner specialization composes with the existing exact constrained-call rule. -/
 theorem generic_call_valid :
     ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩, genericTarget]
-      genericRaw [true, true, true, true] emitted := by decide +kernel
+      genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms generic_call_valid
 
 /-- A different specialization of the same method token cannot satisfy the receiver. -/
 theorem changed_owner_arguments_rejected :
     ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩,
       { genericTarget with arguments := [.atom runtimeScope "System.Int64"] }]
-      genericRaw [true, true, true, true] emitted := by decide +kernel
+      genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms changed_owner_arguments_rejected
 
 /-- The owner arity cannot be dropped while retaining a selected generic method body. -/
 theorem changed_owner_arity_rejected :
     ¬ ConstrainedCallsValid genericTypes [⟨[], genericRaw⟩,
       { genericTarget with closed := { genericTarget.closed with ownerArgumentCount := 0 } }]
-      genericRaw [true, true, true, true] emitted := by decide +kernel
+      genericRaw [true, true, true, true] genericEmitted := by decide +kernel
 #print axioms changed_owner_arity_rejected
 
 /-- Dispatch metadata cannot substitute a same-named owner from another assembly. -/

@@ -5,15 +5,20 @@ import CIL.Extraction.FeatureEffects
 
 namespace CIL.Extraction
 
-/-- The selected program entry must be precisely the resolved target, declared by its closed
-    owner and instantiated at the site's method type arguments, with a receiver argument exactly
-    when the target is an instance method. -/
+/-- The emitted call names the site's method under a `constrained.` prefix on `receiver`, and the
+    program entry its link selects is precisely the resolved target, declared by its closed owner
+    and instantiated at the site's method type arguments, with a receiver argument exactly when
+    the target is an instance method. -/
 private def selectedImplementation (methods : Nat → Option SpecializedMethod) (receiver : TypeExpr)
-    (site : CallSite) (target : ConstrainedTarget) (emitted : Instruction) : Bool :=
+    (site : CallSite) (target : ConstrainedTarget) (emitted : Instruction) (link : Option Link) :
+    Bool :=
   let resolved := target.method
   let arguments := siteMethodArguments site
-  match emitted, namedType (ownerBase (target.declaringType receiver)) with
-  | .call index count, some (scope, name) => match methods index with
+  match emitted, link, namedType (ownerBase (target.declaringType receiver)) with
+  | .call method prefixes, some (.direct index), some (scope, name) =>
+    let count := method.argumentCount
+    method == site.method && prefixes.constrained == some receiver && !prefixes.tail &&
+    match methods index with
     | none => false
     | some method =>
       method.arguments == arguments ++ resolved.ownerArguments &&
@@ -27,7 +32,7 @@ private def selectedImplementation (methods : Nat → Option SpecializedMethod) 
       substituteType arguments resolved.returnType == some method.closed.returnType &&
       resolved.parameters.mapM (substituteType arguments) == some method.closed.parameters &&
       count == resolved.parameters.length + (if resolved.hasThis then 1 else 0)
-  | _, _ => false
+  | _, _, _ => false
 
 /-- The call opcode a constrained prefix may precede: `callvirt` for an instance slot and
     `call` for a static one. -/
@@ -39,7 +44,8 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
     (methods : Nat → Option SpecializedMethod)
     (current previous next : Option RawInstruction) (live nextLive : Option Bool)
-    (emitted : Option Instruction) (targeted : Nat → Bool) (pc : Nat) : Bool :=
+    (emitted : Option Instruction) (link : Option Link) (targeted : Nat → Bool) (pc : Nat) :
+    Bool :=
   if live != some true then true else
   -- A type test stays in the opcode it lowers, against a class its lineage decides.
   if let some (opcode, type) := emitted.bind typeTestSource then
@@ -55,7 +61,7 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
     | some ⟨_, 65046, .type receiver⟩, some emitted =>
       if pc == 0 || targeted pc || !site.hasThis then false else
       match resolve receiver site with
-      | some resolved => selectedImplementation methods receiver site resolved emitted
+      | some resolved => selectedImplementation methods receiver site resolved emitted link
       | none => false
     -- Unprefixed, only a receiver-checked call, whose target the managed-call rule binds, or a
     -- virtual call whose table re-resolves against the catalog.
@@ -68,9 +74,12 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
       if pc == 0 || targeted pc || site.hasThis then false else
       match emitted, resolve receiver site with
       | some emitted, some resolved =>
-        selectedImplementation methods receiver site resolved emitted
+        selectedImplementation methods receiver site resolved emitted link
       | _, _ => false
-    | _ => true
+    -- Unprefixed, a call carries no constrained type.
+    | _ => match emitted with
+      | some (.call _ prefixes) => prefixes.constrained.isNone
+      | _ => true
   | some ⟨_, 65046, _⟩ | some ⟨_, 111, _⟩ => false
   | _ => true
 
@@ -79,9 +88,10 @@ def constrainedSiteCheckWith (resolve : TypeExpr → CallSite → Option Constra
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
     (methods : Nat → Option SpecializedMethod)
     (rawAt : Nat → Option RawInstruction) (liveAt : Nat → Option Bool)
-    (codeAt : Nat → Option Instruction) (targeted : Nat → Bool) (pc : Nat) : Bool :=
+    (codeAt : Nat → Option Instruction) (linkAt : Nat → Option Link) (targeted : Nat → Bool)
+    (pc : Nat) : Bool :=
   constrainedSiteWindow resolve virtualValid castable methods (rawAt pc) (rawAt (pc - 1))
-    (rawAt (pc + 1)) (liveAt pc) (liveAt (pc + 1)) (codeAt pc) targeted pc
+    (rawAt (pc + 1)) (liveAt pc) (liveAt (pc + 1)) (codeAt pc) (linkAt pc) targeted pc
 
 /-- The original metadata-list rule presented through optional instruction lookups. -/
 def constrainedSiteCheck (types : List DispatchType) (methods : Nat → Option SpecializedMethod) :=
@@ -90,31 +100,30 @@ def constrainedSiteCheck (types : List DispatchType) (methods : Nat → Option S
     (castTargetValid (findDispatchType types)) methods
 /-- The per-site rule stated with optional list lookups, including missing-neighbor rejection. -/
 def constrainedSiteValid (types : List DispatchType) (methods : List SpecializedMethod)
-    (raw : RawMethod) (reachable : List Bool) (code : List Instruction) (pc : Nat) : Bool :=
-  constrainedSiteCheck types (methods[·]?) (raw.code[·]?) (reachable[·]?) (code[·]?)
-    (fun target => raw.code.any (branchesTo target)) pc
+    (raw : RawMethod) (reachable : List Bool) (emitted : Method) (pc : Nat) : Bool :=
+  constrainedSiteCheck types (methods[·]?) (raw.code[·]?) (reachable[·]?) (emitted.code[·]?)
+    emitted.linkAt (fun target => raw.code.any (branchesTo target)) pc
 
 /-- Traverse adjacent raw instructions and parallel state/code lists without positional lookup. -/
 def constrainedSites (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
-    (methods : Nat → Option SpecializedMethod)
+    (methods : Nat → Option SpecializedMethod) (linkAt : Nat → Option Link)
     (targeted : Nat → Bool) : Nat → Option RawInstruction →
       List RawInstruction → List Bool → List Instruction → Bool
   | pc, previous, instruction :: raw, live :: states, emitted :: code =>
     constrainedSiteWindow resolve virtualValid castable methods (some instruction) previous
-      raw.head?
-      (some live) states.head? (some emitted) targeted pc &&
-        constrainedSites resolve virtualValid castable methods targeted (pc + 1) (some instruction)
-          raw
-          states code
+      raw.head? (some live) states.head? (some emitted) (linkAt pc) targeted pc &&
+        constrainedSites resolve virtualValid castable methods linkAt targeted (pc + 1)
+          (some instruction) raw states code
   | _, _, [], [], [] => true
   | _, _, _, _, _ => false
 
 /-- Streaming windows agree with the indexed rule on equally long evidence suffixes. -/
 theorem constrainedSites_eq (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
-    (methods : Nat → Option SpecializedMethod) (targeted : Nat → Bool)
-    (wholeRaw : List RawInstruction) (wholeStates : List Bool) (wholeCode : List Instruction)
+    (methods : Nat → Option SpecializedMethod) (linkAt : Nat → Option Link)
+    (targeted : Nat → Bool) (wholeRaw : List RawInstruction) (wholeStates : List Bool)
+    (wholeCode : List Instruction)
     (raw : List RawInstruction) (states : List Bool) (code : List Instruction)
     (pc : Nat)
     (previous : Option RawInstruction)
@@ -122,10 +131,11 @@ theorem constrainedSites_eq (resolve : TypeExpr → CallSite → Option Constrai
     (codeSuffix : code = wholeCode.drop pc)
     (prior : previous = wholeRaw[pc - 1]?)
     (stateLength : raw.length = states.length) (codeLength : raw.length = code.length) :
-    constrainedSites resolve virtualValid castable methods targeted pc previous raw states code =
+    constrainedSites resolve virtualValid castable methods linkAt targeted pc previous raw states
+        code =
       (List.range' pc raw.length).all
         (constrainedSiteCheckWith resolve virtualValid castable methods
-          (wholeRaw[·]?) (wholeStates[·]?) (wholeCode[·]?) targeted) := by
+          (wholeRaw[·]?) (wholeStates[·]?) (wholeCode[·]?) linkAt targeted) := by
   induction raw generalizing states code pc previous with
   | nil =>
     have statesEmpty : states = [] := List.length_eq_zero_iff.mp stateLength.symm
@@ -162,7 +172,8 @@ theorem constrainedSites_eq (resolve : TypeExpr → CallSite → Option Constrai
           rawTail, stateTail, List.head?_drop]
 
 #print axioms constrainedSites_eq
-/-- Every reachable virtual call is statically resolved; no standalone prefix is admitted. -/
+/-- Every reachable virtual call is statically resolved; no standalone prefix is admitted. A
+    `call` names the body its pc's link gives, read through one index of the link table. -/
 def ConstrainedCallsValid (types : List DispatchType) (methods : List SpecializedMethod)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
@@ -172,7 +183,7 @@ def ConstrainedCallsValid (types : List DispatchType) (methods : List Specialize
         (FlowIndex.ofList methods).get?)
       (castTargetValid fun identity =>
         ((DispatchIndex.ofTypes types).findType identity).map (·.raw))
-      (FlowIndex.ofList methods).get?
+      (FlowIndex.ofList methods).get? (linkIndex emitted)
       (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
       0 raw.code.head? raw.code reachable emitted.code = true
 
@@ -183,17 +194,17 @@ theorem ConstrainedCallsValid_iff_original (types : List DispatchType)
     ConstrainedCallsValid types methods raw reachable emitted ↔
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
         (List.range raw.code.length).all
-          (constrainedSiteValid types methods raw reachable emitted.code) = true := by
+          (constrainedSiteValid types methods raw reachable emitted) = true := by
   have resolve : (DispatchIndex.ofTypes types).resolve = resolveConstrained types := by
     funext receiver site
     exact DispatchIndex.resolve_ofTypes types receiver site
   unfold ConstrainedCallsValid
-  rw [resolve, DispatchIndex.findType_raw]
+  rw [resolve, DispatchIndex.findType_raw, linkIndex_eq]
   by_cases stateLength : raw.code.length = reachable.length
   · by_cases codeLength : raw.code.length = emitted.code.length
     · rw [constrainedSites_eq (resolveConstrained types)
         (virtualTableValid types (findDispatchType types) (FlowIndex.ofList methods).get?)
-        (castTargetValid (findDispatchType types)) (FlowIndex.ofList methods).get?
+        (castTargetValid (findDispatchType types)) (FlowIndex.ofList methods).get? emitted.linkAt
         (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
         raw.code reachable emitted.code raw.code reachable emitted.code 0 raw.code.head?
         (by simp) (by simp) (by simp) (by simp [List.head?_eq_getElem?]) stateLength codeLength]

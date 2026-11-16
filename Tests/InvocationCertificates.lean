@@ -1,5 +1,6 @@
 import CIL.Safety.CertifiedContract
 import CIL.Safety.ReturnMemory
+import Tests.Support
 
 /-!
 Consumer uses of invocation certificates on `Echo(v) => v` and its caller
@@ -25,7 +26,8 @@ abbrev relayMethod : Nat := 1
 
 /-- `Relay(v) => Echo(v)`: one call whose result it returns. -/
 @[cil_code] def relay : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.ldarg 0, .call echoMethod 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {}, .ret],
+    links := [(1, .direct echoMethod)] }
 
 /-- `Echo` then `Relay`; the program declares no statics. -/
 @[cil_code] def program : CIL.Program := [echo, relay]
@@ -179,7 +181,7 @@ macro "relay_finish" : tactic => `(tactic| (
   ))
 
 /-- The call `Relay` makes at pc 1, standing in for a `bind_call` site. -/
-theorem relaySite.call : relay.code[1]? = some (.call echoMethod 1) := rfl
+theorem relaySite.call : relay.code[1]? = some (.call (Tests.callee 1)) := rfl
 
 /-- The caller supplies the entry premises, so a callee without a precondition still hands
     over its certificate, whose visited-state clause is the postcondition. -/

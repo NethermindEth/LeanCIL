@@ -100,8 +100,8 @@ selects the suite.
 [CanonicalMethods.cs](../Tests/CanonicalMethods.cs) then reads the same report and lists the
 admitted methods the extraction defines from their decoder by `cil_decoded_method` rather than as
 a literal. It prints how many of the methods extracted for admitted entries that is, and a table
-that counts the other methods by their first refusal (the opcode family of the first hole, or an
-unreachable pc), most frequent first. It compares the list with the
+that counts the other methods by their first refusal (the opcode family of the first hole, a
+call translated to another instruction, or an unreachable pc), most frequent first. It compares the list with the
 checked-in [list](../Tests/canonical-methods.txt), named as the baseline names methods. A method
 that leaves the list fails the scan; a method that joins it fails until
 `dotnet run --file Tests/CanonicalMethods.cs -- --update` records it, so the list only grows.

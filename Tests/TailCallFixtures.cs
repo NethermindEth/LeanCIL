@@ -5,8 +5,6 @@ using Mono.Cecil.Cil;
 partial class Program
 {
     /// <summary>The definition of the link to method 1 at a call site, which the target mutation redirects.</summary>
-    [GeneratedRegex(@"(?m)^(@\[cil_code\] def method0Link\d+ : Link := \.direct )1(?=\r?$)")]
-    private static partial Regex TailLinkTarget();
 
     static void AddTailCallFixtures(string assembly, string root, GeneratedEvidence evidence,
         RejectedEvidence rejected)
@@ -30,8 +28,10 @@ partial class Program
             var output = Path.Combine(root, "Tail-" + name);
             Run(["dotnet", ExtractorPath, "extract", dll, $"TailCalls::{name}({signature})", output]);
             var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-            const string tail = ".tailCall 1 1";
-            if (!source.Contains(tail, StringComparison.Ordinal))
+            // The tail call enters method 1 and carries its prefix; the prefix keeps the method a literal.
+            const string tail = "{ tail := true }";
+            var tailLinks = DirectLinks(source, 1).Where(call => call.Method == 0).ToArray();
+            if (!source.Contains(tail, StringComparison.Ordinal) || tailLinks.Length != 1)
                 throw new InvalidOperationException("Missing emitted tail transfer: " + name);
             var argument = byref ? ".reference (.address ⟨0, 0⟩)" : ".scalar (.i32 42)";
             var result = name switch
@@ -82,31 +82,22 @@ partial class Program
                     """);
             evidence.Add(proof, "PASS compiled tail transfer and lifetime: " + name);
             if (name != "Forward") continue;
-            foreach (var (mutation, before, after, marker) in new[]
+            foreach (var (mutation, before, after, markers) in new[]
             {
-                ("dropped", tail, ".call 1 1",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                        "method0Closed"),
-                ("prefix", "opcode := 65044", "opcode := 0",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                        "method0Closed"),
-                ("target", tail, ".tailCall 0 1", "Extraction.ManagedCallsValid")
+                ("dropped", tail, "{}", new[] { "Extraction.FeatureFlowValid", FeatureObligation(0) }),
+                ("prefix", "opcode := 65044", "opcode := 0", ["Extraction.FeatureFlowValid", FeatureObligation(0)]),
+                ("target", "", "", ["Extraction.ManagedCallsValid"])
             })
             {
                 if (!source.Contains(before, StringComparison.Ordinal))
                     throw new InvalidOperationException("Missing tail mutation target: " + mutation);
                 var forged = Path.Combine(root, "Forged-tail-" + mutation + ".lean");
-                var changed = source.Replace(before, after, StringComparison.Ordinal);
-                // The link moves with the call, so only the binding check can reject the changed target.
-                if (mutation == "target")
-                {
-                    var linked = TailLinkTarget().Replace(changed, "${1}0");
-                    // A replacement that matched nothing would leave the links check as the only rejection.
-                    if (linked == changed) throw new InvalidOperationException("Mutation did not change the link");
-                    changed = linked;
-                }
+                // The call's target is the link at its pc, so only the binding check can reject a changed link.
+                var changed = mutation == "target"
+                    ? ForgeLink(source, 0, tailLinks[0].Pc, ".direct 0")
+                    : source.Replace(before, after, StringComparison.Ordinal);
                 File.WriteAllText(forged, changed);
-                rejected.Add(forged, "PASS tail certificate rejection: " + mutation, marker);
+                rejected.Add(forged, "PASS tail certificate rejection: " + mutation, markers);
             }
         }
         var excludedDll = Path.Combine(root, "TailExcluded.dll");

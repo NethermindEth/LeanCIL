@@ -59,7 +59,7 @@ var added = Excess(decodedCounts, listedCounts);
 string Reason(JsonElement refusal) => refusal.GetProperty("refusal").GetString() switch
 {
     "hole" => "hole: " + refusal.GetProperty("family").GetString(),
-    "runtimeMethod" => "runtime method",
+    "translated" => "translated call or construction",
     "unreachablePc" => "unreachable pc",
     var kind => throw new InvalidDataException("Unknown refusal kind: " + kind)
 };

@@ -1,6 +1,7 @@
 import CIL.MethodIdentity
 import CIL.StructuralLabels
 import CIL.Safety.OutcomeContract
+import Tests.Support
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
     `Percent(v) => v <= 100 ? v : throw new ArgumentOutOfRangeException(...)`,
@@ -12,10 +13,12 @@ open CIL
 def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
 def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
 def method2Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)"
-@[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.ldarg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
-@[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.ldarg 0, .call 2 1, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
+@[cil_code] def method0 : Method := {
+  returnsValue := true, locals := [], links := [(1, .direct 1)], code :=
+    [.ldarg 0, .call (Tests.callee 1) {}, .ldc_i4 1, .conv_i8, .add, .ret] }
+@[cil_code] def method1 : Method := { links := [(1, .direct 2)], returnsValue := true,
+                                      locals := [], code :=
+  [.ldarg 0, .call (Tests.callee 1) {}, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
       .throw .argument] }
 @[cil_code] def method2 : Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,

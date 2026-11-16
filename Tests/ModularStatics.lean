@@ -2,6 +2,7 @@ import CIL.Safety.StaticLinking
 import CIL.Safety.StaticMemoryBelow
 import CIL.Safety.WordMemory
 import CIL.Safety.Execution
+import Tests.Support
 
 /-! Checked static-table linking and loaded-world premises for modular consumer contracts. -/
 
@@ -24,7 +25,8 @@ private def tableRef (owner : String) : Extraction.FieldRef :=
     code := [.ldsflda (tableRef "Lib"), .ldind .i8, .ret] }
 @[cil_code] def appBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, appField)],
-    code := [.ldsflda (tableRef "App"), .pop, .call 1 0, .ret] }
+    code := [.ldsflda (tableRef "App"), .pop, .call (Tests.callee 0) {},
+      .ret], links := [(2, .direct 1)] }
 def library : Library := { entry := libBody }
 def linked : CIL.Program := link [appBody] [library]
 

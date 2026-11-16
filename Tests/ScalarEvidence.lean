@@ -261,9 +261,9 @@ private def floatEvidence (opcode : Nat) : MethodEvidence := withBody {
 private def floatMethod : Method := {
   locals := [], returnsValue := true, declared := { returnType := word },
   code := [.ldc_i4 1, .neg, .conv_i8, .ret] }
-example : FeatureFlowValid #[] (fun _ => none) (floatRaw 107) .scalar floatFeatures
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (floatRaw 107) .scalar floatFeatures
     (List.replicate 4 true) floatMethod.code := by decide
-example : FeatureFlowValid #[] (fun _ => none) (floatRaw 108) .scalar floatFeatures
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (floatRaw 108) .scalar floatFeatures
     (List.replicate 4 true) floatMethod.code := by decide
 example : scalarTransfer (floatRaw 107) (i 107) [.word32] = some [.other] := by decide
 example : scalarTransfer (floatRaw 108) (i 108) [.word32] = some [.other] := by decide
@@ -308,7 +308,7 @@ private def localMethod : Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true,
   declared := { returnType := word },
   code := [.ldc_i4 1, .neg, .stloc 0, .ldloc 0, .conv_i8, .ret] }
-example : FeatureFlowValid #[] (fun _ => none) localRaw .scalar localFeatures
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) localRaw .scalar localFeatures
     (List.replicate 6 true) localMethod.code := by decide
 example : ¬ TranslationValid [] #[] [] [localEvidence] [] [localMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] localRaw localFeatures localStates localMethod.code := by decide
@@ -324,7 +324,7 @@ private def argumentMethod : Method := {
   locals := [], parameterHomes := [(0, .word32)], returnsValue := true,
   declared := { parameters := [intType], returnType := word },
   code := [.ldc_i4 1, .neg, .starg 0, .ldarg 0, .conv_i8, .ret] }
-example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatures
+example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) argumentRaw .scalar argumentFeatures
     (List.replicate 6 true) argumentMethod.code := by decide
 example : ¬ TranslationValid [] #[] [] [argumentEvidence] [] [argumentMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] argumentRaw argumentFeatures localStates argumentMethod.code := by
@@ -344,10 +344,16 @@ private def site : CallSite := {
     owner := .atom scope.identity "Fixture", name := name!"", hasThis := false, genericArity := 0,
     returnType := word, parameters := [word, word] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
-example : validateManagedCall [⟨[], addRaw⟩] []
-    (i 40 (.call { site with method.returnType := intType })) true (.call 0 2) = false := by decide
-example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
+/-- The call linked to method 0 that names `site`'s method, as the extractor emits it. -/
+private def emittedCall (site : CallSite) : Instruction := .call site.method
+private def linkedZero : Option Link := some (.direct 0)
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true linkedZero
+    (emittedCall site) = true := by decide
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40
+    (.call { site with method.returnType := intType }))
+    true linkedZero (emittedCall { site with method.returnType := intType }) = false := by decide
+example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] []
+    (i 40 (.call site)) true linkedZero (emittedCall site) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call { site with
     target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0,
     method.parameters := [], method.returnType := word })) [] = some [.other] := by decide +kernel
@@ -372,8 +378,8 @@ private theorem generic_return_cases :
 #print axioms generic_return_cases
 
 example : validateManagedCall [⟨[], addRaw⟩] []
-    (i 40 (.call { site with method.parameters := [intType, word] })) true (.call 0 2) =
-      false := by decide
+    (i 40 (.call { site with method.parameters := [intType, word] })) true linkedZero
+      (emittedCall { site with method.parameters := [intType, word] }) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.other, .word64] = none := by decide
 /-- Call signatures retain parameter order, receiver kinds and generic substitutions. -/
@@ -743,7 +749,8 @@ private def unsignedSite : CallSite := {
     owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
     parameters := [] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true linkedZero
+    (emittedCall unsignedSite) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/
 private theorem unsigned_signature_cases :
@@ -858,7 +865,8 @@ private def IndirectCase.method (access : IndirectCase) : Method :=
     code := access.code }
 /-- Whether the feature and scalar checks accept the claimed emission. -/
 private def IndirectCase.flows (access : IndirectCase) : Bool :=
-  decide (FeatureFlowValid #[] (fun _ => none) access.rawMethod .scalar access.features
+  decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) access.rawMethod .scalar
+    access.features
       access.reachable access.code) &&
     decide (ScalarFlowValid #[] access.rawMethod access.features access.states access.code)
 /-- Whether the indirect access rule accepts the emission at the access itself. -/

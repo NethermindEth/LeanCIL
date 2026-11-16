@@ -7,13 +7,13 @@ import CIL.Extraction.Generics
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
 conversions, comparisons, integer indirect loads and stores, dynamic frame storage, the class
 type tests `castclass` and `isinst` and the class instance field accesses `ldfld`, `ldflda` and
-`stfld` and the construction `newobj`, with every short and macro form folded into its
-constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that
-decoded instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for
-some operand. Instantiation changes a decoded instruction only in the type a type test names,
-the constructor a construction names, or through a field operand
+`stfld`, the call `call` and the construction `newobj`, with every short and macro form
+folded into its constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it
+is that decoded instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes
+for some operand. Instantiation changes a decoded instruction only in the type a type test names,
+the method a call or construction names, or through a field operand
 (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original with each
-type test at the instantiated type, each construction of the instantiated constructor, and each
+type test at the instantiated type, each call and construction of the instantiated method, and each
 class field access at the same owner with its held type instantiated
 (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is the total decoding: it writes a
 hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
@@ -58,7 +58,7 @@ def RawOperand.isType : RawOperand → Bool
   | .type _ => true
   | _ => false
 
-/-- Whether an operand is a call site, the operand of `newobj`. -/
+/-- Whether an operand is a call site, the operand of `call` and `newobj`. -/
 def RawOperand.isCall : RawOperand → Bool
   | .call _ => true
   | _ => false
@@ -110,7 +110,7 @@ open Extraction
 
 /-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
-  opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
+  opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 || opcode == 40 ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
     (88 <= opcode && opcode <= 106) || opcode == 109 || opcode == 110 || opcode == 115 ||
     opcode == 116 ||
@@ -138,20 +138,27 @@ theorem Instruction.typeTest?_opcode {opcode : Nat} {type : TypeExpr} {instructi
 
 #print axioms Instruction.typeTest?_opcode
 
-/-- The construction `opcode` denotes on a call site: `newobj` (115) of the method it names. -/
-def Instruction.construction? (opcode : Nat) (site : CallSite) : Option Instruction :=
-  if opcode == 115 then some (.newobj site.method) else none
+/-- The instruction `opcode` denotes on a call site: `call` (40) of the method it names, without
+    prefixes, whose target the method's link table gives, or the construction `newobj` (115) of
+    it. -/
+def Instruction.ofCallSite? (opcode : Nat) (site : CallSite) : Option Instruction :=
+  if opcode == 40 then some (.call site.method {})
+  else if opcode == 115 then some (.newobj site.method) else none
 
-/-- Only `newobj` (115) denotes a construction. -/
-theorem Instruction.construction?_opcode {opcode : Nat} {site : CallSite}
-    {instruction : Instruction} (constructed : Instruction.construction? opcode site =
-      some instruction) : opcode = 115 := by
-  unfold Instruction.construction? at constructed
-  split at constructed
-  · exact beq_iff_eq.mp ‹_›
-  · cases constructed
+/-- Only `call` (40) and `newobj` (115) denote an instruction on a call site. -/
+theorem Instruction.ofCallSite?_opcode {opcode : Nat} {site : CallSite}
+    {instruction : Instruction} (named : Instruction.ofCallSite? opcode site = some instruction) :
+    opcode = 40 ∨ opcode = 115 := by
+  unfold Instruction.ofCallSite? at named
+  revert named
+  cases called : opcode == 40
+  · cases constructed : opcode == 115
+    · intro named
+      cases named
+    · exact fun _ => .inr (beq_iff_eq.mp constructed)
+  · exact fun _ => .inl (beq_iff_eq.mp called)
 
-#print axioms Instruction.construction?_opcode
+#print axioms Instruction.ofCallSite?_opcode
 
 /-- The class field instruction `opcode` denotes on `field`: `ldfld` (123), `ldflda` (124)
     or `stfld` (125). -/
@@ -178,7 +185,8 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. A type operand gives the type test its opcode
     names, an instance field of a class the field instruction its opcode names and a call site
-    the construction of the method it names when its opcode is `newobj`; any other
+    the `call` of the method it names, whose target the method's link table gives, when its
+    opcode is `call`, and its construction when its opcode is `newobj`; any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
     operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can write one where
     this admits nothing. -/
@@ -188,7 +196,7 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | .type type => Instruction.typeTest? raw.opcode type
   | .field (.object _ _) _ _ _ false =>
     (FieldRef.ofOperand? raw.operand).bind (Instruction.classField? raw.opcode)
-  | .call site => Instruction.construction? raw.opcode site
+  | .call site => Instruction.ofCallSite? raw.opcode site
   | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   match raw.opcode, raw.operand with
@@ -294,9 +302,9 @@ theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : 
         (Option.filter_eq_some_iff.mp decoded).1
       rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-    · have opcodeIs := Instruction.construction?_opcode (Option.filter_eq_some_iff.mp decoded).1
-      rw [opcodeIs] at opcodeValue
-      exact absurd opcodeValue (by decide)
+    · rcases Instruction.ofCallSite?_opcode (Option.filter_eq_some_iff.mp decoded).1
+        with opcodeIs | opcodeIs <;>
+        rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
     · rw [opcodeValue, Bool.not_false, Bool.or_true,
         ite_eq_left_of_eq_true _ _ (eq_true rfl)] at decoded
       cases decoded
@@ -447,7 +455,10 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
   | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
   | .stfld expected => match emitted with | .stfld actual => expected == actual | _ => false
-  -- A construction compares the constructor it names.
+  -- A call compares the method it names and its prefixes, a construction its constructor.
+  | .call expected prefixes => match emitted with
+    | .call actual actualPrefixes => expected == actual && prefixes == actualPrefixes
+    | _ => false
   | .newobj expected => match emitted with | .newobj actual => expected == actual | _ => false
   -- Dynamic frame storage.
   | .localloc => (emitted matches .localloc)
@@ -465,9 +476,9 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
 #print axioms Instruction.sameValue_eq
 
 /-- Instantiation changes a decoded instruction only in the type a type test names, the method a
-    construction names, or through a field operand: an operand that is none of these decodes as
-    before, and a type test or construction decodes exactly when the original does, to the
-    instruction of the same opcode on the substituted type or call site. -/
+    call or construction names, or through a field operand: an operand that is none of these
+    decodes as before, and a type test, call or construction decodes exactly when the original
+    does, to the instruction of the same opcode on the substituted type or call site. -/
 theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
@@ -477,7 +488,7 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
       | .type _, .type type =>
         (Instruction.ofRaw? raw).bind fun _ => Instruction.typeTest? raw.opcode type
       | .call _, .call site =>
-        (Instruction.ofRaw? raw).bind fun _ => Instruction.construction? raw.opcode site
+        (Instruction.ofRaw? raw).bind fun _ => Instruction.ofCallSite? raw.opcode site
       | _, _ => Instruction.ofRaw? raw := by
   obtain ⟨sameKind, sameType, sameCall, sameField, unchanged⟩ :=
     substituteOperand_mentionsType substituted
@@ -496,11 +507,11 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
   case call before =>
     cases operand
     case call site =>
-      show Option.filter _ (Instruction.construction? opcode site) =
-        (Option.filter _ (Instruction.construction? opcode before)).bind fun _ =>
-          Instruction.construction? opcode site
-      unfold Instruction.construction?
-      cases opcode == 115 <;> rfl
+      show Option.filter _ (Instruction.ofCallSite? opcode site) =
+        (Option.filter _ (Instruction.ofCallSite? opcode before)).bind fun _ =>
+          Instruction.ofCallSite? opcode site
+      unfold Instruction.ofCallSite?
+      cases opcode == 40 <;> cases opcode == 115 <;> rfl
     all_goals exact absurd sameCall Bool.false_ne_true
   -- Any other original either is unchanged or, like its substitute, is refused by the guard.
   all_goals first

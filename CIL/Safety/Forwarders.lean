@@ -67,17 +67,19 @@ theorem plainLoads_unchanged {body : CIL.Method} {indices : List Nat}
 
 #print axioms plainLoads_unchanged
 
-/-- The body that loads the arguments at `loads` in order, calls `callee` with them and
+/-- The body that loads the arguments at `loads` in order, calls `method` with them and
     returns its result through `ret`. -/
-def forwarderCode (loads : List Nat) (callee : Nat) : List CIL.Instruction :=
-  loads.map .ldarg ++ [.call callee loads.length, .ret]
+def forwarderCode (loads : List Nat) (method : CIL.Extraction.MethodRef) : List CIL.Instruction :=
+  loads.map .ldarg ++ [.call method {}, .ret]
 
-/-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
-    `calleeBody`, from a frame that allocates nothing, and declares the callee's return
+/-- `body` forwards the arguments it loads by `loads` to `method`, linked to `callee`, whose
+    body is `calleeBody`, from a frame that allocates nothing, and declares the callee's return
     arity and return storage `narrow`. -/
 structure Forwards (body calleeBody : CIL.Method) (loads : List Nat)
-    (callee : Nat) (narrow : Option CIL.NarrowKind) : Prop where
-  code : body.code = forwarderCode loads callee
+    (method : CIL.Extraction.MethodRef) (callee : Nat) (narrow : Option CIL.NarrowKind) :
+    Prop where
+  code : body.code = forwarderCode loads method
+  arity : method.argumentCount = loads.length
   linked : body.linkAt loads.length = some (.direct callee)
   locals : body.locals = []
   localKinds : body.localKinds = []
@@ -93,8 +95,9 @@ def MethodContract.withArgs {Input Output : Type} (contract : MethodContract Inp
 
 /-- A frame that allocates nothing: entry keeps memory and the frame owns no allocation. -/
 theorem Forwards.enterFrame {body calleeBody : CIL.Method}
-    {loads : List Nat} {callee : Nat}
-    {narrow : Option CIL.NarrowKind} (forwards : Forwards body calleeBody loads callee narrow)
+    {loads : List Nat} {method : CIL.Extraction.MethodRef} {callee : Nat}
+    {narrow : Option CIL.NarrowKind}
+    (forwards : Forwards body calleeBody loads method callee narrow)
     (args : List Value) (memory : Memory) :
     CIL.Safety.enterFrame body args memory =
       .ok (⟨memory.nextIdentity, [], [], 0⟩, memory) := by
@@ -176,19 +179,21 @@ theorem run_load_arguments {program : CIL.Program} {method : Nat} {body : CIL.Me
 
 #print axioms run_load_arguments
 
-/-- A call whose arguments are exactly the stack, valid and fully specified, passes them to
-    the callee in push order and leaves an empty stack. -/
-theorem step_call_loaded {body : CIL.Method} {target callee pc : Nat} {args : List Value}
+/-- A call without `tail.` whose arguments are exactly the stack, valid and fully specified,
+    passes them to the callee in push order and leaves an empty stack. -/
+theorem step_call_loaded {body : CIL.Method} {method : CIL.Extraction.MethodRef}
+    {prefixes : CIL.CallPrefixes} {callee pc : Nat} {args : List Value}
     {frame : Frame} {memory : Memory} {arguments : List Value}
+    (plain : prefixes.tail = false) (arity : method.argumentCount = arguments.length)
     (linked : body.linkAt pc = some (.direct callee))
     (valid : ValuesValid memory arguments) (known : arguments.any Value.hasUnspecified = false) :
-    step body (.call target arguments.length) pc args frame arguments.reverse memory =
+    step body (.call method prefixes) pc args frame arguments.reverse memory =
       .ok (.call callee arguments [] memory) := by
   have taken : arguments.reverse.take arguments.length = arguments.reverse :=
     List.take_of_length_le (by simp)
   have exposed : unspecifiedOperands arguments.length arguments.reverse = false := by
     rw [unspecifiedOperands, taken, List.any_reverse, known]
-  simp only [step, observerCount, exposed, Bool.false_eq_true, ↓reduceIte, linked,
+  simp only [step, observerCount, arity, exposed, Bool.false_eq_true, ↓reduceIte, linked, plain,
     List.length_reverse, Nat.lt_irrefl, taken, List.reverse_reverse,
     checkedValues_of_valid valid, Bind.bind, Except.bind, Pure.pure, Except.pure]
   rw [List.drop_of_length_le (by simp)]
@@ -228,12 +233,14 @@ theorem step_return_unchanged {body : CIL.Method} {narrow : Option CIL.NarrowKin
     returns what the callee's contract promises from the current memory, in the memory
     left once the frame expires. -/
 theorem run_forward_call {Input Output : Type} {contract : MethodContract Input Output}
-    {program : CIL.Program} {method target callee pc : Nat} {body calleeBody : CIL.Method}
+    {program : CIL.Program} {method callee pc : Nat} {body calleeBody : CIL.Method}
+    {called : CIL.Extraction.MethodRef} {prefixes : CIL.CallPrefixes}
     {narrow : Option CIL.NarrowKind} {args : List Value} {frame : Frame} {memory : Memory}
     {input : Input} {post : Memory → List Value → Prop}
     (holds : contract.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
-    (callFetched : body.code[pc]? = some (.call target (contract.args input).length))
+    (callFetched : body.code[pc]? = some (.call called prefixes))
+    (plain : prefixes.tail = false) (arity : called.argumentCount = (contract.args input).length)
     (callLinked : body.linkAt pc = some (.direct callee))
     (returnFetched : body.code[pc + 1]? = some (.ret))
     (returnsValue : body.returnsValue = calleeBody.returnsValue)
@@ -255,7 +262,7 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ calleeChecked
     exact same ▸ valid
   refine run_call_of_contract holds input found callFetched
-    (step_call_loaded callLinked calleeValid known) rfl permitted ?_
+    (step_call_loaded plain arity callLinked calleeValid known) rfl permitted ?_
   intro final out call
   obtain ⟨_, called⟩ := call.invoked
   have returns : contract.Returns input memory final (contract.results out) :=
@@ -284,11 +291,11 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
 theorem MethodContract.Holds.forward {Input Output : Type}
     {contract : MethodContract Input Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
-    {loads : List Nat} {narrow : Option CIL.NarrowKind}
+    {loads : List Nat} {called : CIL.Extraction.MethodRef} {narrow : Option CIL.NarrowKind}
     {forwarded : Input → List Value}
     (holds : contract.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
-    (forwards : Forwards body calleeBody loads callee narrow)
+    (forwards : Forwards body calleeBody loads called callee narrow)
     (selected : ∀ input,
       loads.map (fun index => (forwarded input)[index]?) = (contract.args input).map some)
     (narrowed : ∀ input initial, contract.pre input initial →
@@ -310,7 +317,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
       (covered input initial permitted value member).elim (valid value) id
   have length : (contract.args input).length = loads.length := by
     simpa using (congrArg List.length (selected input)).symm
-  have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads callee)[pc]? := by
+  have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads called)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
   apply WP.adequate.mpr
   refine invoke_exists_of_run found (checkedValues_of_valid forwardedValid)
@@ -323,8 +330,8 @@ theorem MethodContract.Holds.forward {Input Output : Type}
     rfl
   rw [Nat.zero_add, List.append_nil]
   -- The frame owns nothing, so leaving it keeps the callee's final memory.
-  exact run_forward_call (target := callee) holds found calleeFound
-    (by simp [fetched, forwarderCode, length])
+  exact run_forward_call (called := called) (prefixes := {}) holds found calleeFound
+    (by simp [fetched, forwarderCode]) rfl (by rw [forwards.arity, length])
     forwards.linked (by simp [fetched, forwarderCode]) forwards.returnsValue forwards.returnNarrow
     (unchanged input initial) permitted
     (known input initial permitted) (fun _ _ valid _ => valid)
@@ -333,21 +340,23 @@ theorem MethodContract.Holds.forward {Input Output : Type}
 #print axioms MethodContract.Holds.forward
 
 /-- The body that loads the arguments at `loads` in order, loads the address of local 0,
-    calls `callee` with them and returns its result through `ret`. -/
-def outForwarderCode (loads : List Nat) (callee : Nat) : List CIL.Instruction :=
-  loads.map .ldarg ++ [.ldloca 0, .call callee (loads.length + 1), .ret]
+    calls `method` with them and returns its result through `ret`. -/
+def outForwarderCode (loads : List Nat) (method : CIL.Extraction.MethodRef) :
+    List CIL.Instruction :=
+  loads.map .ldarg ++ [.ldloca 0, .call method {}, .ret]
 
-/-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
-    `calleeBody`, with the address of its only local, a byte home of `kind` created from
+/-- `body` forwards the arguments it loads by `loads` to `method`, linked to `callee`, whose
+    body is `calleeBody`, with the address of its only local, a byte home of `kind` created from
     `initial`, as a last out argument whose contents it drops; it declares the callee's
     return arity and has return storage `narrow`. References, spans, arrays and managed
     identities allocate no byte home, so
     `kind` excludes them. Any fitting initializer is accepted; the extractor emits
     `.unmodeled` without `InitLocals` and the kind's zero with it. -/
 structure ForwardsOut (body calleeBody : CIL.Method) (loads : List Nat)
-    (callee : Nat) (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) (initial : CIL.Value) :
-    Prop where
-  code : body.code = outForwarderCode loads callee
+    (method : CIL.Extraction.MethodRef) (callee : Nat) (narrow : Option CIL.NarrowKind)
+    (kind : CIL.LocalKind) (initial : CIL.Value) : Prop where
+  code : body.code = outForwarderCode loads method
+  arity : method.argumentCount = loads.length + 1
   linked : body.linkAt (loads.length + 1) = some (.direct callee)
   locals : body.locals = [initial]
   localKinds : body.localKinds = [kind]
@@ -402,9 +411,9 @@ theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
 /-- Entering a `ForwardsOut` body creates its local as one fresh writable home holding its
     initializer, keeps the caller's memory below `nextIdentity` and stays well formed. -/
 theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
-    {loads : List Nat} {callee : Nat} {narrow : Option CIL.NarrowKind}
-    {kind : CIL.LocalKind} {initial : CIL.Value}
-    (forwards : ForwardsOut body calleeBody loads callee narrow kind initial)
+    {loads : List Nat} {method : CIL.Extraction.MethodRef} {callee : Nat}
+    {narrow : Option CIL.NarrowKind} {kind : CIL.LocalKind} {initial : CIL.Value}
+    (forwards : ForwardsOut body calleeBody loads method callee narrow kind initial)
     (args : List Value) (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ home result,
       CIL.Safety.enterFrame body args memory =
@@ -441,12 +450,12 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
 theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     {outer : MethodContract Outer Output} {inner : MethodContract Inner Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
-    {loads : List Nat} {narrow : Option CIL.NarrowKind}
+    {loads : List Nat} {called : CIL.Extraction.MethodRef} {narrow : Option CIL.NarrowKind}
     {kind : CIL.LocalKind} {initial : CIL.Value}
     (extend : Outer → Reference → Inner)
     (holds : inner.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
-    (forwards : ForwardsOut body calleeBody loads callee narrow kind initial)
+    (forwards : ForwardsOut body calleeBody loads called callee narrow kind initial)
     (selected : ∀ input home,
       loads.map (fun index => (outer.args input)[index]?) ++
           [some (.reference (.address home))] =
@@ -502,7 +511,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
   have length : (inner.args (extend input home)).length = loads.length + 1 := by
     rw [split]; simpa using (congrArg List.length loadedSome)
   have fetched : ∀ pc : Nat,
-      body.code[pc]? = (outForwarderCode loads callee)[pc]? := by
+      body.code[pc]? = (outForwarderCode loads called)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
   have loadedNarrowed : ∀ pair ∈ loads.zip loaded, LoadsUnchanged body pair.1 pair.2 := by
     intro pair member
@@ -540,8 +549,8 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
   rw [stack]
   have exitFresh : ∀ id ∈ frame.owned, memory.nextIdentity ≤ id :=
     fun id member => (owned.2 id member).1
-  refine run_forward_call (target := callee) holds found calleeFound
-    (by rw [length]; simp [fetched, outForwarderCode]) forwards.linked
+  refine run_forward_call (called := called) (prefixes := {}) holds found calleeFound
+    (by simp [fetched, outForwarderCode]) rfl (by rw [forwards.arity, length]) forwards.linked
     (by
       rw [fetched, outForwarderCode, List.getElem?_append_right (by simp; omega)]
       simp [show loads.length + 1 + 1 - loads.length = 2 by omega])

@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Extraction.RuntimeModels
+import Tests.Support
 
 /-!
 # Runtime model tests
@@ -234,7 +235,7 @@ example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 false)) = true
   decide +kernel
 example : catalog.siteAgrees {} (site bigMul) (.memory (.divRemOut 64)) = false := by
   decide +kernel
-example : catalog.siteAgrees {} (site bigMul) (.call 7 3) = false := by decide +kernel
+example : catalog.siteAgrees {} (site bigMul) (.call bigMul) = false := by decide +kernel
 example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 true)) = false := by
   decide +kernel
 
@@ -253,7 +254,7 @@ private def spanIsEmpty : MethodRef :=
 example : misfiled.find {} .call spanIsEmpty = none := by decide +kernel
 
 -- A call the table does not model keeps its call and may emit no model.
-example : catalog.siteAgrees {} (site divRem) (.call 7 3) = true := by decide +kernel
+example : catalog.siteAgrees {} (site divRem) (.call divRem) = true := by decide +kernel
 example : catalog.siteAgrees {} (site divRem) (.memory (.divRemOut 64)) = false := by
   decide +kernel
 
@@ -291,7 +292,9 @@ example : ModelTable :=
 
 -- The runtime table is empty, so it models no call, and a method's calls keep their call.
 example : runtimeModel {} .call bigMul = none := by decide +kernel
-example : RuntimeModelsAgree (method (site bigMul)) [true] { body with code := [.call 7 3] } := by
+example : RuntimeModelsAgree (method
+    (site bigMul)) [true]
+    { body with code := [.call (Tests.callee 3) {}], links := [(0, .direct 7)] } := by
   decide +kernel
 
 end Table

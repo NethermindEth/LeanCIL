@@ -1,5 +1,6 @@
 import CIL.Safety.MethodContract
 import CIL.Safety.OutcomeContract
+import Tests.Support
 
 /-! Store facts stated in their source form, as a carry or borrow helper's proof
     states them, rather than in the form the checked steps compute. -/
@@ -172,7 +173,8 @@ theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : wo
   { code := [.nop, .ret], locals := [], returnsValue := false }
 
 @[cil_code] def normalizationCaller : CIL.Method :=
-  { code := [.call 1 0, .ret], locals := [], returnsValue := false }
+  { code := [.call (Tests.callee 0) {}, .ret], links := [(0, .direct 1)], locals := [],
+    returnsValue := false }
 
 @[cil_code] def normalizationCallProgram : CIL.Program := [normalizationCaller, normalizationCallee]
 

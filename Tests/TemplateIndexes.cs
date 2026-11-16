@@ -35,17 +35,30 @@ object Variant(string path, bool avx, object[] methods) => Activator.CreateInsta
         Name = avx ? "x64-v3" : "scalar", Architecture = avx ? "x64" : "scalar", NativeWidth = 64,
         LittleEndian = true, Avx2 = avx
     }), Model("FeatureProfile"))!, Typed(emitter.GetNestedType("Method", BindingFlags.NonPublic)!, methods))!;
-// The only operations the fixtures need: a feature test, a nop, a return and a static call.
+// The only operations the fixtures need: a feature test, a nop, a return and static and tail calls of method 0
+// or 1, each naming the method operand `site`.
 object Operation(object operation) => operation is not string text ? operation : text switch
 {
     ".feature .avx2" => Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")),
     ".nop" => Create("StackOperation", Enum.Parse(Model("StackOpcode"), "Nop")),
     ".ret" => Create("Return"),
-    ".call 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Static"), 0, 0),
-    ".tailCall 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 0, 0),
-    ".tailCall 1 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 1, 0),
+    "call 0" => Call("Static", 0),
+    "tail call 0" => Call("Tail", 0),
+    "tail call 1" => Call("Tail", 1),
     _ => throw new ArgumentException("Unmodelled fixture operation: " + text)
 };
+// The one method operand every fixture call names, and the term the templates spell it by.
+var site = Create("MethodRef", ".void",
+    Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["Site"]),
+    false, 0, ".void", Listed(typeof(string), []), Listed(typeof(string), []));
+var siteTerm = (string)site.GetType().GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic)!
+    .Invoke(site, [])!;
+object Call(string kind, int method)
+{
+    var call = Create("Call", Enum.Parse(Model("CallKind"), kind), method, 0, false);
+    call.GetType().GetProperty("Site", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(call, site);
+    return call;
+}
 object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadata", returnsValue,
     Listed(Model("InitialValue"), []), Listed(Model("LocalKind"), []), Listed(typeof(int), []),
     Listed(Model("ParameterHome"), []), Listed(Model("StaticSite"), sites),
@@ -58,7 +71,7 @@ var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
     [first] = Variant(first, false, [Method("Caller", ".feature .avx2", ".nop", ".ret")]),
     [second] = Variant(second, true,
-        [Method("Helper", ".ret"), Method("Caller", ".feature .avx2", ".call 0 0", ".ret")])
+        [Method("Helper", ".ret"), Method("Caller", ".feature .avx2", "call 0", ".ret")])
 };
 var read = typeof(Program).GetMethod(nameof(ReadVariants), BindingFlags.Static | BindingFlags.NonPublic)!
     .MakeGenericMethod(variantType).Invoke(null, [variants]);
@@ -79,7 +92,8 @@ Emit();
 var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
 var secondBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings1.lean"));
-if (!templates.Contains("if avx2 then (.call callee0 0) else (.nop)", StringComparison.Ordinal) ||
+if (!templates.Contains($"if avx2 then (.call ({siteTerm}) {{}}) else (.nop)", StringComparison.Ordinal) ||
+    !templates.Contains("[(1, .direct callee0)]", StringComparison.Ordinal) ||
     !firstBinding.Contains("Templates.method0 Extracted.profile Extracted.environment false 0",
         StringComparison.Ordinal) ||
     !secondBinding.Contains("Templates.method1 Extracted.profile Extracted.environment)", StringComparison.Ordinal) ||
@@ -140,15 +154,15 @@ catch (TargetInvocationException error) when (error.InnerException is InvalidDat
     rejected.Message == "Template inputs contain ambiguous managed method identities.") { }
 Console.WriteLine("PASS template order, reordered callees, absent-callee placeholders and duplicate rejection");
 
-// A tail call names its callee by the template's parameter too, whatever index each profile gives it.
+// A tail call's link names its callee by the template's parameter too, whatever index each profile gives it.
 var tailRoot = Path.Combine(root, "Tail");
 var (tailFirst, tailSecond, tailOutput) = (Path.Combine(tailRoot, "First"), Path.Combine(tailRoot, "Second"),
     Path.Combine(tailRoot, "Shared"));
-variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Method("Tail", ".tailCall 0 0")]);
-variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", ".tailCall 1 0"), Method("Target", ".ret")]);
+variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Method("Tail", "tail call 0")]);
+variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", "tail call 1"), Method("Target", ".ret")]);
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
 var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
-if (!tailTemplate.Contains(".tailCall callee0 0", StringComparison.Ordinal) ||
+if (!tailTemplate.Contains($".call ({siteTerm}) {{ tail := true }}", StringComparison.Ordinal) ||
     !tailTemplate.Contains("links := ([(0, .direct callee0)])", StringComparison.Ordinal))
     throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");

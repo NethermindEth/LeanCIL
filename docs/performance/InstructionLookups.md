@@ -158,7 +158,7 @@ walk the known facts, and each fact's eligibility is a lookup in a balanced inde
 body. The ratio measures 4.05, about 400 kernel heartbeats per fact per state, or about 13 million
 for 64 facts over 512 states.
 
-The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
+The suite embeds a hand-written body built with `Method.withCode` and its own link table, one call per segment, into an
 extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
 heartbeats to recheck the lemma `cil_embed` states. It fails when the heartbeats per call grow
 more than 1.15 times. The recheck costs about 56,800 heartbeats per call at both sizes, 1.00
