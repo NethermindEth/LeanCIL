@@ -57,10 +57,6 @@ field code: first difference at index 6 (left length 6, right length 7)
 #guard_msgs (substring := true) in
 example : body 6 = { body 6 with code := (body 6).code ++ [.nop] } := by cil_body
 
-/-- The static field the fixtures below read. -/
-def field : StaticDescriptor :=
-  { identity := 1, fieldName := "Fixture::Value", bytes := List.replicate 8 0 }
-
 /-- An extracted method whose call sits at pc 2, behind a branch, and which reads no static. -/
 def calling : Method := {
   code := [.ldarg 0, .br 2, .call (Tests.callee 1) {}, .ret], links := [(2, .direct 7)],
@@ -70,6 +66,10 @@ def calling : Method := {
 def fieldRef : CIL.Extraction.FieldRef :=
   { owner := .atom "Fixture" "Fixture", index := 0, type := .atom "Fixture" "System.Int64",
     name := name!"Value" }
+
+/-- The static field the fixtures below read. -/
+def field : StaticDescriptor :=
+  { identity := 1, field := fieldRef, bytes := List.replicate 8 0 }
 
 /-- An extracted method that reads a static at pc 0 and calls at pc 3. -/
 def reading : Method := {

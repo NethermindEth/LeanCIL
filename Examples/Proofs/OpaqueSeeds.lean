@@ -6,14 +6,14 @@ open CIL CIL.Safety
 namespace ExampleProof
 
 /-- The identity extraction gave the static field with this metadata name. -/
-def fieldIdentity (name : String) : Nat :=
-  ((Extracted.program.flatMap (·.staticSites.map Prod.snd)).find? (·.fieldName == name)).elim 0
+def fieldIdentity (name : MetadataName) : Nat :=
+  ((Extracted.program.flatMap (·.staticSites.map Prod.snd)).find? (·.field.name == name)).elim 0
     (·.identity)
 
 /-- Caller memory in which the two process-random seeds hold `seed0` and `seed1`. -/
 def seeded (seed0 seed1 : W64) : Safety.Memory := Safety.Memory.boundStatics
-  [(fieldIdentity "System.UInt64 Examples.SeededHash::Seed0", numberBytes seed0.toNat 8),
-   (fieldIdentity "System.UInt64 Examples.SeededHash::Seed1", numberBytes seed1.toNat 8)]
+  [(fieldIdentity name!"Seed0", numberBytes seed0.toNat 8),
+   (fieldIdentity name!"Seed1", numberBytes seed1.toNat 8)]
 
 /-- The hash `SeededHash.Hash` computes from its seeds. -/
 def mix (seed0 seed1 value : W64) : W64 := (value ^^^ seed0) * 0x9E3779B97F4A7C15#64 + seed1

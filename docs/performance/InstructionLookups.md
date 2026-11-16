@@ -189,7 +189,12 @@ size.
 The suite also declares `cil_resolution_facts` for methods of 8, 32 and 128 static sites at even
 pcs and reads every site's `Method.staticAt` through the facts, under the same 1.35 limit per
 site. The facts cost about 5,500, 7,000 and 7,000 heartbeats per site, lower at 8 for the same
-reason, and the reads 22,100 to 23,500 heartbeats per site at every size.
+reason, and the reads 22,400 to 23,800 heartbeats per site at every size.
+
+The suite also decides `StaticIdentitiesValid` for one method of 8, 32 and 128 static sites, each
+of its own field and identity, under the same 1.35 limit per site. The check walks the recorded
+accesses beside the sites once and sorts the pairs of identity and field both ways, and costs
+about 22,900, 21,000 and 22,700 heartbeats per site.
 
 The suite also declares `cil_resolution_facts` for a method whose raw method names one struct
 element type per layout, at 8, 32 and 128 layouts, and reads every element's
@@ -242,6 +247,20 @@ decode to their methods, given one decoding fact per record, and reads the heart
 command. It fails when the heartbeats per record grow more than 1.25 times from one size to the
 next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
 with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
+
+The suite decides with `decide +kernel` the closure of method 0 in three shapes of program: a chain
+of 8, 32 and 128 methods each calling the next, whose closure is the whole program; one method
+whose link table enters seven others 32, 128 and 512 times; and a closure of four methods at the
+start of a program of 128, 512 and 2,048 methods. A search over n methods with e link callees in
+a program of P methods reads each method by its index in the list and gives each callee one packed
+table entry, so it costs O(n * P + e). The suite fails when, in any shape, the heartbeats each
+added unit of n * P + e costs grow more than 1.15 times from the first two sizes to the last two.
+The chain costs about 90,400, 437,300 and 3,533,900 heartbeats, so each added unit of n * P costs
+0.57 times as much at the larger sizes; the fan costs about 2,400 heartbeats per added callee and
+the long program about 255 per added method at every size. The chain grows with the square of
+its methods because its closure is the whole program. A search that folded over its state instead
+cost 2.33 times as much per callee from 128 to 512 callees as from 32 to 128. Run this row alone
+with `dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
 
 ## Reference figures
 

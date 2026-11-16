@@ -9,6 +9,7 @@ partial class Program
         ["Choose"] = "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
         ["Calls"] = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
         ["CallsSummary"] = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
+        ["CountCallsSummary"] = "System.UInt32 Examples.Loops::CountCalls(System.UInt32)",
         ["IdentitySummary"] = "System.UInt64 Examples.GenericMethods::Identity64(System.UInt64)",
         ["RepeatedSummary"] = "System.UInt64 Examples.GenericMethods::Repeated(System.UInt64)",
         ["Alias"] = "System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)",

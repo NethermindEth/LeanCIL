@@ -42,9 +42,14 @@ sentences name the wrong implementations that each unchanged proof rejects.
   and once from a `DecodedSummary` of each.
 - `IdentitySummary` and `RepeatedSummary`: the identity of `GenericIdentity` for `Identity64` and
   `Repeated`, proved once by stepping `Identity<ulong>` and once from a `DecodedSummary` of it that
-  each call applies without stepping its body. `calls_name_summary` shows that each call names the
+  each call applies without stepping its body. Each file also proves that every call names the
   metadata token and type arguments the summary is bound to
   ([decoded summaries](PROOFS-CONTRACTS.md#bind-a-contract-to-a-decoded-method)).
+- `CountCallsSummary`: `Loops.CountCalls` returns its input for every `uint`, proved once by
+  stepping `Decrement` at the call of each iteration and once from a `DecodedSummary` of
+  `Decrement` that `cil_loop_call` applies at that call. The file also proves that every summary
+  of the index the call enters is bound to the token of `Decrement`, and refutes one bound to
+  the token of `CountCalls`.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the
   modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct
