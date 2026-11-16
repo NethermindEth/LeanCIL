@@ -808,8 +808,8 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
 theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
     {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods imports modelled raw reachable emitted) {pc target token : Nat}
-    {method : MethodRef} {prefixes : CallPrefixes} {instruction : RawInstruction}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes} {instruction : RawInstruction}
     {site : CallSite}
     (found : emitted.code[pc]? = some (.call method prefixes))
     (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
