@@ -6,6 +6,11 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:include GeneratedEvidence.cs
+#:include RejectedEvidence.cs
+
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 // Calls::Mutate{n} stores its argument in a local and passes the local by reference to Mutate n times. The proof of
 // each size states the result twice: by stepping every call, and from Mutate's decoded summary at each call.
@@ -30,6 +35,69 @@ foreach (var calls in sizes)
     verification.Verify(assembly, "Fixture", $"System.UInt64 Calls::Mutate{calls}(System.UInt64)", proof,
         Path.Combine(directory, $"Mutate{calls}"));
     Console.WriteLine($"PASS Mutate{calls} by stepping every call and through the decoded summary of Mutate");
+}
+
+// The contract of Mutate without its write, and a caller that leaves Mutate's precondition unproved, are refused
+// with an error in the declaration that needs them.
+var mutate1 = File.ReadAllText(Path.Combine(proofs, "Mutate1.lean"));
+RejectedProof("Footprint", Changed(mutate1, "  footprint := fun (place, _) => [(place, 8)]", "  footprint _ := []"),
+    "mutate_holds");
+RejectedProof("Precondition", Changed(mutate1, "    subst fits result\n    exact loaded\n", "    subst fits result\n"),
+    "correctness");
+
+// With the original of Mutate forged to subtract, the body check refuses the record and Mutate's contract no
+// longer holds, so no summary of it type-checks.
+var summary = mutate1[mutate1.IndexOf("/-- `Mutate` adds two", StringComparison.Ordinal)..
+    mutate1.IndexOf("/-- The caller returns `x` plus two per call and keeps all memory below its entry, applying",
+        StringComparison.Ordinal)];
+var forged = Path.Combine(proofs, "ForgedMutate.lean");
+File.WriteAllText(forged, ForgeDecodedOriginal(File.ReadAllText(Path.Combine(directory, "Mutate1", "Extracted.lean")),
+    1, "opcode := 88,", "opcode := 89,") + $$"""
+
+    import CIL
+    import CIL.MethodIdentity
+    namespace ForgedSummary
+    open CIL CIL.Safety CIL.Extraction
+    bind_method mutate mutateBody := "System.Void Calls::Mutate(System.UInt64&)"
+    {{summary}}
+    end ForgedSummary
+    """);
+var rejected = new RejectedEvidence(Path.Combine(directory, "Rejected"));
+rejected.Add(forged, "PASS a forged original of Mutate refuses its record and its decoded summary",
+    "the decoded method does not match its body bytes or metadata", "unsolved goals");
+rejected.Check();
+
+// `text` with `before`, which must occur once, replaced by `after`.
+static string Changed(string text, string before, string after) =>
+    text.IndexOf(before, StringComparison.Ordinal) is var index && index >= 0 &&
+        text.IndexOf(before, index + 1, StringComparison.Ordinal) < 0
+        ? text.Replace(before, after, StringComparison.Ordinal)
+        : throw new InvalidOperationException("Expected one occurrence of: " + before);
+
+// Verifies `text` as the proof of Mutate1 and requires the verification to fail with an error inside `theorem`.
+void RejectedProof(string name, string text, string theorem)
+{
+    var proof = Path.Combine(proofs, $"Mutate1{name}.lean");
+    File.WriteAllText(proof, text);
+    var lines = text.Split('\n');
+    var start = Array.FindIndex(lines, line => line.StartsWith($"theorem {theorem} ", StringComparison.Ordinal)) + 1;
+    var end = Array.FindIndex(lines, line => line == $"#print axioms {theorem}") + 1;
+    try
+    {
+        verification.Verify(assembly, "Fixture", "System.UInt64 Calls::Mutate1(System.UInt64)", proof,
+            Path.Combine(directory, $"Mutate1{name}"));
+    }
+    catch (InvalidOperationException error)
+    {
+        // The session checks a copy of the proof, with the same lines, as Proof.lean.
+        var located = Regex.Matches(error.Message, @"Proof\.lean:(\d+):\d+: error")
+            .Select(match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)).ToArray();
+        if (start == 0 || end == 0 || !located.Any(line => line >= start && line <= end))
+            throw new InvalidOperationException($"Expected an error in {theorem} ({start}-{end}):\n{error.Message}");
+        Console.WriteLine($"PASS {name.ToLowerInvariant()} mutation refused in {theorem}");
+        return;
+    }
+    throw new InvalidOperationException($"The {name.ToLowerInvariant()} mutation of Mutate1 was accepted");
 }
 
 // One public caller per size, each passing the same local to the private Mutate as often as its name says.

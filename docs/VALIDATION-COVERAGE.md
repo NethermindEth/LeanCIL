@@ -836,7 +836,10 @@ compiled implementation. IdentitySummary and RepeatedSummary prove the statement
 GenericIdentity for one and two calls twice: by stepping `Identity<ulong>`, and from a
 `DecodedSummary` of it bound to its pinned bytes, metadata token and type arguments.
 CallsSummary does the same for `Calls`, whose second callee writes through a reference, and
-`Tests/SummaryCalls.cs` for callers that pass one local to that callee 1, 4 and 16 times.
+`Tests/SummaryCalls.cs` for callers that pass one local to that callee 1, 4 and 16 times. It
+refuses a contract of the callee without its write, a caller that leaves the callee's
+precondition unproved, and the record and contract of a callee whose original is forged.
+`Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
 generated-evidence mutations and mandatory-certificate positive/negative checks.

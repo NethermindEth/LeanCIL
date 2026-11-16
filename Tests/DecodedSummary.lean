@@ -114,6 +114,15 @@ theorem summary_names_site {token : Nat} {arguments : List TypeExpr}
   summary.site caller_calls_valid (pc := 2) rfl rfl rfl rfl rfl rfl
 #print axioms summary_names_site
 
+/-- A summary of the index the caller's call enters, bound to another token, is refuted at that
+    call. -/
+theorem other_token_refused
+    (summary : DecodedSummary program evidence testProfile testEnvironment 1 pin
+      (tokens.main + 1) [] addContract) : False := by
+  have named := (summary_names_site summary).1
+  omega
+#print axioms other_token_refused
+
 /-- The caller returns the sum, proved from the adder's summary without stepping the adder. -/
 theorem caller_returns (memory : Safety.Memory) (left right : W64) :
     WP (Execution (fun fuel => invoke program fuel 0
