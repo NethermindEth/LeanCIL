@@ -209,6 +209,14 @@ layout lists to the struct instead cost 293,000, 313,000, 386,000 and 672,000 he
 field and 38,000, 58,000, 131,000 and 417,000 per type. The reads cost 11,100 to 14,700
 heartbeats per operand at every size.
 
+The suite locates a field of the furthest base on a fresh instance whose class has 2, 8 and 32
+bases, and rejects a field whose owner is outside that lineage, deciding membership in the
+lineage with `decide`. It fails when the heartbeats per base of either grow more than 1.35 times
+from one size to the next. Rejecting costs about 146,400, 65,900 and 45,000 heartbeats per base
+and locating 135,800, 69,300 and 51,100: one walk of the lineage, each base compared once, about
+40,000 heartbeats of comparing two class names. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --lineage-only`.
+
 The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
 `nop`, with the literal link table the extractor writes, and reads the heartbeats of that one
 command. It fails when the heartbeats per call site grow more than 1.35 times from one size to the
