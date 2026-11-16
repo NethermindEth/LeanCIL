@@ -152,7 +152,7 @@ theorem Memory.Renamed.stepFieldAddress {indices : LocalIndexMap} {mapping : All
   refine ⟨mapping, .refl mapping, ?_⟩
   simp only [step_ldflda_eq, mapping.unspecifiedOperands, fieldAddressFault,
     CIL.Method.fieldShape, metadata.environment]
-  split <;> exact .error _
+  split <;> cases sourceBody.environment.fieldShape field <;> exact .error _
 #print axioms Memory.Renamed.stepFieldAddress
 
 /-- Stack allocation faults are resource or memory failures, never named CLR exceptions. -/

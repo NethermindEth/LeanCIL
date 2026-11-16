@@ -275,10 +275,12 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- ones; `fixed_fallback` reads the hole and table-offset exclusions, the others are cleared.
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
-      rename_i addressHome localAllocation unadmitted offsetBeforeTable tableBeforeOffset addOvf
-        addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual
-        objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue
-        castClass isInst storeHome allocatedArray
+      rename_i loadsField addressesField storesField addressHome localAllocation unadmitted
+        offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn
+        rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
+        objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray
+      guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
+      guard_hyp storesField : ∀ (field : CIL.Extraction.FieldRef), operation = .stfld field → False
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
       guard_hyp localAllocation : operation = .localloc → False
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
@@ -299,7 +301,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
         objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
-        localAllocation
+        localAllocation loadsField addressesField storesField
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
