@@ -11,8 +11,9 @@ from model entries searched by the method's name code. At the leaf the entry's n
 owner head are compared, and the entry resolves the whole reference.
 `model_table%` writes a table as a literal balanced tree, so a lookup costs the depth of the tree
 and the comparison of one reference, never the size of the table. `ModelsAgree` requires that
-each live call site that does not keep its call emits the model a catalog's table gives it. Modules that define entries import
-this one; `CIL.Extraction.RuntimeModels` gathers them into the runtime table.
+each live call site that does not keep its call emits the model a catalog's table gives it.
+Modules that define entries import this one; `CIL.Extraction.RuntimeModels` gathers them into the
+runtime table.
 -/
 
 namespace CIL.Extraction

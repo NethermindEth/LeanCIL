@@ -190,9 +190,9 @@ end InstructionEquations
 
 /-- What a call taking `count` arguments does under the link `link` of its pc: enter a `.direct`
     link's method, under `tail.` with the whole stack and retiring the frame; without a link run
-    `unlinked`, the call's runtime model, unless under `tail.`; any other link faults. A regular definition, so the
-    kernel checks a rewrite of its arguments by comparing them, where a `match` on the link would
-    make it evaluate the table's read. -/
+    `unlinked`, the call's runtime model, unless under `tail.`; any other link faults. A regular
+    definition, so the kernel checks a rewrite of its arguments by comparing them, where a `match`
+    on the link would make it evaluate the table's read. -/
 def callStep (link : Option CIL.Link) (count : Nat) (tail : Bool)
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) (memory : Memory) :
     ExecutionResult FrameAction :=

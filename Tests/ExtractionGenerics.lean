@@ -66,8 +66,8 @@ def callCode : Method := {
   links := [(0, .direct 0)] }
 
 /-- Structural proof construction retains the complete managed-call predicate. -/
-theorem structural_call : ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true]
-    callCode := by
+theorem structural_call :
+    ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true] callCode := by
   cil_strict (cil_managed_calls [caller, callSite, closed, raw, word, callCode])
 #print axioms structural_call
 
@@ -98,8 +98,8 @@ theorem generic_argument_rejected :
     ¬ ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] [] (fun _ => false)
       (caller word) [true] callCode := by
   fail_if_success (cil_strict (
-    have invalid : ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] [] (fun _ => false)
-        (caller word) [true] callCode := by
+    have invalid : ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] []
+        (fun _ => false) (caller word) [true] callCode := by
       cil_managed_calls [caller, callSite, closed, raw, word, callCode]))
   decide +kernel
 #print axioms generic_argument_rejected
@@ -111,7 +111,8 @@ def twoArguments : Method :=
 
 /-- Structural proof construction rejects a call with an altered operand and argument count. -/
 theorem argument_count_rejected :
-    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true] twoArguments := by
+    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true]
+      twoArguments := by
   fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] [] (fun _ => false) (caller word) [true]
         twoArguments := by

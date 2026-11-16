@@ -323,7 +323,8 @@ private def emitting (emitted : CIL.Instruction) (links : List (Nat × CIL.Link)
   { body with code := [emitted], links }
 
 -- A model site keeps its call and states no link; a link there, or another emission, is refused.
-example : ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod)) [true]
+example :
+    ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod)) [true]
     (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
 example : ¬ ManagedCallsValid [⟨[], method (site bigMul)⟩] [] (callModelled body)
     (method (site objectConstructorMethod)) [true]
@@ -350,8 +351,9 @@ example : ¬ RuntimeModelsAgree (method (site
     (emitting .pop []) := by decide +kernel
 example : ¬ RuntimeModelsAgree (method (site { objectConstructorMethod with hasThis := false }))
     [true] (emitting .pop []) := by decide +kernel
-example : ¬ RuntimeModelsAgree (method (site { objectConstructorMethod with parameters := [word] }))
-    [true] (emitting .pop []) := by decide +kernel
+example :
+    ¬ RuntimeModelsAgree (method (site { objectConstructorMethod with parameters := [word] }))
+      [true] (emitting .pop []) := by decide +kernel
 
 -- An external call the table does not model needs a link.
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site bigMul)) [true]

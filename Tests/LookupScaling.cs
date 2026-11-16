@@ -731,7 +731,8 @@ void CallCheckCosts()
         var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
         var code = string.Join(", ", pcs.Select(_ => ".call callMethod, .nop"));
         var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
-        var statement = $"ManagedCallsValid [⟨[], callee⟩] [] (fun _ => false) raw (List.replicate {2 * sites} true) body";
+        var statement =
+            $"ManagedCallsValid [⟨[], callee⟩] [] (fun _ => false) raw (List.replicate {2 * sites} true) body";
         var source = $$"""
             import CIL.Extraction.Generics
             open CIL CIL.Extraction Lean Elab Command

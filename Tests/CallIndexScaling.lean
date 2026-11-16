@@ -36,8 +36,8 @@ def callCode (count : Nat) : Method :=
 /-- The original scan: positional table lookups and a scan of the link table at every pc. -/
 def managedOriginal (count : Nat) : Bool :=
   all3 (fun instruction (live, link) operation =>
-      validateLinkedCallWith (fun _ => false) count ((methods count)[·]?) (([] : List ImportSlot)[·]?)
-        instruction live link operation)
+      validateLinkedCallWith (fun _ => false) count ((methods count)[·]?)
+        (([] : List ImportSlot)[·]?) instruction live link operation)
     (calls count).code ((List.replicate count true).zip
       ((List.range count).map (callCode count).linkAt)) (callCode count).code
 /-- Indexed constrained validation. -/

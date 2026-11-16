@@ -121,10 +121,14 @@ def caller : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .no
 def emitted : Method :=
   { returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .ldarg 2, emits site, .ret],
     links := [(3, .direct 1)] }
-example : ManagedCallsValid methods imports (fun _ => false) caller [true, true, true, true, true] emitted := by decide +kernel
-example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] (fun _ => false) caller [true, true, true, true, true] emitted := by decide +kernel
-example : ¬ ManagedCallsValid methods [] (fun _ => false) caller [true, true, true, true, true] emitted := by decide +kernel
-example : ManagedCallsValid methods [] (fun _ => false) caller [true, true, true, false, true] emitted := by decide +kernel
+example : ManagedCallsValid methods imports (fun _ => false) caller [true, true, true, true, true]
+    emitted := by decide +kernel
+example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] (fun _ => false) caller
+    [true, true, true, true, true] emitted := by decide +kernel
+example : ¬ ManagedCallsValid methods [] (fun _ => false) caller [true, true, true, true, true]
+    emitted := by decide +kernel
+example : ManagedCallsValid methods [] (fun _ => false) caller [true, true, true, false, true]
+    emitted := by decide +kernel
 
 /-- Two calls to the slot, at pcs 3 and 7, among nops. -/
 def callerTwice : RawMethod := { callee with code := [⟨0, 0, .none⟩, ⟨1, 0, .none⟩,
@@ -141,7 +145,8 @@ def liveTwice : List Bool := List.replicate 9 true
 def linkedTwice (links : List (Nat × Link)) : Method := { emittedTwice with links := links }
 
 -- A table is accepted when its keys ascend, sit at the call pcs and give each its call's link.
-example : ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice emittedTwice := by
+example :
+    ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice emittedTwice := by
   decide +kernel
 example : ManagedCallsValid methods imports (fun _ => false) callerTwice liveTwice
     (linkedTwice [(3, .direct 1), (7, .direct 1)]) := by decide +kernel

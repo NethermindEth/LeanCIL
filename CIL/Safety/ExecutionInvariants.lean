@@ -459,8 +459,8 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     StepContract body pc operation frame stack m action := by
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
-    constructAggregate constructObject modelStep observedCall runModel featureCall typedTransferCall
-    skipInitCall at h
+    constructAggregate constructObject modelStep observedCall runModel featureCall
+    typedTransferCall skipInitCall at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply managedStep_contract; assumption

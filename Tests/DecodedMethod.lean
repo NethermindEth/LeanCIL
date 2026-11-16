@@ -412,7 +412,8 @@ private def callTable : List SpecializedMethod := [⟨[], callerRaw⟩, ⟨[], s
     method with the same signature but another token, an index past the table, or a link of
     another kind. -/
 theorem decoded_call_links :
-    ManagedCallsValid callTable [] (fun _ => false) callerRaw [true, true, true, true] callerMethod ∧
+    ManagedCallsValid callTable [] (fun _ => false) callerRaw [true, true, true, true]
+      callerMethod ∧
     ¬ ManagedCallsValid callTable [] (fun _ => false) callerRaw [true, true, true, true]
       { callerMethod with links := [(2, .direct 0)] } ∧
     ¬ ManagedCallsValid callTable [] (fun _ => false) callerRaw [true, true, true, true]
