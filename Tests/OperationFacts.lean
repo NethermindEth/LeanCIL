@@ -67,6 +67,30 @@ theorem byte_store {memory after : Memory} {destination : Reference} {bits : CIL
   cil_checked_step [written]
 #print axioms byte_store
 
+/-- A four-byte `stind` consumes the write fact for its width; its kind decides the width. -/
+theorem int_store {memory after : Memory} {destination : Reference} {bits : CIL.W32}
+    (written : write memory destination (numberBytes bits.toNat 4) 1 = .ok after)
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.stind .i4) pc args frame
+        (.scalar (.i32 bits) :: .reference (.address destination) :: rest) memory =
+      .ok (.next (pc + 1) rest frame after) := by
+  cil_checked_step [written]
+#print axioms int_store
+
+/-- Stores its second argument as two bytes through its first. -/
+@[cil_code] def storeShortMethod : CIL.Method := {
+  code := [.ldarg 0, .ldarg 1, .stind .i2, .ret]
+  locals := [], returnsValue := false }
+
+/-- A body run reaches a two-byte `stind` and steps it with the fact derived from its write. -/
+theorem stored_short {memory after : Memory} {destination : Reference} {bits : CIL.W32}
+    (formed : form memory destination = .ok destination)
+    (written : write memory destination (numberBytes bits.toNat 2) 1 = .ok after) :
+    invoke [storeShortMethod] 5 0 [.reference (.address destination), .scalar (.i32 bits)]
+        memory = .ok (after, []) := by
+  cil_checked_steps [formed, written]
+#print axioms stored_short
+
 /-- A symbolic reference with an established formation result can be skipped without a write. -/
 theorem skip_formed_reference {memory : Memory} {reference : ManagedReference}
     {value : Value} (formed : formValue memory reference = .ok value)

@@ -1310,9 +1310,17 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
   let roots := (← getLCtx).foldl (init := #[← getMainTarget]) fun roots declaration =>
     if declaration.isImplementationDetail then roots else roots.push declaration.type
   let nativeStores ← mayStoreNativeInt roots
-  let narrowStores (kind : Name) (written : Expr) : Array (Name × Array Expr) :=
-    #[(``step_storeScalar_of_write, #[written]),
-      (``step_stind_narrow_of_write, #[mkConst kind, written])]
+  -- `mkAppM` leaves an auto-parameter as a premise of the derived fact, so each width side
+  -- condition is decided here; a premise left in place blocks the step the fact states.
+  let narrowStores (width : Nat) (kind : Name) (written : Expr) :
+      MetaM (Array (Name × Array Expr)) := do
+    let byteWidth := mkNatLit width
+    let scalarWidth ← mkDecideProof (mkOr (← mkEq byteWidth (mkNatLit 1))
+      (mkOr (← mkEq byteWidth (mkNatLit 2)) (← mkEq byteWidth (mkNatLit 4))))
+    let kindWidth := mkApp (mkConst ``CIL.NumericKind.width) (mkConst kind)
+    let narrowKind ← mkDecideProof (mkNot (← mkEq kindWidth (mkNatLit 8)))
+    return #[(``step_storeScalar_of_write, #[written, scalarWidth]),
+      (``step_stind_narrow_of_write, #[mkConst kind, written, narrowKind])]
   let operationEquation (operation : Expr) :=
     operation.isAppOfArity ``CIL.Safety.read 4 ||
       operation.isAppOfArity ``CIL.Safety.readSnapshot 4 ||
@@ -1361,6 +1369,15 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                   candidates := candidates ++ #[(``load_scalar_of_read, #[scalar, applied]),
                     (``load_scalar_signed_of_read, #[scalar, applied])]
                 else
+                  -- A narrow write steps a runtime-model store or the one `stind` of its width.
+                  let narrowKind? := match width with
+                    | 1 => some ``CIL.NumericKind.i1
+                    | 2 => some ``CIL.NumericKind.i2
+                    | 4 => some ``CIL.NumericKind.i4
+                    | _ => none
+                  let narrow ← match reading, narrowKind? with
+                    | false, some kind => narrowStores width kind applied
+                    | _, _ => pure #[]
                   let bridges : Array (Name × Array Expr) := match reading, width with
                     | true, 8 => #[(``load_word64_of_read, #[applied])]
                     | true, 16 => #[(``load_vector128_of_read, #[applied])]
@@ -1368,15 +1385,11 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                     | true, 64 => #[(``load_vector512_of_read, #[applied])]
                     | false, 8 => #[(``step_stind_i8_of_write, #[applied])] ++
                         if nativeStores then #[(``step_stind_i_of_write, #[applied])] else #[]
-                    -- A narrow write steps a runtime-model store or the one `stind` of its width.
-                    | false, 1 => narrowStores ``CIL.NumericKind.i1 applied
-                    | false, 2 => narrowStores ``CIL.NumericKind.i2 applied
-                    | false, 4 => narrowStores ``CIL.NumericKind.i4 applied
                     | false, 16 => #[(``step_store128_of_write, #[applied])]
                     | false, 32 => #[(``step_store256_of_write, #[applied])]
                     | false, 64 => #[(``step_store512_of_write, #[applied])]
                     | _, _ => #[]
-                  candidates := candidates ++ bridges
+                  candidates := candidates ++ narrow ++ bridges
           let mut results := #[]
           for (bridge, arguments) in candidates do
             let before ← getMCtx
