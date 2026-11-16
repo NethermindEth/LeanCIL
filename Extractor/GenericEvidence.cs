@@ -212,19 +212,22 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         methodParameterCount = method.GenericParameters.Count;
         var instruction = method.Body.Instructions[pc];
         var (owner, index, held, _) = FieldOperand(instruction, (FieldReference)instruction.Operand);
-        // A specialization's operands are references without a token; its definition's body holds the token.
-        var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
-        return new(owner, index, held, FieldName(original, (FieldReference)original.Body.Instructions[pc].Operand));
+        return new(owner, index, held, FieldName(method, pc));
     }
 
     /// <summary>
-    /// The name of the Field or MemberRef row the field operand's token names in the image of
-    /// <paramref name="method"/>, an original body; the metadata check spells the operand's name against it.
+    /// The name of the Field or MemberRef row the field operand at <paramref name="pc"/> names in the image of
+    /// <paramref name="method"/>'s definition; the metadata check spells the operand's name against it.
     /// </summary>
-    MetadataName FieldName(MethodDefinition method, FieldReference field)
+    MetadataName FieldName(MethodDefinition method, int pc)
     {
-        var image = Pinned.Metadata(method.Module);
+        // A specialization's operands are references without a token; its definition's body holds the token.
+        var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
+        var field = (FieldReference)original.Body.Instructions[pc].Operand;
+        var image = Pinned.Metadata(original.Module);
         var token = field.MetadataToken;
+        if (token.RID == 0)
+            throw new InvalidDataException("Field operand without a metadata row: " + field.FullName);
         return token.TokenType switch
         {
             TokenType.Field => IdentityRows.Name(image,
@@ -279,7 +282,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
                 var (owner, index, held, isStatic) = FieldOperand(instruction, field);
-                var name = FieldName(method, field).ToLean();
+                var name = FieldName(method, instructions.Position(instruction)).ToLean();
                 return $".field ({owner}) {index} ({held}) {name} {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
