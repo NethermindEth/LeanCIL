@@ -82,15 +82,11 @@ partial class Program
                     """);
             evidence.Add(proof, "PASS compiled tail transfer and lifetime: " + name);
             if (name != "Forward") continue;
-            foreach (var (mutation, before, after, marker) in new[]
+            foreach (var (mutation, before, after, markers) in new[]
             {
-                ("dropped", tail, "{}",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                        "method0Closed"),
-                ("prefix", "opcode := 65044", "opcode := 0",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                        "method0Closed"),
-                ("target", "", "", "Extraction.ManagedCallsValid")
+                ("dropped", tail, "{}", new[] { "Extraction.FeatureFlowValid", FeatureObligation(0) }),
+                ("prefix", "opcode := 65044", "opcode := 0", ["Extraction.FeatureFlowValid", FeatureObligation(0)]),
+                ("target", "", "", ["Extraction.ManagedCallsValid"])
             })
             {
                 if (!source.Contains(before, StringComparison.Ordinal))
@@ -101,7 +97,7 @@ partial class Program
                     ? ForgeLink(source, 0, tailLinks[0].Pc, ".direct 0")
                     : source.Replace(before, after, StringComparison.Ordinal);
                 File.WriteAllText(forged, changed);
-                rejected.Add(forged, "PASS tail certificate rejection: " + mutation, marker);
+                rejected.Add(forged, "PASS tail certificate rejection: " + mutation, markers);
             }
         }
         var excludedDll = Path.Combine(root, "TailExcluded.dll");

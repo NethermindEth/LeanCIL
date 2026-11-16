@@ -303,7 +303,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>
     /// The <c>MethodRef</c> term of the call operand of <paramref name="instruction"/>, or the type term of its type
-    /// operand, as the last method's <c>method{n}Closed</c> states it; the emitted instruction must carry the same term.
+    /// operand, as the last method's <c>method{n}Closed</c> states it; the emitted instruction must carry the same
+    /// term.
     /// </summary>
     internal string ClosedOperandOf(Instruction instruction) =>
         closedCalls.TryGetValue(instruction, out var term) ? term

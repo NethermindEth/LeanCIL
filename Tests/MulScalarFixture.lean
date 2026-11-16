@@ -16,7 +16,13 @@ def actual : Method := {
     (134, .direct 5), (144, .direct 5), (149, .direct 5), (154, .direct 9), (159, .direct 5),
     (168, .direct 9), (173, .direct 5), (182, .direct 9), (187, .direct 5), (200, .direct 7)],
   profile := profile, returnsValue := false, locals := [.unmodeled, .unmodeled,
-    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled], localKinds := [.word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .vector256, .vector256, .vector256, .vector256], parameterHomes := [], staticSites := [], code := [
+    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled,
+    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled,
+    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled,
+    .unmodeled], localKinds := [.word64, .word64, .word64, .word64, .word64, .word64, .word64,
+    .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64,
+    .word64, .word64, .word64, .word64, .word64, .vector256, .vector256, .vector256, .vector256],
+    parameterHomes := [], staticSites := [], code := [
   .ldarg 0,
   .fieldAt 0 8,
   .stloc 0,
@@ -228,7 +234,13 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
     (156, .direct wordIndex), (161, .direct countIndex), (170, .direct wordIndex),
     (175, .direct countIndex), (188, .direct storageIndex)],
   profile := profile, returnsValue := false, locals := [.unmodeled, .unmodeled,
-    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled], localKinds := [.word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .vector256, .vector256, .vector256, .vector256], parameterHomes := [], staticSites := [], code := [
+    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled,
+    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled,
+    .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled, .unmodeled,
+    .unmodeled], localKinds := [.word64, .word64, .word64, .word64, .word64, .word64, .word64,
+    .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64, .word64,
+    .word64, .word64, .word64, .word64, .word64, .vector256, .vector256, .vector256, .vector256],
+    parameterHomes := [], staticSites := [], code := [
   .ldarg 0,
   .fieldAt 0 8,
   .stloc 0,

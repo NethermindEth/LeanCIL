@@ -96,13 +96,15 @@ partial class Program
     {
         // The definition writes a decoded method's links as the table constant its decoder is given.
         if (update.Contains("links :=", StringComparison.Ordinal))
-            throw new InvalidOperationException($"Forge method{method}Links, the decoder's input, to change its links");
+            throw new InvalidOperationException(
+                $"Forge method{method}Links, the decoder's input, to change its links");
         var call = DecodedDefinition(source, method);
         if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
         var forged = $"method{method}Forged";
         return source[..call.Index] +
             $"def {forged} (profile : FeatureProfile) (environment : LayoutEnvironment) " +
-            "(original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) (links : List (Nat × Link)) : " +
+            "(original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) " +
+            "(links : List (Nat × Link)) : " +
             "Option Method := (Method.ofRaw? profile environment original arguments links).map fun method => " +
             $"{{ method with {update} }}\n" +
             $"cil_decoded_method method{method}{call.Groups[1].Value} := {forged} profile environment " +
@@ -136,6 +138,13 @@ partial class Program
         return source[..definition.Index] + $"@[cil_code] def method{method}Link{pc} : Link := {link}" +
             source[(definition.Index + definition.Length)..];
     }
+
+    /// <summary>
+    /// The arguments of method `method`'s feature-flow obligation that a decided-false report prints on one line,
+    /// naming that method's raw definition and certificate.
+    /// </summary>
+    static string FeatureObligation(object method) =>
+        $"method{method}Closed profile method{method}FeatureStates method{method}Reachable";
 
     /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
     static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. Regex.Matches(source,

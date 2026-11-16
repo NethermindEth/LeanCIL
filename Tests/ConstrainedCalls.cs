@@ -332,8 +332,7 @@ foreach (var (mutation, forgedSource, obligation) in new[]
     var forged = Path.Combine(root, "Flags-" + mutation + ".lean");
     File.WriteAllText(forged, forgedSource);
     rejected.Add(forged, "PASS forged constant flag: " + mutation,
-        $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-            $"method{obligation}Closed");
+        "Extraction.FeatureFlowValid", FeatureObligation(obligation));
 }
 
 // Extraction keeps the guarded block, and so rejects its clock read, whenever the flag is live or the
@@ -436,7 +435,8 @@ var hiddenOverride = overrideSite.Success ? Regex.Match(spendOverride,
 var defaultBody = Regex.Match(spendDefault, @"def method(\d+)Original : Extraction.RawMethod := " +
     @"\{ token := \d+, owner := ""[^""]+::Examples.IAllowance\\u00601""");
 var defaultCalls = defaultBody.Success
-    ? DirectLinks(spendDefault, int.Parse(defaultBody.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+    ? DirectLinks(spendDefault,
+        int.Parse(defaultBody.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
     : [];
 if (!defaultSite.Success || !hiddenOverride.Success || !defaultBody.Success || defaultCalls.Length != 1)
     throw new Exception("Missing static virtual default mutation target");

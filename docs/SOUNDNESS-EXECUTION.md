@@ -89,7 +89,7 @@ not CLR correspondence. See [layout assumptions](SOUNDNESS-RUNTIME.md#sequential
 `MethodEmbeds` checks execution metadata, the declared signature, the layout environment, static
 descriptors, call links and live instructions under a PC map. A body built as
 `extracted.withCode code` keeps the signature and environment of `extracted`, takes the links its
-`code` implies and resets the static sites; `{ extracted with code := ... }` keeps the links and
+`code` implies, none for a `call`, whose link the body states after it, and resets the static sites; `{ extracted with code := ... }` keeps the links and
 static sites of `extracted`, which are keyed by its pcs. Entry, branch/call targets and resumable
 fallthroughs must match. Expected holes (`.unadmitted`) constrain no actual code and cannot
 occur on a successful expected path. Even a live inserted `nop` is outside this exact relation.

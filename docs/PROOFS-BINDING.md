@@ -220,7 +220,8 @@ embedding compares all of them with the extraction's. A bare literal such as `do
 default signature, with no parameters, a void return and localsinit, so it binds only to a method
 declared that way. Start from the extraction's method and replace its code with `Method.withCode`,
 which keeps `declared`, `environment` and the other fields, gives the body the links its new code
-implies and resets the static sites, which are keyed by pc like the links:
+implies and resets the static sites, which are keyed by pc like the links. A `call` names the method
+its operand names and implies no link, so a body with calls states their links after `withCode`:
 
 ```lean extracted
 import Extracted
@@ -236,21 +237,29 @@ Do not write `{ Extracted.method1 with code := ... }`: a structure update copies
 link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
 new code only where no call or static access moved. A body that reads statics sets the sites after
 `withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`, one entry per
-static access at the body's pc with the extraction's descriptor for it. `withCode` is also the
-form for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
+static access at the body's pc with the extraction's descriptor for it, and a body with calls
+sets its links the same way, `{ Extracted.method1.withCode code with links := [(pc, .direct callee)] }`,
+one entry per call at the body's pc with the method index the call enters. This is also the form
+for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
 
 ```lean
 import CIL.Embedding.Tactic
 
 open CIL
 
-/-- What an extraction emits: a dead block puts the call at pc 3. -/
+/-- The one-argument method both bodies call. -/
+def helper : Extraction.MethodRef :=
+  { owner := .atom "Doc" "Doc", name := name!"Helper", hasThis := false, genericArity := 0,
+    returnType := .atom "Doc" "Word", parameters := [.atom "Doc" "Word"] }
+
+/-- What an extraction emits: a dead block puts the call, linked to method 1, at pc 3. -/
 def emitted : Method :=
-  { code := [.ldarg 0, .br 3, .unadmitted 0, .call 1 1, .ret],
+  { code := [.ldarg 0, .br 3, .unadmitted 0, .call helper, .ret], links := [(3, .direct 1)],
     locals := [], returnsValue := true }
 
-/-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
-def literal : Method := emitted.withCode [.ldarg 0, .br 2, .call 1 1, .ret]
+/-- The body the proof uses; its call is at pc 2, so its link is keyed by pc 2. -/
+def literal : Method :=
+  { emitted.withCode [.ldarg 0, .br 2, .call helper, .ret] with links := [(2, .direct 1)] }
 
 theorem literal_embeds : MethodEmbeds [emitted] 0 literal := by cil_embed
 ```
@@ -258,16 +267,17 @@ theorem literal_embeds : MethodEmbeds [emitted] 0 literal := by cil_embed
 A literal that does not bind is reported field by field. A difference in `declared`, `environment`,
 `staticSites` or `links` prints `field declared:`, `field environment:`, `field staticSites:` or
 `field links:` with the value on each side, and the layout tables as their counts. The `links` line
-says to build the body with `withCode` from the extraction's method, and the `staticSites` line says
-that `withCode` resets the sites and what entries to supply after it. `cil_embed` adds the same
+says to build the body with `withCode` from the extraction's method and to supply the links of its
+calls after it, and the `staticSites` line says that `withCode` resets the sites and what entries to
+supply after it. `cil_embed` adds the same
 text when the static descriptor lists differ or a moved pc resolves another descriptor. The
 `declared` and `environment` lines name no remedy: take both from the extraction's method.
 
 A proof that steps through a call reads the link at the call's pc. `cil_instruction_equations`
 states that read as `body_link{pc} : body.linkAt pc = some link` for each call site, so no proof
-walks the table. For a body that keeps the table its code implies, the fact comes from the
-instruction equation of its pc through `Method.linkAt_of_instruction`, whatever the callee of a
-template is. For an explicit table, as an extraction or a template writes, the command checks once
+walks the table. For a body that keeps the table its code implies, which holds no `call` link, the
+fact comes from the instruction equation of its pc through `Method.linkAt_of_instruction`. For an
+explicit table, as an extraction, a template or a body with calls writes, the command checks once
 that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
 table's entry
 (`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
@@ -322,9 +332,9 @@ theorem decrement_holds : decrementContract.Holds Extracted.program decrement :=
 `bind_method` defines `countCalls` (the index), `countBody` (the extracted body) and the `rfl`
 theorems `countCalls.signature` and `countCalls.found` (`@[cil_code]`). `bind_callee` also requires
 the parent to call that method, by the link of the call site, and adds `decrement.call`, the
-instruction at its call site, and `decrement.link`, its link (`from countBody [k]` selects one of
-several); expected bodies take the index as a parameter, so
-`.call decrement 1` survives renumbering. A statement about the callee alone runs it by that index,
+instruction at its call site, a `call` over the method it names, and `decrement.link`, its link
+(`from countBody [k]` selects one of several); expected bodies take the index as a parameter of their
+link table, so `links := [(pc, .direct decrement)]` survives renumbering. A statement about the callee alone runs it by that index,
 as in `invoke Extracted.program 8 decrement [.scalar (.i32 x)] memory`, which returns
 `.ok (memory, [.scalar (.i32 (x - 1))])`. [CountCalls](../Examples/Proofs/CountCalls.lean) proves
 the contract above and the loop that calls the helper through it.
@@ -604,8 +614,8 @@ unsupported padding; `cil_instruction_equations` generates kernel-checked equati
 `TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
 `Templates` and prove `Extracted.program[i]? = some (Templates.methodN ...)` by `rfl`, including
 all metadata and callee indices. The binding passes `Extracted.profile` and `Extracted.environment`,
-and the call links of the template are those its code implies, so `rfl` also checks them against the
-extraction's link table. Compile a binding only against its corresponding extraction,
+and the template writes its call links as a table over its callee parameters, so `rfl` also checks
+them against the extraction's link table. Compile a binding only against its corresponding extraction,
 recorded in `templates.json`. Add the shared module and selected binding module to your proof
 package, import that binding from the consumer proof, and run `leancil verify` with that
 extraction and proof package. The templates command generates proof source; it does not replace
@@ -644,28 +654,34 @@ import CIL.Safety.SymbolicExecution
 
 abbrev unreachable : CIL.Instruction := .unadmitted 0
 
+/-- The parameterless method the body calls under AVX2. -/
+def helper : CIL.Extraction.MethodRef :=
+  { owner := .atom "Doc" "Doc", name := name!"Helper", hasThis := false, genericArity := 0,
+    returnType := .atom "Doc" "Word", parameters := [] }
+
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
-  { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
+  { profile := { sse42, avx2 }, returnsValue := true, locals := [],
+    links := [(2, .direct callee)], code := [
     .feature .avx2, .brfalse 4,
-    if avx2 then .call callee 0 else unreachable,
+    if avx2 then .call helper else unreachable,
     if avx2 then .ret else unreachable,
     if avx2 then unreachable else .ret] }
 
 cil_instruction_equations body
 
 -- body_instruction2 (sse42 avx2 : Bool) (callee : Nat) :
---   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call callee 0 else unreachable)
+--   (body sse42 avx2 callee).code[2]? = some (if avx2 = true then .call helper else unreachable)
 -- cil_lookup fetches through the equation and decides the `if` from the fact.
 example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
-    ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call callee 0 :=
+    ∃ op, (body sse42 avx2 callee).code[2]? = some op ∧ op = .call helper :=
   ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
 ```
 
 A body whose code length depends on a parameter, such as an `if` around a whole block, is rejected
 with the first pc that is not determined. Only the kernel checks the equations. The command also
-states `body_link{pc} : body.linkAt pc = some link` for each call site, `.direct callee` for
-`.call callee argc` above, when the body's table is the one its code implies or an explicit table
-whose cells and keys are literals. It declares `body_suffix{start}`, the code from every 16th pc
+states `body_link{pc} : body.linkAt pc = some link` for each call site, `.direct callee` at pc 2
+above, when the body's table is the one its code implies or an explicit table whose keys are
+literals. It declares `body_suffix{start}`, the code from every 16th pc
 on, and `body_suffix{start}_placed`, and proves each equation from the suffix that starts its block, so the equations cost time linear in
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
@@ -719,8 +735,9 @@ errors, so a file builds only when the kernel confirms what compiled code comput
 `FieldRef` constant as that constant, so the facts `cil_field_shape` states about the constant
 apply to the method; a listed constant that names no field operand is an error.
 
-The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs and
-every pc is reachable under the profile; a method with a pc the reachability certificate rules out
+The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs, the
+extraction translates each `call` to the plain call the decoder gives rather than to a model, a
+constrained or a tail call, and every pc is reachable under the profile; a method with a pc the reachability certificate rules out
 keeps its literal, whose `.unadmitted` hole at that pc the feature check requires. Its
 `Extracted.lean` then states the method as
 
