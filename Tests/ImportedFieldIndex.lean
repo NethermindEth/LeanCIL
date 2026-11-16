@@ -9,7 +9,8 @@ and `Y`, both `int`, by member references. No carried field list gives the posit
 so metadata binding refuses each as an instance field, at any index and whether the operand names
 `Ext.Point` as a struct or as a class. A method `M(ref Ext.Point)` or `M(Ext.Point)` whose body
 loads, addresses or stores `Y` through its token fails every evidence check, with the emitted
-access at the offset or slot of `X`. Of the platform pair `ValueTuple<int, int>`, `Item1` and
+access at the offset or slot of `X`, and so does an operand that flags `Y` static, since these
+instructions take only instance fields. Of the platform pair `ValueTuple<int, int>`, `Item1` and
 `Item2` keep indices 0 and 1 and any other member is refused.
 -/
 
@@ -93,9 +94,9 @@ theorem unpinned_instance_fields_refused :
 #print axioms unpinned_instance_fields_refused
 
 /-- The body `ldarg.0; ldfld Y; ret`, `ldarg.0; ldflda Y; ret` or `ldarg.0; ldc.i4.1; stfld Y;
-    ret` with `Y` claimed at `index`, over `p` of type `owner`. -/
-private def raw (owner : TypeExpr) (opcode index : Nat) : RawMethod :=
-  let access : RawOperand := .field owner index int32 name!"Y" false
+    ret` with `Y` claimed at `index`, and static when `flagged`, over `p` of type `owner`. -/
+private def raw (owner : TypeExpr) (opcode index : Nat) (flagged := false) : RawMethod :=
+  let access : RawOperand := .field owner index int32 name!"Y" flagged
   { token := 0x06000001, owner := pin.identity ++ "::Fixture", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0, implementation := 0,
     returnType :=
@@ -108,14 +109,14 @@ private def raw (owner : TypeExpr) (opcode index : Nat) : RawMethod :=
       else [⟨0, 0x02, .none⟩, ⟨1, opcode, access⟩, ⟨6, 0x2A, .none⟩] }
 
 /-- The bytes and token table of `raw`, over the metadata of its world. -/
-private def body (owner : TypeExpr) (opcode index : Nat) : BodyEvidence :=
+private def body (owner : TypeExpr) (opcode index : Nat) (flagged := false) : BodyEvidence :=
   let world := slice (owner == pointClass) opcode
   let token := MetadataBuilder.littleEndian 4 world.2.2
   let bytes :=
     if opcode == stfld then [8 * 4 + 2, 0x02, 0x17, stfld] ++ token ++ [0x2A]
     else [7 * 4 + 2, 0x02, opcode] ++ token ++ [0x2A]
-  evidenceOf bytes [(world.2.2, .field owner index int32 name!"Y" false)] { own := world.1 }
-    (raw owner opcode index)
+  evidenceOf bytes [(world.2.2, .field owner index int32 name!"Y" flagged)] { own := world.1 }
+    (raw owner opcode index flagged)
 
 /-- Whether decoding the body fails on exactly the refusal of its `Y` token. -/
 private def refusedAtY (owner : TypeExpr) (opcode index : Nat) : Bool :=
@@ -124,7 +125,14 @@ private def refusedAtY (owner : TypeExpr) (opcode index : Nat) : Bool :=
     token == (slice (owner == pointClass) opcode).2.2
   | _ => false
 
-private def evidence (owner : TypeExpr) (opcode index : Nat) : MethodEvidence :=
+/-- Whether decoding the body with `Y` flagged static fails on its token, before binding. -/
+private def flaggedRefused (owner : TypeExpr) (opcode : Nat) : Bool :=
+  match checkBody (body owner opcode 0 true) (raw owner opcode 0 true) [] with
+  | .error (.mismatchedToken _ token) => token == (slice (owner == pointClass) opcode).2.2
+  | _ => false
+
+private def evidence (owner : TypeExpr) (opcode index : Nat) (flagged := false) :
+    MethodEvidence :=
   let classOwner := owner == pointClass
   let unknown (count : Nat) : Option FeatureState := some ⟨List.replicate count none, []⟩
   let argument : StorageType := if classOwner then .object else .reference
@@ -134,8 +142,8 @@ private def evidence (owner : TypeExpr) (opcode index : Nat) : MethodEvidence :=
   let stored := opcode == stfld
   let operations : List ArgumentOp :=
     if stored then [.load 0, .other, .other, .other] else [.load 0, .other, .other]
-  { original := raw owner opcode index, body := body owner opcode index, arguments := [],
-    closed := raw owner opcode index,
+  { original := raw owner opcode index flagged, body := body owner opcode index flagged,
+    arguments := [], closed := raw owner opcode index flagged,
     parameterInput := { arguments := [argument], locals := [], code := operations },
     reachable := List.replicate (if stored then 4 else 3) true,
     featureStates :=
@@ -147,7 +155,7 @@ private def evidence (owner : TypeExpr) (opcode index : Nat) : MethodEvidence :=
         some [if opcode == ldfld then .word32 else .reference]],
     layoutUses := if classOwner then [] else [.field (if stored then 2 else 1) 0 index access],
     assembly := pin,
-    signature := (spelled? (body owner opcode index).names.signature).getD "" }
+    signature := (spelled? (body owner opcode index flagged).names.signature).getD "" }
 
 /-- `Ext.Point` as CoreCLR lays it out: `X` at 0, `Y` at 4. -/
 private def rawLayouts : List RawLayout :=
@@ -197,6 +205,24 @@ theorem class_access_of_y_at_slot_of_x_rejected :
     ¬ TranslationValid [] #[] [] [evidence pointClass stfld 0] [] [classMethod stfld 0] := by
   decide +kernel
 #print axioms class_access_of_y_at_slot_of_x_rejected
+
+/-- An operand flagging `Y` static, the form binding admits at index 0, fails each instance field
+    instruction on its token, since those opcodes take only instance fields, and is no valid
+    translation. -/
+theorem static_flagged_access_of_y_rejected :
+    ([point, pointClass].all fun owner =>
+      [ldfld, ldflda, stfld].all fun opcode => flaggedRefused owner opcode) = true ∧
+    ¬ TranslationValid rawLayouts layouts [] [evidence point ldfld 0 true] []
+      [structMethod ldfld 0] ∧
+    ¬ TranslationValid rawLayouts layouts [] [evidence point ldflda 0 true] []
+      [structMethod ldflda 0] ∧
+    ¬ TranslationValid rawLayouts layouts [] [evidence point stfld 0 true] []
+      [structMethod stfld 0] ∧
+    ¬ TranslationValid [] #[] [] [evidence pointClass ldfld 0 true] [] [classMethod ldfld 0] ∧
+    ¬ TranslationValid [] #[] [] [evidence pointClass ldflda 0 true] [] [classMethod ldflda 0] ∧
+    ¬ TranslationValid [] #[] [] [evidence pointClass stfld 0 true] [] [classMethod stfld 0] := by
+  decide +kernel
+#print axioms static_flagged_access_of_y_rejected
 
 /-! ## The platform pair -/
 
