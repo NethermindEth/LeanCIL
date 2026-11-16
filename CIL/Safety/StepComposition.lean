@@ -266,6 +266,47 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 #print axioms step_localloc_eq
 
+/-- A typed `ldelem` loads by the shape the method's layouts give its element type. -/
+@[cil_step] theorem step_ldelem_any_eq (element : CIL.Extraction.TypeExpr) (stack : List Value) :
+    step body (.ldelem_any element) pc args frame stack memory =
+      if unspecifiedOperands 2 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, values) ←
+          typedElementInstruction (body.elementShape element) false stack memory
+        return .next (pc + 1) values frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_ldelem_any_eq
+
+/-- A value element's typed access is a snapshot transfer for a struct or vector element and
+    otherwise a numeric load or store of the element's width. -/
+@[cil_step] theorem typedElementInstruction_value (element : CIL.ArrayElement) (store : Bool)
+    (stack : List Value) :
+    typedElementInstruction (.value element) store stack memory =
+      if element.composite then arrayTransferInstruction element store stack memory
+      else if store then arrayStore element.width stack memory
+      else arrayLoad element.width element.signed stack memory := rfl
+
+-- A stepped typed element access shows its element's width and sign as literals.
+attribute [cil_step] CIL.ArrayElement.width CIL.ArrayElement.signed CIL.ArrayElement.composite
+  CIL.EnumStorage.width CIL.EnumStorage.signed
+
+/-- A typed `stelem` stores by the shape the method's layouts give its element type. -/
+@[cil_step] theorem step_stelem_any_eq (element : CIL.Extraction.TypeExpr) (stack : List Value) :
+    step body (.stelem_any element) pc args frame stack memory =
+      if unspecifiedOperands 3 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, values) ←
+          typedElementInstruction (body.elementShape element) true stack memory
+        return .next (pc + 1) values frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_stelem_any_eq
+
 /-- `ldfld` reads the field as the body resolves it, behind the unspecified-bits guard.
     Stepping uses this form only while the field's shape is unknown, and the equations of
     `ObjectSteps` once it is known. -/
@@ -444,6 +485,36 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       instructionStep (.stind kind) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
+@[cil_step] theorem step_ldlen_eq (stack : List Value) :
+    step body .ldlen pc args frame stack memory =
+      instructionStep .ldlen pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 1 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_ldelem_eq {kind} (stack : List Value) :
+    step body (.ldelem kind) pc args frame stack memory =
+      instructionStep (.ldelem kind) pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_ldelem_ref_eq (stack : List Value) :
+    step body .ldelem_ref pc args frame stack memory =
+      instructionStep .ldelem_ref pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_stelem_eq {kind} (stack : List Value) :
+    step body (.stelem kind) pc args frame stack memory =
+      instructionStep (.stelem kind) pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 3 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_stelem_ref_eq (stack : List Value) :
+    step body .stelem_ref pc args frame stack memory =
+      instructionStep .stelem_ref pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 3 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
 -- A stepped `ldind` or `stind` of a known kind shows its width and sign as literals.
 attribute [cil_step, cil_instruction_step] CIL.NumericKind.width CIL.NumericKind.signed
 @[cil_step] theorem step_dup_eq (stack : List Value) :

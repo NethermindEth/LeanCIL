@@ -19,11 +19,31 @@ private def frame : Frame := { activation := 0, locals := [], owned := [] }
 
 /-- A table lookup retains stable identity rather than turning it into a numeric address. -/
 theorem table_provenance :
-    managedStep (.tableElement signature) none 0 frame
+    instruction (.ldelem .i)
       [.scalar (.i32 1),
         .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
-        .ok (.next 1 [.methodPointer ⟨signature, some identity⟩] frame memory) := rfl
+        .ok (memory, [.methodPointer ⟨signature, some identity⟩]) := rfl
 #print axioms table_provenance
+
+/-- The typed `ldelem` of a table's own pointer type reads the same entry; an element type of
+    another signature is an ill-typed state, and a null table throws the named access fault. -/
+theorem typed_table_provenance :
+    typedElementInstruction (.method signature) false
+      [.scalar (.i32 1),
+        .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
+        .ok (memory, [.methodPointer ⟨signature, some identity⟩]) ∧
+    typedElementInstruction (.method ⟨signature.result, []⟩) false
+      [.scalar (.i32 1),
+        .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
+        .error .invalidState ∧
+    typedElementInstruction (.method signature) false [.scalar (.i32 0), .object .null] memory =
+      .error (.thrown .nullReference) ∧
+    typedElementInstruction (.method signature) true
+      [.methodPointer ⟨signature, some identity⟩, .scalar (.i32 1),
+        .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
+        .error .invalidState :=
+  ⟨rfl, rfl, rfl, rfl⟩
+#print axioms typed_table_provenance
 
 /-- A numerical value is never callable, even when it equals an admitted program index. -/
 theorem numeric_pointer_rejected :
@@ -45,12 +65,15 @@ theorem checked_tail_target :
         .ok (.tailCall 1 [.scalar (.i32 42)] memory) := rfl
 #print axioms checked_tail_target
 
-/-- Null array values returned by ordinary helpers retain the same named access fault. -/
+/-- A null array an ordinary helper returns in place of a table throws the named access fault
+    from `ldlen`, and from `ldelem.i` at a well-formed index; at an index of another width
+    `ldelem.i` is an ill-typed state, as for a null value array. -/
 theorem literal_null_table_rejected :
-    managedStep .tableLength none 0 frame [.object .null] memory =
+    instruction .ldlen [.object .null] memory = .error (.thrown .nullReference) ∧
+    instruction (.ldelem .i) [.scalar (.i32 0), .object .null] memory =
       .error (.thrown .nullReference) ∧
-    managedStep (.tableElement signature) none 0 frame [.scalar (.i32 0), .object .null] memory =
-      .error (.thrown .nullReference) := ⟨rfl, rfl⟩
+    instruction (.ldelem .i) [.scalar (.i8 0), .object .null] memory = .error .invalidState :=
+  ⟨rfl, rfl, rfl⟩
 #print axioms literal_null_table_rejected
 
 /-- The selection `indirectTarget` names is the comparison the call arm made in place over the
