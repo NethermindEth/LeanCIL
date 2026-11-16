@@ -213,8 +213,7 @@ The suite locates a field of the furthest base on a fresh instance whose class h
 bases, and rejects a field whose owner is outside that lineage, deciding membership in the
 lineage with `decide`. It fails when the heartbeats per base of either grow more than 1.35 times
 from one size to the next. Rejecting costs about 146,400, 65,900 and 45,000 heartbeats per base
-and locating 135,800, 69,300 and 51,100: one walk of the lineage, each base compared once, about
-40,000 heartbeats of comparing two class names. Run this row alone with
+and locating 135,800, 69,300 and 51,100, so the total grows linearly with the bases. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --lineage-only`.
 
 The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
