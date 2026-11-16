@@ -1084,7 +1084,9 @@ def classFieldLoad (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.
 
 /-- `stfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
     value on top of the stack, an integer of the slot's width, an object or an array of the
-    slot's element, replaces what the receiver below it keeps there. -/
+    slot's element, replaces what the receiver below it keeps there. An `int32` into an 8-byte
+    slot or an `int64` into a narrower one is an invalid state, which no admitted method reaches:
+    the scalar check requires the field's stack kind for a stored integer. -/
 def classFieldStore (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
     (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
   match slot, stack with

@@ -1076,6 +1076,25 @@ example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .word64]
 -- `ldflda` of a class field is decoded; its step faults, since an object field has no address.
 example : scalarEmissionMatches #[] none (i 124 valueField) [.object] (.ldflda value) = true := by
   decide
+/-- A field of `Scope.Node` at raw index 0 holding the runtime integer type `name`. -/
+private def sizedField (name : String) : RawOperand :=
+  .field node 0 (.atom runtime name) name!"value" false
+/-- The field reference `sizedField name` names. -/
+private def sized (name : String) : FieldRef :=
+  { owner := node, index := 0, type := .atom runtime name, name := name!"value" }
+-- A stored integer has the field's stack kind: `int32` up to 4 bytes, `int64` or native for 8.
+example : scalarEmissionMatches #[] none (i 125 (sizedField "System.SByte")) [.word64, .object]
+    (.stfld (sized "System.SByte")) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int16")) [.word64, .object]
+    (.stfld (sized "System.Int16")) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int32")) [.word64, .object]
+    (.stfld (sized "System.Int32")) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int64")) [.word32, .object]
+    (.stfld (sized "System.Int64")) = false := by decide
+example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int32")) [.word32, .object]
+    (.stfld (sized "System.Int32")) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int64")) [.native, .object]
+    (.stfld (sized "System.Int64")) = true := by decide
 -- A field typed as an array of a class holds the array's reference, stored as an object or null;
 -- a value array field stores only an array.
 private def itemsField : RawOperand := .field node 1 (.array node) name!"items" false

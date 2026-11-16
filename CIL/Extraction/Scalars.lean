@@ -404,8 +404,10 @@ private def classFieldSite (instruction : RawInstruction) (emitted : Instruction
 
 /-- `ldfld`, `ldflda` and `stfld` of a class instance field emit the instruction the raw one
     decodes to, naming the field its operand names, on an object or null receiver. A stored
-    class or class array must be an object or null, and a stored value array one of the field's
-    element; the step resolves the slot and faults on a field type without one. -/
+    class or class array must be an object or null, a stored value array one of the field's
+    element, and a stored integer of the field's stack kind (`word32` up to 4 bytes, `word64`
+    or `native` for 8), so `classFieldStore` never meets a word of the other width; the step
+    resolves the slot and faults on a field type without one. -/
 private def classFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Instruction) : Bool :=
   valueEncodingMatches instruction emitted && match emitted, stack with
@@ -413,7 +415,8 @@ private def classFieldMatches (instruction : RawInstruction) (stack : List Scala
   | .stfld field, value :: receiver :: _ =>
     receiver ∈ [.object, .nullObject] &&
       (!referenceFieldType field.type || value ∈ [.object, .nullObject]) &&
-      (valueArrayFieldElement field.type).all (fun declared => value == .array declared)
+      (valueArrayFieldElement field.type).all (fun declared => value == .array declared) &&
+      ((objectFieldShape field.type).isNone || storageCompatible value (scalarType field.type))
   | _, _ => false
 
 /-- Only `ldstr` loads a literal, and only its own text; inside a folded throw it emits nothing. -/
