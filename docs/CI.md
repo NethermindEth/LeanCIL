@@ -66,8 +66,9 @@ concurrent jobs.
   measured time runs alone.
 - `dotnet run --file scripts/EstimateVerificationSchedule.cs -- --jobs` prints the jobs of a full
   run with their estimated minutes.
-- A job's time limit is the largest of its members': 90 minutes for `imports`, 120 for each
-  `exports` partition and 30 for any other suite.
+- A job's time limit is the largest of its members' (90 minutes for `imports`, 120 for each
+  `exports` partition and 30 for any other suite) and at least twice the job's measured time,
+  rounded up to ten minutes.
 - A job is named for its suites, or for its longest suite and the number of others when it runs
   more than three, so job names change when the durations do. Only `Build and verify` is a stable
   check name.

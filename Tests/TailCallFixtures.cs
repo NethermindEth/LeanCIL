@@ -1,11 +1,8 @@
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 partial class Program
 {
-    /// <summary>The definition of the link to method 1 at a call site, which the target mutation redirects.</summary>
-
     static void AddTailCallFixtures(string assembly, string root, GeneratedEvidence evidence,
         RejectedEvidence rejected)
     {
