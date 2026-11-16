@@ -1054,7 +1054,8 @@ partial class Program
             : signatures.SequenceEqual(variantSignatures) ? "same" : "renamed";
     }
 
-    [GeneratedRegex(@"^def method\d+ : Method := .*?(?=^\S)|^cil_decoded_method method(?<decoded>\d+) := [^\n]*",
+    [GeneratedRegex(@"^def method\d+ : Method := .*?(?=^\S)|" +
+        @"^cil_decoded_method method(?<decoded>\d+) (?:\[[^\]\n]*\] )?:= [^\n]*",
         RegexOptions.Multiline | RegexOptions.Singleline)]
     private static partial Regex MethodBody();
 
