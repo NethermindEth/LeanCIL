@@ -690,7 +690,8 @@ syntax "cil_loop_call" (&" keeping")? term:max term:max (" at " ident)? (" [" te
 /-- The contract a `MethodContract.Holds` proof's type names, and the tag of its callee's
     precondition (`preconditionTag`). -/
 def loopHeldContract (holds : Term) : TacticM (Expr × Name) := withMainContext do
-  let type ← whnfR (← inferType (← Term.elabTerm holds none))
+  -- A projection such as `summary.holds` types its contract by an assigned metavariable.
+  let type ← whnfR (← instantiateMVars (← inferType (← Term.elabTerm holds none)))
   let contract ← if type.isAppOf ``MethodContract.Holds then argumentAt "cil_loop_call" type 2
     else pure type
   return (contract, preconditionTag type)
