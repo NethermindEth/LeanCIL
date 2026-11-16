@@ -36,22 +36,6 @@ internal sealed record ArrayAddress(Arrays.Element Element, bool ReadOnly) : Mem
     internal override string ToLean() => $"(.arrayAddress {Element.Expression}" + (ReadOnly ? " false)" : ")");
 }
 
-internal sealed record ArrayLoad(int Width, bool Signed) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayLoad {Width} {LeanText.Bool(Signed)})";
-}
-
-internal sealed record ArrayStore(int Width) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayStore {Width})";
-}
-
-/// <summary>A load or store of a composite array element through a transfer of the whole element.</summary>
-internal sealed record ArrayTransfer(Arrays.Element Element, bool Store) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayTransfer {Element.Expression} {LeanText.Bool(Store)})";
-}
-
 /// <summary>
 /// The pointer addition of a reference and an offset scaled by <paramref name="Stride"/>. A negative stride is
 /// its two's complement.

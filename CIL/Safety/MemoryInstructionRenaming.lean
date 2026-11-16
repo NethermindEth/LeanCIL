@@ -230,7 +230,7 @@ private theorem Memory.Renamed.arrayFillInstructionResult {mapping : AllocationR
 #print axioms Memory.Renamed.arrayFillInstructionResult
 
 /-- Typed array loads and stores transport the exact snapshot mask and checked authority. -/
-private theorem Memory.Renamed.arrayTransferInstructionResult {mapping : AllocationRenaming}
+theorem Memory.Renamed.arrayTransferInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
     (element : CIL.ArrayElement) (store : Bool) (stack : List Value)
@@ -933,8 +933,6 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
   unfold otherMemoryInstruction at observable ⊢
   split at observable
   all_goals try (unfold arrayAddress at observable ⊢; split at observable)
-  all_goals try (unfold arrayLoad at observable ⊢; split at observable)
-  all_goals try (unfold arrayStore at observable ⊢; split at observable)
   all_goals try simp only [List.map_cons, AllocationRenaming.value]
   all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
@@ -1294,7 +1292,6 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
       | with_reducible exact related.referenceAddInstructionResult _ _ _ bounds observable
       | with_reducible exact related.pointerTransferInstructionResult _ _ _ _ bounds observable
       | with_reducible exact related.vector128UnsafeInstructionResult _ _ _ bounds observable
-      | with_reducible exact related.arrayTransferInstructionResult formed _ _ _ bounds observable
       | with_reducible exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
       | with_reducible exact related.singleSpanInstructionResult _ _ _ bounds observable
       | with_reducible exact related.viewObservationInstructionResult _ _ bounds observable

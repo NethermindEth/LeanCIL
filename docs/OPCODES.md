@@ -122,7 +122,8 @@ external enum dependencies are not supported.
 ## Typed indirect dispatch
 
 Managed function pointers can be held in typed locals or supplied as parameters. Supplied
-immutable single-dimensional handler tables support `ldlen` and `ldelem.i`; each entry has one
+immutable single-dimensional handler tables support `ldlen`, `ldelem.i` and `ldelem` of the table's
+own pointer type; each entry has one
 exact signature and must name a non-null catalog target. A null table raises
 `NullReferenceException`, and an invalid index raises `IndexOutOfRangeException`.
 

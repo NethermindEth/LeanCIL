@@ -955,7 +955,7 @@ private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
     (stack values : List Value) (memory result : Memory)
     (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
-  unfold otherMemoryInstruction arrayAddress arrayLoad arrayStore at executed
+  unfold otherMemoryInstruction arrayAddress at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
@@ -1014,6 +1014,25 @@ theorem arrayTransferInstruction_contract (element : CIL.ArrayElement) (store : 
     | cases transferred
     | split at transferred
 #print axioms arrayTransferInstruction_contract
+
+set_option maxHeartbeats 800000 in
+/-- Typed element loads and stores, and the typed read of a handler table, preserve checked
+    effects and stack validity. -/
+theorem typedElementInstruction_contract (shape : CIL.ElementShape) (store : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : typedElementInstruction shape store stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold typedElementInstruction at executed
+  split at executed
+  any_goals split at executed
+  any_goals exact arrayTransferInstruction_contract _ _ _ _ _ _ executed
+  all_goals try simp only [arrayLoad, arrayStore, Bind.bind, Except.bind, Pure.pure,
+    Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms typedElementInstruction_contract
 
 /-- Aligned transfers preserve the existing typed write effect and return only valid scalars. -/
 theorem pointerTransferInstruction_contract (kind : CIL.TransferKind) (alignment : Nat)
@@ -1148,7 +1167,6 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact referenceAddInstruction_contract _ _ _ _ _ _ h
     · exact pointerTransferInstruction_contract _ _ _ _ _ _ _ h
     · exact vector128UnsafeInstruction_contract _ _ _ _ _ _ h
-    · exact arrayTransferInstruction_contract _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact binaryTransferInstruction_contract _ _ _ _ _ _ _ _ _ h
     · exact singleSpanInstruction_contract _ _ _ _ _ _ h

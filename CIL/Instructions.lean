@@ -192,6 +192,13 @@ inductive Instruction where
   /-- `stelem.ref`: a store into an element slot of an array of class references, after the
       covariance check. -/
   | stelem_ref
+  /-- `ldelem` of the declared element type `element`: an element of the storage the method's
+      layouts give that type (`CIL.Method.elementShape`), or the entry of a managed handler
+      table of that signature. -/
+  | ldelem_any (element : Extraction.TypeExpr)
+  /-- `stelem` of the declared element type `element`: a store into an element of the storage
+      the method's layouts give that type. -/
+  | stelem_any (element : Extraction.TypeExpr)
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)

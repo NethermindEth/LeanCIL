@@ -473,10 +473,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Indirect loads and stores of integers and native integers.
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
-        // Array lengths and loads and stores of integer, native integer and class reference elements.
+        // Array allocations, lengths, and element loads and stores by kind or by element type.
         Code.Ldlen, Code.Ldelem_I1, Code.Ldelem_U1, Code.Ldelem_I2, Code.Ldelem_U2, Code.Ldelem_I4, Code.Ldelem_U4,
         Code.Ldelem_I8, Code.Ldelem_I, Code.Ldelem_Ref, Code.Stelem_I, Code.Stelem_I1, Code.Stelem_I2,
-        Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref,
+        Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref, Code.Newarr, Code.Ldelem_Any, Code.Stelem_Any,
         // Class type tests, class instance field accesses, direct calls and constructions.
         Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Newobj,
         // Branches.

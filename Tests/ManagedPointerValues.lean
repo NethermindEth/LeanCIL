@@ -25,6 +25,26 @@ theorem table_provenance :
         .ok (memory, [.methodPointer ⟨signature, some identity⟩]) := rfl
 #print axioms table_provenance
 
+/-- The typed `ldelem` of a table's own pointer type reads the same entry; an element type of
+    another signature is an ill-typed state, and a null table throws the named access fault. -/
+theorem typed_table_provenance :
+    typedElementInstruction (.method signature) false
+      [.scalar (.i32 1),
+        .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
+        .ok (memory, [.methodPointer ⟨signature, some identity⟩]) ∧
+    typedElementInstruction (.method ⟨signature.result, []⟩) false
+      [.scalar (.i32 1),
+        .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
+        .error .invalidState ∧
+    typedElementInstruction (.method signature) false [.scalar (.i32 0), .object .null] memory =
+      .error (.thrown .nullReference) ∧
+    typedElementInstruction (.method signature) true
+      [.methodPointer ⟨signature, some identity⟩, .scalar (.i32 1),
+        .methodTable ⟨signature, some #[other, identity], none, 2, by decide⟩] memory =
+        .error .invalidState :=
+  ⟨rfl, rfl, rfl, rfl⟩
+#print axioms typed_table_provenance
+
 /-- A numerical value is never callable, even when it equals an admitted program index. -/
 theorem numeric_pointer_rejected :
     managedStep (.call signature [⟨identity, 1⟩] true) (some (.indirect [⟨identity, 1⟩])) 0 frame

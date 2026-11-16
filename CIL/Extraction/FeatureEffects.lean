@@ -32,9 +32,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .spanEmpty .. => (0, 1)
   | .arraySpan _ _ range => (range.argumentCount, 1)
   | .observeView _ | .spanReinterpret .. | .spanReadOnly => (1, 1)
-  | .arrayLoad .. | .arrayAddress .. => (2, 1)
-  | .arrayTransfer _ store => if store then (3, 0) else (2, 1)
-  | .arrayStore _ => (3, 0)
+  | .arrayAddress .. => (2, 1)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
   | .nullRef | .stringLiteral _ => (0, 1)
@@ -74,8 +72,8 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
   | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
   -- Array element loads and stores.
-  | .ldelem _ | .ldelem_ref => some (2, 1)
-  | .stelem _ | .stelem_ref => some (3, 0)
+  | .ldelem _ | .ldelem_ref | .ldelem_any _ => some (2, 1)
+  | .stelem _ | .stelem_ref | .stelem_any _ => some (3, 0)
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .stind _ | .copyObject _
   | .setFieldAt .. | .setAggregateFieldAt .. | .stfld _ => some (2, 0)

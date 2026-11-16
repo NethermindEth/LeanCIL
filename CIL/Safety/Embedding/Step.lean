@@ -467,6 +467,32 @@ theorem step_relabel_ldsflda (field : Extraction.FieldRef) : StepRelabel (.ldsfl
 
 #print axioms step_relabel_ldsflda
 
+/-- A typed element access reads its element's shape from the layouts, which relabeling keeps. -/
+theorem step_relabel_ldelem_any (element : Extraction.TypeExpr) :
+    StepRelabel (.ldelem_any element) := by
+  plain_cases
+  simp only [CIL.Method.elementShape, context.environment] at h ⊢
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+  cases h
+  simp only [FrameAction.relabel]
+  rw [context.next rfl]
+
+#print axioms step_relabel_ldelem_any
+
+/-- A typed element store reads its element's shape from the layouts, which relabeling keeps. -/
+theorem step_relabel_stelem_any (element : Extraction.TypeExpr) :
+    StepRelabel (.stelem_any element) := by
+  plain_cases
+  simp only [CIL.Method.elementShape, context.environment] at h ⊢
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+  cases h
+  simp only [FrameAction.relabel]
+  rw [context.next rfl]
+
+#print axioms step_relabel_stelem_any
+
 theorem step_relabel_ldtoken (operand : TokenOperand) : StepRelabel (.ldtoken operand) := by
   cases operand
   plain_cases
@@ -793,6 +819,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
+  case ldelem_any element => exact step_relabel_ldelem_any element
+  case stelem_any element => exact step_relabel_stelem_any element
   case ldtoken operand => exact step_relabel_ldtoken operand
   case stsfld field => exact step_relabel_stsfld field
   case ret => exact step_relabel_ret
@@ -1435,6 +1463,11 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticAddress_congr context.statics]
     raise_lockstep
+  case ldelem_any | stelem_any =>
+    plain_cases
+    simp only [CIL.Method.elementShape, context.environment] at h ⊢
+    dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+    first | cases h | raise_lockstep
   case ldtoken operand =>
     cases operand
     plain_cases

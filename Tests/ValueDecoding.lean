@@ -25,6 +25,9 @@ def classField : FieldRef :=
 /-- The class the type test rows name. -/
 private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 
+/-- The element type `System.Int32`. -/
+private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
+
 /-- A static call site of `T.Account::Deposit(int32)`. -/
 private def callSite : CallSite := {
   method := {
@@ -137,14 +140,16 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 65039, .none⟩, .localloc),
   -- Class type tests.
   (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog),
+  -- Array allocations and element accesses that name their element type.
+  (⟨0, 141, .type int32⟩, .newarr int32), (⟨0, 163, .type int32⟩, .ldelem_any int32),
+  (⟨0, 164, .type int32⟩, .stelem_any int32),
   -- Calls and constructions, whose target the link at their pc gives.
   (⟨0, 40, .call callSite⟩, .call callSite.method),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
-  ``Instruction.newarr, ``Instruction.loadAggregate,
-  ``Instruction.copyObject, ``Instruction.storeAggregate,
+  ``Instruction.loadAggregate, ``Instruction.copyObject, ``Instruction.storeAggregate,
   ``Instruction.initAggregate, ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
@@ -219,6 +224,11 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 107, .none⟩, .conv_i4), (⟨0, 65039, .integer 0⟩, .localloc),
   (⟨0, 116, .none⟩, .castclass dog), (⟨0, 20, .type dog⟩, .ldnull), (⟨0, 20, .none⟩, .ldc_i4 0),
   (⟨0, 142, .integer 0⟩, .ldlen), (⟨0, 154, .type dog⟩, .ldelem_ref),
+  -- Another element type than the token names, the other direction, or a missing token.
+  (⟨0, 141, .type int32⟩, .newarr dog), (⟨0, 163, .type int32⟩, .ldelem_any dog),
+  (⟨0, 163, .type int32⟩, .stelem_any int32), (⟨0, 164, .type int32⟩, .ldelem_any int32),
+  (⟨0, 163, .none⟩, .ldelem_any int32), (⟨0, 148, .none⟩, .ldelem_any int32),
+  (⟨0, 158, .none⟩, .stelem_any int32), (⟨0, 141, .none⟩, .newarr int32),
   -- Another field, another access to the field, a static field or a field of a struct.
   (⟨0, 123, classOperand⟩, .ldfld { classField with index := 2 }),
   (⟨0, 123, classOperand⟩, .ldfld { classField with name := name!"limit" }),
@@ -252,25 +262,27 @@ theorem mutations_rejected :
 /-- An int32 array of the extraction's stack kinds. -/
 private def words : ScalarKind := .array .signed32
 
-/-- An array opcode the decoder reads emits only its decoding: the lowered memory operation and
-    the managed table length it once emitted are refused, and so is a decoded form at the typed
-    `ldelem` and `stelem` opcodes, which name their element by token. -/
+/-- An array opcode the decoder reads emits only its decoding: the managed table length is
+    refused, an opcode of a kind emits no typed form, and a typed opcode emits its token's element
+    type rather than a kind. -/
 theorem element_emission_exact :
     scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
     scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
       true ∧
     scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words]
-      (.memory (.arrayLoad 4 false)) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem_any int32) =
+      true ∧
+    scalarEmissionMatches #[] none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+      (.stelem_any int32) = true ∧
+    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem_any int32) = false ∧
     scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words]
-      (.memory (.arrayStore 4)) = false ∧
+      (.stelem_any int32) = false ∧
     scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.managed .tableLength) = false ∧
     scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
     scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 163, .type (.atom runtimeScope "System.Int32")⟩
-      [.word32, words] (.ldelem .i4) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 164, .type (.atom runtimeScope "System.Int32")⟩
-      [.word32, .word32, words] (.stelem .i4) = false := by
+    scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem .i4) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+      (.stelem .i4) = false := by
   decide +kernel
 
 /-- info: 'Tests.ValueDecoding.element_emission_exact' depends on axioms: [propext, Quot.sound] -/
@@ -336,7 +348,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 80, undecoded 26 of 106 constructors -/
+/-- info: decoded 83, undecoded 25 of 108 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

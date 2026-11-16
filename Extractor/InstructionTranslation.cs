@@ -29,11 +29,11 @@ internal static class InstructionTranslation
             var signature = ManagedPointers.SignatureEvidence(indirect);
             return new IndirectCall(signature, ManagedPointers.Catalog(indirect, methods, methodIndex, tail), tail);
         }
-        // `ldlen` and `ldelem.i` of a handler table emit their decoded instructions with every other array.
+        // Element loads of a handler table emit their decoded instructions with every other array.
         if (i.OpCode.Code is Code.Ldelem_Any &&
             nativeOperands.Incoming.TryGetValue(i, out var tableStack) && tableStack.Length >= 2 &&
-            tableStack[^2] is { Kind: NativeOperands.Kind.MethodTable, Metadata: LocalKind.MethodTable table })
-            return new TableElement(table.Signature);
+            tableStack[^2] is { Kind: NativeOperands.Kind.MethodTable })
+            return new TypedElementAccess(false, null);
         if (i.OpCode.Code == Code.Ldftn && i.Operand is MethodReference address)
         {
             var target = address.Resolve() ?? throw new InvalidDataException("Unresolved managed pointer target");

@@ -100,8 +100,8 @@ def observerCount : CIL.Instruction → Nat
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .stind _ | .copyObject _ => 2
   | .ldlen => 1
-  | .ldelem _ | .ldelem_ref => 2
-  | .stelem _ | .stelem_ref => 3
+  | .ldelem _ | .ldelem_ref | .ldelem_any _ => 2
+  | .stelem _ | .stelem_ref | .stelem_any _ => 3
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
   | .stsfld _ => 1
   -- Method boundaries
@@ -815,8 +815,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .arrayAddress element writable, _ => arrayAddress element writable stack memory
-  | .arrayLoad width signed, _ => arrayLoad width signed stack memory
-  | .arrayStore width, _ => arrayStore width stack memory
   -- Spans
   | .spanEmpty width writable, rest =>
     let view : SpanView := ⟨.null, 0, width, writable⟩
@@ -1072,6 +1070,24 @@ def elementInstruction (op : CIL.Instruction) (stack : List Value) (memory : Mem
     return (← storeSlot memory slot value, rest)
   | _, _ => .error .invalidState
 
+/-- Typed `ldelem` (`store` false) or `stelem` (`store` true) of an element of `shape`: a
+    struct or vector element by checked snapshot, any other value element by its width and sign,
+    or with `ldelem` the entry of a managed handler table of the shape's signature, a null table
+    throwing `NullReferenceException`. Class and unsupported shapes and table stores fault. -/
+def typedElementInstruction (shape : ElementShape) (store : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match shape, store, stack with
+  | .value element, store, _ =>
+    if element.composite then arrayTransferInstruction element store stack memory
+    else if store then arrayStore element.width stack memory
+    else arrayLoad element.width element.signed stack memory
+  | .method signature, false, .scalar index :: .methodTable table :: rest => do
+    if table.signature != signature then .error .invalidState else pure ()
+    return (memory, .methodPointer (← methodTableElement table index memory) :: rest)
+  | .method _, false, .scalar _ :: .object .null :: _ => .error (.thrown .nullReference)
+  | .unsupported reason, _, _ => .error (.unsupported reason)
+  | _, _, _ => .error .invalidState
+
 /-- `ldfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
     receiver gives way to the word, object reference or array reference the slot keeps. A null
     receiver throws `NullReferenceException` and a receiver of another class lineage faults. -/
@@ -1214,7 +1230,6 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .pointerTransfer kind alignment store =>
     pointerTransferInstruction kind alignment store stack memory
   | .vector128Unsafe store offset => vector128UnsafeInstruction store offset stack memory
-  | .arrayTransfer element store => arrayTransferInstruction element store stack memory
   | .binaryRead width signed bigEndian trying =>
     binaryTransferInstruction width signed bigEndian true trying stack memory
   | .binaryWrite width bigEndian trying =>

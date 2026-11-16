@@ -9,11 +9,13 @@ import CIL.Safety.BufferContents
 An array argument is an `ArrayView` whose bytes are the span `view.storage`, so the facts a
 method needs of its elements are `SpanContents` over that span. `SpanContents.array_load`
 turns them into the element reference and loaded value of an in-bound index; a null array
-has no elements, so the bound alone rules it out. `step_arrayLoad_of_element` and
+has no elements, so the bound alone rules it out. `step_ldelem_of_element` and
 `step_arrayAddress_of_element` step `ldelem` and `ldelema` from those facts, and
+`arrayLoad_of_element` reads a typed `ldelem` once it steps to `arrayLoad`;
 `arrayElement_formed` lets a method return the element address. A loop indexing the array
 names the element it stores to with `arrayElement_of_access` and steps `stelem` with
-`step_arrayStore_of_write`; `SpanView.length_bounded` of the storage span lets its signed bound
+`step_stelem_narrow_of_write` or `step_stelem_wide_of_write`, or a typed `stelem` with
+`arrayStore_of_write`; `SpanView.length_bounded` of the storage span lets its signed bound
 test read as unsigned.
 -/
 
@@ -86,25 +88,21 @@ theorem SpanContents.array_load {memory : Memory} {view : ArrayView} {width : Na
 
 #print axioms SpanContents.array_load
 
-/-- `ldelem` of an element whose address and load succeed pushes the loaded value. -/
-theorem step_arrayLoad_of_element {memory : Memory} {view : ArrayView} {index : CIL.Value}
+/-- A numeric element load whose address and load succeed pushes the loaded value; a typed
+    `ldelem` of a numeric element steps to this load. -/
+theorem arrayLoad_of_element {memory : Memory} {view : ArrayView} {index : CIL.Value}
     {position width : Nat} {signed : Bool} {reference : Reference} {value : CIL.Value}
     (indexed : arrayIndex index = some position)
     (found : arrayElement memory view position width = .ok reference)
     (loaded : loadValue memory (.address reference) width signed = .ok value) :
-    ∀ body pc args frame rest,
-      step body (.memory (.arrayLoad width signed)) pc args frame
-        (.scalar index :: .array view :: rest) memory =
-        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
-  intro body pc args frame rest
-  rw [step_memory_eq]
+    ∀ rest, arrayLoad width signed (.scalar index :: .array view :: rest) memory =
+      .ok (memory, .scalar value :: rest) := by
+  intro rest
   cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
     subst indexed <;>
-    simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
-      CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayLoad, arrayIndex, found, loaded, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    simp [arrayLoad, arrayIndex, found, loaded, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_arrayLoad_of_element
+#print axioms arrayLoad_of_element
 
 /-- `ldelem` of `kind` from an element whose address and load succeed pushes the loaded value. -/
 theorem step_ldelem_of_element (kind : CIL.NumericKind) {memory : Memory} {view : ArrayView}
@@ -183,51 +181,41 @@ theorem arrayElement_of_access {memory : Memory} {view : ArrayView} {base : Refe
 
 #print axioms arrayElement_of_access
 
-/-- `stelem` of a 1-, 2- or 4-byte word into an element whose write succeeds leaves that
-    write's memory. -/
-theorem step_arrayStore_of_write {memory after : Memory} {view : ArrayView} {index : CIL.Value}
+/-- A numeric element store of a 1-, 2- or 4-byte word whose write succeeds leaves that write's
+    memory; a typed `stelem` of a numeric element steps to this store. -/
+theorem arrayStore_of_write {memory after : Memory} {view : ArrayView} {index : CIL.Value}
     {position width : Nat} {reference : Reference} {bits : CIL.W32}
     (indexed : arrayIndex index = some position)
     (found : arrayElement memory view position width = .ok reference)
     (written : write memory reference (numberBytes bits.toNat width) 1 = .ok after)
     (narrow : width = 1 ∨ width = 2 ∨ width = 4 := by decide) :
-    ∀ body pc args frame rest,
-      step body (.memory (.arrayStore width)) pc args frame
-        (.scalar (.i32 bits) :: .scalar index :: .array view :: rest) memory =
-        .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_memory_eq]
+    ∀ rest, arrayStore width (.scalar (.i32 bits) :: .scalar index :: .array view :: rest) memory =
+      .ok (after, rest) := by
+  intro rest
   rcases narrow with rfl | rfl | rfl <;>
   cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
     subst indexed <;>
-    simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
-      CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayStore, arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure]
+    simp [arrayStore, arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind,
+      Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_arrayStore_of_write
+#print axioms arrayStore_of_write
 
-/-- `stelem` of an 8-byte word into an element whose write succeeds leaves that write's
-    memory. -/
-theorem step_arrayStore_i64_of_write {memory after : Memory} {view : ArrayView}
+/-- A numeric element store of an 8-byte word whose write succeeds leaves that write's memory;
+    a typed `stelem` of an 8-byte element steps to this store. -/
+theorem arrayStore_i64_of_write {memory after : Memory} {view : ArrayView}
     {index : CIL.Value} {position : Nat} {reference : Reference} {bits : CIL.W64}
     (indexed : arrayIndex index = some position)
     (found : arrayElement memory view position 8 = .ok reference)
     (written : write memory reference (numberBytes bits.toNat 8) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body (.memory (.arrayStore 8)) pc args frame
-        (.scalar (.i64 bits) :: .scalar index :: .array view :: rest) memory =
-        .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_memory_eq]
+    ∀ rest, arrayStore 8 (.scalar (.i64 bits) :: .scalar index :: .array view :: rest) memory =
+      .ok (after, rest) := by
+  intro rest
   cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
     subst indexed <;>
-    simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
-      CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayStore, arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind,
-      Pure.pure, Except.pure]
+    simp [arrayStore, arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind,
+      Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_arrayStore_i64_of_write
+#print axioms arrayStore_i64_of_write
 
 /-- `stelem` of a 1-, 2- or 4-byte `kind` into an element whose write succeeds leaves that
     write's memory. -/

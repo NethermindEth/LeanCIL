@@ -133,7 +133,7 @@ private def referenceArrayStep (instruction : RawInstruction) (stack : List Scal
   | _, _ => none
 
 /-- Exact array stack transition, including primitive tokens and element types, with the
-    operation a typed `ldelema`, `ldelem` or `stelem` emits; a decoded opcode emits none. -/
+    operation an `ldelema` emits; a decoded opcode emits none. -/
 private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
     Option (Option MemoryOp × List ScalarKind) := do
   if let some after := referenceArrayStep instruction stack then return (none, after)
@@ -156,45 +156,38 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
     let .type token := instruction.operand | none
     let expected ← arrayElementType token
     if element.isSome && element != some expected then none else pure ()
-    match expected with
-    | .aggregate .. | .vector .. =>
+    if expected.composite then
       if store then
-        if value == some .other then return (some (.arrayTransfer expected true), tail) else none
-      else return (some (.arrayTransfer expected false), .other :: tail)
-    | _ => pure ()
-  let (width, signed, native) : Nat × Bool × Bool ←
+        if value == some .other then return (none, tail) else none
+      else return (none, .other :: tail)
+  let (width, native) : Nat × Bool ←
     if opcode ∈ [163, 164] then do
       let .type token := instruction.operand | none
       let expected ← arrayElementType token
       if element.isSome && element != some expected then none else
-        pure (expected.width, expected.signed, expected.native)
+        pure (expected.width, expected.native)
     else do
       if instruction.operand != .none then none else pure ()
-      let (width, signed, native) ← match opcode with
-        | 144 => some (1, true, false) | 145 => some (1, false, false)
-        | 146 => some (2, true, false) | 147 => some (2, false, false)
-        | 148 | 149 => some (4, false, false)
-        | 150 => some (8, false, false) | 151 | 155 => some (8, false, true)
-        | 156 => some (1, false, false) | 157 => some (2, false, false)
-        | 158 => some (4, false, false) | 159 => some (8, false, false)
+      let (width, native) ← match opcode with
+        | 144 | 145 | 156 => some (1, false) | 146 | 147 | 157 => some (2, false)
+        | 148 | 149 | 158 => some (4, false) | 150 | 159 => some (8, false)
+        | 151 | 155 => some (8, true)
         | _ => none
       if let some actual := element then
-        if (match actual with | .aggregate .. | .vector .. => true | _ => false) then none else pure ()
+        if actual.composite then none else pure ()
         if actual.width != width || actual.native != native then none else pure ()
-      pure (width, signed, native)
+      pure (width, native)
   let kind := if native then ScalarKind.native else if width == 8 then .word64 else .word32
-  let typed := opcode ∈ [163, 164]
   if store then
-    if value == some kind then return (if typed then some (.arrayStore width) else none, tail)
-    else none
-  else return (if typed then some (.arrayLoad width signed) else none, kind :: tail)
+    if value == some kind then return (none, tail) else none
+  else return (none, kind :: tail)
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Instruction → Bool
   | .newarr _ => true
-  | .ldlen | .ldelem _ | .ldelem_ref | .stelem _ | .stelem_ref => true
-  | .memory (.arrayLoad ..) | .memory (.arrayStore _) | .memory (.arrayAddress ..) => true
-  | .memory (.arrayTransfer ..) => true
+  | .ldlen | .ldelem _ | .ldelem_ref | .stelem _ | .stelem_ref | .ldelem_any _ | .stelem_any _ =>
+    true
+  | .memory (.arrayAddress ..) => true
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode: a
@@ -208,13 +201,8 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
   else if Instruction.valueOpcode instruction.opcode then valueEncodingMatches instruction emitted
   else
   match arrayStep instruction stack, emitted with
-  | some (some (.arrayLoad width signed), _), .memory (.arrayLoad actual polarity) =>
-    width == actual && signed == polarity
-  | some (some (.arrayStore width), _), .memory (.arrayStore actual) => width == actual
   | some (some (.arrayAddress element _), _), .memory (.arrayAddress actual _) =>
     element == actual.metadata
-  | some (some (.arrayTransfer element store), _), .memory (.arrayTransfer actual actualStore) =>
-    element == actual.metadata && store == actualStore
   | _, _ => false
 /-- Opcodes whose emitted encoding the scalar check fixes: integer constants, arithmetic,
     shifts, `neg`, `not`, conversions and compare-branches. -/
@@ -459,10 +447,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableElement signature, index :: .methodTable actual :: _ =>
-      index ∈ [.word32, .native] && signature == actual && instruction.opcode == 163 &&
-        (match instruction.operand with
-         | .type type => managedSignature type == some signature | _ => false)
     | _, _ => false
   else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches instruction stack emitted

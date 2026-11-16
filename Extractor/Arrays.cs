@@ -105,15 +105,15 @@ internal static class Arrays
     {
         /// <summary>The lemma stepping a load of an element whose address and load succeed.</summary>
         internal string LoadLemma =>
-            Kind is { } kind ? $"step_ldelem_of_element {kind.Term()}" : "step_arrayLoad_of_element";
+            Kind is { } kind ? $"step_ldelem_of_element {kind.Term()}" : "arrayLoad_of_element";
 
         /// <summary>The lemma stepping a store into an element whose write succeeds.</summary>
         internal string StoreLemma => (Kind, Width) switch
         {
             ({ } kind, 8) => $"step_stelem_wide_of_write {kind.Term()}",
             ({ } kind, _) => $"step_stelem_narrow_of_write {kind.Term()}",
-            (null, 8) => "step_arrayStore_i64_of_write",
-            _ => "step_arrayStore_of_write"
+            (null, 8) => "arrayStore_i64_of_write",
+            _ => "arrayStore_of_write"
         };
     }
 
@@ -121,8 +121,8 @@ internal static class Arrays
     internal static NumericAccess? Numeric(Operation op) => op switch
     {
         ArrayElementAccess access => new(access.Width, access.Signed, access.Store, access.Kind),
-        Memory { Operation: ArrayLoad load } => new(load.Width, load.Signed, false, null),
-        Memory { Operation: ArrayStore store } => new(store.Width, false, true, null),
+        TypedElementAccess { Storage: { Kind: not NativeOperands.Kind.ArrayComposite } storage } typed =>
+            new(storage.Width, storage.Signed, typed.Store, null),
         _ => null
     };
 
@@ -134,13 +134,7 @@ internal static class Arrays
             throw new InvalidDataException("Branch enters an array address after its readonly prefix");
     }
 
-    static Operation Typed(Instruction instruction, bool store, string architecture)
-    {
-        var element = Storage((TypeReference)instruction.Operand, architecture) ??
-            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand);
-        if (element.Kind == NativeOperands.Kind.ArrayComposite)
-            return MemoryOperation.Of(new ArrayTransfer(element, store));
-        return MemoryOperation.Of(store
-            ? new ArrayStore(element.Width) : new ArrayLoad(element.Width, element.Signed));
-    }
+    static TypedElementAccess Typed(Instruction instruction, bool store, string architecture) =>
+        new(store, Storage((TypeReference)instruction.Operand, architecture) ??
+            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand));
 }

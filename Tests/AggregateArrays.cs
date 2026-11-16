@@ -79,16 +79,17 @@ foreach (var method in methods)
 }
 foreach (var (name, before, after, theorem) in new[]
 {
-    ("Read", " 16) false)", " 8) false)", "method0_layouts_validated"),
-    ("Read", " 16) false)", " 16) true)", "method0_scalars_validated"),
-    ("ReadVector", ".vector " + JsonSerializer.Serialize("System.Runtime.Intrinsics.Vector128`1<System.UInt64>") +
-        " 16) false)", ".vector " + JsonSerializer.Serialize("System.Runtime.Intrinsics.Vector128`1<System.Int64>") +
-        " 16) false)", "method0_scalars_validated"),
+    // A typed element access is decoded from its body, so a forgery names another element at its raw token, which
+    // the certified stack states bind; the element's width is the one its checked layout gives.
+    ("Read", "/Pair\" 0) }", "/Other\" 0) }", "method0_scalars_validated"),
+    ("ReadVector", "\"System.UInt64\")) }", "\"System.Int64\")) }", "method0_scalars_validated"),
     ("ReadOnlyView", " 16) false .whole)", " 16) true .whole)", "method0_scalars_validated"),
     ("View", " 16) true .whole)", " 8) true .whole)", "method0_layouts_validated")
 })
 {
     var original = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    if (name is "Read" or "ReadVector" && !original.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+        throw new Exception("Typed element access is not decoded from its body: " + name);
     var source = NarrowEvidence(original, theorem);
     if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing array mutation: " + name);
     var path = Path.Combine(root, "Rejected" + name + theorem + ".lean");

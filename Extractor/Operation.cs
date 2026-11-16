@@ -543,6 +543,19 @@ internal sealed record ArrayElementAccess(NumericKind Kind, bool Store) : Operat
         $".{(Store ? "stelem" : "ldelem")} {Kind.Term()}";
 }
 
+/// <summary>
+/// A typed <c>ldelem</c> or <c>stelem</c> of the element type <paramref name="Element"/>, the raw operand's type
+/// expression. <paramref name="Storage"/> is the element's inline storage, or null for a handler table's method
+/// pointer.
+/// </summary>
+internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, string? Element = null) : Operation
+{
+    // Translation does not see the layout table the term indexes, so the emitter attaches it.
+    internal override string Render(Func<int, string> calleeName) =>
+        $".{(Store ? "stelem_any" : "ldelem_any")} ({Element ??
+            throw new InvalidOperationException("A typed element access is rendered before its element type is attached")})";
+}
+
 /// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
 internal sealed record ReferenceElementAccess(bool Store) : Operation
 {
@@ -636,12 +649,6 @@ internal abstract record ManagedPointer : Operation
 internal sealed record TableLength : ManagedPointer
 {
     protected override string Body(Func<int, string> calleeName) => ".tableLength";
-}
-
-/// <summary>A load of the element of a method table of the given signature.</summary>
-internal sealed record TableElement(string Signature) : ManagedPointer
-{
-    protected override string Body(Func<int, string> calleeName) => $"(.tableElement {Signature})";
 }
 
 /// <summary>An indirect call through a callable pointer of the given signature and target catalog.</summary>

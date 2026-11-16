@@ -5,17 +5,16 @@ import CIL.Extraction.Generics
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
-conversions, comparisons, integer indirect loads and stores, array lengths and the integer and
-reference element loads and stores, dynamic frame storage, the class
-type tests `castclass` and `isinst` and the class instance field accesses `ldfld`, `ldflda` and
-`stfld`, the call `call` and the construction `newobj`, with every short and macro form
-folded into its constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it
+conversions, comparisons, integer indirect loads and stores, array allocations, lengths and
+element loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst`
+and the class instance field accesses `ldfld`, `ldflda` and `stfld`, the call `call` and the
+construction `newobj`, with every short and macro form folded into its constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it
 is that decoded instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes
-for some operand. Instantiation changes a decoded instruction only in the type a type test names,
-the method a call or construction names, or through a field operand
+for some operand. Instantiation changes a decoded instruction only in the type a type operand
+names, the method a call or construction names, or through a field operand
 (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original with each
-type test at the instantiated type, each call and construction of the instantiated method, and each
-class field access at the same owner with its held type instantiated
+type test and typed array instruction at the instantiated type, each call and construction of
+the instantiated method, and each class field access at the same owner with its held type instantiated
 (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is the total decoding: it writes a
 hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
 (`Instruction.ofRaw_eq_unadmitted_iff`).
@@ -116,30 +115,40 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (88 <= opcode && opcode <= 106) || opcode == 109 || opcode == 110 || opcode == 115 ||
     opcode == 116 ||
     opcode == 117 || (123 <= opcode && opcode <= 125) || (130 <= opcode && opcode <= 139) ||
-    opcode == 142 || (144 <= opcode && opcode <= 151) || (154 <= opcode && opcode <= 159) ||
-    opcode == 162 ||
+    opcode == 141 || opcode == 142 || (144 <= opcode && opcode <= 151) ||
+    (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
     opcode == 224 || (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
 
-/-- The class type test `opcode` denotes on `type`: `castclass` (116) or `isinst` (117). -/
-def Instruction.typeTest? (opcode : Nat) (type : TypeExpr) : Option Instruction :=
+/-- The instruction `opcode` denotes on the type operand `type`: the class type test `castclass`
+    (116) or `isinst` (117), or the array instruction `newarr` (141), `ldelem` (163) or
+    `stelem` (164) of that element type. -/
+def Instruction.ofType? (opcode : Nat) (type : TypeExpr) : Option Instruction :=
   if opcode == 116 then some (.castclass type) else if opcode == 117 then some (.isinst type)
-  else none
+  else if opcode == 141 then some (.newarr type) else if opcode == 163 then some (.ldelem_any type)
+  else if opcode == 164 then some (.stelem_any type) else none
 
-/-- Only `castclass` (116) and `isinst` (117) denote a type test. -/
-theorem Instruction.typeTest?_opcode {opcode : Nat} {type : TypeExpr} {instruction : Instruction}
-    (tested : Instruction.typeTest? opcode type = some instruction) :
-    opcode = 116 ∨ opcode = 117 := by
-  unfold Instruction.typeTest? at tested
-  revert tested
+/-- Only `castclass` (116), `isinst` (117), `newarr` (141), `ldelem` (163) and `stelem` (164)
+    denote an instruction on a type operand. -/
+theorem Instruction.ofType?_opcode {opcode : Nat} {type : TypeExpr} {instruction : Instruction}
+    (named : Instruction.ofType? opcode type = some instruction) :
+    opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 := by
+  unfold Instruction.ofType? at named
+  revert named
   cases castclass : opcode == 116
   · cases isinst : opcode == 117
-    · intro tested
-      first | cases tested | simp at tested
-    · exact fun _ => .inr (beq_iff_eq.mp isinst)
+    · cases allocation : opcode == 141
+      · cases load : opcode == 163
+        · cases store : opcode == 164
+          · intro named
+            first | cases named | simp at named
+          · exact fun _ => .inr (.inr (.inr (.inr (beq_iff_eq.mp store))))
+        · exact fun _ => .inr (.inr (.inr (.inl (beq_iff_eq.mp load))))
+      · exact fun _ => .inr (.inr (.inl (beq_iff_eq.mp allocation)))
+    · exact fun _ => .inr (.inl (beq_iff_eq.mp isinst))
   · exact fun _ => .inl (beq_iff_eq.mp castclass)
 
-#print axioms Instruction.typeTest?_opcode
+#print axioms Instruction.ofType?_opcode
 
 /-- The instruction `opcode` denotes on a call site: `call` (40) of the method it names, without
     prefixes, whose target the method's link table gives, or the construction `newobj` (115) of
@@ -186,8 +195,8 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
 #print axioms Instruction.classField?_opcode
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
-    with short and macro forms folded into it. A type operand gives the type test its opcode
-    names, an instance field of a class the field instruction its opcode names and a call site
+    with short and macro forms folded into it. A type operand gives the type test or typed array
+    instruction its opcode names, an instance field of a class the field instruction its opcode names and a call site
     the `call` of the method it names, whose target the method's link table gives, when its
     opcode is `call`, and its construction when its opcode is `newobj`; any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
@@ -196,7 +205,7 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
 def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
   match raw.operand with
-  | .type type => Instruction.typeTest? raw.opcode type
+  | .type type => Instruction.ofType? raw.opcode type
   | .field (.object _ _) _ _ _ false =>
     (FieldRef.ofOperand? raw.operand).bind (Instruction.classField? raw.opcode)
   | .call site => Instruction.ofCallSite? raw.opcode site
@@ -309,8 +318,8 @@ theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : 
   cases opcodeValue : Instruction.valueOpcode raw.opcode
   · unfold Instruction.ofRaw? at decoded
     split at decoded
-    · rcases Instruction.typeTest?_opcode (Option.filter_eq_some_iff.mp decoded).1
-        with opcodeIs | opcodeIs <;>
+    · rcases Instruction.ofType?_opcode (Option.filter_eq_some_iff.mp decoded).1
+        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
     · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp
         (Option.filter_eq_some_iff.mp decoded).1
@@ -471,6 +480,12 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .castclass expected =>
     match emitted with | .castclass actual => expected == actual | _ => false
   | .isinst expected => match emitted with | .isinst actual => expected == actual | _ => false
+  -- Typed array instructions compare the element type they name.
+  | .newarr expected => match emitted with | .newarr actual => expected == actual | _ => false
+  | .ldelem_any expected =>
+    match emitted with | .ldelem_any actual => expected == actual | _ => false
+  | .stelem_any expected =>
+    match emitted with | .stelem_any actual => expected == actual | _ => false
   -- Class field instructions compare the field they name.
   | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
   | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
@@ -495,10 +510,10 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
 
 #print axioms Instruction.sameValue_eq
 
-/-- Instantiation changes a decoded instruction only in the type a type test names, the method a
-    call or construction names, or through a field operand: an operand that is none of these
-    decodes as before, and a type test, call or construction decodes exactly when the original
-    does, to the instruction of the same opcode on the substituted type or call site. -/
+/-- Instantiation changes a decoded instruction only in the type a type operand names, the method
+    a call or construction names, or through a field operand: an operand that is none of these
+    decodes as before, and an instruction on a type operand or a call site decodes exactly when the
+    original does, to the instruction of the same opcode on the substituted type or call site. -/
 theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
@@ -506,7 +521,7 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
     Instruction.ofRaw? { raw with operand } =
       match raw.operand, operand with
       | .type _, .type type =>
-        (Instruction.ofRaw? raw).bind fun _ => Instruction.typeTest? raw.opcode type
+        (Instruction.ofRaw? raw).bind fun _ => Instruction.ofType? raw.opcode type
       | .call _, .call site =>
         (Instruction.ofRaw? raw).bind fun _ => Instruction.ofCallSite? raw.opcode site
       | _, _ => Instruction.ofRaw? raw := by
@@ -518,11 +533,12 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
   case type before =>
     cases operand
     case type type =>
-      show Option.filter _ (Instruction.typeTest? opcode type) =
-        (Option.filter _ (Instruction.typeTest? opcode before)).bind fun _ =>
-          Instruction.typeTest? opcode type
-      unfold Instruction.typeTest?
-      cases opcode == 116 <;> cases opcode == 117 <;> rfl
+      show Option.filter _ (Instruction.ofType? opcode type) =
+        (Option.filter _ (Instruction.ofType? opcode before)).bind fun _ =>
+          Instruction.ofType? opcode type
+      unfold Instruction.ofType?
+      cases opcode == 116 <;> cases opcode == 117 <;> cases opcode == 141 <;>
+        cases opcode == 163 <;> cases opcode == 164 <;> rfl
     all_goals exact absurd sameType Bool.false_ne_true
   case call before =>
     cases operand

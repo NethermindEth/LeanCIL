@@ -17,12 +17,8 @@ private def int32 : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope
 /-- The struct `Record`, at layout index 0. -/
 private def record : CIL.Extraction.TypeExpr := .aggregate "Record" 0
 
-/-- A typed load cannot claim an element token differing from the supplied array type. -/
-theorem wrong_element_token :
-    CIL.Extraction.scalarOpMatches
-      (rawArray 163 (.type (.atom CIL.Extraction.runtimeScope "System.UInt32")))
-      [.word32, .array .signed32] (.memory (.arrayLoad 4 false)) = false := by decide +kernel
-#print axioms wrong_element_token
+/-- The element type `System.UInt32`. -/
+private def uint32 : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope "System.UInt32"
 
 /-- A static method without arguments; the stack transfers below read none of its fields. -/
 private def holder : CIL.Extraction.RawMethod := {
@@ -35,6 +31,19 @@ private def holder : CIL.Extraction.RawMethod := {
 private def transfer (opcode : Nat) (stack : List CIL.Extraction.ScalarKind) :
     Option (List CIL.Extraction.ScalarKind) :=
   CIL.Extraction.scalarTransfer holder (rawArray opcode) stack
+
+/-- A typed load cannot claim an element token differing from the supplied array type, and emits
+    exactly the element type its token names. -/
+theorem wrong_element_token :
+    CIL.Extraction.scalarTransfer holder (rawArray 163 (.type uint32))
+      [.word32, .array .signed32] = none ∧
+    CIL.Extraction.scalarTransfer holder (rawArray 163 (.type int32))
+      [.word32, .array .signed32] = some [.word32] ∧
+    CIL.Extraction.scalarOpMatches (rawArray 163 (.type uint32)) [.word32, .array .unsigned32]
+      (.ldelem_any int32) = false ∧
+    CIL.Extraction.scalarOpMatches (rawArray 163 (.type uint32)) [.word32, .array .unsigned32]
+      (.ldelem_any uint32) = true := by decide +kernel
+#print axioms wrong_element_token
 
 /-- Equal physical widths do not make native and fixed-width array accesses interchangeable. -/
 theorem native_element_mismatch :
@@ -54,7 +63,7 @@ theorem float_load_forgery :
     CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
       (.ldelem .i4) = false ∧
     CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
-      (.memory (.arrayLoad 4 false)) = false := by decide +kernel
+      (.ldelem_any int32) = false := by decide +kernel
 #print axioms float_load_forgery
 
 /-- An ordinary int64 is not a valid array index in raw CIL stack evidence. -/
@@ -155,86 +164,102 @@ theorem byref_null_not_array :
 
 /-- Narrow signed loads extend the stored byte. -/
 theorem signed_byte_read :
-    memoryInstruction (.arrayLoad 1 true) [.scalar (.i32 0), .array bytes] memory =
+    typedElementInstruction (.value .signed8) false [.scalar (.i32 0), .array bytes] memory =
       .ok (memory, [.scalar (.i32 4294967295)]) := rfl
 #print axioms signed_byte_read
 
 /-- The unsigned encoding reads the same byte without sign extension. -/
 theorem unsigned_byte_read :
-    memoryInstruction (.arrayLoad 1 false) [.scalar (.i32 0), .array bytes] memory =
+    typedElementInstruction (.value .unsigned8) false [.scalar (.i32 0), .array bytes] memory =
       .ok (memory, [.scalar (.i32 255)]) := rfl
 #print axioms unsigned_byte_read
 
 /-- Native indices are accepted without truncating them to int32. -/
 theorem native_index :
-    memoryInstruction (.arrayLoad 4 false) [.scalar (.i64 0), .array words] memory =
+    typedElementInstruction (.value .signed32) false [.scalar (.i64 0), .array words] memory =
       .ok (memory, [.scalar (.i32 255)]) := rfl
 #print axioms native_index
 
 /-- Index equal to length is outside the array even if its address could be a sentinel. -/
 theorem end_index_rejected :
-    memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 4), .array words] memory =
+    typedElementInstruction (.value .signed32) false [.scalar (.i32 4), .array words] memory =
       .error (.thrown .indexOutOfRange) := rfl
 #print axioms end_index_rejected
 
 /-- Negative int32 indexes are out of bounds. -/
 theorem negative_index_rejected :
-    memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 4294967295), .array words] memory =
+    typedElementInstruction (.value .signed32) false
+      [.scalar (.i32 4294967295), .array words] memory =
       .error (.thrown .indexOutOfRange) := rfl
 #print axioms negative_index_rejected
 
 /-- A high native index cannot wrap into the array. -/
 theorem high_native_index_rejected :
-    memoryInstruction (.arrayLoad 4 false)
+    typedElementInstruction (.value .signed32) false
       [.scalar (.i64 18446744073709551615), .array words] memory =
       .error (.thrown .indexOutOfRange) := rfl
 #print axioms high_native_index_rejected
 
 /-- Null is checked before index bounds. -/
 theorem null_before_bounds :
-    memoryInstruction (.arrayLoad 4 false)
+    typedElementInstruction (.value .signed32) false
       [.scalar (.i32 4294967295), .array ⟨.null, 0, .signed32⟩] memory =
       .error (.thrown .nullReference) := rfl
 #print axioms null_before_bounds
 
 /-- Array shape does not grant read authority. -/
 theorem unreadable_rejected :
-    memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 0), .array words] noAuthority =
+    typedElementInstruction (.value .signed32) false [.scalar (.i32 0), .array words] noAuthority =
       .error (.memory .unreadable (.address ⟨0, 0⟩) 4) := rfl
 #print axioms unreadable_rejected
 
 /-- An array value cannot make uninitialized data readable. -/
 theorem uninitialized_rejected :
-    memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 0), .array words] uninitialized =
+    typedElementInstruction (.value .signed32) false
+      [.scalar (.i32 0), .array words] uninitialized =
       .error (.memory .uninitialized (.address ⟨0, 0⟩) 4) := rfl
 #print axioms uninitialized_rejected
 
 /-- Writes need authority even though the array itself has no readonly-view flag. -/
 theorem unwritable_rejected :
-    memoryInstruction (.arrayStore 4) [.scalar (.i32 7), .scalar (.i32 1), .array words]
+    typedElementInstruction (.value .signed32) true
+      [.scalar (.i32 7), .scalar (.i32 1), .array words]
       noAuthority = .error (.memory .unwritable (.address ⟨0, 4⟩) 4) := rfl
 #print axioms unwritable_rejected
 
 /-- The selected element is initialized by a store without reading its previous contents. -/
 theorem store_initializes_element :
     (do
-      let (updated, _) ← memoryInstruction (.arrayStore 4)
+      let (updated, _) ← typedElementInstruction (.value .signed32) true
         [.scalar (.i32 305419896), .scalar (.i32 1), .array words] uninitialized
-      memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 1), .array words] updated :
+      typedElementInstruction (.value .signed32) false [.scalar (.i32 1), .array words] updated :
         ExecutionResult (Memory × List Value)).map Prod.snd = .ok [.scalar (.i32 305419896)] := rfl
 #print axioms store_initializes_element
 
 /-- Bytes on both sides of the updated element retain their initial values. -/
 theorem store_preserves_neighbors :
-    (memoryInstruction (.arrayStore 4)
+    (typedElementInstruction (.value .signed32) true
       [.scalar (.i32 7), .scalar (.i32 1), .array words] memory).map
         (fun (updated, _) => (updated.cells 0 0, updated.cells 0 8)) =
       .ok (memory.cells 0 0, memory.cells 0 8) := rfl
 #print axioms store_preserves_neighbors
 
+/-- A typed access to an element of no inline storage faults: a class element is an ill-typed
+    state, and a by-ref-like struct or floating-point element is unsupported. -/
+theorem typed_shapes_refused :
+    typedElementInstruction (.reference int32) false [.scalar (.i32 0), .array words] memory =
+      .error .invalidState ∧
+    typedElementInstruction (.unsupported CIL.ElementShape.byRefLikeElement) false
+      [.scalar (.i32 0), .array words] memory =
+      .error (.unsupported CIL.ElementShape.byRefLikeElement) ∧
+    typedElementInstruction (.unsupported CIL.ElementShape.unsupportedType) true
+      [.scalar (.i32 0), .scalar (.i32 0), .array words] memory =
+      .error (.unsupported CIL.ElementShape.unsupportedType) := ⟨rfl, rfl, rfl⟩
+#print axioms typed_shapes_refused
+
 /-- A valid array cannot be read using an unrelated element width. -/
 theorem wrong_width_rejected :
-    memoryInstruction (.arrayLoad 8 false) [.scalar (.i32 0), .array words] memory =
+    typedElementInstruction (.value .signed64) false [.scalar (.i32 0), .array words] memory =
       .error .invalidState := rfl
 #print axioms wrong_width_rejected
 

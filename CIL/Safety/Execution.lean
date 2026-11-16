@@ -555,6 +555,13 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .newarr element, .scalar length :: rest =>
     let (array, memory) ← allocateElements (body.elementShape element) length m
     return .next (pc + 1) (array :: rest) frame memory
+  -- Typed element accesses take the storage the layouts give their declared element type.
+  | .ldelem_any element, _ =>
+    let (memory, values) ← typedElementInstruction (body.elementShape element) false stack m
+    return .next (pc + 1) values frame memory
+  | .stelem_any element, _ =>
+    let (memory, values) ← typedElementInstruction (body.elementShape element) true stack m
+    return .next (pc + 1) values frame memory
   -- A call enters the body its pc links to; its operand gives only the argument count.
   | .call method prefixes, _ =>
     let some (.direct callee) := body.linkAt pc | .error unlinkedCall
