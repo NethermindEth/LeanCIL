@@ -1,3 +1,4 @@
+Nethermind.LeanCIL.Jump Nethermind.LeanCIL.ProofOutline/Body::JumpOf(Nethermind.LeanCIL.Operation)
 System.Boolean Nethermind.LeanCIL.CliDiagnostics::IsBidiControl(System.Char)
 System.Boolean Nethermind.LeanCIL.VectorSignatures::GetByReferenceType(System.Boolean)
 System.Boolean Nethermind.LeanCIL.VectorSignatures::GetModifiedType(System.Boolean,System.Boolean,System.Boolean)
