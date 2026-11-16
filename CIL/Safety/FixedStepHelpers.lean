@@ -280,6 +280,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal
         objectAbove objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray
       guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
+      guard_hyp addressesField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldflda field →
+        False
       guard_hyp storesField : ∀ (field : CIL.Extraction.FieldRef), operation = .stfld field → False
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
       guard_hyp localAllocation : operation = .localloc → False
