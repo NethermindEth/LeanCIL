@@ -198,7 +198,8 @@ def callStep (link : Option CIL.Link) (count : Nat) (tail : Bool) (stack : List 
   | some (.direct callee) =>
     if tail then
       if stack.length != count then .error .invalidState
-      else do return FrameAction.tailCall callee (← stack.reverse.mapM (checkedValue memory)) memory
+      else do
+        return FrameAction.tailCall callee (← stack.reverse.mapM (checkedValue memory)) memory
     else if stack.length < count then .error .invalidState
     else do
       let arguments ← (stack.take count).reverse.mapM (checkedValue memory)
