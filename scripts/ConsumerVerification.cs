@@ -2553,7 +2553,7 @@ partial class Program
                 var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
                     requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i],
                     deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
-                        new(bindingSourcesKey!,
+                        deep!.Requests, new(bindingSourcesKey!,
                             File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
                             Sha(LeanExecutable))),
                     libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,

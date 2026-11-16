@@ -4373,7 +4373,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         /// <summary>Each body is the image's bytes at the offset the section table maps its MethodDef RVA to.
         /// </summary>
         BodyBytes,
-        /// <summary>The carried table header, rows and heap entries are the image's bytes at their positions.
+        /// <summary>
+        /// Each carried metadata block's table header, Assembly row, table rows and heap entries are the image's,
+        /// with MethodDef RVAs zeroed, under one numbering of the #Strings and #Blob offsets per heap for the table
+        /// rows and another for the Assembly row. The identity, key token, corlib, links, #GUID, the Module table
+        /// and the RVAs of MethodDefs outside the evidence are not part of it.
         /// </summary>
         MetadataRows,
         /// <summary>Each platform type relied on is the value type, class or enum the extraction took it for.
@@ -5150,8 +5154,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             RequireImplementationImports(extraction);
             var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
                 deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
-                    new(bindingSourcesKey!, File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(),
-                        Sha(LeanExecutable))),
+                    deep!.Requests, new(bindingSourcesKey!,
+                        File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(), Sha(LeanExecutable))),
                 libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),

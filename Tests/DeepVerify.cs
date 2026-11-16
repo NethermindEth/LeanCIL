@@ -96,10 +96,14 @@ if (args is not ["--support-restore"] && !focusedDiagnostics)
     Console.WriteLine("PASS support replay mutation preserves no successful receipt or deep report");
 if (args is ["--support-mutation"]) return;
 var report = verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs);
+// Each audited fact names the theorem that states it; every other fact stays not covered.
+(BindingFact Fact, string Theorem)[] auditedFacts =
+    [(BindingFact.BodyBytes, "BindingAudit.bodies"), (BindingFact.MetadataRows, "BindingAudit.metadataRows")];
 if (report.binding.mode != BindingMode.Deep ||
-    report.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed ||
-    report.binding.facts.Where(fact => fact.id != BindingFact.BodyBytes)
-        .Any(fact => fact.status != BindingStatus.NotCovered) ||
+    report.binding.facts.Any(fact => auditedFacts.Any(audited => audited.Fact == fact.id)
+        ? fact.status != BindingStatus.Reconfirmed ||
+            fact.theorem != auditedFacts.Single(audited => audited.Fact == fact.id).Theorem
+        : fact.status != BindingStatus.NotCovered) ||
     report.binding.images.Length != 2 || report.binding.images[0].status != BindingStatus.Reconfirmed ||
     report.binding.images[1].role != ImageRole.Unused ||
     report.binding.images[1].status != BindingStatus.NotCovered ||
@@ -170,6 +174,13 @@ finally
 Console.WriteLine("PASS a base-only family's certified session companion is rejected on preparation reuse");
 if (args is ["--prepared-inventory"]) return;
 
+var subjects = BindingRequests(new("", [new("Identity", inputs.Images[0].Digest, [])], 1));
+var withoutRows = DeepBindingSection(inputs, [new("Identity", inputs.Images[0])],
+    [.. subjects.Where(request => request.Module != MetadataRowsModule)], report.binding.sources!);
+if (withoutRows.facts.Single(fact => fact.id == BindingFact.MetadataRows).status != BindingStatus.NotCovered ||
+    withoutRows.facts.Single(fact => fact.id == BindingFact.BodyBytes).theorem != "BindingAudit.bodies")
+    throw new InvalidOperationException("A fact without an audited request was reported as reconfirmed");
+Console.WriteLine("PASS the deep report reconfirms exactly the subjects of its audited requests");
 double previousMilliseconds = 0;
 foreach (var count in new[] { 64, 512, 4096 })
 {
@@ -181,7 +192,7 @@ foreach (var count in new[] { 64, 512, 4096 })
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         for (var repetition = 0; repetition < 64; repetition++)
         {
-            var section = DeepBindingSection(inputs, pins, report.binding.sources!);
+            var section = DeepBindingSection(inputs, pins, subjects, report.binding.sources!);
             if (section.images.Length != count + 1)
                 throw new InvalidOperationException("Deep report lost an image association");
         }
@@ -233,7 +244,7 @@ Reject("wrong body evidence", "Compiled artifacts changed", "kernel replay", fre
     var start = text.IndexOf("theorem bodies :", StringComparison.Ordinal);
     if (start < 0) throw new InvalidOperationException("Missing body theorem");
     File.WriteAllText(source, text[..start] + """
-        theorem bodies : StrictBinding.BodiesBound images [] := StrictBinding.claimsHold_nil prepared
+        theorem bodies : StrictBinding.BodiesBound images [] := StrictBinding.claimsHold_nil Bodies.prepared
         #print axioms bodies
         end BindingAudit
         """);
@@ -372,7 +383,7 @@ void CheckFailureDiagnostics()
         }
 
         foreach (var target in new[] { "body-type", "body-axiom", "digest-type", "images-type",
-            "body-kernel", "digest-kernel", "images-kernel",
+            "body-kernel", "digest-kernel", "images-kernel", "rows-page-kernel",
             "replay-proof", "replay-identity", "replay-library", "replay-assembly", "replay-auditor",
             "original-proof", "original-identity", "original-library", "original-assembly" })
         {
@@ -403,7 +414,7 @@ void CheckFailureDiagnostics()
             string[]? before = null;
             var diagnostic = target switch
             {
-                "body-kernel" or "digest-kernel" or "images-kernel" => "while replaying",
+                "body-kernel" or "digest-kernel" or "images-kernel" or "rows-page-kernel" => "while replaying",
                 "body-axiom" => "Unapproved proof axioms",
                 "original-proof" or "replay-proof" => "Proof inputs changed",
                 "original-identity" or "replay-identity" => "extraction identity changed",
@@ -433,6 +444,14 @@ void CheckFailureDiagnostics()
                     }
                     if (stage != "deep-check sources") return;
                     var fresh = Directory.EnumerateDirectories(output, "proof-*").Single();
+                    if (target == "rows-page-kernel")
+                    {
+                        var rows = ModuleSource(fresh, MetadataRowsModule);
+                        File.WriteAllText(rows, ForgedRowPage(File.ReadAllText(rows)));
+                        changed = true;
+                        before = Receipts();
+                        return;
+                    }
                     var module = target is "digest-type" or "digest-kernel" ? "I" + Sha(image)
                         : target is "images-type" or "images-kernel" ? "Images" : "Bodies";
                     var path = Path.Combine(fresh, "BindingAudit", module + ".lean");
@@ -482,7 +501,8 @@ void CheckFailureDiagnostics()
                 .Select(fact => fact.id).ToArray();
             var failedImages = failed.images.Where(item => item.status == FailureReports.BindingFailureStatus.Failed)
                 .Select(item => item.sha256).ToArray();
-            string[] expectedFacts = target.StartsWith("body-", StringComparison.Ordinal) ? ["body-bytes"] : [];
+            string[] expectedFacts = target.StartsWith("body-", StringComparison.Ordinal) ? ["body-bytes"]
+                : target.StartsWith("rows-", StringComparison.Ordinal) ? ["metadata-rows"] : [];
             if (!changed || before is null || !before.SequenceEqual(Receipts()) ||
                 !failedFacts.SequenceEqual(expectedFacts) ||
                 !failedImages.SequenceEqual(target is "digest-type" or "digest-kernel" ? [Sha(image)] : []))
@@ -507,6 +527,20 @@ void CheckFailureDiagnostics()
     }
     finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", priorCache); }
 }
+
+// Row page 0 keeps its statement and takes a proof of True, which only kernel replay rejects.
+static string ForgedRowPage(string source) => "import Lean\n" + source
+    .Replace("theorem page0 :", "theorem page0_valid :", StringComparison.Ordinal)
+    .Replace("end MetadataRows", """
+        set_option debug.skipKernelTC true in
+        run_cmd Lean.Elab.Command.liftCoreM do
+          let valid <- Lean.getConstInfo `BindingAudit.MetadataRows.page0_valid
+          Lean.addDecl (.thmDecl {
+            name := `BindingAudit.MetadataRows.page0, levelParams := [], type := valid.type,
+            value := Lean.mkConst ``True.intro })
+
+        end MetadataRows
+        """, StringComparison.Ordinal);
 
 void RequireNoReport()
 {

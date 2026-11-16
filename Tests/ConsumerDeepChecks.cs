@@ -511,10 +511,10 @@ void CheckExportMutation(bool originalProofMutation = false)
 
 static void CheckDeep(Report report)
 {
+    BindingFact[] audited = [BindingFact.BodyBytes, BindingFact.MetadataRows];
     if (report.binding.mode != BindingMode.Deep || report.binding.facts.Length != 12 ||
-        report.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed ||
-        report.binding.facts.Where(fact => fact.id != BindingFact.BodyBytes)
-            .Any(fact => fact.status != BindingStatus.NotCovered))
+        report.binding.facts.Any(fact => fact.status !=
+            (audited.Contains(fact.id) ? BindingStatus.Reconfirmed : BindingStatus.NotCovered)))
         throw new InvalidOperationException("Consumer deep report has incorrect binding coverage.");
 }
 

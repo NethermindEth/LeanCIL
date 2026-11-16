@@ -38,11 +38,12 @@ partial class Program
         Console.WriteLine("PASS the body proof pages at about 250 methods up to 8 pages");
         var package = FixturePackage();
         Run(["lake", "build", "StrictBinding.Evidence"], package, progress: "Building the strict binding library");
-        CheckGeneratedBodiesModuleElaborates(root, package);
+        CheckGeneratedPagedModulesElaborate(root, package);
         CheckAssemblyBlockScaling(root, package);
         CheckSliceRowsScaling(root, package);
         CheckUserStringScaling(root, package);
         CheckMetadataPageScaling(root, package);
+        CheckMetadataRowsModuleScaling(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -279,6 +280,81 @@ partial class Program
         Console.WriteLine($"PASS the complete metadata proof has flat cost per page ({measured})");
     }
 
+    /// <summary>
+    /// The pages of the generated metadata rows module, kernel-checked as replay checks them, over one synthetic
+    /// image whose methods each carry its Assembly block and their own MethodDef row, at 318, 1272 and 5088 methods
+    /// paged as a deep run pages them. The evidence's metadata list is given directly, and the heartbeats of one
+    /// preparation are subtracted. A method selects its image and checks the block and its row once, so a method
+    /// may cost at most twice as much at 5088 methods as at 1272, although the image the preparations decode grows
+    /// with the methods too.
+    /// </summary>
+    static void CheckMetadataRowsModuleScaling(string root, string package)
+    {
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+        const string imports = "import BindingAudit.Images\nimport Extracted\nimport StrictBinding.Evidence\n";
+        const string claimsOfEvidence = "(StrictBinding.metadataClaims Extracted.methodEvidence)";
+        const string boundEvidence = "StrictBinding.MetadataRowsBound images Extracted.methodEvidence";
+        int[] sizes = [318, 1272, 5088];
+        Directory.CreateDirectory(root);
+        var heartbeats = new long[sizes.Length];
+        foreach (var (index, methods) in sizes.Index())
+        {
+            var file = SyntheticMethods(methods);
+            var size = BindingPageSize(methods);
+            var source = PagedFactModuleSource(BindingFact.MetadataRows, methods, size).ReplaceLineEndings("\n");
+            var pages = BindingPageCount(methods, size);
+            if (!source.StartsWith(imports, StringComparison.Ordinal) ||
+                source.Split(claimsOfEvidence).Length != pages + 1 || source.Split(boundEvidence).Length != 2)
+                throw new InvalidOperationException("The generated metadata rows module changed its form");
+            // Replay checks each page in the kernel; elaborating without the option makes the kernel check it here.
+            var module = source[imports.Length..].Replace("set_option debug.skipKernelTC true in\n", "")
+                .Replace(claimsOfEvidence, "claims", StringComparison.Ordinal)
+                .Replace(boundEvidence, "StrictBinding.ClaimsHold StrictBinding.methodMetadataBound images claims",
+                    StringComparison.Ordinal);
+            var rows = Enumerable.Range(1, methods).Select(row =>
+                $"def slice{row} : CIL.Extraction.MetadataSlice :=\n  " +
+                StrictBindingFacts.Slice(file, new HashSet<int> { MetadataTokens.GetToken(
+                    MetadataTokens.MethodDefinitionHandle(row)) }) +
+                $"\ndef method{row} : CIL.Extraction.MethodMetadata := {{ own := slice{row} }}\n");
+            // One list per page keeps each list literal within the elaborator's recursion limit.
+            var parts = Enumerable.Range(1, methods).Chunk(size).ToArray();
+            var lists = string.Concat(parts.Select((part, page) =>
+                $"def claims{page} : List CIL.Extraction.MethodMetadata :=\n  " +
+                $"[{string.Join(", ", part.Select(row => $"method{row}"))}]\n"));
+            var joined = Enumerable.Range(0, parts.Length - 1).Reverse()
+                .Aggregate($"claims{parts.Length - 1}", (rest, page) => $"(claims{page} ++ {rest})");
+            var path = Path.Combine(root, $"MetadataRows{methods}.lean");
+            File.WriteAllText(path, $$"""
+                import StrictBinding.Evidence
+
+                namespace Methods{{methods}}
+                {{BindingImage.Definitions(file)}}
+                def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
+                  {{StrictBindingFacts.AssemblyBlock(file)}}
+                {{string.Concat(rows)}}{{lists}}def claims : List CIL.Extraction.MethodMetadata := {{joined}}
+                def BindingAudit.images : List StrictBinding.PinnedImage :=
+                  [{ identity := "{{StrictBindingFacts.Identity(file)}}", image := image }]
+                {{report}}
+                theorem preparedOnce : StrictBinding.ok (StrictBinding.prepare BindingAudit.images) = true := by
+                  decide +kernel
+                {{report}}
+                {{module}}
+                {{report}}
+                #print axioms BindingAudit.metadataRows
+                end Methods{{methods}}
+
+                """);
+            heartbeats[index] = CheckHeartbeats(path, package, 1, $"metadata rows of {methods} methods")[0];
+        }
+        var measured = string.Join(", ", sizes.Zip(heartbeats, (methods, cost) => $"{cost} heartbeats at {methods}"));
+        var perMethod = (double)heartbeats[2] / sizes[2] / ((double)heartbeats[1] / sizes[1]);
+        if (heartbeats[1] <= 0 || perMethod > MaximumPerClaimGrowth)
+            throw new InvalidOperationException($"The metadata rows module costs {measured}; a method costs " +
+                $"{perMethod:F2} times as much at {sizes[2]} methods as at {sizes[1]}");
+        Console.WriteLine($"PASS the metadata rows module is linear in the methods ({measured}; " +
+            $"{perMethod:F2} times per method)");
+    }
+
     /// <summary>A library whose user-string heap holds one repeated UTF-16 string at offset 1.</summary>
     static byte[] SyntheticUserString(int characters)
     {
@@ -384,10 +460,10 @@ partial class Program
     }
 
     /// <summary>
-    /// Elaborates the module the audit generates, over an extraction with no methods, so a malformed
+    /// Elaborates each paged module the audit generates, also over an extraction with no methods, so a malformed
     /// declaration in the generator fails here and not only in an end-to-end audit.
     /// </summary>
-    static void CheckGeneratedBodiesModuleElaborates(string root, string package)
+    static void CheckGeneratedPagedModulesElaborate(string root, string package)
     {
         const string imports = "import BindingAudit.Images\nimport Extracted\nimport StrictBinding.Evidence\n";
         const string stubs = """
@@ -401,19 +477,21 @@ partial class Program
 
             """;
         Directory.CreateDirectory(root);
-        foreach (var (methods, size) in new[] { (3, 1), (0, BindingPageSize(0)) })
-        {
-            var source = BodiesModuleSource(methods, size);
-            if (!source.StartsWith(imports, StringComparison.Ordinal))
-                throw new InvalidOperationException("The generated bodies module no longer starts with its imports");
-            var path = Path.Combine(root, $"GeneratedBodies{methods}.lean");
-            File.WriteAllText(path, stubs.ReplaceLineEndings("\n") + source[imports.Length..]);
-            var run = Execute(["lake", "env", "lean", path], cwd: package);
-            if (run.Code != 0)
-                throw new InvalidOperationException(
-                    $"The generated bodies module for {methods} methods does not elaborate: {run.Output}");
-        }
-        Console.WriteLine("PASS the generated bodies module elaborates, also for no methods");
+        foreach (var fact in PagedFacts)
+            foreach (var (methods, size) in new[] { (3, 1), (0, BindingPageSize(0)) })
+            {
+                var source = PagedFactModuleSource(fact, methods, size).ReplaceLineEndings("\n");
+                if (!source.StartsWith(imports, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"The generated {fact} module no longer starts with its imports");
+                var path = Path.Combine(root, $"Generated{fact}{methods}.lean");
+                File.WriteAllText(path, stubs.ReplaceLineEndings("\n") + source[imports.Length..]);
+                var run = Execute(["lake", "env", "lean", path], cwd: package);
+                if (run.Code != 0)
+                    throw new InvalidOperationException(
+                        $"The generated {fact} module for {methods} methods does not elaborate: {run.Output}");
+            }
+        Console.WriteLine("PASS each generated paged module elaborates, also for no methods");
     }
 
     /// <summary>

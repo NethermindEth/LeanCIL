@@ -55,7 +55,7 @@ statement, inputs and library identity; their prose is not an independent specif
 | `leancil check` | Extraction artifact integrity | No user-theorem verification. |
 | `leancil list` | Metadata method discovery | Listing does not imply admission or correctness. |
 | `audit-library` | Kernel-replayed compiled declarations and namespace theorem audit | Not proof that a package build directory was compiled from its current sources. |
-| `verify --deep-checks` | Kernel-checked binding of the extraction's method bodies to assembly files with stated digests | Covers only the items it reports as reconfirmed; every fact it does not check stays trusted and is reported as not covered, and all pinned images require consumer-stated digests. The meaning of the audited statements rests on the `StrictBinding` sources and the Lean toolchain, whose hash and version the report prints. |
+| `verify --deep-checks` | Kernel-checked binding of the extraction's method bodies and carried metadata rows to assembly files with stated digests | Covers only the items it reports as reconfirmed; every fact it does not check stays trusted and is reported as not covered, and all pinned images require consumer-stated digests. The meaning of the audited statements rests on the `StrictBinding` sources and the Lean toolchain, whose hash and version the report prints. |
 
 `Extracted.signatures` selects method indices and is hash-bound. It lists the `signature` of each
 `methodEvidence` record, which `TranslationValid` equates with the full name the method's

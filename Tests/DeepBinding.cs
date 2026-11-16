@@ -20,7 +20,7 @@ partial class Program
                 binding.GetProperty("facts").GetArrayLength() != 12 ||
                 binding.GetProperty("images").GetArrayLength() != 2 ||
                 binding.GetProperty("facts").EnumerateArray().Count(fact =>
-                    fact.GetProperty("status").GetString() == "reconfirmed") != 1)
+                    fact.GetProperty("status").GetString() == "reconfirmed") != 2)
                 throw new InvalidOperationException("Unexpected joint binding report: " + result.Stdout);
             Console.WriteLine("PASS joint CLI verification reports image digests and all twelve facts");
         }
@@ -63,7 +63,7 @@ partial class Program
                         if (next != "deep-check sources") return;
                         var directory = Directory.EnumerateDirectories(extraction, "proof-*").Single();
                         var bodies = ModuleSource(directory, BodiesModule);
-                        File.WriteAllText(bodies, BodiesModuleSource(methods, 1));
+                        File.WriteAllText(bodies, PagedFactModuleSource(BindingFact.BodyBytes, methods, 1));
                         var path = ModuleSource(directory, module);
                         var source = File.ReadAllText(path);
                         var changed = edit(source);
@@ -123,12 +123,12 @@ partial class Program
             .Replace(BodiesDocstring, """
                 set_option debug.skipKernelTC true in
                 run_cmd Lean.Elab.Command.liftCoreM do
-                  let valid <- Lean.getConstInfo `BindingAudit.page1_valid
+                  let valid <- Lean.getConstInfo `BindingAudit.Bodies.page1_valid
                   Lean.addDecl (.thmDecl {
-                    name := `BindingAudit.page1, levelParams := [], type := valid.type,
+                    name := `BindingAudit.Bodies.page1, levelParams := [], type := valid.type,
                     value := Lean.mkConst ``True.intro })
 
-                """ + "\n" + BodiesDocstring, StringComparison.Ordinal), "BindingAudit.page1",
+                """ + "\n" + BodiesDocstring, StringComparison.Ordinal), "BindingAudit.Bodies.page1",
             BindingFact.BodyBytes, rejectedStage: "replay diagnostics");
         Mutation("wrong pinned identity theorem", ImagesModule, source => source.Replace(
             "theorem images_eq : images =",

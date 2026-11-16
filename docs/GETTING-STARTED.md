@@ -76,7 +76,8 @@ Verified: ExampleProof.correctness
 ```
 
 `Binding:` lists the facts about the assembly image that this run trusts; `verify --deep-checks`
-reconfirms them in the kernel ([deep verification](CLI.md#deep-verification)).
+reconfirms `body-bytes` and `metadata-rows` in the kernel and reports the others as not covered
+([deep verification](CLI.md#deep-verification)).
 
 `Subject:` is the method the theorem's conclusion is about and `Extraction entry:` the method the
 extraction started from; see [reading the report](CLI.md#reading-the-report).

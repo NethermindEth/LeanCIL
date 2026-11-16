@@ -2,8 +2,8 @@ using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 
-// Deep verification checks that the method bodies of an extraction are the bytes of
-// assembly files whose SHA-256 digests the caller states.
+// Deep verification checks that the method bodies and carried metadata rows of an extraction are
+// those of assembly files whose SHA-256 digests the caller states.
 partial class Program
 {
     /// <summary>One call's retained inputs and attempt, available to its caller after a failure.</summary>
@@ -262,43 +262,94 @@ partial class Program
         return contribution;
     }
 
-    /// <summary>The facts established by a complete, stable joint deep audit.</summary>
+    /// <summary>
+    /// The facts and images of a complete, stable joint deep audit, read from the subjects of the requests that
+    /// audit passed: each subject is reconfirmed by its request's theorem, and every fact no request names is not
+    /// covered for its recorded reason.
+    /// </summary>
     static BindingSection DeepBindingSection(DeepCheckInputs inputs, IReadOnlyList<DeepCheckInputs.Pin> pins,
-        StatementSources sources)
+        IReadOnlyList<BindingRequest> audited, StatementSources sources)
     {
+        Dictionary<BindingFact, string> factTheorems = [];
+        Dictionary<string, string> imageTheorems = new(StringComparer.Ordinal);
+        foreach (var request in audited)
+        {
+            var distinct = request.Subject switch
+            {
+                BindingSubject.Fact fact => factTheorems.TryAdd(fact.Value, request.Audit.name),
+                BindingSubject.Image image => imageTheorems.TryAdd(image.Digest, request.Audit.name),
+                _ => true
+            };
+            if (!distinct) throw new InvalidOperationException("Two deep-check requests name one subject: " +
+                request.Audit.name);
+        }
         var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet(StringComparer.Ordinal);
         ImageResult[] images =
         [
-            .. pins.Select(pin => new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned,
-                BindingStatus.Reconfirmed, "BindingAudit.I" + pin.Image.Digest + ".digest", null)),
+            .. pins.Select(pin => imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
+                ? new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned, BindingStatus.Reconfirmed,
+                    theorem, null)
+                : new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned, BindingStatus.NotCovered, null,
+                    "no checked theorem states the digest of this image")),
             .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
                 new ImageResult(image.Path, image.Digest, ImageRole.Unused, BindingStatus.NotCovered, null,
                     "no extraction pin or checked binding claim names this image"))
         ];
         BindingFactResult[] facts = [.. Enum.GetValues<BindingFact>().Select(fact =>
-            fact == BindingFact.BodyBytes
-                ? new BindingFactResult(fact, BindingStatus.Reconfirmed, "BindingAudit.bodies", null)
-                : new BindingFactResult(fact, BindingStatus.NotCovered, null, fact switch
-                {
-                    BindingFact.MetadataRows =>
-                        "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
-                    BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
-                    BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
-                    BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
-                    BindingFact.ObjectFields => "no check reads System.Object fields from an image",
-                    BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
-                    BindingFact.DispatchCatalogs => "no check reads the types of an image",
-                    BindingFact.StaticData => "no check reads static data from the image",
-                    BindingFact.GenericConstraints => "no check reads constraints from the image",
-                    BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
-                    BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
-                    _ => throw new InvalidOperationException("Missing binding fact result: " + fact)
-                }))];
+            factTheorems.TryGetValue(fact, out var theorem)
+                ? new BindingFactResult(fact, BindingStatus.Reconfirmed, theorem, null)
+                : new BindingFactResult(fact, BindingStatus.NotCovered, null, NotCoveredReason(fact)))];
         return new(BindingMode.Deep, new(inputs.Path, inputs.Digest), sources, images, facts);
     }
 
+    /// <summary>Why a deep run that audited no theorem about a fact does not cover it.</summary>
+    static string NotCoveredReason(BindingFact fact) => fact switch
+    {
+        BindingFact.BodyBytes => "no checked theorem binds the method bodies to the pinned images",
+        BindingFact.MetadataRows =>
+            "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
+        BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
+        BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
+        BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
+        BindingFact.ObjectFields => "no check reads System.Object fields from an image",
+        BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
+        BindingFact.DispatchCatalogs => "no check reads the types of an image",
+        BindingFact.StaticData => "no check reads static data from the image",
+        BindingFact.GenericConstraints => "no check reads constraints from the image",
+        BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
+        BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
+        _ => throw new InvalidOperationException("Missing binding fact reason: " + fact)
+    };
+
     const string ImagesModule = "BindingAudit.Images";
     const string BodiesModule = "BindingAudit.Bodies";
+    const string MetadataRowsModule = "BindingAudit.MetadataRows";
+
+    /// <summary>The facts proved page by page over the method evidence, in the order their modules build.</summary>
+    static readonly BindingFact[] PagedFacts = [BindingFact.BodyBytes, BindingFact.MetadataRows];
+
+    /// <summary>
+    /// A paged fact's generated module and the namespace of its pages; the theorem that states it, the proposition
+    /// it states about `BindingAudit.images` and `Extracted.methodEvidence`, and the check and claims its pages
+    /// read; and the module title, summary and theorem docstring.
+    /// </summary>
+    static (string Module, string Pages, string Theorem, string Proposition, string Check, string Claims,
+        string Title, string Summary, string Statement) PagedFact(BindingFact fact) => fact switch
+    {
+        BindingFact.BodyBytes => (BodiesModule, "Bodies", "bodies", "StrictBinding.BodiesBound",
+            "StrictBinding.bodyClaimBound", "StrictBinding.bodyClaims", "Method bodies in the pinned images",
+            "Every method body of the extraction's evidence is the bytes at the place the MethodDef row of its\n" +
+            "token gives in the pinned image of its assembly",
+            "The method bodies of `Extracted.methodEvidence` are in the pinned images."),
+        BindingFact.MetadataRows => (MetadataRowsModule, "MetadataRows", "metadataRows",
+            "StrictBinding.MetadataRowsBound", "StrictBinding.methodMetadataBound", "StrictBinding.metadataClaims",
+            "Method metadata in the pinned images",
+            "Every metadata block of the extraction's evidence holds the table header, Assembly row, table rows\n" +
+            "and heap entries of the pinned image its identity names, under one numbering of the #Strings and\n" +
+            "#Blob offsets per heap and with MethodDef RVAs zeroed",
+            "The metadata blocks of `Extracted.methodEvidence` belong to the pinned images."),
+        _ => throw new ArgumentOutOfRangeException(nameof(fact), fact, "Not a paged binding fact")
+    };
 
     /// <summary>The method bodies per page until the page cap applies; each page is one kernel evaluation.</summary>
     const int PageMethodsTarget = 250;
@@ -436,8 +487,9 @@ partial class Program
         foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
-        File.WriteAllText(ModuleSource(plan.Output, BodiesModule), BodiesModuleSource(plan.Methods,
-            BindingPageSize(plan.Methods)));
+        foreach (var fact in PagedFacts)
+            File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
+                plan.Methods, BindingPageSize(plan.Methods)));
     }
 
     static string ModuleSource(string directory, string module) =>
@@ -500,46 +552,50 @@ partial class Program
     }
 
     /// <summary>
-    /// The bodies module: one theorem per page of methods, each its own kernel evaluation, and `bodies`, which the
-    /// kernel-checked composition `claimsHold_of_pages` derives for the whole evidence. The composition
-    /// needs the pages to number enough to cover the evidence and to be the first pages in order, so no method is
-    /// skipped, repeated or reordered.
+    /// The module of a paged fact: one theorem per page of the claims the method evidence makes, each its own kernel
+    /// evaluation, and the fact's theorem, which the kernel-checked composition `claimsHold_of_pages` derives for
+    /// the whole evidence. The composition needs the pages to number enough to cover the evidence and to be the
+    /// first pages in order, so no claim is skipped, repeated or reordered.
     /// </summary>
-    static string BodiesModuleSource(int methods, int size)
+    static string PagedFactModuleSource(BindingFact fact, int methods, int size)
     {
+        var paged = PagedFact(fact);
         var pages = BindingPageCount(methods, size);
         var lemmas = string.Concat(Enumerable.Range(0, pages).Select(page => $$"""
             set_option debug.skipKernelTC true in
-            /-- The bodies of page {{page}} of the claims are in the pinned images. -/
-            theorem page{{page}} : StrictBinding.ClaimsHold StrictBinding.bodyClaimBound images
-                (StrictBinding.claimPage (StrictBinding.bodyClaims Extracted.methodEvidence) {{size}} {{page}}) := by
+            /-- The claims of page {{page}} hold in the pinned images. -/
+            theorem page{{page}} : StrictBinding.ClaimsHold {{paged.Check}} images
+                (StrictBinding.claimPage ({{paged.Claims}} Extracted.methodEvidence) {{size}} {{page}}) := by
               decide +kernel
 
 
             """));
-        var chain = string.Concat(Enumerable.Range(0, pages).Reverse().Select(page => $"(.succ page{page} "));
+        var chain = string.Concat(Enumerable.Range(0, pages).Reverse()
+            .Select(page => $"(.succ {paged.Pages}.page{page} "));
         return $$"""
             import BindingAudit.Images
             import Extracted
             import StrictBinding.Evidence
 
             /-!
-            # Method bodies in the pinned images
+            # {{paged.Title}}
 
-            Every method body of the extraction's evidence is the bytes at the place the MethodDef row of its
-            token gives in the pinned image of its assembly, proved page by page. The preparation and
-            each page lemma are kernel-checked when this module is replayed.
+            {{paged.Summary}}, proved page by page. The preparation and each page lemma are kernel-checked
+            when this module is replayed.
             -/
 
             namespace BindingAudit
+            namespace {{paged.Pages}}
 
             set_option debug.skipKernelTC true in
             /-- The pinned images decode and spell the identities they are pinned under. -/
             theorem prepared : StrictBinding.ok (StrictBinding.prepare images) = true := by decide +kernel
 
-            {{lemmas}}/-- The method bodies of `Extracted.methodEvidence` are in the pinned images. -/
-            theorem bodies : StrictBinding.BodiesBound images Extracted.methodEvidence :=
-              StrictBinding.claimsHold_of_pages (size := {{size}}) (count := {{pages}}) prepared
+            {{lemmas}}end {{paged.Pages}}
+
+            /-- {{paged.Statement}} -/
+            theorem {{paged.Theorem}} : {{paged.Proposition}} images Extracted.methodEvidence :=
+              StrictBinding.claimsHold_of_pages (size := {{size}}) (count := {{pages}}) {{paged.Pages}}.prepared
                 (by decide +kernel) {{chain}}.zero{{new string(')', pages)}}
 
             end BindingAudit
@@ -580,14 +636,14 @@ partial class Program
             }
         };
         var imagesEq = App(Const("Eq", 1), App(Const("List", 0), pinned), Const("BindingAudit.images"), images);
-        var bodies = App(Const("StrictBinding.BodiesBound"), Const("BindingAudit.images"),
-            Const("Extracted.methodEvidence"));
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
-            new(BodiesModule, new("BindingAudit.bodies", bodies, ApprovedAxioms),
-                new BindingSubject.Fact(BindingFact.BodyBytes)),
+            .. PagedFacts.Select(fact => (Fact: fact, Paged: PagedFact(fact))).Select(item => new BindingRequest(
+                item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
+                    Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
+                new BindingSubject.Fact(item.Fact))),
             .. plan.Images.DistinctBy(image => image.Sha256).Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
                 App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Sha256)),
@@ -615,8 +671,9 @@ partial class Program
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        if (failures.ContainsKey(ImagesModule)) failures[BodiesModule] = "build: " + ImagesModule + " did not build";
-        else if (Build(BodiesModule) is { } bodiesError) failures[BodiesModule] = "build: " + bodiesError;
+        foreach (var module in PagedFacts.Select(fact => PagedFact(fact).Module))
+            if (failures.ContainsKey(ImagesModule)) failures[module] = "build: " + ImagesModule + " did not build";
+            else if (Build(module) is { } pagedError) failures[module] = "build: " + pagedError;
         return failures;
     }
 
