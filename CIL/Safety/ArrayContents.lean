@@ -102,7 +102,7 @@ theorem step_arrayLoad_of_element {memory : Memory} {view : ArrayView} {index : 
     subst indexed <;>
     simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
       CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayIndex, found, loaded, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      arrayLoad, arrayIndex, found, loaded, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_arrayLoad_of_element
 
@@ -121,7 +121,7 @@ theorem step_arrayAddress_of_element {memory : Memory} {view : ArrayView} {index
     subst indexed <;>
     simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
       CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayIndex, typed, found, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      arrayAddress, arrayIndex, typed, found, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_arrayAddress_of_element
 
@@ -183,8 +183,8 @@ theorem step_arrayStore_of_write {memory after : Memory} {view : ArrayView} {ind
     subst indexed <;>
     simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
       CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
-      Except.pure]
+      arrayStore, arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
 
 #print axioms step_arrayStore_of_write
 
@@ -205,8 +205,8 @@ theorem step_arrayStore_i64_of_write {memory after : Memory} {view : ArrayView}
     subst indexed <;>
     simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
       CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
-      Except.pure]
+      arrayStore, arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
 
 #print axioms step_arrayStore_i64_of_write
 

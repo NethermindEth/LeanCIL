@@ -387,12 +387,13 @@ See [segment contracts](../CIL/Safety/SegmentContract.lean).
 
 `SegmentExit` distinguishes a continuing boundary, a return, a located fault and divergence.
 `SegmentExit.Raises` names CLR exceptions through `ExecutionFault.clrException`, retaining
-the distinction between thrown and arithmetic faults. Fault exits exclude fuel exhaustion;
-divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
+the distinction between thrown and arithmetic faults. Fault exits are definite faults, so they
+exclude fuel exhaustion and `unsupported` faults; divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
 release. `SegmentState.localFootprint body code` names the byte homes and widths of the slots that
 `segmentStores body code` lists.
 
-`ReachesRun` relates settled outcomes before and after a prefix, including prefixes with calls.
+`ReachesRun` relates stable outcomes (`Stable`: any outcome but fuel exhaustion) before and after
+a prefix, including prefixes with calls.
 `ReachesRun.call` takes the caller stack and the callee arguments separately. Its checked step
 premise establishes argument order and the retained stack, including a constructor's receiver.
 A reaching exit supplies continuation equivalence and a positive fuel lower bound. Its boundary
@@ -630,7 +631,7 @@ invariant state of smaller measure.
 | Exit at the loop's own `throw` | `loop_outcome_throw` |
 | Compose paths in either outcome | `loop_outcome_next`, `loop_reaches_outcome` |
 | Lift the head outcome through frame setup | `ensures_outcome_of_loop`, to `EnsuresOutcome pre post raises`, which names the outcome of every permitted input; with `raises` constantly `none` it is `Ensures` (`ensures_outcome_none`) |
-| Refute an expected exception | `loop_outcome_some_refuted`, from any settled run that does not throw it |
+| Refute an expected exception | `loop_outcome_some_refuted`, from any settled run that does not throw it; a run that ends in fuel exhaustion or an `unsupported` fault is not settled |
 
 The normal-only rules are the `none` instances of the outcome rules. Unsupported execution,
 invalid state and fuel exhaustion never satisfy an expected loop exception.

@@ -316,7 +316,7 @@ theorem missing_authority_rejected : ¬ unguardedContract.Holds Extracted.progra
   have faulted : invoke Extracted.program 8 pair (unguardedContract.args ⟨⟨0, 0⟩, 0, 0⟩) readOnly =
       .error ⟨2, 2, .memory .unwritable (.address ⟨0, 0⟩) 8⟩ := rfl
   have up := invoke_mono _ _ 8 _ _ _ (.ok (final, values)) trivial ran
-  have down := invoke_mono _ _ fuel _ _ _ _ (by simp [Settled]) faulted
+  have down := invoke_mono _ _ fuel _ _ _ _ (by simp [Stable]) faulted
   rw [Nat.add_comm] at down
   cases up.symm.trans down
 

@@ -27,6 +27,11 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--element-shape-only", StringComparer.Ordinal))
+{
+    ElementShapeCosts();
+    return;
+}
 if (args.Contains("--shape-resolution-only", StringComparer.Ordinal))
 {
     ShapeResolutionCosts();
@@ -67,6 +72,11 @@ if (args.Contains("--metadata-name-only", StringComparer.Ordinal))
     MetadataNameCosts();
     return;
 }
+if (args.Contains("--model-table-only", StringComparer.Ordinal))
+{
+    ModelTableCosts();
+    return;
+}
 if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
 {
     IndirectTargetCosts();
@@ -79,6 +89,7 @@ CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
+ElementShapeCosts();
 ShapeResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 CallCheckCosts();
@@ -117,6 +128,8 @@ const int SparseLongStatements = 1000;
 const double AllowedCallGrowth = 1.35;
 // Type identities compare one code per name, so a name four times as long may cost at most this much more.
 const double AllowedNameGrowth = 1.05;
+// A model table sixteen times as large may cost a lookup at most this much more.
+const double AllowedModelLookupGrowth = 1.05;
 // The most heartbeats deciding equality or inequality of two type identities may cost at either name length.
 const long TypeDecisionLimit = 9_500;
 // `decide +kernel` costs about 2,000 heartbeats for any statement; less means the decision was not measured.
@@ -345,6 +358,100 @@ void ArgumentResolutionCosts()
             Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
         }
     }
+}
+
+// Fails when element shape facts or reads cost over 1.35 times more per element type as types and layouts grow
+// together, or over 1.35 times more in total as sites of 8 types grow; per-site facts would grow with the sites.
+void ElementShapeCosts()
+{
+    const double AllowedElementGrowth = 1.35;
+    var shapeDirectory = At("artifacts/LookupScaling/ElementShapes");
+    Directory.CreateDirectory(shapeDirectory);
+    (string Name, Func<(int Size, long Facts, long Reads), long> Cost)[] measures =
+        [("facts", sample => sample.Facts), ("reads", sample => sample.Reads)];
+    var byType = new[] { 8, 32, 128 }.Select(size =>
+        (Count: size, Sample: ElementShapeSample(shapeDirectory, size, size))).ToArray();
+    foreach (var (name, cost) in measures)
+    {
+        var perElement = byType.Select(sample => (double)cost(sample.Sample) / sample.Count).ToArray();
+        var measured = string.Join("; ", byType.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{sample.Count} = {(double)cost(sample.Sample) / sample.Count:F0}")));
+        if (perElement.Skip(1).Zip(perElement).Any(pair => pair.First > pair.Second * AllowedElementGrowth))
+            throw new InvalidOperationException(
+                $"Element shape {name} cost {measured} heartbeats per element type; the limit is " +
+                $"{AllowedElementGrowth} times the cost per element type at the size before.");
+        Console.WriteLine($"PASS element shape {name}: {measured} heartbeats per element type");
+    }
+    const int SharedTypes = 8;
+    var bySite = new[] { 8, 32, 128 }.Select(sites =>
+        (Count: sites, Sample: ElementShapeSample(shapeDirectory, SharedTypes, sites))).ToArray();
+    foreach (var (name, cost) in measures)
+    {
+        var totals = bySite.Select(sample => (double)cost(sample.Sample)).ToArray();
+        var measured = string.Join("; ", bySite.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{sample.Count} = {cost(sample.Sample)}")));
+        if (totals.Skip(1).Zip(totals).Any(pair => pair.First > pair.Second * AllowedElementGrowth))
+            throw new InvalidOperationException(
+                $"Element shape {name} of {SharedTypes} types cost {measured} heartbeats by site count; the limit " +
+                $"is {AllowedElementGrowth} times the cost at the site count before.");
+        Console.WriteLine($"PASS element shape {name} of {SharedTypes} types: {measured} heartbeats by site count");
+    }
+}
+
+// The heartbeats of the element shape facts of a method with `sites` struct element sites over `types` layouts, the
+// site at position k naming layout k mod types, and of reading every type's shape through them.
+(int Size, long Facts, long Reads) ElementShapeSample(string directory, int types, int sites)
+{
+    var indices = Enumerable.Range(0, types).ToArray();
+    var raw = string.Join(",\n  ", indices.Select(index => $$"""
+        { identity := "Cell{{index}}", explicit := false, packing := 0, declaredSize := 0, fields := [] }
+        """));
+    var computed = string.Join(",\n  ", indices.Select(index =>
+        $$"""{ layout := { size := {{4 * (index + 1)}}, fields := [] }, alignment := 4 }"""));
+    var code = string.Join(", ", Enumerable.Range(0, sites).Select(site =>
+        $$"""⟨{{5 * site}}, 163, .type (.aggregate "Cell{{site % types}}" {{site % types}})⟩"""));
+    var reads = string.Join(", ", indices.Select(index =>
+        $$"""body.elementShape (.aggregate "Cell{{index}}" {{index}})"""));
+    var shapes = string.Join(", ", indices.Select(index =>
+        $$""".value (.aggregate "Cell{{index}}" {{4 * (index + 1)}})"""));
+    var source = $$"""
+        import CIL.Safety.ValueSteps
+        open CIL CIL.Extraction Lean Elab Command
+        set_option maxRecDepth 8192
+        /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+        elab "#resolution_cost " label:str " in " command:command : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand command
+          let after <- IO.getNumHeartbeats
+          logInfo m!"resolution {label.getString} {after - before} heartbeats"
+        def rawLayouts : List RawLayout := [
+          {{raw}}]
+        def computedLayouts : Array ComputedLayout := #[
+          {{computed}}]
+        def environment : LayoutEnvironment := { rawLayouts := rawLayouts, layouts := computedLayouts }
+        def body : Method := { code := [.ret], locals := [], returnsValue := false, environment := environment }
+        theorem body_returnsValue : body.returnsValue = false := rfl
+        theorem body_declared : body.declared = {} := rfl
+        def bodyClosed : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false, callingConvention := 0,
+          attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+          initLocals := true, maxStack := 2, genericParameters := [], code := [{{code}}] }
+        #resolution_cost "fact" in cil_resolution_facts body
+        #resolution_cost "simplifier" in
+        theorem body_reads : [{{reads}}] = [{{shapes}}] := by simp only [cil_code]
+        #print axioms body_elementShape{{types - 1}}
+        #print axioms body_reads
+        """ + "\n";
+    var path = Path.Combine(directory, $"Elements{types}Sites{sites}.lean");
+    File.WriteAllText(path, source);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException("Element shape facts introduced an unproved theorem.");
+    var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+    if (costs.Length != 2)
+        throw new InvalidOperationException("Missing element shape costs: " + output);
+    return (types, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
+        long.Parse(costs[1].Groups[2].Value, CultureInfo.InvariantCulture));
 }
 
 // Fails when the shape facts or reads of distinct operands cost over 1.35 times more per operand than at the size
@@ -986,6 +1093,7 @@ foreach (var outcome in new[] { "equal", "unequal" })
     Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
 }
 MetadataNameCosts();
+ModelTableCosts();
 
 // The heartbeats `decide +kernel` adds to the name clause of the call and field operand checks, which reads a typed
 // name back and compares its bytes with the row's. Names of 20, 80 and 320 bytes share all but their last byte. The
@@ -1031,6 +1139,99 @@ void MetadataNameCosts()
             $"A metadata name spells its bytes at {measured} heartbeats; per byte, the limit is " +
             $"{AllowedGrowth} times the cost at the shorter length."));
     Console.WriteLine($"PASS a metadata name spells its bytes at {measured} heartbeats");
+}
+
+// `runtimeModel` searches a literal tree of model entries by name code and compares one method reference at the leaf,
+// so a lookup in 256 entries costs the four extra tree levels over 16 and no more, whether it queries the first, the
+// middle or the last entry; a scan of the entries would make the last cost more. The agreement check runs one
+// lookup per live call site, so its cost per site stays flat over 8, 32 and 128 sites. Each site calls a distinct
+// method, so the kernel cannot reuse one site's lookup for another.
+void ModelTableCosts()
+{
+    var tableDirectory = At("artifacts/LookupScaling/ModelTables");
+    Directory.CreateDirectory(tableDirectory);
+    int[] tableSizes = [16, 256];
+    int[] siteCounts = [8, 32, 128];
+    string[] positions = ["first", "middle", "last"];
+    int Queried(string position, int size) => position switch { "first" => 0, "middle" => size / 2, _ => size - 1 };
+    string Entries(int size) => string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
+        $"ModelEntry.exact .call (method name!\"Model{index:D4}\") (.memory (.divRemOut {index}))"));
+    string Table(int size) => $$"""
+        /-- {{size}} modelled methods. -/
+        def entries{{size}} : List ModelEntry := [
+          {{Entries(size)}}]
+        /-- Their literal table. -/
+        def table{{size}} : ModelTable := model_table% entries{{size}}
+        {{string.Join("\n", positions.Select(position => Lookup(position, size)))}}
+        """;
+    string Lookup(string position, int size) => $$"""
+        #kernel_cost "model lookup {{position}} {{size}}"
+          (table{{size}}.find {} .call (method name!"Model{{Queried(position, size):D4}}") =
+            some (.memory (.divRemOut {{Queried(position, size)}})))
+        """;
+    string Emitted(int index) => $".memory (.divRemOut {index})";
+    string Site(int index) =>
+        $"⟨{index}, 40, .call {{ method := method name!\"Model{index:D4}\", target := .external \"\", " +
+        "typeArguments := [], parameterCount := 0, returnsValue := true }⟩";
+    string Sites(int count) => $$"""
+        /-- {{count}} live calls of distinct modelled methods, the call at index i to method i. -/
+        def raw{{count}} : RawMethod := { shell with code := [
+          {{string.Join(",\n  ", Enumerable.Range(0, count).Select(Site))}}] }
+        /-- The model each call emits. -/
+        def code{{count}} : List Instruction :=
+          [{{string.Join(", ", Enumerable.Range(0, count).Select(Emitted))}}]
+        #kernel_cost "model agreement {{count}}"
+          (ModelsAgree catalog {} raw{{count}} (List.replicate {{count}} true) code{{count}})
+        """;
+    var path = Path.Combine(tableDirectory, "ModelTables.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Extraction.RuntimeModels
+        open CIL CIL.Extraction Lean Elab Command
+        {{KernelCostCommand}}
+        /-- A static method of no parameters named `name`. -/
+        def method (name : MetadataName) : MethodRef :=
+          { owner := .atom "Tests" "Models", name, hasThis := false, genericArity := 0, returnType := .void,
+            parameters := [] }
+        {{string.Join("\n", tableSizes.Select(Table))}}
+        /-- The larger table, accounting for every `divRemOut` emission. -/
+        def catalog : ModelCatalog where
+          table := table256
+          lowered
+            | .memory (.divRemOut width) => some (.memory (.divRemOut width))
+            | _ => none
+        /-- A method shell whose code each fixture supplies. -/
+        def shell : RawMethod :=
+          { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
+            attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+            initLocals := true, maxStack := 1, genericParameters := [], code := [] }
+        {{string.Join("\n", siteCounts.Select(Sites))}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ModelTableCost().Matches(output).ToDictionary(
+        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != positions.Length * tableSizes.Length + siteCounts.Length ||
+        costs.Values.Min() < KernelDecisionFloor)
+        throw new InvalidOperationException("Missing model table costs:\n" + output);
+    foreach (var position in positions)
+    {
+        var lookups = tableSizes.Select(size => costs[("lookup " + position, size)]).ToArray();
+        var lookupMeasure = string.Join(", ", tableSizes.Select(size =>
+            string.Create(CultureInfo.InvariantCulture, $"{costs[("lookup " + position, size)]} at {size} entries")));
+        if (lookups[1] > lookups[0] * AllowedModelLookupGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"A model lookup of the {position} entry costs {lookupMeasure} heartbeats; the limit is " +
+                $"{AllowedModelLookupGrowth} times the cost in the smaller table."));
+        Console.WriteLine($"PASS a model lookup of the {position} entry costs {lookupMeasure} heartbeats");
+    }
+    double PerSite(int count) => (double)costs[("agreement", count)] / count;
+    var agreementMeasure = string.Join(", ", siteCounts.Select(count =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[("agreement", count)]} at {count} sites")));
+    if (!siteCounts.Zip(siteCounts.Skip(1)).All(pair => PerSite(pair.Second) <= PerSite(pair.First) * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"The model agreement check costs {agreementMeasure} heartbeats; per site, the limit is {AllowedGrowth} " +
+            $"times the cost at the smaller count."));
+    Console.WriteLine($"PASS the model agreement check costs {agreementMeasure} heartbeats");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -2096,6 +2297,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\bname spells ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost();
+
+    [GeneratedRegex(@"\bmodel (lookup first|lookup middle|lookup last|agreement) ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ModelTableCost();
 
     [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ExceptionDecision();

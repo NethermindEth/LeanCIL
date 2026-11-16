@@ -200,11 +200,10 @@ example : ¬ Transported (.error ⟨1, 6, .unsupported "Opcode not admitted"⟩ 
   rintro ⟨_, thrown⟩
   cases thrown
 
-/-- The extraction raises, but the literal body proves nothing about it: it never raises. -/
-example : ¬ Raises (extracted.set 1 holeThrow) 1 [.scalar (.i64 101)] empty outOfRange := by
-  rintro ⟨_, fault, ran, thrown⟩
-  cases invoke_unique (by simp [Settled, thrown]) (by simp [Settled]) ran hole_faults
-  simp at thrown
+/-- The extraction raises, but the literal body proves nothing about it: its hole's fault is not
+    a throw, and it is not settled, so `invoke_unique` refutes no raise from it either. -/
+example : ¬ Settled (.error ⟨1, 6, .unsupported "Opcode not admitted"⟩ :
+    Except LocatedFault (Safety.Memory × List Safety.Value)) := by decide
 
 theorem literal_exhausted : Safety.invoke literal 0 1 [.scalar (.i64 101)] empty = .error ⟨1, 0, .fuelExhausted⟩ := rfl
 

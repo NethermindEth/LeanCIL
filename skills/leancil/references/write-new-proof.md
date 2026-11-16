@@ -225,6 +225,6 @@ Report a property that does not hold as a result. Show the user the failing inpu
 counterexample as its own theorem:
 [WrongAdd](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/WrongAdd.lean)
 proves a counterexample to the addition contract for a subtracting implementation, and
-`MethodContract.not_holds_of_fault` refutes a contract from a located fault on an input meeting
-its precondition
+`MethodContract.not_holds_of_fault` refutes a contract from a located definite fault on an input
+meeting its precondition; fuel exhaustion and an `unsupported` fault are not definite
 ([refutation](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#refute-a-contract)).
