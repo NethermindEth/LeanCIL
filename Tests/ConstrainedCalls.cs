@@ -73,6 +73,12 @@ foreach (var (name, type, expected) in new[]
     Run(["dotnet", ExtractorPath, "extract", name == "DirectGeneric" ? directAssembly : assembly,
         $"ConstrainedCalls::{name}(Examples.{type}&)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    // A specialized body's field operands carry no token, so its closed raw method names the field by the row the
+    // definition's token names.
+    if (name == "Generic" && !source.Split('\n').Any(line =>
+            line.Contains("Closed : Extraction.RawMethod", StringComparison.Ordinal) &&
+            line.Contains("name!\"Value\"", StringComparison.Ordinal)))
+        throw new InvalidOperationException($"The closed body of {name} does not name its field operand Value");
     var proof = Path.Combine(root, name + ".lean");
     var extent = type.Contains('`') ? 8 : 4;
     File.WriteAllText(proof, source + $$"""
