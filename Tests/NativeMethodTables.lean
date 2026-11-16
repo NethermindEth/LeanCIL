@@ -201,9 +201,8 @@ theorem native_add_rejected :
 
 /-- A native array element load validates the same backing storage as pointer loading. -/
 theorem native_array_load :
-    managedStep (.tableElement signature) none 0 frame
-      [.scalar (.i32 1), .methodTable opaqueTable] memory =
-        .ok (.next 1 [.methodPointer ⟨signature, some second⟩] frame memory) := rfl
+    instruction (.ldelem .i) [.scalar (.i32 1), .methodTable opaqueTable] memory =
+      .ok (memory, [.methodPointer ⟨signature, some second⟩]) := rfl
 #print axioms native_array_load
 
 /-- A caller's signature that differs from the table's. -/
@@ -344,6 +343,19 @@ theorem native_cursor_table_reads_refused :
     transfer 163 (.type signature.typeExpr) [.word32, nativeKind] = none := by
   decide +kernel
 #print axioms native_cursor_table_reads_refused
+
+/-- `ldlen` and `ldelem.i` of a handler table emit their decoded instructions, not the managed
+    table operations or a value-array load. -/
+theorem table_reads_emit_decoded :
+    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [tableKind] .ldlen = true ∧
+    scalarEmissionMatches #[] none ⟨0, 151, .none⟩ [.word32, tableKind] (.ldelem .i) = true ∧
+    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [tableKind] (.managed .tableLength) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 151, .none⟩ [.word32, tableKind]
+      (.managed (.tableElement signature)) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 151, .none⟩ [.word32, tableKind]
+      (.memory (.arrayLoad 8 false)) = false := by
+  decide +kernel
+#print axioms table_reads_emit_decoded
 
 end TableTransfer
 

@@ -64,17 +64,17 @@ private def runs (code : List CIL.Instruction) (arguments : List CIL.Safety.Valu
 
 /-- `ldlen` reads the length back from the allocation's size. -/
 theorem length_of_fresh :
-    (runs [.ldc_i4 3, .newarr node, .memory .referenceArrayLength, .ret] []
+    (runs [.ldc_i4 3, .newarr node, .ldlen, .ret] []
       budgeted).map Prod.snd = .ok [.scalar (.i64 3)] := rfl
 #print axioms length_of_fresh
 
 /-- `ldlen`, `ldelem.ref` and `stelem.ref` of a null array throw `NullReferenceException`. -/
 theorem null_array_throws :
-    runs [.ldnull, .memory .referenceArrayLength, .ret] [] budgeted =
+    runs [.ldnull, .ldlen, .ret] [] budgeted =
       .error ⟨0, 1, .thrown .nullReference⟩ ∧
-    runs [.ldnull, .ldc_i4 0, .memory .referenceArrayLoad, .ret] [] budgeted =
+    runs [.ldnull, .ldc_i4 0, .ldelem_ref, .ret] [] budgeted =
       .error ⟨0, 2, .thrown .nullReference⟩ ∧
-    runs [.ldnull, .ldc_i4 0, .ldnull, .memory .referenceArrayStore,
+    runs [.ldnull, .ldc_i4 0, .ldnull, .stelem_ref,
       .ldc_i4 0, .ret] [] budgeted =
       .error ⟨0, 3, .thrown .nullReference⟩ := ⟨rfl, rfl, rfl⟩
 #print axioms null_array_throws
@@ -82,26 +82,26 @@ theorem null_array_throws :
 /-- An index at the length, or a negative one read unsigned, throws `IndexOutOfRangeException`
     before a stored value's class is checked. -/
 theorem index_out_of_range :
-    runs [.ldc_i4 2, .newarr node, .ldc_i4 2, .memory .referenceArrayLoad,
+    runs [.ldc_i4 2, .newarr node, .ldc_i4 2, .ldelem_ref,
       .ret] [] budgeted = .error ⟨0, 3, .thrown .indexOutOfRange⟩ ∧
     runs [.ldc_i4 2, .newarr circle, .ldc_i4 (-1), .ldarg 0,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
+      .stelem_ref, .ldc_i4 0, .ret] [squareObject] holdingSquare =
       .error ⟨0, 4, .thrown .indexOutOfRange⟩ := ⟨rfl, rfl⟩
 #print axioms index_out_of_range
 
 /-- A fresh element is null, and null is storable into any array of class references. -/
 theorem null_elements :
-    (runs [.ldc_i4 1, .newarr node, .ldc_i4 0, .memory .referenceArrayLoad,
+    (runs [.ldc_i4 1, .newarr node, .ldc_i4 0, .ldelem_ref,
       .ret] [] budgeted).map Prod.snd = .ok [.object .null] ∧
     (runs [.ldc_i4 1, .newarr circle, .dup, .ldc_i4 0, .ldnull,
-      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret] []
+      .stelem_ref, .ldc_i4 0, .ldelem_ref, .ret] []
       budgeted).map Prod.snd = .ok [.object .null] := ⟨rfl, rfl⟩
 #print axioms null_elements
 
 /-- A `Square` is storable into an array of `Shape` and loads back as itself. -/
 theorem covariant_store :
     (runs [.ldc_i4 1, .newarr shape, .dup, .ldc_i4 0, .ldarg 0,
-      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret]
+      .stelem_ref, .ldc_i4 0, .ldelem_ref, .ret]
       [squareObject] holdingSquare).map Prod.snd = .ok [squareObject] := rfl
 #print axioms covariant_store
 
@@ -109,7 +109,7 @@ theorem covariant_store :
     element keeps what it held. -/
 theorem mismatched_store :
     runs [.ldc_i4 1, .newarr circle, .ldc_i4 0, .ldarg 0,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
+      .stelem_ref, .ldc_i4 0, .ret] [squareObject] holdingSquare =
       .error ⟨0, 4, .thrown .arrayTypeMismatch⟩ := rfl
 #print axioms mismatched_store
 
@@ -117,7 +117,7 @@ theorem mismatched_store :
     exception the CLR might not throw. -/
 theorem array_store_unsupported :
     runs [.ldc_i4 1, .newarr shape, .dup, .ldc_i4 0, .ldc_i4 1,
-      .newarr shape, .memory .referenceArrayStore, .ldc_i4 0, .ret] []
+      .newarr shape, .stelem_ref, .ldc_i4 0, .ret] []
       budgeted = .error ⟨0, 6, .unsupported "Array store outside the admitted classes"⟩ := rfl
 #print axioms array_store_unsupported
 
@@ -132,7 +132,7 @@ private def holdingText : CIL.Safety.Memory :=
     the string's own class. -/
 theorem opaque_store :
     (runs [.ldc_i4 1, .newarr text, .dup, .ldc_i4 0, .ldarg 0,
-      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret]
+      .stelem_ref, .ldc_i4 0, .ldelem_ref, .ret]
       [.object (.address ⟨0, 0⟩)] holdingText).map Prod.snd =
       .ok [.object (.address ⟨0, 0⟩)] := rfl
 #print axioms opaque_store
@@ -141,10 +141,10 @@ theorem opaque_store :
     stored into an array of `Shape` does too: neither class derives from the other. -/
 theorem opaque_mismatch :
     runs [.ldc_i4 1, .newarr text, .ldc_i4 0, .ldarg 0,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨1, 0⟩)]
+      .stelem_ref, .ldc_i4 0, .ret] [.object (.address ⟨1, 0⟩)]
       holdingText = .error ⟨0, 4, .thrown .arrayTypeMismatch⟩ ∧
     runs [.ldc_i4 1, .newarr shape, .ldc_i4 0, .ldarg 0,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨0, 0⟩)]
+      .stelem_ref, .ldc_i4 0, .ret] [.object (.address ⟨0, 0⟩)]
       holdingText = .error ⟨0, 4, .thrown .arrayTypeMismatch⟩ := ⟨rfl, rfl⟩
 #print axioms opaque_mismatch
 

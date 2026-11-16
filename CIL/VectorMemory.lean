@@ -167,8 +167,8 @@ inductive MemoryOp where
   | spanSlice (explicitLength : Bool) | spanReadOnly
   /-- A span view over supplied reference-free array storage, without allocation or copying. -/
   | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
-  /-- Integer operations over supplied array storage; allocation is not modelled. -/
-  | arrayLength | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
+  /-- A typed integer element load or store over supplied array storage. -/
+  | arrayLoad (width : Nat) (signed : Bool) | arrayStore (width : Nat)
   /-- A checked element address retains allocation provenance without granting authority. -/
   | arrayAddress (element : ArrayElement) (writable : Bool := true)
   /-- A typed reference-free element transfer retains byte initialization masks. -/
@@ -187,12 +187,6 @@ inductive MemoryOp where
   /-- An `ArgumentOutOfRangeException` guard comparing a `width`-bit integer with a bound. The
       parameter name is an opaque string nothing reads. -/
   | comparisonGuard (guard : ComparisonGuard) (width : Nat) (signed : Bool)
-  /-- `ldlen` of an array of class references: its element count, as a native integer. -/
-  | referenceArrayLength
-  /-- `ldelem.ref` of an array of class references: the reference its element's slot holds. -/
-  | referenceArrayLoad
-  /-- `stelem.ref` of an array of class references, after the CLR's covariance check. -/
-  | referenceArrayStore
   deriving DecidableEq, Repr
 
 /-- Bytes the model reserves for each class instance field, in declaration order. The layout is
@@ -221,15 +215,14 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanFromReference .. | .byteOffset => 2
   | .spanSingleReference .. => 1
   | .arraySpan _ _ range => range.argumentCount
-  | .spanReinterpret .. | .spanReadOnly | .arrayLength => 1
+  | .spanReinterpret .. | .spanReadOnly => 1
   | .arrayLoad .. | .arrayAddress .. => 2
   | .arrayTransfer _ store => if store then 3 else 2
-  | .arrayStore _ | .referenceArrayStore => 3
-  | .referenceArrayLoad => 2
+  | .arrayStore _ => 3
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .nullRef | .stringLiteral _ | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue .. | .createSpan _
-  | .spanReference | .spanLength | .isNullRef | .referenceArrayLength => 1
+  | .spanReference | .spanLength | .isNullRef => 1
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
 def offsetValue (signed : Bool) (value : Value) : Option Int :=

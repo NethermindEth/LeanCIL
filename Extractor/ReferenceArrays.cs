@@ -21,15 +21,14 @@ internal static class ReferenceArrays
 
     /// <summary>
     /// The checked operation for an array instruction over an array of class references, or null when the
-    /// instruction is not one. <paramref name="arrayOperand"/> says whether <c>ldlen</c> reads such an array.
+    /// instruction is not one; <c>ldlen</c> is the same instruction for every array.
     /// </summary>
-    internal static Operation? Translate(Instruction instruction, bool arrayOperand) => instruction.OpCode.Code switch
+    internal static Operation? Translate(Instruction instruction) => instruction.OpCode.Code switch
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
             new NewArray(new(LayoutEvidence.Scope(element), element.FullName)),
-        Code.Ldlen when arrayOperand => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Length)),
-        Code.Ldelem_Ref => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Load)),
-        Code.Stelem_Ref => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Store)),
+        Code.Ldelem_Ref => new ReferenceElementAccess(false),
+        Code.Stelem_Ref => new ReferenceElementAccess(true),
         Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any
             when instruction.Operand is TypeReference element &&
                 (ObjectTypes.Candidate(element) || Element(element)) =>

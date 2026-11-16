@@ -391,16 +391,6 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {site : Nat}
 
 #print axioms StepContract.initializeSpanLocal
 
-/-- The length a method table answers is a well-formed native integer. -/
-theorem methodTableLength_numeric {table : CIL.MethodTable} {length : CIL.Value}
-    (counted : methodTableLength table = .ok length) : numericValue length = true := by
-  unfold methodTableLength at counted
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at counted
-  repeat' first
-    | (cases counted <;> rfl)
-    | split at counted
-#print axioms methodTableLength_numeric
-
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat)

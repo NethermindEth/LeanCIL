@@ -31,6 +31,135 @@ theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ 
     exact next value checked observable
 #print axioms checkedNative_bind
 
+/-- A method table's length reads no memory, so renaming leaves it and its faults unchanged. -/
+theorem methodTableLength_renamed (mapping : AllocationRenaming)
+    (table : CIL.MethodTable) :
+    ResultRenamed mapping Eq (methodTableLength table) (methodTableLength table) := by
+  unfold methodTableLength
+  cases table.targets with
+  | none => exact .error _
+  | some targets =>
+    by_cases large : targets.size ≥ 2 ^ 31
+    · simp only [large, ite_true, Bind.bind, Except.bind]; exact .error _
+    · simp only [large, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]; exact .ok rfl
+#print axioms methodTableLength_renamed
+
+/-- An observable method table element read selects the same pointer in renamed memory: a
+    native backing resolves its stable binding to the renamed allocation. -/
+theorem Memory.Renamed.methodTableElement_bind {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {relation : β → γ → Prop}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (table : CIL.MethodTable) (index : CIL.Value)
+    (sourceNext : CIL.MethodPointer → ExecutionResult β)
+    (targetNext : CIL.MethodPointer → ExecutionResult γ)
+    (observable : SuccessOrThrow (methodTableElement table index source >>= sourceNext))
+    (next : ∀ pointer, SuccessOrThrow (sourceNext pointer) →
+      ResultRenamed mapping relation (sourceNext pointer) (targetNext pointer)) :
+    ResultRenamed mapping relation (methodTableElement table index source >>= sourceNext)
+      (methodTableElement table index target >>= targetNext) := by
+  unfold methodTableElement at observable ⊢
+  obtain ⟨signature, targets, backing, entryCount, counted⟩ := table
+  cases selected : arrayIndex index with
+  | none => simp only [Bind.bind, Except.bind]; exact .error _
+  | some position =>
+    simp only [selected] at observable ⊢
+    cases targets with
+    | none => exact .error _
+    | some targets =>
+      by_cases large : targets.size ≥ 2 ^ 31
+      · simp only [large, ite_true, Bind.bind, Except.bind]; exact .error _
+      · simp only [large, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
+          at observable ⊢
+        cases found : targets[position]? with
+        | none => simp only; exact .error _
+        | some entry =>
+          simp only [found] at observable ⊢
+          cases backing with
+          | none => simp only at observable ⊢; exact next _ observable
+          | some backing =>
+            simp only at observable ⊢
+            exact checkedNative_bind _ _ _ _
+              (fun value proof => related.loadNativeTable_success formed _ value proof) observable
+              (fun value _ observed => next value observed)
+#print axioms Memory.Renamed.methodTableElement_bind
+
+/-- Array lengths, element loads and stores, and handler table reads touch the mapped element
+    and relate their memories. -/
+theorem Memory.Renamed.elementInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (op : CIL.Instruction)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (elementInstruction op stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (elementInstruction op stack source)
+      (elementInstruction op (stack.map mapping.value) target) := by
+  unfold elementInstruction at observable ⊢
+  split at observable
+  -- Every arm names its stack constructors, so the renamed stack reduces to the same arm.
+  all_goals try simp only [List.map_cons, AllocationRenaming.value, AllocationRenaming.arrayView,
+    arrayLoad, arrayStore] at observable ⊢
+  all_goals try dsimp +instances only [AllocationRenaming.arrayView]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,
+    ManagedReference.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals have imageEquality : ∀ left right, left < mapping.sourceLimit →
+      right < mapping.sourceLimit → (mapping.image left = mapping.image right ↔ left = right) :=
+    fun left right leftBound rightBound =>
+      ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (methodTableLength_renamed mapping _).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply related.methodTableElement_bind formed _ _ _ _ observable
+       intro pointer observable
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.loadSlot formed _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArrayOf _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArraySlot _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       have slotBound := referenceArraySlot_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.storableIn _ _ (by assumption)).bind
+       intro first second same
+       subst second)
+    | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadValue _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.checkedArray _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.arrayElement _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound : first.allocation < mapping.sourceLimit := by
+         rw [related.sourceLimit]
+         exact (checkedArrayElement_valid _ _ _ _ _ sourceStep).below formed
+       subst second)
+    | dsimp +instances only [AllocationRenaming.reference]
+    | simp only [mapping.isNull, imageEquality]
+    | (split <;> try simp only [*, mapping.isNull, AllocationRenaming.managedReference,
+        Bind.bind, Except.bind])
+#print axioms Memory.Renamed.elementInstructionResult
+
 set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
 theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
@@ -55,6 +184,7 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
       [List.map_cons, AllocationRenaming.value]
     all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
     all_goals try exact related.memoryInstructionResult _ formed _ bounds observable
+    all_goals try exact related.elementInstructionResult _ formed _ bounds observable
     all_goals try solve
       | (apply checkedNative_bind _ _ _ _
           (fun value proof => related.loadNativeTable_success formed _ value proof) observable

@@ -393,6 +393,36 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       instructionStep (.stind kind) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
+@[cil_step] theorem step_ldlen_eq (stack : List Value) :
+    step body .ldlen pc args frame stack memory =
+      instructionStep .ldlen pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 1 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_ldelem_eq {kind} (stack : List Value) :
+    step body (.ldelem kind) pc args frame stack memory =
+      instructionStep (.ldelem kind) pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_ldelem_ref_eq (stack : List Value) :
+    step body .ldelem_ref pc args frame stack memory =
+      instructionStep .ldelem_ref pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_stelem_eq {kind} (stack : List Value) :
+    step body (.stelem kind) pc args frame stack memory =
+      instructionStep (.stelem kind) pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 3 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
+@[cil_step] theorem step_stelem_ref_eq (stack : List Value) :
+    step body .stelem_ref pc args frame stack memory =
+      instructionStep .stelem_ref pc frame stack memory := by
+  simp only [step, instructionStep, instruction, observerCount, pureArity]
+  by_cases observed : unspecifiedOperands 3 stack = true <;>
+    simp only [observed, ↓reduceIte, Bool.false_eq_true] <;> rfl
 -- A stepped `ldind` or `stind` of a known kind shows its width and sign as literals.
 attribute [cil_step, cil_instruction_step] CIL.NumericKind.width CIL.NumericKind.signed
 @[cil_step] theorem step_dup_eq (stack : List Value) :

@@ -414,8 +414,8 @@ does not lay out, and a short budget is the model's `allocationFailure`. The len
 `newarr` decodes it for value arrays: a negative `int32` or native length throws
 `System.OverflowException`, and one above `0x7fffffc7` is unsupported.
 
-`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (`.referenceArrayLength`,
-`.referenceArrayLoad`, `.referenceArrayStore`) locate it with `referenceArrayOf`: a null array
+`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (the object arms of `elementInstruction`)
+locate it with `referenceArrayOf`: a null array
 throws `NullReferenceException`, and a reference to anything but offset 0 of a live array of
 class references is an ill-typed state. An index read unsigned at or past the length then
 throws `IndexOutOfRangeException` (`referenceArraySlot`), so a negative int32 index is out of

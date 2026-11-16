@@ -823,7 +823,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
+    | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -878,6 +879,11 @@ theorem step_relabel_shr_un : StepRelabel .shr_un := step_relabel _
 theorem step_relabel_clt : StepRelabel .clt := step_relabel _
 theorem step_relabel_ldind (kind : CIL.NumericKind) : StepRelabel (.ldind kind) := step_relabel _
 theorem step_relabel_stind (kind : CIL.NumericKind) : StepRelabel (.stind kind) := step_relabel _
+theorem step_relabel_ldlen : StepRelabel .ldlen := step_relabel _
+theorem step_relabel_ldelem (kind : CIL.NumericKind) : StepRelabel (.ldelem kind) := step_relabel _
+theorem step_relabel_ldelem_ref : StepRelabel .ldelem_ref := step_relabel _
+theorem step_relabel_stelem (kind : CIL.NumericKind) : StepRelabel (.stelem kind) := step_relabel _
+theorem step_relabel_stelem_ref : StepRelabel .stelem_ref := step_relabel _
 theorem step_relabel_dup : StepRelabel .dup := step_relabel _
 theorem step_relabel_pop : StepRelabel .pop := step_relabel _
 theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabel _
@@ -1470,7 +1476,8 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
+    | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

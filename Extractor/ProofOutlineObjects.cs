@@ -89,7 +89,7 @@ internal static partial class ProofOutline
 
     /// <summary>A scalar element read and the field footprints its contents must be disjoint from.</summary>
     sealed record WordRead(Parameter Array, string Index, int Stores, string Name,
-        (Access Write, string Apart)[] Writes, bool CallerIndex);
+        (Access Write, string Apart)[] Writes, bool CallerIndex, Arrays.NumericAccess Load);
 
     enum AccessKind { Load, Store, Read, Own }
 
@@ -590,7 +590,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
                         $"(.address {values.Array.Name})", Array: values.Array));
                 }
-                else if (op is Memory { Operation: ArrayLoad { Width: 4 or 8, Signed: false } elementLoad })
+                else if (LeanCIL.Arrays.Numeric(op) is { Store: false, Width: 4 or 8, Signed: false } elementLoad)
                 {
                     var index = Pop();
                     if (Pop() is not Values { Array.Words: { } array } ||
@@ -612,14 +612,26 @@ internal static partial class ProofOutline
                             ArrayApart.Add(key, apart = "arrayApart" + ArrayApart.Count);
                         return (write, apart);
                     }).ToArray();
-                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes, callerIndex));
+                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes, callerIndex,
+                        elementLoad));
                     stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
                 }
-                else if (op is Memory { Operation: ArrayLength })
+                else if (op is ArrayLength)
                 {
-                    if (Pop() is not Values values) return Stop("`ldlen` of an array the outline cannot name");
-                    Steps.Add(new ArrayUse(values.Array, stores, Length: true));
-                    stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
+                    switch (Pop())
+                    {
+                        case Values values:
+                            Steps.Add(new ArrayUse(values.Array, stores, Length: true));
+                            stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
+                            break;
+                        case ArrayArgument array:
+                            Steps.Add(new ElementAccess(array.Name, ElementKind.Length, stores));
+                            var length = array.Name == Fresh?.Array ? $"{Fresh.Length}" : array.Name + "Length";
+                            stack.Add(new Word($"(BitVec.ofNat 64 {length})", 8));
+                            break;
+                        default:
+                            return Stop("`ldlen` of an array the outline cannot name");
+                    }
                 }
                 else if (op is Call { Kind: CallKind.Static or CallKind.Instance } invocation)
                 {
@@ -681,13 +693,6 @@ internal static partial class ProofOutline
                     else if (callee.Spec.Result is not null)
                         stack.Add(new Word(null, callee.Spec.Result is { Width: 8 } ? 8 : 4));
                 }
-                else if (op is Memory { Operation: ReferenceArrayOperation { Access: ReferenceArrayAccess.Length } })
-                {
-                    if (Pop() is not ArrayArgument array) return Stop("`ldlen` of an array the outline cannot name");
-                    Steps.Add(new ElementAccess(array.Name, ElementKind.Length, stores));
-                    var length = array.Name == Fresh?.Array ? $"{Fresh.Length}" : array.Name + "Length";
-                    stack.Add(new Word($"(BitVec.ofNat 64 {length})", 8));
-                }
                 // An array of a runtime class, such as `string[]`, is not stepped.
                 else if (op is NewArray { Class: { } allocated } && allocated.Scope != TypeTests.RuntimeScope)
                 {
@@ -702,7 +707,7 @@ internal static partial class ProofOutline
                     stores++;
                     stack.Add(new ArrayArgument(Fresh.Array));
                 }
-                else if (op is Memory { Operation: ReferenceArrayOperation { Access: ReferenceArrayAccess.Load } })
+                else if (op is ReferenceElementAccess { Store: false })
                 {
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`ldelem.ref` of an array or index the outline cannot name");
@@ -738,7 +743,7 @@ internal static partial class ProofOutline
                         Formed: held.Formed, Slot: slot, LiteralIndex: at.Literal is not null));
                     stack.Add(held);
                 }
-                else if (op is Memory { Operation: ReferenceArrayOperation { Access: ReferenceArrayAccess.Store } })
+                else if (op is ReferenceElementAccess { Store: true })
                 {
                     var value = Pop();
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
@@ -1636,12 +1641,12 @@ internal static partial class ProofOutline
             var name = array.Name + "LengthStep" + stores;
             var memory = ObjectWalk.Memory(stores);
             lean.Line($"{indent}have {name} : ∀ body pc args frame rest,");
-            lean.Line($"{indent}    step body (.memory .arrayLength) pc args frame (.array {array.Name} :: rest)");
+            lean.Line($"{indent}    step body .ldlen pc args frame (.array {array.Name} :: rest)");
             lean.Line($"{indent}      {memory} = .ok (.next (pc + 1)");
             lean.Line($"{indent}        (.scalar (.i64 (BitVec.ofNat 64 {array.Name}.length)) :: rest) frame");
             lean.Line($"{indent}        {memory}) := by");
             lean.Line($"{indent}  intros");
-            lean.Line($"{indent}  simp [step_memory_arrayLength_eq, {WordValid(array, stores)}, " +
+            lean.Line($"{indent}  simp [step_ldlen_array_eq, {WordValid(array, stores)}, " +
                 $"{array.Name}Reference, checkedAt, Except.mapError] <;> rfl");
             Add(name);
         }
@@ -1677,7 +1682,7 @@ internal static partial class ProofOutline
             });
             lean.Wrapped($"{indent}obtain ⟨{read.Name}Reference, {read.Name}Found, {read.Name}Loaded⟩ :=",
                 $"{contents}.array_load {WordValid(array, read.Stores)} (by decide) {read.Name}Bound".Terms(), "");
-            Add($"step_arrayLoad_of_element (index := .i32 _) rfl {read.Name}Found {read.Name}Loaded");
+            Add($"{read.Load.LoadLemma} (index := .i32 _) rfl {read.Name}Found {read.Name}Loaded");
         }
 
         /// <summary>A `newarr` charged to the budget premise, confined to no caller memory, with a `Holds` of null

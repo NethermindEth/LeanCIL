@@ -27,11 +27,6 @@ internal sealed record OtherMemory : MemoryOperation
     internal override string ToLean() => lean;
 }
 
-internal sealed record ArrayLength : MemoryOperation
-{
-    internal override string ToLean() => ".arrayLength";
-}
-
 /// <summary>
 /// The address of an array element. <paramref name="ReadOnly"/> says the address follows a readonly prefix, which
 /// the term spells with a trailing flag.
@@ -55,18 +50,6 @@ internal sealed record ArrayStore(int Width) : MemoryOperation
 internal sealed record ArrayTransfer(Arrays.Element Element, bool Store) : MemoryOperation
 {
     internal override string ToLean() => $"(.arrayTransfer {Element.Expression} {LeanText.Bool(Store)})";
-}
-
-internal enum ReferenceArrayAccess { Length, Load, Store }
-
-internal sealed record ReferenceArrayOperation(ReferenceArrayAccess Access) : MemoryOperation
-{
-    internal override string ToLean() => Access switch
-    {
-        ReferenceArrayAccess.Length => ".referenceArrayLength",
-        ReferenceArrayAccess.Load => ".referenceArrayLoad",
-        _ => ".referenceArrayStore"
-    };
 }
 
 /// <summary>

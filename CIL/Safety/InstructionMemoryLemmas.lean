@@ -841,19 +841,35 @@ theorem wideArithmeticInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms wideArithmeticInstruction_contract
 
-/-- Reference array loads, stores and lengths preserve checked effects and stack validity. -/
-theorem referenceArrayInstruction_contract (operation : CIL.MemoryOp)
+/-- The length a method table answers is a well-formed native integer. -/
+theorem methodTableLength_numeric {table : CIL.MethodTable} {length : CIL.Value}
+    (counted : methodTableLength table = .ok length) : numericValue length = true := by
+  unfold methodTableLength at counted
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at counted
+  repeat' first
+    | (cases counted <;> rfl)
+    | split at counted
+#print axioms methodTableLength_numeric
+
+set_option maxHeartbeats 800000 in
+/-- Array lengths, element loads and stores, and the two reads of a handler table preserve
+    checked effects and stack validity. -/
+theorem elementInstruction_contract (op : CIL.Instruction)
     (stack values : List Value) (memory result : Memory)
-    (executed : referenceArrayInstruction operation stack memory = .ok (result, values)) :
+    (executed : elementInstruction op stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
-  unfold referenceArrayInstruction referenceArrayLength referenceArrayLoad referenceArrayStore
-    at executed
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  unfold elementInstruction at executed
+  split at executed <;> try simp only [arrayLoad, arrayStore, Bind.bind, Except.bind, Pure.pure,
+    Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
+    | solve
+      | cases executed
+        exact InstructionContract.of_effect (.unchanged _) (fun retained =>
+          ValuesValid.cons (methodTableLength_numeric (by assumption)) retained.tail)
     | cases executed
     | split at executed
-#print axioms referenceArrayInstruction_contract
+#print axioms elementInstruction_contract
 
 /-- Class instance field loads preserve checked effects and stack validity. -/
 theorem classFieldLoad_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
@@ -939,7 +955,7 @@ private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
     (stack values : List Value) (memory result : Memory)
     (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
-  unfold otherMemoryInstruction arrayAddress arrayLength arrayLoad arrayStore at executed
+  unfold otherMemoryInstruction arrayAddress arrayLoad arrayStore at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
@@ -1144,9 +1160,6 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact staticSpanInstruction_contract _ _ _ _ _ h
     · exact staticSpanInstruction_contract _ _ _ _ _ h
-    · exact referenceArrayInstruction_contract _ _ _ _ _ h
-    · exact referenceArrayInstruction_contract _ _ _ _ _ h
-    · exact referenceArrayInstruction_contract _ _ _ _ _ h
     · exact stringLiteralInstruction_contract _ _ _ _ _ h
     · exact throwIfNullInstruction_contract _ _ _ _ h
     · exact zeroGuardInstruction_contract _ _ _ _ _ _ _ h
@@ -1162,6 +1175,7 @@ theorem instruction_contract (operation : CIL.Instruction) (stack values : List 
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply memoryInstruction_contract; assumption
+    | solve | apply elementInstruction_contract; assumption
     | solve | cases h; instruction_contract_close
     | cases h
     | split at h

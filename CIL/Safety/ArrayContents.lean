@@ -106,6 +106,25 @@ theorem step_arrayLoad_of_element {memory : Memory} {view : ArrayView} {index : 
 
 #print axioms step_arrayLoad_of_element
 
+/-- `ldelem` of `kind` from an element whose address and load succeed pushes the loaded value. -/
+theorem step_ldelem_of_element (kind : CIL.NumericKind) {memory : Memory} {view : ArrayView}
+    {index : CIL.Value} {position : Nat} {reference : Reference} {value : CIL.Value}
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position kind.width = .ok reference)
+    (loaded : loadValue memory (.address reference) kind.width kind.signed = .ok value) :
+    ∀ body pc args frame rest,
+      step body (.ldelem kind) pc args frame (.scalar index :: .array view :: rest) memory =
+        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro body pc args frame rest
+  rw [step_ldelem_eq]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;> cases kind <;>
+    simp [instructionStep, instruction, elementInstruction, observerCount, unspecifiedOperands,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, arrayLoad, arrayIndex, found, loaded,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_ldelem_of_element
+
 /-- `ldelema` of an element of the array's own element type pushes the element's address. -/
 theorem step_arrayAddress_of_element {memory : Memory} {view : ArrayView} {index : CIL.Value}
     {element : CIL.ArrayElement} {position : Nat} {reference : Reference}
@@ -209,6 +228,56 @@ theorem step_arrayStore_i64_of_write {memory after : Memory} {view : ArrayView}
       Pure.pure, Except.pure]
 
 #print axioms step_arrayStore_i64_of_write
+
+/-- `stelem` of a 1-, 2- or 4-byte `kind` into an element whose write succeeds leaves that
+    write's memory. -/
+theorem step_stelem_narrow_of_write (kind : CIL.NumericKind) {memory after : Memory}
+    {view : ArrayView} {index : CIL.Value} {position : Nat} {reference : Reference}
+    {bits : CIL.W32}
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position kind.width = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat kind.width) 1 = .ok after)
+    (narrow : kind.width = 1 ∨ kind.width = 2 ∨ kind.width = 4 := by decide) :
+    ∀ body pc args frame rest,
+      step body (.stelem kind) pc args frame
+        (.scalar (.i32 bits) :: .scalar index :: .array view :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_stelem_eq]
+  cases kind <;> simp only [CIL.NumericKind.width] at narrow found written <;> (try omega) <;>
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [instructionStep, instruction, elementInstruction, observerCount, unspecifiedOperands,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, CIL.NumericKind.width, arrayStore,
+      arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
+
+#print axioms step_stelem_narrow_of_write
+
+/-- `stelem.i8` or `stelem.i` of an 8-byte word into an element whose write succeeds leaves that
+    write's memory. -/
+theorem step_stelem_wide_of_write (kind : CIL.NumericKind) {memory after : Memory}
+    {view : ArrayView} {index : CIL.Value} {position : Nat} {reference : Reference}
+    {bits : CIL.W64}
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position 8 = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat 8) 1 = .ok after)
+    (wide : kind = .i8 ∨ kind = .i := by decide) :
+    ∀ body pc args frame rest,
+      step body (.stelem kind) pc args frame
+        (.scalar (.i64 bits) :: .scalar index :: .array view :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_stelem_eq]
+  rcases wide with rfl | rfl <;>
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [instructionStep, instruction, elementInstruction, observerCount, unspecifiedOperands,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, CIL.NumericKind.width, arrayStore,
+      arrayIndex, found, written, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
+      Except.pure]
+
+#print axioms step_stelem_wide_of_write
 
 /-- `values` are the elements of a span over the whole array in either access mode, which shares
     its storage extent. -/

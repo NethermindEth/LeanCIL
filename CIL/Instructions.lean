@@ -173,6 +173,18 @@ inductive Instruction where
   | ldind (kind : NumericKind)
   /-- `stind` of `kind`: a store through a writable reference. -/
   | stind (kind : NumericKind)
+  /-- `ldlen`: the element count of an array or of a managed handler table, as a native int. -/
+  | ldlen
+  /-- `ldelem` of `kind`: an element of a value array, or with `.i` the entry of a managed
+      handler table. -/
+  | ldelem (kind : NumericKind)
+  /-- `ldelem.ref`: the reference an element slot of an array of class references holds. -/
+  | ldelem_ref
+  /-- `stelem` of `kind`: a store into an element of a value array. -/
+  | stelem (kind : NumericKind)
+  /-- `stelem.ref`: a store into an element slot of an array of class references, after the
+      covariance check. -/
+  | stelem_ref
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)

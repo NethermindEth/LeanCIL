@@ -237,11 +237,11 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
       (otherMemoryInstruction operation stack n) := by
-  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress CIL.Safety.arrayLength
-    CIL.Safety.arrayLoad CIL.Safety.arrayStore
+  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress CIL.Safety.arrayLoad
+    CIL.Safety.arrayStore
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
-    same.arrayValidate, same.arrayElement, same.loadTransfer]
+    same.arrayElement, same.loadTransfer]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -285,15 +285,16 @@ private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same
     | split
 #print axioms Memory.Equivalent.wideArithmeticInstruction
 
-/-- Reference array accesses locate the same slot and perform equivalent checked accesses. -/
-private theorem Memory.Equivalent.referenceArrayInstruction {m n : Memory}
-    (same : m.Equivalent n) (operation : CIL.MemoryOp) (stack : List Value) :
-    ResultEquivalent MemoryFirstEquivalent (referenceArrayInstruction operation stack m)
-      (referenceArrayInstruction operation stack n) := by
-  unfold CIL.Safety.referenceArrayInstruction CIL.Safety.referenceArrayLength
-    CIL.Safety.referenceArrayLoad CIL.Safety.referenceArrayStore
+/-- Array lengths and element accesses, and the two reads of a handler table, locate the same
+    element and perform equivalent checked accesses. -/
+private theorem Memory.Equivalent.elementInstruction {m n : Memory}
+    (same : m.Equivalent n) (op : CIL.Instruction) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (elementInstruction op stack m)
+      (elementInstruction op stack n) := by
+  unfold CIL.Safety.elementInstruction CIL.Safety.arrayLoad CIL.Safety.arrayStore
+    CIL.Safety.methodTableElement
   split <;> try simp only [same.loadSlot, same.referenceArrayOf, same.referenceArraySlot,
-    same.storableIn]
+    same.storableIn, same.loadValue, same.arrayValidate, same.arrayElement, same.loadNativeTable]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -301,8 +302,11 @@ private theorem Memory.Equivalent.referenceArrayInstruction {m n : Memory}
     | (apply ResultEquivalent.bind (same.storeSlot _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
     | split
-#print axioms Memory.Equivalent.referenceArrayInstruction
+#print axioms Memory.Equivalent.elementInstruction
 
 /-- Class field loads locate the same field and read equivalent memories alike. -/
 theorem Memory.Equivalent.classFieldLoad {m n : Memory} (same : m.Equivalent n)
@@ -527,9 +531,6 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.wideArithmeticInstruction _ _
     · exact same.staticSpanInstruction _ _
     · exact same.staticSpanInstruction _ _
-    · exact same.referenceArrayInstruction _ _
-    · exact same.referenceArrayInstruction _ _
-    · exact same.referenceArrayInstruction _ _
     · exact same.stringLiteralInstruction _ _
     · exact same.throwIfNullInstruction _
     · exact same.zeroGuardInstruction _ _ _ _
@@ -545,6 +546,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
     | exact same.memoryInstruction _ _
+    | exact same.elementInstruction _ _
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)

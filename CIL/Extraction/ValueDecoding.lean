@@ -5,7 +5,8 @@ import CIL.Extraction.Generics
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
-conversions, comparisons, integer indirect loads and stores, dynamic frame storage, the class
+conversions, comparisons, integer indirect loads and stores, array lengths and the integer and
+reference element loads and stores, dynamic frame storage, the class
 type tests `castclass` and `isinst` and the class instance field accesses `ldfld`, `ldflda` and
 `stfld` and the construction `newobj`, with every short and macro form folded into its
 constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that
@@ -115,6 +116,8 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (88 <= opcode && opcode <= 106) || opcode == 109 || opcode == 110 || opcode == 115 ||
     opcode == 116 ||
     opcode == 117 || (123 <= opcode && opcode <= 125) || (130 <= opcode && opcode <= 139) ||
+    opcode == 142 || (144 <= opcode && opcode <= 151) || (154 <= opcode && opcode <= 159) ||
+    opcode == 162 ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
     opcode == 224 || (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
 
@@ -244,6 +247,17 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | 82, .none => some (.stind .i1) | 83, .none => some (.stind .i2)
   | 84, .none => some (.stind .i4) | 85, .none => some (.stind .i8)
   | 223, .none => some (.stind .i)
+  -- Array lengths and elements; the floating kinds decode to nothing.
+  | 142, .none => some .ldlen
+  | 144, .none => some (.ldelem .i1) | 145, .none => some (.ldelem .u1)
+  | 146, .none => some (.ldelem .i2) | 147, .none => some (.ldelem .u2)
+  | 148, .none => some (.ldelem .i4) | 149, .none => some (.ldelem .u4)
+  | 150, .none => some (.ldelem .i8) | 151, .none => some (.ldelem .i)
+  | 154, .none => some .ldelem_ref
+  | 155, .none => some (.stelem .i) | 156, .none => some (.stelem .i1)
+  | 157, .none => some (.stelem .i2) | 158, .none => some (.stelem .i4)
+  | 159, .none => some (.stelem .i8)
+  | 162, .none => some .stelem_ref
   -- Arithmetic, bitwise operations and shifts.
   | 88, .none => some .add | 89, .none => some .sub | 90, .none => some .mul
   | 91, .none => some .div | 92, .none => some .div_un
@@ -397,6 +411,12 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   -- Indirect loads and stores compare their kind.
   | .ldind expected => match emitted with | .ldind actual => expected == actual | _ => false
   | .stind expected => match emitted with | .stind actual => expected == actual | _ => false
+  -- Array lengths and elements compare their kind.
+  | .ldlen => (emitted matches .ldlen)
+  | .ldelem expected => match emitted with | .ldelem actual => expected == actual | _ => false
+  | .ldelem_ref => (emitted matches .ldelem_ref)
+  | .stelem expected => match emitted with | .stelem actual => expected == actual | _ => false
+  | .stelem_ref => (emitted matches .stelem_ref)
   -- Arithmetic, bitwise operations and shifts.
   | .add => (emitted matches .add)
   | .sub => (emitted matches .sub)

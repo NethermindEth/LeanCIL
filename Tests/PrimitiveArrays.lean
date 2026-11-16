@@ -24,28 +24,44 @@ theorem wrong_element_token :
       [.word32, .array .signed32] (.memory (.arrayLoad 4 false)) = false := by decide +kernel
 #print axioms wrong_element_token
 
+/-- A static method without arguments; the stack transfers below read none of its fields. -/
+private def holder : CIL.Extraction.RawMethod := {
+  token := 0x06000001, owner := "Scope::Fixture", hasThis := false, explicitThis := false,
+  callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+  parameters := [], locals := [], initLocals := true, maxStack := 3, genericParameters := [],
+  code := [] }
+
+/-- The stack kinds the raw array instruction `opcode` leaves on `stack`. -/
+private def transfer (opcode : Nat) (stack : List CIL.Extraction.ScalarKind) :
+    Option (List CIL.Extraction.ScalarKind) :=
+  CIL.Extraction.scalarTransfer holder (rawArray opcode) stack
+
 /-- Equal physical widths do not make native and fixed-width array accesses interchangeable. -/
 theorem native_element_mismatch :
-    CIL.Extraction.scalarOpMatches (rawArray 151) [.word32, .array .signed64]
-      (.memory (.arrayLoad 8 false)) = false := by decide +kernel
+    transfer 151 [.word32, .array .nativeInt] = some [.native] ∧
+    transfer 151 [.word32, .array .signed64] = none ∧
+    transfer 150 [.word32, .array .nativeInt] = none := by decide +kernel
 #print axioms native_element_mismatch
 
 /-- A native-width array store requires a native stack value, not an int64 claim. -/
 theorem native_store_mismatch :
-    CIL.Extraction.scalarOpMatches (rawArray 155) [.word64, .word32, .array .nativeInt]
-      (.memory (.arrayStore 8)) = false := by decide +kernel
+    transfer 155 [.native, .word32, .array .nativeInt] = some [] ∧
+    transfer 155 [.word64, .word32, .array .nativeInt] = none := by decide +kernel
 #print axioms native_store_mismatch
 
 /-- Unsupported floating-point loads cannot certify an integer load via equal stack effects. -/
 theorem float_load_forgery :
+    CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
+      (.ldelem .i4) = false ∧
     CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
       (.memory (.arrayLoad 4 false)) = false := by decide +kernel
 #print axioms float_load_forgery
 
 /-- An ordinary int64 is not a valid array index in raw CIL stack evidence. -/
 theorem invalid_index_kind :
-    CIL.Extraction.scalarOpMatches (rawArray 148) [.word64, .array .signed32]
-      (.memory (.arrayLoad 4 false)) = false := by decide +kernel
+    transfer 148 [.word32, .array .signed32] = some [.word32] ∧
+    transfer 148 [.native, .array .signed32] = some [.word32] ∧
+    transfer 148 [.word64, .array .signed32] = none := by decide +kernel
 #print axioms invalid_index_kind
 
 private def memory : Memory := {
@@ -110,31 +126,31 @@ theorem numeric_kind_store_bytes :
 
 /-- Length is native-sized and does not read array data or require read authority. -/
 theorem length_without_authority :
-    memoryInstruction .arrayLength [.array words] noAuthority =
+    elementInstruction .ldlen [.array words] noAuthority =
       .ok (noAuthority, [.scalar (.i64 4)]) := rfl
 #print axioms length_without_authority
 
 /-- A non-null empty array has length zero. -/
 theorem empty_length :
-    memoryInstruction .arrayLength [.array ⟨.address ⟨1, 0⟩, 0, .signed32⟩] memory =
+    elementInstruction .ldlen [.array ⟨.address ⟨1, 0⟩, 0, .signed32⟩] memory =
       .ok (memory, [.scalar (.i64 0)]) := rfl
 #print axioms empty_length
 
 /-- Null is distinct from an empty array and raises the named runtime exception. -/
 theorem null_length :
-    memoryInstruction .arrayLength [.array ⟨.null, 0, .signed32⟩] memory =
+    elementInstruction .ldlen [.array ⟨.null, 0, .signed32⟩] memory =
       .error (.thrown .nullReference) := rfl
 #print axioms null_length
 
 /-- The raw null literal has the same runtime array-null behavior. -/
 theorem literal_null_length :
-    memoryInstruction .arrayLength [.object .null] memory =
+    elementInstruction .ldlen [.object .null] memory =
       .error (.thrown .nullReference) := rfl
 #print axioms literal_null_length
 
 /-- A null byref, as `Unsafe.NullRef` produces, is not an array and has no length. -/
 theorem byref_null_not_array :
-    memoryInstruction .arrayLength [.reference .null] memory = .error .invalidState := rfl
+    elementInstruction .ldlen [.reference .null] memory = .error .invalidState := rfl
 #print axioms byref_null_not_array
 
 /-- Narrow signed loads extend the stored byte. -/
@@ -224,7 +240,7 @@ theorem wrong_width_rejected :
 
 /-- Invalid backing extents fail as model errors, not as expected runtime exceptions. -/
 theorem invalid_extent_rejected :
-    memoryInstruction .arrayLength [.array { words with length := 5 }] memory =
+    elementInstruction .ldlen [.array { words with length := 5 }] memory =
       .error (.memory .outsideAllocation (.address ⟨0, 0⟩) 0) := rfl
 #print axioms invalid_extent_rejected
 

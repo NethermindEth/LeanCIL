@@ -461,14 +461,17 @@ internal sealed record StoreScalar(int Width) : Operation
     internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
 }
 
-/// <summary>The integer element an <c>ldind</c> or <c>stind</c> opcode names; <c>I</c> is native-sized.</summary>
+/// <summary>
+/// The integer element an <c>ldind</c>, <c>stind</c>, <c>ldelem</c> or <c>stelem</c> opcode names; <c>I</c> is
+/// native-sized.
+/// </summary>
 internal enum NumericKind { I1, U1, I2, U2, I4, U4, I8, I }
 
-/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its constructor.</summary>
-internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
+/// <summary>The width, sign extension and Lean term of a <see cref="NumericKind"/>.</summary>
+internal static class NumericKinds
 {
-    /// <summary>Bytes the access moves; native int is eight bytes on every admitted profile.</summary>
-    internal int Width => Kind switch
+    /// <summary>Bytes an access of the kind moves; native int is eight bytes on every admitted profile.</summary>
+    internal static int Width(this NumericKind kind) => kind switch
     {
         NumericKind.I1 or NumericKind.U1 => 1,
         NumericKind.I2 or NumericKind.U2 => 2,
@@ -477,12 +480,53 @@ internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
     };
 
     /// <summary>A load sign-extends: only the one- and two-byte signed kinds.</summary>
-    internal bool Signed => Kind is NumericKind.I1 or NumericKind.I2;
+    internal static bool Signed(this NumericKind kind) => kind is NumericKind.I1 or NumericKind.I2;
 
     /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
-    internal string KindTerm => "." + Kind.ToString().ToLowerInvariant();
+    internal static string Term(this NumericKind kind) => "." + kind.ToString().ToLowerInvariant();
+}
+
+/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its constructor.</summary>
+internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
+{
+    /// <summary>Bytes the access moves.</summary>
+    internal int Width => Kind.Width();
+
+    /// <summary>Whether a load sign-extends.</summary>
+    internal bool Signed => Kind.Signed();
+
+    /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
+    internal string KindTerm => Kind.Term();
 
     internal override string Render(Func<int, string> calleeName) => $".{(Store ? "stind" : "ldind")} {KindTerm}";
+}
+
+/// <summary>An <c>ldlen</c> of a value array, an array of class references or a managed handler table.</summary>
+internal sealed record ArrayLength : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => ".ldlen";
+}
+
+/// <summary>
+/// An <c>ldelem</c> or <c>stelem</c> of <paramref name="Kind"/> on a value array, or the <c>ldelem.i</c> of a managed
+/// handler table, rendered as its constructor.
+/// </summary>
+internal sealed record ArrayElementAccess(NumericKind Kind, bool Store) : Operation
+{
+    /// <summary>Bytes the access moves.</summary>
+    internal int Width => Kind.Width();
+
+    /// <summary>Whether a load sign-extends.</summary>
+    internal bool Signed => Kind.Signed();
+
+    internal override string Render(Func<int, string> calleeName) =>
+        $".{(Store ? "stelem" : "ldelem")} {Kind.Term()}";
+}
+
+/// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
+internal sealed record ReferenceElementAccess(bool Store) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => Store ? ".stelem_ref" : ".ldelem_ref";
 }
 
 /// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>

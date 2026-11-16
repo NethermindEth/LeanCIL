@@ -87,6 +87,13 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 76, .none⟩, .ldind .i8), (⟨0, 77, .none⟩, .ldind .i), (⟨0, 82, .none⟩, .stind .i1),
   (⟨0, 83, .none⟩, .stind .i2), (⟨0, 84, .none⟩, .stind .i4), (⟨0, 85, .none⟩, .stind .i8),
   (⟨0, 223, .none⟩, .stind .i),
+  -- Array lengths and integer and class reference element loads and stores.
+  (⟨0, 142, .none⟩, .ldlen), (⟨0, 144, .none⟩, .ldelem .i1), (⟨0, 145, .none⟩, .ldelem .u1),
+  (⟨0, 146, .none⟩, .ldelem .i2), (⟨0, 147, .none⟩, .ldelem .u2), (⟨0, 148, .none⟩, .ldelem .i4),
+  (⟨0, 149, .none⟩, .ldelem .u4), (⟨0, 150, .none⟩, .ldelem .i8), (⟨0, 151, .none⟩, .ldelem .i),
+  (⟨0, 154, .none⟩, .ldelem_ref), (⟨0, 155, .none⟩, .stelem .i), (⟨0, 156, .none⟩, .stelem .i1),
+  (⟨0, 157, .none⟩, .stelem .i2), (⟨0, 158, .none⟩, .stelem .i4), (⟨0, 159, .none⟩, .stelem .i8),
+  (⟨0, 162, .none⟩, .stelem_ref),
   -- Arithmetic, bitwise operations and shifts.
   (⟨0, 88, .none⟩, .add), (⟨0, 89, .none⟩, .sub), (⟨0, 90, .none⟩, .mul), (⟨0, 91, .none⟩, .div),
   (⟨0, 92, .none⟩, .div_un), (⟨0, 93, .none⟩, .rem), (⟨0, 94, .none⟩, .rem_un),
@@ -188,6 +195,10 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 15, .argument 4⟩, .ldloca 4), (⟨0, 58, .target 1⟩, .brfalse 1),
   (⟨0, 138, .none⟩, .conv_ovf_un .i8), (⟨0, 211, .none⟩, .conv_i8),
   (⟨0, 130, .none⟩, .conv_ovf .i1), (⟨0, 215, .none⟩, .add_ovf), (⟨0, 65027, .none⟩, .cgt),
+  (⟨0, 144, .none⟩, .ldelem .u1), (⟨0, 144, .none⟩, .ldelem .i2),
+  (⟨0, 148, .none⟩, .ldelem .u4), (⟨0, 151, .none⟩, .ldelem .i8), (⟨0, 155, .none⟩, .stelem .i8),
+  (⟨0, 154, .none⟩, .ldelem .i), (⟨0, 162, .none⟩, .stelem .i), (⟨0, 74, .none⟩, .ldelem .i4),
+  (⟨0, 84, .none⟩, .stelem .i4), (⟨0, 148, .none⟩, .ldind .i4), (⟨0, 142, .none⟩, .ldind .i),
   -- A local or argument index wider than its form encodes.
   (⟨0, 17, .local 256⟩, .ldloc 256), (⟨0, 65036, .local 65536⟩, .ldloc 65536),
   (⟨0, 14, .argument 256⟩, .ldarg 256), (⟨0, 65033, .argument 65536⟩, .ldarg 65536),
@@ -198,6 +209,7 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .ldarg 1), (⟨0, 15, .argument 1⟩, .ldarg 1),
   (⟨0, 107, .none⟩, .conv_i4), (⟨0, 65039, .integer 0⟩, .localloc),
   (⟨0, 116, .none⟩, .castclass dog), (⟨0, 20, .type dog⟩, .ldnull), (⟨0, 20, .none⟩, .ldc_i4 0),
+  (⟨0, 142, .integer 0⟩, .ldlen), (⟨0, 154, .type dog⟩, .ldelem_ref),
   -- Another field, another access to the field, a static field or a field of a struct.
   (⟨0, 123, classOperand⟩, .ldfld { classField with index := 2 }),
   (⟨0, 123, classOperand⟩, .ldfld { classField with name := name!"limit" }),
@@ -221,6 +233,34 @@ theorem mutations_rejected :
 /-- info: 'Tests.ValueDecoding.mutations_rejected' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms mutations_rejected
+
+/-- An int32 array of the extraction's stack kinds. -/
+private def words : ScalarKind := .array .signed32
+
+/-- An array opcode the decoder reads emits only its decoding: the lowered memory operation and
+    the managed table length it once emitted are refused, and so is a decoded form at the typed
+    `ldelem` and `stelem` opcodes, which name their element by token. -/
+theorem element_emission_exact :
+    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
+    scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
+      true ∧
+    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
+    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words]
+      (.memory (.arrayLoad 4 false)) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words]
+      (.memory (.arrayStore 4)) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.managed .tableLength) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 163, .type (.atom runtimeScope "System.Int32")⟩
+      [.word32, words] (.ldelem .i4) = false ∧
+    scalarEmissionMatches #[] none ⟨0, 164, .type (.atom runtimeScope "System.Int32")⟩
+      [.word32, .word32, words] (.stelem .i4) = false := by
+  decide +kernel
+
+/-- info: 'Tests.ValueDecoding.element_emission_exact' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms element_emission_exact
 
 /-- A decided match gives the decoded instruction, sign extension of a short constant included. -/
 theorem short_constant_decoded :
@@ -281,7 +321,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 74, undecoded 28 of 102 constructors -/
+/-- info: decoded 79, undecoded 28 of 107 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

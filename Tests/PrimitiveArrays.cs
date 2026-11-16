@@ -103,16 +103,10 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
             }
         }
         evidence.Add(proof, "PASS runtime, certificate and checked array execution: " + name);
-        if (name != "ReadSByte") continue;
-        foreach (var (mutation, replacement) in new[]
-            { ("signedness", ".arrayLoad 1 false"), ("width", ".arrayLoad 2 true") })
-        {
-            const string target = ".arrayLoad 1 true";
-            if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing mutation target");
-            var forged = Path.Combine(root, "ForgedArray-" + mutation + ".lean");
-            File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array operation: " + replacement, "ScalarFlowValid");
-        }
+        // The decoder reads each element access from the body, so no emitted kind is left to forge; the
+        // mutations of Tests/ValueDecoding.lean reject another sign or width at the opcode.
+        if (!source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+            throw new Exception("Element accessor is not decoded from its body: " + name);
     }
 }
 var compositions = new (string Name, string Signature, string Arguments, string Expected)[]

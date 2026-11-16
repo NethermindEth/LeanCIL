@@ -153,8 +153,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "constructions" => ([], [$".newobj {{ owner := {NodeType}, name := name!\".ctor\", hasThis := true, " +
         "genericArity := 0, returnType := .void, parameters := [] }", ".pop"], [".ldc_i4 0", ".ret"]),
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
-    "elements" => ([], [".ldarg 0", ".ldarg 1", ".memory (.arrayLoad 4 true)", ".pop", ".ldarg 0", ".ldarg 1",
-        ".ldarg 1", ".memory (.arrayStore 4)"], [".ldc_i4 0", ".ret"]),
+    "elements" => ([], [".ldarg 0", ".ldarg 1", ".ldelem .i4", ".pop", ".ldarg 0", ".ldarg 1",
+        ".ldarg 1", ".stelem .i4"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -528,12 +528,12 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
                 (word : CIL.Value) (valid : view.validate memory = .ok ())
                 (found : arrayElement memory view index.toNat 4 = .ok element)
-                (loaded : loadValue memory (.address element) 4 true = .ok word)
+                (loaded : loadValue memory (.address element) 4 false = .ok word)
                 (written : write memory element (numberBytes index.toNat 4) 1 = .ok memory) :
                 invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index)] memory =
                   .ok (memory, [.scalar (.i32 0)]) := by
-              have loadFact := step_arrayLoad_of_element (index := .i32 index) rfl found loaded
-              have storeFact := step_arrayStore_of_write (index := .i32 index) rfl found written
+              have loadFact := step_ldelem_of_element .i4 (index := .i32 index) rfl found loaded
+              have storeFact := step_stelem_narrow_of_write .i4 (index := .i32 index) rfl found written
               cil_checked_steps [valid, loadFact, storeFact]
             """,
         "homes" => $$"""

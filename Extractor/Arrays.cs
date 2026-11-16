@@ -73,23 +73,56 @@ internal static class Arrays
     {
         Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
             { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
-        Code.Ldlen => MemoryOperation.Of(new ArrayLength()),
+        Code.Ldlen => new ArrayLength(),
         Code.Ldelema => MemoryOperation.Of(new ArrayAddress(
             Storage((TypeReference)instruction.Operand, architecture) ??
                 throw new InvalidDataException("Unsupported array element token: " + instruction.Operand),
             instruction.Previous?.OpCode.Code == Code.Readonly)),
-        Code.Ldelem_I1 => MemoryOperation.Of(new ArrayLoad(1, true)),
-        Code.Ldelem_U1 => MemoryOperation.Of(new ArrayLoad(1, false)),
-        Code.Ldelem_I2 => MemoryOperation.Of(new ArrayLoad(2, true)),
-        Code.Ldelem_U2 => MemoryOperation.Of(new ArrayLoad(2, false)),
-        Code.Ldelem_I4 or Code.Ldelem_U4 => MemoryOperation.Of(new ArrayLoad(4, false)),
-        Code.Ldelem_I8 or Code.Ldelem_I => MemoryOperation.Of(new ArrayLoad(8, false)),
-        Code.Stelem_I1 => MemoryOperation.Of(new ArrayStore(1)),
-        Code.Stelem_I2 => MemoryOperation.Of(new ArrayStore(2)),
-        Code.Stelem_I4 => MemoryOperation.Of(new ArrayStore(4)),
-        Code.Stelem_I8 or Code.Stelem_I => MemoryOperation.Of(new ArrayStore(8)),
+        Code.Ldelem_I1 => new ArrayElementAccess(NumericKind.I1, false),
+        Code.Ldelem_U1 => new ArrayElementAccess(NumericKind.U1, false),
+        Code.Ldelem_I2 => new ArrayElementAccess(NumericKind.I2, false),
+        Code.Ldelem_U2 => new ArrayElementAccess(NumericKind.U2, false),
+        Code.Ldelem_I4 => new ArrayElementAccess(NumericKind.I4, false),
+        Code.Ldelem_U4 => new ArrayElementAccess(NumericKind.U4, false),
+        Code.Ldelem_I8 => new ArrayElementAccess(NumericKind.I8, false),
+        Code.Ldelem_I => new ArrayElementAccess(NumericKind.I, false),
+        Code.Stelem_I1 => new ArrayElementAccess(NumericKind.I1, true),
+        Code.Stelem_I2 => new ArrayElementAccess(NumericKind.I2, true),
+        Code.Stelem_I4 => new ArrayElementAccess(NumericKind.I4, true),
+        Code.Stelem_I8 => new ArrayElementAccess(NumericKind.I8, true),
+        Code.Stelem_I => new ArrayElementAccess(NumericKind.I, true),
         Code.Ldelem_Any => Typed(instruction, false, architecture),
         Code.Stelem_Any => Typed(instruction, true, architecture),
+        _ => null
+    };
+
+    /// <summary>
+    /// A numeric element load or store: its width, whether a load sign-extends, and the step lemma a proof outline
+    /// cites for it. <paramref name="Kind"/> is the opcode's suffix, or null for a typed access naming its element
+    /// by token.
+    /// </summary>
+    internal sealed record NumericAccess(int Width, bool Signed, bool Store, NumericKind? Kind)
+    {
+        /// <summary>The lemma stepping a load of an element whose address and load succeed.</summary>
+        internal string LoadLemma =>
+            Kind is { } kind ? $"step_ldelem_of_element {kind.Term()}" : "step_arrayLoad_of_element";
+
+        /// <summary>The lemma stepping a store into an element whose write succeeds.</summary>
+        internal string StoreLemma => (Kind, Width) switch
+        {
+            ({ } kind, 8) => $"step_stelem_wide_of_write {kind.Term()}",
+            ({ } kind, _) => $"step_stelem_narrow_of_write {kind.Term()}",
+            (null, 8) => "step_arrayStore_i64_of_write",
+            _ => "step_arrayStore_of_write"
+        };
+    }
+
+    /// <summary>The numeric element access <paramref name="op"/> performs, or null when it performs none.</summary>
+    internal static NumericAccess? Numeric(Operation op) => op switch
+    {
+        ArrayElementAccess access => new(access.Width, access.Signed, access.Store, access.Kind),
+        Memory { Operation: ArrayLoad load } => new(load.Width, load.Signed, false, null),
+        Memory { Operation: ArrayStore store } => new(store.Width, false, true, null),
         _ => null
     };
 
