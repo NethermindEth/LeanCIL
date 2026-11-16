@@ -762,24 +762,6 @@ instance (methods : List SpecializedMethod) (imports : List ImportSlot)
     Decidable (ManagedCallsValid methods imports modelled raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
-/-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
-    Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
-macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
-  `(tactic| first
-    | (apply (ManagedCallsValid_iff_original _ _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_, ?_, ?_⟩
-       · decide +kernel
-       · decide +kernel
-       · rfl
-       · rfl
-       · simp [all3, validateLinkedCallWith, Instruction.constructor?, Instruction.linkFits,
-           validateModelCall, modelledCallSite, validateManagedCallWith, validateConstructionWith,
-           managedCallTarget, calleeMatchesSite,
-           callOperandMatches, Method.linkAt, linkLookup,
-           $[$facts:term],*] <;>
-           decide +kernel)
-    | decide +kernel)
-
 /-- Every live pc passes the linked call rule with the link the table gives it. -/
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
     {modelled : MethodRef → Bool} {raw : RawMethod} {reachable : List Bool} {emitted : Method}

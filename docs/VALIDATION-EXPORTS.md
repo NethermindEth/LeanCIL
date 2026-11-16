@@ -85,9 +85,9 @@ Full integration results come from the CI partition jobs. The routing tests,
   must reject subtraction forged as addition. The Lean fixtures cover negative offsets and
   differences, end positions, readonly preservation, every unsigned branch, and null,
   cross-allocation, invalid-position and signed-comparison rejection.
-- `Tests/ExtractionGenerics.lean` covers the `cil_managed_calls` tactic, and the 15 generated
-  generic-method samples in `Tests/GenericEvidence.cs` cover the generated managed-call checks.
-  Direct tactic rejection checks cover changed signedness, assembly scope, generic arguments and
+- `Tests/ExtractionGenerics.lean` decides the managed-call check of a generic call site, and the 15
+  generated generic-method samples in `Tests/GenericEvidence.cs` cover the generated managed-call
+  checks. Its rejection checks cover changed signedness, assembly scope, generic arguments and
   argument count.
 - `Tests/GenericEvidence.cs` also checks exact external-call identity sharing, repeated emission,
   pruned-only identities and Unicode/escaped characters. Changed bytes, versions and tokens fail
