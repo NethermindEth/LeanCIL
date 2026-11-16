@@ -94,8 +94,7 @@ if (templates.Split("@[cil_code] def method").Length != 4 ||
 // Each body that enters a method names its links, so the table never depends on a default.
 foreach (var body in templates.Split("@[cil_code] def method").Skip(1))
 {
-    string[] callForms = [".call ", ".callInstance ", ".callVirtual ", ".newAggregate ", ".newObject ",
-        ".managed (.call "];
+    string[] callForms = [".call ", ".callInstance ", ".callVirtual ", ".newobj ", ".managed (.call "];
     var emptyLinks = body.Contains("links := [],", StringComparison.Ordinal);
     if (callForms.Any(form => body.Contains(form, StringComparison.Ordinal)) &&
         (emptyLinks || !body.Contains("links := ", StringComparison.Ordinal)))

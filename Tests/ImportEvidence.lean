@@ -99,8 +99,8 @@ example : validateManagedCall methods imports (call site) true (linked 1)
 example :
     validateManagedCall methods imports ⟨8, 115, .call site⟩ true (linked 1) (emits site) =
       false := by decide +kernel
-example : validateManagedCall methods imports ⟨8, 115, .call site⟩ true none
-    (.newAggregate 1 3 0) = false := by decide +kernel
+example : validateManagedCall methods imports ⟨8, 115, .call site⟩ true (linked 1)
+    (.newobj site.method) = false := by decide +kernel
 example : validateManagedCall methods imports (call { site with typeArguments := [word] }) true
     (linked 1) (emits site) = false := by decide +kernel
 

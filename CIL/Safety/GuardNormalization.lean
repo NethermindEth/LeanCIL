@@ -110,19 +110,29 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_call (method : Extraction.MethodRef) (prefixes : CallPrefixes) :
     observerCount (.call method prefixes) = method.argumentCount := rfl
 #print axioms guard_call
+@[cil_guard] theorem guard_newobj (constructor : CIL.Extraction.MethodRef) :
+    observerCount (.newobj constructor) = constructor.parameters.length := rfl
+#print axioms guard_newobj
 
 open Lean Meta in
+/-- A count a closed method operand fixes, as a numeral; `none` when a variable decides it. -/
+def closedOperandCount? (count : Expr) : MetaM (Option Expr) := do
+  let reduced ← withDefault <| whnf count
+  return (reduced.rawNatLit? <|> reduced.nat?).map mkNatLit
+
 /-- The argument count of a call's method as a numeral, when a closed term fixes its parameter
     list and receiver flag; a method a variable decides is left as it is. -/
 dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.argumentCount _) :=
   fun expression => do
-    let_expr CIL.Extraction.MethodRef.argumentCount _ := expression | return .continue
-    let count ← withDefault <| whnf expression
-    match count.rawNatLit? <|> count.nat? with
-    | some value => return .done (mkNatLit value)
-    | none => return .continue
-@[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
-    observerCount (.newAggregate callee argc size) = argc := rfl
+    let some count ← closedOperandCount? expression | return .continue
+    return .done count
+
+/-- The parameter count of a constructor a construction names, as `reduceArgumentCount` reduces
+    a call's argument count. -/
+dsimproc [cil_step, cil_guard] reduceParameterCount
+    (List.length (CIL.Extraction.MethodRef.parameters _)) := fun expression => do
+  let some count ← closedOperandCount? expression | return .continue
+  return .done count
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
     observerCount (.memory op) = op.argumentCount := rfl
 @[cil_guard] theorem guard_throw (exception : ExceptionType) :

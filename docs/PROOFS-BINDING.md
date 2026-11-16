@@ -237,10 +237,12 @@ Do not write `{ Extracted.method1 with code := ... }`: a structure update copies
 link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
 new code only where no call or static access moved. A body that reads statics sets the sites after
 `withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`, one entry per
-static access at the body's pc with the extraction's descriptor for it, and a body with calls
-sets its links the same way, `{ Extracted.method1.withCode code with links := [(pc, .direct callee)] }`,
-one entry per call at the body's pc with the method index the call enters. This is also the form
-for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
+static access at the body's pc with the extraction's descriptor for it. A `call` and a `newobj`
+imply no link, since their operands name the method's metadata and not the method index or
+allocation, so a body that calls or constructs states its whole table after `withCode`, in pc
+order, as in `{ Extracted.method1.withCode code with links := [(pc, link), ...] }`, with the
+extraction's link at each call and construction. This is also the form for a body embedded into an
+extraction with dead blocks, where the pcs of the calls differ:
 
 ```lean
 import CIL.Embedding.Tactic
@@ -273,11 +275,12 @@ supply after it. `cil_embed` adds the same
 text when the static descriptor lists differ or a moved pc resolves another descriptor. The
 `declared` and `environment` lines name no remedy: take both from the extraction's method.
 
-A proof that steps through a call reads the link at the call's pc. `cil_instruction_equations`
-states that read as `body_link{pc} : body.linkAt pc = some link` for each call site, so no proof
-walks the table. For a body that keeps the table its code implies, which holds no `call` link, the
-fact comes from the instruction equation of its pc through `Method.linkAt_of_instruction`. For an
-explicit table, as an extraction, a template or a body with calls writes, the command checks once
+A proof that steps through a call or a construction reads the link at its pc.
+`cil_instruction_equations` states that read as `body_link{pc} : body.linkAt pc = some link` for
+each call site, so no proof walks the table. For a body that keeps the table its code implies, the
+fact comes from the instruction equation of its pc through `Method.linkAt_of_instruction`; such a
+table has no entry at a `call` or `newobj`, which then faults. For an explicit table, as an
+extraction, a template or a body that calls or constructs writes, the command checks once
 that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
 table's entry
 (`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
@@ -720,10 +723,12 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
 method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? profile environment
-original typeArguments links`, gives; `links` is the method's link table, which gives each `call` pc
-the body it enters. Compiled code evaluates the decoder, and the command writes the
-result as constructors over numerals, except that a field whose type is that of a constant passed
-to the decoder, such as the profile and the environment, is written as that constant. The kernel
+links original typeArguments`, gives. The decoder takes the link table as given: a `call` and a
+`newobj` name their method's metadata, and the table states the method index, and for a
+construction the allocation, each enters, which `Extraction.ManagedCallsValid` checks against the
+raw site. Compiled code evaluates the decoder, and the command writes the result as constructors
+over numerals, except that a field whose type is that of a constant passed to the decoder, such as
+the profile, the environment and the link table, is written as that constant. The kernel
 then checks by reduction the theorem, named with the suffix `_decoded`, that
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
@@ -737,13 +742,14 @@ apply to the method; a listed constant that names no field operand is an error.
 
 The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs, the
 extraction translates each `call` to the plain call the decoder gives rather than to a model, a
-constrained or a tail call, and every pc is reachable under the profile; a method with a pc the reachability certificate rules out
-keeps its literal, whose `.unadmitted` hole at that pc the feature check requires. Its
+constrained or a tail call, and each `newobj` to a construction rather than to a runtime model,
+and every pc is reachable under the profile; a method with a pc the reachability certificate rules
+out keeps its literal, whose `.unadmitted` hole at that pc the feature check requires. Its
 `Extracted.lean` then states the method as
 
 ```text
-def method0Links : List (Nat × Link) := [...]
-cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw method0Links
+cil_decoded_method method0 := Method.ofRaw? profile environment method0Links method0Original
+  method0TypeArgumentsRaw
 ```
 
 in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when

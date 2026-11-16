@@ -183,9 +183,12 @@ private theorem step_relinked {body : CIL.Method} (links : List (Nat × CIL.Link
       step body op pc args frame stack m := by
   -- A matcher stuck on the stack carries the call arms, which read the table; split the
   -- stack as deep as the patterns look so the matcher selects this instruction's arm.
-  cases op <;> simp only [CIL.Instruction.readsLink, reduceCtorEq] at unlinked
+  cases op <;> simp only [CIL.Instruction.readsLink, CIL.Instruction.link?,
+    CIL.Instruction.statesLink, Option.isSome_none, Option.isSome_some, Bool.or_false,
+    Bool.or_true, reduceCtorEq] at unlinked
   case managed operation =>
-    cases operation <;> simp only [reduceCtorEq] at unlinked
+    cases operation <;> simp only [Option.isSome_none, Option.isSome_some,
+      Bool.true_eq_false] at unlinked
     all_goals first
       | rfl
       | (rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩
@@ -217,9 +220,12 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
         | some callee => simpa [linked] using (step_callee stepped enters).1
       simp only [Except.map, FrameAction.relocate_of_callee_none f action none]
   | true =>
-    cases op <;> simp only [CIL.Instruction.readsLink, reduceCtorEq] at linked
+    cases op <;> simp only [CIL.Instruction.readsLink, CIL.Instruction.link?,
+      CIL.Instruction.statesLink, Option.isSome_none, Option.isSome_some, Bool.or_false,
+      Bool.or_true, Bool.false_eq_true] at linked
     case managed operation =>
-      cases operation <;> simp only [reduceCtorEq] at linked
+      cases operation <;> simp only [Option.isSome_none, Option.isSome_some,
+        Bool.false_eq_true] at linked
       simp only [step, CIL.Method.linkAt_relocate]
       rw [apply_ite (Except.map (FrameAction.relocate f))]
       refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
@@ -252,7 +258,8 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
       rcases body.linkAt pc with _ | link
       · rfl
       cases link <;> try rfl
-      all_goals simp only [Option.map_some, CIL.Link.relocate]
+      all_goals simp only [Option.map_some, CIL.Link.relocate, newobjStep, constructAggregate,
+        constructObject]
       all_goals repeat' first
         | rfl
         | (split <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map,

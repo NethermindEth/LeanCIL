@@ -12,9 +12,11 @@ open CIL
 def method0Signature : String := "System.UInt64 Constructs.Calls::Root(System.UInt64,System.UInt64)"
 def method1Signature : String := "System.Void Constructs.Word::.ctor(System.UInt64,System.UInt64,System.UInt64,System.UInt64)"
 def method2Signature : String := "System.Void Constructs.Pair::.ctor(System.UInt64,System.UInt64)"
-@[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.ldarg 0, .ldarg 1, .newAggregate 2 2 16, .fieldAt 8 8, .ldarg 1, .ldc_i4 1, .conv_i8,
-    .ldc_i4 2, .conv_i8, .ldarg 0, .newAggregate 1 4 32, .fieldAt 24 8, .add, .ret] }
+@[cil_code] def method0 : Method := {
+  returnsValue := true, locals := [],
+  code := [.ldarg 0, .ldarg 1, .newobj (.arity 2), .fieldAt 8 8, .ldarg 1, .ldc_i4 1, .conv_i8,
+    .ldc_i4 2, .conv_i8, .ldarg 0, .newobj (.arity 4), .fieldAt 24 8, .add, .ret],
+  links := [(2, .aggregate 2 16), (10, .aggregate 1 32)] }
 @[cil_code] def method1 : Method := { returnsValue := false, locals := [], code :=
   [.ldarg 0, .ldarg 1, .setFieldAt 0 8, .ldarg 0, .ldarg 2, .setFieldAt 8 8, .ldarg 0, .ldarg 3,
     .setFieldAt 16 8, .ldarg 0, .ldarg 4, .setFieldAt 24 8, .ret] }
@@ -210,7 +212,7 @@ theorem root_correct : rootContract.Holds Extracted.program root := root_holds p
 namespace Defaults
 
 @[cil_code] def caller : CIL.Method := { returnsValue := true, locals := [], code :=
-  [.ldarg 0, .newAggregate 1 1 16, .fieldAt 8 8, .ret] }
+  [.ldarg 0, .newobj (.arity 1), .fieldAt 8 8, .ret], links := [(1, .aggregate 1 16)] }
 @[cil_code] def lowOnly : CIL.Method := { returnsValue := false, locals := [], code :=
   [.ldarg 0, .ldarg 1, .setFieldAt 0 8, .ret] }
 @[cil_code] def program : CIL.Program := [caller, lowOnly]
@@ -379,9 +381,7 @@ theorem half_width_rejected (value : PairInput → Unit → List (BitVec 8)) :
 
 set_option pp.mvars false in
 /--
-CIL.Instruction.add, CIL.Instruction.ret][2]?
-is not definitionally equal to the right-hand side
-  some (CIL.Instruction.newAggregate ?_ ?_ 8)
+⊢ some (CIL.Link.aggregate 2 16) = some (CIL.Link.aggregate 2 8)
 -/
 #guard_msgs (substring := true) in
 /-- The tactic refuses an 8-byte constructor contract at the 16-byte `newobj` site. -/

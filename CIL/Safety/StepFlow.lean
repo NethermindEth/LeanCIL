@@ -67,7 +67,8 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     (h : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) :
     op.readsLink = true ∧ callee ∈ body.calleesAt pc := by
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+    constructAggregate constructObject at h
   dsimp only at h
   split at h
   all_goals repeat' first
@@ -141,18 +142,19 @@ theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
   all_goals (cases h; refine ⟨_, by assumption, ?_⟩; simp_all)
 #print axioms step_call_action
 
-/-- Aggregate construction enters the constructor its link names with a temporary, never as a
-    plain call. -/
-theorem step_newAggregate_action {body : CIL.Method} {target argc pc : Nat} {size}
-    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.newAggregate target argc size) pc args frame stack m = .ok action) :
-    ∃ callee linkedSize arguments rest frame' temporary kind m',
-      body.linkAt pc = some (.aggregate callee linkedSize) ∧
+/-- A construction under an `.aggregate` link enters the constructor the link names with a
+    temporary, never as a plain call. -/
+theorem step_newobj_aggregate_action {body : CIL.Method} {constructor : CIL.Extraction.MethodRef}
+    {callee pc : Nat} {size : Fin (2^64)} {args : List Value} {frame : Frame}
+    {stack : List Value} {m : Memory} {action : FrameAction}
+    (linked : body.linkAt pc = some (.aggregate callee size))
+    (h : step body (.newobj constructor) pc args frame stack m = .ok action) :
+    ∃ arguments rest frame' temporary kind m',
       action = .construct callee arguments rest frame' temporary kind m' := by
-  unfold step at h
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  unfold step newobjStep constructAggregate at h
+  simp only [linked, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, _, _, _, _, _, by assumption, rfl⟩)
-#print axioms step_newAggregate_action
+  all_goals (cases h; exact ⟨_, _, _, _, _, _, rfl⟩)
+#print axioms step_newobj_aggregate_action
 
 end CIL.Safety

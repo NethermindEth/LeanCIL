@@ -132,7 +132,7 @@ internal static class LeanEmitter
         foreach (var operation in operations)
         {
             // A tail call lists no callee: a method that only tail-calls is proved by `decide`, which unfolds none.
-            if (operation is not (Call { Kind: not CallKind.Tail } or NewAggregate or NewObject)) continue;
+            if (operation is not (Call { Kind: not CallKind.Tail } or Newobj)) continue;
             hasCall = true;
             var target = operation.Methods.Single();
             if (target >= 0 && target < methodCount) targets.Add(target);
@@ -237,6 +237,8 @@ internal static class LeanEmitter
                     NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                     StaticFieldInstruction access => access with { Field = genericEvidence.FieldReferenceOf(m, pc) },
+                    Newobj construction =>
+                        construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
                     _ => operation
                 };
             }
@@ -271,17 +273,21 @@ internal static class LeanEmitter
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)
                 lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
-            var linkTable = "[" + string.Join(", ", linkEntries.Select(entry =>
-                $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]";
+            // One named table, which the literal and the decoder both take, so a decoded method's links are the
+            // extractor's and its link facts name the same definitions as a literal's.
+            var linkTable = $"method{n}Links";
+            lean.AppendLine($"@[cil_code] def {linkTable} : List (Nat × Link) := [" + string.Join(", ",
+                linkEntries.Select(entry => $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
-            // A call names the method its closed operand names, which the definition just written spells.
+            // A call names the method its raw operand names; a constrained one also the type the definition just
+            // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)
                 if (ops[pc] is Call { Kind: not CallKind.Instance } call)
                     ops[pc] = call with
                     {
-                        Site = genericEvidence.ClosedOperandOf(m.Body.Instructions[pc]),
+                        Site = genericEvidence.MethodReferenceOf(m, pc),
                         ConstrainedType = call.Constrained
                             ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
                     };
@@ -298,11 +304,9 @@ internal static class LeanEmitter
                 var naming = string.Join(", ", ops.OfType<ClassField>().Select(access =>
                     operandShapes.FieldName(access.Reference ?? throw new InvalidOperationException(
                         "A class field access has no field operand."))).Distinct());
-                // The table is a named argument of the decoder, so the method's links field names it.
-                lean.AppendLine($"def method{n}Links : List (Nat × Link) := {linkTable}");
                 lean.AppendLine($"cil_decoded_method method{n} {(naming.Length == 0 ? "" : $"[{naming}] ")}:= " +
-                    $"Method.ofRaw? profile {FrameMetadata.EnvironmentLean} method{n}Original " +
-                    $"method{n}TypeArgumentsRaw method{n}Links");
+                    $"Method.ofRaw? profile {FrameMetadata.EnvironmentLean} {linkTable} method{n}Original " +
+                    $"method{n}TypeArgumentsRaw");
             }
             else
             {
@@ -352,7 +356,7 @@ internal static class LeanEmitter
                 $"closed := method{n}Closed, parameterInput := method{n}RawArguments, " +
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
-                $"dispatchTypes := method{n}DispatchTypes, " +
+                $"dispatchTypes := method{n}DispatchTypes, links := method{n}Links, " +
                 $"assembly := assembly{pinned.Index(methods[n].Module)}, " +
                 $"signature := method{n}Signature }}")) + "]");
         for (var n = 0; n < methods.Length; n++)

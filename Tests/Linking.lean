@@ -163,7 +163,7 @@ open CIL
 
 def body : Method := {
   code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callVirtual [(.void, 2)] 1,
-    .newAggregate 3 0 8, .ret]
+    .newobj (.arity 0), .ret]
   links := [(1, .direct 1), (3, .virtual [(.void, 2)]), (4, .aggregate 3 8)]
   locals := [], returnsValue := false }
 

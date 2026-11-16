@@ -120,34 +120,68 @@ theorem argument_count_rejected :
 #print axioms argument_count_rejected
 
 /-- A class deriving from `Test.Counter` whose instances have two fields, its base's included,
-    and its one-argument constructor. -/
+    and its constructor, taking one `word`. -/
 def tally : TypeExpr := .object "Test" "Tally"
 def counter : TypeExpr := .object "Test" "Counter"
 def tallyConstructor : RawMethod := { closed with
-  hasThis := true, objectReceiver := true, objectFieldCount := 2, objectBases := [counter] }
+  token := 2, owner := "Test::Tally", hasThis := true, returnType := .void, parameters := [word],
+  objectReceiver := true, objectFieldCount := 2, objectBases := [counter] }
+/-- A struct `Test::Pair` and its constructor, taking one `word` after its storage's address. -/
+def pair : TypeExpr := .aggregate "Test::Pair" 16
+def pairConstructor : RawMethod := { tallyConstructor with
+  token := 3, owner := "Test::Pair", objectReceiver := false, objectFieldCount := 0,
+  objectBases := [] }
+/-- The program's methods: the class constructor at index 0, the struct constructor at 1. -/
+def constructors (index : Nat) : Option SpecializedMethod :=
+  [(⟨[], tallyConstructor⟩ : SpecializedMethod), ⟨[], pairConstructor⟩][index]?
+/-- The managed site of each constructor. -/
 def construction : CallSite := {
   method := {
     owner := tally, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
-    parameters := [] },
-  name := ".ctor", target := .managed 0, typeArguments := [], parameterCount := 1,
+    parameters := [word] },
+  name := ".ctor", target := .managed 2, typeArguments := [], parameterCount := 1,
   returnsValue := false }
+def pairConstruction : CallSite := { construction with method.owner := pair, target := .managed 3 }
+/-- The raw `newobj` of each site. -/
+def newTally : RawInstruction := ⟨0, 115, .call construction⟩
+def newPair : RawInstruction := ⟨0, 115, .call pairConstruction⟩
 
--- A construction allocates the call site's class, with its constructor's class's bases, at one
--- slot per field of that class.
-theorem construction_owner_and_size :
-    constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [counter] 16) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [counter] 8) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [counter] 24) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor (.newObject 0 1 tally [] 16) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor
-      (.newObject 0 1 tally [counter, tally] 16) ∧
-    ¬ constructedOwnerMatches construction tallyConstructor
-      (.newObject 0 1 (.object "Test" "Other") [counter] 16) ∧
-    ¬ constructedOwnerMatches { construction with method.owner := word }
-      { tallyConstructor with objectReceiver := false } (.newObject 0 1 word [counter] 16) ∧
-    ¬ constructedOwnerMatches construction { tallyConstructor with objectReceiver := false }
-      (.newObject 0 1 tally [counter] 16) := by decide +kernel
-#print axioms construction_owner_and_size
+-- A class construction is linked `.object` to the method its site names, with that class's
+-- bases and one slot per field; a struct construction is linked `.aggregate` to its method. A
+-- dead site passes unlinked.
+theorem constructions_linked :
+    validateConstructionWith constructors newTally true (some (.object 0 [counter] 16))
+      construction.method ∧
+    validateConstructionWith constructors newPair true (some (.aggregate 1 16))
+      pairConstruction.method ∧
+    validateConstructionWith constructors newTally false none construction.method := by
+  decide +kernel
+#print axioms constructions_linked
+
+-- Forged links: another size, other bases, a constructor of the other kind, another method, no
+-- link, a constructor the site does not name, or a call opcode.
+theorem forged_constructions_rejected :
+    ¬ validateConstructionWith constructors newTally true (some (.object 0 [counter] 8))
+      construction.method ∧
+    ¬ validateConstructionWith constructors newTally true (some (.object 0 [counter] 24))
+      construction.method ∧
+    ¬ validateConstructionWith constructors newTally true (some (.object 0 [] 16))
+      construction.method ∧
+    ¬ validateConstructionWith constructors newTally true
+      (some (.object 0 [counter, tally] 16)) construction.method ∧
+    ¬ validateConstructionWith constructors newTally true (some (.aggregate 0 16))
+      construction.method ∧
+    ¬ validateConstructionWith constructors newPair true (some (.object 1 [] 0))
+      pairConstruction.method ∧
+    ¬ validateConstructionWith constructors newTally true (some (.object 1 [counter] 16))
+      construction.method ∧
+    ¬ validateConstructionWith constructors newTally true none construction.method ∧
+    ¬ validateConstructionWith constructors newTally true (some (.object 0 [counter] 16))
+      pairConstruction.method ∧
+    ¬ validateConstructionWith constructors ⟨0, 40, .call construction⟩ true
+      (some (.object 0 [counter] 16)) construction.method := by
+  decide +kernel
+#print axioms forged_constructions_rejected
 
 /-- A non-virtual instance method of `Tally` taking one word, and a call site of it. -/
 def deposit : RawMethod := { closed with

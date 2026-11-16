@@ -34,7 +34,8 @@ theorem Instruction.continues_of_linked {op : CIL.Instruction}
     (notTail : ∀ method prefixes, op = .call method prefixes → prefixes.tail = false)
     (notManagedTail : ∀ signature catalog, op ≠ .managed (.call signature catalog true)) :
     op.continues = true := by
-  cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.continues]
+  cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.link?,
+    CIL.Instruction.statesLink, CIL.Instruction.continues]
 
 #print axioms Instruction.continues_of_linked
 

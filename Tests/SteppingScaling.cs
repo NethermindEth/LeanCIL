@@ -66,7 +66,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("hypotheseslookup", [16, 64, 256], false), ("hypothesesdirect", [16, 256], false),
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
-    ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false)
+    ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false),
+    ("constructions", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -130,6 +131,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // The objects body loads an int64 field of its object argument and pops it per cycle, so each `ldfld`
 // reads the field's shape fact and two memory facts of constant size.
 // The statics body loads one static field and pops it per cycle, with one static site per load.
+// The constructions body constructs a class instance and pops it per cycle, so each `newobj` reads its
+// `.object` link from the body's table and one allocation fact and enters a constructor that returns.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
@@ -145,6 +148,9 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
         ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
     "allocation" => ([], [".ldc_i4 2", $".newarr ({NodeType})", ".pop"], [".ldc_i4 0", ".ret"]),
+    // The constructor reference is a literal, as an extraction writes it.
+    "constructions" => ([], [$".newobj {{ owner := {NodeType}, name := name!\".ctor\", hasThis := true, " +
+        "genericArity := 0, returnType := .void, parameters := [] }", ".pop"], [".ldc_i4 0", ".ret"]),
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
@@ -229,6 +235,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     {
         "tablecalls" => $" links := {linkTable},",
         "calls" => " links := callLinks,",
+        "constructions" => " links := [" +
+            string.Join(", ", Enumerable.Range(0, cycles).Select(cycle => $"({cycle * 2}, .object 1 [] 8)")) + "],",
         _ => ""
     };
     var callDefinitions = workload is "calls" or "tablecalls" ? $$"""
@@ -248,7 +256,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
-        "allocation" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
+        "allocation" or "constructions" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
         "objects" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         _ => ""
@@ -290,6 +298,10 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         /-- The callee every call of the calls body enters; it returns its argument. -/
         def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
         cil_instruction_equations callee
+        """ + "\n" : "") + (workload == "constructions" ? """
+        /-- The constructor every construction of the constructions body enters; it returns at once. -/
+        def constructor : CIL.Method := { locals := [], returnsValue := false, code := [.ret] }
+        cil_instruction_equations constructor
         """ + "\n" : "") + (workload is "arguments" or "homes" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{(statics ? "{}" : signature)}} := rfl
@@ -497,6 +509,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 (allocated : newReferenceArray memory ({{NodeType}}) (.i32 2) = .ok (array, memory)) :
                 invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [allocated]
+            """,
+        "constructions" => $$"""
+            /-- Every `newobj` allocates by one fact that keeps the memory and enters the constructor. -/
+            theorem checked (memory : Memory) (object : Reference)
+                (allocated : allocateObject memory ⟨{{NodeType}}, []⟩ 8 = .ok (object, memory))
+                (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+                invoke [body, constructor] {{operations.Length + 3}} 0 [] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [allocated, formed]
             """,
         "objects" => $$"""
             /-- Every `ldfld` reads its slot from the field's shape fact and two memory facts of its object. -/

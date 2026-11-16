@@ -426,6 +426,42 @@ def allocateElements (shape : ElementShape) (length : CIL.Value) (memory : Memor
   | .method _ => .error (.unsupported ElementShape.methodAllocation)
   | .unsupported reason => .error (.unsupported reason)
 
+/-- `newobj` of a value type: a zeroed temporary of `size` bytes owned by `frame`, passed by
+    address to `callee` ahead of the `argc` arguments on the stack; the driver pushes the
+    temporary's value once the constructor returns. -/
+def constructAggregate (callee argc : Nat) (size : Fin (2^64)) (frame : Frame)
+    (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
+  if size = 0 || stack.length < argc then .error .invalidState else
+    let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+    let (temporary, memory) ← allocateHome m frame.activation size
+    let (_, memory) ← storeLocal memory (.bytes (.aggregate size) temporary)
+      (.scalar (.aggregate (List.replicate size 0)))
+    let frame := { frame with owned := temporary.allocation :: frame.owned }
+    return .construct callee (.reference (.address temporary) :: arguments)
+      (stack.drop argc) frame temporary (.aggregate size) memory
+
+/-- `newobj` of a class: a fresh zeroed instance of `type` with `size` bytes of fields, passed
+    to `constructor` as its receiver ahead of the `argc` arguments on the stack, and left on the
+    caller's stack for when the constructor returns. -/
+def constructObject (constructor argc : Nat) (type : RuntimeType) (size : Nat)
+    (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
+  if stack.length < argc then .error .invalidState else
+    let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+    let (object, memory) ← allocateObject m type size
+    let created := Value.object (.address object)
+    return .call constructor (created :: arguments) (created :: stack.drop argc) memory
+
+/-- `newobj` of a constructor of `owner` taking `argc` arguments, as its `link` states: a
+    value-type temporary for `.aggregate`, a class instance with the link's bases for
+    `.object`. Any other link, or none, faults with `unlinkedCall`. -/
+def newobjStep (link : Option CIL.Link) (owner : CIL.Extraction.TypeExpr) (argc : Nat)
+    (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction :=
+  match link with
+  | some (.aggregate callee size) => constructAggregate callee argc size frame stack m
+  | some (.object constructor bases size) =>
+    constructObject constructor argc ⟨owner, bases⟩ size stack m
+  | _ => .error unlinkedCall
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
@@ -433,8 +469,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
   -- Native table offsets, faulting arithmetic, object identity, type tests, instance fields,
-  -- argument homes, `localloc` and `newarr` are matched apart, so neither match exceeds the 79
-  -- alternatives `split` handles.
+  -- argument homes, `localloc`, `newarr` and `newobj` are matched apart, so neither match exceeds
+  -- the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -550,6 +586,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     else if stack.length < method.argumentCount then .error .invalidState else
       let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
       return .call callee arguments (stack.drop method.argumentCount) m
+  -- A construction allocates what the link at its pc states and enters the constructor it names.
+  | .newobj constructor, _ =>
+    newobjStep (body.linkAt pc) constructor.owner constructor.parameters.length frame stack m
   -- A hole faults on every stack.
   | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
@@ -667,23 +706,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
-  | .newAggregate _ argc size, _ =>
-    let some (.aggregate callee _) := body.linkAt pc | .error unlinkedCall
-    if size = 0 || stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      let (temporary, memory) ← allocateHome m frame.activation size
-      let (_, memory) ← storeLocal memory (.bytes (.aggregate size) temporary)
-        (.scalar (.aggregate (List.replicate size 0)))
-      let frame := { frame with owned := temporary.allocation :: frame.owned }
-      return .construct callee (.reference (.address temporary) :: arguments)
-        (stack.drop argc) frame temporary (.aggregate size) memory
-  | .newObject _ argc owner bases size, _ =>
-    let some (.object constructor _ _) := body.linkAt pc | .error unlinkedCall
-    if stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      let (object, memory) ← allocateObject m ⟨owner, bases⟩ size
-      let created := Value.object (.address object)
-      return .call constructor (created :: arguments) (created :: stack.drop argc) memory
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory

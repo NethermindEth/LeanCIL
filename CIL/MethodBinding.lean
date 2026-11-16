@@ -54,11 +54,13 @@ def environmentField (left right : LayoutEnvironment) : Option String :=
     s!"  right: {right.rawLayouts.length} raw layouts, {right.layouts.size} computed")
 
 /-- What to do when a body's link table differs: a structure update copies the old table, and
-    `Method.withCode` drops the links of `call` sites, which no instruction implies. -/
+    `Method.withCode` drops the links of `call` and `newobj` sites, whose instructions imply
+    none. -/
 def linksHint : String :=
   "\n  a body written as `{ method with code := ... }` keeps the links of `method`, keyed by its \
-    own pcs; `Method.withCode` keeps only the links its code implies, so a body with `call` sites \
-    supplies their links after it: `{ body with links := [(pc, .direct callee), ...] }`"
+    own pcs; build it with `Method.withCode` so its links follow its code; `call` and `newobj` \
+    imply no link, so a body that calls or constructs then states their links in pc order: \
+    `{ body with links := [(pc, link), ...] }`"
 
 /-- What to do when a body's static sites differ: `Method.withCode` resets them. -/
 def staticSitesHint : String :=

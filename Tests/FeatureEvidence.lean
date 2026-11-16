@@ -226,7 +226,7 @@ example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 0) = true :=
 example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.stloc 1) = false := by decide +kernel
 example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 1) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
-example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
+example : emittedFeatureEffect (.newobj (.arity 2)) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
 theorem indexed_local_eligibility :
     let types := [intType, .atom runtimeScope "System.Boolean",

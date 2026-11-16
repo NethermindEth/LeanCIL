@@ -137,7 +137,8 @@ theorem allocation_over_budget :
     which then also waits on the caller's stack. -/
 private def creator : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.newObject 1 0 account.identity [] 8, .ret] }
+    code := [.newobj { CIL.Extraction.MethodRef.arity 0 with owner := account.identity }, .ret],
+    links := [(0, .object 1 [] 8)] }
 private def constructor : CIL.Method :=
   { returnsValue := false, locals := [], code := [.ret] }
 
@@ -228,7 +229,9 @@ private def nextAccount : Extraction.FieldRef :=
     code := [.ldarg 0, .ldfld nextAccount, .ret] }
 /-- `newobj` of an 8-byte instance whose constructor is method 4. -/
 @[cil_code] def creating : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.newObject 4 0 account.identity [] 8, .ret] }
+  { returnsValue := true, locals := [],
+    code := [.newobj { CIL.Extraction.MethodRef.arity 0 with owner := account.identity }, .ret],
+    links := [(0, .object 4 [] 8)] }
 /-- A constructor or instance method that does nothing. -/
 @[cil_code] def doingNothing : CIL.Method :=
   { returnsValue := false, locals := [], code := [.ret] }
@@ -412,7 +415,8 @@ theorem unrelated_classes_need_catalog :
 /-- A one-method program whose only `newobj` creates an instance of `type`. -/
 private def createsOne (type : RuntimeType) : CIL.Program :=
   [{ returnsValue := true, locals := [],
-     code := [.newObject 1 0 type.identity type.bases 16, .ret] }]
+     code := [.newobj { CIL.Extraction.MethodRef.arity 0 with owner := type.identity }, .ret],
+     links := [(0, .object 1 type.bases 16)] }]
 
 /-- The site check accepts a program creating a cataloged class with its own chain, and rejects
     one whose `newobj` records the lineage no CLR object can have, so execution of it is not

@@ -102,7 +102,7 @@ theorem with_code_binds :
     fun line => (line.takeWhile (· != ':')).toString) == ["field links"]
 
 #guard ((MethodBinding.methodDifferences calling (donor.withCode calling.code)).map
-    fun line => (line.splitOn "links := [(pc, .direct callee)").length) == [2]
+    fun line => (line.splitOn "links := [(pc, link), ...]").length) == [2]
 
 /-- `reading`'s code under `withCode`, with its call's link. -/
 def readingLinked : Method := { donor.withCode reading.code with links := [(3, .direct 7)] }

@@ -1204,28 +1204,17 @@ theorem step_appendLocals_callVirtual (targets : List (CIL.Extraction.TypeExpr Ã
 
 #print axioms step_appendLocals_callVirtual
 
-/-- `newAggregate` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64)) :
-    StepAppendLocals (.newAggregate constructor argc size) := by
+/-- `newobj` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
+    StepAppendLocals (.newobj constructor) := by
+
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step newobjStep constructAggregate constructObject
   frame_natural
 
-#print axioms step_appendLocals_newAggregate
-
-/-- `newObject` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_newObject (constructor argc : Nat) (owner : Extraction.TypeExpr)
-    (bases : List Extraction.TypeExpr) (size : Nat) :
-    StepAppendLocals (.newObject constructor argc owner bases size) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
-
-#print axioms step_appendLocals_newObject
+#print axioms step_appendLocals_newobj
 
 /-- `skipInit` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_skipInit :
@@ -1543,10 +1532,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_callInstance method argc
     case callVirtual targets argc =>
       exact step_appendLocals_callVirtual targets argc
-    case newAggregate constructor argc size =>
-      exact step_appendLocals_newAggregate constructor argc size
-    case newObject constructor argc owner bases size =>
-      exact step_appendLocals_newObject constructor argc owner bases size
+    case newobj constructor =>
+      exact step_appendLocals_newobj constructor
     case skipInit =>
       exact step_appendLocals_skipInit
     case feature id =>

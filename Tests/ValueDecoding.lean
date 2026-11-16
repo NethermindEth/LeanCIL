@@ -33,6 +33,14 @@ private def callSite : CallSite := {
   name := "Deposit", target := .managed 0x06000001, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
+/-- A managed site of the `int32` constructor of `T.Account`. -/
+private def accountConstruction : CallSite := {
+  method := {
+    owner := .object "T" "T.Account", name := name!".ctor", hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [.atom runtimeScope "System.Int32"] },
+  name := ".ctor", target := .managed 1, typeArguments := [], parameterCount := 1,
+  returnsValue := false }
+
 /-- One raw instruction per value opcode, every short, long and macro form, with the instruction
     ECMA-335 assigns it; constants include the extremes of each form's range and locals the largest
     index each width encodes. -/
@@ -122,8 +130,9 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 65039, .none⟩, .localloc),
   -- Class type tests.
   (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog),
-  -- Calls, whose target the link at their pc gives.
-  (⟨0, 40, .call callSite⟩, .call callSite.method)]
+  -- Calls and constructions, whose target the link at their pc gives.
+  (⟨0, 40, .call callSite⟩, .call callSite.method),
+  (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
@@ -133,8 +142,7 @@ def undecoded : List Name := [
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
   ``Instruction.initializeSpanLocal, ``Instruction.managed, ``Instruction.callInstance,
-  ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
-  ``Instruction.skipInit, ``Instruction.feature,
+  ``Instruction.callVirtual, ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
   ``Instruction.ldtoken]
@@ -207,12 +215,18 @@ def mutations : List (RawInstruction × Instruction) := [
     name!"balance" true⟩, .ldfld classField),
   (⟨0, 123, .field (.aggregate "T::Pair" 0) 1 (.atom runtimeScope "System.Int32")
     name!"balance" false⟩, .ldfld { classField with owner := .aggregate "T::Pair" 0 }),
-  -- Another method, a prefix the bytes do not hold, or a call operand under another opcode.
+  -- Another method or constructor than the site names, a prefix the bytes do not hold, or a call
+  -- operand under another opcode.
   (⟨0, 40, .call callSite⟩, .call { callSite.method with name := name!"Withdraw" }),
   (⟨0, 40, .call callSite⟩, .call callSite.method { tail := true }),
   (⟨0, 40, .call callSite⟩, .call callSite.method { constrained := some dog }),
   (⟨0, 40, .none⟩, .call callSite.method),
-  (⟨0, 111, .call callSite⟩, .call callSite.method)]
+  (⟨0, 111, .call callSite⟩, .call callSite.method),
+  (⟨0, 115, .call accountConstruction⟩,
+    .newobj { accountConstruction.method with parameters := [] }),
+  (⟨0, 115, .call accountConstruction⟩,
+    .newobj { accountConstruction.method with owner := .object "T" "T.Other" }),
+  (⟨0, 40, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
 /-- No mutation matches its raw instruction. -/
 theorem mutations_rejected :
@@ -282,7 +296,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 74, undecoded 28 of 102 constructors -/
+/-- info: decoded 75, undecoded 26 of 101 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

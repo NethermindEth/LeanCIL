@@ -82,7 +82,7 @@ internal static class Blockers
     // Names, not definitions: a definition holds its extraction's whole module alive across every later entry.
     sealed record LiteralMethod(string Method, GenericEvidence.DecodeRefusal Refusal);
 
-    // The report's text for a refusal; the family is null at an unreachable pc.
+    // The report's text for a refusal; only a hole has a family.
     static object Refusal(string method, GenericEvidence.DecodeRefusal refusal) => new
     {
         method, ilOffset = refusal.Offset, opcode = refusal.Opcode.Name,

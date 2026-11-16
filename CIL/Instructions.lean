@@ -231,11 +231,11 @@ inductive Instruction where
       enters the body `targets` lists for its exact runtime class. A null receiver throws
       `System.NullReferenceException`; a class `targets` omits is a model fault, not a call. -/
   | callVirtual (targets : List (Extraction.TypeExpr × Nat)) (argc : Nat)
-  | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
-  /-- A fresh zeroed instance of class `owner` with `size` bytes of fields, passed to
-      `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
-  | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr)
-      (bases : List Extraction.TypeExpr) (size : Nat)
+  /-- `newobj` of `constructor`: a fresh zeroed instance of its owner, passed to the constructor
+      the link at its pc names as its receiver ahead of the constructor's parameters, and pushed
+      once it returns. The link states what is allocated: a value-type temporary for
+      `.aggregate`, a class instance with its bases for `.object`. -/
+  | newobj (constructor : Extraction.MethodRef)
   /-- `castclass`: the object unchanged when it is null or an instance of `type`;
       `InvalidCastException` otherwise. -/
   | castclass (type : Extraction.TypeExpr)
@@ -378,31 +378,49 @@ def Link.callees : Link → List Nat
   | .indirect catalog => catalog.map ManagedTarget.method
 
 /-- The link that an instruction's own program index implies; `none` for instructions that
-    enter no method and for `call`, whose operand names a method rather than a program index. -/
+    enter no method and for `call` and `newobj`, whose operands name a method rather than a
+    program index. -/
 def Instruction.link? (op : Instruction) : Option Link := by
   -- Built by cases: a catch-all `match` on this type elaborates to a sparse recursor that
   -- depends on `propext`, and every method literal's default link table would inherit it.
   cases op
   case callInstance method _ => exact some (.direct method)
   case callVirtual targets _ => exact some (.virtual targets)
-  case newAggregate method _ size => exact some (.aggregate method size)
-  case newObject method _ _ bases size => exact some (.object method bases size)
   case managed operation =>
     cases operation
     case call _ catalog _ => exact some (.indirect catalog)
     all_goals exact none
   all_goals exact none
 
-/-- Whether a step of the instruction reads the link of its pc: every call and construction. A
-    body that gives such a pc no link of the right kind faults the step. -/
-def Instruction.readsLink (op : Instruction) : Bool := by
+/-- The constructor a `newobj` names; `none` for every other instruction. Its link is not implied
+    by the operand: the link table states the constructor's index and the allocation. -/
+def Instruction.constructor? (op : Instruction) : Option Extraction.MethodRef := by
   cases op
-  case managed operation =>
-    cases operation
-    case call => exact true
-    all_goals exact false
-  case call | callInstance | callVirtual | newAggregate | newObject => exact true
+  case newobj constructor => exact some constructor
+  all_goals exact none
+
+/-- The instruction is a `newobj`. -/
+def Instruction.constructs (op : Instruction) : Bool := op.constructor?.isSome
+
+/-- An instruction that names a constructor is the `newobj` of it. -/
+theorem Instruction.eq_newobj_of_constructor? {op : Instruction}
+    {constructor : Extraction.MethodRef} (named : op.constructor? = some constructor) :
+    op = .newobj constructor := by
+  cases op <;> cases named <;> rfl
+
+#print axioms Instruction.eq_newobj_of_constructor?
+
+/-- The instruction's operand names a method without implying its program index, so the link
+    table states the link it reads: a `call` or a `newobj`. -/
+def Instruction.statesLink (op : Instruction) : Bool := by
+  cases op
+  case call | newobj => exact true
   all_goals exact false
+
+/-- The instruction reads the link at its pc when it steps: it implies one, or its table states
+    one. A body that gives such a pc no link of the right kind faults the step. -/
+def Instruction.readsLink (op : Instruction) : Bool :=
+  op.link?.isSome || op.statesLink
 
 /-- The link table a code list implies: each linking instruction's pc with its link. The pcs come
     from `List.range`, which the kernel reduces to literals. Numbered by `zipIdx`, each pc would be
@@ -450,7 +468,9 @@ def Method.staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
 
 /-- `method` with new code and the link table that code implies. Static sites are keyed by pc like
     the links, so they are reset to none; a body that reads statics supplies its own after the
-    call. The declared signature, the environment and the other fields are kept. A plain
+    call, and so does a body with a pc whose instruction `statesLink`, a `call` or `newobj`,
+    since it implies none. The declared signature, the environment and the other fields are
+    kept. A plain
     `{ method with code := ... }` keeps the old table and sites, whose pcs are those of the old
     code. -/
 def Method.withCode (method : Method) (code : List Instruction) : Method :=

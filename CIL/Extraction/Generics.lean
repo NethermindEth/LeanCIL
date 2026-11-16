@@ -405,16 +405,14 @@ structure SpecializedMethod where
   deriving DecidableEq, Repr
 
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
-    opcode: `call` (40) for `.call`, whose callee is the `.direct` link of its pc, `callvirt`
-    (111) for a receiver-checked call, `newobj` (115) for a construction. -/
+    opcode: `call` (40) for `.call`, whose callee is the `.direct` link of its pc, and `callvirt`
+    (111) for a receiver-checked call. -/
 private def managedCallTarget (opcode : Nat) (link : Option Link) :
     Instruction → Option (Nat × Nat)
   | .call method _ => match link with
     | some (.direct target) => if opcode = 40 then some (target, method.argumentCount) else none
     | _ => none
   | .callInstance target count => if opcode = 111 then some (target, count) else none
-  | .newAggregate target count _ | .newObject target count .. =>
-    if opcode = 115 then some (target, count) else none
   | _ => none
 
 /-- A `call` names the method its raw operand names, unless a `constrained.` prefix lowered the
@@ -423,14 +421,63 @@ def callOperandMatches (site : CallSite) : Instruction → Bool
   | .call method prefixes => prefixes.constrained.isSome || method == site.method
   | _ => true
 
-/-- A class construction allocates an instance of the call site's declaring class, with that
-    class's bases and one slot per instance field, whose constructor takes that instance as its
-    object receiver. -/
-def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Instruction → Bool
-  | .newObject _ _ owner bases size => owner == site.declaringType && callee.objectReceiver &&
-    bases == callee.objectBases && size == objectFieldOffset callee.objectFieldCount &&
-    match owner with | .object .. => true | _ => false
-  | _ => true
+/-- Split a scoped declaring type from its ordered generic arguments. -/
+def managedOwner : TypeExpr → Option (String × List TypeExpr)
+  | .atom scope name | .constructor scope name | .object scope name =>
+    some (scope ++ "::" ++ name, [])
+  | .aggregate identity _ => some (identity, [])
+  | .apply owner argument => do
+    let (identity, arguments) ← managedOwner owner
+    return (identity, arguments ++ [argument])
+  | _ => none
+
+/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
+def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
+  match managedOwner site.declaringType with
+  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
+    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
+    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
+  | none => false
+
+/-- `callee` is the extracted method a managed site with metadata token `token` names: the same
+    owner with its type arguments, token, method type arguments and declared signature. -/
+def calleeMatchesSite (site : CallSite) (token : Nat) (callee : SpecializedMethod) : Bool :=
+  managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
+  callee.closed.token == token && callee.arguments == site.typeArguments &&
+  callee.closed.parameters.length == site.parameterCount &&
+  callee.closed.hasThis == site.hasThis &&
+  (callee.closed.returnType != .void) == site.returnsValue &&
+  callee.closed.returnType == site.returnType &&
+  callee.closed.parameters == site.parameterTypes
+
+/-- What a live `newobj` of `constructor` may be linked to. Its raw instruction is `newobj` (115)
+    of a managed site naming `constructor`, and the linked method is the one the site names. A
+    value-type constructor, whose owner is no class and whose receiver is no object, is linked
+    `.aggregate`; a class constructor taking its instance as object receiver is linked `.object`
+    with the class's bases and one slot per instance field. A dead site passes. -/
+def validateConstructionWith (methods : Nat → Option SpecializedMethod) (raw : RawInstruction)
+    (live : Bool) (link : Option Link) (constructor : MethodRef) : Bool :=
+  if !live then true else
+  match link with
+  | none => false
+  | some link =>
+    let isClass := match constructor.owner with | .object .. => true | _ => false
+    raw.opcode == 115 && match raw.operand with
+    | .call site => site.method == constructor && match site.target with
+      | .managed token => match link with
+        | .aggregate index _ => match methods index with
+          | some callee => calleeMatchesSite site token callee && !isClass &&
+            !callee.closed.objectReceiver
+          | none => false
+        | .object index bases size => match methods index with
+          | some callee => calleeMatchesSite site token callee && isClass &&
+            callee.closed.objectReceiver && bases == callee.closed.objectBases &&
+            size == objectFieldOffset callee.closed.objectFieldCount
+          | none => false
+        | _ => false
+      | .external _ => false
+    | _ => false
+
 
 /-- The `Virtual` flag of a method's metadata attributes (ECMA-335 II.23.1.10). -/
 def virtualMethodAttribute : Nat := 0x40
@@ -483,24 +530,6 @@ def managedTargetMatches (methods : Nat → Option SpecializedMethod)
     callableType callee.closed.returnType == signature.result &&
     callee.closed.parameters.map callableType == signature.parameters &&
     managedSignature signature.typeExpr == some signature
-
-/-- Split a scoped declaring type from its ordered generic arguments. -/
-def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name | .object scope name =>
-    some (scope ++ "::" ++ name, [])
-  | .aggregate identity _ => some (identity, [])
-  | .apply owner argument => do
-    let (identity, arguments) ← managedOwner owner
-    return (identity, arguments ++ [argument])
-  | _ => none
-
-/-- Owner arguments occupy the suffix after method arguments, with independently checked arity. -/
-def managedOwnerMatches (site : CallSite) (owner : String) (ownerCount : Nat) : Bool :=
-  match managedOwner site.declaringType with
-  | some (identity, arguments) => identity == owner && ownerCount == site.ownerArgumentCount &&
-    arguments.length == ownerCount && ownerCount ≤ site.typeArguments.length &&
-    site.typeArguments.drop (site.typeArguments.length - ownerCount) == arguments
-  | none => false
 
 /-- Exact function address evidence; integer constants cannot acquire callable provenance. -/
 def managedAddressMatches (methods : Nat → Option SpecializedMethod)
@@ -557,6 +586,9 @@ def validateManagedCallWith (methodCount : Nat)
           callee.closed.returnType == site.returnType
         | none => false
     | _ => false
+  -- A live construction is checked with its link by `validateConstructionWith`; without the link
+  -- it passes nothing.
+  | .newobj _ => false
   | _ =>
   match raw.operand with
   | .call site => match site.target with
@@ -565,43 +597,41 @@ def validateManagedCallWith (methodCount : Nat)
       | some (target, count) => match methods target with
         | none => false
         | some callee =>
-          managedOwnerMatches site callee.closed.owner callee.closed.ownerArgumentCount &&
-          callee.closed.token == token && callee.arguments == site.typeArguments &&
-          callee.closed.parameters.length == site.parameterCount &&
-          callee.closed.hasThis == site.hasThis &&
-          (callee.closed.returnType != .void) == site.returnsValue &&
-          callee.closed.returnType == site.returnType &&
-          callee.closed.parameters == site.parameterTypes &&
-          count == site.parameterCount + (if raw.opcode != 115 && site.hasThis then 1 else 0) &&
-          constructedOwnerMatches site callee.closed emitted &&
+          calleeMatchesSite site token callee &&
+          count == site.parameterCount + (if site.hasThis then 1 else 0) &&
           checkedReceiverMatches callee.closed emitted && callOperandMatches site emitted
     | .external identity => match emitted, link with
       | .call method prefixes, some (.direct target) =>
         !prefixes.tail && prefixes.constrained.isNone && method == site.method &&
           validateImportCallWith methodCount imports raw.opcode site identity target
             method.argumentCount
-      | .call .., _ | .callInstance .., _ | .newAggregate .., _ | .newObject .., _ => false
+      | .call .., _ | .callInstance .., _ => false
       | _, _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .callInstance .. | .newAggregate .. | .newObject .. => false
+    | .call .. | .callInstance .. => false
     | _ => true
 
-/-- Whether `link` is a link the instruction can have at its pc: a `.direct` one for a `call`,
-    whose operand names a method, and the link its program index implies for any other. -/
+/-- Whether `link` is a link an instruction other than a construction can have at its pc: a
+    `.direct` one for a `call`, whose operand names a method, and the link its program index
+    implies for any other. -/
 def _root_.CIL.Instruction.linkFits (emitted : Instruction) (link : Option Link) : Bool :=
   match emitted with
   | .call .. => (link matches some (.direct _))
   | _ => link == emitted.link?
 
-/-- `link` is what the method's link table gives this pc. It must fit the instruction, live or
-    not, so a key sits only at a call-family pc and each call-family pc has one, and the
-    instruction must pass `validateManagedCallWith` with it. -/
+/-- `link` is what the method's link table gives this pc. A construction is checked with it by
+    `validateConstructionWith`. Any other instruction must fit it, live or not, so a key sits only
+    at a pc that reads a link and each call-family pc other than a construction has one, and must
+    pass `validateManagedCallWith` with it. -/
 def validateLinkedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
-  emitted.linkFits link &&
-    validateManagedCallWith methodCount methods imports raw live link emitted
+  match emitted.constructor? with
+  | some constructor => validateConstructionWith methods raw live link constructor
+  | none =>
+    emitted.linkFits link &&
+      validateManagedCallWith methodCount methods imports raw live link emitted
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -613,10 +643,16 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
 
+/-- The linked call rule stated against the original lists. -/
+def validateLinkedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
+  validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
+
 /-- The emitted link table's keys ascend and are pcs of the emitted code, and each pc is checked
     with the link the table gives it, read by one walk beside the code; so the table gives every
-    `call` pc a `.direct` link, every other call-family pc the link its instruction implies, and
-    has no other key. Every call emitted at a live call site of `raw` binds to the method table or
+    `call` pc a `.direct` link, every live construction a link `validateConstructionWith`
+    accepts, every other call-family pc the link its instruction implies, and has no key at a pc
+    that reads none. Every call emitted at a live call site of `raw` binds to the method table or
     an import slot, and no other instruction emits a call. An external site may instead emit a
     non-call translation, which other validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -662,13 +698,13 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
 
 #print axioms ManagedCallsValid_iff_original
 
-/-- An admitted body gives every pc a link its instruction fits: a `.direct` link at a `call`
-    and the link its program index implies elsewhere, so a step of an admitted body never takes
-    the `unlinkedCall` branch. -/
+/-- An admitted body gives every pc of an instruction other than a construction a link the
+    instruction fits: a `.direct` link at a `call` and the link its program index implies
+    elsewhere, so a step of such an instruction never takes the `unlinkedCall` branch. -/
 theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
     {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) {pc : Nat}
-    {op : Instruction} (found : emitted.code[pc]? = some op) :
+    {op : Instruction} (found : emitted.code[pc]? = some op) (implied : op.constructs = false) :
     op.linkFits (emitted.linkAt pc) = true := by
   obtain ⟨_, _, statesLength, codeLength, checks⟩ :=
     (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
@@ -681,7 +717,9 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
       some (reachable[pc], emitted.linkAt pc) := by
     simp [List.getElem?_zip_eq_some, liveInside, inside]
   have checked := all3_at checks rawFound paired found
-  simp only [validateLinkedCallWith, Bool.and_eq_true] at checked
+  have unnamed : op.constructor? = none := by
+    simpa [Instruction.constructs] using implied
+  simp only [validateLinkedCallWith, unnamed, Bool.and_eq_true] at checked
   exact checked.1
 
 #print axioms ManagedCallsValid.linkFits
@@ -701,17 +739,18 @@ macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
        · decide +kernel
        · rfl
        · rfl
-       · simp [all3, validateLinkedCallWith, Instruction.linkFits, validateManagedCallWith,
-           managedCallTarget, constructedOwnerMatches, callOperandMatches, Method.linkAt,
-           linkLookup,
+       · simp [all3, validateLinkedCallWith, Instruction.constructor?, Instruction.linkFits,
+           validateManagedCallWith, validateConstructionWith, managedCallTarget, calleeMatchesSite,
+           callOperandMatches, Method.linkAt, linkLookup,
            $[$facts:term],*] <;>
            decide +kernel)
     | decide +kernel)
 
+/-- Every live pc passes the linked call rule with the link the table gives it. -/
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
     {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
-    validateManagedCall methods imports raw.code[pc] reachable[pc.val]! (emitted.linkAt pc)
+    validateLinkedCall methods imports raw.code[pc] reachable[pc.val]! (emitted.linkAt pc.val)
       (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
   obtain ⟨_, _, statesLength, codeLength, checks⟩ :=
     (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
@@ -721,10 +760,9 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
   have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc.val]? =
       some (reachable[pc.val], emitted.linkAt pc) := by
     simp [List.getElem?_zip_eq_some, live, present]
-  have checked := all3_at checks (List.getElem?_eq_getElem pc.isLt) paired
+  have pass := all3_at checks (List.getElem?_eq_getElem pc.isLt) paired
     (List.getElem?_eq_getElem present)
-  simp only [validateLinkedCallWith, Bool.and_eq_true] at checked
-  exact checked.2
+  exact pass
 
 /-- An accepted live `call` linked past every extracted method is an external site calling a
     slot with its identity and arity. -/

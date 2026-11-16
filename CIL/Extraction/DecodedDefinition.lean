@@ -6,17 +6,17 @@ import CIL.SymbolicExecution
 # Methods defined by evaluating the decoder
 
 `cil_decoded_method name := decoder` evaluates a closed `Option CIL.Method`, such as
-`Method.ofRaw? profile environment original arguments links`, defines `name` as the method it gives
+`Method.ofRaw? profile environment links original arguments`, defines `name` as the method it gives
 and adds `name_decoded : decoder = some name`, which the kernel checks by evaluating the
 decoder. Compiled code computes the value, which is written as constructors over numerals, so
 the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`, ... read as
 literals to `cil_instruction_equations`, `cil_resolution_facts` and stepping, and no text an
 extractor writes supplies any part of the method. A field whose type is that of a constant
-passed to the decoder, such as an extraction's `profile` and `environment`, is written as that
-constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand equal to
-a listed `FieldRef` constant as that constant, as an extraction's literal names it, so the facts
-`cil_field_shape` states about the constant apply. Neither the compiled evaluation nor that
-choice is trusted: the kernel checks `name_decoded` and every fact.
+passed to the decoder, such as an extraction's `profile`, `environment` and link table, is written
+as that constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand
+equal to a listed `FieldRef` constant as that constant, as an extraction's literal names it, so
+the facts `cil_field_shape` states about the constant apply. Neither the compiled evaluation nor
+that choice is trusted: the kernel checks `name_decoded` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
