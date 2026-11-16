@@ -356,21 +356,22 @@ private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
           exact .error _
 #print axioms Memory.Renamed.stepCallVirtual
 
-/-- A direct call transports as a call: both bodies link its pc to the same callee, so both runs
-    enter it with related arguments or fault alike. -/
+/-- A direct call transports as a call or, under `tail.`, as a tail call: both bodies link its
+    pc to the same callee, so both runs enter it with related arguments or fault alike. -/
 private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
     {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
     {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
-    (sourceBody targetBody : CIL.Method) (callee argc pc : Nat)
+    (sourceBody targetBody : CIL.Method) (method : CIL.Extraction.MethodRef)
+    (prefixes : CIL.CallPrefixes) (pc : Nat)
     (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
     (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.call callee argc) pc arguments sourceFrame stack source)
-      (step targetBody (.call callee argc) pc (arguments.map mapping.value)
+      (step sourceBody (.call method prefixes) pc arguments sourceFrame stack source)
+      (step targetBody (.call method prefixes) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
   simp only [step, mapping.unspecifiedOperands, List.length_map, linked,
     ← List.map_take, ← List.map_drop, ← List.map_reverse]
-  by_cases guard : unspecifiedOperands (observerCount (.call callee argc)) stack = true
+  by_cases guard : unspecifiedOperands (observerCount (.call method prefixes)) stack = true
   · simp only [guard, ite_true]
     exact .error _
   · simp only [guard, Bool.false_eq_true, ite_false]
@@ -380,49 +381,28 @@ private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
     cases link <;> try exact .error _
     rename_i callee
     try dsimp only
-    by_cases short : stack.length < argc
-    · simp only [short, ite_true]
-      exact .error _
-    · simp only [short, ite_false]
-      apply (related.checkedValues _ (by
-        intro value member
-        exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
-      intro first second same
-      subst second
-      exact .ok (.call related)
+    by_cases tail : prefixes.tail = true
+    · simp only [tail, ite_true]
+      split
+      · exact .error _
+      · apply (related.checkedValues _ (by
+          intro value member
+          exact bounds value (List.mem_reverse.mp member))).bind
+        intro first second same
+        subst second
+        exact .ok (.tailCall related)
+    · simp only [tail, Bool.false_eq_true, ite_false]
+      by_cases short : stack.length < method.argumentCount
+      · simp only [short, ite_true]
+        exact .error _
+      · simp only [short, ite_false]
+        apply (related.checkedValues _ (by
+          intro value member
+          exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
+        intro first second same
+        subst second
+        exact .ok (.call related)
 #print axioms Memory.Renamed.stepCall
-
-/-- A tail call transports as a tail call: both bodies link its pc to the same callee. -/
-private theorem Memory.Renamed.stepTailCall {indices : LocalIndexMap}
-    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
-    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
-    (sourceBody targetBody : CIL.Method) (callee argc pc : Nat)
-    (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
-    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
-    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.tailCall callee argc) pc arguments sourceFrame stack source)
-      (step targetBody (.tailCall callee argc) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map, linked, ← List.map_reverse]
-  by_cases guard : unspecifiedOperands (observerCount (.tailCall callee argc)) stack = true
-  · simp only [guard, ite_true]
-    exact .error _
-  · simp only [guard, Bool.false_eq_true, ite_false]
-    generalize sourceBody.linkAt pc = link
-    rcases link with _ | link
-    · exact .error _
-    cases link <;> try exact .error _
-    rename_i callee
-    try dsimp only
-    split
-    · exact .error _
-    · apply (related.checkedValues _ (by
-        intro value member
-        exact bounds value (List.mem_reverse.mp member))).bind
-      intro first second same
-      subst second
-      exact .ok (.tailCall related)
-#print axioms Memory.Renamed.stepTailCall
 
 /-- Bodies that read an argument from the incoming list, narrowed alike, load related values. -/
 theorem Memory.Renamed.loadArgument {mapping : AllocationRenaming}
@@ -523,14 +503,10 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
     · simp only [guarded, Bool.false_eq_true, ite_false] at observable ⊢
       rw [metadata.linkAt pc]
       exact related.managedStep frames formed native _ pc stack bounds observable
-  by_cases direct : ∃ callee argc, operation = .call callee argc
-  · rcases direct with ⟨callee, argc, rfl⟩
-    exact related.stepCall sourceBody targetBody callee argc pc (metadata.linkAt pc) arguments
-      stack bounds
-  by_cases tail : ∃ callee argc, operation = .tailCall callee argc
-  · rcases tail with ⟨callee, argc, rfl⟩
-    exact related.stepTailCall sourceBody targetBody callee argc pc (metadata.linkAt pc) arguments
-      stack bounds
+  by_cases direct : ∃ method prefixes, operation = .call method prefixes
+  · rcases direct with ⟨method, prefixes, rfl⟩
+    exact related.stepCall sourceBody targetBody method prefixes pc (metadata.linkAt pc)
+      arguments stack bounds
   by_cases receiverChecked : ∃ callee argc, operation = .callInstance callee argc
   · rcases receiverChecked with ⟨callee, argc, rfl⟩
     exact related.stepCallInstance formed sourceBody targetBody callee argc pc
@@ -552,7 +528,6 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
       | exact False.elim (direct ⟨_, _, rfl⟩)
-      | exact False.elim (tail ⟨_, _, rfl⟩)
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | exact False.elim (casting ⟨_, rfl⟩)

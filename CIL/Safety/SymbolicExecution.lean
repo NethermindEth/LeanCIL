@@ -1120,8 +1120,8 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
 
 /-- Opcodes whose step reads the body's link at the step's pc. -/
 def linkedOpcodes : List Lean.Name :=
-  [``CIL.Instruction.call, ``CIL.Instruction.tailCall, ``CIL.Instruction.callInstance,
-    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newAggregate, ``CIL.Instruction.newObject,
+  [``CIL.Instruction.call, ``CIL.Instruction.callInstance, ``CIL.Instruction.callVirtual,
+    ``CIL.Instruction.newAggregate, ``CIL.Instruction.newObject,
     ``CIL.Instruction.managed]
 
 open Lean Elab Tactic Meta in
@@ -1845,7 +1845,8 @@ elab_rules : tactic
        · cil_checked_side [$facts,*]
        · cil_checked_side [$facts,*])))
 
-/-- Whether an opcode steps to a call action: `call`, or `callvirt` with a non-null receiver. -/
+/-- Whether an opcode steps to a call action: `call` without `tail.`, or `callvirt` with a
+    non-null receiver. The driver has no tail-transfer step, so a tail call fails here. -/
 def callsCallee (operation : Lean.Name) : Bool :=
   operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.callInstance ||
     operation == ``CIL.Instruction.callVirtual

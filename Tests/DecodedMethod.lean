@@ -14,7 +14,9 @@ the bytes rather than the definition's. A stored argument takes a home. An instr
 the value family decodes to a hole carrying its opcode, which faults when stepped; a body the
 check refuses, or one with an argument instruction naming an undeclared argument, gives no
 method, and neither does a program with such a body. A method defined by `cil_decoded_method`
-is the decoder's method, written as literals its facts and stepping read.
+is the decoder's method, written as literals its facts and stepping read. A call decodes to the
+method its operand names, with the target the supplied link table gives its pc, and the call
+check rejects a link that names another method.
 -/
 
 namespace Tests.DecodedMethod
@@ -23,7 +25,7 @@ open CIL CIL.Extraction Tests.BodyEncoding Tests.BodyDecoding Tests.MetadataWorl
 
 /-- The method of the bytes of `body` against the definition `original`, with no layouts. -/
 private def decoded (body : Option BodyEvidence) (original : RawMethod) : Option Method :=
-  body.bind fun body => Method.ofBody? .scalar {} body original []
+  body.bind fun body => Method.ofBody? .scalar {} body original [] []
 
 /-- `ldc.i4.1; ldc.i4.2; add; ret`. -/
 private def addRaw : RawMethod :=
@@ -47,7 +49,7 @@ theorem add_decodes :
 
 /-- An explicit receiver cannot be decoded as an additional implicit argument. -/
 theorem explicit_this_has_no_raw_method :
-    (Method.ofRaw? .scalar {} { addRaw with explicitThis := true } []).isNone = true := by
+    (Method.ofRaw? .scalar {} { addRaw with explicitThis := true } [] []).isNone = true := by
   decide +kernel
 #print axioms explicit_this_has_no_raw_method
 
@@ -132,12 +134,12 @@ private def argumentRaw (opcode index : Nat) : RawMethod :=
 /-- An argument load, store or address of the one declared argument decodes, and one naming a
     second argument gives no method: no frame holds it, and a store or address has no home. -/
 theorem undeclared_argument_has_no_method :
-    (Method.ofRaw? .scalar {} (argumentRaw 0x0E 0) []).isSome = true ∧
-      (Method.ofRaw? .scalar {} (storeRaw 0) []).isSome = true ∧
-      (Method.ofRaw? .scalar {} (argumentRaw 0x0F 0) []).isSome = true ∧
-      (Method.ofRaw? .scalar {} (argumentRaw 0x0E 1) []).isNone = true ∧
-      (Method.ofRaw? .scalar {} (storeRaw 1) []).isNone = true ∧
-      (Method.ofRaw? .scalar {} (argumentRaw 0x0F 1) []).isNone = true := by
+    (Method.ofRaw? .scalar {} (argumentRaw 0x0E 0) [] []).isSome = true ∧
+      (Method.ofRaw? .scalar {} (storeRaw 0) [] []).isSome = true ∧
+      (Method.ofRaw? .scalar {} (argumentRaw 0x0F 0) [] []).isSome = true ∧
+      (Method.ofRaw? .scalar {} (argumentRaw 0x0E 1) [] []).isNone = true ∧
+      (Method.ofRaw? .scalar {} (storeRaw 1) [] []).isNone = true ∧
+      (Method.ofRaw? .scalar {} (argumentRaw 0x0F 1) [] []).isNone = true := by
   decide +kernel
 #print axioms undeclared_argument_has_no_method
 
@@ -166,7 +168,7 @@ private def genericCastRaw : RawMethod :=
 /-- The code is decoded from the instantiated definition, so the cast tests the type argument
     rather than the open parameter. -/
 theorem generic_cast_tests_its_argument :
-    (Method.ofRaw? .scalar {} genericCastRaw [dogClass]).map (·.code) =
+    (Method.ofRaw? .scalar {} genericCastRaw [dogClass] []).map (·.code) =
       some [.ldnull, .castclass dogClass, .pop, .ret] := by
   cil_kernel_rfl
 #print axioms generic_cast_tests_its_argument
@@ -188,7 +190,7 @@ private def newarrBody : BodyEvidence :=
     opcode 0x8D, since no family admits a type operand yet. -/
 theorem newarr_decodes_to_a_hole :
     (checkBody newarrBody newarrRaw []).toBool = true ∧
-      (Method.ofBody? .scalar {} newarrBody newarrRaw []).map (·.code) =
+      (Method.ofBody? .scalar {} newarrBody newarrRaw [] []).map (·.code) =
         some [.ldc_i4 1, .unadmitted 0x8D, .pop, .ret] := by
   constructor
   · decide +kernel
@@ -197,7 +199,7 @@ theorem newarr_decodes_to_a_hole :
 
 /-- The method decoded from the newarr bytes loads its constant and faults at the hole's pc. -/
 theorem decoded_hole_faults :
-    (Method.ofBody? .scalar {} newarrBody newarrRaw []).map (fun method =>
+    (Method.ofBody? .scalar {} newarrBody newarrRaw [] []).map (fun method =>
       Safety.invoke [method] 4 0 [] Safety.Memory.empty) =
         some (.error ⟨0, 1, .unsupported "Opcode not admitted"⟩) := by
   cil_kernel_rfl
@@ -214,11 +216,13 @@ private def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :
     while one refused body leaves the program without one. -/
 theorem program_needs_every_body :
     ((encodeBody pin addRaw).bind fun addBody =>
-      (decodedProgram? .scalar {} [item addRaw addBody, item newarrRaw newarrBody]).map
+      (decodedProgram? .scalar {} [item addRaw addBody, item newarrRaw newarrBody]
+        (fun _ => [])).map
         List.length) = some 2 ∧
       ((encodeBody pin addRaw).bind fun addBody =>
         decodedProgram? .scalar {}
-          [item addRaw addBody, item { addRaw with parameters := [uint64] } addBody]).isNone =
+          [item addRaw addBody, item { addRaw with parameters := [uint64] } addBody]
+            (fun _ => [])).isNone =
         true := by
   constructor <;> decide +kernel
 #print axioms program_needs_every_body
@@ -235,7 +239,7 @@ private def sumRaw : RawMethod :=
   { method 8 false [] [instr 0 2, instr 1 3, instr 2 0x58, instr 3 0x15, instr 4 0x58,
       instr 5 0x2A] with parameters := [uint32, uint32], returnType := uint32 }
 
-cil_decoded_method sumMethod := Method.ofRaw? testProfile testEnvironment sumRaw []
+cil_decoded_method sumMethod := Method.ofRaw? testProfile testEnvironment sumRaw [] []
 cil_instruction_equations sumMethod
 
 /-- The definition is the method the decoder gives: the decoded code, the declared signature,
@@ -247,7 +251,7 @@ example : sumMethod =
       returnsValue := true } := rfl
 
 /-- info: Tests.DecodedMethod.sumMethod_decoded :
-  Method.ofRaw? testProfile testEnvironment sumRaw [] = some sumMethod -/
+  Method.ofRaw? testProfile testEnvironment sumRaw [] [] = some sumMethod -/
 #guard_msgs (whitespace := lax) in #check sumMethod_decoded
 
 -- The kernel proves the decoded fact and the field facts by reduction, with no other axiom.
@@ -267,7 +271,7 @@ example : sumMethod =
 #guard_msgs in #check sumMethod_profile
 
 -- An instruction outside the value family is defined as the hole carrying its opcode.
-cil_decoded_method newarrMethod := Method.ofRaw? testProfile testEnvironment newarrRaw []
+cil_decoded_method newarrMethod := Method.ofRaw? testProfile testEnvironment newarrRaw [] []
 cil_instruction_equations newarrMethod
 
 /-- info: Tests.DecodedMethod.newarrMethod_instruction1 :
@@ -284,7 +288,7 @@ private def ageRaw : RawMethod :=
 
 -- A field operand equal to a listed constant is written as that constant, as an extraction's
 -- literal names it, so the shape facts stated about the constant apply to the decoded method.
-cil_decoded_method ageMethod [ageField] := Method.ofRaw? testProfile testEnvironment ageRaw []
+cil_decoded_method ageMethod [ageField] := Method.ofRaw? testProfile testEnvironment ageRaw [] []
 cil_instruction_equations ageMethod
 
 /-- info: Tests.DecodedMethod.ageMethod_instruction1 :
@@ -299,20 +303,20 @@ def weightField : FieldRef := { ageField with index := 1 }
   Tests.DecodedMethod.weightField -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method weightMethod [weightField] :=
-  Method.ofRaw? testProfile testEnvironment ageRaw []
+  Method.ofRaw? testProfile testEnvironment ageRaw [] []
 
 -- A body naming an undeclared argument defines nothing.
 /-- error: cil_decoded_method: the decoder gives no method
-  Method.ofRaw? testProfile testEnvironment (argumentRaw 14 1) [] -/
+  Method.ofRaw? testProfile testEnvironment (argumentRaw 14 1) [] [] -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method undeclaredMethod :=
-  Method.ofRaw? testProfile testEnvironment (argumentRaw 0x0E 1) []
+  Method.ofRaw? testProfile testEnvironment (argumentRaw 0x0E 1) [] []
 
 -- A decoder with a hole is not evaluated.
 /-- error: cil_decoded_method: the decoder must be a closed term
-  Method.ofRaw? ?m.1 testEnvironment sumRaw [] -/
+  Method.ofRaw? ?m.1 testEnvironment sumRaw [] [] -/
 #guard_msgs (whitespace := lax) in
-cil_decoded_method openMethod := Method.ofRaw? _ testEnvironment sumRaw []
+cil_decoded_method openMethod := Method.ofRaw? _ testEnvironment sumRaw [] []
 
 /-- A number the kernel cannot reduce; compiled code evaluates it to its default. -/
 opaque stuckIndex : Nat
@@ -347,7 +351,7 @@ private def countdownRaw : RawMethod :=
       instr 10 0x2A] with
     parameters := [uint32], returnType := uint32 }
 
-cil_decoded_method countdownMethod := Method.ofRaw? testProfile testEnvironment countdownRaw []
+cil_decoded_method countdownMethod := Method.ofRaw? testProfile testEnvironment countdownRaw [] []
 cil_instruction_equations countdownMethod
 cil_resolution_facts countdownMethod
 
@@ -367,5 +371,59 @@ theorem sum_returns (memory : Safety.Memory) (left right : W32) :
       .ok (memory, [.scalar (.i32 (left + right + 0xFFFFFFFF))]) := by
   cil_checked_steps
 #print axioms sum_returns
+
+/-- `sumRaw` as the definition with its own token, the callee of `callerRaw`. -/
+private def summingRaw : RawMethod := { sumRaw with token := tokens.main + 1 }
+
+/-- The call site of `summingRaw`, a static method of the world's `Program` class. -/
+private def sumSite : CallSite := {
+  method := {
+    owner := .object ownIdentity "Program", name := name!"Sum", hasThis := false,
+    genericArity := 0, returnType := uint32, parameters := [uint32, uint32] },
+  name := "Sum", target := .managed summingRaw.token, typeArguments := [], parameterCount := 2,
+  returnsValue := true }
+
+/-- `ldarg.0; ldarg.1; call Sum(uint32, uint32); ret` over two `uint32` parameters. -/
+private def callerRaw : RawMethod :=
+  { method 8 false [] [instr 0 2, instr 1 3, instr 2 0x28 (.call sumSite), instr 7 0x2A] with
+    parameters := [uint32, uint32], returnType := uint32 }
+
+-- The bytes name the callee's token; the program index of `summingRaw`, 1, is the link at pc 2.
+cil_decoded_method callerMethod :=
+  Method.ofRaw? testProfile testEnvironment callerRaw [] [(2, .direct 1)]
+cil_instruction_equations callerMethod
+cil_resolution_facts callerMethod
+
+/-- The call decodes to the method its operand names, and its target is the link the decoder
+    was given. -/
+example : callerMethod.code[2]? = some (.call sumSite.method) ∧
+    callerMethod.linkAt 2 = some (.direct 1) := ⟨rfl, rfl⟩
+
+/-- The decoded caller returns what the decoded callee its link names returns. -/
+theorem caller_returns (memory : Safety.Memory) (left right : W32) :
+    ∃ fuel, Safety.invoke [callerMethod, sumMethod] fuel 0
+        [.scalar (.i32 left), .scalar (.i32 right)] memory =
+      .ok (memory, [.scalar (.i32 (left + right + 0xFFFFFFFF))]) := by
+  cil_checked_steps
+#print axioms caller_returns
+
+/-- The table `callerMethod`'s link indexes: the caller at 0 and its callee at 1. -/
+private def callTable : List SpecializedMethod := [⟨[], callerRaw⟩, ⟨[], summingRaw⟩]
+
+/-- The call check accepts the link the decoder was given and rejects a forged one: another
+    method with the same signature but another token, an index past the table, or a link of
+    another kind. -/
+theorem decoded_call_links :
+    ManagedCallsValid callTable [] callerRaw [true, true, true, true] callerMethod ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [(2, .direct 0)] } ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [(2, .direct 2)] } ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [(2, .virtual [(uint32, 1)])] } ∧
+    ¬ ManagedCallsValid callTable [] callerRaw [true, true, true, true]
+      { callerMethod with links := [] } := by
+  decide +kernel
+#print axioms decoded_call_links
 
 end Tests.DecodedMethod

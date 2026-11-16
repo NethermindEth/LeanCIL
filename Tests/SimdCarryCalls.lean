@@ -1,6 +1,7 @@
 import CIL.Safety.MethodContract
 import CIL.Safety.CheckedMemoryFacts
 import CIL.SIMD.PackedLanes
+import Tests.Support
 
 /-!
 # Checked SIMD carry and borrow composition
@@ -163,7 +164,8 @@ theorem repaired_subtract (left right : V256) :
 /-- A checked caller obtains the cascade from one helper and supplies it to the repair helper. -/
 @[cil_code] def callerBody : Method :=
   { profile, locals := [], returnsValue := true,
-    code := [.ldarg 0, .ldarg 1, .call 1 2, .ldarg 0, .ldarg 1, .call 2 3, .ret] }
+    code := [.ldarg 0, .ldarg 1, .call (Tests.callee 2) {}, .ldarg 0, .ldarg 1, .call
+      (Tests.callee 3) {}, .ret], links := [(2, .direct 1), (5, .direct 2)] }
 
 /-- The public contract specifies whole-vector wrapping arithmetic and unchanged memory. -/
 def arithmeticContract (subtract : Bool) : MethodContract (V256 × V256) V256 where
@@ -220,7 +222,7 @@ structure StoredInput where
 @[cil_code] def storedBody : Method :=
   { profile, locals := [], returnsValue := false,
     code := [.ldarg 0, .ldarg 1, .memory .load256, .ldarg 2, .memory .load256,
-      .call 0 2, .memory .store256, .ret] }
+      .call (Tests.callee 2) {}, .memory .store256, .ret], links := [(5, .direct 0)] }
 
 /-- The output becomes the exact arithmetic result, with no separation or initial-output premise. -/
 def storedContract (subtract : Bool) : MethodContract StoredInput Unit where
@@ -354,8 +356,9 @@ private def overlapArguments : List CIL.Safety.Value :=
 
 /-- This incorrect caller overwrites the first input before taking its snapshot. -/
 @[cil_code] private def earlyStoreBody : Method :=
-  storedBody.withCode ([.ldarg 0, .ldc_i8 0, .intrinsic (.vector (.create64 256)) 1,
-      .memory .store256] ++ storedBody.code)
+  { storedBody.withCode ([.ldarg 0, .ldc_i8 0, .intrinsic (.vector (.create64 256)) 1, .memory
+      .store256] ++ storedBody.code) with
+    links := storedBody.links.map fun entry => (entry.1 + 4, entry.2) }
 
 /-- Observe the output bytes only after the real checked invocation returns. -/
 private def observedStore (body : Method) :=

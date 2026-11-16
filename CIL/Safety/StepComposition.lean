@@ -186,18 +186,25 @@ theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option
 
 #print axioms returnFrom_none_eq
 
-/-- A call enters the method its link names, after checking its `argc` arguments, deepest
-    first; the rest of the stack waits for the caller's continuation. -/
-@[cil_step] theorem step_call_eq (target argc : Nat) (stack : List Value) :
-    step body (.call target argc) pc args frame stack memory =
-      if unspecifiedOperands argc stack then
+/-- A call enters the method its link names, after checking the arguments its method takes,
+    deepest first. Under `tail.` they are the whole stack and the frame retires; otherwise the
+    rest of the stack waits for the caller's continuation. -/
+@[cil_step] theorem step_call_eq (method : Extraction.MethodRef) (prefixes : CallPrefixes)
+    (stack : List Value) :
+    step body (.call method prefixes) pc args frame stack memory =
+      if unspecifiedOperands method.argumentCount stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else match body.linkAt pc with
         | some (.direct callee) =>
-          if stack.length < argc then .error .invalidState
+          if prefixes.tail then
+            if stack.length != method.argumentCount then .error .invalidState
+            else do
+              return FrameAction.tailCall callee (← stack.reverse.mapM (checkedValue memory))
+                memory
+          else if stack.length < method.argumentCount then .error .invalidState
           else do
-            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-            return FrameAction.call callee arguments (stack.drop argc) memory
+            let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue memory)
+            return FrameAction.call callee arguments (stack.drop method.argumentCount) memory
         | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl

@@ -56,8 +56,12 @@ string[] Excess(Dictionary<string, int> counts, Dictionary<string, int> bound) =
 var lost = Excess(listedCounts, decodedCounts);
 var added = Excess(decodedCounts, listedCounts);
 
-string Reason(JsonElement refusal) => refusal.GetProperty("refusal").GetString() == "hole"
-    ? "hole: " + refusal.GetProperty("family").GetString() : "unreachable pc";
+string Reason(JsonElement refusal) => refusal.GetProperty("refusal").GetString() switch
+{
+    "hole" => "hole: " + refusal.GetProperty("family").GetString(),
+    "translated" => "translated call",
+    _ => "unreachable pc"
+};
 string Opcodes(IEnumerable<JsonElement> refusals) => string.Join(", ", refusals
     .GroupBy(refusal => refusal.GetProperty("opcode").GetString()!, StringComparer.Ordinal)
     .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal)

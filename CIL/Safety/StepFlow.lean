@@ -42,7 +42,7 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {link : Option CIL.Link} 
     {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
     (executed : managedStep operation link pc frame stack memory = .ok action)
     (enters : action.callee = some callee) :
-      (CIL.Instruction.managed operation).link?.isSome = true ∧
+      (CIL.Instruction.managed operation).readsLink = true ∧
         callee ∈ (link.map CIL.Link.callees).getD [] := by
   unfold managedStep methodTableLength methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
@@ -60,13 +60,13 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {link : Option CIL.Link} 
 #print axioms managedStep_callee
 
 set_option maxHeartbeats 800000 in
-/-- A successful call or construction is a step of a call-family instruction, and enters a method
-    its link at the step's pc lists. -/
+/-- A successful call or construction is a step of an instruction that reads its link, and enters
+    a method its link at the step's pc lists. -/
 theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction} {callee : Nat}
     (h : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) :
-    op.link?.isSome = true ∧ callee ∈ body.calleesAt pc := by
+    op.readsLink = true ∧ callee ∈ body.calleesAt pc := by
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
   dsimp only at h
   split at h
@@ -126,30 +126,20 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
   have : r target = target + 1 := ite_eq_left rfl
   omega
 
-/-- A call instruction only ever enters the method its link names, as a call, never as a
-    construction. -/
-theorem step_call_action {body : CIL.Method} {target argc pc : Nat} {args : List Value}
+/-- A `call` only ever enters the method its link names, never as a construction: under a `tail.`
+    prefix it retires the frame, and otherwise it calls and continues. -/
+theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
+    {prefixes : CIL.CallPrefixes} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.call target argc) pc args frame stack m = .ok action) :
-    ∃ callee arguments rest m', body.linkAt pc = some (.direct callee) ∧
-      action = .call callee arguments rest m' := by
+    (h : step body (.call method prefixes) pc args frame stack m = .ok action) :
+    ∃ callee, body.linkAt pc = some (.direct callee) ∧
+      if prefixes.tail then ∃ arguments updated, action = .tailCall callee arguments updated
+      else ∃ arguments rest m', action = .call callee arguments rest m' := by
   unfold step at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, _, by assumption, rfl⟩)
+  all_goals (cases h; refine ⟨_, by assumption, ?_⟩; simp_all)
 #print axioms step_call_action
-
-/-- A tail-call instruction requests frame retirement and exactly the callee its link names. -/
-theorem step_tailCall_action {body : CIL.Method} {target argc pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.tailCall target argc) pc args frame stack m = .ok action) :
-    ∃ callee arguments updated, body.linkAt pc = some (.direct callee) ∧
-      action = .tailCall callee arguments updated := by
-  unfold step at h
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, by assumption, rfl⟩)
-#print axioms step_tailCall_action
 
 /-- Aggregate construction enters the constructor its link names with a temporary, never as a
     plain call. -/

@@ -1,5 +1,6 @@
 import CIL.Safety.AllocationRefinement
 import Tests.AllocationRenaming
+import Tests.Support
 
 /-!
 # Complete executions with private dead locals
@@ -27,24 +28,24 @@ theorem initial_formed : initial.WellFormed where
 def indices : LocalIndexMap := .skip (.keep (.skip (.keep (.skip .nil))))
 
 /-- The source retains one initialized word32 home and one initialized by its code. -/
-def sourceBody (code : List CIL.Instruction) : CIL.Method := {
+def sourceBody (code : List CIL.Instruction) (links : List (Nat × CIL.Link)) : CIL.Method := {
   returnsValue := true
   locals := [.i32 7, .unmodeled]
   localKinds := [.word32, .word32]
   declared := { initLocals := false }
-  code }
+  code, links }
 
 /-- Initialized private word64 homes precede, separate and follow the retained word32 homes. -/
-def targetBody (code : List CIL.Instruction) : CIL.Method := {
+def targetBody (code : List CIL.Instruction) (links : List (Nat × CIL.Link)) : CIL.Method := {
   returnsValue := true
   locals := [.i64 17, .i32 7, .i64 23, .unmodeled, .i64 31]
   localKinds := [.word64, .word32, .word64, .word32, .word64]
   declared := { initLocals := false }
-  code := code.map indices.operation }
+  code := code.map indices.operation, links }
 
 /-- Retained local operands, all method metadata and exact frame declarations match. -/
-theorem bodies_related (code : List CIL.Instruction) :
-    Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
+theorem bodies_related (code : List CIL.Instruction) (links : List (Nat × CIL.Link)) :
+    Nonempty (MethodRenaming (sourceBody code links) (targetBody code links)) := by
   refine Nonempty.intro {
     indices := indices
     metadata := {
@@ -55,7 +56,7 @@ theorem bodies_related (code : List CIL.Instruction) :
       arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
       declared := rfl
       environment := rfl
-      links := indices.linksOfCode_map code }
+      links := rfl }
     declarations :=
       .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
         (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil))))
@@ -99,15 +100,18 @@ theorem invalid_dead_initializers_rejected :
 /-- The child reads seven from its retained initializer after allocating its numeric homes. -/
 def childCode : List CIL.Instruction := [.ldloc 0, .ret]
 
+/-- The caller's call, at pc 2, enters the child, method 1. -/
+def callerLinks : List (Nat × CIL.Link) := [(2, .direct 1)]
+
 /-- The inserted nonzero initializer really writes the fresh private home during frame entry. -/
 theorem private_initializer_readback :
-    (enterFrame (targetBody childCode) [] initial).map
+    (enterFrame (targetBody childCode []) [] initial).map
       (fun result => read result.2 ⟨1, 0⟩ 8 1) = .ok (.ok (numberBytes 17 8)) := by rfl
 #print axioms private_initializer_readback
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Instruction :=
-  [.ldc_i4 9, .stloc 0, .call 1 0, .stloc 1, .ldc_i4 4, .localloc, .pop]
+  [.ldc_i4 9, .stloc 0, .call (Tests.callee 0), .stloc 1, .ldc_i4 4, .localloc, .pop]
 
 /-- The resumed caller reads both retained homes after its child and dynamic allocation. -/
 def returningCode : List CIL.Instruction := allocationPrefix ++ [.ldloc 0, .ldloc 1, .add, .ret]
@@ -117,11 +121,11 @@ def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw .invalidO
 
 /-- Both methods use the same declaration transformation and preserve their callable indices. -/
 def sourceProgram (code : List CIL.Instruction) : CIL.Program :=
-  [sourceBody code, sourceBody childCode]
+  [sourceBody code callerLinks, sourceBody childCode []]
 
 /-- The actual program relocates every local operand in both caller and child. -/
 def targetProgram (code : List CIL.Instruction) : CIL.Program :=
-  [targetBody code, targetBody childCode]
+  [targetBody code callerLinks, targetBody childCode []]
 
 /-- The complete program satisfies the checked method correspondence, including its child. -/
 theorem programs_related (code : List CIL.Instruction) :
@@ -130,12 +134,12 @@ theorem programs_related (code : List CIL.Instruction) :
   cases method with
   | zero =>
     cases found
-    exact ⟨_, rfl, bodies_related code⟩
+    exact ⟨_, rfl, bodies_related code callerLinks⟩
   | succ method =>
     cases method with
     | zero =>
       cases found
-      exact ⟨_, rfl, bodies_related childCode⟩
+      exact ⟨_, rfl, bodies_related childCode []⟩
     | succ method => cases found
 #print axioms programs_related
 
@@ -245,9 +249,10 @@ theorem unchanged_operand_rejected :
   intro equal; cases equal
 #print axioms unchanged_operand_rejected
 
-/-- Replacing the nested call target violates the exact instruction equation. -/
+/-- Replacing the nested call's method violates the exact instruction equation. -/
 theorem changed_callee_rejected :
-    ([.call 0 0] : List CIL.Instruction) ≠ [.call 1 0].map indices.operation := by
+    ([.call (Tests.callee 0)] : List CIL.Instruction) ≠
+      [.call (Tests.callee 1)].map indices.operation := by
   intro equal; cases equal
 #print axioms changed_callee_rejected
 

@@ -1,6 +1,7 @@
 import CIL.Extraction.Generics
 import CIL.Extraction.Scalars
 import CIL.Safety.SymbolicExecution
+import Tests.Support
 
 namespace Tests.ExtractionGenerics
 open CIL CIL.Extraction
@@ -47,21 +48,27 @@ example : typeStorage [{
 example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.parameter 0)) =
     some (.apply (.constructor "scope" "Box`1") word) := by decide
 
-/-- A call whose scoped signature and generic arguments match the selected closed method. -/
-def caller (parameter : TypeExpr) : RawMethod := { closed with code := [⟨0, 40, .call {
+/-- A call site whose scoped signature and generic arguments match the selected closed method. -/
+def callSite (parameter : TypeExpr) : CallSite := {
   method := {
     owner := .atom "Test" "Owner", name := name!"Call", hasThis := false, genericArity := 1,
     returnType := word, parameters := [.byref parameter], methodArguments := [word] },
   name := "Call", target := .managed 1, typeArguments := [word], parameterCount := 1,
-  returnsValue := true }⟩] }
+  returnsValue := true }
+
+/-- A method whose one instruction calls `callSite parameter`. -/
+def caller (parameter : TypeExpr) : RawMethod :=
+  { closed with code := [⟨0, 40, .call (callSite parameter)⟩] }
 
 /-- The emitted target and argument count are independently checked against the call site. -/
-def callCode : Method := { locals := [], returnsValue := true, code := [.call 0 1] }
+def callCode : Method := {
+  locals := [], returnsValue := true, code := [.call (callSite word).method],
+  links := [(0, .direct 0)] }
 
 /-- Structural proof construction retains the complete managed-call predicate. -/
 theorem structural_call : ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
     callCode := by
-  cil_strict (cil_managed_calls [caller, closed, raw, word, callCode])
+  cil_strict (cil_managed_calls [caller, callSite, closed, raw, word, callCode])
 #print axioms structural_call
 
 /-- Equal storage width does not permit substituting a signed parameter. -/
@@ -71,7 +78,7 @@ theorem signed_parameter_rejected :
   fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] []
         (caller (.atom runtimeScope "System.Int64")) [true] callCode := by
-      cil_managed_calls [caller, closed, raw, word, callCode]))
+      cil_managed_calls [caller, callSite, closed, raw, word, callCode]))
   decide +kernel
 #print axioms signed_parameter_rejected
 
@@ -82,7 +89,7 @@ theorem parameter_scope_rejected :
   fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] []
         (caller (.atom "attacker" "System.UInt64")) [true] callCode := by
-      cil_managed_calls [caller, closed, raw, word, callCode]))
+      cil_managed_calls [caller, callSite, closed, raw, word, callCode]))
   decide +kernel
 #print axioms parameter_scope_rejected
 
@@ -93,18 +100,20 @@ theorem generic_argument_rejected :
   fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[.atom runtimeScope "System.Int64"], closed⟩] []
         (caller word) [true] callCode := by
-      cil_managed_calls [caller, closed, raw, word, callCode]))
+      cil_managed_calls [caller, callSite, closed, raw, word, callCode]))
   decide +kernel
 #print axioms generic_argument_rejected
 
-/-- Structural proof construction rejects a call with an altered argument count. -/
+/-- A call operand that names another method with two parameters, so another argument count. -/
+def twoArguments : Method := { callCode with code := [.call (Tests.callee 2)] }
+
+/-- Structural proof construction rejects a call with an altered operand and argument count. -/
 theorem argument_count_rejected :
-    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
-      { callCode with code := [.call 0 2] } := by
+    ¬ ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true] twoArguments := by
   fail_if_success (cil_strict (
     have invalid : ManagedCallsValid [⟨[word], closed⟩] [] (caller word) [true]
-        { callCode with code := [.call 0 2] } := by
-      cil_managed_calls [caller, closed, raw, word, callCode]))
+        twoArguments := by
+      cil_managed_calls [caller, callSite, closed, raw, word, callCode, twoArguments]))
   decide +kernel
 #print axioms argument_count_rejected
 
@@ -148,17 +157,22 @@ def depositSite : CallSite := {
   name := "Deposit", target := .managed closed.token, typeArguments := [], parameterCount := 1,
   returnsValue := true }
 
+/-- The link of a call site whose callee is method 0. -/
+def linkedZero : Option Link := some (.direct 0)
+
 -- Only `callvirt` emits a receiver-checked call, counting the receiver, and only into a method
 -- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.
 theorem receiver_checked_calls :
-    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.call 0 2) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true
+    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.callInstance 0 2) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
+      (.call depositSite.method) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true linkedZero
+      (.callInstance 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.callInstance 0 1) ∧
     ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }⟩] []
-      ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) := by decide +kernel
+      ⟨0, 111, .call depositSite⟩ true linkedZero (.callInstance 0 2) := by decide +kernel
 #print axioms receiver_checked_calls
 
 /-- `deposit` marked virtual, as an override or a `virtual` member is. -/
@@ -167,9 +181,10 @@ def virtualDeposit : RawMethod := { deposit with attributes := virtualMethodAttr
 -- A virtual body is admitted as the target of a plain `call`, which runs exactly that body, but a
 -- `callvirt` of it can never become a fixed-target receiver-checked call.
 theorem virtual_bodies_called_directly :
-    validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true (.call 0 2) ∧
+    validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true
+      linkedZero (.call depositSite.method) ∧
     ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 111, .call depositSite⟩ true
-      (.callInstance 0 2) := by decide +kernel
+      linkedZero (.callInstance 0 2) := by decide +kernel
 #print axioms virtual_bodies_called_directly
 
 /-- A method with a class instance local and parameter beside a scalar of each. -/

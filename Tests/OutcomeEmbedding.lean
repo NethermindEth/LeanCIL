@@ -1,6 +1,7 @@
 import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.Outcomes
 import CIL.Safety.SymbolicExecution
+import Tests.Support
 
 /-! Outcome contracts proved over literal bodies transfer to an extraction that inserts an
     excluded dead block in the throwing helper and renumbers its throw. -/
@@ -12,7 +13,8 @@ def outOfRange : ExceptionType := .argumentOutOfRange
 
 /-- `Outer(v) => Check(v)`: any exception comes from the helper. -/
 @[cil_code] def outer : Method :=
-  { returnsValue := true, locals := [], code := [.ldarg 0, .call 1 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {}, .ret],
+    links := [(1, .direct 1)] }
 
 /-- `Check(v) => v > 100 ? throw new ArgumentOutOfRangeException() : v`, as the proof states it. -/
 @[cil_code] def check : Method := { returnsValue := true, locals := [], code :=
@@ -70,7 +72,7 @@ theorem check_in_range : checkInRange.Holds literal 1 := by
 -- The method contract transfers to the extraction without reading `extractedCheck`.
 theorem extracted_in_range : checkInRange.Holds extracted 1 := check_embeds.method_holds (literal_set ▸ check_in_range)
 
-theorem outer_call : outer.code[1]? = some (.call 1 1) := rfl
+theorem outer_call : outer.code[1]? = some (.call (Tests.callee 1)) := rfl
 
 /-- `Outer` propagates the helper's exception and returns its result, read off the helper's contract. -/
 theorem outer_holds (checkHolds : checkContract.Holds literal 1) : outerContract.Holds literal 0 := by

@@ -107,8 +107,20 @@ namespace CIL.Safety
 #print axioms guard_starg
 @[cil_guard] theorem guard_ldarga (index : Nat) : observerCount (.ldarga index) = 0 := rfl
 #print axioms guard_ldarga
-@[cil_guard] theorem guard_call (callee argc : Nat) :
-    observerCount (.call callee argc) = argc := rfl
+@[cil_guard] theorem guard_call (method : Extraction.MethodRef) (prefixes : CallPrefixes) :
+    observerCount (.call method prefixes) = method.argumentCount := rfl
+#print axioms guard_call
+
+open Lean Meta in
+/-- The argument count of a call's method as a numeral, when a closed term fixes its parameter
+    list and receiver flag; a method a variable decides is left as it is. -/
+dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.argumentCount _) :=
+  fun expression => do
+    let_expr CIL.Extraction.MethodRef.argumentCount _ := expression | return .continue
+    let count ← withDefault <| whnf expression
+    match count.rawNatLit? <|> count.nat? with
+    | some value => return .done (mkNatLit value)
+    | none => return .continue
 @[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     observerCount (.newAggregate callee argc size) = argc := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :

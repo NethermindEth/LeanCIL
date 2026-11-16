@@ -1,4 +1,5 @@
 import CIL.Safety.Execution
+import Tests.Support
 
 /-! # Span values across interpreter calls, locals and frame lifetimes
 
@@ -24,7 +25,7 @@ private def reader : Method := {
 
 private def caller : Method := {
   code := [.ldarg 0, .stloc 0, .ldloc 0, .ldarg 1, .ldarg 2, .memory (.spanSlice true),
-    .ldarg 3, .call 1 2, .ret]
+    .ldarg 3, .call (Tests.callee 2) {}, .ret], links := [(7, .direct 1)]
   locals := [.nullRef], localKinds := [.span 4 false], returnsValue := true }
 
 theorem local_slice_and_call :

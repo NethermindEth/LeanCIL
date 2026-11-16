@@ -286,10 +286,15 @@ where
     | (⟨_, 42, _⟩, some state) => some state.stack.head?.join
     | _ => none
 
-/-- The word an emitted parameterless call pushes when `constants` knows its callee's return.
-    `constants` reads each callee's own certificate, which its own obligation validates. -/
-def calleeConstant (constants : Nat → Option W32) : Instruction → Option W32
-  | .call index 0 => constants index
+/-- The word an emitted parameterless call, not a tail call, pushes when `constants` knows the
+    return of the callee that `link`, the link of its pc, names. `constants` reads each callee's
+    own certificate, which its own obligation validates. -/
+def calleeConstant (constants : Nat → Option W32) (link : Option Link) :
+    Instruction → Option W32
+  | .call method prefixes => match link with
+    | some (.direct index) =>
+      if method.argumentCount = 0 && !prefixes.tail then constants index else none
+    | _ => none
   | _ => none
 
 /-- Fixed CLI stack effects; unknown values are never interpreted as false.
@@ -524,7 +529,8 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
   if (match emitted with
-    | .tailCall .. | .managed (.call _ _ true) => true | _ => false) then return false
+    | .call _ prefixes => prefixes.tail | .managed (.call _ _ true) => true | _ => false) then
+    return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
       | .none, .localloc => true
@@ -620,9 +626,9 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some (.raise raised), .throw exception => raised == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
-  | some .tailCall, .tailCall target count => match instruction.operand with
-    | .call site => site.returnType == raw.returnType &&
-      featureOpMatches layouts raw instruction (.call target count)
+  | some .tailCall, .call method prefixes => match instruction.operand with
+    | .call site => prefixes.tail && site.returnType == raw.returnType &&
+      featureOpMatches layouts raw instruction (.call method { prefixes with tail := false })
     | _ => false
   | some .tailCall, .managed (.call signature catalog true) =>
     signature.result == callableType raw.returnType &&
@@ -638,7 +644,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     raw instructions `rawAt` gives, and flow into a weaker state at every recomputed
     successor. -/
 private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
-    (constants : Nat → Option W32) (raw : RawMethod)
+    (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
     (facts : LocalFacts Locals)
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
@@ -649,7 +655,8 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     wellShaped raw facts state &&
       (featureOpMatchesAt layouts raw role instruction emitted &&
         indirectSiteWindow rawAt pc instruction emitted) &&
-      match featureTransferAtWith layouts raw facts profile (calleeConstant constants emitted)
+      match featureTransferAtWith layouts raw facts profile
+          (calleeConstant constants (linkAt pc) emitted)
           role instruction state,
           featureSuccessors role pc instruction state.stack with
       | some after, some successors =>
@@ -673,35 +680,35 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     `constants` gives, by emitted method index, the word a parameterless call to that method
     pushes. -/
 def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32)
-    (raw : RawMethod) (profile : FeatureProfile)
+    (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) : Prop :=
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := [] }) ∧
   (let facts := LocalFacts.known raw.locals.length (FeatureLocalIndex.ofRaw raw).eligible
-   all3Flow (fun lookup => checkFeatureSiteWith layouts constants raw facts profile lookup
+   all3Flow (fun lookup => checkFeatureSiteWith layouts constants linkAt raw facts profile lookup
       (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? (FlowIndex.ofList raw.code).get?)
     (.ofList certificate) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code) = true
 
-instance (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : RawMethod)
-    (profile : FeatureProfile) (certificate : FeatureCertificate)
-    (reachable : List Bool) (code : List Instruction) :
-    Decidable (FeatureFlowValid layouts constants raw profile certificate reachable code) :=
+instance (layouts : Array RawLayout) (constants : Nat → Option W32)
+    (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
+    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) :
+    Decidable (FeatureFlowValid layouts constants linkAt raw profile certificate reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- The specification of the feature check over full per-local lists: the entry state has no
     known fact, and every site is checked against the complete certificate and fold-role lists
     with the raw local-eligibility rule. -/
 def FeatureListValid (layouts : Array RawLayout) (constants : Nat → Option W32)
-    (raw : RawMethod) (profile : FeatureProfile)
+    (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureListCertificate) (reachable : List Bool) (code : List Instruction) :
     Prop :=
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some
     { stack := [], locals := List.replicate raw.locals.length none }) ∧
-  all3 (checkFeatureSiteWith layouts constants raw
+  all3 (checkFeatureSiteWith layouts constants linkAt raw
       (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
       (fun target => certificate[target]?)
       (fun target => (foldRoles raw.locals raw.code)[target]?)
@@ -711,13 +718,14 @@ def FeatureListValid (layouts : Array RawLayout) (constants : Nat → Option W32
 /-- Streaming validation has exactly the same entry, mask, shape and successor checks
     as indexing the complete certificate and fold-role lists at every site. -/
 private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
-    (constants : Nat → Option W32) (raw : RawMethod) (profile : FeatureProfile)
+    (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
+    (profile : FeatureProfile)
     (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) :
-    FeatureFlowValid layouts constants raw profile certificate reachable code ↔
+    FeatureFlowValid layouts constants linkAt raw profile certificate reachable code ↔
       certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
       reachable = certificate.map Option.isSome ∧
       certificate[0]? = some (some { stack := [], locals := [] }) ∧
-      all3 (checkFeatureSiteWith layouts constants raw (knownLocals raw) profile
+      all3 (checkFeatureSiteWith layouts constants linkAt raw (knownLocals raw) profile
           (fun target => certificate[target]?)
           (fun target => (foldRoles raw.locals raw.code)[target]?)
           (fun target => raw.code[target]?))
@@ -870,14 +878,15 @@ private def expandCertificate (raw : RawMethod) (certificate : FeatureCertificat
 /-- On a certificate of known-fact states, each site check agrees with the list check of the
     expanded certificate. -/
 private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
-    (constants : Nat → Option W32) (raw : RawMethod) (profile : FeatureProfile)
+    (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
+    (profile : FeatureProfile)
     (certificate : FeatureCertificate) (roles : Nat → Option (Option FoldRole))
     (rawAt : Nat → Option RawInstruction) (allKnown : AllKnown raw certificate)
     (site : (RawInstruction × Option FoldRole) × Nat) (state : Option FeatureState)
     (emitted : Instruction) (member : state ∈ certificate) :
-    checkFeatureSiteWith layouts constants raw (knownLocals raw) profile
+    checkFeatureSiteWith layouts constants linkAt raw (knownLocals raw) profile
         (fun target => certificate[target]?) roles rawAt site state emitted =
-      checkFeatureSiteWith layouts constants raw
+      checkFeatureSiteWith layouts constants linkAt raw
         (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
         (fun target => (expandCertificate raw certificate)[target]?) roles rawAt site
         (state.map (FeatureState.expand raw.locals.length)) emitted := by
@@ -887,14 +896,14 @@ private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
     have known := allKnown state member
     obtain ⟨⟨instruction, role⟩, pc⟩ := site
     have transfer := featureTransferAtWith_expand layouts raw raw.locals.length
-      (featureLocalEligible raw) profile (calleeConstant constants emitted) role instruction state
-      known
+      (featureLocalEligible raw) profile (calleeConstant constants (linkAt pc) emitted) role
+      instruction state known
     simp only [checkFeatureSiteWith, knownLocals, Option.map_some,
       wellShaped_expand (featureLocalEligible_none raw), known, Bool.true_and, transfer.1,
       FeatureState.expand_stack]
     cases transferred : featureTransferAtWith layouts raw
         (LocalFacts.known raw.locals.length (featureLocalEligible raw)) profile
-        (calleeConstant constants emitted) role instruction state with
+        (calleeConstant constants (linkAt pc) emitted) role instruction state with
     | none => rfl
     | some after =>
       have afterKnown := transfer.2 after transferred
@@ -928,19 +937,21 @@ private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
 /-- The check accepts a certificate exactly when its states hold known facts and its expansion
     satisfies the list specification. -/
 private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
-    (constants : Nat → Option W32) (raw : RawMethod) (profile : FeatureProfile)
+    (constants : Nat → Option W32) (linkAt : Nat → Option Link) (raw : RawMethod)
+    (profile : FeatureProfile)
     (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) :
-    FeatureFlowValid layouts constants raw profile certificate reachable code ↔
-      AllKnown raw certificate ∧ FeatureListValid layouts constants raw profile
+    FeatureFlowValid layouts constants linkAt raw profile certificate reachable code ↔
+      AllKnown raw certificate ∧ FeatureListValid layouts constants linkAt raw profile
         (expandCertificate raw certificate) reachable code := by
   rw [FeatureFlowValid_iff_indexed]
   unfold FeatureListValid
   have sitesEqual (allKnown : AllKnown raw certificate) := all3_map
     (Option.map (FeatureState.expand raw.locals.length))
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code
-    fun site state emitted member => checkFeatureSiteWith_known_eq_list layouts constants raw
-      profile certificate (fun target => (foldRoles raw.locals raw.code)[target]?)
-      (fun target => raw.code[target]?) allKnown site state emitted member
+    fun site state emitted member =>
+      checkFeatureSiteWith_known_eq_list layouts constants linkAt raw profile certificate
+        (fun target => (foldRoles raw.locals raw.code)[target]?)
+        (fun target => raw.code[target]?) allKnown site state emitted member
   constructor
   · rintro ⟨length, codeLength, mask, entry, sites⟩
     have allKnown : AllKnown raw certificate := by
@@ -978,12 +989,13 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
 
 /-- A certificate the check accepts expands to one the list specification accepts. -/
 theorem FeatureFlowValid.expand {layouts : Array RawLayout} {constants : Nat → Option W32}
+    {linkAt : Nat → Option Link}
     {raw : RawMethod} {profile : FeatureProfile} {certificate : FeatureCertificate}
     {reachable : List Bool} {code : List Instruction}
-    (valid : FeatureFlowValid layouts constants raw profile certificate reachable code) :
-    FeatureListValid layouts constants raw profile
+    (valid : FeatureFlowValid layouts constants linkAt raw profile certificate reachable code) :
+    FeatureListValid layouts constants linkAt raw profile
       (certificate.map (Option.map (FeatureState.expand raw.locals.length))) reachable code :=
-  ((FeatureFlowValid_iff_expand layouts constants raw profile certificate reachable code).mp
+  ((FeatureFlowValid_iff_expand layouts constants linkAt raw profile certificate reachable code).mp
     valid).2
 
 #print axioms FeatureFlowValid.expand
@@ -994,9 +1006,10 @@ private def FeatureListState.compress (state : FeatureListState) : FeatureState 
 
 /-- Every state a certificate the list specification accepts holds one fact per local. -/
 private theorem FeatureListValid.lengths {layouts : Array RawLayout}
-    {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
+    {constants : Nat → Option W32} {linkAt : Nat → Option Link} {raw : RawMethod}
+    {profile : FeatureProfile}
     {certificate : FeatureListCertificate} {reachable : List Bool} {code : List Instruction}
-    (valid : FeatureListValid layouts constants raw profile certificate reachable code)
+    (valid : FeatureListValid layouts constants linkAt raw profile certificate reachable code)
     {state : FeatureListState} (member : some state ∈ certificate) :
     state.locals.length = raw.locals.length := by
   obtain ⟨⟨⟨instruction, role⟩, pc⟩, emitted, checked⟩ := all3_mem valid.2.2.2.2 member
@@ -1040,14 +1053,15 @@ private theorem expandCertificate_inj {raw : RawMethod} :
 /-- Every certificate the list specification accepts is the expansion of exactly one certificate
     the check accepts. -/
 theorem FeatureListValid.known {layouts : Array RawLayout} {constants : Nat → Option W32}
+    {linkAt : Nat → Option Link}
     {raw : RawMethod} {profile : FeatureProfile} {certificate : FeatureListCertificate}
     {reachable : List Bool} {code : List Instruction}
-    (valid : FeatureListValid layouts constants raw profile certificate reachable code) :
+    (valid : FeatureListValid layouts constants linkAt raw profile certificate reachable code) :
     ∃ known : FeatureCertificate,
-      (FeatureFlowValid layouts constants raw profile known reachable code ∧
+      (FeatureFlowValid layouts constants linkAt raw profile known reachable code ∧
         known.map (Option.map (FeatureState.expand raw.locals.length)) = certificate) ∧
       ∀ other : FeatureCertificate,
-        FeatureFlowValid layouts constants raw profile other reachable code →
+        FeatureFlowValid layouts constants linkAt raw profile other reachable code →
         other.map (Option.map (FeatureState.expand raw.locals.length)) = certificate →
         other = known := by
   let known := certificate.map (Option.map FeatureListState.compress)
@@ -1076,12 +1090,12 @@ theorem FeatureListValid.known {layouts : Array RawLayout} {constants : Nat → 
       simp only [FeatureListState.compress]
       rw [← length]
       exact compressKnown_known listed.locals
-  have accepted : FeatureFlowValid layouts constants raw profile known reachable code :=
-    (FeatureFlowValid_iff_expand layouts constants raw profile known reachable code).mpr
+  have accepted : FeatureFlowValid layouts constants linkAt raw profile known reachable code :=
+    (FeatureFlowValid_iff_expand layouts constants linkAt raw profile known reachable code).mpr
       ⟨allKnown, expanded ▸ valid⟩
   refine ⟨known, ⟨accepted, expanded⟩, fun other otherValid otherExpanded => ?_⟩
   have otherKnown :=
-    ((FeatureFlowValid_iff_expand layouts constants raw profile other reachable code).mp
+    ((FeatureFlowValid_iff_expand layouts constants linkAt raw profile other reachable code).mp
       otherValid).1
   exact expandCertificate_inj otherKnown allKnown (otherExpanded.trans expanded.symm)
 
@@ -1127,24 +1141,25 @@ theorem factsWeaken_preserves {source target : List (Option W32)} {values : List
 
 /-- Abstract execution edges are computed from raw instructions, incoming facts and the
     emitted call targets, rather than copied from the extractor's claimed reachable mask. -/
-def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : RawMethod)
-    (profile : FeatureProfile) (certificate : FeatureCertificate) (code : List Instruction)
-    (pc target : Nat) : Prop :=
+def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32)
+    (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
+    (certificate : FeatureCertificate) (code : List Instruction) (pc target : Nat) : Prop :=
   ∃ instruction role state emitted after successors,
     (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (instruction, role) ∧
     certificate[pc]? = some (some state) ∧ code[pc]? = some emitted ∧
-    featureTransferAt layouts raw profile (calleeConstant constants emitted) role instruction
-      state = some after ∧
+    featureTransferAt layouts raw profile (calleeConstant constants (linkAt pc) emitted) role
+      instruction state = some after ∧
     featureSuccessors role pc instruction state.stack = some successors ∧ target ∈ successors
 
 /-- Validation establishes closure under every independently recomputed edge,
     including backedges and every possible switch destination. -/
 theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
-    {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
+    {constants : Nat → Option W32} {linkAt : Nat → Option Link} {raw : RawMethod}
+    {profile : FeatureProfile}
     {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
-    (valid : FeatureFlowValid layouts constants raw profile certificate reachable code)
+    (valid : FeatureFlowValid layouts constants linkAt raw profile certificate reachable code)
     {pc target : Nat}
-    (edge : FeatureEdge layouts constants raw profile certificate code pc target) :
+    (edge : FeatureEdge layouts constants linkAt raw profile certificate code pc target) :
     ∃ incoming, certificate[target]? = some (some incoming) := by
   obtain ⟨instruction, role, state, emitted, after, successors, rawAt, stateAt, codeAt,
     transferred, successorsAt, member⟩ := edge
@@ -1171,20 +1186,21 @@ theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
 
 /-- The pcs reachable from entry along recomputed feature edges. -/
 inductive FeaturePath (layouts : Array RawLayout) (constants : Nat → Option W32)
-    (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
-    (code : List Instruction) : Nat → Prop where
-  | entry : FeaturePath layouts constants raw profile certificate code 0
-  | next {pc target} : FeaturePath layouts constants raw profile certificate code pc →
-      FeatureEdge layouts constants raw profile certificate code pc target →
-        FeaturePath layouts constants raw profile certificate code target
+    (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
+    (certificate : FeatureCertificate) (code : List Instruction) : Nat → Prop where
+  | entry : FeaturePath layouts constants linkAt raw profile certificate code 0
+  | next {pc target} : FeaturePath layouts constants linkAt raw profile certificate code pc →
+      FeatureEdge layouts constants linkAt raw profile certificate code pc target →
+        FeaturePath layouts constants linkAt raw profile certificate code target
 
 /-- Arbitrarily many steps through the validated graph remain in the emitted
     reachable mask; this includes cyclic paths without a bound on iterations. -/
 theorem FeatureFlowValid.path_reachable {layouts : Array RawLayout}
-    {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
+    {constants : Nat → Option W32} {linkAt : Nat → Option Link} {raw : RawMethod}
+    {profile : FeatureProfile}
     {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
-    (valid : FeatureFlowValid layouts constants raw profile certificate reachable code)
-    {pc : Nat} (path : FeaturePath layouts constants raw profile certificate code pc) :
+    (valid : FeatureFlowValid layouts constants linkAt raw profile certificate reachable code)
+    {pc : Nat} (path : FeaturePath layouts constants linkAt raw profile certificate code pc) :
     reachable[pc]? = some true := by
   have present : ∃ incoming, certificate[pc]? = some (some incoming) := by
     cases path with

@@ -1172,8 +1172,8 @@ theorem step_appendLocals_bne_un (target : Nat) :
 #print axioms step_appendLocals_bne_un
 
 /-- `call` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_call (method : Nat) (argc : Nat) :
-    StepAppendLocals (.call method argc) := by
+theorem step_appendLocals_call (method : CIL.Extraction.MethodRef) (prefixes : CallPrefixes) :
+    StepAppendLocals (.call method prefixes) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
@@ -1203,17 +1203,6 @@ theorem step_appendLocals_callVirtual (targets : List (CIL.Extraction.TypeExpr Ã
   frame_natural
 
 #print axioms step_appendLocals_callVirtual
-
-/-- `tailCall` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_tailCall (method : Nat) (argc : Nat) :
-    StepAppendLocals (.tailCall method argc) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
-
-#print axioms step_appendLocals_tailCall
 
 /-- `newAggregate` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64)) :
@@ -1548,14 +1537,12 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_beq target
     case bne_un target =>
       exact step_appendLocals_bne_un target
-    case call method argc =>
-      exact step_appendLocals_call method argc
+    case call method prefixes =>
+      exact step_appendLocals_call method prefixes
     case callInstance method argc =>
       exact step_appendLocals_callInstance method argc
     case callVirtual targets argc =>
       exact step_appendLocals_callVirtual targets argc
-    case tailCall method argc =>
-      exact step_appendLocals_tailCall method argc
     case newAggregate constructor argc size =>
       exact step_appendLocals_newAggregate constructor argc size
     case newObject constructor argc owner bases size =>

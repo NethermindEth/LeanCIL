@@ -175,14 +175,16 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
   case ret =>
     obtain ⟨_, _, rfl⟩ := step_ret_returns h
     exact resumes.elim
-  case tailCall callee argc =>
-    simp only [step] at h
-    repeat' first
-      | contradiction
-      | exact resumes.elim
-      | cases h
-      | split at h
-      | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  case call method prefixes =>
+    cases tail : prefixes.tail
+    · simp [CIL.Instruction.continues, tail]
+    · simp only [step, tail, ite_true] at h
+      repeat' first
+        | contradiction
+        | exact resumes.elim
+        | cases h
+        | split at h
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   case managed operation =>
     cases operation <;> try rfl
     rename_i signature catalog tail

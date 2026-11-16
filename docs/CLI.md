@@ -257,7 +257,8 @@ An admitted entry lists its extracted methods in `decodedMethods`, those the ext
 from their decoder, and in `literalMethods`, those it writes as literals. Each literal method
 gives the IL offset and opcode of its first pc that keeps the literal, the refusal (`hole` for an
 opcode the decoder does not decode, `unreachablePc` for a pc the reachability certificate rules
-out) and, for a hole, the opcode's family.
+out, `translated` for a `call` the extraction translates to another instruction than a plain
+call, such as a runtime model or a feature constant) and, for a hole, the opcode's family.
 
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source

@@ -141,6 +141,13 @@ inductive TokenOperand where
   | field (field : Extraction.FieldRef)
   deriving DecidableEq, Repr
 
+/-- The prefixes of a `call`: `tail.` retires the caller's frame before the transfer, and
+    `constrained.` names the type on which the called member is resolved to an implementation. -/
+structure CallPrefixes where
+  tail : Bool := false
+  constrained : Option Extraction.TypeExpr := none
+  deriving DecidableEq, Repr
+
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
@@ -189,8 +196,6 @@ inductive Instruction where
   | ldloca (index : Nat)
   | stloc (index : Nat)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
-  /-- Transfer to a managed method after retiring the current activation. -/
-  | tailCall (callee argc : Nat)
   /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
   | managed (operation : ManagedOp)
   -- Constants, conversions, arithmetic and stack shuffling.
@@ -214,8 +219,11 @@ inductive Instruction where
   | blt (target : Nat)
   | beq (target : Nat)
   | bne_un (target : Nat)
-  -- Calls and constructors; `argc` values are popped as arguments.
-  | call (method : Nat) (argc : Nat)
+  /-- `call` of `method`: it enters the body its pc links to with `method.argumentCount`
+      popped values as arguments. Under `tail.` those are the whole stack and the caller's
+      frame retires before the transfer. -/
+  | call (method : Extraction.MethodRef) (prefixes : CallPrefixes := {})
+  -- Constructors and receiver calls; `argc` values are popped as arguments.
   /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the
       `argc` arguments, throws `System.NullReferenceException` before the call. -/
   | callInstance (method : Nat) (argc : Nat)
@@ -370,14 +378,12 @@ def Link.callees : Link → List Nat
   | .indirect catalog => catalog.map ManagedTarget.method
 
 /-- The link that an instruction's own program index implies; `none` for instructions that
-    enter no method. -/
+    enter no method and for `call`, whose operand names a method rather than a program index. -/
 def Instruction.link? (op : Instruction) : Option Link := by
   -- Built by cases: a catch-all `match` on this type elaborates to a sparse recursor that
   -- depends on `propext`, and every method literal's default link table would inherit it.
   cases op
-  case call method _ => exact some (.direct method)
   case callInstance method _ => exact some (.direct method)
-  case tailCall method _ => exact some (.direct method)
   case callVirtual targets _ => exact some (.virtual targets)
   case newAggregate method _ size => exact some (.aggregate method size)
   case newObject method _ _ bases size => exact some (.object method bases size)
@@ -386,6 +392,17 @@ def Instruction.link? (op : Instruction) : Option Link := by
     case call _ catalog _ => exact some (.indirect catalog)
     all_goals exact none
   all_goals exact none
+
+/-- Whether a step of the instruction reads the link of its pc: every call and construction. A
+    body that gives such a pc no link of the right kind faults the step. -/
+def Instruction.readsLink (op : Instruction) : Bool := by
+  cases op
+  case managed operation =>
+    cases operation
+    case call => exact true
+    all_goals exact false
+  case call | callInstance | callVirtual | newAggregate | newObject => exact true
+  all_goals exact false
 
 /-- The link table a code list implies: each linking instruction's pc with its link. The pcs come
     from `List.range`, which the kernel reduces to literals. Numbered by `zipIdx`, each pc would be

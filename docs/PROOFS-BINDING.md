@@ -704,7 +704,8 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
 method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? profile environment
-original typeArguments`, gives. Compiled code evaluates the decoder, and the command writes the
+original typeArguments links`, gives; `links` is the method's link table, which gives each `call` pc
+the body it enters. Compiled code evaluates the decoder, and the command writes the
 result as constructors over numerals, except that a field whose type is that of a constant passed
 to the decoder, such as the profile and the environment, is written as that constant. The kernel
 then checks by reduction the theorem, named with the suffix `_decoded`, that
@@ -724,7 +725,8 @@ keeps its literal, whose `.unadmitted` hole at that pc the feature check require
 `Extracted.lean` then states the method as
 
 ```text
-cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw
+def method0Links : List (Nat × Link) := [...]
+cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw method0Links
 ```
 
 in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when

@@ -5,6 +5,7 @@ import CIL.Safety.LoopAutomation
 import CIL.Safety.OutcomeContract
 import CIL.Safety.LocalSnapshotSteps
 import CIL.SIMD.VectorLemmas
+import Tests.Support
 
 namespace Tests.Automation
 
@@ -202,7 +203,8 @@ theorem run_prefix_bounded_two_goals (memory : CIL.Safety.Memory) (frame : CIL.S
   code := [.ldarg 0, .ret], locals := [], returnsValue := true }
 
 @[cil_code] def callPrefixMethod : CIL.Method := {
-  code := [.ldarg 0, .call 1 1, .ldarg 0, .add, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .ldarg 0, .add,
+    .ret], links := [(1, .direct 1)], locals := [], returnsValue := true }
 
 -- A bounded step over a call runs the callee but stops before the caller's continuation.
 theorem run_call_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (a : CIL.W64) :
@@ -1216,7 +1218,7 @@ open CIL.Safety in
 theorem opaque_numeric_call (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
     (memory : Memory) (numeric : numericValue argument = true)
     (known : argument.hasUnspecified = false) (linked : body.linkAt 0 = some (.direct 1)) :
-    step body (.call 1 1) 0 [] frame [.scalar argument] memory =
+    step body (.call (Tests.callee 1)) 0 [] frame [.scalar argument] memory =
       .ok (.call 1 [.scalar argument] [] memory) := by
   fail_if_success cil_checked_step [known, linked]
   cil_checked_step [numeric, known, linked]

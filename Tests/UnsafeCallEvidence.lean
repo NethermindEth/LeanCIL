@@ -89,11 +89,15 @@ end Tests.UnsafeCallEvidence
 
 namespace Tests.UnsafeCallEvidence
 
+/-- A type of the fixture's own assembly with the runtime `Unsafe` class's name. -/
+private def localUnsafe : TypeExpr := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe"
+
 /-- A genuine managed call to a local lookalike is not reserved as a lowered runtime helper. -/
 theorem local_reference_helper_name :
     UnsafeCallsValid [] (raw { call with
-      method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe",
-      name := "AreSame", parameterCount := 2, returnsValue := true }) [true] [.call 1 2] := by
+      method.owner := localUnsafe,
+      name := "AreSame", parameterCount := 2, returnsValue := true }) [true]
+      [.call { call.method with owner := localUnsafe }] := by
   decide +kernel
 #print axioms local_reference_helper_name
 

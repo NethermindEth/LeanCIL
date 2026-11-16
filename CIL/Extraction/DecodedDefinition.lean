@@ -6,7 +6,7 @@ import CIL.SymbolicExecution
 # Methods defined by evaluating the decoder
 
 `cil_decoded_method name := decoder` evaluates a closed `Option CIL.Method`, such as
-`Method.ofRaw? profile environment original arguments`, defines `name` as the method it gives
+`Method.ofRaw? profile environment original arguments links`, defines `name` as the method it gives
 and adds `name_decoded : decoder = some name`, which the kernel checks by evaluating the
 decoder. Compiled code computes the value, which is written as constructors over numerals, so
 the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`, ... read as
@@ -109,6 +109,8 @@ deriving instance ToExpr for NumericKind
 deriving instance ToExpr for Extraction.TypeExpr
 deriving instance ToExpr for MetadataName
 deriving instance ToExpr for Extraction.FieldRef
+deriving instance ToExpr for Extraction.MethodRef
+deriving instance ToExpr for CallPrefixes
 deriving instance ToExpr for ViewObservation
 deriving instance ToExpr for MemoryOp
 deriving instance ToExpr for Address

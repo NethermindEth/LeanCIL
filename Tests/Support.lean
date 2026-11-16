@@ -18,4 +18,20 @@ def caller : Memory where
 /-- A reference to the start of `caller`'s allocation. -/
 def reference : Value := .reference (.address ⟨0, 0⟩)
 
+/-- A static method of `count` parameters, for a body that calls through its link table and
+    needs only the call's arity; the owner, name and types are placeholders no check reads. -/
+def callee (count : Nat) : CIL.Extraction.MethodRef where
+  owner := .void
+  name := ⟨1⟩
+  hasThis := false
+  genericArity := 0
+  returnType := .void
+  parameters := List.replicate count .void
+
+/-- A placeholder method takes exactly its parameter count of arguments. -/
+@[simp] theorem callee_argumentCount (count : Nat) : (callee count).argumentCount = count := by
+  simp [callee, CIL.Extraction.MethodRef.argumentCount]
+
+#print axioms callee_argumentCount
+
 end Tests

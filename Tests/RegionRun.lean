@@ -1,6 +1,7 @@
 import CIL.Safety.RegionRun
 import CIL.Safety.Embedding.Simulation
 import CIL.Safety.Embedding.Suffix
+import Tests.Support
 
 /-! A suffix run moves to a body whose prefix is a call instead of inline code. -/
 namespace Tests.RegionRun
@@ -18,7 +19,8 @@ def expected : Method :=
 
 /-- The same suffix after a compiled helper call, one pc earlier. -/
 def actual : Method :=
-  { code := [.ldarg 0, .call 1 1, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
+  { code := [.ldarg 0, .call (Tests.callee 1) {}, .ldc_i4 1, .add, .ret],
+    links := [(1, .direct 1)], locals := [], returnsValue := true }
 
 def masked : Method :=
   { expected with code := List.replicate 3 (.unadmitted 0) ++ expected.code.drop 3 }
@@ -44,10 +46,11 @@ theorem suffix_moves (fuel : Nat) (args stack : List Value) (frame : Frame) (m :
 
 /-- A region may call into a whole method listed from pc 0. -/
 def caller : Method :=
-  { code := [.ldc_i4 5, .ret, .ldarg 0, .call 1 1, .ret], locals := [], returnsValue := true }
+  { code := [.ldc_i4 5, .ret, .ldarg 0, .call (Tests.callee 1) {}, .ret],
+    links := [(3, .direct 1)], locals := [], returnsValue := true }
 def rewritten : Method :=
   { caller with code := [.unadmitted 0, .throw .baseException,
-      .ldarg 0, .call 1 1, .ret] }
+      .ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(3, .direct 1)] }
 
 abbrev calling : Nat → Nat → Prop := fun method pc => inStarts [(0, 2), (1, 0)] method pc = true
 
@@ -80,8 +83,9 @@ def longMasked (profile : CIL.FeatureProfile) : Method :=
     (List.replicate 3 (.unadmitted 0) ++ longSuffix)
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
-  (longExpected profile).withCode ([.ldarg 0, .call callee 1] ++
-    longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)))
+  { (longExpected profile).withCode ([.ldarg 0, .call (Tests.callee 1)] ++ longSuffix.map
+      (Instruction.relabel (fun pc => pc - 3 + 2))) with
+    links := [(1, .direct callee)] }
 
 theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
 
@@ -116,20 +120,22 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
       simp_all [Instruction.targets] <;> omega
   · intro pc after
     rfl
-  · exact CIL.Embedding.links_of_relocated_suffix rfl rfl
-      (by simp [longActual, longMasked, Method.withCode])
+  · exact CIL.Embedding.links_of_shifted_table (expectedBefore := []) (expectedAfter := [])
+      (actualBefore := [(1, .direct callee)]) rfl rfl nofun (by simp) nofun
 
 /-- A call inside the relocated suffix keeps its link at the shifted pc. -/
 def callExpected : Method :=
-  { code := [.ldarg 0, .ldc_i4 6, .shr, .ldarg 1, .call 2 1, .ret], locals := [],
-    returnsValue := true }
+  { code := [.ldarg 0, .ldc_i4 6, .shr, .ldarg 1, .call (Tests.callee 1) {}, .ret],
+    links := [(4, .direct 2)], locals := [], returnsValue := true }
 
 def callMasked : Method :=
-  callExpected.withCode (List.replicate 3 (.unadmitted 0) ++
-    callExpected.code.drop 3)
+  { callExpected.withCode (List.replicate 3 (.unadmitted 0) ++ callExpected.code.drop
+    3) with links := callExpected.links }
 
+/-- A call to method 1 replaces the masked prefix, and the suffix's call moves to pc 3. -/
 def callActual : Method :=
-  callExpected.withCode ([.ldarg 0, .call 1 1] ++ callExpected.code.drop 3)
+  { callExpected.withCode ([.ldarg 0, .call (Tests.callee 1)] ++ callExpected.code.drop
+    3) with links := [(1, .direct 1), (3, .direct 2)] }
 
 theorem callSuffix_refines :
     CIL.Embedding.BodyRefines callMasked callActual (CIL.Embedding.suffixRename 3 2) := by
@@ -147,7 +153,9 @@ theorem callSuffix_refines :
     rcases member with rfl | rfl | rfl <;> simp [Instruction.targets] at inside
   · intro pc after
     rfl
-  · exact CIL.Embedding.links_of_relocated_suffix rfl rfl rfl
+  · exact CIL.Embedding.links_of_shifted_table (expectedBefore := [])
+      (expectedAfter := [(4, .direct 2)]) (actualBefore := [(1, .direct 1)]) rfl rfl nofun
+      (by simp) (by simp)
 
 #print axioms callSuffix_refines
 
@@ -191,7 +199,8 @@ theorem absentAndEmpty : regionClosedCheck [caller, helper] [(99, 0), (0, 999)] 
 
 /-- A listed absent callee still belongs to the region; execution separately rejects it. -/
 theorem absentCallee : regionClosedCheck
-    [caller.withCode [.call 99 0, .ret]] [(0, 0), (99, 0)] = true := by
+    [{ caller.withCode [.call (Tests.callee 0), .ret] with links := [(0, .direct 99)] }]
+    [(0, 0), (99, 0)] = true := by
   decide +kernel
 #print axioms absentCallee
 

@@ -330,8 +330,8 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   SpecializationValid rawLayouts item.original item.arguments item.closed item.parameterInput ∧
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
-  FeatureFlowValid rawLayouts.toArray (evidenceConstants all) item.closed method.profile
-    item.featureStates item.reachable method.code ∧
+  FeatureFlowValid rawLayouts.toArray (evidenceConstants all) (linkIndex method) item.closed
+    method.profile item.featureStates item.reachable method.code ∧
   ManagedCallsValid (specializationTable all) imports
     (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧

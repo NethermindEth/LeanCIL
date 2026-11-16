@@ -6,8 +6,10 @@ import CIL.Extraction.Translation
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
 instruction of the instantiated definition as `Instruction.ofRaw` decodes it, a hole where no
-family admits the opcode yet, a type test naming the type argument and a field access naming the
-instantiated field, and the frame, homes and signature from the same definition.
+family admits the opcode yet, a type test naming the type argument, a field access naming the
+instantiated field and a call naming the instantiated method, and the frame, homes and signature
+from the same definition. A call's target is a program index, which the bytes do not state, so
+the caller supplies the link table; the evidence check ties each link to its call's token.
 `Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
 and `decodedProgram?` applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
@@ -17,14 +19,15 @@ translator output.
 
 namespace CIL.Extraction
 
-/-- The method a raw definition denotes at `arguments`: each instruction of its instantiated
-    code as `Instruction.ofRaw` decodes it, frame and signature from the same definition,
-    homes over every pc, and no static sites, opaque vector locals or links. Every instruction
+/-- The method a raw definition denotes at `arguments` with link table `links`: each instruction
+    of its instantiated code as `Instruction.ofRaw` decodes it, frame and signature from the same
+    definition, homes over every pc, and no static sites or opaque vector locals. Every instruction
     decodes, so `none` means the instantiation failed (an explicit receiver signature has none),
     a parameter, local or homed argument type has no storage or slot kind, or the code fails the
     argument rule of the evidence check, `validateArgumentOpAt`, at some pc. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (source : RawMethod) (arguments : List TypeExpr) : Option Method := do
+    (source : RawMethod) (arguments : List TypeExpr) (links : List (Nat × Link)) :
+    Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
   let storage ← closedArguments environment.rawLayouts closed
   let code := closed.code.map Instruction.ofRaw
@@ -38,22 +41,23 @@ def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnv
     profile := profile, code := code, localKinds := localKinds,
     locals := localKinds.map (LocalKind.initialValue source.initLocals),
     parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
-    environment := environment, returnsValue := closed.returnType != .void }
+    environment := environment, links := links, returnsValue := closed.returnType != .void }
 
-/-- The method pinned body bytes denote: `checkBody` checks the definition's metadata, and the
-    code and init flag are the ones decoded from the bytes. -/
+/-- The method pinned body bytes denote with link table `links`: `checkBody` checks the
+    definition's metadata, and the code and init flag are the ones decoded from the bytes. -/
 def _root_.CIL.Method.ofBody? (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (body : BodyEvidence) (original : RawMethod) (arguments : List TypeExpr) :
-    Option Method := do
+    (body : BodyEvidence) (original : RawMethod) (arguments : List TypeExpr)
+    (links : List (Nat × Link)) : Option Method := do
   let decoded ← (checkBody body original arguments).toOption
   Method.ofRaw? profile environment
-    { original with code := decoded.code, initLocals := decoded.initLocals } arguments
+    { original with code := decoded.code, initLocals := decoded.initLocals } arguments links
 
-/-- The program the evidence's body bytes denote, method by method. -/
+/-- The program the evidence's body bytes denote, method by method, each with the link table
+    `links` gives its position. -/
 def decodedProgram? (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (evidence : List MethodEvidence) : Option Program :=
-  evidence.mapM fun item =>
-    Method.ofBody? profile environment item.body item.original item.arguments
+    (evidence : List MethodEvidence) (links : Nat → List (Nat × Link)) : Option Program :=
+  (evidence.zipIdx).mapM fun (item, index) =>
+    Method.ofBody? profile environment item.body item.original item.arguments (links index)
 
 /-- A body that decodes to `method` passes `checkBody` with the method's own code and init flag. -/
 theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : BodyEvidence}
@@ -76,14 +80,15 @@ theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : B
 theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : AssemblyPin}
     {body : BodyEvidence} {original : RawMethod} {arguments : List TypeExpr}
     {signature : String} {profile : FeatureProfile} {environment : LayoutEnvironment}
+    {links : List (Nat × Link)}
     (decodes : BodyDecodes pins pin body original arguments signature) :
-    Method.ofBody? profile environment body original arguments =
-      Method.ofRaw? profile environment original arguments := by
+    Method.ofBody? profile environment body original arguments links =
+      Method.ofRaw? profile environment original arguments links := by
   obtain ⟨decoded, checks, sameCode, sameInit⟩ := BodyDecodes.code decodes
   unfold Method.ofBody?
   rw [checks]
   show Method.ofRaw? profile environment
-    { original with code := decoded.code, initLocals := decoded.initLocals } arguments = _
+    { original with code := decoded.code, initLocals := decoded.initLocals } arguments links = _
   rw [sameCode, sameInit]
 
 #print axioms Method.ofBody?_of_decodes
@@ -93,8 +98,8 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
     type test names the type argument and a field access the instantiated field. -/
 theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {source : RawMethod} {arguments : List TypeExpr}
-    {method : Method}
-    (decoded : Method.ofRaw? profile environment source arguments = some method) :
+    {links : List (Nat × Link)} {method : Method}
+    (decoded : Method.ofRaw? profile environment source arguments links = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
   unfold Method.ofRaw? at decoded

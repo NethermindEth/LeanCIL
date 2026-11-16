@@ -18,6 +18,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     readonly ExternalIdentityEvidence externalIdentities = new();
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     int methodParameterCount;
+    // Operand terms of the closed code, by instruction, kept while its definition is written.
+    Dictionary<Instruction, string>? closedOperands;
 
     // Type serialization needs no method bodies; only method and dispatch evidence read originals.
     PinnedAssemblies Pinned => pinned ??
@@ -137,6 +139,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var method = $"{{ owner := {ownerType}, name := {MetadataName.OfText(name).ToLean()}, " +
             $"hasThis := {Bool(reference.HasThis)}, genericArity := {genericArity}, returnType := {returnType}, " +
             $"parameters := {parameters}, methodArguments := {methodArguments} }}";
+        closedOperands?.TryAdd(instruction, method);
         return $"{{ method := {method}, name := {Quote(name)}, target := {target}, " +
             $"typeArguments := {typeArguments}, ownerArgumentCount := {owners.Length}, " +
             $"parameterCount := {reference.Parameters.Count}, " +
@@ -274,7 +277,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             case VariableDefinition local: return $".local {local.Index}";
             case TypeReference type when instruction.OpCode.Code == Code.Newarr:
                 return $".type ({ArrayElement(type)})";
-            case TypeReference type: return $".type ({Type(type)})";
+            case TypeReference type:
+                var term = Type(type);
+                closedOperands?.TryAdd(admittedInstruction, term);
+                return $".type ({term})";
             case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
             case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:
                 return $".indirectCall ({Type(site.ReturnType)}) "+
@@ -292,6 +298,16 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             default: throw new InvalidDataException("Unsupported raw CIL operand: " + instruction.Operand.GetType().Name);
         }
     }
+
+    Dictionary<Instruction, string> closedCalls = [];
+
+    /// <summary>
+    /// The <c>MethodRef</c> term of the call operand of <paramref name="instruction"/>, or the type term of its type
+    /// operand, as the last method's <c>method{n}Closed</c> states it; the emitted instruction must carry the same term.
+    /// </summary>
+    internal string ClosedOperandOf(Instruction instruction) =>
+        closedCalls.TryGetValue(instruction, out var term) ? term
+            : throw new InvalidDataException("No closed operand term for the instruction at " + instruction.Offset);
 
     internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
@@ -395,7 +411,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var originalEvidence = Method(original, method, reachable);
         // Token operands are spelled in the original's generic context, as its code is.
         var body = Body(original, method, reachable, number);
+        closedOperands = [];
         var closedEvidence = Method(method, method, reachable);
+        closedCalls = closedOperands;
+        closedOperands = null;
         externalIdentities.Emit(lean);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);
@@ -435,8 +454,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Indirect loads and stores of integers and native integers.
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
-        // Class type tests and class instance field accesses.
-        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
+        // Class type tests, class instance field accesses and direct calls.
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call,
         // Branches.
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
@@ -457,8 +476,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }.ToFrozenSet();
 
     /// <summary>What keeps a method's literal at one pc: a pc the reachability certificate rules out, since a
-    /// decoded instruction there fails the feature check, or an opcode `Method.ofRaw?` writes as a hole.</summary>
-    internal enum RefusalKind { UnreachablePc, Hole }
+    /// decoded instruction there fails the feature check, an opcode `Method.ofRaw?` writes as a hole, or a call the
+    /// extraction translates to another instruction than the plain `call` the decoder gives.</summary>
+    internal enum RefusalKind { UnreachablePc, Hole, Translated }
 
     /// <summary>The part of the model that an opcode outside <see cref="DecodedOpcodes"/> needs before it
     /// decodes.</summary>
@@ -476,17 +496,24 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>
     /// Why the extraction does not define `method` from its decoder, or null when it does: `Method.ofRaw?` writes no
-    /// hole at any pc and every pc is in the reachability certificate. A wrong null fails the build at the method's
+    /// hole at any pc, every pc is in the reachability certificate and each `call` is translated, as the decoder
+    /// gives it, to a plain call, which `operations` holds by pc. A wrong null fails the build at the method's
     /// `cil_decoded_method` definition. One pass over the body.
     /// </summary>
-    internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable)
+    internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
+        IReadOnlyList<Operation> operations)
     {
-        foreach (var instruction in method.Body.Instructions)
+        var instructions = method.Body.Instructions;
+        for (var pc = 0; pc < instructions.Count; pc++)
         {
+            var instruction = instructions[pc];
             if (!reachable.Contains(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
             if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
+            if (instruction.OpCode.Code == Code.Call &&
+                operations[pc] is not Call { Kind: CallKind.Static, Constrained: false })
+                return new(instruction.Offset, instruction.OpCode, RefusalKind.Translated);
         }
         return null;
     }
