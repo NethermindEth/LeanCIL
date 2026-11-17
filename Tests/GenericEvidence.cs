@@ -412,7 +412,8 @@ void CheckExternalCallTargets()
     {
         ("wrong-raw-target", baseline.Replace("target := .external externalIdentity0",
             "target := .external externalIdentity1", StringComparison.Ordinal)),
-        ("wrong-emitted-intrinsic", baseline.Replace(".vector .createScalarUnsafe64",
+        // CreateScalarUnsafe is a modelled call; the comparison is the lowered intrinsic this body still emits.
+        ("wrong-emitted-intrinsic", baseline.Replace(".vector (.equalsAll 128)",
             ".avx2 .band", StringComparison.Ordinal))
     })
     {
