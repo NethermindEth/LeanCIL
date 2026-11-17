@@ -1,6 +1,8 @@
 import CIL.Extraction.MetadataBinding
 import CIL.Extraction.PinnedIndex
+import CIL.Extraction.Prefixes
 import Std.Data.TreeMap
+import Std.Data.TreeMap.Lemmas
 
 /-!
 # Method body decoding
@@ -18,7 +20,8 @@ rows, the PE container and definitions in platform assemblies stay trusted.
 
 Opcodes use the numbering of `RawInstruction`: one-byte opcodes keep their byte and two-byte
 opcodes `0xFE nn` are `0xFE00 + nn`. Branch operands become instruction indices, and a branch may
-not enter a prefixed instruction after its first prefix. A body with extra sections (exception
+not enter a prefixed instruction after its first prefix, so the decoded code satisfies
+`PrefixEntryFree` (`checkBody_prefixEntryFree`). A body with extra sections (exception
 handlers) is rejected, since the model has none.
 -/
 
@@ -177,6 +180,9 @@ structure BodyEvidence where
   /-- The type arguments of a generic instance, method arguments first, as the types its
       signature names; empty for a method that is not an instance. -/
   instantiation : List ResolvedType := []
+  /-- The instruction index and token of each static field access and field `ldtoken` whose
+      field a carried `Field` row defines, in code order; the decoder records the same list. -/
+  statics : List (Nat × Nat) := []
   deriving DecidableEq, Repr
 
 /-- What a body's bytes say about its method: the fields `RawMethod` takes from the body, and
@@ -186,6 +192,9 @@ structure DecodedBody where
   initLocals : Bool
   localSignature : Nat
   code : List RawInstruction
+  /-- The instruction index and token of each static field access whose field a carried row
+      defines, as `BodyEvidence.statics` lists them. -/
+  statics : List (Nat × Nat)
   deriving DecidableEq, Repr
 
 /-- Why a body does not decode. Offsets are byte offsets of the instruction within the code. -/
@@ -322,26 +331,35 @@ private def readOpcode (offset : Nat) : List Nat → Except BodyError (Nat × Na
   | [0xFE] => .error (.truncatedOpcode offset)
   | first :: rest => .ok (first, 1, rest)
 
-/-- Decode the instruction stream starting at byte `offset`. `fuel` is the byte count, which
+/-- The token of a static field operand whose binding found the carried `Field` row defining
+    it, read again from the operand bytes; `none` for any other operand. -/
+private def boundStaticToken (tokens : Std.TreeMap Nat (RawOperand × TokenFacts)) (offset : Nat)
+    (operand : RawOperand) (bytes : List Nat) : Option Nat :=
+  match operand with
+  | .field _ _ _ _ true => do
+    let (token, _) ← (readUnsigned offset 4 bytes).toOption
+    let (_, facts) ← tokens[token]?
+    if facts.staticField == some true then some token else none
+  | _ => none
+
+/-- Decode the instruction stream starting at byte `offset`, the instruction numbered `index`,
+    with the index and token of each bound static field operand. `fuel` is the byte count, which
     bounds the instruction count since each instruction takes at least one byte. Branch operands
     carry absolute byte offsets. -/
 private def decodeInstructions (tokens : Std.TreeMap Nat (RawOperand × TokenFacts)) :
-    Nat → Nat → List Nat → Except BodyError (List RawInstruction)
-  | _, _, [] => .ok []
-  | 0, offset, _ => .error (.truncatedOperand offset)
-  | fuel + 1, offset, bytes => do
+    Nat → Nat → Nat → List Nat → Except BodyError (List RawInstruction × List (Nat × Nat))
+  | _, _, _, [] => .ok ([], [])
+  | 0, offset, _, _ => .error (.truncatedOperand offset)
+  | fuel + 1, offset, index, bytes => do
     let (opcode, width, afterOpcode) ← readOpcode offset bytes
     let some kind := operandKind opcode | throw (.unknownOpcode offset opcode)
     let (operand, following, remaining) ←
       decodeOperand tokens offset (offset + width) opcode kind afterOpcode
-    let rest ← decodeInstructions tokens fuel following remaining
-    .ok ({ offset := offset, opcode := opcode, operand := operand } :: rest)
-
-/-- The opcodes that prefix the instruction after them: `unaligned.`, `volatile.`, `tail.`,
-    `constrained.`, `no.` and `readonly.`. -/
-def isPrefixOpcode (opcode : Nat) : Bool :=
-  opcode == 0xFE12 || opcode == 0xFE13 || opcode == 0xFE14 || opcode == 0xFE16 ||
-    opcode == 0xFE19 || opcode == 0xFE1E
+    let (rest, statics) ← decodeInstructions tokens fuel following (index + 1) remaining
+    let instruction : RawInstruction := { offset := offset, opcode := opcode, operand := operand }
+    match boundStaticToken tokens offset operand afterOpcode with
+    | some token => .ok (instruction :: rest, (index, token) :: statics)
+    | none => .ok (instruction :: rest, statics)
 
 /-- Map each instruction's start offset to its index and to whether a prefix opcode precedes
     it. -/
@@ -448,11 +466,11 @@ def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence
     throw (.codeSizeMismatch header.codeSize code.length)
   let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
   let tokens ← checkTable env frame body.tokens.operands ∅
-  let raw ← decodeInstructions tokens code.length 0 code
+  let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
   let starts := indexStarts raw 0 false ∅
   let instructions ← raw.mapM (resolveBranches starts code.length)
   .ok { maxStack := header.maxStack, initLocals := header.initLocals,
-        localSignature := header.localSignature, code := instructions }
+        localSignature := header.localSignature, code := instructions, statics := statics }
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at
@@ -481,7 +499,8 @@ def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeE
     (arguments : List TypeExpr) : Bool :=
   match checkBody body method arguments with
   | .ok decoded => decoded.maxStack == method.maxStack &&
-      decoded.initLocals == method.initLocals && decoded.code == method.code
+      decoded.initLocals == method.initLocals && decoded.code == method.code &&
+      decoded.statics == body.statics
   | .error _ => false
 
 /-- The body's tables are what its metadata bytes give, and the method's definition, locals,
@@ -501,6 +520,177 @@ abbrev BodyDecodes (pins : List AssemblyPin) (pin : AssemblyPin) (body : BodyEvi
     body.names.Spell method ∧ body.names.Selects signature ∧
     bodyMatches body method arguments = true
 
+/-- Whether the instruction before `index` of `code` is a prefix; the first never is. -/
+private def followsPrefix (code : List RawInstruction) : Nat → Bool
+  | 0 => false
+  | index + 1 => (code[index]?).any (isPrefixOpcode ·.opcode)
 
+/-- Every entry of `starts` records whether its index follows a prefix in `code`. -/
+private def StartsFollow (code : List RawInstruction)
+    (starts : Std.TreeMap Nat (Nat × Bool)) : Prop :=
+  ∀ (offset index : Nat) (after : Bool), starts[offset]? = some (index, after) →
+    after = followsPrefix code index
+
+/-- `indexStarts` records, for each instruction it indexes, whether a prefix precedes it. -/
+private theorem indexStarts_follow (code : List RawInstruction) :
+    ∀ (rest : List RawInstruction) (index : Nat) (after : Bool)
+      (starts : Std.TreeMap Nat (Nat × Bool)),
+      code.drop index = rest → after = followsPrefix code index → StartsFollow code starts →
+      StartsFollow code (indexStarts rest index after starts)
+  | [], _, _, _, _, _, follow => by simpa [indexStarts] using follow
+  | instruction :: rest, index, after, starts, dropped, current, follow => by
+    simp only [indexStarts]
+    have fetched : code[index]? = some instruction := by
+      rw [← List.head?_drop, dropped]; rfl
+    apply indexStarts_follow code rest (index + 1)
+    · rw [← List.tail_drop, dropped]; rfl
+    · simp [followsPrefix, fetched]
+    · unfold StartsFollow at follow ⊢
+      intro offset found after' entry
+      rw [Std.TreeMap.getElem?_insert] at entry
+      split at entry
+      · simp only [Option.some.injEq, Prod.mk.injEq] at entry
+        obtain ⟨rfl, rfl⟩ := entry
+        exact current
+      · exact follow offset found after' entry
+
+#print axioms indexStarts_follow
+
+/-- A branch destination the body decoder resolves is an entry of `starts` that follows no
+    prefix. -/
+private theorem instructionIndex_unprefixed {starts : Std.TreeMap Nat (Nat × Bool)}
+    {codeLength offset target index : Nat}
+    (resolved : instructionIndex starts codeLength offset target = .ok index) :
+    ∃ entry : Nat, starts[entry]? = some (index, false) := by
+  unfold instructionIndex at resolved
+  by_cases outside : codeLength ≤ target
+  · simp [outside] at resolved
+  · cases found : starts[target]? with
+    | none => simp [outside, found] at resolved
+    | some entry =>
+      obtain ⟨foundIndex, after⟩ := entry
+      cases after
+      · simp only [outside, found, ite_false, Except.ok.injEq] at resolved
+        exact ⟨target, resolved ▸ found⟩
+      · simp [outside, found] at resolved
+
+#print axioms instructionIndex_unprefixed
+
+/-- A list an `Except`-valued function maps entirely holds at each index the image of the
+    input there. -/
+private theorem mapM_ok_at {α β ε : Type} {make : α → Except ε β} :
+    ∀ {inputs : List α} {outputs : List β}, inputs.mapM make = .ok outputs →
+      ∀ (index : Nat) (output : β), outputs[index]? = some output →
+        ∃ input, inputs[index]? = some input ∧ make input = .ok output
+  | [], outputs, made, index, output, found => by
+    simp only [List.mapM_nil, pure, Except.pure, Except.ok.injEq] at made
+    subst made
+    simp at found
+  | input :: rest, outputs, made, index, output, found => by
+    simp only [List.mapM_cons, bind, Except.bind, pure, Except.pure] at made
+    cases first : make input with
+    | error => simp [first] at made
+    | ok head =>
+      cases others : rest.mapM make with
+      | error => simp [first, others] at made
+      | ok tail =>
+        simp only [first, others, Except.ok.injEq] at made
+        subst made
+        cases index with
+        | zero =>
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+          exact ⟨input, rfl, found ▸ first⟩
+        | succ index =>
+          simpa using mapM_ok_at others index output (by simpa using found)
+
+#print axioms mapM_ok_at
+
+/-- An instruction the decoder resolves keeps its opcode, and each of its branch destinations is
+    an entry of `starts` that follows no prefix. -/
+private theorem resolveBranches_unprefixed {starts : Std.TreeMap Nat (Nat × Bool)}
+    {codeLength : Nat} {instruction resolved : RawInstruction}
+    (ok : resolveBranches starts codeLength instruction = .ok resolved) :
+    resolved.opcode = instruction.opcode ∧ ∀ target, branchesTo target resolved = true →
+      ∃ entry : Nat, starts[entry]? = some (target, false) := by
+  unfold resolveBranches at ok
+  split at ok
+  · next destination operand =>
+    cases index : instructionIndex starts codeLength instruction.offset destination with
+    | error => simp [index, bind, Except.bind] at ok
+    | ok found =>
+      simp only [index, bind, Except.bind, Except.ok.injEq] at ok
+      subst ok
+      refine ⟨rfl, fun target branches => ?_⟩
+      simp only [branchesTo, beq_iff_eq] at branches
+      exact branches ▸ instructionIndex_unprefixed index
+  · next destinations operand =>
+    cases indices : destinations.mapM (instructionIndex starts codeLength instruction.offset) with
+    | error => simp [indices, bind, Except.bind] at ok
+    | ok found =>
+      simp only [indices, bind, Except.bind, Except.ok.injEq] at ok
+      subst ok
+      refine ⟨rfl, fun target branches => ?_⟩
+      simp only [branchesTo, List.contains_iff_mem] at branches
+      obtain ⟨position, at_position⟩ := List.mem_iff_getElem?.mp branches
+      obtain ⟨_, _, resolvedAt⟩ := mapM_ok_at indices position target at_position
+      exact instructionIndex_unprefixed resolvedAt
+  · next unbranched =>
+    simp only [Except.ok.injEq] at ok
+    subst ok
+    refine ⟨rfl, fun target branches => ?_⟩
+    simp only [branchesTo] at branches
+    simp at branches
+
+#print axioms resolveBranches_unprefixed
+
+/-- Instructions whose branch destinations the decoder resolved against their own starts
+    have no branch into the instruction after a prefix. -/
+private theorem resolved_prefixEntryFree {raw instructions : List RawInstruction}
+    {codeLength : Nat}
+    (ok : raw.mapM (resolveBranches (indexStarts raw 0 false ∅) codeLength) = .ok instructions) :
+    PrefixEntryFree instructions := by
+  have follow : StartsFollow raw (indexStarts raw 0 false ∅) :=
+    indexStarts_follow raw raw 0 false ∅ List.drop_zero rfl (by
+      unfold StartsFollow
+      intro offset index after found
+      simp at found)
+  intro pc instruction fetched isPrefix
+  rw [List.any_eq_false]
+  intro other member branches
+  obtain ⟨position, otherAt⟩ := List.mem_iff_getElem?.mp member
+  obtain ⟨_, _, resolvedOther⟩ := mapM_ok_at ok position other otherAt
+  obtain ⟨entry, found⟩ := (resolveBranches_unprefixed resolvedOther).2 (pc + 1) branches
+  have unprefixed := follow entry (pc + 1) false found
+  obtain ⟨original, originalAt, resolvedHere⟩ := mapM_ok_at ok pc instruction fetched
+  have sameOpcode := (resolveBranches_unprefixed resolvedHere).1
+  simp [followsPrefix, originalAt, ← sameOpcode, isPrefix] at unprefixed
+
+#print axioms resolved_prefixEntryFree
+
+/-- No branch of a decoded body, reachable or not, enters the instruction after a prefix. -/
+theorem decodeBody_prefixEntryFree {env : MetadataEnv} {arity ownerArity : Nat}
+    {body : BodyEvidence} {decoded : DecodedBody}
+    (ok : decodeBody env arity ownerArity body = .ok decoded) : PrefixEntryFree decoded.code := by
+  unfold decodeBody at ok
+  simp only [bind, Except.bind] at ok
+  repeat' split at ok
+  all_goals first
+    | (simp only [Except.ok.injEq] at ok; subst ok; exact resolved_prefixEntryFree ‹_›)
+    | simp_all
+
+#print axioms decodeBody_prefixEntryFree
+
+/-- No branch of a body the check accepts enters the instruction after a prefix. -/
+theorem checkBody_prefixEntryFree {body : BodyEvidence} {method : RawMethod}
+    {arguments : List TypeExpr} {decoded : DecodedBody}
+    (ok : checkBody body method arguments = .ok decoded) : PrefixEntryFree decoded.code := by
+  unfold checkBody at ok
+  simp only [bind, Except.bind] at ok
+  repeat' split at ok
+  all_goals first
+    | (simp only [Except.ok.injEq] at ok; subst ok; exact decodeBody_prefixEntryFree ‹_›)
+    | simp_all
+
+#print axioms checkBody_prefixEntryFree
 
 end CIL.Extraction

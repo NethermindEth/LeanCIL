@@ -54,6 +54,10 @@ internal static class VerificationSuites
             "per-method editor extractions, watch refresh and ordinary fresh certification"),
         new("imports", "Tests/ContractImports.cs",
             "implementation-bound contract imports and conditional caller verification"),
+        new("closures", "Tests/ProgramClosures.cs",
+            "summaries proved over a method's closure, applied in programs that hold the closure at other " +
+            "indices or its identical methods at one index, and refuted relocations onto other bytes or " +
+            "differing bodies"),
         new("exceptionlint", "Tests/ExceptionLint.cs", "diagnostic XML exception drift without proof claims"),
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
@@ -146,10 +150,14 @@ internal static class VerificationSuites
             "a per-site cost that does not grow with the call sites; the call check and the evidence theorem of " +
             "a body with no call at a per-statement and a total cost that do not grow with the body; the proof " +
             "that 8, 32 and 128 evidence records decode to their methods at a per-record cost that does not grow " +
-            "with the records; the argument facts of " +
+            "with the records; the closure of a method in a program at a cost per unit of methods times program " +
+            "length plus link callees that does not grow with the methods, the callees or the program; the " +
+            "argument facts of " +
             "cil_resolution_facts and the reads through them at a per-argument cost that does not grow with " +
             "the parameters, and its static site facts and the reads through them at a per-site cost that does " +
-            "not grow with the sites; the array element shape facts of cil_resolution_facts and the reads " +
+            "not grow with the sites; the program's static identity check at a per-site cost that grows less " +
+            "than 1.35 times from 8 to 32 to 128 sites; the array element shape facts of " +
+            "cil_resolution_facts and the reads " +
             "through them at a per-element-type cost that does not grow with the layouts or the sites naming " +
             "each type; a runtime model lookup at a kernel cost that does not grow with the model table, and " +
             "the runtime model agreement check at a per-site cost that does not grow with the call sites; the " +

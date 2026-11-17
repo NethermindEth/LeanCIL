@@ -1194,7 +1194,7 @@ def opaqueField : CIL.Extraction.FieldRef :=
 
 /-- The site of `opaqueField`: an opaque value of four bytes. -/
 def opaqueSite : CIL.StaticDescriptor :=
-  { identity := 0, fieldName := "Fixture::Value", bytes := [0, 0, 0, 0],
+  { identity := 0, field := opaqueField, bytes := [0, 0, 0, 0],
     initializer := some { method := 1, arguments := [] }, scalar := some true,
     opaqueValue := true }
 

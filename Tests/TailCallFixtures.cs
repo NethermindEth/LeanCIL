@@ -123,7 +123,7 @@ partial class Program
             #print axioms excluded_indirect_tail
             """);
         evidence.Add(excludedProof, "PASS profile-excluded indirect tail");
-        foreach (var mutation in new[] { "branch", "return", "missing-pointer", "stack", "type" })
+        foreach (var mutation in new[] { "branch", "dead-branch", "return", "missing-pointer", "stack", "type" })
         {
             var changed = Path.Combine(root, "Tail-Rejected-" + mutation + ".dll");
             using (var module = ModuleDefinition.ReadModule(dll))
@@ -133,6 +133,8 @@ partial class Program
                 var call = prefix.Next;
                 var processor = method.Body.GetILProcessor();
                 if (mutation == "branch") processor.InsertBefore(prefix, Instruction.Create(OpCodes.Br, call));
+                // An unreachable branch after the final return still may not enter the tail call.
+                else if (mutation == "dead-branch") processor.Append(Instruction.Create(OpCodes.Br, call));
                 else if (mutation == "return") processor.InsertAfter(call, Instruction.Create(OpCodes.Nop));
                 else if (mutation == "stack")
                     processor.InsertBefore(method.Body.Instructions[0], Instruction.Create(OpCodes.Ldc_I4_0));
@@ -150,7 +152,7 @@ partial class Program
                 "TailCalls::Forward(System.Int32)", Path.Combine(root, "Tail-Rejected-" + mutation)]);
             var marker = mutation switch
             {
-                "branch" => "middle of a tail transfer",
+                "branch" or "dead-branch" => "Branch enters the instruction after a prefix",
                 "missing-pointer" => "Invalid evaluation stack during reachability",
                 "stack" => "Tail call requires exactly its arguments",
                 _ => "Unsupported tail prefix"

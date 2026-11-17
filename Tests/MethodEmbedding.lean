@@ -647,14 +647,14 @@ theorem update_rejected : ¬ Embeds viaUpdate moved [0, 1, 3, 4] :=
 #guard ((MethodBinding.methodDifferences moved viaWithCode).map fun line =>
     (line.splitOn "withCode").length) == [1, 2]
 
-/-- The static field the fixtures below read. -/
-def staticField : StaticDescriptor :=
-  { identity := 1, fieldName := "Fixture::Value", bytes := List.replicate 8 0 }
-
 /-- The field operand of the static reads below. -/
 def staticFieldRef : CIL.Extraction.FieldRef :=
   { owner := .atom "Fixture" "Fixture", index := 0, type := .atom "Fixture" "System.Int64",
     name := name!"Value" }
+
+/-- The static field the fixtures below read. -/
+def staticField : StaticDescriptor :=
+  { identity := 1, field := staticFieldRef, bytes := List.replicate 8 0 }
 
 /-- What an extraction emits when a dead block puts a static read at pc 2. -/
 def staticMoved : Method := {

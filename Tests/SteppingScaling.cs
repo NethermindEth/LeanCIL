@@ -69,8 +69,9 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
     ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
     ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false),
-    ("constructions", [16, 64, 256], false), ("elements", [16, 64, 256], false),
-    ("typedelements", [16, 64, 256], false), ("typedsteps", [16, 64, 256], false)
+    ("constructions", [16, 64, 256], false), ("objectconstructors", [16, 64, 256], false),
+    ("elements", [16, 64, 256], false), ("typedelements", [16, 64, 256], false),
+    ("typedsteps", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -136,6 +137,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // The statics body loads one static field and pops it per cycle, with one static site per load.
 // The constructions body constructs a class instance and pops it per cycle, so each `newobj` reads its
 // `.object` link from the body's table and one allocation fact and enters a constructor that returns.
+// The objectconstructors body calls the `System.Object` constructor on its object argument per cycle, so
+// each call reads that its pc has no link and the runtime model fact of its pc.
 // The elements body loads and pops one int32 element of its array argument, then stores its index
 // argument into that element, per cycle, so each access reads one element fact of constant size.
 // The typed elements body does the same through `ldelem` and `stelem` with an `int32` type operand,
@@ -161,6 +164,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "constructions" => ([], [$".newobj {{ owner := {NodeType}, name := name!\".ctor\", hasThis := true, " +
         "genericArity := 0, returnType := .void, parameters := [] }", ".pop"], [".ldc_i4 0", ".ret"]),
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
+    "objectconstructors" => ([], [".ldarg 0", ".call CIL.Extraction.objectConstructorMethod {}"],
+        [".ldc_i4 0", ".ret"]),
     "elements" => ([], [".ldarg 0", ".ldarg 1", ".ldelem .i4", ".pop", ".ldarg 0", ".ldarg 1",
         ".ldarg 1", ".stelem .i4"], [".ldc_i4 0", ".ret"]),
     "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
@@ -235,7 +240,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
             "    name := name!\"Value\" }\n" +
             "def staticValue : CIL.StaticDescriptor :=\n" +
-            "  { identity := 0, fieldName := \"Fixture::Value\", bytes := [7, 0, 0, 0],\n" +
+            "  { identity := 0, field := staticField, bytes := [7, 0, 0, 0],\n" +
             "    initializer := some { method := 1, arguments := [] }, scalar := some true }\n"
         : "";
     // One site per load, so every step resolves its own pc among all the body's sites.
@@ -271,7 +276,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
         "allocation" or "constructions" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
-        "objects" =>
+        "objects" or "objectconstructors" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         "elements" => "import CIL.Safety.ArrayContents\n",
         "typedelements" or "typedsteps" => "import CIL.Safety.ArrayContents\nimport CIL.Safety.ResolutionFacts\n",
@@ -346,6 +351,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         /-- The constructor every construction of the constructions body enters; it returns at once. -/
         def constructor : CIL.Method := { locals := [], returnsValue := false, code := [.ret] }
         cil_instruction_equations constructor
+        """ + "\n" : "") + (workload == "objectconstructors" ? """
+        cil_runtime_models body
         """ + "\n" : "") + (workload is "arguments" or "homes" or "typedelements" or "typedsteps" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{(workload is "arguments" or "homes" ? signature : "{}")}} := rfl
@@ -573,6 +580,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [formed, located, loaded]
             """,
+        "objectconstructors" => $$"""
+            /-- Every call of the `System.Object` constructor consumes the receiver and keeps the memory. -/
+            theorem checked (memory : Memory) (object : Reference)
+                (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+                invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [formed]
+            """,
         "elements" => $$"""
             /-- Every element access reads the one element the index names, whose store keeps the memory. -/
             theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
@@ -675,10 +690,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var samples = Enumerable.Range(0, full ? Repetitions : 1)
         .Select(index => Compile(module, path, "proof" + index)).ToArray();
     var commands = samples.Select(sample => sample.Commands.Single(command => command.Label == "checked")).ToArray();
+    // The message carries every sample, so a run that differs says which count moved and by how much.
     if (commands.Select(command => command.Heartbeats).Distinct().Count() != 1 ||
         commands.Select(command => command.KernelHeartbeats).Distinct().Count() != 1 ||
         samples.Select(sample => sample.Bytes).Distinct().Count() != 1)
-        throw new InvalidOperationException("Stepping work did not repeat exactly for " + module);
+        throw new InvalidOperationException($"Stepping work did not repeat exactly for {module}: heartbeats " +
+            $"{string.Join(", ", commands.Select(command => command.Heartbeats))}; kernel heartbeats " +
+            $"{string.Join(", ", commands.Select(command => command.KernelHeartbeats))}; bytes " +
+            $"{string.Join(", ", samples.Select(sample => sample.Bytes))}");
     var proofBytes = baseline is null ? 0 : samples[0].Bytes - baseline.Bytes;
     if (full && proofBytes <= 0) throw new InvalidOperationException("Missing compiled proof bytes for " + module);
     var row = new SteppingMeasurement(workload, operations.Length, cycles, memory ? 2 * cycles + 1 : 0,

@@ -19,15 +19,6 @@ internal static class MemoryPrefixes
                 (instruction.Operand is not byte alignment || alignment is not (1 or 2 or 4) ||
                  instruction.Next is null || !SupportedTarget(instruction.Next.OpCode.Code)))
                 throw new InvalidDataException("Unsupported or malformed unaligned prefix");
-
-            var targets = instruction.Operand switch
-            {
-                Instruction target => new[] { target },
-                Instruction[] branches => branches,
-                _ => []
-            };
-            if (targets.Any(target => target?.Previous?.OpCode.Code == Code.Unaligned))
-                throw new InvalidDataException("Branch enters the middle of an unaligned instruction");
         }
     }
 

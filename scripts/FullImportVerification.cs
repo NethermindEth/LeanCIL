@@ -953,9 +953,9 @@ run_cmd do
         object app = AuditConstant("Extracted.program");
         object libraries = AuditConstant("LeanCILFullComposition.libraries");
         object linked = App(AuditConstant("CIL.Safety.link"), app, libraries);
-        object except = App(new { @const = "Except", levels = new[] { 0, 0 } }, AuditConstant("String"), program);
-        object success = App(new { @const = "Except.ok", levels = new[] { 0, 0 } }, AuditConstant("String"), program,
-            linked);
+        object collision = AuditConstant("CIL.Safety.StaticCollision");
+        object except = App(new { @const = "Except", levels = new[] { 0, 0 } }, collision, program);
+        object success = App(new { @const = "Except.ok", levels = new[] { 0, 0 } }, collision, program, linked);
         object checkedLink = App(new { @const = "Eq", levels = new[] { 1 } }, except,
             App(AuditConstant("CIL.Safety.linkChecked"), app, libraries), success);
         object callerClaim = App(AuditConstant("LeanCILFullComposition.fullCallerClaim"), linked);

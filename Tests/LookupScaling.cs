@@ -60,6 +60,7 @@ if (args.Contains("--method-decode-only", StringComparer.Ordinal))
 if (args.Contains("--static-facts-only", StringComparer.Ordinal))
 {
     StaticFactCosts();
+    StaticIdentityCosts();
     return;
 }
 if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
@@ -70,6 +71,11 @@ if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
 if (args.Contains("--decoded-program-only", StringComparer.Ordinal))
 {
     DecodedProgramCosts();
+    return;
+}
+if (args.Contains("--closure-only", StringComparer.Ordinal))
+{
+    ClosureCosts();
     return;
 }
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
@@ -97,6 +103,11 @@ if (args.Contains("--lineage-only", StringComparer.Ordinal))
     LineageCosts();
     return;
 }
+if (args.Contains("--prefix-entry-only", StringComparer.Ordinal))
+{
+    PrefixEntryCosts();
+    return;
+}
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 ExceptionDecisionCosts();
@@ -112,8 +123,11 @@ CallCheckCosts();
 DecodeCosts();
 MethodDecodeCosts();
 StaticFactCosts();
+StaticIdentityCosts();
 DecodedDefinitionCosts();
 DecodedProgramCosts();
+PrefixEntryCosts();
+ClosureCosts();
 ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -391,7 +405,7 @@ void StaticFactCosts()
     foreach (var size in new[] { 8, 32, 128 })
     {
         string Descriptor(int index) => string.Create(CultureInfo.InvariantCulture,
-            $"{{ identity := {index}, fieldName := \"Fixture::Field\", bytes := [{index % 256}] }}");
+            $"{{ identity := {index}, field := field, bytes := [{index % 256}] }}");
         var code = string.Join(", ", Enumerable.Repeat(".ldsfld field, .pop", size)) + ", .ret";
         var sites = string.Join(", ",
             Enumerable.Range(0, size).Select(index => $"({2 * index}, {Descriptor(index)})"));
@@ -443,6 +457,63 @@ void StaticFactCosts()
                 $"{AllowedSiteGrowth} times the cost per site at the size before.");
         Console.WriteLine($"PASS static site {name}: {measured} heartbeats per site");
     }
+}
+
+// `StaticIdentitiesValid` reads each site's recorded token from one index of the body and inserts the site into two
+// ordered maps, so deciding it at 8, 32 and 128 sites of distinct fields and identities costs at most
+// AllowedIdentityGrowth times more per site than at the size before; comparing each site with every other would not.
+void StaticIdentityCosts()
+{
+    const double AllowedIdentityGrowth = 1.35;
+    var identityDirectory = At("artifacts/LookupScaling/StaticIdentities");
+    Directory.CreateDirectory(identityDirectory);
+    var samples = new List<(int Size, long Cost)>();
+    foreach (var size in new[] { 8, 32, 128 })
+    {
+        var code = string.Join(", ", Enumerable.Repeat(".ldsfld field, .pop", size)) + ", .ret";
+        var sites = string.Join(", ", Enumerable.Range(0, size).Select(index => string.Create(
+            CultureInfo.InvariantCulture, $"({2 * index}, {{ identity := {index}, field := field, bytes := [0] }})")));
+        var statics = string.Join(", ", Enumerable.Range(0, size).Select(index => string.Create(
+            CultureInfo.InvariantCulture, $"({2 * index}, {0x04000001 + index})")));
+        var source = $$"""
+            import CIL.Extraction.StaticIdentities
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 8192
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#identity_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"static identities {after - before} heartbeats"
+            def field : FieldRef :=
+              { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair", name := name!"Field" }
+            def body : Method := {
+              code := [{{code}}], locals := [], returnsValue := false, declared := {},
+              staticSites := [{{sites}}] }
+            def evidence : BodyEvidence :=
+              { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [bytesOf "Fixture"],
+                tables := [], names := {}, pinned := PinnedIndex.ofIdentities [], statics := [{{statics}}] }
+            #identity_cost
+            theorem identities_valid : StaticIdentitiesValid [body] [evidence] := by decide +kernel
+            #print axioms identities_valid
+            """ + "\n";
+        var path = Path.Combine(identityDirectory, $"Sites{size}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("The static identity check introduced an unproved theorem.");
+        var cost = LookupPatterns.StaticIdentities().Match(output);
+        if (!cost.Success) throw new InvalidOperationException("Missing static identity cost: " + output);
+        samples.Add((size, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perSite = samples.Select(sample => (double)sample.Cost / sample.Size).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{sample.Size} = {(double)sample.Cost / sample.Size:F0}")));
+    if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedIdentityGrowth))
+        throw new InvalidOperationException(
+            $"Static identities cost {measured} heartbeats per site; the limit is " +
+            $"{AllowedIdentityGrowth} times the cost per site at the size before.");
+    Console.WriteLine($"PASS static identities: {measured} heartbeats per site");
 }
 
 // Fails when element shape facts or reads cost over 1.35 times more per element type as types and layouts grow
@@ -738,7 +809,8 @@ void CallCheckCosts()
         var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
         var code = string.Join(", ", pcs.Select(_ => ".call callMethod, .nop"));
         var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
-        var statement = $"ManagedCallsValid [⟨[], callee⟩] [] raw (List.replicate {2 * sites} true) body";
+        var statement =
+            $"ManagedCallsValid [⟨[], callee⟩] [] (fun _ => false) raw (List.replicate {2 * sites} true) body";
         var source = $$"""
             import CIL.Extraction.Generics
             open CIL CIL.Extraction Lean Elab Command
@@ -938,6 +1010,79 @@ void DecodeCosts()
     Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
 }
 
+// The heartbeats `decide +kernel` adds to deciding that no branch of a body of 500, 2000 and 8000 instructions enters
+// the instruction after a prefix, and to deciding the readonly rule at every pc of the same body. The prefix rule tests
+// bits of a mask of branch destinations built in one pass, so four times the instructions may cost at most
+// `AllowedLocalGrowth` more per instruction, and as it replaces the readonly rule's entry checks it may cost no more
+// than that rule, whose `Std.TreeSet` of destinations costs the logarithm of the body at each lookup.
+void PrefixEntryCosts()
+{
+    const int SegmentLength = 4;
+    var directory = At("artifacts/LookupScaling/PrefixEntry");
+    Directory.CreateDirectory(directory);
+    var samples = new List<(int Instructions, long Prefix, long Window)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(directory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.Scalars
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            namespace PrefixEntryCost
+            /-- The element type of every address. -/
+            def intType : TypeExpr := .atom runtimeScope "System.Int32"
+            /-- One segment: a `readonly.` prefix, the element address it modifies, a pop and a branch
+                to the prefix of the next segment. -/
+            def segment (index : Nat) : List RawInstruction :=
+              let start := {{SegmentLength}} * index
+              [⟨start, 65054, .none⟩, ⟨start + 1, 143, .type intType⟩, ⟨start + 2, 38, .none⟩,
+                ⟨start + 3, 43, .target (start + {{SegmentLength}})⟩]
+            /-- The instructions the translator emits for one segment. -/
+            def codeSegment (index : Nat) : List Instruction :=
+              [.nop, .memory (.arrayAddress .signed32 false), .pop, .br ({{SegmentLength}} * (index + 1))]
+            /-- A body of {{instructions}} raw instructions. -/
+            def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
+            /-- The {{instructions}} emitted instructions of the body. -/
+            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            #kernel_cost "prefix entry {{instructions}}"
+              prefixEntryFreeWith (branchTargetMask raw).testBit 0 raw = true
+            #kernel_cost "readonly window {{instructions}}"
+              (let rawAt := (FlowIndex.ofList raw).get?
+               let targeted := (Std.TreeSet.ofList (branchTargets raw) compare).contains
+               (raw.zipIdx.zip code).all fun ((instruction, pc), emitted) =>
+                 readOnlySiteWindow rawAt targeted pc instruction emitted) = true
+            end PrefixEntryCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var costs = LookupPatterns.PrefixEntry().Matches(output)
+            .ToDictionary(match => match.Groups[1].Value,
+                match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture), StringComparer.Ordinal);
+        if (!costs.TryGetValue("prefix entry", out var prefix) ||
+            !costs.TryGetValue("readonly window", out var window))
+            throw new InvalidOperationException($"Missing the prefix entry costs:\n{output}");
+        samples.Add((instructions, prefix, window));
+    }
+    string Measured(Func<(int Instructions, long Prefix, long Window), long> cost) => string.Join("; ",
+        samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{(double)cost(sample) / sample.Instructions:F1} at {sample.Instructions}")));
+    bool Grows(Func<(int Instructions, long Prefix, long Window), long> cost)
+    {
+        var perInstruction = samples.Select(sample => (double)cost(sample) / sample.Instructions).ToArray();
+        return samples.Any(sample => cost(sample) < KernelDecisionFloor) ||
+            perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth);
+    }
+    var measured = $"{Measured(sample => sample.Prefix)} heartbeats per instruction, against " +
+        $"{Measured(sample => sample.Window)} for the readonly rule";
+    if (Grows(sample => sample.Prefix) || Grows(sample => sample.Window) ||
+        samples.Any(sample => sample.Prefix > sample.Window))
+        throw new InvalidOperationException(
+            $"Deciding prefix entry costs {measured}; the limit is {AllowedLocalGrowth} times the cost per " +
+            "instruction at the size before, and no more than the readonly rule at each size.");
+    Console.WriteLine($"PASS deciding prefix entry costs {measured}");
+}
+
 // The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
 // instructions with four parameters and four locals gives the emitted code, the initialized locals and no homes or
 // links. Each instruction is decoded and instantiated once, so four times the instructions may cost at most
@@ -1113,6 +1258,80 @@ void DecodedProgramCosts()
             $"{AllowedLocalGrowth} times the cost per record at the size before.");
     Console.WriteLine($"PASS proving a decoded program costs {measured} heartbeats per record");
 }
+
+// A closure search reads each of its n methods by index from a program of P methods and gives each of the e callees
+// their link tables enter one packed table entry, so it costs O(n * P + e) kernel steps. Each shape grows one term:
+// a chain whose closure is the whole program grows n * P, one method calling seven others grows e, and a closure of
+// four methods at the start of a longer program grows P. A search that folded over its state instead costs time
+// quadratic in e.
+void ClosureCosts()
+{
+    var closureDirectory = At("artifacts/LookupScaling/Closures");
+    Directory.CreateDirectory(closureDirectory);
+    // Four times the units of n * P + e may cost at most this much more per unit.
+    const double AllowedClosureGrowth = 1.15;
+    ClosureShape[] shapes =
+    [
+        new("chain", [8, 32, 128], size => [.. Enumerable.Range(0, size).Select(int[] (index) =>
+            index + 1 < size ? [index + 1] : [])], size => size, size => size - 1),
+        new("fan", [32, 128, 512], size => [[.. Enumerable.Range(0, size).Select(index => 1 + index % 7)],
+            .. Enumerable.Repeat(Array.Empty<int>(), 7)], _ => 8, size => size),
+        new("tail", [128, 512, 2048], size => [[1], [2], [3], .. Enumerable.Repeat(Array.Empty<int>(), size - 3)],
+            _ => 4, _ => 3)
+    ];
+    string Statement(ClosureShape shape, int size)
+    {
+        var program = shape.Program(size);
+        return $$"""
+            /-- The {{shape.Name}} program of size {{size}}. -/
+            def {{shape.Name}}{{size}} : Program :=
+              [{{string.Join(", ", program.Select(callees => $"stub [{string.Join(", ", callees)}]"))}}]
+            #kernel_cost "closure {{shape.Name}} {{size}}"
+              (({{shape.Name}}{{size}}.closure 0).map Prod.snd =
+                some [{{string.Join(", ", Enumerable.Range(0, shape.Methods(size)))}}])
+            """;
+    }
+    var path = Path.Combine(closureDirectory, "Closures.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Safety.ProgramClosure
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        open CIL Lean Elab Command
+        {{KernelCostCommand}}
+        /-- A method whose link table enters `callees` in order, one call pc each. -/
+        def stub (callees : List Nat) : Method :=
+          { code := [], locals := [], returnsValue := false,
+            links := callees.zipIdx.map fun (callee, pc) => (pc, .direct callee) }
+        {{string.Join("\n", shapes.SelectMany(shape => shape.Sizes.Select(size => Statement(shape, size))))}}
+        """ + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ClosureCost().Matches(output).ToDictionary(
+        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != shapes.Sum(shape => shape.Sizes.Length) || costs.Values.Min() < KernelDecisionFloor)
+        throw new InvalidOperationException("Missing closure costs:\n" + output);
+    foreach (var shape in shapes)
+    {
+        var units = shape.Sizes.Select(size =>
+            (double)shape.Methods(size) * shape.Program(size).Length + shape.Edges(size)).ToArray();
+        if (ClosureGrowth(units, [.. units.Select(unit => unit * unit)]) <= AllowedClosureGrowth)
+            throw new InvalidOperationException($"The {shape.Name} bound accepts a cost quadratic in n * P + e");
+        var growth = ClosureGrowth(units, [.. shape.Sizes.Select(size => (double)costs[(shape.Name, size)])]);
+        var measured = string.Join(", ", shape.Sizes.Select(size =>
+            string.Create(CultureInfo.InvariantCulture, $"{costs[(shape.Name, size)]} at {size}")));
+        if (growth > AllowedClosureGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"The {shape.Name} closure costs {measured} heartbeats; its cost per unit of n * P + e grows " +
+                $"{growth:F2} times, more than {AllowedClosureGrowth}"));
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"PASS the {shape.Name} closure costs {measured} heartbeats, {growth:F2} times as much per unit of " +
+            $"n * P + e between its last sizes as between its first"));
+    }
+}
+
+// How many times as much each added unit costs between the last two sizes as between the first two.
+static double ClosureGrowth(double[] units, double[] costs) =>
+    (costs[2] - costs[1]) / (units[2] - units[1]) / ((costs[1] - costs[0]) / (units[1] - units[0]));
 
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
 void ClosedArgumentsCosts()
@@ -2577,6 +2796,13 @@ enum LocalSlots
     Pointer,
 }
 
+/// <summary>
+/// A program shape of the closure cost row: the program of each size, and the methods and link callees of the
+/// closure of its method 0.
+/// </summary>
+record ClosureShape(string Name, int[] Sizes, Func<int, int[][]> Program, Func<int, int> Methods,
+    Func<int, int> Edges);
+
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
@@ -2597,6 +2823,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution();
+
+    [GeneratedRegex(@"static identities ([0-9]+) heartbeats")]
+    internal static partial Regex StaticIdentities();
 
     [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
     internal static partial Regex CallCheck();
@@ -2643,6 +2872,12 @@ static partial class LookupPatterns
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedDefinition();
 
+    [GeneratedRegex(@"(prefix entry|readonly window) [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex PrefixEntry();
+
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedProgram();
+
+    [GeneratedRegex(@"\bclosure (chain|fan|tail) ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ClosureCost();
 }

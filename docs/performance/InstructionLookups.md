@@ -128,6 +128,17 @@ instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, bo
 per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
 at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
 
+It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
+bodies of 500, 2,000 and 8,000 instructions, whose segments each hold a `readonly.` prefix, its
+`ldelema`, a `pop` and a branch to the prefix of the next segment, and decides the readonly rule
+at every pc of the same body. It fails when the cost per instruction of either at 2,000 or 8,000
+exceeds 1.25 times the cost at the size before, or when the prefix rule costs more than the
+readonly rule at any size. The prefix rule tests bits of a mask of the branch destinations built
+in one pass and costs about 1,380 heartbeats per instruction at every size. The readonly rule,
+whose `Std.TreeSet` of destinations costs the logarithm of the body to build and to read, costs
+about 15,900, 19,300 and 23,200. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
+
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or
@@ -189,7 +200,12 @@ size.
 The suite also declares `cil_resolution_facts` for methods of 8, 32 and 128 static sites at even
 pcs and reads every site's `Method.staticAt` through the facts, under the same 1.35 limit per
 site. The facts cost about 5,500, 7,000 and 7,000 heartbeats per site, lower at 8 for the same
-reason, and the reads 22,100 to 23,500 heartbeats per site at every size.
+reason, and the reads 22,400 to 23,800 heartbeats per site at every size.
+
+The suite also decides `StaticIdentitiesValid` for one method of 8, 32 and 128 static sites, each
+of its own field and identity, under the same 1.35 limit per site. The check walks the recorded
+accesses beside the sites once and sorts the pairs of identity and field both ways, and costs
+about 22,900, 21,000 and 22,700 heartbeats per site.
 
 The suite also declares `cil_resolution_facts` for a method whose raw method names one struct
 element type per layout, at 8, 32 and 128 layouts, and reads every element's
@@ -242,6 +258,20 @@ decode to their methods, given one decoding fact per record, and reads the heart
 command. It fails when the heartbeats per record grow more than 1.25 times from one size to the
 next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
 with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
+
+The suite decides with `decide +kernel` the closure of method 0 in three shapes of program: a chain
+of 8, 32 and 128 methods each calling the next, whose closure is the whole program; one method
+whose link table enters seven others 32, 128 and 512 times; and a closure of four methods at the
+start of a program of 128, 512 and 2,048 methods. A search over n methods with e link callees in
+a program of P methods reads each method by its index in the list and gives each callee one packed
+table entry, so it costs O(n * P + e). The suite fails when, in any shape, the heartbeats each
+added unit of n * P + e costs grow more than 1.15 times from the first two sizes to the last two.
+The chain costs about 90,400, 437,300 and 3,533,900 heartbeats, so each added unit of n * P costs
+0.57 times as much at the larger sizes; the fan costs about 2,400 heartbeats per added callee and
+the long program about 255 per added method at every size. The chain grows with the square of
+its methods because its closure is the whole program. A search that folded over its state instead
+cost 2.33 times as much per callee from 128 to 512 callees as from 32 to 128. Run this row alone
+with `dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
 
 ## Reference figures
 

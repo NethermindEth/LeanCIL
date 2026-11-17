@@ -153,6 +153,7 @@ Test("test entry points", () =>
     Equal(VerificationSelection.Select(["Tests/WordReaderOutlines.cs"]), ["wordreader"]);
     Equal(VerificationSelection.Select(["Tests/SavedWordReaderOutlines.cs"]), ["savedwordreader"]);
     Equal(VerificationSelection.Select(["Tests/WordReaderOutlineSupport.cs"]), ["savedwordreader", "wordreader"]);
+    Equal(VerificationSelection.Select(["Tests/ProgramClosures/Proof.lean"]), ["closures"]);
     Equal(VerificationSelection.Select(["Tests/SkipInitialization.cs"]), ["unsafe"]);
     Equal(VerificationSelection.Select(["Tests/NullReferences.cs"]), ["unsafe"]);
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })

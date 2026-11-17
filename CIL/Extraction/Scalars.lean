@@ -3,8 +3,8 @@ import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
-import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.GuardCalls
+import CIL.Extraction.Prefixes
 import CIL.Resolution
 
 /-!
@@ -66,11 +66,12 @@ def scalarType : TypeExpr → ScalarKind
   | _ => .other
 
 /-- The stack kind of the receiver of an instance method declared by `owner`: an object
-    reference for a class, a byref for a value type. -/
+    reference for a class or `System.Object`, a byref for a value type. -/
 def receiverKind (owner : TypeExpr) : ScalarKind :=
   match owner with
   | .object .. => .object
-  | _ => scalarType (.byref owner)
+  | _ => if owner == .atom runtimeScope "System.Object" then .object
+    else scalarType (.byref owner)
 
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
@@ -880,7 +881,6 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         if let some (type, read, _) := unsafeValueCall instruction then
         (if read then [] else [scalarType type]) ++ [.reference] else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
-      if objectConstructorCall instruction then [.object] else
       if nullGuardCall instruction then [.object, .object] else
       if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
@@ -986,6 +986,46 @@ theorem readOnlySiteWindow_eq (raw : RawMethod) :
   rfl
 
 #print axioms readOnlySiteWindow_eq
+
+/-- In a body where no branch enters the instruction after a prefix, the readonly rule's
+    branch-entry checks refuse nothing, so it accepts what it accepts with no branch targets. -/
+theorem readOnlySiteWindow_prefixEntryFree {code : List RawInstruction}
+    (free : PrefixEntryFree code) (pc : Nat) (instruction : RawInstruction)
+    (emitted : Instruction) (fetched : code[pc]? = some instruction) :
+    readOnlySiteWindow (code[·]?) (fun target => code.any (branchesTo target)) pc instruction
+        emitted =
+      readOnlySiteWindow (code[·]?) (fun _ => false) pc instruction emitted := by
+  have readOnlyPrefix : isPrefixOpcode 65054 = true := by decide
+  unfold readOnlySiteWindow
+  by_cases readOnly : instruction.opcode = 65054
+  · have entry := free pc instruction fetched (readOnly ▸ readOnlyPrefix)
+    simp [readOnly, entry]
+  · simp only [readOnly, beq_iff_eq, ite_false]
+    split
+    · rcases pc with _ | previousPc
+      · simp
+      · cases previous : code[previousPc]? with
+        | none => simp [previous]
+        | some before =>
+          by_cases follows : before.opcode = 65054
+          · have entry := free previousPc before previous (follows ▸ readOnlyPrefix)
+            simp [previous, follows, entry]
+          · have unprefixed : (before.opcode == 65054) = false := by simpa using follows
+            simp [previous, unprefixed]
+    · rfl
+
+#print axioms readOnlySiteWindow_prefixEntryFree
+
+/-- A readonly prefix the rule accepts has no branch entering the address after it. -/
+theorem readOnlySiteWindow_untargeted {rawAt : Nat → Option RawInstruction}
+    {targeted : Nat → Bool} {pc : Nat} {instruction : RawInstruction} {emitted : Instruction}
+    (accepted : readOnlySiteWindow rawAt targeted pc instruction emitted = true)
+    (readOnly : instruction.opcode = 65054) : targeted (pc + 1) = false := by
+  simp only [readOnlySiteWindow, readOnly, beq_self_eq_true, ite_true, Bool.and_eq_true,
+    Bool.not_eq_true'] at accepted
+  exact accepted.2
+
+#print axioms readOnlySiteWindow_untargeted
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, satisfy the readonly rule

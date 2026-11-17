@@ -117,6 +117,7 @@ import CIL.Safety.OutcomeContract
 import CIL.Safety.RuntimeExceptions
 import CIL.Safety.Imports
 import CIL.Safety.Linking
+import CIL.Safety.ProgramClosure
 import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn
@@ -195,6 +196,7 @@ import CIL.Safety.TupleDivision
 import CIL.Extraction.LayoutProjection
 import CIL.Extraction.Translation
 import CIL.Extraction.DecodedMethod
+import CIL.Extraction.Prefixes
 import CIL.Extraction.DecodedDefinition
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence

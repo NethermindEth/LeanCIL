@@ -163,8 +163,11 @@ private def formsMethod : RawMethod :=
     instr 23 0x7B someField, instr 28 0xD0 (.call writeLineSite), instr 33 0xD0 staticField,
     instr 38 0x2A]
 
+/-- The forms decode with the static field `ldtoken` recorded at its index, and not without it. -/
 theorem other_operand_forms_decode :
-    bodyMatches (evidence formsBytes formsOperands) formsMethod [] = true := by decide +kernel
+    bodyMatches { evidence formsBytes formsOperands with statics := [(7, tokens.totalField)] }
+      formsMethod [] = true ∧
+    bodyMatches (evidence formsBytes formsOperands) formsMethod [] = false := by decide +kernel
 #print axioms other_operand_forms_decode
 
 /-- A branch to a `volatile.` prefix enters the prefixed instruction at its first prefix. -/
@@ -274,6 +277,15 @@ theorem rejects_branch_to_the_instruction_after_a_prefix :
       true := by
   decide +kernel
 #print axioms rejects_branch_to_the_instruction_after_a_prefix
+
+/-- A branch after the final `ret`, which no path reaches, into the instruction after a
+    `volatile.` prefix: the rule covers every branch of the body, so decoded code always
+    satisfies `PrefixEntryFree`. -/
+theorem rejects_unreachable_branch_after_a_prefix :
+    failsWith (evidence [0x1E, 0x2A, 0xFE, 0x13, 0x4A, 0x2A, 0x2B, 0xFC])
+      (.branchIntoPrefixed 5 3) = true := by
+  decide +kernel
+#print axioms rejects_unreachable_branch_after_a_prefix
 
 /-- A `switch` case that reaches the instruction after a `readonly.` prefix. -/
 theorem rejects_switch_target_after_a_prefix :

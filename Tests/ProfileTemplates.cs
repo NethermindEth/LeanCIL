@@ -39,6 +39,7 @@ public static class Dispatch
         return value;
     }
 }
+public sealed class Blank { }
 public static class StaticDispatch
 {
     public static readonly uint Bias = 7;
@@ -292,6 +293,45 @@ File.Copy(Path.Combine(genericShared, "TemplateBindings0.lean"), Path.Combine(ge
 Compile(generic, "TemplateBindings0", genericPath);
 Console.WriteLine("PASS distinct closed generic callee identities and exact bindings");
 
+// A class constructor calls the System.Object constructor with no link. The template steps that call through its
+// runtime model, so a proof over the template needs no fact an extraction states.
+var constructed = Path.Combine(directory, "Constructor");
+Run(Extract("extract", assembly, "Dispatch", "Blank::.ctor()", constructed));
+var constructorShared = Path.Combine(directory, "ConstructorShared");
+Run(["dotnet", ExtractorPath, "templates", constructorShared, constructed]);
+var constructorTemplate = File.ReadAllText(Path.Combine(constructorShared, "Templates.lean"));
+if (!constructorTemplate.Contains(".call ({ owner := .atom Extraction.runtimeScope \"System.Object\"",
+        StringComparison.Ordinal) || !constructorTemplate.Contains("links := []", StringComparison.Ordinal))
+    throw new InvalidOperationException("The constructor template lost its unlinked System.Object constructor call.");
+var constructorPath = constructed + Path.PathSeparator + constructorShared + Path.PathSeparator + library;
+Compile(constructorShared, "Templates", constructorPath);
+File.WriteAllText(Path.Combine(constructorShared, "ConstructorProof.lean"), """
+    import Templates
+    import CIL.Safety.SymbolicExecution
+    import CIL.Safety.ObjectSteps
+
+    /-! A proof over a generated constructor template. -/
+    namespace ConstructorProof
+    open CIL CIL.Safety
+
+    /-- The template constructor of a class deriving from `System.Object` returns, for any profile. -/
+    theorem constructs (program : Program) (index : Nat) (profile : FeatureProfile)
+        (environment : LayoutEnvironment)
+        (found : program[index]? = some (Templates.method0 profile environment))
+        (memory : Safety.Memory) (object : Reference)
+        (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+        invoke program 10 index [.object (.address object)] memory = .ok (memory, []) := by
+      cil_checked_steps [formed]
+    #print axioms constructs
+    end ConstructorProof
+    """);
+Compile(constructorShared, "ConstructorProof", constructorPath);
+Compile(constructed, "Extracted", constructorPath);
+File.Copy(Path.Combine(constructorShared, "TemplateBindings0.lean"),
+    Path.Combine(constructed, "TemplateBindings0.lean"), overwrite: true);
+Compile(constructed, "TemplateBindings0", constructorPath);
+Console.WriteLine("PASS a constructor template steps its unlinked System.Object constructor call");
+
 var staticOutputs = new[] { "scalar", "x64-v3" }.Select(profile =>
     Path.Combine(directory, "Static-" + profile)).ToArray();
 for (var index = 0; index < staticOutputs.Length; index++)
@@ -300,7 +340,7 @@ for (var index = 0; index < staticOutputs.Length; index++)
 var staticShared = Path.Combine(directory, "StaticShared");
 Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
 var staticTemplate = File.ReadAllText(Path.Combine(staticShared, "Templates.lean"));
-if (!staticTemplate.Contains("fieldName := \"System.UInt32 StaticDispatch::Bias\"", StringComparison.Ordinal))
+if (!staticTemplate.Contains("name := name!\"Bias\" }", StringComparison.Ordinal))
     throw new InvalidOperationException("Static template omitted its field identity.");
 var staticFiles = Directory.GetFiles(staticShared).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllText);
 Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
@@ -321,7 +361,8 @@ var staticPath = staticOutputs[0] + Path.PathSeparator + library;
 var changedStatic = Path.Combine(directory, "ChangedStatic");
 Directory.CreateDirectory(changedStatic);
 File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
-    staticTemplate.Replace("StaticDispatch::Bias", "StaticDispatch::Changed", StringComparison.Ordinal));
+    staticTemplate.Replace("name := name!\"Bias\" }, bytes", "name := name!\"Changed\" }, bytes",
+        StringComparison.Ordinal));
 Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
 RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
 var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
