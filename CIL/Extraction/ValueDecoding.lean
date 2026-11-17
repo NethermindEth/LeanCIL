@@ -639,16 +639,18 @@ end CIL
 
 namespace CIL.Extraction
 
-/-- Whether `emitted` is exactly what `raw` decodes to with no prefix before it. -/
-def valueEncodingMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
-  match Instruction.ofRaw? none raw with
+/-- Whether `emitted` is exactly what `raw` decodes to after `previous`, the raw instruction
+    before it. -/
+def valueEncodingMatches (previous : Option RawInstruction) (raw : RawInstruction)
+    (emitted : Instruction) : Bool :=
+  match Instruction.ofRaw? previous raw with
   | some decoded => decoded.sameValue emitted
   | none => false
 
 /-- A matching value encoding is exactly the decoded instruction. -/
-theorem valueEncodingMatches_sound {raw : RawInstruction} {emitted : Instruction}
-    (matched : valueEncodingMatches raw emitted = true) :
-    Instruction.ofRaw? none raw = some emitted := by
+theorem valueEncodingMatches_sound {previous : Option RawInstruction} {raw : RawInstruction}
+    {emitted : Instruction} (matched : valueEncodingMatches previous raw emitted = true) :
+    Instruction.ofRaw? previous raw = some emitted := by
   unfold valueEncodingMatches at matched
   split at matched
   · next decoded decodes => rw [decodes, Instruction.sameValue_eq matched]

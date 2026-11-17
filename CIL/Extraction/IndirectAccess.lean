@@ -89,7 +89,7 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
       -- A span `ldobj` copies nothing; extraction refuses every other operand type.
       else instruction.opcode == 113 && spanLocal type && (emitted matches .nop)
     | some alignment, opcode, _ =>
-      valueEncodingMatches instruction emitted ||
+      valueEncodingMatches previous instruction emitted ||
         (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)
 
 /-- The indirect access rule at `pc`, reading the raw instructions next to it through `rawAt`:

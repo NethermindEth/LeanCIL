@@ -988,7 +988,7 @@ void DecodeCosts()
             namespace ValueDecodingCost
             {{ValueBody(instructions)}}
             #kernel_cost "decode {{instructions}}"
-              (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
+              (raw.zip code).all (fun pair => valueEncodingMatches none pair.1 pair.2) = true
             end ValueDecodingCost
             """ + "\n");
         var package = FixturePackage();

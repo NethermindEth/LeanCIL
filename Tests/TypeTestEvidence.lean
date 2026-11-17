@@ -209,24 +209,25 @@ private def bird : TypeExpr := .object owner "Fixture.Bird"
 /-- `castclass` and `isinst` of a class match their own raw opcode and class on an object or
     null. -/
 theorem class_tests_match :
-    scalarEmissionMatches #[] none (i 116 (.type dog)) [.object] (.castclass dog) = true ∧
-    scalarEmissionMatches #[] none (i 117 (.type dog)) [.nullObject] (.isinst dog) = true := by
+    scalarEmissionMatches #[] none none (i 116 (.type dog)) [.object] (.castclass dog) = true ∧
+    scalarEmissionMatches #[] none none (i 117 (.type dog)) [.nullObject]
+      (.isinst dog) = true := by
   decide
 #print axioms class_tests_match
 
 /-- A raw `isinst` emitted as `castclass` is rejected by the scalar check and the decoder: the
     two differ on a failed test. -/
 theorem isinst_decoded_as_castclass :
-    scalarEmissionMatches #[] none (i 117 (.type dog)) [.object] (.castclass dog) = false ∧
-    valueEncodingMatches (i 117 (.type dog)) (.castclass dog) = false := by
+    scalarEmissionMatches #[] none none (i 117 (.type dog)) [.object] (.castclass dog) = false ∧
+    valueEncodingMatches none (i 117 (.type dog)) (.castclass dog) = false := by
   decide
 #print axioms isinst_decoded_as_castclass
 
 /-- A cast emitted against another class than its raw operand is rejected by the scalar check
     and the decoder. -/
 theorem cast_other_type :
-    scalarEmissionMatches #[] none (i 116 (.type dog)) [.object] (.castclass bird) = false ∧
-    valueEncodingMatches (i 116 (.type dog)) (.castclass bird) = false := by
+    scalarEmissionMatches #[] none none (i 116 (.type dog)) [.object] (.castclass bird) = false ∧
+    valueEncodingMatches none (i 116 (.type dog)) (.castclass bird) = false := by
   decide
 #print axioms cast_other_type
 

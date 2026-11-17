@@ -39,9 +39,9 @@ theorem wrong_element_token :
       [.word32, .array .signed32] = none ∧
     CIL.Extraction.scalarTransfer holder (rawArray 163 (.type int32))
       [.word32, .array .signed32] = some [.word32] ∧
-    CIL.Extraction.scalarOpMatches (rawArray 163 (.type uint32)) [.word32, .array .unsigned32]
+    CIL.Extraction.scalarOpMatches none (rawArray 163 (.type uint32)) [.word32, .array .unsigned32]
       (.ldelem_any int32) = false ∧
-    CIL.Extraction.scalarOpMatches (rawArray 163 (.type uint32)) [.word32, .array .unsigned32]
+    CIL.Extraction.scalarOpMatches none (rawArray 163 (.type uint32)) [.word32, .array .unsigned32]
       (.ldelem_any uint32) = true := by decide +kernel
 #print axioms wrong_element_token
 
@@ -60,9 +60,9 @@ theorem native_store_mismatch :
 
 /-- Unsupported floating-point loads cannot certify an integer load via equal stack effects. -/
 theorem float_load_forgery :
-    CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
+    CIL.Extraction.scalarEmissionMatches #[] none none (rawArray 152) [.word32, .array .signed32]
       (.ldelem .i4) = false ∧
-    CIL.Extraction.scalarEmissionMatches #[] none (rawArray 152) [.word32, .array .signed32]
+    CIL.Extraction.scalarEmissionMatches #[] none none (rawArray 152) [.word32, .array .signed32]
       (.ldelem_any int32) = false := by decide +kernel
 #print axioms float_load_forgery
 
@@ -349,10 +349,10 @@ theorem byref_like_layout_containment :
 
 /-- Native length operands certify, while raw int64 stack kinds do not. -/
 theorem allocation_native_kind :
-    CIL.Extraction.scalarOpMatches
+    CIL.Extraction.scalarOpMatches none
       (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
       [.native] (.newarr int32) = true ∧
-    CIL.Extraction.scalarOpMatches
+    CIL.Extraction.scalarOpMatches none
       (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
       [.word64] (.newarr int32) = false := by decide +kernel
 #print axioms allocation_native_kind
@@ -360,13 +360,13 @@ theorem allocation_native_kind :
 /-- `newarr` carries the raw token itself: another element type, even one of equal width, or
     the same struct under another identity or layout index, does not match it. -/
 theorem allocation_token_mismatch :
-    CIL.Extraction.scalarOpMatches (rawArray 141 (.type int32)) [.word32]
+    CIL.Extraction.scalarOpMatches none (rawArray 141 (.type int32)) [.word32]
       (.newarr (.atom CIL.Extraction.runtimeScope "System.UInt32")) = false ∧
-    CIL.Extraction.scalarOpMatches (rawArray 141 (.type record)) [.word32]
+    CIL.Extraction.scalarOpMatches none (rawArray 141 (.type record)) [.word32]
       (.newarr (.aggregate "Other" 0)) = false ∧
-    CIL.Extraction.scalarOpMatches (rawArray 141 (.type record)) [.word32]
+    CIL.Extraction.scalarOpMatches none (rawArray 141 (.type record)) [.word32]
       (.newarr (.aggregate "Record" 1)) = false ∧
-    CIL.Extraction.scalarOpMatches (rawArray 141 (.type record)) [.word32]
+    CIL.Extraction.scalarOpMatches none (rawArray 141 (.type record)) [.word32]
       (.newarr record) = true := by decide +kernel
 #print axioms allocation_token_mismatch
 

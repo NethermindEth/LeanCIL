@@ -79,10 +79,10 @@ theorem addition_mixed_overflow :
 
 /-- Bare addition admits native/int32 pairs and rejects fixed-width int64/int32 pairs. -/
 theorem addition_admission :
-    scalarOpMatches ⟨0, 88, .none⟩ [.word32, .native] .add = true ∧
-    scalarOpMatches ⟨0, 88, .none⟩ [.native, .word32] .add = true ∧
-    scalarOpMatches ⟨0, 88, .none⟩ [.word32, .word64] .add = false ∧
-    scalarOpMatches ⟨0, 88, .none⟩ [.word64, .word32] .add = false := by
+    scalarOpMatches none ⟨0, 88, .none⟩ [.word32, .native] .add = true ∧
+    scalarOpMatches none ⟨0, 88, .none⟩ [.native, .word32] .add = true ∧
+    scalarOpMatches none ⟨0, 88, .none⟩ [.word32, .word64] .add = false ∧
+    scalarOpMatches none ⟨0, 88, .none⟩ [.word64, .word32] .add = false := by
   decide
 #print axioms addition_admission
 
