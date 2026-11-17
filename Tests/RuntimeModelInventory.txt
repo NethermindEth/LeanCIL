@@ -418,6 +418,7 @@ System.Runtime::System.Void System.ArgumentOutOfRangeException::ThrowIfNotEqual(
 System.Runtime::System.Void System.ArgumentOutOfRangeException::ThrowIfZero(T,System.String)
 System.Runtime::System.Void System.Array::Fill(T[],T)
 System.Runtime::System.Void System.Array::Fill(T[],T,System.Int32,System.Int32)
+System.Runtime::System.Void System.Object::.ctor()
 System.Runtime::System.Void System.ReadOnlySpan`1::.ctor(System.Void*,System.Int32)
 System.Runtime::System.Void System.ReadOnlySpan`1::.ctor(T&)
 System.Runtime::System.Void System.ReadOnlySpan`1::.ctor(T[])
