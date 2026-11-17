@@ -68,10 +68,11 @@ internal static class ExceptionLint
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
                 Operation operation = InstructionTranslation.Translate(instruction, method, methodIndices,
                     methodIndex, instructions, profile, nativeOperands, parameterHomes);
+                // A modelled call raises what the operation its model runs as raises.
+                if (operation is ModelCall call) operation = call.Model;
                 foreach (ExceptionType named in RuntimeExceptions(operation))
                     sites.Add(new(method.FullName, instruction.Offset, named,
-                        "interpreter operation: " + (operation is ModelCall call
-                            ? "call modelled as " + call.Model.ToLean() : operation.ToLean())));
+                        "interpreter operation: " + operation.ToLean()));
             }
         }
         ExceptionType[] modeled = sites.Select(site => site.Exception).Distinct()
@@ -112,11 +113,7 @@ internal static class ExceptionLint
 
     static IEnumerable<ExceptionType> RuntimeExceptions(Operation operation)
     {
-        if (operation is ModelCall call)
-        {
-            foreach (var exception in RuntimeExceptions(call.Model)) yield return exception;
-        }
-        else if (operation is Divide divide)
+        if (operation is Divide divide)
         {
             yield return ExceptionType.DivideByZero;
             if (divide.Signed) yield return ExceptionType.Overflow;
