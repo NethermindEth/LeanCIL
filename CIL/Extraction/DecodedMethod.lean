@@ -6,8 +6,8 @@ import CIL.Extraction.Translation
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
 instruction of the instantiated definition as `Instruction.ofRaw` decodes it after the
-instruction before it, a hole where no
-family admits the opcode yet, a type test naming the type argument, a field access naming the
+instruction before it, a hole where no family admits the opcode yet, a type test naming the
+type argument, a field access naming the
 instantiated field, a call or construction naming the instantiated method, the frame, homes and
 signature from the same definition, and the link table the extraction states, which the call
 check ties to each raw site.
@@ -24,9 +24,10 @@ namespace CIL.Extraction
     code as `Instruction.ofRaw` decodes it after the instruction before it, frame and signature
     from the same definition, homes over every pc, the link table `links`, and no static sites
     or opaque vector locals. The table is not read here; `ManagedCallsValid` ties each entry to
-    its raw site. Every instruction decodes, so `none` means the instantiation failed (an explicit receiver signature has none),
-    a parameter, local or homed argument type has no storage or slot kind, or the code fails the
-    argument rule of the evidence check, `validateArgumentOpAt`, at some pc. -/
+    its raw site. Every instruction decodes, so `none` means the instantiation failed (an
+    explicit receiver signature has none), a parameter, local or homed argument type has no
+    storage or slot kind, or the code fails the argument rule of the evidence check,
+    `validateArgumentOpAt`, at some pc. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (source : RawMethod) (arguments : List TypeExpr) :
     Option Method := do
