@@ -103,7 +103,6 @@ def indirectSiteWindow (rawAt : Nat → Option RawInstruction) (pc : Nat)
     (accessAlignment (some instruction)).any Option.isSome &&
       (rawAt (pc + 1)).any (fun next => unalignedTaker next.opcode) && (emitted matches .nop)
   | 65043 => false
-  -- `pc - 1` saturates at 0, so the first instruction must not read itself as its prefix.
-  | _ => indirectAccessMatches (if pc == 0 then none else rawAt (pc - 1)) instruction emitted
+  | _ => indirectAccessMatches (rawBefore rawAt pc) instruction emitted
 
 end CIL.Extraction
