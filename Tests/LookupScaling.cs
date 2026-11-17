@@ -2174,24 +2174,50 @@ string MethodNumber(string extracted, string method, string name)
         ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
         : number;
 }
-// Heartbeats of the method's `method{n}_body_validated`, less the same file with its proof left open.
-long BodyCheck(string name, string entry, string method)
+// The heartbeats of the method's `method{n}_body_validated` and, for `tablesMethod`, of that method's
+// `tables_valid`, read in one file of the extraction narrowed to the body obligation. Each is read after the same
+// statement closed with `sorry`, which is subtracted.
+(long Body, long Tables) BodyChecks(string name, string entry, string method, string? tablesMethod = null)
 {
     var output = Path.Combine(directory, "Body" + name);
     Run(Extract("extract", bodyAssembly, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var number = MethodNumber(extracted, method, name);
-    var theorem = $"method{number}_body_validated";
-    var narrowed = NarrowEvidence(extracted, theorem);
-    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := ⟨[^\r\n]*⟩\r?$").Value;
-    if (proof.Length == 0) throw new InvalidOperationException("Missing body obligation " + theorem);
-    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := ⟨", StringComparison.Ordinal)] + " := sorry");
-    return Heartbeats(Path.Combine(output, "BodyChecked.lean"), narrowed, equations: false) -
-        Heartbeats(Path.Combine(output, "BodyOpen.lean"), open, equations: false);
+    var body = $"method{MethodNumber(extracted, method, name)}_body_validated";
+    var narrowed = NarrowEvidence(extracted, body);
+    var obligations = new List<(Match Proof, string Kind)> { (Obligation(narrowed, body, @"⟨[^\r\n]*⟩"), "body") };
+    if (tablesMethod is not null)
+        obligations.Add((Obligation(narrowed, $"method{MethodNumber(extracted, tablesMethod, name)}_tables_valid",
+            @"by decide \+kernel"), "tables"));
+    var parts = new List<string>();
+    var readAt = new Dictionary<string, int>();
+    var start = 0;
+    foreach (var (proof, kind) in obligations.OrderBy(obligation => obligation.Proof.Index))
+    {
+        parts.Add(narrowed[start..proof.Index]);
+        var statement = proof.Groups["statement"].Value;
+        parts.Add($"theorem {proof.Groups["name"].Value}_open : {statement} := sorry\n");
+        readAt[kind] = parts.Count - 1;
+        parts.Add(proof.Value);
+        start = proof.Index + proof.Length;
+    }
+    parts.Add(narrowed[start..]);
+    var costs = PartHeartbeats(Path.Combine(output, "BodyChecked.lean"), parts);
+    long Cost(string kind) => costs[readAt[kind]] - costs[readAt[kind] - 1];
+    return (Cost("body"), tablesMethod is null ? 0 : Cost("tables"));
 }
+// The line of obligation `theorem` in `narrowed`, proved by a term matching `proof`.
+static Match Obligation(string narrowed, string theorem, string proof)
+{
+    var line = Regex.Match(narrowed,
+        @"(?m)^theorem (?<name>" + theorem + @") : (?<statement>[^\r\n]*?) := " + proof + @"\r?\n");
+    return line.Success ? line : throw new InvalidOperationException("Missing obligation " + theorem);
+}
+long BodyCheck(string name, string entry, string method) => BodyChecks(name, entry, method).Body;
 var chainCosts = chainLengths.Select(count => (double)BodyCheck("Chain" + count, "Chain" + count,
     $"Chain{count}_{count - 1}")).ToArray();
-var rowCosts = bulkSizes.Select(count => (double)BodyCheck("Rows" + count, "Rows" + count, $"Small{count}")).ToArray();
+var rowChecks = bulkSizes.Select(count =>
+    BodyChecks("Rows" + count, "Rows" + count, $"Small{count}", $"Bulk{count}")).ToArray();
+var rowCosts = rowChecks.Select(check => (double)check.Body).ToArray();
 for (var step = 1; step < chainCosts.Length; step++)
 {
     var growth = chainCosts[step] / chainCosts[step - 1];
@@ -2230,20 +2256,8 @@ for (var step = 1; step < stringCosts.Length; step++)
 }
 // The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries, times a
 // logarithm, and is made once per method.
-long TablesCheck(string name, string method)
-{
-    var output = Path.Combine(directory, "Body" + name);
-    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var theorem = $"method{MethodNumber(extracted, method, name)}_tables_valid";
-    var narrowed = NarrowEvidence(extracted, theorem);
-    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := by decide \+kernel\r?$").Value;
-    if (proof.Length == 0) throw new InvalidOperationException("Missing tables obligation in " + name);
-    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := by", StringComparison.Ordinal)] + " := sorry");
-    return Heartbeats(Path.Combine(output, "TablesChecked.lean"), narrowed, equations: false) -
-        Heartbeats(Path.Combine(output, "TablesOpen.lean"), open, equations: false);
-}
-var tablesFew = TablesCheck("Rows" + bulkSizes[0], "Bulk" + bulkSizes[0]);
-var tablesMany = TablesCheck("Rows" + bulkSizes[1], "Bulk" + bulkSizes[1]);
+var tablesFew = rowChecks[0].Tables;
+var tablesMany = rowChecks[1].Tables;
 var tablesGrowth = tablesMany / (double)tablesFew;
 Console.WriteLine(FormattableString.Invariant(
     $"PASS tables check of a method carrying {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
@@ -2259,9 +2273,10 @@ if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
 // carried: the increment from 100 to 200 fields is 100/90 of the increment from 10 to 100, and a quadratic walk of the
 // rows makes it more than three times as large.
 const double AllowedFieldIncrementRatio = 1.5;
-var fieldBody = fieldCounts.Select(count => (double)BodyCheck("Fields" + count,
-    $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}")).ToArray();
-var fieldTables = fieldCounts.Select(count => (double)TablesCheck("Fields" + count, $"Read{count}")).ToArray();
+var fieldChecks = fieldCounts.Select(count => BodyChecks("Fields" + count,
+    $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}", $"Read{count}")).ToArray();
+var fieldBody = fieldChecks.Select(check => (double)check.Body).ToArray();
+var fieldTables = fieldChecks.Select(check => (double)check.Tables).ToArray();
 var fieldBodyGrowth = fieldBody[^1] / fieldBody[0];
 Console.WriteLine(FormattableString.Invariant(
     $"PASS body check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
@@ -2284,20 +2299,19 @@ if (fieldIncrementRatio > AllowedFieldIncrementRatio)
         FormattableString.Invariant($"the limit is {AllowedFieldIncrementRatio}."));
 
 // `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
-// the cost grows with the length of the name and no faster. Each file is measured against the same file with
-// the proof left open, so the statement's own elaboration is not counted.
+// the cost grows with the length of the name and no faster. Each proof is read after the same statement closed with
+// `sorry` in its file, so the statement's own elaboration is not counted.
 const double AllowedSpellingGrowth = 1.1;
 var spellingLengths = new[] { 20, 80, 320 };
 long SpellingCheck(int length)
 {
     var name = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
     var bytes = string.Join(", ", name.Select(character => (int)character));
-    var statement = $"theorem spells : CIL.Extraction.spelled? [{bytes}] = some \"{name}\"";
-    var header = "import CIL.Extraction.KernelEquation\n";
-    return Heartbeats(Path.Combine(directory, $"Spelling{length}Checked.lean"),
-            $"{header}{statement} := by cil_kernel_rfl\n", equations: false) -
-        Heartbeats(Path.Combine(directory, $"Spelling{length}Open.lean"),
-            $"{header}{statement} := sorry\n", equations: false);
+    var statement = $"CIL.Extraction.spelled? [{bytes}] = some \"{name}\"";
+    var costs = PartHeartbeats(Path.Combine(directory, $"Spelling{length}.lean"),
+        ["import CIL.Extraction.KernelEquation\n", $"theorem spells_open : {statement} := sorry\n",
+            $"theorem spells : {statement} := by cil_kernel_rfl\n"]);
+    return costs[1] - costs[0];
 }
 var spellingCosts = spellingLengths.Select(length => (double)SpellingCheck(length)).ToArray();
 for (var step = 1; step < spellingLengths.Length; step++)
@@ -2322,23 +2336,27 @@ void IndirectTargetCosts()
     var targetDirectory = At("artifacts/LookupScaling/IndirectTarget");
     Directory.CreateDirectory(targetDirectory);
     int[] ownerLengths = [64, 256, 1024];
-    long Selection(int length, bool proved)
+    // The selection's heartbeats, less those of its statement closed with `sorry` and read before it in the same file.
+    long Selection(int length)
     {
         var owner = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
         var identity = $$"""⟨"{{owner}}", 6, []⟩""";
-        var proof = proved ? "by cil_kernel_rfl" : "sorry";
-        var text = $$"""
+        var header = """
             import CIL.Safety.Execution
             import CIL.Extraction.KernelEquation
             def signature : CIL.ManagedSignature :=
               ⟨.atom CIL.Extraction.runtimeScope "System.Int32", [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
-            theorem selected : CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
-                ⟨signature, some {{identity}}⟩ = some 1 := {{proof}}
+            """ + "\n";
+        var statement = $$"""
+            CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
+                ⟨signature, some {{identity}}⟩ = some 1
             """;
-        var path = Path.Combine(targetDirectory, $"Owner{length}{(proved ? "Checked" : "Open")}.lean");
-        return Heartbeats(path, text, equations: false);
+        var costs = PartHeartbeats(Path.Combine(targetDirectory, $"Owner{length}.lean"),
+            [header, $"theorem selected_open : {statement} := sorry\n",
+                $"theorem selected : {statement} := by cil_kernel_rfl\n"]);
+        return costs[1] - costs[0];
     }
-    var costs = ownerLengths.Select(length => (double)(Selection(length, true) - Selection(length, false))).ToArray();
+    var costs = ownerLengths.Select(length => (double)Selection(length)).ToArray();
     for (var step = 1; step < ownerLengths.Length; step++)
     {
         var lengthRatio = ownerLengths[step] / (double)ownerLengths[step - 1];
