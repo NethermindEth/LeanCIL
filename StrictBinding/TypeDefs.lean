@@ -1,15 +1,18 @@
-import StrictBinding.Evidence
+import StrictBinding.Sorted
 
 /-!
 # Type definitions at stated rows
 
 A claim names a TypeDef row of a pinned image and states what that row defines: its namespace
 and name, the type that encloses it, its kind, the Field rows it owns and the type it extends.
-The claim also states the NestedClass row of a nested type and the row its base type is, so
-`typeDefBound` reads a fixed number of cells and `#Strings` entries for each claim, whatever the
-size of the tables. `TypeDefAt` states the same parts as reads of the image, and
+The claim also states the NestedClass rows that place the type and the row its base type is,
+so `typeDefBound` reads a fixed number of cells and `#Strings` entries for each claim, whatever
+the size of the tables. `TypeDefAt` states the same parts as reads of the image, and
 `typeDefAt_of_typeDefBound` proves that a successful check means them; `TypeDefsBound` checks a
-list of claims against one preparation of the pinned images.
+list of claims against one preparation of the pinned images. That a top-level type has no
+NestedClass row, and a nested type exactly one, follows from the stated rows together with
+`KeysSorted` for the NestedClass table, a separate fact over the whole table
+(`not_nested_of_topLevel`, `only_row_of_nested`).
 -/
 
 namespace StrictBinding
@@ -17,6 +20,17 @@ namespace StrictBinding
 open CIL.Safety (except_bind_ok)
 
 /-! ## Claims -/
+
+/-- Where a claim places a type in the NestedClass table, with the rows that show it. -/
+inductive Nesting where
+  /-- At the top level: NestedClass rows before `next` name lower TypeDef rows and rows from
+      `next` on name higher ones, so with the table sorted no row names the type. `next` is one
+      past the table when every row names a lower TypeDef row. -/
+  | topLevel (next : Nat)
+  /-- Nested in TypeDef row `enclosing`, as NestedClass row `nestedRow` states; the rows beside
+      it name lower and higher TypeDef rows, so with the table sorted it is the type's only row. -/
+  | nested (nestedRow enclosing : Nat)
+  deriving DecidableEq, Repr
 
 /-- What a type definition is, as the flags and base type of its row decide (II.23.1.15). -/
 inductive TypeKind where
@@ -47,9 +61,7 @@ structure TypeDefClaim where
   row : Nat
   typeNamespace : List Nat
   typeName : List Nat
-  /-- The NestedClass row that pairs this row with the TypeDef row enclosing it, and that row;
-      none for a type at the top level. -/
-  nesting : Option (Nat × Nat)
+  nesting : Nesting
   kind : TypeKind
   /-- The first Field row the type owns and how many rows it owns. -/
   fields : Nat × Nat
@@ -95,8 +107,8 @@ def enclosingTypeColumn : Nat := 1
 def visibilityOf (flags : Nat) : Nat := flags % 8
 
 /-- The lowest visibility of a nested type. `NotPublic` (0) and `Public` (1) are the
-    visibilities of a type at the top level, and II.22.37 gives a nested visibility exactly to
-    the rows NestedClass lists. -/
+    visibilities of a type at the top level, and II.22.37 says the visibility decides whether a
+    type is nested; the NestedClass rows a claim states show that the table agrees. -/
 def nestedVisibility : Nat := 2
 
 /-- The interface semantics bit of TypeDef flags. -/
@@ -134,6 +146,27 @@ def kindOf (flags : Nat) (typeNamespace typeName : List Nat) (base : BaseType) :
 
 /-! ## Propositions -/
 
+/-- The number of NestedClass rows of the image. -/
+def nestedCount (image : PreparedImage) : Nat :=
+  image.layout.rowCount CIL.Extraction.Table.nestedClass
+
+/-- The TypeDef row that NestedClass row `nestedRow` names as nested. -/
+def nestedTypeOf (image : PreparedImage) (nestedRow : Nat) : Except AuditError Nat :=
+  image.layout.cell image.view (nestedClassToken nestedRow) nestedTypeColumn
+
+/-- The TypeDef row that NestedClass row `nestedRow` names as enclosing. -/
+def enclosingOf (image : PreparedImage) (nestedRow : Nat) : Except AuditError Nat :=
+  image.layout.cell image.view (nestedClassToken nestedRow) enclosingTypeColumn
+
+/-- NestedClass row `nestedRow` names a TypeDef row below `row`, or is row zero, before the
+    table. -/
+def NamesBelow (image : PreparedImage) (nestedRow row : Nat) : Prop :=
+  nestedRow = 0 ∨ ∃ value, nestedTypeOf image nestedRow = .ok value ∧ value < row
+
+/-- NestedClass row `nestedRow` names a TypeDef row above `row`, or is past the table. -/
+def NamesAbove (image : PreparedImage) (nestedRow row : Nat) : Prop :=
+  nestedCount image < nestedRow ∨ ∃ value, nestedTypeOf image nestedRow = .ok value ∧ row < value
+
 /-- Column `column` of the row of `token` names the terminated `#Strings` entry `bytes`. -/
 def NameAt (image : PreparedImage) (token column : Nat) (bytes : List Nat) : Prop :=
   ∃ key, image.layout.cell image.view token column = .ok key ∧ StringAt image key (bytes ++ [0])
@@ -145,14 +178,17 @@ def fieldsEnd (image : PreparedImage) (row : Nat) : Except AuditError Nat :=
     image.layout.cell image.view (typeDefToken (row + 1)) typeDefFieldListColumn
   else pure (image.layout.rowCount CIL.Extraction.Table.field + 1)
 
-/-- A row at the top level has a top-level visibility; a nested row has a nested visibility and
-    the stated NestedClass row pairs it with the stated enclosing row. -/
-def NestingAt (image : PreparedImage) (row flags : Nat) : Option (Nat × Nat) → Prop
-  | Option.none => visibilityOf flags < nestedVisibility
-  | some (nestedRow, enclosing) =>
-    nestedVisibility ≤ visibilityOf flags ∧
-      image.layout.cell image.view (nestedClassToken nestedRow) nestedTypeColumn = .ok row ∧
-      image.layout.cell image.view (nestedClassToken nestedRow) enclosingTypeColumn = .ok enclosing
+/-- A row at the top level has a top-level visibility and the stated NestedClass rows bracket it;
+    a nested row has a nested visibility, the stated NestedClass row pairs it with the stated
+    enclosing row, and the rows beside that row name other types. -/
+def NestingAt (image : PreparedImage) (row flags : Nat) : Nesting → Prop
+  | .topLevel next =>
+    visibilityOf flags < nestedVisibility ∧ 1 ≤ next ∧ next ≤ nestedCount image + 1 ∧
+      NamesBelow image (next - 1) row ∧ NamesAbove image next row
+  | .nested nestedRow enclosing =>
+    nestedVisibility ≤ visibilityOf flags ∧ 1 ≤ nestedRow ∧ nestedRow ≤ nestedCount image ∧
+      nestedTypeOf image nestedRow = .ok row ∧ enclosingOf image nestedRow = .ok enclosing ∧
+      NamesBelow image (nestedRow - 1) row ∧ NamesAbove image (nestedRow + 1) row
 
 /-- The `Extends` value `baseValue` names the stated base type, with its namespace and name. -/
 def BaseAt (image : PreparedImage) (baseValue : Nat) : BaseType → Prop
@@ -195,15 +231,31 @@ def nameBound (image : PreparedImage) (token column : Nat) (bytes : List Nat) (r
   let key ← image.layout.cell image.view token column
   requirePart row part (← stringFound image key (bytes ++ [0]))
 
-/-- The row's visibility and the stated NestedClass row agree with the claimed nesting. -/
-def nestingBound (image : PreparedImage) (row flags : Nat) :
-    Option (Nat × Nat) → Except AuditError Unit
-  | Option.none => requirePart row .nesting (decide (visibilityOf flags < nestedVisibility))
-  | some (nestedRow, enclosing) => do
-    requirePart row .nesting (decide (nestedVisibility ≤ visibilityOf flags))
-    let nested ← image.layout.cell image.view (nestedClassToken nestedRow) nestedTypeColumn
-    let outer ← image.layout.cell image.view (nestedClassToken nestedRow) enclosingTypeColumn
+/-- Whether NestedClass row `nestedRow` names a TypeDef row below `row` or is row zero. -/
+def namesBelow (image : PreparedImage) (nestedRow row : Nat) : Except AuditError Bool :=
+  if nestedRow = 0 then pure true else do return decide ((← nestedTypeOf image nestedRow) < row)
+
+/-- Whether NestedClass row `nestedRow` names a TypeDef row above `row` or is past the table. -/
+def namesAbove (image : PreparedImage) (nestedRow row : Nat) : Except AuditError Bool :=
+  if nestedCount image < nestedRow then pure true
+  else do return decide (row < (← nestedTypeOf image nestedRow))
+
+/-- The row's visibility and the stated NestedClass rows agree with the claimed nesting. The
+    check reads at most three NestedClass rows. -/
+def nestingBound (image : PreparedImage) (row flags : Nat) : Nesting → Except AuditError Unit
+  | .topLevel next => do
+    requirePart row .nesting (decide (visibilityOf flags < nestedVisibility ∧ 1 ≤ next ∧
+      next ≤ nestedCount image + 1))
+    requirePart row .nesting (← namesBelow image (next - 1) row)
+    requirePart row .nesting (← namesAbove image next row)
+  | .nested nestedRow enclosing => do
+    requirePart row .nesting (decide (nestedVisibility ≤ visibilityOf flags ∧ 1 ≤ nestedRow ∧
+      nestedRow ≤ nestedCount image))
+    let nested ← nestedTypeOf image nestedRow
+    let outer ← enclosingOf image nestedRow
     requirePart row .nesting (nested == row && outer == enclosing)
+    requirePart row .nesting (← namesBelow image (nestedRow - 1) row)
+    requirePart row .nesting (← namesAbove image (nestedRow + 1) row)
 
 /-- The `Extends` value names the claimed base type and that row has the claimed names. -/
 def baseBound (image : PreparedImage) (row baseValue : Nat) :
@@ -277,28 +329,133 @@ theorem nameAt_of_nameBound {image : PreparedImage} (bounded : image.view.Bounde
 
 #print axioms nameAt_of_nameBound
 
+/-- A lower-row check that succeeds means the row names a lower TypeDef row or is row zero. -/
+theorem namesBelow_ok {image : PreparedImage} {nestedRow row : Nat}
+    (checked : namesBelow image nestedRow row = .ok true) : NamesBelow image nestedRow row := by
+  unfold namesBelow at checked
+  split at checked
+  · exact Or.inl (by assumption)
+  · obtain ⟨value, readValue, checked⟩ := except_bind_ok checked
+    simp only [pure, Except.pure, Except.ok.injEq, decide_eq_true_eq] at checked
+    exact Or.inr ⟨value, readValue, checked⟩
+
+#print axioms namesBelow_ok
+
+/-- A higher-row check that succeeds means the row names a higher TypeDef row or is past the
+    table. -/
+theorem namesAbove_ok {image : PreparedImage} {nestedRow row : Nat}
+    (checked : namesAbove image nestedRow row = .ok true) : NamesAbove image nestedRow row := by
+  unfold namesAbove at checked
+  split at checked
+  · exact Or.inl (by assumption)
+  · obtain ⟨value, readValue, checked⟩ := except_bind_ok checked
+    simp only [pure, Except.pure, Except.ok.injEq, decide_eq_true_eq] at checked
+    exact Or.inr ⟨value, readValue, checked⟩
+
+#print axioms namesAbove_ok
+
 /-- A nesting check that succeeds means the claimed nesting. -/
-theorem nestingAt_of_nestingBound {image : PreparedImage} {row flags : Nat}
-    {nesting : Option (Nat × Nat)} (checked : nestingBound image row flags nesting = .ok ()) :
+theorem nestingAt_of_nestingBound {image : PreparedImage} {row flags : Nat} {nesting : Nesting}
+    (checked : nestingBound image row flags nesting = .ok ()) :
     NestingAt image row flags nesting := by
   cases nesting with
-  | none =>
+  | topLevel next =>
     unfold nestingBound at checked
-    show visibilityOf flags < nestedVisibility
-    exact of_decide_eq_true (requirePart_ok checked)
-  | some pair =>
-    obtain ⟨nestedRow, enclosing⟩ := pair
+    obtain ⟨visible, visibleOk, checked⟩ := except_bind_ok checked
+    cases visible
+    obtain ⟨below, belowOk, checked⟩ := except_bind_ok checked
+    obtain ⟨placed, placedOk, checked⟩ := except_bind_ok checked
+    cases placed
+    obtain ⟨above, aboveOk, aboveHolds⟩ := except_bind_ok checked
+    have bounds := of_decide_eq_true (requirePart_ok visibleOk)
+    have belowTrue := requirePart_ok placedOk
+    have aboveTrue := requirePart_ok aboveHolds
+    subst belowTrue
+    subst aboveTrue
+    exact ⟨bounds.1, bounds.2.1, bounds.2.2, namesBelow_ok belowOk, namesAbove_ok aboveOk⟩
+  | nested nestedRow enclosing =>
     unfold nestingBound at checked
     obtain ⟨visible, visibleOk, checked⟩ := except_bind_ok checked
     cases visible
     obtain ⟨nested, readNested, checked⟩ := except_bind_ok checked
     obtain ⟨outer, readOuter, checked⟩ := except_bind_ok checked
-    have same := requirePart_ok checked
+    obtain ⟨paired, pairedOk, checked⟩ := except_bind_ok checked
+    cases paired
+    obtain ⟨below, belowOk, checked⟩ := except_bind_ok checked
+    obtain ⟨placed, placedOk, checked⟩ := except_bind_ok checked
+    cases placed
+    obtain ⟨above, aboveOk, aboveHolds⟩ := except_bind_ok checked
+    have bounds := of_decide_eq_true (requirePart_ok visibleOk)
+    have same := requirePart_ok pairedOk
     simp only [Bool.and_eq_true, beq_iff_eq] at same
     obtain ⟨rfl, rfl⟩ := same
-    exact ⟨of_decide_eq_true (requirePart_ok visibleOk), readNested, readOuter⟩
+    have belowTrue := requirePart_ok placedOk
+    have aboveTrue := requirePart_ok aboveHolds
+    subst belowTrue
+    subst aboveTrue
+    exact ⟨bounds.1, bounds.2.1, bounds.2.2, readNested, readOuter, namesBelow_ok belowOk,
+      namesAbove_ok aboveOk⟩
 
 #print axioms nestingAt_of_nestingBound
+
+/-- The key II.22 requires the NestedClass table sorted by: its nested type column. -/
+def nestedClassKey : List Nat := [nestedTypeColumn]
+
+/-- In a sorted NestedClass table, a row names a TypeDef row at most the one a later row names. -/
+theorem nestedType_le {image : PreparedImage}
+    (sorted : KeysSorted image CIL.Extraction.Table.nestedClass nestedClassKey)
+    {lower upper first last : Nat} (low : 1 ≤ lower) (ordered : lower ≤ upper)
+    (inside : upper ≤ nestedCount image) (readFirst : nestedTypeOf image lower = .ok first)
+    (readLast : nestedTypeOf image upper = .ok last) : first ≤ last :=
+  value_le_of_keysSorted sorted low ordered inside readFirst readLast
+
+#print axioms nestedType_le
+
+/-- With the NestedClass table sorted, no NestedClass row names a type claimed at the top level. -/
+theorem not_nested_of_topLevel {image : PreparedImage} {row flags next : Nat}
+    (sorted : KeysSorted image CIL.Extraction.Table.nestedClass nestedClassKey)
+    (placed : NestingAt image row flags (.topLevel next)) :
+    ∀ nestedRow, 1 ≤ nestedRow → nestedRow ≤ nestedCount image →
+      nestedTypeOf image nestedRow ≠ .ok row := by
+  intro nestedRow low high read
+  obtain ⟨_, first, last, below, above⟩ := placed
+  by_cases before : nestedRow < next
+  · rcases below with zero | ⟨bound, readBound, less⟩
+    · omega
+    · have := nestedType_le sorted low (show nestedRow ≤ next - 1 by omega) (by omega) read
+        readBound
+      omega
+  · rcases above with past | ⟨bound, readBound, greater⟩
+    · omega
+    · have := nestedType_le sorted first (show next ≤ nestedRow by omega) high readBound read
+      omega
+
+#print axioms not_nested_of_topLevel
+
+/-- With the NestedClass table sorted, the row a nested claim states is the only NestedClass row
+    that names the type. -/
+theorem only_row_of_nested {image : PreparedImage} {row flags nestedRow enclosing : Nat}
+    (sorted : KeysSorted image CIL.Extraction.Table.nestedClass nestedClassKey)
+    (placed : NestingAt image row flags (.nested nestedRow enclosing)) :
+    ∀ other, 1 ≤ other → other ≤ nestedCount image → nestedTypeOf image other = .ok row →
+      other = nestedRow := by
+  intro other low high read
+  obtain ⟨_, first, last, _, _, below, above⟩ := placed
+  by_cases before : other < nestedRow
+  · rcases below with zero | ⟨bound, readBound, less⟩
+    · omega
+    · have := nestedType_le sorted low (show other ≤ nestedRow - 1 by omega) (by omega) read
+        readBound
+      omega
+  · by_cases after : nestedRow < other
+    · rcases above with past | ⟨bound, readBound, greater⟩
+      · omega
+      · have := nestedType_le sorted (show 1 ≤ nestedRow + 1 by omega)
+          (show nestedRow + 1 ≤ other by omega) high readBound read
+        omega
+    · omega
+
+#print axioms only_row_of_nested
 
 /-- A base check that succeeds means the claimed base type and its names. -/
 theorem baseAt_of_baseBound {image : PreparedImage} (bounded : image.view.Bounded)

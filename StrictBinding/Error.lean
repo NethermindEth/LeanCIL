@@ -101,6 +101,8 @@ inductive AuditError where
   | heapNumbering (heap key : Nat)
   /-- TypeDef row `row` does not have this part of the claimed type definition. -/
   | typeDefMismatch (row : Nat) (part : TypeDefPart)
+  /-- Row `row` of `table` has a key below the key of the row before it. -/
+  | unsortedTable (table row : Nat)
   deriving DecidableEq, Repr
 
 /-- Whether a check succeeded; the proposition of each audited theorem is `ok check = true`. -/

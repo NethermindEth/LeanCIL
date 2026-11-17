@@ -440,12 +440,15 @@ partial class Program
     }
 
     /// <summary>
-    /// A type definition claim names its row, its NestedClass row and its base row, so its check reads a fixed
-    /// number of cells and entries whatever the size of the tables. Images with 64, 256 and 1024 classes beside the
-    /// types of `SyntheticTypes` are checked against eight claims that System.Reflection.Metadata reads from them,
-    /// and the heartbeats of preparing each image are subtracted. The check at 1024 classes may cost at most
-    /// `MaximumTableGrowth` times the check at 64. The smallest image also rejects claims that each change one part
-    /// of a claim that holds.
+    /// A type definition claim names its row, the NestedClass rows that place it and its base row, so its check reads
+    /// a fixed number of cells and entries whatever the size of the tables. Images with 64, 256 and 1024 classes,
+    /// half of them nested, beside the types of `SyntheticTypes` are checked against nine claims that
+    /// System.Reflection.Metadata reads from them, and the heartbeats of preparing each image are subtracted. The
+    /// check at 1024 classes may cost at most `MaximumTableGrowth` times the check at 64. The same images are
+    /// checked to have a NestedClass table sorted by its nested type column, which reads every row once: a row added
+    /// at the largest size may cost at most `MaximumPerRowGrowth` times a row added at the smaller ones. The
+    /// smallest image also rejects claims that each change one part of a claim that holds, a NestedClass row that
+    /// repeats its neighbour's type, and a NestedClass table out of order.
     /// </summary>
     static void CheckTypeDefinitionScaling(string root, string package)
     {
@@ -453,12 +456,14 @@ partial class Program
         int[] sizes = [64, 256, 1024];
         Run(["lake", "build", "StrictBinding.TypeDefs", "Tests.StrictBinding.Mutation"], package,
             progress: "Building the type definition checks");
-        var cases = string.Concat(sizes.Select(size =>
+        var files = sizes.Select(SyntheticTypes).ToArray();
+        var nestedRows = files.Select(NestedTypeRows).ToArray();
+        var cases = string.Concat(sizes.Select((size, index) =>
         {
-            var file = SyntheticTypes(size);
+            var file = files[index];
             var identity = StrictBindingFacts.Identity(file);
-            var claims = TypeDefinitionClaims(file, identity);
-            var rejections = size == sizes[0] ? TypeDefinitionRejections(claims) : "";
+            var claims = TypeDefinitionClaims(file, identity, nestedRows[index]);
+            var rejections = index == 0 ? TypeDefinitionRejections(file, identity, claims, nestedRows[index]) : "";
             return $$"""
                 namespace Types{{size}}
                 {{BindingImage.Definitions(file)}}
@@ -478,34 +483,106 @@ partial class Program
 
                 """;
         }));
+        var sorting = string.Concat(sizes.Select((size, index) => $$"""
+            namespace Sorted{{size}}
+            /-- The NestedClass table of the image is sorted by its nested type column. -/
+            def claims : List StrictBinding.SortedClaim := [{ identity := "{{StrictBindingFacts.Identity(files[index])
+                }}", table := {{(int)TableIndex.NestedClass}}, key := StrictBinding.nestedClassKey }]
+            {{report}}
+            theorem prepared : StrictBinding.ok (StrictBinding.prepare Types{{size}}.pinned) = true := by
+              decide +kernel
+            {{report}}
+            theorem checked : StrictBinding.TablesSorted Types{{size}}.pinned claims := by decide +kernel
+            {{report}}
+            #print axioms checked
+            end Sorted{{size}}
+
+            """));
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, "TypeDefs.lean");
-        File.WriteAllText(path, $"import StrictBinding.TypeDefs\nimport Tests.StrictBinding.Mutation\n\n{cases}");
-        var checks = CheckHeartbeats(path, package, sizes.Length, "type definition claims");
+        File.WriteAllText(path, $"import StrictBinding.TypeDefs\nimport Tests.StrictBinding.Mutation\n\n{cases}" +
+            $"{sorting}{UnsortedNestedClassRejection(files[0])}");
+        var measured = CheckHeartbeats(path, package, 2 * sizes.Length, "type definition and sorted table claims");
+        long[] checks = measured[..sizes.Length];
         var growth = (double)checks[^1] / checks[0];
-        var measured = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size} classes"));
+        var costs = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size} classes"));
         if (checks[0] <= 0 || growth > MaximumTableGrowth)
-            throw new InvalidOperationException($"The type definition check costs {measured}; {growth:F2} times as " +
+            throw new InvalidOperationException($"The type definition check costs {costs}; {growth:F2} times as " +
                 $"much at {sizes[^1]} classes as at {sizes[0]}");
-        Console.WriteLine($"PASS the type definition check reads a fixed part of the tables ({measured}; " +
+        Console.WriteLine($"PASS the type definition check reads a fixed part of the tables ({costs}; " +
             $"{growth:F2} times at {sizes[^1] / sizes[0]} times the classes)");
+        var sortedCost = RequireGrowth([.. nestedRows.Select(rows => rows.Length)], measured[sizes.Length..],
+            MaximumPerRowGrowth, "NestedClass sortedness check", "row");
+        Console.WriteLine($"PASS the sortedness check is linear in the NestedClass rows ({sortedCost})");
+    }
+
+    /// <summary>The TypeDef rows of the nested types of an image, in ascending order.</summary>
+    static int[] NestedTypeRows(byte[] file)
+    {
+        using var reader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(file));
+        var metadata = reader.GetMetadataReader();
+        int[] rows = [.. metadata.TypeDefinitions.Where(handle => !metadata.GetTypeDefinition(handle)
+            .GetDeclaringType().IsNil).Select(handle => MetadataTokens.GetRowNumber(handle)).Order()];
+        if (rows.Length != metadata.GetTableRowCount(TableIndex.NestedClass))
+            throw new InvalidOperationException("Each synthetic nested type must own exactly one NestedClass row.");
+        return rows;
+    }
+
+    /// <summary>
+    /// The image with the nested type column of NestedClass row `nestedRow` set to TypeDef row `typeRow`, at the
+    /// position System.Reflection.Metadata gives the table.
+    /// </summary>
+    static byte[] WithNestedType(byte[] file, int nestedRow, int typeRow)
+    {
+        using var reader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(file));
+        var metadata = reader.GetMetadataReader();
+        if (metadata.GetTableRowCount(TableIndex.TypeDef) >= 1 << 16)
+            throw new InvalidOperationException("The nested type column must be two bytes wide.");
+        var offset = reader.PEHeaders.MetadataStartOffset + metadata.GetTableMetadataOffset(TableIndex.NestedClass) +
+            (nestedRow - 1) * metadata.GetTableRowSize(TableIndex.NestedClass);
+        var changed = (byte[])file.Clone();
+        changed[offset] = (byte)typeRow;
+        changed[offset + 1] = (byte)(typeRow >> 8);
+        return changed;
+    }
+
+    /// <summary>
+    /// The image with NestedClass row 2 naming TypeDef row 1, below the type row 1 names, is refused as unsorted at
+    /// row 2.
+    /// </summary>
+    static string UnsortedNestedClassRejection(byte[] file)
+    {
+        var changed = WithNestedType(file, 2, 1);
+        var identity = StrictBindingFacts.Identity(changed);
+        return $$"""
+            namespace Unsorted
+            {{BindingImage.Definitions(changed)}}
+            theorem rejects_a_nested_class_table_out_of_order : Tests.StrictBinding.failsWith
+                (StrictBinding.checkAll StrictBinding.sortedClaimBound
+                  [{ identity := "{{identity}}", image := image }]
+                  [{ identity := "{{identity}}", table := {{(int)TableIndex.NestedClass}},
+                     key := StrictBinding.nestedClassKey }])
+                (.unsortedTable {{(int)TableIndex.NestedClass}} 2) = true := by decide +kernel
+            #print axioms rejects_a_nested_class_table_out_of_order
+            end Unsorted
+
+            """;
     }
 
     /// <summary>A type definition claim: its row, name, kind and enclosing row, and the claim in Lean.</summary>
     sealed record TypeDefinitionClaim(int Row, string Name, string Kind, int? Enclosing, string Lean);
 
     /// <summary>
-    /// Claims about the first class and the last seven rows of an image from `SyntheticTypes`, with every part read
-    /// by System.Reflection.Metadata.
+    /// Claims about the first class and the last eight rows of an image from `SyntheticTypes`, with every part read
+    /// by System.Reflection.Metadata. A nested type is placed at its NestedClass row and a type at the top level
+    /// between the rows that name lower and higher types, given `nestedRows`, the ascending nested type rows.
     /// </summary>
-    static TypeDefinitionClaim[] TypeDefinitionClaims(byte[] file, string identity)
+    static TypeDefinitionClaim[] TypeDefinitionClaims(byte[] file, string identity, int[] nestedRows)
     {
         using var reader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(file));
         var metadata = reader.GetMetadataReader();
-        if (metadata.GetTableRowCount(TableIndex.NestedClass) != 1)
-            throw new InvalidOperationException("The synthetic types must have exactly one NestedClass row.");
         var rows = metadata.GetTableRowCount(TableIndex.TypeDef);
-        int[] claimed = [2, .. Enumerable.Range(rows - 6, 7)];
+        int[] claimed = [2, .. Enumerable.Range(rows - 7, 8)];
         string Bytes(StringHandle text) =>
             "[" + string.Join(", ", System.Text.Encoding.UTF8.GetBytes(metadata.GetString(text))) + "]";
         (string Namespace, string Name) NamesOf(EntityHandle handle) => handle.Kind switch
@@ -535,7 +612,8 @@ partial class Program
                 : "classType";
             var declaring = definition.GetDeclaringType();
             int? enclosing = declaring.IsNil ? null : MetadataTokens.GetRowNumber(declaring);
-            var nesting = enclosing is { } outer ? $"some (1, {outer})" : "none";
+            var nesting = enclosing is { } outer ? $".nested {Array.IndexOf(nestedRows, row) + 1} {outer}"
+                : $".topLevel {nestedRows.Count(nested => nested < row) + 1}";
             var baseTerm = baseType.IsNil ? ".none"
                 : baseType.Kind == HandleKind.TypeSpecification ? $".spec {MetadataTokens.GetToken(baseType)}"
                 : $".named {MetadataTokens.GetToken(baseType)} {Ascii(baseNamespace)} {Ascii(baseName)}";
@@ -547,14 +625,17 @@ partial class Program
     }
 
     /// <summary>
-    /// Rejections that each change one part of a claim that holds: the nested class claimed at the top level and
-    /// inside another row, the first class claimed nested, the interface claimed a class, `System.Enum` claimed a
-    /// value type, the class over a generic instantiation claimed to extend another TypeSpec row, and the last row
-    /// claimed to extend another TypeDef.
+    /// Rejections that each change one part of a claim that holds: a nested class claimed at the top level, at
+    /// another NestedClass row and inside another row, the first class claimed nested, `System.Enum` claimed between
+    /// other NestedClass rows and claimed a value type, the interface claimed a class, the class over a generic
+    /// instantiation claimed to extend another TypeSpec row, and the last row claimed to extend another TypeDef.
+    /// The image whose NestedClass row before the last names the last row's type too refuses the last nested class.
     /// </summary>
-    static string TypeDefinitionRejections(TypeDefinitionClaim[] claims)
+    static string TypeDefinitionRejections(byte[] file, string identity, TypeDefinitionClaim[] claims,
+        int[] nestedRows)
     {
-        var nested = Array.FindIndex(claims, claim => claim.Enclosing is not null);
+        var nested = Array.FindIndex(claims, claim => claim.Name == "Inner");
+        var lastNested = Array.FindIndex(claims, claim => claim.Name == "Inner2");
         var face = Array.FindIndex(claims, claim => claim.Kind == "interface");
         var enumItself = Array.FindIndex(claims, claim => claim.Name == "Enum");
         var instantiated = Array.FindIndex(claims, claim => claim.Name == "Numbers");
@@ -567,10 +648,30 @@ partial class Program
             #print axioms {{name}}
 
             """;
-        return Rejects("rejects_a_nested_class_at_the_top_level", nested, "nesting := none", "nesting") +
-            Rejects("rejects_another_enclosing_row", nested, $"nesting := some (1, {claims[nested].Enclosing + 1})",
+        var nestedRow = Array.IndexOf(nestedRows, claims[nested].Row) + 1;
+        var lastRow = Array.IndexOf(nestedRows, claims[lastNested].Row) + 1;
+        var duplicated = WithNestedType(file, lastRow - 1, claims[lastNested].Row);
+        return Rejects("rejects_a_nested_class_at_the_top_level", nested, $"nesting := .topLevel {nestedRow}",
                 "nesting") +
-            Rejects("rejects_a_top_level_class_claimed_nested", 0, "nesting := some (1, 2)", "nesting") +
+            Rejects("rejects_another_nested_class_row", lastNested,
+                $"nesting := .nested {lastRow - 1} {claims[lastNested].Enclosing}", "nesting") +
+            Rejects("rejects_another_enclosing_row", nested,
+                $"nesting := .nested {nestedRow} {claims[nested].Enclosing + 1}", "nesting") +
+            Rejects("rejects_a_top_level_class_claimed_nested", 0, "nesting := .nested 1 2", "nesting") +
+            Rejects("rejects_a_bracket_that_does_not_hold", enumItself,
+                $"nesting := .topLevel {lastRow + 1}", "nesting") +
+            $$"""
+            namespace Duplicated
+            {{BindingImage.Definitions(duplicated)}}
+            /-- NestedClass row {{lastRow - 1}} names TypeDef row {{claims[lastNested].Row}}, as the next row does. -/
+            theorem rejects_a_nested_class_with_two_rows : Tests.StrictBinding.failsWith (StrictBinding.checkAll
+                StrictBinding.typeDefClaimBound [{ identity := "{{identity}}", image := image }]
+                [{{claims[lastNested].Lean}}])
+                (.typeDefMismatch {{claims[lastNested].Row}} .nesting) = true := by decide +kernel
+            #print axioms rejects_a_nested_class_with_two_rows
+            end Duplicated
+
+            """ +
             Rejects("rejects_an_interface_claimed_a_class", face, "kind := .classType", "kind") +
             Rejects("rejects_system_enum_claimed_a_value_type", enumItself, "kind := .valueType", "kind") +
             Rejects("rejects_another_type_spec", instantiated,
@@ -580,10 +681,11 @@ partial class Program
     }
 
     /// <summary>
-    /// A library with `count` public classes that each own a field and extend `System.Object`, then an enum, a
-    /// struct, an interface, a class nested in the first class, a `System.Enum` that extends `System.ValueType`, a
-    /// class that extends `List<int>` and a class that extends the first class. Each of the last seven owns one
-    /// field, and the last owns the final two rows of the Field table.
+    /// A library with `count` classes that each own a field and extend `System.Object`, the odd ones nested in the
+    /// first, then an enum, a struct, an interface, a class nested in the first class, a `System.Enum` that extends
+    /// `System.ValueType`, a second class nested in the first, a class that extends `List<int>` and a class that
+    /// extends the first class. Each of the last eight owns one field, and the last owns the final two rows of the
+    /// Field table.
     /// </summary>
     static byte[] SyntheticTypes(int count)
     {
@@ -625,7 +727,13 @@ partial class Program
             MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
         var firstClass = Define(TypeAttributes.Public, typeNamespace, "C0", objectType, 1);
         for (var index = 1; index < count; index++)
-            Define(TypeAttributes.Public, typeNamespace, "C" + index, objectType, 1);
+        {
+            var odd = index % 2 == 1;
+            var defined = Define(odd ? TypeAttributes.NestedPublic : TypeAttributes.Public,
+                odd ? default : typeNamespace, "C" + index, objectType, 1);
+            if (odd)
+                metadata.AddNestedType(defined, firstClass);
+        }
         Define(TypeAttributes.Public | TypeAttributes.Sealed, typeNamespace, "Small", enumType, 1);
         Define(TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.SequentialLayout, typeNamespace, "Pair",
             valueType, 1);
@@ -635,6 +743,7 @@ partial class Program
         metadata.AddNestedType(nestedClass, firstClass);
         Define(TypeAttributes.Public | TypeAttributes.Abstract, metadata.GetOrAddString("System"), "Enum", valueType,
             1);
+        metadata.AddNestedType(Define(TypeAttributes.NestedPublic, default, "Inner2", objectType, 1), firstClass);
         Define(TypeAttributes.Public, typeNamespace, "Numbers", listOfInt, 1);
         Define(TypeAttributes.Public, typeNamespace, "Derived", firstClass, 2);
         var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
