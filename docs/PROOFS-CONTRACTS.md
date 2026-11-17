@@ -522,12 +522,14 @@ method and the bytes.
 | `decodedProgram?_eq_some` | Turns `BodiesDecode` into `decodedProgram? profile environment evidence = some program` |
 | `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
-| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call |
+| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |
 
 An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
 `(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
-for a method defined from its decoder. The proof of `decodedProgram?_eq_some` adds one
+for a method defined from its decoder, and `site` its `ManagedCallsValid` premise from
+`Extracted.method{n}_calls_validated` of the caller and its instruction and link premises from a
+`bind_call` site's `call` and `link` facts. The proof of `decodedProgram?_eq_some` adds one
 constructor per record, so its cost is linear in the methods of the extraction
 ([scaling](performance/InstructionLookups.md)).
 A summary whose bound names another token, or whose record's bytes decode to another method, does

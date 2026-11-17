@@ -843,6 +843,10 @@ heartbeats from 4 to 16 calls as from 1 to 4, or when 16 calls through it cost a
 as stepping them. It refuses a contract of the callee without its write, a caller that leaves the callee's
 precondition unproved, and, for a callee whose original is forged, its record, its contract and
 the summary built on them.
+CountCallsSummary proves `Loops.CountCalls` twice: by stepping `Decrement` at the call in its
+loop, and from a `DecodedSummary` of it. `Tests/SummaryCalls.cs` refuses that loop with a summary
+that bounds `Decrement`'s result without stating it, at the invariant, and with a summary claimed
+for the caller's own token, at the site check.
 `Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
