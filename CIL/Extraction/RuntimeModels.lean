@@ -2,6 +2,7 @@ import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.IntegerMath
 import CIL.Extraction.VectorModels
+import CIL.Extraction.BitModels
 
 /-!
 # Runtime model resolution
@@ -18,7 +19,7 @@ namespace CIL.Extraction
 
 /-- The runtime methods with a model. -/
 def modelEntries : List ModelEntry :=
-  objectConstructorEntry :: vectorEntries ++ integerMathEntries
+  objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -37,6 +38,7 @@ def callModelled (body : Method) (method : MethodRef) : Bool :=
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
   simp [runtimeModels, SearchTree.toList, modelEntries, vectorEntries, integerMathEntries,
+    bitEntries, bitHelpers, bitHelperModel,
     mathOperations, mathIntegers, IntegerMath.signedOnly]
 
 #print axioms runtimeModels_entries

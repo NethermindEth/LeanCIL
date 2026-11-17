@@ -86,10 +86,13 @@ emits a model in place of its call to emit exactly the model the table gives its
 site the table does not model to emit none of the models the table accounts for. The table holds
 the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of
 `Vector128` and `Vector256`, and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and
-`Sign` of `System.Math` and of each integer type that declares them, whose calls keep their
-calls, so the table accounts for no lowered emission. A helper entry gives the scalar intrinsic of
-its integer type only to a static, non-generic reference of that owner and exact runtime
-assembly whose parameters and result have that type. A model the table gives a kept call must be
+`Sign` of `System.Math` and of each integer type that declares them, the bit helpers of
+`System.Numerics.BitOperations` and of each integer type that declares them, and
+`BinaryPrimitives.ReverseEndianness`, whose calls keep their calls, so the table accounts for no
+lowered emission. A helper entry gives the scalar intrinsic of its integer type only to a static,
+non-generic reference of that owner and exact runtime assembly whose parameters and result have
+that type; a bit count's result is `int` under `BitOperations` and the integer type under the
+type that declares it. A model the table gives a kept call must be
 available in the method's profile, and `Instruction.ProfileAgreement` reads a call through the
 model its method has; `ManagedCallsValid` requires a live call of a modelled method to keep its call, and
 `UnsafeCallsValid` rejects `pop` at every `call`, `calli`, `callvirt` or `newobj` site, where it

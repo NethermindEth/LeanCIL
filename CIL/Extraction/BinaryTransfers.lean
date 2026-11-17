@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.SpanCalls
 
 /-!
 # Exact endian-aware integer transfers
@@ -15,16 +15,12 @@ private inductive BinaryTransfer where
   | write (width : Nat) (bigEndian trying : Bool)
   deriving DecidableEq
 
-/-- Exact assembly identity for the endian-aware span API. -/
-private def binaryScope : String :=
-  "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-
 /-- Decode a bounded overload family, retaining its complete raw signature. -/
 private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
   if raw.opcode != 40 then none else pure ()
   let .call site := raw.operand | none
   if site.hasThis || !site.typeArguments.isEmpty || site.declaringType !=
-      .atom binaryScope "System.Buffers.Binary.BinaryPrimitives" then none else pure ()
+      .atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives" then none else pure ()
   let (read, trying, suffix) ←
     if site.name.startsWith "TryRead" then some (true, true, site.name.drop 7 |>.toString)
     else if site.name.startsWith "TryWrite" then some (false, true, site.name.drop 8 |>.toString)
@@ -51,7 +47,7 @@ private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
     (if read && !trying then "" else ",System." ++ name ++ (if read then "&" else ""))
   if site.parameterTypes != parameters || site.parameterCount != parameters.length ||
       site.returnType != result || site.returnsValue != (read || trying) ||
-      site.target != .external (binaryScope ++ "::" ++ resultName ++
+      site.target != .external (spanMemoryScope ++ "::" ++ resultName ++
         " System.Buffers.Binary.BinaryPrimitives::" ++ site.name ++ "(" ++ parameterNames ++ ")")
     then none
   else if read then some (.read width signed bigEndian trying)

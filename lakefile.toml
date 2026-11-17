@@ -97,6 +97,9 @@ name = "Tests.FieldShape"
 name = "Tests.RuntimeModels"
 
 [[lean_lib]]
+name = "Tests.BitModels"
+
+[[lean_lib]]
 name = "Tests.ReturnOpcode"
 
 [[lean_lib]]

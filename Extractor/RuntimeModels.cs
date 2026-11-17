@@ -148,6 +148,7 @@ internal static class RuntimeModels
             ValidateSignature(reference, profile.Architecture);
             return vector;
         }
+        if (BitModels.Call(reference, profile) is { } bits) return bits;
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||
             !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
@@ -179,7 +180,7 @@ internal static class RuntimeModels
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
-            "System.Memory" => Scalar(reference) ?? BinaryTransfers.Translate(reference) ??
+            "System.Memory" => BinaryTransfers.Translate(reference) ??
                 ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
@@ -190,7 +191,7 @@ internal static class RuntimeModels
         return op;
     }
 
-    private static readonly (string Type, int Width, bool Signed)[] MathIntegers =
+    internal static readonly (string Type, int Width, bool Signed)[] MathIntegers =
     [
         ("System.SByte", 8, true), ("System.Byte", 8, false),
         ("System.Int16", 16, true), ("System.UInt16", 16, false),
@@ -202,26 +203,6 @@ internal static class RuntimeModels
     [
         ("Min", ScalarFunction.Min, 2), ("Max", ScalarFunction.Max, 2), ("Clamp", ScalarFunction.Clamp, 3),
         ("Abs", ScalarFunction.Abs, 1), ("Sign", ScalarFunction.Sign, 1)
-    ];
-    private static readonly (string Type, int Width)[] RotatableWords =
-        [("System.UInt32", 32), ("System.UInt64", 64), ("System.UIntPtr", 64)];
-    private static readonly (string Name, ScalarFunction Function)[] Rotations =
-        [("RotateLeft", ScalarFunction.RotateLeft), ("RotateRight", ScalarFunction.RotateRight)];
-    private static readonly (string Name, ScalarFunction Function)[] BitCounts =
-    [
-        ("PopCount", ScalarFunction.PopCount), ("LeadingZeroCount", ScalarFunction.LeadingZeroCount),
-        ("TrailingZeroCount", ScalarFunction.TrailingZeroCount), ("Log2", ScalarFunction.Log2)
-    ];
-    private static readonly (string Type, int Width, bool Signed)[] Pow2Integers =
-    [
-        ("System.Int32", 32, true), ("System.UInt32", 32, false),
-        ("System.Int64", 64, true), ("System.UInt64", 64, false),
-        ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
-    ];
-    private static readonly (string Type, int Width, bool Signed)[] ByteAndNativeIntegers =
-    [
-        ("System.SByte", 8, true), ("System.Byte", 8, false),
-        ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
     ];
 
     private static readonly Dictionary<string, Operation> ScalarOperations = BuildScalarOperations();
@@ -270,12 +251,7 @@ internal static class RuntimeModels
     {
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default) return null;
-        return reference.DeclaringType.Scope.Name switch
-        {
-            "System.Runtime" => RuntimeScalar(reference.FullName),
-            "System.Memory" => ReverseEndianness(reference.FullName),
-            _ => null
-        };
+        return reference.DeclaringType.Scope.Name == "System.Runtime" ? RuntimeScalar(reference.FullName) : null;
     }
 
     private static Operation? RuntimeScalar(string signature) => ScalarOperations.GetValueOrDefault(signature);
@@ -304,59 +280,7 @@ internal static class RuntimeModels
         foreach (var (type, width, signed) in MathIntegers)
             operations.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
                 Scalar(ScalarFunction.DivRem, width, signed, 2));
-        foreach (var (type, width) in RotatableWords)
-        {
-            foreach (var (name, function) in Rotations)
-                operations.Add($"{type} System.Numerics.BitOperations::{name}({type},System.Int32)",
-                    Scalar(function, width, false, 2));
-            foreach (var (name, function) in BitCounts)
-                operations.Add($"System.Int32 System.Numerics.BitOperations::{name}({type})",
-                    Scalar(function, width, false, 1));
-            operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
-                Scalar(ScalarFunction.RoundUpToPowerOf2, width, false, 1));
-        }
-        foreach (var (type, width, _) in MathIntegers.Where(integer => integer.Width is 32 or 64))
-        foreach (var (name, function) in Rotations)
-            operations.Add($"{type} {type}::{name}({type},System.Int32)", Scalar(function, width, false, 2));
-        foreach (var (type, width, signed) in Pow2Integers)
-        foreach (var (name, function) in BitCounts)
-        {
-            if (name == "Log2" && signed) continue;
-            operations.Add($"{type} {type}::{name}({type})", Scalar(function, width, false, 1, result: width));
-        }
-        foreach (var (type, width, signed) in Pow2Integers)
-        {
-            var model = Scalar(ScalarFunction.IsPow2, width, signed, 1);
-            operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})", model);
-            operations.Add($"System.Boolean {type}::IsPow2({type})", model);
-        }
-        foreach (var (type, width, signed) in MathIntegers.Where(integer => integer.Width is 8 or 16))
-        {
-            operations.Add($"System.Boolean {type}::IsPow2({type})", Scalar(ScalarFunction.IsPow2, width, signed, 1));
-            foreach (var (name, function) in BitCounts.Where(count => count.Name != "Log2"))
-                operations.Add($"{type} {type}::{name}({type})", Scalar(function, width, false, 1));
-            if (signed) continue;
-            operations.Add($"{type} {type}::Log2({type})", Scalar(ScalarFunction.Log2, width, false, 1));
-            foreach (var (name, function) in Rotations)
-                operations.Add($"{type} {type}::{name}({type},System.Int32)", Scalar(function, width, false, 2));
-        }
         return operations;
-    }
-
-    // System.Buffers.Binary.BinaryPrimitives, defined in System.Memory.
-    private static Operation? ReverseEndianness(string signature)
-    {
-        foreach (var (type, width, signed) in ByteAndNativeIntegers)
-            if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
-                return Scalar(ScalarFunction.ReverseEndianness, width, signed, 1);
-        foreach (var width in new[] { 16, 32, 64 })
-        foreach (var signed in new[] { false, true })
-        {
-            var type = $"System.{(signed ? "Int" : "UInt")}{width}";
-            if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
-                return Scalar(ScalarFunction.ReverseEndianness, width, signed, 1);
-        }
-        return null;
     }
 
     private static Operation? Runtime(string signature) => signature switch

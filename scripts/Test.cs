@@ -247,7 +247,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
     "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
-    "Tests.RuntimeModels"],
+    "Tests.RuntimeModels", "Tests.BitModels"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
@@ -256,7 +256,7 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
     + "decoding, declared narrowing, value opcode decoding, decoded method, decoded summary, replay diagnostic, "
     + "literal body evidence, return metadata, object array, embedding retention and profile, full transfer, "
-    + "SHA-1, assembly index, pin index scaling, field reference and runtime model tests");
+    + "SHA-1, assembly index, pin index scaling, field reference, runtime model and bit helper model tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 RunFixture("Tests/SummaryCalls.cs", [], streamOutput: true, progress: "Byref calls through a decoded summary");

@@ -745,7 +745,9 @@ every admitted hardware profile.
 | `System.ArgumentNullException` | `ThrowIfNull(object, string)` | Raises `ArgumentNullException` for a null argument and otherwise pops both operands; the parameter name is never read |
 | `System.ArgumentOutOfRangeException` | `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan`, `ThrowIfLessThanOrEqual` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Raises `ArgumentOutOfRangeException` exactly when the integer test holds, comparing unsigned types as unsigned, and otherwise pops its operands; see [argument guards](SOUNDNESS-RUNTIME.md#argument-guards) |
 
-Signed 8/16-bit rotations and primitive signed `Log2` are unsupported.
+Signed 8/16-bit rotations and primitive signed `Log2` are unsupported. A call of a `BitOperations`
+helper, of the same helper on an integer type or of `ReverseEndianness` keeps its `call`, which runs
+the scalar intrinsic the runtime model table gives its method reference.
 
 `System.Math.Min`, `Max` and `Clamp` support signed and unsigned 8-, 16-, 32-, 64-bit and native
 integers. `Abs` and `Sign` support the signed types; `Sign` returns an `int`. `Abs` of the
