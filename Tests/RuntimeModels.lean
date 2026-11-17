@@ -515,6 +515,14 @@ example : runtimeModel {} .call { getElement128Method with returnType := int } =
 example : runtimeModel {} .call
     { getElement128Method with owner := runtimeType "System.Runtime.Intrinsics.Vector128" } =
     none := by decide +kernel
+example : runtimeModel {} .call { getElement128Method with owner := getElement256Method.owner } =
+    none := by decide +kernel
+example : runtimeModel {} .call
+    { createScalarUnsafeMethod with owner := getElement256Method.owner } = none := by
+  decide +kernel
+example : runtimeModel {} .call
+    { createScalarUnsafeMethod with owner := runtimeType "System.Runtime.Intrinsics.Vector128" } =
+    none := by decide +kernel
 example : runtimeModel {} .newobj createScalarUnsafeMethod = none := by decide +kernel
 
 -- A vector helper site keeps its call; the intrinsic it was lowered to is refused there, which a
@@ -531,6 +539,10 @@ example : ¬ RuntimeModelsAgree (method (site createScalarUnsafeMethod)) [true]
     (emitting createLowered []) := by decide +kernel
 example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
     {} {} (method (site createScalarUnsafeMethod)) [true] [createLowered] := by decide +kernel
+example : ManagedCallsValid [] [] (callModelled body) (method (site getElement256Method)) [true]
+    (emitting (.call getElement256Method {}) []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site getElement256Method)) [true]
+    (emitting (.call getElement256Method {}) [(0, .direct 0)]) := by decide +kernel
 
 end Table
 
@@ -588,7 +600,7 @@ example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
       [.scalar (.v128Low64 7), int32 1] heapMemory := by cil_kernel_rfl
 
 section
-open CIL.Extraction (createScalarUnsafeMethod getElement128Method)
+open CIL.Extraction (createScalarUnsafeMethod getElement128Method getElement256Method)
 
 -- Each vector helper call steps as its intrinsic. `GetElement` reads lane 0 of a vector known
 -- only in its low lane, where the call faulted before it left its operands to its model.
@@ -603,6 +615,19 @@ example : step (calling getElement128Method) (.call getElement128Method {}) 0 []
       [int32 1, .scalar (.v128Low64 7)] heapMemory =
     step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
       [int32 1, .scalar (.v128Low64 7)] heapMemory := by cil_kernel_rfl
+/-- A 256-bit vector whose four 64-bit lanes hold 1, 2, 3 and 4, lowest first. -/
+private def lanes : BitVec 256 := CIL.Vector.pack256 1 2 3 4
+example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
+      [int32 2, .scalar (.v256 lanes)] heapMemory =
+    step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
+      [int32 2, .scalar (.v256 lanes)] heapMemory := by cil_kernel_rfl
+example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
+      [int32 2, .scalar (.v256 lanes)] heapMemory =
+    .ok (.next 1 [.scalar (.i64 3)] frame heapMemory) := by cil_kernel_rfl
+example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
+      [int32 4, .scalar (.v256 lanes)] heapMemory =
+    step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
+      [int32 4, .scalar (.v256 lanes)] heapMemory := by cil_kernel_rfl
 example : step (calling createScalarUnsafeMethod) (.call createScalarUnsafeMethod {}) 0 [] frame
       [.scalar (.i64 7)] heapMemory =
     step body (.intrinsic (.vector .createScalarUnsafe64) 1) 0 [] frame [.scalar (.i64 7)]
