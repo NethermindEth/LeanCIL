@@ -244,7 +244,10 @@ body up to 256 instructions, and one compilation for every other body.
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. The arguments and homes bodies read one of a list of arguments or home slots that
   grows with the body, so their heartbeats per instruction may grow at most by the ratio of the
-  sizes, linearly in the number of arguments. For the bodies with three compilations, compiled
+  sizes, linearly in the number of arguments. The virtual body makes 16 virtual calls through a
+  dispatch table whose size is the row's size, and each call looks its receiver's class up in that
+  list, so its heartbeats per instruction may grow at most by the ratio of the table sizes. For
+  the bodies with three compilations, compiled
   proof bytes per instruction may also grow by at most 1.35 times. Frontend milliseconds are
   recorded for comparison between runs.
 - For the hypotheses bodies the sizes are the numbers of hypotheses: in the accumulate, contract
