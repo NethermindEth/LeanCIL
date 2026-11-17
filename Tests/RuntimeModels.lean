@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Safety.StepComposition
+import CIL.Safety.BoundaryStepRenaming
 import CIL.Extraction.RuntimeModels
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
@@ -654,6 +655,33 @@ private def unsafeLow : CIL.Program :=
       returnsValue := true }]
 example : (invoke unsafeLow 8 0 [.scalar (.i64 7)] Memory.empty).map Prod.snd =
     .ok [.scalar (.i64 7)] := by cil_kernel_rfl
+
+end
+
+section
+open CIL.Extraction (ModelEntry)
+
+-- Every memory operation's model transports under an allocation renaming: a read, a write and
+-- an operation with an out operand among them.
+example : (CIL.RuntimeModel.memory (.arraySpan .signed32 true .whole)).StepRenamed :=
+  memory_stepRenamed _
+example : (CIL.RuntimeModel.memory (.spanCopy 4 true)).StepRenamed := memory_stepRenamed _
+example : (CIL.RuntimeModel.memory (.divRemOut 64)).StepRenamed := memory_stepRenamed _
+
+/-- A family of entries that resolve only memory operations transports under every renaming,
+    which is the case such a family adds to `runtimeModel_stepRenamed`. -/
+theorem memoryEntries_stepRenamed (entries : List ModelEntry)
+    (memoryOnly : ∀ entry ∈ entries,
+      entry.Yields fun model => ∃ operation, model = .memory operation) :
+    ∀ entry ∈ entries, entry.Yields CIL.RuntimeModel.StepRenamed := by
+  intro entry member environment method model found
+  obtain ⟨operation, rfl⟩ := memoryOnly entry member environment method model found
+  exact memory_stepRenamed operation
+/--
+info: 'Tests.RuntimeModels.memoryEntries_stepRenamed' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms memoryEntries_stepRenamed
 
 end
 

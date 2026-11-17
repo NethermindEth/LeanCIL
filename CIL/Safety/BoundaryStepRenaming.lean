@@ -296,22 +296,24 @@ private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
 #print axioms Memory.Renamed.stepCallVirtual
 
 /-- Running `model` for a call without a link transports under every allocation renaming:
-    related bodies, memories, frames and stacks step to related results. -/
+    related bodies, well-formed source memories, frames and stacks whose source run succeeds or
+    throws step to related results. -/
 def _root_.CIL.RuntimeModel.StepRenamed (model : CIL.RuntimeModel) : Prop :=
   ∀ {indices : LocalIndexMap} {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop}
     {source target : Memory} {sourceFrame targetFrame : Frame},
     Memory.Renamed mapping scopes source target →
-    Frame.Renamed indices mapping scopes sourceFrame targetFrame →
+    Frame.Renamed indices mapping scopes sourceFrame targetFrame → source.WellFormed →
     ∀ (sourceBody targetBody : CIL.Method), StepMetadata sourceBody targetBody →
     ∀ (pc : Nat) (stack : List Value), (∀ value ∈ stack, value.Below mapping.sourceLimit) →
+    SuccessOrThrow (modelStep (some model) sourceBody pc sourceFrame stack source) →
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (modelStep (some model) sourceBody pc sourceFrame stack source)
       (modelStep (some model) targetBody pc targetFrame (stack.map mapping.value) target)
 
 /-- The `System.Object` constructor's model drops the receiver alike on both sides. -/
 theorem objectConstructor_stepRenamed : CIL.RuntimeModel.objectConstructor.StepRenamed := by
-  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ pc
-    stack _
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc
+    stack _ _
   simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel]
   split
   · exact .error _
@@ -325,8 +327,8 @@ theorem objectConstructor_stepRenamed : CIL.RuntimeModel.objectConstructor.StepR
     so both sides fault alike or push the same value. -/
 theorem intrinsic_stepRenamed (operation : CIL.Intrinsic) (argc : Nat) :
     (CIL.RuntimeModel.intrinsic operation argc).StepRenamed := by
-  intro indices mapping scopes source target sourceFrame targetFrame related frames sourceBody
-    targetBody metadata pc stack _
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ sourceBody
+    targetBody metadata pc stack _ _
   simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel, intrinsicCall,
     metadata.profile, List.length_map, ← List.map_take, ← List.map_drop, ← List.map_reverse]
   split
@@ -347,6 +349,26 @@ theorem intrinsic_stepRenamed (operation : CIL.Intrinsic) (argc : Nat) :
   exact .ok (.next related frames)
 
 #print axioms intrinsic_stepRenamed
+
+/-- A memory operation's model runs as that operation, which transports its successful effect or
+    named throw on the corresponding allocations. -/
+theorem memory_stepRenamed (operation : CIL.MemoryOp) :
+    (CIL.RuntimeModel.memory operation).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames formed _ _ _
+    pc stack bounds observable
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel,
+    CIL.RuntimeModel.observerCount] at observable ⊢
+  by_cases observed : unspecifiedOperands operation.argumentCount stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  simp only [observed, Bool.false_eq_true, ite_false] at observable ⊢
+  apply (related.memoryInstructionResult operation formed stack bounds
+    (SuccessOrThrow.bind_left observable)).bind
+  intro left right ⟨memories, values⟩
+  rw [values]
+  exact .ok (.next memories frames)
+
+#print axioms memory_stepRenamed
 
 /-- Every model of the runtime table transports under a renaming; an entry adds its model's
     case here. -/
@@ -372,10 +394,12 @@ private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
     {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
     {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (method : CIL.Extraction.MethodRef)
-    (prefixes : CIL.CallPrefixes) (pc : Nat)
+    (formed : source.WellFormed) (sourceBody targetBody : CIL.Method)
+    (method : CIL.Extraction.MethodRef) (prefixes : CIL.CallPrefixes) (pc : Nat)
     (metadata : StepMetadata sourceBody targetBody)
-    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
+    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.call method prefixes) pc arguments sourceFrame stack source)) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.call method prefixes) pc arguments sourceFrame stack source)
       (step targetBody (.call method prefixes) pc (arguments.map mapping.value)
@@ -383,19 +407,20 @@ private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
   have unobserved : unspecifiedOperands 0 stack = false := rfl
   simp only [step, observerCount, unobserved, Bool.false_eq_true, ite_false,
     observedCall, mapping.unspecifiedOperands, List.length_map, metadata.linkAt pc,
-    metadata.environment, ← List.map_take, ← List.map_drop, ← List.map_reverse]
-  generalize sourceBody.linkAt pc = link
+    metadata.environment, ← List.map_take, ← List.map_drop, ← List.map_reverse] at observable ⊢
+  generalize sourceBody.linkAt pc = link at observable ⊢
   rcases link with _ | link
-  · dsimp only
+  · dsimp only at observable ⊢
     by_cases tail : prefixes.tail = true
     · simp only [tail, ite_true]
       exact .error _
-    simp only [tail, Bool.false_eq_true, ite_false]
+    simp only [tail, Bool.false_eq_true, ite_false] at observable ⊢
     cases found : CIL.Extraction.runtimeModel sourceBody.environment .call method with
     | none => exact .error _
     | some model =>
-      exact runtimeModel_stepRenamed found related frames sourceBody targetBody metadata pc
-        stack bounds
+      rw [found] at observable
+      exact runtimeModel_stepRenamed found related frames formed sourceBody targetBody metadata
+        pc stack bounds observable
   · by_cases guard : unspecifiedOperands method.argumentCount stack = true
     · simp only [guard, ite_true]
       exact .error _
@@ -527,8 +552,8 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       exact related.managedStep frames native _ pc stack bounds observable
   by_cases direct : ∃ method prefixes, operation = .call method prefixes
   · rcases direct with ⟨method, prefixes, rfl⟩
-    exact related.stepCall frames sourceBody targetBody method prefixes pc metadata arguments
-      stack bounds
+    exact related.stepCall frames formed sourceBody targetBody method prefixes pc metadata
+      arguments stack bounds observable
   by_cases receiverChecked : ∃ callee argc, operation = .callInstance callee argc
   · rcases receiverChecked with ⟨callee, argc, rfl⟩
     exact related.stepCallInstance formed sourceBody targetBody callee argc pc
