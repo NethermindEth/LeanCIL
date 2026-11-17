@@ -408,13 +408,11 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
   | _, _, _ => false
 
 /-- The decoded `readonly.` rule at one site after `previous`: `readonly.` and `ldelema` emit
-    their decoding, and only `ldelema` follows `readonly.`. Translated sites never consult the
-    decoder, so the follower clause holds them to the rule until no site is translated. -/
+    their decoding, so an `ldelema` is read-only exactly when `readonly.` precedes it. -/
 def readOnlyDecodedMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (emitted : Instruction) : Bool :=
-  (previous.all (fun before => before.opcode != 65054) || instruction.opcode == 143) &&
-    (!(instruction.opcode == 143 || instruction.opcode == 65054) ||
-      valueEncodingMatches previous instruction emitted)
+  !(instruction.opcode == 143 || instruction.opcode == 65054) ||
+    valueEncodingMatches previous instruction emitted
 
 /-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
     `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
@@ -940,34 +938,26 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
       | .stloc actual => actual == index
       | _ => false) : Option Bool).getD false
 
-/-- The raw instruction before each pc of `code`, `none` at the first, streamed with the sites
-    so that no site looks its predecessor up. -/
-def predecessors (code : List RawInstruction) : List (Option RawInstruction) :=
-  none :: code.map some
-
-/-- At every pc of the code, the streamed predecessor is the instruction before it. -/
-theorem predecessors_getElem? {code : List RawInstruction} {pc : Nat} (inside : pc < code.length) :
-    (predecessors code)[pc]? = some (rawBefore (code[·]?) pc) := by
-  cases pc with
-  | zero => rfl
-  | succ previousPc =>
-    have before : previousPc < code.length := by omega
-    simp [predecessors, rawBefore, List.getElem?_eq_getElem before]
-
-#print axioms predecessors_getElem?
+/-- A `readonly.` site requires the raw instruction after it, `next`, to be `ldelema` (143), so a
+    `readonly.` that ends the body is refused. This is the rule that only `ldelema` follows
+    `readonly.`: a reachable `readonly.` falls through to the instruction after it, which
+    `PrefixEntryFree` keeps every branch out of. Translated sites never consult the decoder, so
+    the rule holds them to it until no site is translated. -/
+def readOnlyPrefixMatches (next : Option RawInstruction) (instruction : RawInstruction) : Bool :=
+  instruction.opcode != 65054 || next.any (fun following => following.opcode == 143)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    agree with the feature stack depth, emit the right encoding after `previous`, the raw
-    instruction before it, satisfy the indirect access rule over the raw instructions `rawAt`
-    gives, and give every successor, which must be reachable, exactly the resulting stack kinds,
-    with local slots read through `locals`. -/
+    agree with the feature stack depth, satisfy the indirect access rule and the `readonly.` rule
+    (`readOnlyPrefixMatches`) over the raw instructions `rawAt` gives, emit the right encoding
+    after the raw instruction before it, and give every successor, which must be reachable,
+    exactly the resulting stack kinds, with local slots read through `locals`. -/
 private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
     (context : NativeDispatchContext) (locals : ScalarLocals) (rawAt : Nat → Option RawInstruction)
     (successor : List ScalarKind → Nat → Bool) :
-    ((RawInstruction × Option FoldRole) × Option RawInstruction) × Nat → Option FeatureState →
-      Option (List ScalarKind) → Instruction → Bool
+    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
+      Instruction → Bool
   | _, none, none, .unadmitted _ => true
-  | (((instruction, role), previous), pc), some feature, some stack, emitted =>
+  | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with
         | some (.spanConstructor index constructor) => match emitted with
@@ -975,7 +965,8 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       indirectSiteWindow rawAt pc instruction emitted &&
-      scalarEmissionMatches layouts role previous instruction stack emitted &&
+      readOnlyPrefixMatches (rawAt (pc + 1)) instruction &&
+      scalarEmissionMatches layouts role (rawBefore rawAt pc) instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted locals ||
       match scalarTransfer raw instruction stack role context locals,
           featureSuccessors role pc instruction feature.stack with
@@ -1000,8 +991,7 @@ def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : Fe
           | some (some _, incoming) => incoming == some after
           | _ => false) instruction feature stack emitted)
     (.ofList (features.zip certificate)) 0
-    ((raw.code.zip (foldRoles raw.locals raw.code)).zip (predecessors raw.code)).zipIdx
-    (features.zip certificate) code = true
+    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx (features.zip certificate) code = true
 
 instance (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate)
@@ -1046,8 +1036,8 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
             instruction feature stack emitted)
-        (((raw.code.zip (foldRoles raw.locals raw.code)).zip (predecessors raw.code)).zipIdx.zip
-          features) certificate code = true := by
+        ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
+        true := by
   dsimp only [ScalarFlowValid]
   have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) :=
     funext (FlowIndex.get?_ofList raw.code)
@@ -1058,8 +1048,7 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
   · by_cases scalarLength : raw.code.length = certificate.length
     · rw [all3_zip_states _ _ _ _ _ (featureLength.symm.trans scalarLength)]
       simp only [List.length_zipIdx, List.length_zip]
-      exact Nat.le_trans (Nat.min_le_left _ _)
-        (Nat.le_trans (Nat.min_le_left _ _) (Nat.le_of_eq featureLength))
+      exact Nat.le_trans (Nat.min_le_left _ _) (Nat.le_of_eq featureLength)
     · simp [scalarLength]
   · simp [featureLength]
 
@@ -1079,19 +1068,16 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
     scalarEmissionMatches layouts role (rawBefore (raw.code[·]?) pc) instruction stack emitted =
       true := by
-  have inside : pc < raw.code.length := (List.getElem?_eq_some_iff.mp rawAt).1
-  have pairAt :
-      ((raw.code.zip (foldRoles raw.locals raw.code)).zip (predecessors raw.code)).zipIdx[pc]? =
-        some (((instruction, role), rawBefore (raw.code[·]?) pc), pc) := by
-    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt,
-      predecessors_getElem? inside]
+  have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
+      some ((instruction, role), pc) := by
+    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
   have statesAt : (features.zip certificate)[pc]? = some (some feature, some stack) :=
     List.getElem?_zip_eq_some.mpr ⟨featureAt, stackAt⟩
   have sites := valid.2.2.2.2
   rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
   have checked := all3_at sites pairAt statesAt emittedAt
   simp only [checkScalarSite, Bool.and_eq_true] at checked
-  exact checked.1.2
+  simpa only [rawBefore, FlowIndex.get?_ofList] using checked.1.2
 
 #print axioms ScalarFlowValid.instruction_checked
 

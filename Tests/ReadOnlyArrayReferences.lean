@@ -202,16 +202,20 @@ theorem forged_addresses_refused :
   decide +kernel
 #print axioms forged_addresses_refused
 
-/-- A reachable `readonly.` that ends the body has no successor to take it. -/
+/-- A reachable `readonly.` that ends the body has no `ldelema` after it to take it. -/
 theorem final_prefix_refused :
-    !accepted (body [prefixRaw]) (depthsOf [0, 1, 2])
-      [some [], some [.array .signed32], some [.word32, .array .signed32]]
-      [.ldarg 0, .ldarg 1, .nop] := by
+    !readOnlyPrefixMatches none prefixRaw &&
+      !accepted (body [prefixRaw]) (depthsOf [0, 1, 2])
+        [some [], some [.array .signed32], some [.word32, .array .signed32]]
+        [.ldarg 0, .ldarg 1, .nop] := by
   decide +kernel
 #print axioms final_prefix_refused
 
-/-- A second `readonly.`, a `nop` or an `ldelem` after `readonly.` does not take it. -/
+/-- A second `readonly.`, a `nop` or an `ldelem` after `readonly.` does not take it, so the
+    prefix site refuses it. -/
 theorem wrong_followers_refused :
+    [⟨4, 65054, .none⟩, ⟨4, 0, .none⟩, ⟨4, 148, .none⟩].all
+      (fun following => !readOnlyPrefixMatches (some following) prefixRaw) ∧
     !accepted (body [prefixRaw, ⟨4, 65054, .none⟩, addressRaw 6, retRaw 11])
       (depthsOf [0, 1, 2, 2, 2, 1]) (addressStates 3)
       [.ldarg 0, .ldarg 1, .nop, .nop, .ldelema intType true, .ret] ∧
@@ -240,14 +244,29 @@ private def takeSite : CallSite := {
   name := "Take", target := .managed 0x06000001, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
-/-- A call decodes alone but not after `readonly.`, and the scalar check refuses it there. -/
+/-- A call decodes alone but not after `readonly.`, and the `readonly.` before it is refused at
+    the prefix site. -/
 theorem prefixed_call_refused :
     (valueEncodingMatches none ⟨4, 40, .call takeSite⟩ (.call takeSite.method) &&
       (CIL.Instruction.ofRaw? (some prefixRaw) ⟨4, 40, .call takeSite⟩).isNone &&
-      !scalarEmissionMatches #[] none (some prefixRaw) ⟨4, 40, .call takeSite⟩
-        [.word32] (.call takeSite.method)) = true := by
+      !readOnlyPrefixMatches (some ⟨4, 40, .call takeSite⟩) prefixRaw) = true := by
   decide +kernel
 #print axioms prefixed_call_refused
+
+/-- A void body whose first instruction branches over a dead `readonly.` to the `ret` after it. -/
+private def deadPrefixRaw : RawMethod :=
+  { raw 2 with
+    returnType := .void
+    code := [⟨0, 43, .target 2⟩, ⟨2, 65054, .none⟩, ⟨4, 42, .none⟩] }
+
+/-- A live instruction other than `ldelema` after a dead `readonly.` passes the scalar check,
+    which checks no unreachable prefix, and is refused by `PrefixEntryFree`, since a branch reaches
+    it. -/
+theorem dead_prefix_follower_refused :
+    ScalarFlowValid #[] deadPrefixRaw [some ⟨[], []⟩, none, some ⟨[], []⟩] [some [], none, some []]
+      [.br 2, .unadmitted 65054, .ret] ∧ ¬ PrefixEntryFree deadPrefixRaw.code := by
+  decide +kernel
+#print axioms dead_prefix_follower_refused
 
 end DecodedReadOnly
 

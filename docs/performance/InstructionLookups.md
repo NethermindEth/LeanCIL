@@ -134,9 +134,9 @@ and 512 array element addresses, each followed by a branch, with and without a `
 prefix, less the heartbeats of stating the same certificate. Each instruction of these bodies, as
 of the local bodies whose `ScalarFlowValid` is checked below, carries the byte offset extraction
 writes for it. It fails when the cost per address
-at 256 or 512 exceeds 1.15 times the cost at 128. The check streams the raw instruction before
-each site with the site (`predecessors`) and measures 1.01 for plain and 1.02 for prefixed
-addresses.
+at 256 or 512 exceeds 1.15 times the cost at 128. The check reads the raw instructions next to a
+site from a `FlowIndex` built once per body, only at the sites that need them, and measures
+1.01 for plain and 1.02 for prefixed addresses.
 
 It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
 bodies of 500, 2,000 and 8,000 instructions, whose segments each hold a `readonly.` prefix, its

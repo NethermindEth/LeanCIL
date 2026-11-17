@@ -39,8 +39,9 @@ each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `s
 `ldelem.ref` and `stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed
 access or element address takes its element's width from the element shape of the method's checked
 layouts. An `ldelema` decodes read-only exactly when `readonly.` precedes it, and `readonly.`
-decodes to `nop`; no instruction but `ldelema` decodes after `readonly.`, and the scalar check also
-refuses a translated instruction there (`readOnlyDecodedMatches`). Each `ldobj`
+decodes to `nop`; no instruction but `ldelema` decodes after `readonly.`, and the scalar check
+requires the raw instruction after each reachable `readonly.` to be `ldelema`, which also holds a
+translated instruction to the rule (`readOnlyPrefixMatches`). Each `ldobj`
 and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
 the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
