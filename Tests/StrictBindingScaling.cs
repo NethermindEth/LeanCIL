@@ -441,11 +441,11 @@ partial class Program
 
     /// <summary>
     /// A type definition claim names its row, its NestedClass row and its base row, so its check reads a fixed
-    /// number of cells and entries whatever the size of the tables. Images with 64, 256 and 1024 classes beside an
-    /// enum, a struct, an interface, a nested class and a class that extends a TypeDef are checked against six
-    /// claims that System.Reflection.Metadata reads from them, and the heartbeats of preparing each image are
-    /// subtracted. The check at 1024 classes may cost at most `MaximumTableGrowth` times the check at 64. The
-    /// smallest image also rejects a claim that changes one part of a nested, an interface or a derived type.
+    /// number of cells and entries whatever the size of the tables. Images with 64, 256 and 1024 classes beside the
+    /// types of `SyntheticTypes` are checked against eight claims that System.Reflection.Metadata reads from them,
+    /// and the heartbeats of preparing each image are subtracted. The check at 1024 classes may cost at most
+    /// `MaximumTableGrowth` times the check at 64. The smallest image also rejects claims that each change one part
+    /// of a claim that holds.
     /// </summary>
     static void CheckTypeDefinitionScaling(string root, string package)
     {
@@ -491,12 +491,12 @@ partial class Program
             $"{growth:F2} times at {sizes[^1] / sizes[0]} times the classes)");
     }
 
-    /// <summary>One claim of a type definition: its row, its kind, and the claim as a Lean term.</summary>
-    sealed record TypeDefinitionClaim(int Row, string Kind, int? Enclosing, string Lean);
+    /// <summary>A type definition claim: its row, name, kind and enclosing row, and the claim in Lean.</summary>
+    sealed record TypeDefinitionClaim(int Row, string Name, string Kind, int? Enclosing, string Lean);
 
     /// <summary>
-    /// Claims about the first class, the enum, the struct, the interface, the nested class and the last row of an
-    /// image from `SyntheticTypes`, with every part read by System.Reflection.Metadata.
+    /// Claims about the first class and the last seven rows of an image from `SyntheticTypes`, with every part read
+    /// by System.Reflection.Metadata.
     /// </summary>
     static TypeDefinitionClaim[] TypeDefinitionClaims(byte[] file, string identity)
     {
@@ -505,7 +505,7 @@ partial class Program
         if (metadata.GetTableRowCount(TableIndex.NestedClass) != 1)
             throw new InvalidOperationException("The synthetic types must have exactly one NestedClass row.");
         var rows = metadata.GetTableRowCount(TableIndex.TypeDef);
-        int[] claimed = [2, rows - 4, rows - 3, rows - 2, rows - 1, rows];
+        int[] claimed = [2, .. Enumerable.Range(rows - 6, 7)];
         string Bytes(StringHandle text) =>
             "[" + string.Join(", ", System.Text.Encoding.UTF8.GetBytes(metadata.GetString(text))) + "]";
         (string Namespace, string Name) NamesOf(EntityHandle handle) => handle.Kind switch
@@ -527,16 +527,19 @@ partial class Program
             var baseType = definition.BaseType;
             var (baseNamespace, baseName) = baseType.IsNil ? ("", "") : NamesOf(baseType);
             var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+            var isEnumItself = (metadata.GetString(definition.Namespace), metadata.GetString(definition.Name)) ==
+                ("System", "Enum");
             var kind = isInterface ? "interface"
                 : (baseNamespace, baseName) == ("System", "Enum") ? "enum"
-                : (baseNamespace, baseName) == ("System", "ValueType") ? "valueType"
+                : (baseNamespace, baseName) == ("System", "ValueType") && !isEnumItself ? "valueType"
                 : "classType";
             var declaring = definition.GetDeclaringType();
             int? enclosing = declaring.IsNil ? null : MetadataTokens.GetRowNumber(declaring);
             var nesting = enclosing is { } outer ? $"some (1, {outer})" : "none";
             var baseTerm = baseType.IsNil ? ".none"
+                : baseType.Kind == HandleKind.TypeSpecification ? $".spec {MetadataTokens.GetToken(baseType)}"
                 : $".named {MetadataTokens.GetToken(baseType)} {Ascii(baseNamespace)} {Ascii(baseName)}";
-            return new TypeDefinitionClaim(row, kind, enclosing,
+            return new TypeDefinitionClaim(row, metadata.GetString(definition.Name), kind, enclosing,
                 $"{{ identity := \"{identity}\", row := {row}, typeNamespace := {Bytes(definition.Namespace)}, " +
                 $"typeName := {Bytes(definition.Name)}, nesting := {nesting}, kind := .{kind}, " +
                 $"fields := ({first}, {fields.Count}), base := {baseTerm} }}");
@@ -545,13 +548,16 @@ partial class Program
 
     /// <summary>
     /// Rejections that each change one part of a claim that holds: the nested class claimed at the top level and
-    /// inside another row, the first class claimed nested, the interface claimed a class, and the last row claimed
-    /// to extend another TypeDef.
+    /// inside another row, the first class claimed nested, the interface claimed a class, `System.Enum` claimed a
+    /// value type, the class over a generic instantiation claimed to extend another TypeSpec row, and the last row
+    /// claimed to extend another TypeDef.
     /// </summary>
     static string TypeDefinitionRejections(TypeDefinitionClaim[] claims)
     {
         var nested = Array.FindIndex(claims, claim => claim.Enclosing is not null);
         var face = Array.FindIndex(claims, claim => claim.Kind == "interface");
+        var enumItself = Array.FindIndex(claims, claim => claim.Name == "Enum");
+        var instantiated = Array.FindIndex(claims, claim => claim.Name == "Numbers");
         var last = claims.Length - 1;
         string Rejects(string name, int index, string change, string part) => $$"""
             theorem {{name}} : Tests.StrictBinding.failsWith (StrictBinding.checkAll
@@ -566,14 +572,18 @@ partial class Program
                 "nesting") +
             Rejects("rejects_a_top_level_class_claimed_nested", 0, "nesting := some (1, 2)", "nesting") +
             Rejects("rejects_an_interface_claimed_a_class", face, "kind := .classType", "kind") +
+            Rejects("rejects_system_enum_claimed_a_value_type", enumItself, "kind := .valueType", "kind") +
+            Rejects("rejects_another_type_spec", instantiated,
+                $"base := .spec {MetadataTokens.GetToken(MetadataTokens.TypeSpecificationHandle(2))}", "base") +
             Rejects("rejects_another_base_definition", last,
                 $"base := .named {MetadataTokens.GetToken(MetadataTokens.TypeDefinitionHandle(3))} [] []", "base");
     }
 
     /// <summary>
     /// A library with `count` public classes that each own a field and extend `System.Object`, then an enum, a
-    /// struct, an interface, a class nested in the first class and a class that extends the first class; each of
-    /// the last five owns one field and the last owns the final rows of the Field table.
+    /// struct, an interface, a class nested in the first class, a `System.Enum` that extends `System.ValueType`, a
+    /// class that extends `List<int>` and a class that extends the first class. Each of the last seven owns one
+    /// field, and the last owns the final two rows of the Field table.
     /// </summary>
     static byte[] SyntheticTypes(int count)
     {
@@ -592,9 +602,15 @@ partial class Program
         var signature = new BlobBuilder();
         new BlobEncoder(signature).Field().Type().Int32();
         var fieldSignature = metadata.GetOrAddBlob(signature);
+        var listType = metadata.AddTypeReference(runtime, metadata.GetOrAddString("System.Collections.Generic"),
+            metadata.GetOrAddString("List`1"));
+        var instance = new BlobBuilder();
+        new BlobEncoder(instance).TypeSpecificationSignature().GenericInstantiation(listType, 1, false).AddArgument()
+            .Int32();
+        var listOfInt = metadata.AddTypeSpecification(metadata.GetOrAddBlob(instance));
         var fields = 0;
         var typeNamespace = metadata.GetOrAddString("Synthetic");
-        TypeDefinitionHandle Define(TypeAttributes attributes, bool nested, string name, EntityHandle baseType,
+        TypeDefinitionHandle Define(TypeAttributes attributes, StringHandle space, string name, EntityHandle baseType,
             int owned)
         {
             var first = MetadataTokens.FieldDefinitionHandle(fields + 1);
@@ -602,22 +618,25 @@ partial class Program
                 metadata.AddFieldDefinition(FieldAttributes.Public, metadata.GetOrAddString("F" + (fields + index)),
                     fieldSignature);
             fields += owned;
-            return metadata.AddTypeDefinition(attributes, nested ? default : typeNamespace,
-                metadata.GetOrAddString(name), baseType, first, MetadataTokens.MethodDefinitionHandle(1));
+            return metadata.AddTypeDefinition(attributes, space, metadata.GetOrAddString(name), baseType, first,
+                MetadataTokens.MethodDefinitionHandle(1));
         }
         metadata.AddTypeDefinition(default, default, metadata.GetOrAddString("<Module>"), default,
             MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
-        var firstClass = Define(TypeAttributes.Public, false, "C0", objectType, 1);
+        var firstClass = Define(TypeAttributes.Public, typeNamespace, "C0", objectType, 1);
         for (var index = 1; index < count; index++)
-            Define(TypeAttributes.Public, false, "C" + index, objectType, 1);
-        Define(TypeAttributes.Public | TypeAttributes.Sealed, false, "Small", enumType, 1);
-        Define(TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.SequentialLayout, false, "Pair",
+            Define(TypeAttributes.Public, typeNamespace, "C" + index, objectType, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Sealed, typeNamespace, "Small", enumType, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.SequentialLayout, typeNamespace, "Pair",
             valueType, 1);
-        Define(TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract, false, "IShape", default,
-            1);
-        var nestedClass = Define(TypeAttributes.NestedPublic, true, "Inner", objectType, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract, typeNamespace, "IShape",
+            default, 1);
+        var nestedClass = Define(TypeAttributes.NestedPublic, default, "Inner", objectType, 1);
         metadata.AddNestedType(nestedClass, firstClass);
-        Define(TypeAttributes.Public, false, "Derived", firstClass, 2);
+        Define(TypeAttributes.Public | TypeAttributes.Abstract, metadata.GetOrAddString("System"), "Enum", valueType,
+            1);
+        Define(TypeAttributes.Public, typeNamespace, "Numbers", listOfInt, 1);
+        Define(TypeAttributes.Public, typeNamespace, "Derived", firstClass, 2);
         var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
             new BlobBuilder());
         var image = new BlobBuilder();
