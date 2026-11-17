@@ -1,4 +1,5 @@
 import CIL.Extraction.Features
+import CIL.Extraction.RuntimeModels
 import Std.Data.TreeSet.Lemmas
 import Lean.Elab.Tactic.BuiltinTactic
 
@@ -11,7 +12,7 @@ exact raw metadata and the matching emitted intrinsic, available under the metho
 Other intrinsic families retain their existing extraction checks.
 
 `Vector128.CreateScalarUnsafe` leaves the upper half of its result unspecified, so a
-method that uses it keeps eligible `Vector128<ulong>` locals as opaque whole values rather
+method that calls it keeps eligible `Vector128<ulong>` locals as opaque whole values rather
 than bytes; `OpaqueLocalsValid` fixes that set from the raw body.
 
 Signature strings below use string gaps, so each literal is one unbroken identity.
@@ -81,10 +82,6 @@ private def exactSignatures : List (String × String × String × Intrinsic × N
       System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
       System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
     .vector .combine256, 2),
-  ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe",
-    "System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
-      System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)",
-    .vector .createScalarUnsafe64, 1),
   ("System.Runtime.Intrinsics.X86.Avx2", "ShiftLeftLogical",
     "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
@@ -176,8 +173,6 @@ private def exactCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
   | .avx512DQ .moveMask512 => some (.atom runtimeScope "System.Int32", [ulongVector "512"])
   | .avx512DQ .moveMask64 => some (.atom runtimeScope "System.Int32", [ulongVector "256"])
   | .vector .combine256 => some (ulongVector "512", [ulongVector "256", ulongVector "256"])
-  | .vector .createScalarUnsafe64 =>
-    some (ulongVector "128", [.atom runtimeScope "System.UInt64"])
   | .avx2 .shuffleBytes => some (byteVector "256", [byteVector "256", byteVector "256"])
   | .sse .shuffleBytes | .aes .encrypt | .armAes .encrypt =>
     some (byteVector "128", [byteVector "128", byteVector "128"])
@@ -388,14 +383,17 @@ private theorem exactCallFamily_eq_original (instruction : RawInstruction) :
       ← intrinsicSignature_matches, signature]
 #print axioms exactCallFamily_eq_original
 
-/-- The intrinsic and arity of an emitted admitted intrinsic. -/
+/-- The intrinsic and arity of an emitted intrinsic that only an exact call may stand for. No
+    call does for `CreateScalarUnsafe` or `GetElement`, whose calls keep their calls and run
+    their models, so those intrinsics are refused at every site. -/
 def emittedExactIntrinsic : Instruction → Option (Intrinsic × Nat)
   | .intrinsic intrinsic arity => match intrinsic with
     | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
     | .avx512 .ltu512 | .avx512 .gtu512
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
-    | .vector .createScalarUnsafe64 | .avx2 .shuffleBytes | .sse .shuffleBytes
+    | .vector .createScalarUnsafe64 | .vector (.extract64 _)
+    | .avx2 .shuffleBytes | .sse .shuffleBytes
     | .sse .multiplyEven32 | .aes .encrypt | .armAes .encrypt | .armAes .mixColumns
     | .advSimd .reverseElement8 | .avx512 .permuteVar4x64x2
     | .vector (.band _) | .vector (.bor _) | .vector (.bxor _) | .vector (.bnot _)
@@ -534,22 +532,26 @@ private def opaqueAddressesValid (method : Method) : Bool :=
   method.code.all fun operation => match operation with
     | .ldloca index => !slots.contains index
     | _ => true
-/-- The opaque locals are exactly the eligible ones when the method uses
+/-- Whether `operation` calls a method whose runtime model in `environment` is
+    `CreateScalarUnsafe`. -/
+def createsScalarUnsafe (environment : LayoutEnvironment) : Instruction → Bool
+  | .call method _ =>
+    runtimeModel environment .call method == some (.intrinsic (.vector .createScalarUnsafe64) 1)
+  | _ => false
+
+/-- The opaque locals are exactly the eligible ones when the method calls
     `CreateScalarUnsafe` and none otherwise; each is a 128-bit vector slot whose address the
     emitted code never takes. -/
 def OpaqueLocalsValid (closed : RawMethod) (method : Method) : Prop :=
-  method.opaqueVectorLocals = (if method.code.any (fun op =>
-    match op with
-    | .intrinsic (.vector .createScalarUnsafe64) _ => true
-    | _ => false) then opaqueLocalIndices closed else []) ∧
+  method.opaqueVectorLocals = (if method.code.any (createsScalarUnsafe method.environment)
+    then opaqueLocalIndices closed else []) ∧
   opaqueKindsValid method = true ∧ opaqueAddressesValid method = true
 
 /-- Indexed opaque-local checks preserve the original kind and no-address obligations. -/
 theorem OpaqueLocalsValid_iff_scan (closed : RawMethod) (method : Method) :
     OpaqueLocalsValid closed method ↔
-      method.opaqueVectorLocals = (if method.code.any (fun op => match op with
-        | .intrinsic (.vector .createScalarUnsafe64) _ => true
-        | _ => false) then opaqueLocalIndices closed else []) ∧
+      method.opaqueVectorLocals = (if method.code.any (createsScalarUnsafe method.environment)
+        then opaqueLocalIndices closed else []) ∧
       method.opaqueVectorLocals.all (fun index => method.localKinds[index]? == some .vector128) =
         true ∧
       method.code.all (fun operation => match operation with

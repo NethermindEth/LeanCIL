@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
+using System.Text;
 using Mono.Cecil;
 using MemberReference = Mono.Cecil.MemberReference;
 using TypeReference = Mono.Cecil.TypeReference;
@@ -85,24 +86,18 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         return (metadata, collection.Tables(), collection.Assemblies());
     }
 
-    /// <summary>The most bytes one numeral of a byte literal holds: the elaborator parses a numeral in time quadratic
-    /// in its digits.</summary>
-    const int LiteralChunkBytes = 256;
-
     /// <summary>
-    /// A Lean byte list as <c>CIL.Extraction.fixedBytes</c> literals of at most <see cref="LiteralChunkBytes"/> bytes,
-    /// each its length and one big-endian hexadecimal numeral, joined by <c>++</c>. The elaborator reads one numeral
-    /// where a list literal costs a numeral and a constructor per byte; the qualified name resolves wherever the text
-    /// is pasted.
+    /// A Lean byte list as one <c>CIL.Extraction.fixedBytes</c> literal: its length and its big-endian code, as
+    /// <see cref="NumeralCode.Append"/> writes it. The elaborator reads numerals where a list literal costs a numeral
+    /// and a constructor per byte; the qualified names resolve wherever the text is pasted.
     /// </summary>
     internal static string Bytes(IEnumerable<byte> bytes)
     {
         var data = bytes.ToArray();
         if (data.Length == 0) return "[]";
-        var chunks = data.Chunk(LiteralChunkBytes)
-            .Select(chunk => $"CIL.Extraction.fixedBytes {chunk.Length} 0x{Convert.ToHexString(chunk)}").ToArray();
-        // `++` associates to the left, which copies every prefix again; nesting to the right copies each chunk once.
-        return "(" + string.Join(" ++ (", chunks) + new string(')', chunks.Length);
+        var text = new StringBuilder($"(CIL.Extraction.fixedBytes {data.Length} ");
+        NumeralCode.Append(text, data);
+        return text.Append(')').ToString();
     }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>

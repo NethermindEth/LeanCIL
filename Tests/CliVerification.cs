@@ -713,8 +713,16 @@ Console.WriteLine("PASS CLI version names the framework revision and toolchain")
 if (args.Length == 0)
 {
     var packages = Path.Combine(output, "packages");
-    if (Directory.Exists(packages)) Directory.Delete(packages, true);
-    Run(["dotnet", "pack", At("Extractor"), "-c", "Release", "-o", packages], progress: "CLI development pack");
+    var packBuild = Path.Combine(output, "pack-build");
+    foreach (var directory in new[] { packages, packBuild })
+        if (Directory.Exists(directory)) Directory.Delete(directory, true);
+    // Later suites of the same job run the extractor this one found, so the pack builds into its own directories.
+    var sharedExtractor = Sha(ExtractorPath);
+    Run(["dotnet", "pack", At("Extractor"), "-c", "Release", "-o", packages,
+        $"-p:OutputPath={Path.Combine(packBuild, "bin")}/",
+        $"-p:IntermediateOutputPath={Path.Combine(packBuild, "obj")}/"], progress: "CLI development pack");
+    if (Sha(ExtractorPath) != sharedExtractor)
+        throw new InvalidOperationException("The development pack rebuilt the shared extractor at " + ExtractorPath);
     var package = Directory.GetFiles(packages, "Nethermind.LeanCIL.*.nupkg").Single();
     var packageVersion = Path.GetFileNameWithoutExtension(package)["Nethermind.LeanCIL.".Length..];
     var unpacked = Path.Combine(packages, "unpacked");

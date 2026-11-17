@@ -321,6 +321,33 @@ theorem objectConstructor_stepRenamed : CIL.RuntimeModel.objectConstructor.StepR
 
 #print axioms objectConstructor_stepRenamed
 
+/-- An intrinsic's model reads only scalar operands and the profile, which related bodies share,
+    so both sides fault alike or push the same value. -/
+theorem intrinsic_stepRenamed (operation : CIL.Intrinsic) (argc : Nat) :
+    (CIL.RuntimeModel.intrinsic operation argc).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames sourceBody
+    targetBody metadata pc stack _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel, intrinsicCall,
+    metadata.profile, List.length_map, ← List.map_take, ← List.map_drop, ← List.map_reverse]
+  split
+  · exact .error _
+  split
+  · exact .error _
+  split
+  · exact .error _
+  apply (mapping.scalarOperands _).bind
+  intro values otherValues same
+  subst otherValues
+  apply (mapping.checkedIntrinsic _ _).bind
+  intro value otherValue same
+  subst otherValue
+  apply (related.checkedValue _ (by trivial)).bind
+  intro checked otherChecked same
+  subst otherChecked
+  exact .ok (.next related frames)
+
+#print axioms intrinsic_stepRenamed
+
 /-- Every model of the runtime table transports under a renaming; an entry adds its model's
     case here. -/
 theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
@@ -329,9 +356,12 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     model.StepRenamed :=
   CIL.Extraction.runtimeModel_yields (property := CIL.RuntimeModel.StepRenamed)
     (by
-      simp only [CIL.Extraction.modelEntries, CIL.Extraction.objectConstructorEntry,
-        List.mem_singleton, forall_eq, CIL.Extraction.ModelEntry.exact_yields]
-      exact objectConstructor_stepRenamed) found
+      intro entry member
+      simp only [CIL.Extraction.modelEntries, List.mem_append, List.mem_cons] at member
+      rcases member with (rfl | member) | member
+      · exact CIL.Extraction.ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
+      · exact CIL.Extraction.vectorEntries_yields intrinsic_stepRenamed entry member
+      · exact CIL.Extraction.integerMathEntries_yields intrinsic_stepRenamed entry member) found
 
 #print axioms runtimeModel_stepRenamed
 
@@ -350,24 +380,26 @@ private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
       (step sourceBody (.call method prefixes) pc arguments sourceFrame stack source)
       (step targetBody (.call method prefixes) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map, metadata.linkAt pc,
+  have unobserved : unspecifiedOperands 0 stack = false := rfl
+  simp only [step, observerCount, unobserved, Bool.false_eq_true, ite_false,
+    observedCall, mapping.unspecifiedOperands, List.length_map, metadata.linkAt pc,
     metadata.environment, ← List.map_take, ← List.map_drop, ← List.map_reverse]
-  by_cases guard : unspecifiedOperands (observerCount (.call method prefixes)) stack = true
-  · simp only [guard, ite_true]
-    exact .error _
-  · simp only [guard, Bool.false_eq_true, ite_false]
-    generalize sourceBody.linkAt pc = link
-    rcases link with _ | link
-    · dsimp only
-      by_cases tail : prefixes.tail = true
-      · simp only [tail, ite_true]
-        exact .error _
-      simp only [tail, Bool.false_eq_true, ite_false]
-      cases found : CIL.Extraction.runtimeModel sourceBody.environment .call method with
-      | none => exact .error _
-      | some model =>
-        exact runtimeModel_stepRenamed found related frames sourceBody targetBody metadata pc
-          stack bounds
+  generalize sourceBody.linkAt pc = link
+  rcases link with _ | link
+  · dsimp only
+    by_cases tail : prefixes.tail = true
+    · simp only [tail, ite_true]
+      exact .error _
+    simp only [tail, Bool.false_eq_true, ite_false]
+    cases found : CIL.Extraction.runtimeModel sourceBody.environment .call method with
+    | none => exact .error _
+    | some model =>
+      exact runtimeModel_stepRenamed found related frames sourceBody targetBody metadata pc
+        stack bounds
+  · by_cases guard : unspecifiedOperands method.argumentCount stack = true
+    · simp only [guard, ite_true]
+      exact .error _
+    simp only [guard, Bool.false_eq_true, ite_false]
     cases link <;> try exact .error _
     rename_i callee
     try dsimp only

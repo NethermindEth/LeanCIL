@@ -80,7 +80,7 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
   (stack.take count).any Value.hasUnspecified
 
 /-- Operands an op observes or exposes across a method boundary; `step` rejects the op when
-    any of them has unspecified bits. -/
+    any of them has unspecified bits. A call counts none, since the arm of its link checks. -/
 def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf
@@ -100,13 +100,12 @@ def observerCount : CIL.Instruction → Nat
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .stind _ | .copyObject _ => 2
   | .ldlen => 1
-  | .ldelem _ | .ldelem_ref | .ldelem_any _ => 2
+  | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
   | .stelem _ | .stelem_ref | .stelem_any _ => 3
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
   | .stsfld _ => 1
   -- Method boundaries
   | .ret => 1
-  | .call method _ => method.argumentCount
   | .callInstance _ argc | .callVirtual _ argc => argc
   | .newobj constructor => constructor.parameters.length
   | .managed (.call signature _ _) => signature.parameters.length + 1
@@ -117,6 +116,8 @@ def observerCount : CIL.Instruction → Nat
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
   | .ldc_i8 _ | .ldnull | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unadmitted _ => 0
+  -- A linked call checks its method's arguments, and a call's model the operands it observes.
+  | .call .. => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/
 def checkedAt (reference : ManagedReference) (width : Nat) (result : Checked α) :
@@ -812,7 +813,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
-  | .arrayAddress element writable, _ => arrayAddress element writable stack memory
   -- Spans
   | .spanEmpty width writable, rest =>
     let view : SpanView := ⟨.null, 0, width, writable⟩
@@ -1085,6 +1085,15 @@ def typedElementInstruction (shape : ElementShape) (store : Bool) (stack : List 
   | .method _, false, .scalar _ :: .object .null :: _ => .error (.thrown .nullReference)
   | .unsupported reason, _, _ => .error (.unsupported reason)
   | _, _, _ => .error .invalidState
+
+/-- `ldelema` of an element of `shape`: the reference `arrayAddress` gives for a value
+    element, read-only when `readOnly`. Class, method-table and unsupported shapes fault. -/
+def elementAddressInstruction (shape : ElementShape) (readOnly : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match shape with
+  | .value element => arrayAddress element (!readOnly) stack memory
+  | .unsupported reason => .error (.unsupported reason)
+  | _ => .error .invalidState
 
 /-- `ldfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
     receiver gives way to the word, object reference or array reference the slot keeps. A null

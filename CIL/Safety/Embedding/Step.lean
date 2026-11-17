@@ -414,17 +414,6 @@ theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPr
   plain_cases
   rw [context.link]
   split at h
-  · rename_i linked
-    try simp only [linked]
-    by_cases tail : prefixes.tail = true
-    · by_cases short : (stack.length != method.argumentCount) = true
-      · simp [tail, short] at h
-      · simp only [tail, short, ↓reduceIte] at h ⊢
-        lockstep
-    · by_cases short : stack.length < method.argumentCount
-      · simp [tail, short] at h
-      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-        lockstep
   · rename_i unlinked
     try simp only [unlinked]
     by_cases tail : prefixes.tail = true
@@ -435,7 +424,21 @@ theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPr
       simp only [FrameAction.relabel]
       rw [context.next (by simp [CIL.Instruction.continues, tail])]
       exact modelStep_move context.profile h
-  · cases h
+  · rename_i link linked
+    try simp only [linked]
+    dsimp only [observedCall] at h ⊢
+    obtain ⟨observed, h⟩ := observer_ok h
+    simp only [observed, Bool.false_eq_true, ↓reduceIte]
+    cases link <;> try cases h
+    by_cases tail : prefixes.tail = true
+    · by_cases short : (stack.length != method.argumentCount) = true
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte] at h ⊢
+        lockstep
+    · by_cases short : stack.length < method.argumentCount
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+        lockstep
 
 #print axioms step_relabel_call
 
@@ -555,6 +558,19 @@ theorem step_relabel_stelem_any (element : Extraction.TypeExpr) :
   rw [context.next rfl]
 
 #print axioms step_relabel_stelem_any
+
+/-- An element address reads its element's shape from the layouts, which relabeling keeps. -/
+theorem step_relabel_ldelema (element : Extraction.TypeExpr) (readOnly : Bool) :
+    StepRelabel (.ldelema element readOnly) := by
+  plain_cases
+  simp only [CIL.Method.elementShape, context.environment] at h ⊢
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+  cases h
+  simp only [FrameAction.relabel]
+  rw [context.next rfl]
+
+#print axioms step_relabel_ldelema
 
 theorem step_relabel_ldtoken (operand : TokenOperand) : StepRelabel (.ldtoken operand) := by
   cases operand
@@ -883,6 +899,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case ldsflda field => exact step_relabel_ldsflda field
   case ldelem_any element => exact step_relabel_ldelem_any element
   case stelem_any element => exact step_relabel_stelem_any element
+  case ldelema element readOnly => exact step_relabel_ldelema element readOnly
   case ldtoken operand => exact step_relabel_ldtoken operand
   case stsfld field => exact step_relabel_stsfld field
   case ret => exact step_relabel_ret
@@ -1150,15 +1167,6 @@ theorem step_raise_call (method : CIL.Extraction.MethodRef) (prefixes : CallPref
   plain_cases
   rw [context.link]
   split at h
-  · rename_i linked
-    try simp only [linked]
-    by_cases tail : prefixes.tail = true
-    · simp only [tail, ↓reduceIte] at h ⊢
-      exact h
-    · by_cases short : stack.length < method.argumentCount
-      · simp [tail, short] at h
-      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-        raise_lockstep
   · rename_i unlinked
     try simp only [unlinked]
     by_cases tail : prefixes.tail = true
@@ -1166,7 +1174,19 @@ theorem step_raise_call (method : CIL.Extraction.MethodRef) (prefixes : CallPref
     · simp only [tail, Bool.false_eq_true, ↓reduceIte] at h ⊢
       rw [context.environment]
       exact modelStep_move_error context.profile h
-  · simp [unlinkedCall] at h
+  · rename_i link linked
+    try simp only [linked]
+    dsimp only [observedCall] at h ⊢
+    obtain ⟨observed, h⟩ := observer_thrown h
+    simp only [observed, Bool.false_eq_true, ↓reduceIte]
+    cases link <;> try (simp [unlinkedCall] at h; done)
+    by_cases tail : prefixes.tail = true
+    · simp only [tail, ↓reduceIte] at h ⊢
+      exact h
+    · by_cases short : stack.length < method.argumentCount
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+        raise_lockstep
 
 #print axioms step_raise_call
 
@@ -1535,7 +1555,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticAddress_congr context.statics]
     raise_lockstep
-  case ldelem_any | stelem_any =>
+  case ldelem_any | stelem_any | ldelema =>
     plain_cases
     simp only [CIL.Method.elementShape, context.environment] at h ⊢
     dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢

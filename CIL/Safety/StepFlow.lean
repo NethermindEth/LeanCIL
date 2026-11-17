@@ -67,7 +67,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     (h : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) :
     op.readsLink = true ∧ callee ∈ body.calleesAt pc := by
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+  unfold step observedCall intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject at h
   dsimp only at h
   split at h
@@ -140,7 +140,7 @@ theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
       else ∃ arguments rest m', action = .call callee arguments rest m') ∨
     (body.linkAt pc = none ∧ prefixes.tail = false ∧
       ∃ values final, action = .next (pc + 1) values frame final) := by
-  unfold step at h
+  unfold step observedCall at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
   all_goals first

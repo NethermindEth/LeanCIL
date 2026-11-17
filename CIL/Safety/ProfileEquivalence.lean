@@ -16,10 +16,13 @@ theorem enterFrame_profile (body : CIL.Method) (profile : CIL.FeatureProfile)
     (args : List Value) (memory : Memory) :
     enterFrame { body with profile } args memory = enterFrame body args memory := rfl
 
-/-- A call without a link runs the same under any two profiles, since no model of the runtime
-    table consults the profile. -/
+/-- A call without a link runs the same under two profiles that agree on the query of the
+    model its method has, if any. -/
 theorem modelStep_profile_eq (body : CIL.Method) (method : Extraction.MethodRef)
-    (p q : CIL.FeatureProfile) (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    (p q : CIL.FeatureProfile)
+    (agreement : ∀ model, Extraction.runtimeModel body.environment .call method = some model →
+      model.ProfileAgreement p q)
+    (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
     modelStep (Extraction.runtimeModel body.environment .call method) { body with profile := p }
         pc frame stack memory =
       modelStep (Extraction.runtimeModel body.environment .call method)
@@ -27,13 +30,15 @@ theorem modelStep_profile_eq (body : CIL.Method) (method : Extraction.MethodRef)
   cases found : Extraction.runtimeModel body.environment .call method with
   | none => rfl
   | some model =>
-    have free := Extraction.runtimeModel_readsProfile found
-    cases model <;> first | rfl | simp [RuntimeModel.readsProfile] at free
+    have agrees := agreement model found
+    cases model <;> try rfl
+    all_goals simp only [CIL.RuntimeModel.ProfileAgreement] at agrees
+    all_goals simp only [modelStep, runModel, intrinsicCall, featureCall, agrees]
 
 /-- A checked step does not depend on the method's profile when the instruction agrees on
     both profiles. -/
 theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.FeatureProfile)
-    (agreement : op.ProfileAgreement p q) (pc : Nat) (args : List Value)
+    (agreement : op.ProfileAgreement body.environment p q) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (memory : Memory) :
     step { body with profile := p } op pc args frame stack memory =
       step { body with profile := q } op pc args frame stack memory := by
@@ -44,11 +49,11 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
   split <;> try rfl
   all_goals split <;> try rfl
   all_goals split <;> try rfl
-  all_goals try exact modelStep_profile_eq ..
-  all_goals try (split <;> first | rfl | exact modelStep_profile_eq ..)
+  all_goals try exact modelStep_profile_eq _ _ _ _ agreement ..
+  all_goals try (split <;> first | rfl | exact modelStep_profile_eq _ _ _ _ agreement ..)
   all_goals simp only [CIL.Instruction.ProfileAgreement] at agreement
   all_goals try simp only [agreement]
-  all_goals simp only [CIL.step_profile_eq op p q agreement]
+  all_goals simp only [CIL.step_profile_eq body.environment op p q agreement]
 
 /-- Running a reprofiled program gives the same result, fault or success, under any two
     profiles the program agrees on. -/

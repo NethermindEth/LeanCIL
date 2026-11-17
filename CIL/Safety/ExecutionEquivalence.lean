@@ -328,8 +328,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (frame : Frame) (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by
-  unfold CIL.Safety.step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
-    constructAggregate constructObject
+  unfold CIL.Safety.step observedCall intrinsicCall referenceCompareCall referenceSubtractCall
+    newobjStep constructAggregate constructObject
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.loadArgument, same.addressArgument,
@@ -424,6 +424,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.typedElementInstruction _ _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.elementAddressInstruction _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
        obtain ⟨otherMemory, otherValues⟩ := right

@@ -18,6 +18,8 @@ if (args is not ([] or ["--update"])) throw new ArgumentException("Usage: Runtim
 var extractor = Assembly.LoadFrom(ExtractorPath);
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
+// A call the Lean model table models keeps its call; the translator asks for its model before any lowered form.
+var callModel = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("CallModel", flags)!;
 var identityImage = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("IdentityImage", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
 // No built-in declares AES, so each architecture's widest built-in is also probed with its AES flag.
@@ -146,7 +148,7 @@ Console.WriteLine($"PASS runtime dispatcher catalog: {entries.Length} definition
 object? TranslatePinned(MethodReference method, object? profile)
 {
     identityImage.Invoke(null, [method.DeclaringType]);
-    try { return translate.Invoke(null, [method, profile]); }
+    try { return callModel.Invoke(null, [method, profile]) ?? translate.Invoke(null, [method, profile]); }
     catch (TargetInvocationException exception) when (exception.InnerException is
         InvalidDataException or NotSupportedException or AssemblyResolutionException)
     {

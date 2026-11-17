@@ -1,12 +1,13 @@
 import CIL.ExecutionLemmas
+import CIL.Extraction.RuntimeModels
 
 /-!
 # Profile equivalence
 
 Shows when a method's result does not depend on the hardware it runs on. Two feature
-profiles agree on a program when every feature test and intrinsic availability check in it
-gives the same answer under both. Checked execution equivalence is proved in
-`CIL.Safety.ProfileEquivalence`.
+profiles agree on a program when every feature test and intrinsic availability check in it,
+including those of the runtime models its calls run, gives the same answer under both. Checked
+execution equivalence is proved in `CIL.Safety.ProfileEquivalence`.
 -/
 
 namespace CIL
@@ -16,17 +17,29 @@ layout, static data and return conventions remain exactly the same. -/
 def reprofile (program : Program) (profile : FeatureProfile) : Program :=
   program.map fun body => { body with profile := profile }
 
-/-- `p` and `q` answer the profile query `op` makes, if any, the same way: a feature test or
-    an intrinsic's availability. -/
-def Instruction.ProfileAgreement (op : Instruction) (p q : FeatureProfile) : Prop :=
-  match op with
+/-- `p` and `q` answer the profile query `model` makes, if any, the same way: a feature test
+    or an intrinsic's availability. -/
+def RuntimeModel.ProfileAgreement (model : RuntimeModel) (p q : FeatureProfile) : Prop :=
+  match model with
   | .feature featureId => p.evaluate featureId = q.evaluate featureId
   | .intrinsic operation _ => operation.available p = operation.available q
   | _ => True
 
-/-- `p` and `q` agree on every instruction of every method. -/
+/-- `p` and `q` answer the profile query `op` makes, if any, the same way: a feature test, an
+    intrinsic's availability, or the query of the runtime model a call of a method with one runs,
+    resolved in `environment`. -/
+def Instruction.ProfileAgreement (environment : LayoutEnvironment) (op : Instruction)
+    (p q : FeatureProfile) : Prop :=
+  match op with
+  | .feature featureId => p.evaluate featureId = q.evaluate featureId
+  | .intrinsic operation _ => operation.available p = operation.available q
+  | .call method _ => ∀ model, Extraction.runtimeModel environment .call method = some model →
+      model.ProfileAgreement p q
+  | _ => True
+
+/-- `p` and `q` agree on every instruction of every method, in that method's environment. -/
 def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :=
-  ∀ body ∈ program, ∀ op ∈ body.code, op.ProfileAgreement p q
+  ∀ body ∈ program, ∀ op ∈ body.code, op.ProfileAgreement body.environment p q
 
 /-- An intrinsic step observes the profile only through the intrinsic's availability. -/
 theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool)
@@ -41,8 +54,8 @@ theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool)
 #print axioms step_intrinsic
 
 /-- A step under agreeing profiles has the same outcome. -/
-theorem step_profile_eq (op : Instruction) (p q : FeatureProfile)
-    (h : op.ProfileAgreement p q) (returns : Bool)
+theorem step_profile_eq (environment : LayoutEnvironment) (op : Instruction)
+    (p q : FeatureProfile) (h : op.ProfileAgreement environment p q) (returns : Bool)
     (narrow : Option NarrowKind) (pc : Nat)
     (stack : List Value) (memory : Memory) :
     step op returns narrow pc stack memory p =
@@ -125,15 +138,29 @@ theorem Intrinsic.available_of_required (operation : Intrinsic) (p : FeatureProf
       simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
   case avx512DQ operation => cases operation <;> simp_all
 
-theorem Instruction.ProfileAgreement.symm (op : Instruction) (p q : FeatureProfile)
-    (h : op.ProfileAgreement p q) : op.ProfileAgreement q p := by
-  cases op <;> try trivial
+theorem RuntimeModel.ProfileAgreement.symm (model : RuntimeModel) (p q : FeatureProfile)
+    (h : model.ProfileAgreement p q) : model.ProfileAgreement q p := by
+  cases model <;> try trivial
   all_goals exact Eq.symm h
 
-theorem Instruction.ProfileAgreement.trans (op : Instruction) (p q r : FeatureProfile)
-    (hpq : op.ProfileAgreement p q) (hqr : op.ProfileAgreement q r) :
-    op.ProfileAgreement p r := by
+theorem RuntimeModel.ProfileAgreement.trans (model : RuntimeModel) (p q r : FeatureProfile)
+    (hpq : model.ProfileAgreement p q) (hqr : model.ProfileAgreement q r) :
+    model.ProfileAgreement p r := by
+  cases model <;> try trivial
+  all_goals exact Eq.trans hpq hqr
+
+theorem Instruction.ProfileAgreement.symm (environment : LayoutEnvironment) (op : Instruction)
+    (p q : FeatureProfile) (h : op.ProfileAgreement environment p q) :
+    op.ProfileAgreement environment q p := by
   cases op <;> try trivial
+  case call => exact fun model found => (h model found).symm
+  all_goals exact Eq.symm h
+
+theorem Instruction.ProfileAgreement.trans (environment : LayoutEnvironment) (op : Instruction)
+    (p q r : FeatureProfile) (hpq : op.ProfileAgreement environment p q)
+    (hqr : op.ProfileAgreement environment q r) : op.ProfileAgreement environment p r := by
+  cases op <;> try trivial
+  case call => exact fun model found => (hpq model found).trans _ _ _ _ (hqr model found)
   all_goals exact Eq.trans hpq hqr
 
 /-- An intrinsic's availability is fixed by the features it needs: two profiles that agree on
@@ -148,10 +175,20 @@ theorem Intrinsic.available_eq_of_required (operation : Intrinsic) (p q : Featur
   case avx512 operation => cases operation <;> simp_all
   case avx512DQ operation => cases operation <;> simp_all
 
-/-- The profile flags `op` reads: the feature it tests, or every feature its intrinsic needs. -/
-def Instruction.profileReads : Instruction → List Feature
+/-- The profile flags `model` reads: the feature it tests, or every feature its intrinsic
+    needs. -/
+def RuntimeModel.profileReads : RuntimeModel → List Feature
   | .feature featureId => [featureId]
   | .intrinsic operation _ => operation.requiredFeatures
+  | _ => []
+
+/-- The profile flags `op` reads: the feature it tests, every feature its intrinsic needs, or
+    those of the runtime model a call runs, resolved in `environment`. -/
+def Instruction.profileReads (environment : LayoutEnvironment) : Instruction → List Feature
+  | .feature featureId => [featureId]
+  | .intrinsic operation _ => operation.requiredFeatures
+  | .call method _ =>
+    ((Extraction.runtimeModel environment .call method).map RuntimeModel.profileReads).getD []
   -- A new profile-reading op breaks `step_profile_eq`; covering it in `ProfileAgreement`
   -- then breaks `ProfileAgreement.of_flags` until it is listed here.
   | _ => []
@@ -159,7 +196,16 @@ def Instruction.profileReads : Instruction → List Feature
 /-- Every profile flag an instruction of any method in the program reads, the same scope
     `Program.ProfileAgreement` quantifies over. -/
 def Program.profileReads (program : Program) : List Feature :=
-  program.flatMap fun body => body.code.flatMap Instruction.profileReads
+  program.flatMap fun body => body.code.flatMap (Instruction.profileReads body.environment)
+
+/-- Two profiles that agree on every flag a model reads agree on the model. -/
+theorem RuntimeModel.ProfileAgreement.of_flags (model : RuntimeModel) (p q : FeatureProfile)
+    (agree : ∀ featureId ∈ model.profileReads, p.evaluate featureId = q.evaluate featureId) :
+    model.ProfileAgreement p q := by
+  cases model with
+  | feature featureId => exact agree featureId (List.mem_singleton_self featureId)
+  | intrinsic operation _ => exact Intrinsic.available_eq_of_required operation p q agree
+  | _ => trivial
 
 /-- Two profiles that agree on every flag the program reads agree on the whole program. The
     hypothesis is decidable, so `decide` closes it for concrete profiles. -/
@@ -167,15 +213,21 @@ theorem Program.ProfileAgreement.of_flags (program : Program) (p q : FeatureProf
     (agree : ∀ featureId ∈ program.profileReads, p.evaluate featureId = q.evaluate featureId) :
     program.ProfileAgreement p q := by
   intro body member op instruction
-  have reads : ∀ featureId ∈ op.profileReads, p.evaluate featureId = q.evaluate featureId :=
+  have reads : ∀ featureId ∈ op.profileReads body.environment,
+      p.evaluate featureId = q.evaluate featureId :=
     fun featureId read => agree featureId (List.mem_flatMap.mpr
       ⟨body, member, List.mem_flatMap.mpr ⟨op, instruction, read⟩⟩)
   cases op with
   | feature featureId => exact reads featureId (List.mem_singleton_self featureId)
   | intrinsic operation _ => exact Intrinsic.available_eq_of_required operation p q reads
+  | call method _ =>
+    intro model found
+    exact RuntimeModel.ProfileAgreement.of_flags model p q fun featureId read =>
+      reads featureId (by simp [Instruction.profileReads, found, read])
   | _ => trivial
 
 #print axioms Intrinsic.available_eq_of_required
 #print axioms Program.ProfileAgreement.of_flags
+#print axioms RuntimeModel.ProfileAgreement.of_flags
 
 end CIL

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
@@ -12,9 +13,9 @@ using System.Text;
 static class BindingImage
 {
     const int ChunkBytes = 64;
+    const int ChunkBits = 8 * ChunkBytes;
     const int PageChunks = 64;
     const int PageBytes = ChunkBytes * PageChunks;
-    const int ChunkLiteralDigits = 2 * ChunkBytes;
 
     static readonly uint[] InitialState =
         [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
@@ -34,26 +35,34 @@ static class BindingImage
     /// <summary>The lowercase hexadecimal SHA-256 digest of a file.</summary>
     internal static string Digest(byte[] file) => Convert.ToHexStringLower(SHA256.HashData(file));
 
-    /// <summary>The page and image definitions of a file, in the namespace the caller has opened.</summary>
+    /// <summary>
+    /// The page and image definitions of a file, in the namespace the caller has opened; the module must import
+    /// `CIL.Extraction.FixedDigits`. Each page splits one code of its zero-padded bytes into its chunks, so chunks
+    /// that end in the same bytes are not separate numerals that collide in the kernel's caches.
+    /// </summary>
     internal static string Definitions(byte[] file)
     {
         var text = new StringBuilder();
-        var pages = PageCount(file.Length);
-        for (var page = 0; page < pages; page++)
+        for (var page = 0; page < PageCount(file.Length); page++)
         {
             var first = page * PageBytes;
-            var chunks = (Math.Min(file.Length - first, PageBytes) + ChunkBytes - 1) / ChunkBytes;
-            text.Append($"def page{page} : List Nat := [\n");
-            for (var chunk = 0; chunk < chunks; chunk++)
-            {
-                var literal = ChunkLiteral(file, first + chunk * ChunkBytes);
-                text.Append($"  0x{literal}{(chunk + 1 < chunks ? "," : "")}\n");
-            }
-            text.Append("]\n\n");
+            var present = Math.Min(file.Length - first, PageBytes);
+            var chunks = (present + ChunkBytes - 1) / ChunkBytes;
+            var bytes = new byte[chunks * ChunkBytes];
+            file.AsSpan(first, present).CopyTo(bytes);
+            text.Append(CultureInfo.InvariantCulture,
+                $"def page{page} : List Nat := CIL.Extraction.fixedDigitsWithin {ChunkBits} {chunks} {chunks} ");
+            NumeralCode.Append(text, bytes);
+            text.Append(" []\n\n");
         }
-        var names = string.Join(", ", Enumerable.Range(0, pages).Select(page => "page" + page));
-        text.Append($"def image : StrictBinding.ImageBytes := {{ length := {file.Length}, pages := [{names}] }}\n");
-        return text.ToString();
+        return text.Append(ImageDefinition(file.Length)).ToString();
+    }
+
+    /// <summary>The image definition of a file of <paramref name="length"/> bytes over its page definitions.</summary>
+    internal static string ImageDefinition(int length)
+    {
+        var names = string.Join(", ", Enumerable.Range(0, PageCount(length)).Select(page => "page" + page));
+        return $"def image : StrictBinding.ImageBytes := {{ length := {length}, pages := [{names}] }}\n";
     }
 
     /// <summary>
@@ -110,14 +119,6 @@ static class BindingImage
     static string PageTerm(int page, int pages, int length) =>
         page + 1 < pages ? "page" + page : $"(CIL.Crypto.padded page{page} {length})";
 
-    static string ChunkLiteral(byte[] file, int offset)
-    {
-        var chunk = new byte[ChunkBytes];
-        Array.Copy(file, offset, chunk, 0, Math.Min(ChunkBytes, file.Length - offset));
-        var literal = Convert.ToHexStringLower(chunk);
-        return literal.Length == ChunkLiteralDigits ? literal : throw new InvalidOperationException("Bad chunk");
-    }
-
     static string Words(uint[] state) => "[" + string.Join(", ", state.Select(word => $"0x{word:x8}")) + "]";
 
     /// <summary>The hash state before page k, for k up to the page count: the state after the last page.</summary>
@@ -173,5 +174,35 @@ static class BindingImage
         }
         uint[] sum = [a, b, c, d, e, f, g, h];
         return [.. sum.Select((word, index) => state[index] + word)];
+    }
+}
+
+/// <summary>
+/// Lean source for bytes as one big-endian number: one hexadecimal numeral of at most
+/// <see cref="LiteralBytes"/> bytes, or the codes of its first half of numerals and of the rest joined by
+/// <c>Nat.lor</c> and <c>Nat.shiftLeft</c>. One joined term keeps numerals with equal low bytes from colliding in
+/// the kernel's caches, which hash a numeral by its low 64 bits.
+/// </summary>
+static class NumeralCode
+{
+    /// <summary>
+    /// The most bytes one numeral holds: the elaborator parses a numeral in time quadratic in its digits.
+    /// </summary>
+    internal const int LiteralBytes = 256;
+
+    /// <summary>Appends the code of <paramref name="data"/>.</summary>
+    internal static void Append(StringBuilder text, ReadOnlySpan<byte> data)
+    {
+        if (data.Length <= LiteralBytes)
+        {
+            text.Append("0x").Append(Convert.ToHexString(data));
+            return;
+        }
+        var highBytes = (data.Length + LiteralBytes - 1) / LiteralBytes / 2 * LiteralBytes;
+        text.Append("(Nat.lor (Nat.shiftLeft ");
+        Append(text, data[..highBytes]);
+        text.Append(CultureInfo.InvariantCulture, $" {8 * (data.Length - highBytes)}) ");
+        Append(text, data[highBytes..]);
+        text.Append(')');
     }
 }

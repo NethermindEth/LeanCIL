@@ -54,11 +54,11 @@ def RuntimeModel.observerCount : RuntimeModel → Nat
   | .typedTransfer _ store => if store then 2 else 1
   | .skipInit => 1
 
-/-- Whether running `model` consults the method's feature profile. -/
-def RuntimeModel.readsProfile : RuntimeModel → Bool
-  | .intrinsic .. | .feature _ => true
-  | .memory _ | .constant _ | .referenceCompare _ | .referenceSubtract | .typedTransfer ..
-  | .skipInit | .objectConstructor => false
+/-- Whether `profile` may run `model`: an intrinsic must be available in it, and every other
+    model runs under any profile. -/
+def RuntimeModel.available (profile : FeatureProfile) : RuntimeModel → Bool
+  | .intrinsic operation _ => operation.available profile
+  | _ => true
 
 /-- Whether only a call to a runtime method reaches `operation`, so that no opcode emits it.
     `cpblk` and `initblk` emit the block operations, which calls also reach, so they count as
@@ -78,6 +78,6 @@ def MemoryOp.callReached : MemoryOp → Bool
   -- Opcode meanings: blocks, vector loads and stores, arrays and literals
   | .copyBlock _ | .initBlock _
   | .load128 | .load256 | .load512 | .store128 | .store256 | .store512
-  | .arrayAddress .. | .stringLiteral _ => false
+  | .stringLiteral _ => false
 
 end CIL

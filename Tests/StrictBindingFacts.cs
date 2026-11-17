@@ -170,8 +170,7 @@ static partial class StrictBindingFacts
 
 
             """);
-        text.Append(ChunkRow().Replace(BindingImage.Definitions(file), "  joinHalves 0x${high}\n    0x${low}${end}"))
-            .Append('\n');
+        text.Append(FixturePage(file)).Append('\n');
         text.Append(BindingImage.SingleDigestTheorem(file)).Append("#print axioms digest\n\n");
         var identity = Read(file).Last().Text;
         text.Append("/-- The identity of the assembly the image holds. -/\ndef identity : String :=\n")
@@ -500,6 +499,23 @@ static partial class StrictBindingFacts
         return "[" + string.Join("\n" + indent + " ", lines) + "]";
     }
 
+    /// <summary>
+    /// The page and image definitions of a fixture image of at most one page: its 64-byte chunks listed, each split
+    /// into its high and low 32 bytes, so that each line of the checked-in module stays within the line width. The
+    /// page is the same list of the same type that the audit reads through the same reader as a generated page.
+    /// </summary>
+    static string FixturePage(byte[] file)
+    {
+        const int chunkBytes = 64;
+        const int halfDigits = chunkBytes; // two hexadecimal digits per byte of a half chunk
+        var padded = new byte[(file.Length + chunkBytes - 1) / chunkBytes * chunkBytes];
+        file.CopyTo(padded, 0);
+        var rows = padded.Chunk(chunkBytes).Select(chunk => Convert.ToHexStringLower(chunk))
+            .Select(hex => $"  joinHalves 0x{hex[..halfDigits]}\n    0x{hex[halfDigits..]}");
+        return $"def page0 : List Nat := [\n{string.Join(",\n", rows)}\n]\n\n" +
+            BindingImage.ImageDefinition(file.Length);
+    }
+
     /// <summary>The bytes of the image a fixture module holds.</summary>
     internal static byte[] ReadImage(string module)
     {
@@ -519,6 +535,4 @@ static partial class StrictBindingFacts
     [GeneratedRegex(@"^  joinHalves 0x([0-9a-f]{64})\n    0x([0-9a-f]{64}),?$", RegexOptions.Multiline)]
     private static partial Regex Chunk();
 
-    [GeneratedRegex(@"^  0x(?<high>[0-9a-f]{64})(?<low>[0-9a-f]{64})(?<end>,?)$", RegexOptions.Multiline)]
-    private static partial Regex ChunkRow();
 }

@@ -296,7 +296,8 @@ the `MethodContract` and `OutcomeContract` lemmas for a contract indexed by
 `programStaticDescriptors`.
 
 `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in `program.profileReads`,
-which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
+the flags its feature tests and intrinsics read, a call's being those of its method's runtime
+model, which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
 program with no profile reads, `empty : program.profileReads = []` discharges the premise with
 `by simp [empty]`. A separate per-profile extraction is covered once it is shown equal to the
 reprofiled program, by `rfl` when only the profiles differ.

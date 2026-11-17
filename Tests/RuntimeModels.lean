@@ -2,6 +2,7 @@ import CIL.Safety.Execution
 import CIL.Extraction.RuntimeModels
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
+import CIL.ProfileEquivalence
 import Tests.Support
 
 /-!
@@ -170,7 +171,7 @@ example : [CIL.MemoryOp.observeView .spanEmpty, .binaryRead 4 false false false,
     .zeroGuard .negative 32 true, .comparisonGuard .greaterThan 32 true].all
       CIL.MemoryOp.callReached := rfl
 example : [CIL.MemoryOp.copyBlock 1, .initBlock 1, .load128, .load256, .load512, .store128,
-    .store256, .store512, .arrayAddress element, .stringLiteral ""].any
+    .store256, .store512, .stringLiteral ""].any
       CIL.MemoryOp.callReached = false := rfl
 
 
@@ -231,18 +232,18 @@ private def site (method : MethodRef) (opcode : Nat := 40) : RawInstruction :=
 example : catalog.table = ModelTable.ofEntries entries := rfl
 
 -- A modelled call agrees only with its own model: BigMul emitted as DivRem is refused.
-example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 false)) = true := by
+example : catalog.siteAgrees {} {} (site bigMul) (.memory (.bigMul64 false)) = true := by
   decide +kernel
-example : catalog.siteAgrees {} (site bigMul) (.memory (.divRemOut 64)) = false := by
+example : catalog.siteAgrees {} {} (site bigMul) (.memory (.divRemOut 64)) = false := by
   decide +kernel
 -- A call keeps its operand; `ManagedCallsValid` decides whether a model or a link enters it.
-example : catalog.siteAgrees {} (site bigMul) (.call bigMul) = true := by decide +kernel
-example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 true)) = false := by
+example : catalog.siteAgrees {} {} (site bigMul) (.call bigMul) = true := by decide +kernel
+example : catalog.siteAgrees {} {} (site bigMul) (.memory (.bigMul64 true)) = false := by
   decide +kernel
 
 -- An entry reached by name, opcode and owner still refuses a reference its resolve rejects.
 example : catalog.table.find {} .call signedBigMul = none := by decide +kernel
-example : catalog.siteAgrees {} (site signedBigMul) (.memory (.bigMul64 false)) = false := by
+example : catalog.siteAgrees {} {} (site signedBigMul) (.memory (.bigMul64 false)) = false := by
   decide +kernel
 example : catalog.table.find {} .call { spanLength word with hasThis := false } = none := by
   decide +kernel
@@ -255,21 +256,21 @@ private def spanIsEmpty : MethodRef :=
 example : misfiled.find {} .call spanIsEmpty = none := by decide +kernel
 
 -- A call the table does not model keeps its call and may emit no model.
-example : catalog.siteAgrees {} (site divRem) (.call divRem) = true := by decide +kernel
-example : catalog.siteAgrees {} (site divRem) (.memory (.divRemOut 64)) = false := by
+example : catalog.siteAgrees {} {} (site divRem) (.call divRem) = true := by decide +kernel
+example : catalog.siteAgrees {} {} (site divRem) (.memory (.divRemOut 64)) = false := by
   decide +kernel
 
 -- The opcode and the owner are part of the key; a generic owner matches by its head.
 example : catalog.table.find {} .newobj bigMul = none := by decide +kernel
 example : catalog.table.find {} .call { bigMul with owner := runtimeType "System.Maths" } =
     none := by decide +kernel
-example : catalog.siteAgrees {} (site (spanLength word)) (.memory .spanLength) = true := by
+example : catalog.siteAgrees {} {} (site (spanLength word)) (.memory .spanLength) = true := by
   decide +kernel
 example : catalog.table.find {} .call
     { spanLength word with owner := runtimeType "System.String" } = none := by decide +kernel
-example : catalog.siteAgrees {} (site (spanLength (runtimeType "System.Byte")))
+example : catalog.siteAgrees {} {} (site (spanLength (runtimeType "System.Byte")))
     (.memory .spanLength) = true := by decide +kernel
-example : catalog.siteAgrees {} (site bigMul 115) (.memory (.bigMul64 false)) = false := by
+example : catalog.siteAgrees {} {} (site bigMul 115) (.memory (.bigMul64 false)) = false := by
   decide +kernel
 
 /-- A method whose only instruction is `instruction`. -/
@@ -279,9 +280,9 @@ private def method (instruction : RawInstruction) : RawMethod :=
     initLocals := true, maxStack := 3, genericParameters := [], code := [instruction] }
 
 -- Only live sites are checked.
-example : ModelsAgree catalog {} (method (site bigMul)) [false] [.memory (.divRemOut 64)] := by
+example : ModelsAgree catalog {} {} (method (site bigMul)) [false] [.memory (.divRemOut 64)] := by
   decide +kernel
-example : ¬ ModelsAgree catalog {} (method (site bigMul)) [true] [.memory (.divRemOut 64)] := by
+example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [true] [.memory (.divRemOut 64)] := by
   decide +kernel
 
 -- Two entries for one slot are refused when the table is built.
@@ -369,6 +370,180 @@ example : UnsafeCallsValid [] (method ⟨0, 38, .none⟩) [true] [.pop] := by de
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site bigMul)) [true]
     (emitting (.call bigMul {}) []) := by decide +kernel
 
+-- The integer helpers of `System.Math` and of each integer type.
+private def int : TypeExpr := runtimeType "System.Int32"
+private def mathOwner : TypeExpr := runtimeType "System.Math"
+
+/-- `owner::name` taking `arity` values of `type` and returning `result`. -/
+private def helper (name : MetadataName) (type : TypeExpr) (arity : Nat)
+    (result : TypeExpr := type) (owner : TypeExpr := mathOwner) : MethodRef :=
+  { owner, name, hasThis := false, genericArity := 0, returnType := result,
+    parameters := List.replicate arity type }
+
+private def mathMin : MethodRef := helper name!"Min" int 2
+private def mathMax : MethodRef := helper name!"Max" int 2
+private def mathClamp : MethodRef := helper name!"Clamp" int 3
+private def mathAbs : MethodRef := helper name!"Abs" int 1
+private def mathSign : MethodRef := helper name!"Sign" (runtimeType "System.Int64") 1 int
+
+-- Each helper resolves to its scalar intrinsic at the width and signedness of its type.
+example : runtimeModel {} .call mathMin = some (.intrinsic (.scalar (.math .min 32 true)) 2) := by
+  decide +kernel
+example : runtimeModel {} .call mathMax = some (.intrinsic (.scalar (.math .max 32 true)) 2) := by
+  decide +kernel
+example : runtimeModel {} .call mathClamp =
+    some (.intrinsic (.scalar (.math .clamp 32 true)) 3) := by decide +kernel
+example : runtimeModel {} .call mathAbs = some (.intrinsic (.scalar (.math .abs 32 true)) 1) := by
+  decide +kernel
+example : runtimeModel {} .call mathSign =
+    some (.intrinsic (.scalar (.math .sign 64 true)) 1) := by decide +kernel
+example : runtimeModel {} .call (helper name!"Min" word 2) =
+    some (.intrinsic (.scalar (.math .min 64 false)) 2) := by decide +kernel
+example : runtimeModel {} .call (helper name!"Max" (runtimeType "System.IntPtr") 2) =
+    some (.intrinsic (.scalar (.math .max 64 true)) 2) := by decide +kernel
+example : runtimeModel {} .call (helper name!"Max" (runtimeType "System.Byte") 2) =
+    some (.intrinsic (.scalar (.math .max 8 false)) 2) := by decide +kernel
+-- The integer type that declares a helper is modelled like `System.Math`.
+example : runtimeModel {} .call (helper name!"Max" int 2 (owner := int)) =
+    some (.intrinsic (.scalar (.math .max 32 true)) 2) := by decide +kernel
+
+-- A receiver, a generic arity or method argument, a wrong arity, mixed or unmodelled types, a
+-- wrong result, an unsigned `Abs`, or another owner, assembly or opcode has no model.
+example : runtimeModel {} .call { mathMax with hasThis := true } = none := by decide +kernel
+example : runtimeModel {} .call { mathMax with genericArity := 1 } = none := by decide +kernel
+example : runtimeModel {} .call { mathMax with methodArguments := [int] } = none := by
+  decide +kernel
+example : runtimeModel {} .call (helper name!"Max" int 3) = none := by decide +kernel
+example : runtimeModel {} .call (helper name!"Abs" int 2) = none := by decide +kernel
+example : runtimeModel {} .call { mathMax with parameters := [int, runtimeType "System.Int64"] } =
+    none := by decide +kernel
+example : runtimeModel {} .call (helper name!"Max" (runtimeType "System.Boolean") 2) = none := by
+  decide +kernel
+example : runtimeModel {} .call (helper name!"Max" (.atom "Fixture" "System.Int32") 2) = none := by
+  decide +kernel
+example : runtimeModel {} .call { mathMax with returnType := runtimeType "System.Int64" } =
+    none := by decide +kernel
+example : runtimeModel {} .call (helper name!"Sign" int 1) = some
+    (.intrinsic (.scalar (.math .sign 32 true)) 1) := by decide +kernel
+example : runtimeModel {} .call (helper name!"Sign" (runtimeType "System.Int16") 1) = none := by
+  decide +kernel
+example : runtimeModel {} .call (helper name!"Abs" word 1) = none := by decide +kernel
+example : runtimeModel {} .call (helper name!"Abs" word 1 (owner := word)) = none := by
+  decide +kernel
+example : runtimeModel {} .call (helper name!"Max" int 2 (owner := runtimeType "System.Int64")) =
+    none := by decide +kernel
+example : runtimeModel {} .call
+    (helper name!"Max" int 2 (owner := .atom "Fixture" "System.Math")) = none := by decide +kernel
+example : runtimeModel {} .call
+    (helper name!"Max" int 2 (owner := .atom "System.Private.CoreLib" "System.Math")) = none := by
+  decide +kernel
+example : runtimeModel {} .call (helper name!"Max" int 2 (owner := runtimeType "System.Maths")) =
+    none := by decide +kernel
+example : runtimeModel {} .newobj mathMax = none := by decide +kernel
+
+-- A helper site keeps its call; the lowered intrinsic is refused there, and a call or intrinsic
+-- of another helper is refused where the site calls `Min`, which a table without the helpers
+-- accepted.
+private def maxLowered : CIL.Instruction := .intrinsic (.scalar (.math .max 32 true)) 2
+example : RuntimeModelsAgree (method (site mathMax)) [true] (emitting (.call mathMax {}) []) := by
+  decide +kernel
+example : ¬ RuntimeModelsAgree (method (site mathMax)) [true] (emitting maxLowered []) := by
+  decide +kernel
+example : ¬ RuntimeModelsAgree (method (site mathMin)) [true] (emitting maxLowered []) := by
+  decide +kernel
+example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+    {} {} (method (site mathMin)) [true] [maxLowered] := by decide +kernel
+example : ManagedCallsValid [] [] (callModelled body) (method (site mathMin)) [true]
+    (emitting (.call mathMin {}) []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site mathMin)) [true]
+    (emitting (.call mathMax {}) []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site mathMin)) [true]
+    (emitting (.call mathMin {}) [(0, .direct 0)]) := by decide +kernel
+
+-- A modelled intrinsic must be available in the method's profile: an AVX2 entry is refused at a
+-- site whose profile lacks AVX2 and accepted where it has it.
+/-- `Avx2.And` on two 256-bit vectors, which a table below models. -/
+private def avx2And : MethodRef :=
+  { owner := runtimeType "System.Runtime.Intrinsics.X86.Avx2", name := name!"And",
+    hasThis := false, genericArity := 0, returnType := word, parameters := [word, word] }
+private def avx2Catalog : ModelCatalog :=
+  { table := model_table% [ModelEntry.exact .call avx2And (.intrinsic (.avx2 .band) 2)],
+    lowered := fun _ => none }
+example : avx2Catalog.siteAgrees {} {} (site avx2And) (.call avx2And {}) = false := by
+  decide +kernel
+example : avx2Catalog.siteAgrees {} { avx2 := true } (site avx2And) (.call avx2And {}) = true := by
+  decide +kernel
+
+-- The profile query of a call is its model's: the helpers read no flag, so every two profiles
+-- agree on a program that calls one.
+/-- A method that returns `Math.Max` of its two arguments. -/
+private def maxProgram : CIL.Program :=
+  [{ body with code := [.ldarg 0, .ldarg 1, .call mathMax {}, .ret], returnsValue := true }]
+example : CIL.Program.profileReads maxProgram = [] := by decide +kernel
+example : CIL.Program.ProfileAgreement maxProgram {} { avx2 := true } :=
+  CIL.Program.ProfileAgreement.of_flags _ _ _ (by decide +kernel)
+
+-- Each vector helper resolves to its intrinsic.
+example : runtimeModel {} .call createScalarUnsafeMethod =
+    some (.intrinsic (.vector .createScalarUnsafe64) 1) := by decide +kernel
+example : runtimeModel {} .call getElement128Method =
+    some (.intrinsic (.vector (.extract64 128)) 2) := by decide +kernel
+example : runtimeModel {} .call getElement256Method =
+    some (.intrinsic (.vector (.extract64 256)) 2) := by decide +kernel
+
+-- A receiver, another generic arity, method argument, element type, vector width, arity or
+-- result, or another assembly or opcode has no model.
+/-- `Vector128<ulong>` and `Vector256<ulong>`. -/
+private def vector128 : TypeExpr := ulongVectorOf "System.Runtime.Intrinsics.Vector128`1"
+private def vector256 : TypeExpr := ulongVectorOf "System.Runtime.Intrinsics.Vector256`1"
+example : runtimeModel {} .call { createScalarUnsafeMethod with hasThis := true } = none := by
+  decide +kernel
+example : runtimeModel {} .call { createScalarUnsafeMethod with parameters := [int] } = none := by
+  decide +kernel
+example : runtimeModel {} .call { createScalarUnsafeMethod with returnType := vector256 } =
+    none := by decide +kernel
+example : runtimeModel {} .call { getElement128Method with genericArity := 0 } = none := by
+  decide +kernel
+example : runtimeModel {} .call { getElement128Method with methodArguments := [int] } = none := by
+  decide +kernel
+example : runtimeModel {} .call { getElement128Method with parameters := [vector256, int] } =
+    none := by decide +kernel
+example : runtimeModel {} .call { getElement128Method with parameters := [vector128] } = none := by
+  decide +kernel
+example : runtimeModel {} .call { getElement128Method with returnType := int } = none := by
+  decide +kernel
+example : runtimeModel {} .call
+    { getElement128Method with owner := runtimeType "System.Runtime.Intrinsics.Vector128" } =
+    none := by decide +kernel
+example : runtimeModel {} .call { getElement128Method with owner := getElement256Method.owner } =
+    none := by decide +kernel
+example : runtimeModel {} .call
+    { createScalarUnsafeMethod with owner := getElement256Method.owner } = none := by
+  decide +kernel
+example : runtimeModel {} .call
+    { createScalarUnsafeMethod with owner := runtimeType "System.Runtime.Intrinsics.Vector128" } =
+    none := by decide +kernel
+example : runtimeModel {} .newobj createScalarUnsafeMethod = none := by decide +kernel
+
+-- A vector helper site keeps its call; the intrinsic it was lowered to is refused there, which a
+-- table without the helpers accepted.
+private def extractLowered : CIL.Instruction := .intrinsic (.vector (.extract64 128)) 2
+private def createLowered : CIL.Instruction := .intrinsic (.vector .createScalarUnsafe64) 1
+example : RuntimeModelsAgree (method (site getElement128Method)) [true]
+    (emitting (.call getElement128Method {}) []) := by decide +kernel
+example : ¬ RuntimeModelsAgree (method (site getElement128Method)) [true]
+    (emitting extractLowered []) := by decide +kernel
+example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+    {} {} (method (site getElement128Method)) [true] [extractLowered] := by decide +kernel
+example : ¬ RuntimeModelsAgree (method (site createScalarUnsafeMethod)) [true]
+    (emitting createLowered []) := by decide +kernel
+example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+    {} {} (method (site createScalarUnsafeMethod)) [true] [createLowered] := by decide +kernel
+example : ManagedCallsValid [] [] (callModelled body) (method (site getElement256Method)) [true]
+    (emitting (.call getElement256Method {}) []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site getElement256Method)) [true]
+    (emitting (.call getElement256Method {}) [(0, .direct 0)]) := by decide +kernel
+
 end Table
 
 /-- The receiver an object constructor call consumes. -/
@@ -379,5 +554,94 @@ example : step { body with code := [.call CIL.Extraction.objectConstructorMethod
     (.call CIL.Extraction.objectConstructorMethod {}) 0 [] frame [receiver] heapMemory =
       step body .pop 0 [] frame [receiver] heapMemory := by
   cil_kernel_rfl
+
+-- Each helper call steps as the scalar intrinsic it was lowered to, faults included.
+/-- A body whose only instruction is a call of `method`, with no link. -/
+private def calling (method : CIL.Extraction.MethodRef) : CIL.Method :=
+  { body with code := [.call method {}] }
+private def int32 (value : Int) : Value := .scalar (.i32 (BitVec.ofInt 32 value))
+example : step (calling Table.mathMin) (.call Table.mathMin {}) 0 [] frame [int32 3, int32 (-2)]
+      heapMemory =
+    step body (.intrinsic (.scalar (.math .min 32 true)) 2) 0 [] frame [int32 3, int32 (-2)]
+      heapMemory := by cil_kernel_rfl
+example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame [int32 3, int32 (-2)]
+      heapMemory =
+    step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame [int32 3, int32 (-2)]
+      heapMemory := by cil_kernel_rfl
+example : step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
+      [int32 9, int32 1, int32 5] heapMemory =
+    step body (.intrinsic (.scalar (.math .clamp 32 true)) 3) 0 [] frame
+      [int32 9, int32 1, int32 5] heapMemory := by cil_kernel_rfl
+example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame [int32 (-7)]
+      heapMemory =
+    step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-7)]
+      heapMemory := by cil_kernel_rfl
+example : step (calling Table.mathSign) (.call Table.mathSign {}) 0 [] frame
+      [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory =
+    step body (.intrinsic (.scalar (.math .sign 64 true)) 1) 0 [] frame
+      [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory := by cil_kernel_rfl
+example : (step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
+    [int32 3, int32 (-2)] heapMemory).toBool := by cil_kernel_rfl
+-- Bounds out of order and the most negative `Abs` fault as the intrinsic does.
+example : step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
+      [int32 1, int32 5, int32 9] heapMemory =
+    step body (.intrinsic (.scalar (.math .clamp 32 true)) 3) 0 [] frame
+      [int32 1, int32 5, int32 9] heapMemory := by cil_kernel_rfl
+example : (step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
+    [int32 1, int32 5, int32 9] heapMemory).toBool = false := by cil_kernel_rfl
+example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame
+      [int32 (-2147483648)] heapMemory =
+    step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-2147483648)]
+      heapMemory := by cil_kernel_rfl
+-- A modelled call leaves unspecified operands to its model, so it faults as the intrinsic does.
+example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
+      [.scalar (.v128Low64 7), int32 1] heapMemory =
+    step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame
+      [.scalar (.v128Low64 7), int32 1] heapMemory := by cil_kernel_rfl
+
+section
+open CIL.Extraction (createScalarUnsafeMethod getElement128Method getElement256Method)
+
+-- Each vector helper call steps as its intrinsic. `GetElement` reads lane 0 of a vector known
+-- only in its low lane, where the call faulted before it left its operands to its model.
+example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
+      [int32 0, .scalar (.v128Low64 7)] heapMemory =
+    step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
+      [int32 0, .scalar (.v128Low64 7)] heapMemory := by cil_kernel_rfl
+example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
+      [int32 0, .scalar (.v128Low64 7)] heapMemory =
+    .ok (.next 1 [.scalar (.i64 7)] frame heapMemory) := by cil_kernel_rfl
+example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
+      [int32 1, .scalar (.v128Low64 7)] heapMemory =
+    step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
+      [int32 1, .scalar (.v128Low64 7)] heapMemory := by cil_kernel_rfl
+/-- A 256-bit vector whose four 64-bit lanes hold 1, 2, 3 and 4, lowest first. -/
+private def lanes : BitVec 256 := CIL.Vector.pack256 1 2 3 4
+example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
+      [int32 2, .scalar (.v256 lanes)] heapMemory =
+    step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
+      [int32 2, .scalar (.v256 lanes)] heapMemory := by cil_kernel_rfl
+example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
+      [int32 2, .scalar (.v256 lanes)] heapMemory =
+    .ok (.next 1 [.scalar (.i64 3)] frame heapMemory) := by cil_kernel_rfl
+example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
+      [int32 4, .scalar (.v256 lanes)] heapMemory =
+    step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
+      [int32 4, .scalar (.v256 lanes)] heapMemory := by cil_kernel_rfl
+example : step (calling createScalarUnsafeMethod) (.call createScalarUnsafeMethod {}) 0 [] frame
+      [.scalar (.i64 7)] heapMemory =
+    step body (.intrinsic (.vector .createScalarUnsafe64) 1) 0 [] frame [.scalar (.i64 7)]
+      heapMemory := by cil_kernel_rfl
+
+/-- `GetElement(CreateScalarUnsafe(value), 0)` as two calls, as an extraction emits it. -/
+private def unsafeLow : CIL.Program :=
+  [{ body with
+      code := [.ldarg 0, .call createScalarUnsafeMethod {}, .ldc_i4 0,
+        .call getElement128Method {}, .ret],
+      returnsValue := true }]
+example : (invoke unsafeLow 8 0 [.scalar (.i64 7)] Memory.empty).map Prod.snd =
+    .ok [.scalar (.i64 7)] := by cil_kernel_rfl
+
+end
 
 end Tests.RuntimeModels

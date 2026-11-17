@@ -1377,10 +1377,13 @@ elab_rules : tactic
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else if let #[link, model] := linkFacts then
-        -- A modelled call rewrites by one equation and leaves a step the kernel evaluates.
+        -- A modelled call rewrites by one equation and leaves a step the kernel evaluates; one
+        -- whose model is an intrinsic the kernel cannot evaluate steps as that intrinsic.
         `(tactic| cil_strict (first
           | (refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
              rfl)
+          | (refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
+             cil_checked_intrinsic [$facts:term,*])
           | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
       else if let (true, #[link]) := (operation == ``CIL.Instruction.call, linkFacts) then
         -- A directly linked call rewrites by one equation that never mentions the model.

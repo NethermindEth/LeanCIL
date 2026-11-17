@@ -35,9 +35,12 @@ validated layouts.
 
 Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
 `ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes, and so must
-each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `stelem`, `ldelem.ref` and
-`stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed access takes its
-element's width from the element shape of the method's checked layouts. Each `ldobj`
+each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `stelem`, `ldelema`,
+`ldelem.ref` and `stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed
+access or element address takes its element's width from the element shape of the method's checked
+layouts. An `ldelema` decodes read-only exactly when `readonly.` precedes it, and `readonly.`
+decodes to `nop`; no instruction but `ldelema` decodes after `readonly.`, and the scalar check also
+refuses a translated instruction there (`readOnlyDecodedMatches`). Each `ldobj`
 and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
 the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
@@ -120,11 +123,13 @@ assembly's identity with its pin, lists the identity of every pinned assembly (`
 `Extracted.assemblies`) and names the identity each of its slices spells.
 
 Every byte list of this evidence (body bytes, rows, heap entries, header bytes and UTF-8 names) is written
-as `CIL.Extraction.fixedBytes count 0x...` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
-and one hexadecimal numeral holding the bytes big-endian, with a list longer than 256 bytes written as such
-literals of at most 256 bytes joined by `++`. Elaborating a numeral costs a few allocations, where a list
-literal costs a numeral and a constructor per byte; the kernel computes the list when a check reads it,
-splitting each numeral in halves down to words of eight bytes, and the checks see the same list values.
+as `CIL.Extraction.fixedBytes count code` ([FixedDigits](../CIL/Extraction/FixedDigits.lean), specified in
+[ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
+and one number holding the bytes big-endian. The code of a list of at most 256 bytes is one hexadecimal numeral,
+and a longer list's code joins numerals of at most 256 bytes with `Nat.lor` and `Nat.shiftLeft`. Elaborating a
+numeral costs a few allocations, where a list literal costs a numeral and a constructor per byte; the kernel
+computes the list when a check reads it, splitting the code in halves down to words of eight bytes, and the
+checks see the same list values.
 
 ### Names tied to bytes by equations
 

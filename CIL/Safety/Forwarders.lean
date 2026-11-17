@@ -193,8 +193,9 @@ theorem step_call_loaded {body : CIL.Method} {method : CIL.Extraction.MethodRef}
     List.take_of_length_le (by simp)
   have exposed : unspecifiedOperands arguments.length arguments.reverse = false := by
     rw [unspecifiedOperands, taken, List.any_reverse, known]
-  simp only [step, observerCount, arity, exposed, Bool.false_eq_true, ↓reduceIte, linked, plain,
-    List.length_reverse, Nat.lt_irrefl, taken, List.reverse_reverse,
+  have unobserved : unspecifiedOperands 0 arguments.reverse = false := rfl
+  simp only [step, observerCount, observedCall, unobserved, arity, exposed, Bool.false_eq_true,
+    ↓reduceIte, linked, plain, List.length_reverse, Nat.lt_irrefl, taken, List.reverse_reverse,
     checkedValues_of_valid valid, Bind.bind, Except.bind, Pure.pure, Except.pure]
   rw [List.drop_of_length_le (by simp)]
 

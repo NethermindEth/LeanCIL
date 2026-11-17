@@ -217,6 +217,7 @@ internal static class LeanEmitter
                 {
                     NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
                     TypedElementAccess access => access with { Element = genericEvidence.ArrayElementOf(m, i) },
+                    ElementAddress address => address with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                     StaticFieldInstruction access => access with { Field = genericEvidence.FieldReferenceOf(m, pc) },
                     Newobj construction =>
@@ -229,7 +230,7 @@ internal static class LeanEmitter
                 ops.Add(reachable.Contains(i) ? Translated(i, ops.Count) : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
-            var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
+            var needsOpaqueLocals = ops.Any(op => op is ModelCall { Model: VectorCreateScalarUnsafe64 });
             int[] opaqueLocals = needsOpaqueLocals ? [.. m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
                     !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)] : [];

@@ -167,7 +167,8 @@ internal static class VerificationSuites
             "less than 1.35 times from 8 to 32 to 128 to 512 struct types; locating a class field on an " +
             "instance, and rejecting a field whose owner is outside the instance's lineage, at a per-base cost " +
             "that grows less than 1.35 times from 2 to 8 to 32 bases; the kernel check of one body at a cost " +
-            "independent of the methods and metadata rows of its extraction; the kernel's selection of a calli " +
+            "independent of the methods and metadata rows of its extraction, and at a per-instruction cost that " +
+            "does not grow with the string tokens of the body; the kernel's selection of a calli " +
             "body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the " +
             "method decoded from a raw body at a per-instruction kernel cost that does not grow with the body, " +
             "and the method cil_decoded_method defines from that body at a per-instruction cost that does not " +

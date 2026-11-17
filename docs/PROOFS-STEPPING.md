@@ -260,11 +260,14 @@ width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and 
   simplified. A `.call` with no link runs its method's runtime model; `cil_runtime_models body`
   states `body_model{pc} : runtimeModel body.environment .call method = some model` at each such
   pc of a named body, and the `reduceRuntimeModel` simproc evaluates the lookup for a literal or
-  template body. With both facts the stepper rewrites by `step_call_model`, and a directly linked
+  template body, or for any environment when the method reference is closed. With both facts the stepper rewrites by `step_call_model`, and a directly linked
   `.call` by `step_call_direct`, so the kernel checks one equation whose right side no longer
   reads the link and a linked call never mentions the model; `step_call_eq` remains for a call
   whose link no fact decides. `cil_checked_steps` steps a call without a link on in the same
-  method, as any instruction that continues there.
+  method, as any instruction that continues there. `step_call_intrinsic` rewrites such a call
+  whose model is an intrinsic to the step of that intrinsic, since a call without a link checks
+  only the operands its model observes; the stepper uses it, with the supplied intrinsic facts,
+  when the kernel cannot evaluate the model's step.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies

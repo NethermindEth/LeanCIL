@@ -50,10 +50,16 @@ foreach (var name in new[] { "Element", "Read", "Write" })
         """);
     evidence.Add(proof, "PASS runtime and certified array reference: " + name);
     if (name != "Element") continue;
-    const string target = ".arrayAddress .signed32";
-    if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing address mutation target");
+    // The address is decoded from its body, so a forgery names another element at its raw token, which the certified
+    // stack states bind.
+    if (!source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+        throw new Exception("Element address is not decoded from its body");
+    const string target = """opcode := 143, operand := .type (.atom Extraction.runtimeScope "System.Int32")""";
+    var scalars = NarrowEvidence(source, "method0_scalars_validated");
+    if (!scalars.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing address mutation target");
     var forged = Path.Combine(root, "ForgedElement.lean");
-    File.WriteAllText(forged, source.Replace(target, ".arrayAddress .unsigned32", StringComparison.Ordinal));
+    File.WriteAllText(forged, scalars.Replace(target, target.Replace("Int32", "UInt32", StringComparison.Ordinal),
+        StringComparison.Ordinal));
     var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
         throw new Exception("Forged element address was not rejected by scalar evidence: " + rejection.Output);

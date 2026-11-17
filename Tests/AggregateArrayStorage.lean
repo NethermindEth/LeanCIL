@@ -62,7 +62,7 @@ theorem expired :
 
 /-- A readonly element address retains its restriction on subsequent writes. -/
 theorem readonly_address :
-    memoryInstruction (.arrayAddress element false) [.scalar (.i32 1), .array view] memory =
+    elementAddressInstruction (.value element) true [.scalar (.i32 1), .array view] memory =
       .ok (memory, [.readOnlyReference (.address ⟨0, 16⟩)]) := rfl
 #print axioms readonly_address
 

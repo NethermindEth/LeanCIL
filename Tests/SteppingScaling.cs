@@ -19,6 +19,7 @@ const double HypothesisCostLimit = 100.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
+const int VirtualSites = 16;
 const string Int32Type = ".atom CIL.Extraction.runtimeScope \"System.Int32\"";
 const string Int64Type = ".atom CIL.Extraction.runtimeScope \"System.Int64\"";
 const string NodeType = ".object \"Examples\" \"Examples.Node\"";
@@ -71,7 +72,9 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("tablecalls", [16, 64, 256], true), ("objects", [16, 64, 256], false), ("statics", [16, 64, 256], false),
     ("constructions", [16, 64, 256], false), ("objectconstructors", [16, 64, 256], false),
     ("elements", [16, 64, 256], false), ("typedelements", [16, 64, 256], false),
-    ("typedsteps", [16, 64, 256], false)
+    ("typedsteps", [16, 64, 256], false), ("addresses", [16, 64, 256], false),
+    ("addresssteps", [16, 64, 256], false), ("instance", [16, 64, 256], false), ("virtual", [1, 16, 64], false),
+    ("intrinsiccalls", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -110,7 +113,8 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
     var measurements = workload.OrderBy(row => row.Size).ToArray();
     // A lookup outside a driver reads every hypothesis in scope, so only the hypothesis limit bounds it.
     for (var index = 1; index < measurements.Length && workload.Key != "hypothesesdirect"; index++)
-        CheckGrowth(measurements[index - 1], measurements[index], workload.Key is "arguments" or "homes");
+        CheckGrowth(measurements[index - 1], measurements[index], workload.Key is "arguments" or "homes",
+            workload.Key == "virtual");
     if (workload.Key.StartsWith("hypotheses"))
         CheckHypothesisCost(measurements[0], measurements[^1]);
 }
@@ -145,6 +149,15 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // then copies one struct element of a second array onto itself. Each step evaluates the typed access
 // from element facts, its shape from the literal body's layouts; the generated shape facts are in scope
 // but leave the cost unchanged. The typed steps body is the same body stepped by one fact per access.
+// The instance body makes one receiver-checked instance call on its object argument per cycle, into a
+// method that returns at once, through the link its instruction implies. The virtual body makes
+// `VirtualSites` virtual calls on it through a named dispatch table whose size is the row's size, with
+// the receiver's class last, so each call reads one runtime type fact and looks its class up in the table.
+// The intrinsic calls body computes `Math.Max` of its two int64 arguments and pops it per cycle, so each
+// call reads that its pc has no link and the runtime model fact of its pc, a scalar intrinsic.
+// The addresses body forms a writable and a readonly address of one int32 element of its array argument
+// and pops each, per cycle, each stepped by a fact derived from the element fact and the generated shape
+// fact; the address steps body steps the same body by one supplied fact per address.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
@@ -166,11 +179,16 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
     "objectconstructors" => ([], [".ldarg 0", ".call CIL.Extraction.objectConstructorMethod {}"],
         [".ldc_i4 0", ".ret"]),
+    "instance" => ([], [".ldarg 0", ".callInstance 1 1"], [".ldc_i4 0", ".ret"]),
+    "virtual" => ([], [".ldarg 0", ".callVirtual dispatch 1"], [".ldc_i4 0", ".ret"]),
+    "intrinsiccalls" => ([], [".ldarg 0", ".ldarg 1", ".call maxMethod {}", ".pop"], [".ldarg 0", ".ret"]),
     "elements" => ([], [".ldarg 0", ".ldarg 1", ".ldelem .i4", ".pop", ".ldarg 0", ".ldarg 1",
         ".ldarg 1", ".stelem .i4"], [".ldc_i4 0", ".ret"]),
     "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
         ".ldarg 1", ".ldarg 1", $".stelem_any ({Int32Type})", ".ldarg 2", ".ldarg 1", ".ldarg 2", ".ldarg 1",
         $".ldelem_any ({PairType})", $".stelem_any ({PairType})"], [".ldc_i4 0", ".ret"]),
+    "addresses" or "addresssteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelema ({Int32Type}) false", ".pop",
+        ".ldarg 0", ".ldarg 1", ".nop", $".ldelema ({Int32Type}) true", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -211,6 +229,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         : workload == "depth" ? depth - 1
         : workload is "arguments" or "homes" ? parameters - 1
         : snapshots ? requested - SnapshotLocalCount
+        : workload == "virtual" ? VirtualSites
         : Math.Max(1, (requested - opening.Length - ending.Length) / cycle.Length);
     var operations = workload switch
     {
@@ -267,6 +286,18 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         /-- The body's link table, every call entering method 1. -/
         @[cil_code] def callLinks : List (Nat × CIL.Link) := {{linkTable}}
         """ + "\n" : "") : "";
+    // The dispatch table of the virtual body: one class per entry, each entering method 1.
+    var dispatchDefinition = workload == "virtual" ? $$"""
+        /-- The virtual body's dispatch table; the receiver's class is its last entry. -/
+        @[cil_code] def dispatch : List (CIL.Extraction.TypeExpr × Nat) :=
+          [{{string.Join(", ", Enumerable.Range(0, requested).Select(entry => $"({VirtualClass(entry)}, 1)"))}}]
+        """ + "\n" : "";
+    var maxDefinition = workload == "intrinsiccalls" ? $$"""
+        /-- `Math.Max(long, long)`, which the runtime table models as a scalar intrinsic. -/
+        def maxMethod : CIL.Extraction.MethodRef :=
+          { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"Max", hasThis := false,
+            genericArity := 0, returnType := {{Int64Type}}, parameters := [{{Int64Type}}, {{Int64Type}}] }
+        """ + "\n" : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -276,10 +307,12 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
         "allocation" or "constructions" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
-        "objects" or "objectconstructors" =>
+        "objects" or "objectconstructors" or "instance" or "virtual" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         "elements" => "import CIL.Safety.ArrayContents\n",
-        "typedelements" or "typedsteps" => "import CIL.Safety.ArrayContents\nimport CIL.Safety.ResolutionFacts\n",
+        "intrinsiccalls" => "import CIL.Safety.ResolutionFacts\n",
+        "typedelements" or "typedsteps" or "addresses" or "addresssteps" =>
+            "import CIL.Safety.ArrayContents\nimport CIL.Safety.ResolutionFacts\n",
         _ => ""
     };
     // The objects body reads field 1 of a class, an int64 in the slot at model offset 8; a step that
@@ -309,7 +342,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         _ => ""
     };
     // The raw view names each element type a typed access of the body names, as an extraction's does.
-    var rawView = workload is "typedelements" or "typedsteps" ? $$"""
+    var rawView = workload is "addresses" or "addresssteps" ? $$"""
+        /-- The element address opcode of `body` with its type operand. -/
+        def bodyClosed : CIL.Extraction.RawMethod :=
+          { token := 1, owner := "Examples", hasThis := false, explicitThis := false, callingConvention := 0,
+            attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+            initLocals := true, maxStack := 2, genericParameters := [],
+            code := [⟨0, 143, .type ({{Int32Type}})⟩] }
+        """ + "\n" : workload is "typedelements" or "typedsteps" ? $$"""
         /-- The element opcodes of `body` with their type operands. -/
         def bodyClosed : CIL.Extraction.RawMethod :=
           { token := 1, owner := "Examples", hasThis := false, explicitThis := false, callingConvention := 0,
@@ -342,7 +382,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        {{fieldDefinitions}}{{staticField}}{{callDefinitions}}{{bodyDefinition}}
+        {{fieldDefinitions}}{{staticField}}{{callDefinitions}}{{dispatchDefinition}}{{maxDefinition}}{{bodyDefinition}}
         """ + "\n" + (workload is "calls" or "tablecalls" ? """
         /-- The callee every call of the calls body enters; it returns its argument. -/
         def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
@@ -351,9 +391,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         /-- The constructor every construction of the constructions body enters; it returns at once. -/
         def constructor : CIL.Method := { locals := [], returnsValue := false, code := [.ret] }
         cil_instruction_equations constructor
-        """ + "\n" : "") + (workload == "objectconstructors" ? """
+        """ + "\n" : "") + (workload is "instance" or "virtual" ? """
+        /-- The instance method every call of the instance and virtual bodies enters; it returns at once. -/
+        def instanceMethod : CIL.Method := { locals := [], returnsValue := false, code := [.ret] }
+        cil_instruction_equations instanceMethod
+        """ + "\n" : "") + (workload is "objectconstructors" or "intrinsiccalls" ? """
         cil_runtime_models body
-        """ + "\n" : "") + (workload is "arguments" or "homes" or "typedelements" or "typedsteps" || statics ? $$"""
+        """ + "\n" : "") + (workload is "arguments" or "homes" or "typedelements" or "typedsteps" or "addresses" or
+            "addresssteps" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{(workload is "arguments" or "homes" ? signature : "{}")}} := rfl
         {{rawView}}cil_resolution_facts body
@@ -588,6 +633,24 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [formed]
             """,
+        "instance" => $$"""
+            /-- Every receiver-checked call enters the method on the live receiver and keeps the memory. -/
+            theorem checked (memory : Memory) (object : Reference)
+                (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+                invoke [body, instanceMethod] {{operations.Length + 3}} 0 [.object (.address object)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [formed]
+            """,
+        "virtual" => $$"""
+            /-- Every virtual call reads the receiver's class and enters the entry the table lists for it. -/
+            theorem checked (memory : Memory) (object : Reference)
+                (formed : formObject memory (.address object) = .ok (.object (.address object)))
+                (typed : runtimeTypeOf memory object =
+                  .ok { identity := {{VirtualClass(requested - 1)}}, bases := [] }) :
+                invoke [body, instanceMethod] {{operations.Length + 3}} 0 [.object (.address object)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [formed, typed]
+            """,
         "elements" => $$"""
             /-- Every element access reads the one element the index names, whose store keeps the memory. -/
             theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
@@ -640,6 +703,33 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index), .array pairs]
                   memory = .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [valid, pairsValid, load, store, pairLoad, pairStore]
+            """,
+        "addresses" => $$"""
+            /-- Every element address is the element the index names, writable or read-only. -/
+            theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
+                (valid : view.validate memory = .ok ()) (typed : view.elementType = .signed32)
+                (found : arrayElement memory view index.toNat 4 = .ok element) :
+                invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              have writable := step_ldelema_of_element false body_elementShape0 typed (index := .i32 index) rfl
+                found
+              have readOnly := step_ldelema_of_element true body_elementShape0 typed (index := .i32 index) rfl
+                found
+              cil_checked_steps [valid, writable, readOnly]
+            """,
+        "addresssteps" => $$"""
+            /-- Every element address steps by one supplied fact. -/
+            theorem checked (memory : Memory) (view : ArrayView) (index : CIL.W32) (element : Reference)
+                (valid : view.validate memory = .ok ())
+                (writable : ∀ body pc args frame rest, step body (.ldelema ({{Int32Type}}) false) pc args frame
+                  (.scalar (.i32 index) :: .array view :: rest) memory =
+                  .ok (.next (pc + 1) (.reference (.address element) :: rest) frame memory))
+                (readOnly : ∀ body pc args frame rest, step body (.ldelema ({{Int32Type}}) true) pc args frame
+                  (.scalar (.i32 index) :: .array view :: rest) memory =
+                  .ok (.next (pc + 1) (.readOnlyReference (.address element) :: rest) frame memory)) :
+                invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [valid, writable, readOnly]
             """,
         "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/
@@ -758,6 +848,9 @@ CompiledSample Compile(string module, string source, string suffix)
     return new(commands, new FileInfo(compiled).Length, timer.ElapsedMilliseconds);
 }
 
+// The class of entry `entry` of the virtual body's dispatch table.
+static string VirtualClass(int entry) => $".object \"Examples\" \"Examples.Class{entry}\"";
+
 static long Median(IEnumerable<long> values)
 {
     var sorted = values.Order().ToArray();
@@ -765,10 +858,13 @@ static long Median(IEnumerable<long> values)
 }
 
 // A body whose argument count grows with its length may cost per instruction at most linearly in that
-// count, since each read indexes the argument list; any other body costs a bounded amount per instruction.
-static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer, bool linearInArguments = false)
+// count, since each read indexes the argument list. A virtual call looks its class up in a literal list, so it
+// may cost at most linearly in the table size. Any other body costs a bounded amount per instruction.
+static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer, bool linearInArguments = false,
+    bool linearInTable = false)
 {
-    var workBudget = linearInArguments ? (double)longer.Instructions / shorter.Instructions : WorkGrowthLimit;
+    var workBudget = linearInArguments ? (double)longer.Instructions / shorter.Instructions
+        : linearInTable ? (double)longer.Size / shorter.Size : WorkGrowthLimit;
     Check("frontend heartbeats", shorter.FrontendHeartbeatsPerInstruction,
         longer.FrontendHeartbeatsPerInstruction, workBudget);
     Check("kernel heartbeats", shorter.KernelHeartbeatsPerInstruction,

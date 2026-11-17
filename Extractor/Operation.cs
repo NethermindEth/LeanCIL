@@ -317,9 +317,10 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
 
 /// <summary>
 /// A call of a runtime method that the Lean model table models from its raw operand, <see cref="Site"/>: it keeps
-/// the CIL call and states no link, so the interpreter runs the model the operand names.
+/// the CIL call and states no link, so the interpreter runs the model the operand names. The extractor's analyses
+/// read <paramref name="Model"/>, the operation the model runs as, in place of the call.
 /// </summary>
-internal sealed record ModelCall : Operation
+internal sealed record ModelCall(Operation Model) : Operation
 {
     /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
     internal MethodRef? Site { get; init; }
@@ -567,6 +568,18 @@ internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, s
     internal override string Render(Func<int, string> calleeName) =>
         $".{(Store ? "stelem_any" : "ldelem_any")} ({Element ?? throw new InvalidOperationException(
             "A typed element access is rendered before its element type is attached")})";
+}
+
+/// <summary>
+/// An <c>ldelema</c> of the element type <paramref name="Element"/>, the raw operand's type expression, whose inline
+/// storage is <paramref name="Storage"/>; <paramref name="ReadOnly"/> records a <c>readonly.</c> prefix.
+/// </summary>
+internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, string? Element = null) : Operation
+{
+    // Translation does not see the layout table the term indexes, so the emitter attaches it.
+    internal override string Render(Func<int, string> calleeName) =>
+        $".ldelema ({Element ?? throw new InvalidOperationException(
+            "An element address is rendered before its element type is attached")}) {(ReadOnly ? "true" : "false")}";
 }
 
 /// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>

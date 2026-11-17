@@ -46,12 +46,7 @@ internal static class InstructionTranslation
             nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
             tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
             throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
-        if (i.OpCode.Code == Code.Readonly)
-        {
-            Arrays.ValidateReadOnly(instructions, i);
-            return StackOperation.Nop;
-        }
-        if (i.Previous?.OpCode.Code == Code.Readonly) Arrays.ValidateReadOnly(instructions, i.Previous);
+        InstructionPrefixes.ValidateTaker(i);
         if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
@@ -164,8 +159,8 @@ internal static class InstructionTranslation
         if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;
-            if (i.OpCode.Code == Code.Call
-                && RuntimeModels.ObjectConstructor(r)) return new ModelCall();
+            if (i.OpCode.Code == Code.Call && RuntimeModels.CallModel(r, profile) is { } model)
+                return new ModelCall(model);
             if (RuntimeModel(r, profile) is { } modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);
@@ -183,7 +178,7 @@ internal static class InstructionTranslation
         }
         return i.OpCode.Code switch
         {
-            Code.Nop => StackOperation.Nop,
+            Code.Nop or Code.Readonly => StackOperation.Nop,
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,

@@ -100,7 +100,7 @@ partial class Program
             "Extracted.methodEvidence) 1 1)", "Extracted.methodEvidence) 1 0)", StringComparison.Ordinal),
             "Deep-check module build failed");
         Mutation("changed image digit", reference.Module, source => FirstChunkDigit().Replace(source,
-            match => "  0x" + match.Groups[1].Value + (match.Groups[2].Value == "0" ? "1" : "0"), 1),
+            match => match.Groups[1].Value + (match.Groups[2].Value == "0" ? "1" : "0"), 1),
             "replay");
         Mutation("body theorem about other evidence", BodiesModule, source => ReplaceBodies(source,
             "theorem bodies : StrictBinding.BodiesBound images [] := by decide +kernel"),
@@ -142,7 +142,7 @@ partial class Program
     static string ReplaceBodies(string source, string replacement) =>
         source[..source.IndexOf(BodiesDocstring, StringComparison.Ordinal)] + replacement + "\n\nend BindingAudit\n";
 
-    [GeneratedRegex(@"(?m)^  0x([0-9a-f]{40})([0-9a-f])")]
+    [GeneratedRegex(@"(?m)^(def page0 : List Nat := [^\n]*?0x[0-9A-F]{40})([0-9A-F])")]
     private static partial Regex FirstChunkDigit();
 
 }

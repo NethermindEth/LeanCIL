@@ -52,6 +52,20 @@ inductive TableError where
   | invalidPublicKeyToken (length : Nat)
   deriving DecidableEq, Repr
 
+/-- The part of a type definition claim that its TypeDef row does not have. -/
+inductive TypeDefPart where
+  | typeName
+  | typeNamespace
+  /-- The row's visibility or the stated NestedClass row does not give the claimed nesting. -/
+  | nesting
+  /-- The row's flags and base type give another kind. -/
+  | kind
+  /-- The row's field list or the next row's does not bound the claimed Field rows. -/
+  | fields
+  /-- The `Extends` column does not name the claimed base row, or that row has other names. -/
+  | base
+  deriving DecidableEq, Repr
+
 /-- Why a binding fact does not hold. -/
 inductive AuditError where
   /-- The image constant has the wrong chunk count, an oversized chunk or nonzero padding. -/
@@ -85,6 +99,10 @@ inductive AuditError where
       carried entry has a key no row cell holds, a row key has no carried entry, a key is not
       below the omitted-entry marker, or the carried entries of the heap do not ascend by key. -/
   | heapNumbering (heap key : Nat)
+  /-- TypeDef row `row` does not have this part of the claimed type definition. -/
+  | typeDefMismatch (row : Nat) (part : TypeDefPart)
+  /-- Row `row` of `table` has a key below the key of the row before it. -/
+  | unsortedTable (table row : Nat)
   deriving DecidableEq, Repr
 
 /-- Whether a check succeeded; the proposition of each audited theorem is `ok check = true`. -/

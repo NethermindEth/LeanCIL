@@ -680,6 +680,7 @@ partial class Program
 
     static string ImageModuleSource(BindingImagePin image) => $$"""
         import StrictBinding.Sha256
+        import CIL.Extraction.FixedDigits
 
         /-!
         # Image of an assembly file

@@ -490,10 +490,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Indirect loads and stores of integers and native integers.
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
-        // Array allocations, lengths, and element loads and stores by kind or by element type.
+        // Array allocations, lengths, element loads and stores by kind or by element type, and element
+        // addresses with the readonly prefix they take.
         Code.Ldlen, Code.Ldelem_I1, Code.Ldelem_U1, Code.Ldelem_I2, Code.Ldelem_U2, Code.Ldelem_I4, Code.Ldelem_U4,
         Code.Ldelem_I8, Code.Ldelem_I, Code.Ldelem_Ref, Code.Stelem_I, Code.Stelem_I1, Code.Stelem_I2,
         Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref, Code.Newarr, Code.Ldelem_Any, Code.Stelem_Any,
+        Code.Ldelema, Code.Readonly,
         // Class type tests, class instance field accesses, direct calls and constructions.
         Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Newobj,
         // Branches.
@@ -575,7 +577,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Call or Code.Callvirt or Code.Calli or Code.Newobj or Code.Jmp or Code.Ldftn or Code.Ldvirtftn
             or Code.Constrained or Code.Tail => HoleFamily.Calls,
         Code.Ldfld or Code.Ldflda or Code.Stfld or Code.Ldsfld or Code.Ldsflda or Code.Stsfld => HoleFamily.Fields,
-        Code.Newarr or Code.Ldlen or Code.Ldelema or Code.Readonly or Code.Ldelem_Any or Code.Stelem_Any
+        Code.Newarr or Code.Ldlen or Code.Ldelem_Any or Code.Stelem_Any
             or Code.Ldelem_I1 or Code.Ldelem_U1 or Code.Ldelem_I2 or Code.Ldelem_U2 or Code.Ldelem_I4
             or Code.Ldelem_U4 or Code.Ldelem_I8 or Code.Ldelem_I or Code.Ldelem_R4 or Code.Ldelem_R8
             or Code.Ldelem_Ref or Code.Stelem_I or Code.Stelem_I1 or Code.Stelem_I2 or Code.Stelem_I4
