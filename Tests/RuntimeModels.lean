@@ -1,4 +1,5 @@
 import CIL.Safety.Execution
+import CIL.Safety.StepComposition
 import CIL.Extraction.RuntimeModels
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
@@ -140,6 +141,18 @@ example : observedCall (CIL.RuntimeModel.referenceCompare .same).observerCount
       (fun _ => runModel body (.referenceCompare .same) 3 frame
         [.scalar (.v128Low64 0), start] staticMemory) =
     step body .ceq 3 [] frame [.scalar (.v128Low64 0), start] staticMemory := rfl
+
+-- A memory model is its memory instruction, so a memory step equation steps a modelled call:
+-- one success and the unspecified-bits fault, each reached through `modelStep_memory`.
+example : modelStep (some (.memory .isNullRef)) body 3 frame [.reference .null] staticMemory =
+    .ok (.next 4 [.scalar (.i32 1)] frame staticMemory) := by
+  rw [modelStep_memory (args := [])]
+  rfl
+example : modelStep (some (.memory .isNullRef)) body 3 frame [.scalar (.v128Low64 0)]
+      staticMemory =
+    .error (.unsupported "Instruction observes unspecified vector bits") := by
+  rw [modelStep_memory (args := [])]
+  exact step_unspecified rfl
 
 -- Each model observes the operands its emitted instruction observes.
 example : (CIL.RuntimeModel.intrinsic (.scalar (.rotateLeft 32)) 2).observerCount =

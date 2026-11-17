@@ -323,6 +323,29 @@ theorem step_call_intrinsic {method : Extraction.MethodRef} {prefixes : CallPref
 
 #print axioms step_call_intrinsic
 
+/-- A memory operation's model runs as the `.memory` instruction of that operation: both guard
+    its `argumentCount` operands and run `memoryInstruction`, so its step equations apply. -/
+theorem modelStep_memory (operation : CIL.MemoryOp) (stack : List Value) :
+    modelStep (some (.memory operation)) body pc frame stack memory =
+      step body (.memory operation) pc args frame stack memory := by
+  simp only [modelStep, observedCall, runModel, CIL.RuntimeModel.observerCount, step,
+    observerCount, staticInstruction]
+  rfl
+
+#print axioms modelStep_memory
+
+/-- A call without a link whose method's model is a memory operation steps as that operation. -/
+theorem step_call_memory {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {operation : CIL.MemoryOp} (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method = some (.memory operation))
+    (direct : prefixes.tail = false) (stack : List Value) :
+    step body (.call method prefixes) pc args frame stack memory =
+      step body (.memory operation) pc args frame stack memory := by
+  rw [step_call_model (link := link) (found := found) (direct := direct),
+    modelStep_memory (args := args)]
+
+#print axioms step_call_memory
+
 /-- A call whose pc links `callee` directly enters it, as `callStep` says; the model it would
     run without a link is never read. Stepping selects it once the link fact is known. -/
 theorem step_call_direct {method : Extraction.MethodRef} {prefixes : CallPrefixes}
