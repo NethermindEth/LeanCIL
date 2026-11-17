@@ -16,7 +16,7 @@ private def array : ArrayView := ⟨.address ⟨0, 0⟩, 2, .signed32⟩
 
 /-- Address formation needs a live extent, not initialized contents or access authority. -/
 theorem address_without_authority :
-    memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 1), .array array] memory =
+    elementAddressInstruction (.value .signed32) false [.scalar (.i32 1), .array array] memory =
       .ok (memory, [.reference (.address ⟨0, 4⟩)]) := rfl
 #print axioms address_without_authority
 
@@ -27,26 +27,26 @@ theorem address_cannot_grant_write :
 
 /-- The end position is not an array element, even though it can be a valid pointer position. -/
 theorem end_address_rejected :
-    memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 2), .array array] memory =
+    elementAddressInstruction (.value .signed32) false [.scalar (.i32 2), .array array] memory =
       .error (.thrown .indexOutOfRange) := rfl
 #print axioms end_address_rejected
 
 /-- A null array has no element address. -/
 theorem null_address_rejected :
-    memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 0), .object .null] memory =
+    elementAddressInstruction (.value .signed32) false [.scalar (.i32 0), .object .null] memory =
       .error (.thrown .nullReference) := rfl
 #print axioms null_address_rejected
 
 /-- Negative indices cannot wrap back into the allocation. -/
 theorem negative_address_rejected :
-    memoryInstruction (.arrayAddress .signed32)
+    elementAddressInstruction (.value .signed32) false
       [.scalar (.i32 (BitVec.ofInt 32 (-1))), .array array] memory =
       .error (.thrown .indexOutOfRange) := rfl
 #print axioms negative_address_rejected
 
 /-- Empty arrays have no element, including at their valid end position. -/
 theorem empty_address_rejected :
-    memoryInstruction (.arrayAddress .signed32)
+    elementAddressInstruction (.value .signed32) false
       [.scalar (.i32 0), .array ⟨.address ⟨0, 8⟩, 0, .signed32⟩] memory =
       .error (.thrown .indexOutOfRange) := rfl
 #print axioms empty_address_rejected
@@ -57,11 +57,23 @@ theorem expired_element_rejected :
       .error (.memory .expiredLifetime (.address ⟨0, 4⟩) 0) := rfl
 #print axioms expired_element_rejected
 
+/-- An address needs inline element storage: a class element is an ill-typed state, and no heap
+    array holds a by-ref-like struct. -/
+theorem address_shapes_refused :
+    elementAddressInstruction (.reference (.atom CIL.Extraction.runtimeScope "System.String"))
+      false [.scalar (.i32 0), .array array] memory = .error .invalidState ∧
+    elementAddressInstruction (.unsupported CIL.ElementShape.byRefLikeElement) true
+      [.scalar (.i32 0), .array array] memory =
+      .error (.unsupported CIL.ElementShape.byRefLikeElement) := ⟨rfl, rfl⟩
+#print axioms address_shapes_refused
+
 /-- A same-width element token does not justify a different typed element address. -/
 theorem wrong_address_token :
     CIL.Extraction.scalarOpMatches none
       ⟨0, 143, .type (.atom CIL.Extraction.runtimeScope "System.Int32")⟩
-      [.word32, .array .signed32] (.memory (.arrayAddress .unsigned32)) = false := by decide +kernel
+      [.word32, .array .signed32]
+      (.ldelema (.atom CIL.Extraction.runtimeScope "System.UInt32") false) = false := by
+  decide +kernel
 #print axioms wrong_address_token
 
 end Tests.ArrayElementReferences

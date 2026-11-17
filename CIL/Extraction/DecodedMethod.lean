@@ -101,6 +101,20 @@ theorem MethodEvidenceValid.prefixEntryFree {rawLayouts : List RawLayout}
 
 #print axioms MethodEvidenceValid.prefixEntryFree
 
+/-- The scalar flow of a method's evidence holds with no readonly window: its closed code has no
+    branch into the instruction after a prefix. -/
+theorem MethodEvidenceValid.scalarFlowValid_decodedReadOnly {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    ScalarFlowValidWith (fun _ _ _ => true) rawLayouts.toArray item.closed item.featureStates
+      item.scalarStates method.code := by
+  have free := valid.prefixEntryFree
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, scalar, -, -, -, -⟩ := valid
+  exact (ScalarFlowValid_iff_decodedReadOnly free).mp scalar
+
+#print axioms MethodEvidenceValid.scalarFlowValid_decodedReadOnly
+
 /-- The instantiated code of a definition whose body the check accepts, read from that body,
     has no branch into the instruction after a prefix. -/
 theorem checkBody_instantiated_prefixEntryFree {layouts : List RawLayout} {body : BodyEvidence}

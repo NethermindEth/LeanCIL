@@ -74,10 +74,10 @@ internal static class Arrays
         Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
             { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
         Code.Ldlen => new ArrayLength(),
-        Code.Ldelema => MemoryOperation.Of(new ArrayAddress(
+        Code.Ldelema => new ElementAddress(
             Storage((TypeReference)instruction.Operand, architecture) ??
                 throw new InvalidDataException("Unsupported array element token: " + instruction.Operand),
-            instruction.Previous?.OpCode.Code == Code.Readonly)),
+            instruction.Previous?.OpCode.Code == Code.Readonly),
         Code.Ldelem_I1 => new ArrayElementAccess(NumericKind.I1, false),
         Code.Ldelem_U1 => new ArrayElementAccess(NumericKind.U1, false),
         Code.Ldelem_I2 => new ArrayElementAccess(NumericKind.I2, false),
@@ -125,14 +125,6 @@ internal static class Arrays
             new(storage.Width, storage.Signed, typed.Store, null),
         _ => null
     };
-
-    internal static void ValidateReadOnly(InstructionIndex instructions, Instruction prefix)
-    {
-        if (prefix.Next is not { OpCode.Code: Code.Ldelema } address || prefix.Operand is not null)
-            throw new InvalidDataException("Readonly prefix requires an immediate array element address");
-        if (instructions.IsTarget(address))
-            throw new InvalidDataException("Branch enters an array address after its readonly prefix");
-    }
 
     static TypedElementAccess Typed(Instruction instruction, bool store, string architecture) =>
         new(store, Storage((TypeReference)instruction.Operand, architecture) ??

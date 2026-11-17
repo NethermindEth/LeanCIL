@@ -932,7 +932,6 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
       (otherMemoryInstruction operation (stack.map mapping.value) target) := by
   unfold otherMemoryInstruction at observable ⊢
   split at observable
-  all_goals try (unfold arrayAddress at observable ⊢; split at observable)
   all_goals try simp only [List.map_cons, AllocationRenaming.value]
   all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable

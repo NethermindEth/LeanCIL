@@ -15,7 +15,7 @@ private def memory : Memory := {
 
 /-- The prefix restricts the returned reference even with writable backing storage. -/
 theorem restricted_address :
-    memoryInstruction (.arrayAddress .signed32 false)
+    elementAddressInstruction (.value .signed32) true
       [.scalar (.i32 1), .array ⟨.address ⟨0, 0⟩, 2, .signed32⟩] memory =
       .ok (memory, [.readOnlyReference (.address ⟨0, 4⟩)]) := rfl
 #print axioms restricted_address
@@ -115,23 +115,22 @@ private def features : CIL.Extraction.FeatureCertificate :=
 private def states : CIL.Extraction.ScalarCertificate :=
   [some [], some [.array .signed32], some [.word32, .array .signed32],
     some [.word32, .array .signed32], some [.reference], none]
-private def code (writable : Bool) : List CIL.Instruction :=
-  [.ldarg 0, .ldarg 1, .nop, .memory (.arrayAddress .signed32 writable), .ret,
-    .unadmitted 43]
+private def code (readOnly : Bool) : List CIL.Instruction :=
+  [.ldarg 0, .ldarg 1, .nop, .ldelema intType readOnly, .ret, .unadmitted 43]
 
 /-- A branch to the prefix itself does not bypass the restriction. -/
-theorem prefix_certificate : CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code false) :=
-  by decide +kernel
+theorem prefix_certificate :
+    CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code true) := by decide +kernel
 #print axioms prefix_certificate
 
 /-- Independently forging a writable address under the same readonly raw CIL fails. -/
 theorem writable_forgery_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code true) := by decide +kernel
+    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code false) := by decide +kernel
 #print axioms writable_forgery_rejected
 
 /-- Changing only the branch target to skip the prefix is rejected, even for a dead branch. -/
 theorem branch_into_address_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 3) features states (code false) := by decide +kernel
+    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 3) features states (code true) := by decide +kernel
 #print axioms branch_into_address_rejected
 
 /-- The readonly rule as `ScalarFlowValid` evaluates it, over a body's indexed instructions and
@@ -143,13 +142,13 @@ private def readOnlyAt (body : CIL.Extraction.RawMethod) :=
 /-- The accepted certificate passes the readonly rule at its prefix and its element address. -/
 theorem prefix_sites_accepted :
     readOnlyAt (raw 2) 2 ⟨2, 65054, .none⟩ .nop = true ∧
-    readOnlyAt (raw 2) 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 false)) =
+    readOnlyAt (raw 2) 3 ⟨4, 143, .type intType⟩ (.ldelema intType true) =
       true := by decide +kernel
 #print axioms prefix_sites_accepted
 
 /-- A writable address under the prefix fails the readonly rule at the address itself. -/
 theorem writable_address_site_rejected :
-    readOnlyAt (raw 2) 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 true)) =
+    readOnlyAt (raw 2) 3 ⟨4, 143, .type intType⟩ (.ldelema intType false) =
       false := by decide +kernel
 #print axioms writable_address_site_rejected
 
@@ -161,17 +160,138 @@ private def operandRaw : CIL.Extraction.RawMethod :=
     still passes, and the certificate is rejected. -/
 theorem prefix_operand_rejected :
     readOnlyAt operandRaw 2 ⟨2, 65054, .integer 0⟩ .nop = false ∧
-    readOnlyAt operandRaw 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 false)) =
+    readOnlyAt operandRaw 3 ⟨4, 143, .type intType⟩ (.ldelema intType true) =
       true ∧
-    ¬ CIL.Extraction.ScalarFlowValid #[] operandRaw features states (code false) := by
+    ¬ CIL.Extraction.ScalarFlowValid #[] operandRaw features states (code true) := by
   decide +kernel
 #print axioms prefix_operand_rejected
 
 /-- A branch to the element address fails the readonly rule at both the prefix and the address. -/
 theorem entered_sites_rejected :
     readOnlyAt (raw 3) 2 ⟨2, 65054, .none⟩ .nop = false ∧
-    readOnlyAt (raw 3) 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 false)) =
+    readOnlyAt (raw 3) 3 ⟨4, 143, .type intType⟩ (.ldelema intType true) =
       false := by decide +kernel
 #print axioms entered_sites_rejected
+
+/-! ## The decoded readonly rule
+
+Each body below is an element address body accepted by the scalar check with and without the
+readonly window, changed in one place; every refusal holds without the window, from decoding,
+the rule that only `ldelema` follows `readonly.`, and successor reachability. -/
+
+section DecodedReadOnly
+open CIL.Extraction
+
+/-- A body of `ldarg.0; ldarg.1` then `rest`, with the signature of `raw`. -/
+private def body (rest : List RawInstruction) : RawMethod :=
+  { raw 2 with code := ⟨0, 2, .none⟩ :: ⟨1, 3, .none⟩ :: rest }
+
+/-- Feature states at the stack depths `depths`, one pc each. -/
+private def depthsOf (depths : List Nat) : FeatureCertificate :=
+  depths.map fun depth => some ⟨List.replicate depth none, []⟩
+
+/-- The scalar stacks of an address body: the array and index pushed, held through `held` pcs,
+    then the reference the address leaves, returned. -/
+private def addressStates (held : Nat) : ScalarCertificate :=
+  [some [], some [.array .signed32]] ++ List.replicate held (some [.word32, .array .signed32]) ++
+    [some [.reference]]
+
+/-- The `readonly.` prefix, `ldelema int32` and `ret` at the offsets they hold after two
+    one-byte loads. -/
+private def prefixRaw : RawInstruction := ⟨2, 65054, .none⟩
+private def addressRaw (offset : Nat) : RawInstruction := ⟨offset, 143, .type intType⟩
+private def retRaw (offset : Nat) : RawInstruction := ⟨offset, 42, .none⟩
+
+/-- Whether both the windowed scalar check and the check with no readonly window accept. -/
+private def bothAccept (body : RawMethod) (features : FeatureCertificate)
+    (states : ScalarCertificate) (code : List CIL.Instruction) : Bool :=
+  decide (ScalarFlowValid #[] body features states code) &&
+    decide (ScalarFlowValidWith (fun _ _ _ => true) #[] body features states code)
+
+/-- Whether both the windowed scalar check and the check with no readonly window refuse. -/
+private def bothRefuse (body : RawMethod) (features : FeatureCertificate)
+    (states : ScalarCertificate) (code : List CIL.Instruction) : Bool :=
+  !decide (ScalarFlowValid #[] body features states code) &&
+    !decide (ScalarFlowValidWith (fun _ _ _ => true) #[] body features states code)
+
+/-- A readonly and a writable element address, each emitted as it decodes, pass both checks. -/
+theorem decoded_addresses_accepted :
+    bothAccept (body [prefixRaw, addressRaw 4, retRaw 9]) (depthsOf [0, 1, 2, 2, 1])
+      (addressStates 2) [.ldarg 0, .ldarg 1, .nop, .ldelema intType true, .ret] ∧
+    bothAccept (body [addressRaw 2, retRaw 7]) (depthsOf [0, 1, 2, 1]) (addressStates 1)
+      [.ldarg 0, .ldarg 1, .ldelema intType false, .ret] := by
+  decide +kernel
+#print axioms decoded_addresses_accepted
+
+/-- An address whose flag disagrees with the raw prefix, or whose element differs from its
+    operand, is not the decoding of its raw instruction. -/
+theorem forged_addresses_refused :
+    bothRefuse (body [prefixRaw, addressRaw 4, retRaw 9]) (depthsOf [0, 1, 2, 2, 1])
+      (addressStates 2) [.ldarg 0, .ldarg 1, .nop, .ldelema intType false, .ret] ∧
+    bothRefuse (body [addressRaw 2, retRaw 7]) (depthsOf [0, 1, 2, 1]) (addressStates 1)
+      [.ldarg 0, .ldarg 1, .ldelema intType true, .ret] ∧
+    bothRefuse (body [prefixRaw, addressRaw 4, retRaw 9]) (depthsOf [0, 1, 2, 2, 1])
+      (addressStates 2)
+      [.ldarg 0, .ldarg 1, .nop, .ldelema (.atom runtimeScope "System.UInt32") true,
+        .ret] := by
+  decide +kernel
+#print axioms forged_addresses_refused
+
+/-- A reachable `readonly.` that ends the body has no successor to take it. -/
+theorem final_prefix_refused :
+    bothRefuse (body [prefixRaw]) (depthsOf [0, 1, 2])
+      [some [], some [.array .signed32], some [.word32, .array .signed32]]
+      [.ldarg 0, .ldarg 1, .nop] := by
+  decide +kernel
+#print axioms final_prefix_refused
+
+/-- A second `readonly.`, a `nop` or an `ldelem` after `readonly.` does not take it. -/
+theorem wrong_followers_refused :
+    bothRefuse (body [prefixRaw, ⟨4, 65054, .none⟩, addressRaw 6, retRaw 11])
+      (depthsOf [0, 1, 2, 2, 2, 1]) (addressStates 3)
+      [.ldarg 0, .ldarg 1, .nop, .nop, .ldelema intType true, .ret] ∧
+    bothRefuse (body [prefixRaw, ⟨4, 0, .none⟩, addressRaw 5, retRaw 10])
+      (depthsOf [0, 1, 2, 2, 2, 1]) (addressStates 3)
+      [.ldarg 0, .ldarg 1, .nop, .nop, .ldelema intType false, .ret] ∧
+    bothRefuse (body [prefixRaw, ⟨4, 148, .none⟩, retRaw 5]) (depthsOf [0, 1, 2, 2, 1])
+      [some [], some [.array .signed32], some [.word32, .array .signed32],
+        some [.word32, .array .signed32], some [.word32]]
+      [.ldarg 0, .ldarg 1, .nop, .ldelem .i4, .ret] := by
+  decide +kernel
+#print axioms wrong_followers_refused
+
+/-- `ldelema` takes no prefix but `readonly.`: after `unaligned.` it has no decoding. -/
+theorem unaligned_address_refused :
+    bothRefuse (body [⟨2, 65042, .integer 1⟩, addressRaw 5, retRaw 10]) (depthsOf [0, 1, 2, 2, 1])
+      (addressStates 2) [.ldarg 0, .ldarg 1, .nop, .ldelema intType false, .ret] := by
+  decide +kernel
+#print axioms unaligned_address_refused
+
+/-- A static call of `Fixture.Sink::Take(int32)`. -/
+private def takeSite : CallSite := {
+  method := {
+    owner := .object "Fixture" "Fixture.Sink", name := name!"Take",
+    hasThis := false, genericArity := 0, returnType := .void, parameters := [intType] },
+  name := "Take", target := .managed 0x06000001, typeArguments := [], parameterCount := 1,
+  returnsValue := false }
+
+/-- A call decodes alone but not after `readonly.`, and the scalar check refuses it there. -/
+theorem prefixed_call_refused :
+    (valueEncodingMatches none ⟨4, 40, .call takeSite⟩ (.call takeSite.method) &&
+      (CIL.Instruction.ofRaw? (some prefixRaw) ⟨4, 40, .call takeSite⟩).isNone &&
+      !scalarEmissionMatches #[] none (some prefixRaw) ⟨4, 40, .call takeSite⟩
+        [.word32] (.call takeSite.method)) = true := by
+  decide +kernel
+#print axioms prefixed_call_refused
+
+/-- A branch into the address after `readonly.` passes the check with no readonly window but not
+    body decoding, whose `PrefixEntryFree` the equivalence with the windowed check assumes. -/
+theorem entered_address_decoding_refused :
+    ScalarFlowValidWith (fun _ _ _ => true) #[] (raw 3) features states
+      (code true) ∧ ¬ PrefixEntryFree (raw 3).code := by
+  decide +kernel
+#print axioms entered_address_decoding_refused
+
+end DecodedReadOnly
 
 end Tests.ReadOnlyArrayReferences

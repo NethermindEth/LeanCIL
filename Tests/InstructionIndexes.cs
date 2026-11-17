@@ -18,8 +18,8 @@ var extractor = Assembly.LoadFrom(ExtractorPath);
 var indexType = extractor.GetType("Nethermind.LeanCIL.InstructionIndex", true)!;
 var position = indexType.GetMethod("Position", BindingFlags.Instance | BindingFlags.NonPublic)!;
 var isTarget = indexType.GetMethod("IsTarget", BindingFlags.Instance | BindingFlags.NonPublic)!;
-var validate = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!
-    .GetMethod("ValidateReadOnly", BindingFlags.Static | BindingFlags.NonPublic)!;
+var validateEntry = extractor.GetType("Nethermind.LeanCIL.InstructionPrefixes", true)!
+    .GetMethod("ValidateEntry", BindingFlags.Static | BindingFlags.NonPublic)!;
 object Index(MethodDefinition method) => Activator.CreateInstance(indexType,
     BindingFlags.Instance | BindingFlags.NonPublic, null, [method], null)!;
 using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
@@ -37,7 +37,7 @@ for (var offset = 0; offset < method.Body.Instructions.Count; offset++)
         throw new Exception("Instruction position used byte offsets instead of identity");
 if ((int)position.Invoke(index, [Instruction.Create(OpCodes.Nop)])! != -1)
     throw new Exception("Foreign instruction was admitted");
-validate.Invoke(null, [index, prefix]);
+validateEntry.Invoke(null, [method]);
 foreach (var switched in new[] { false, true })
 {
     branch.OpCode = switched ? OpCodes.Switch : OpCodes.Br;
@@ -46,11 +46,11 @@ foreach (var switched in new[] { false, true })
     if (!(bool)isTarget.Invoke(index, [address])!) throw new Exception("Missing prefix-bypass target");
     try
     {
-        validate.Invoke(null, [index, prefix]);
+        validateEntry.Invoke(null, [method]);
         throw new Exception("Accepted a branch bypassing readonly");
     }
     catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
-        rejected.Message.Contains("Branch enters an array address", StringComparison.Ordinal)) { }
+        rejected.Message.Contains("Branch enters the instruction after a prefix", StringComparison.Ordinal)) { }
 }
 method.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Nop));
 if ((int)position.Invoke(Index(method), [first])! != 1)

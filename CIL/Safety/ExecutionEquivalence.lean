@@ -429,6 +429,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherMemory, otherValues⟩ := right
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.elementAddressInstruction _ _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.fieldLoad _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left

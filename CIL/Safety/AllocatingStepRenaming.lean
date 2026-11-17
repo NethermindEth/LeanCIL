@@ -138,6 +138,39 @@ theorem Memory.Renamed.stepStelemAny {indices : LocalIndexMap} {mapping : Alloca
       true pc stack bounds observable
 #print axioms Memory.Renamed.stepStelemAny
 
+/-- A checked `ldelema` step keeps the allocation map: both bodies give the element the same
+    shape. -/
+theorem Memory.Renamed.stepLdelema {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed) (sourceBody targetBody : CIL.Method)
+    (metadata : StepMetadata sourceBody targetBody) (element : CIL.Extraction.TypeExpr)
+    (readOnly : Bool) (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.ldelema element readOnly) pc arguments sourceFrame stack source)) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.ldelema element readOnly) pc arguments sourceFrame stack source)
+      (step targetBody (.ldelema element readOnly) pc (arguments.map mapping.value)
+        targetFrame (stack.map mapping.value) target) := by
+  simp only [step_ldelema_eq, mapping.unspecifiedOperands] at observable ⊢
+  split at observable
+  · cases observable
+  · rename_i guard
+    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    have shaped : targetBody.elementShape element = sourceBody.elementShape element := by
+      simp only [CIL.Method.elementShape, metadata.environment]
+    rw [shaped]
+    apply (related.elementAddressInstructionResult _ readOnly sourceFormed stack bounds
+      observable.bind_left).bind
+    intro first second result
+    rcases first with ⟨sourceAfter, values⟩
+    rcases second with ⟨targetAfter, targetValues⟩
+    rcases result with ⟨memories, rfl⟩
+    exact .ok (.next memories frames)
+#print axioms Memory.Renamed.stepLdelema
+
 /-- `ldsfld` reads the descriptor bound to its pc, which a step renaming keeps. -/
 theorem staticLoad_metadata {sourceBody targetBody : CIL.Method}
     (metadata : StepMetadata sourceBody targetBody) (pc : Nat) (memory : Memory) :

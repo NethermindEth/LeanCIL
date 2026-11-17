@@ -955,7 +955,7 @@ private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
     (stack values : List Value) (memory result : Memory)
     (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
-  unfold otherMemoryInstruction arrayAddress at executed
+  unfold otherMemoryInstruction at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
@@ -1033,6 +1033,21 @@ theorem typedElementInstruction_contract (shape : CIL.ElementShape) (store : Boo
     | cases executed
     | split at executed
 #print axioms typedElementInstruction_contract
+
+/-- An element address writes nothing and returns only a valid reference. -/
+theorem elementAddressInstruction_contract (shape : CIL.ElementShape) (readOnly : Bool)
+    (stack values : List Value) (memory result : Memory)
+    (executed : elementAddressInstruction shape readOnly stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold elementAddressInstruction at executed
+  split at executed
+  all_goals try unfold arrayAddress at executed
+  all_goals try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms elementAddressInstruction_contract
 
 /-- Aligned transfers preserve the existing typed write effect and return only valid scalars. -/
 theorem pointerTransferInstruction_contract (kind : CIL.TransferKind) (alignment : Nat)

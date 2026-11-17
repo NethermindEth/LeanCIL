@@ -135,7 +135,7 @@ inductive FixedStepFamily where
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newarr _
-  | .ldelem_any _ | .stelem_any _
+  | .ldelem_any _ | .stelem_any _ | .ldelema ..
   | .newobj _ | .memory _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded
   | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
   | .add | .sub => .reference
@@ -278,8 +278,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
       rename_i loadsField addressesField storesField addressHome localAllocation loadsStatic
-        addressesStatic tokensStatic storesStatic loadsTyped storesTyped calls constructs
-        unadmitted offsetBeforeTable
+        addressesStatic tokensStatic storesStatic loadsTyped storesTyped addressesTyped calls
+        constructs unadmitted offsetBeforeTable
         tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
         convOvf convOvfUn
         objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse
@@ -296,6 +296,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       guard_hyp storesStatic : ∀ field, operation = .stsfld field → False
       guard_hyp loadsTyped : ∀ element, operation = .ldelem_any element → False
       guard_hyp storesTyped : ∀ element, operation = .stelem_any element → False
+      guard_hyp addressesTyped : ∀ element readOnly, operation = .ldelema element readOnly → False
       guard_hyp calls : ∀ method prefixes, operation = .call method prefixes → False
       guard_hyp constructs : ∀ constructor, operation = .newobj constructor → False
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
@@ -317,7 +318,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
         objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
         localAllocation loadsField addressesField storesField loadsStatic addressesStatic
-        tokensStatic storesStatic loadsTyped storesTyped constructs
+        tokensStatic storesStatic loadsTyped storesTyped addressesTyped constructs
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

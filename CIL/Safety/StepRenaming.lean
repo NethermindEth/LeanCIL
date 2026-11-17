@@ -58,6 +58,9 @@ theorem stepTransport : StepTransport := by
     case stelem_any.refl element =>
       exact ⟨mapping, .refl mapping, memories.stepStelemAny frames sourceFormed sourceBody
         targetBody metadata element pc arguments stack bounds observable⟩
+    case ldelema.refl element readOnly =>
+      exact ⟨mapping, .refl mapping, memories.stepLdelema frames sourceFormed sourceBody
+        targetBody metadata element readOnly pc arguments stack bounds observable⟩
     case ldsfld.refl field =>
       exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
         targetBody metadata field pc arguments stack⟩

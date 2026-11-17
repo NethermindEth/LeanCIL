@@ -493,6 +493,10 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         assumption
     | solve |
         apply StepContract.instruction
+        apply elementAddressInstruction_contract
+        assumption
+    | solve |
+        apply StepContract.instruction
         first
           | (apply fieldLoad_contract; assumption)
           | (apply fieldStore_contract; assumption)
