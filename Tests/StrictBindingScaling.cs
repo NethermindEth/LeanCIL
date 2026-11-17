@@ -20,6 +20,9 @@ partial class Program
     /// <summary>The most an added metadata page may cost relative to an earlier added page.</summary>
     const double MaximumPerPageGrowth = 1.25;
 
+    /// <summary>The most a check of fixed claims may cost more, as a multiple, at 16 times the TypeDef rows.</summary>
+    const double MaximumTableGrowth = 1.15;
+
     /// <summary>
     /// Body-check heartbeats grow linearly with claims and cover decoding the image once per page.
     /// The fixture's heartbeat count is the fixed cost subtracted from each larger case.
@@ -44,6 +47,7 @@ partial class Program
         CheckUserStringScaling(root, package);
         CheckMetadataPageScaling(root, package);
         CheckMetadataRowsModuleScaling(root, package);
+        CheckTypeDefinitionScaling(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -433,6 +437,191 @@ partial class Program
             throw new InvalidOperationException($"The {subject} costs {measured}; a {unit} costs {growth} times as " +
                 $"much from {sizes[1]} to {sizes[2]} as from {sizes[0]} to {sizes[1]}");
         return $"{measured}; {growth} times per {unit}";
+    }
+
+    /// <summary>
+    /// A type definition claim names its row, its NestedClass row and its base row, so its check reads a fixed
+    /// number of cells and entries whatever the size of the tables. Images with 64, 256 and 1024 classes beside an
+    /// enum, a struct, an interface, a nested class and a class that extends a TypeDef are checked against six
+    /// claims that System.Reflection.Metadata reads from them, and the heartbeats of preparing each image are
+    /// subtracted. The check at 1024 classes may cost at most `MaximumTableGrowth` times the check at 64. The
+    /// smallest image also rejects a claim that changes one part of a nested, an interface or a derived type.
+    /// </summary>
+    static void CheckTypeDefinitionScaling(string root, string package)
+    {
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+        int[] sizes = [64, 256, 1024];
+        Run(["lake", "build", "StrictBinding.TypeDefs", "Tests.StrictBinding.Mutation"], package,
+            progress: "Building the type definition checks");
+        var cases = string.Concat(sizes.Select(size =>
+        {
+            var file = SyntheticTypes(size);
+            var identity = StrictBindingFacts.Identity(file);
+            var claims = TypeDefinitionClaims(file, identity);
+            var rejections = size == sizes[0] ? TypeDefinitionRejections(claims) : "";
+            return $$"""
+                namespace Types{{size}}
+                {{BindingImage.Definitions(file)}}
+                /-- The synthetic image under its assembly identity. -/
+                def pinned : List StrictBinding.PinnedImage := [{ identity := "{{identity}}", image := image }]
+                /-- The claimed type definitions, as System.Reflection.Metadata reads them. -/
+                def claims : List StrictBinding.TypeDefClaim :=
+                  [{{string.Join(",\n   ", claims.Select(claim => claim.Lean))}}]
+                {{report}}
+                theorem prepared : StrictBinding.ok (StrictBinding.prepare pinned) = true := by decide +kernel
+                {{report}}
+                theorem checked : StrictBinding.TypeDefsBound pinned claims := by decide +kernel
+                {{report}}
+                #print axioms checked
+                {{rejections}}
+                end Types{{size}}
+
+                """;
+        }));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "TypeDefs.lean");
+        File.WriteAllText(path, $"import StrictBinding.TypeDefs\nimport Tests.StrictBinding.Mutation\n\n{cases}");
+        var checks = CheckHeartbeats(path, package, sizes.Length, "type definition claims");
+        var growth = (double)checks[^1] / checks[0];
+        var measured = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size} classes"));
+        if (checks[0] <= 0 || growth > MaximumTableGrowth)
+            throw new InvalidOperationException($"The type definition check costs {measured}; {growth:F2} times as " +
+                $"much at {sizes[^1]} classes as at {sizes[0]}");
+        Console.WriteLine($"PASS the type definition check reads a fixed part of the tables ({measured}; " +
+            $"{growth:F2} times at {sizes[^1] / sizes[0]} times the classes)");
+    }
+
+    /// <summary>One claim of a type definition: its row, its kind, and the claim as a Lean term.</summary>
+    sealed record TypeDefinitionClaim(int Row, string Kind, int? Enclosing, string Lean);
+
+    /// <summary>
+    /// Claims about the first class, the enum, the struct, the interface, the nested class and the last row of an
+    /// image from `SyntheticTypes`, with every part read by System.Reflection.Metadata.
+    /// </summary>
+    static TypeDefinitionClaim[] TypeDefinitionClaims(byte[] file, string identity)
+    {
+        using var reader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(file));
+        var metadata = reader.GetMetadataReader();
+        if (metadata.GetTableRowCount(TableIndex.NestedClass) != 1)
+            throw new InvalidOperationException("The synthetic types must have exactly one NestedClass row.");
+        var rows = metadata.GetTableRowCount(TableIndex.TypeDef);
+        int[] claimed = [2, rows - 4, rows - 3, rows - 2, rows - 1, rows];
+        string Bytes(StringHandle text) =>
+            "[" + string.Join(", ", System.Text.Encoding.UTF8.GetBytes(metadata.GetString(text))) + "]";
+        (string Namespace, string Name) NamesOf(EntityHandle handle) => handle.Kind switch
+        {
+            HandleKind.TypeDefinition => (metadata.GetString(metadata.GetTypeDefinition((TypeDefinitionHandle)handle)
+                .Namespace), metadata.GetString(metadata.GetTypeDefinition((TypeDefinitionHandle)handle).Name)),
+            HandleKind.TypeReference => (metadata.GetString(metadata.GetTypeReference((TypeReferenceHandle)handle)
+                .Namespace), metadata.GetString(metadata.GetTypeReference((TypeReferenceHandle)handle).Name)),
+            _ => ("", "")
+        };
+        string Ascii(string text) => "[" + string.Join(", ", System.Text.Encoding.UTF8.GetBytes(text)) + "]";
+        return [.. claimed.Select(row =>
+        {
+            var definition = metadata.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(row));
+            var fields = definition.GetFields();
+            if (fields.Count == 0)
+                throw new InvalidOperationException($"Synthetic TypeDef row {row} must own a field.");
+            var first = MetadataTokens.GetRowNumber(fields.First());
+            var baseType = definition.BaseType;
+            var (baseNamespace, baseName) = baseType.IsNil ? ("", "") : NamesOf(baseType);
+            var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
+            var kind = isInterface ? "interface"
+                : (baseNamespace, baseName) == ("System", "Enum") ? "enum"
+                : (baseNamespace, baseName) == ("System", "ValueType") ? "valueType"
+                : "classType";
+            var declaring = definition.GetDeclaringType();
+            int? enclosing = declaring.IsNil ? null : MetadataTokens.GetRowNumber(declaring);
+            var nesting = enclosing is { } outer ? $"some (1, {outer})" : "none";
+            var baseTerm = baseType.IsNil ? ".none"
+                : $".named {MetadataTokens.GetToken(baseType)} {Ascii(baseNamespace)} {Ascii(baseName)}";
+            return new TypeDefinitionClaim(row, kind, enclosing,
+                $"{{ identity := \"{identity}\", row := {row}, typeNamespace := {Bytes(definition.Namespace)}, " +
+                $"typeName := {Bytes(definition.Name)}, nesting := {nesting}, kind := .{kind}, " +
+                $"fields := ({first}, {fields.Count}), base := {baseTerm} }}");
+        })];
+    }
+
+    /// <summary>
+    /// Rejections that each change one part of a claim that holds: the nested class claimed at the top level and
+    /// inside another row, the first class claimed nested, the interface claimed a class, and the last row claimed
+    /// to extend another TypeDef.
+    /// </summary>
+    static string TypeDefinitionRejections(TypeDefinitionClaim[] claims)
+    {
+        var nested = Array.FindIndex(claims, claim => claim.Enclosing is not null);
+        var face = Array.FindIndex(claims, claim => claim.Kind == "interface");
+        var last = claims.Length - 1;
+        string Rejects(string name, int index, string change, string part) => $$"""
+            theorem {{name}} : Tests.StrictBinding.failsWith (StrictBinding.checkAll
+                StrictBinding.typeDefClaimBound pinned
+                [{ ({{claims[index].Lean}} : StrictBinding.TypeDefClaim) with {{change}} }])
+                (.typeDefMismatch {{claims[index].Row}} .{{part}}) = true := by decide +kernel
+            #print axioms {{name}}
+
+            """;
+        return Rejects("rejects_a_nested_class_at_the_top_level", nested, "nesting := none", "nesting") +
+            Rejects("rejects_another_enclosing_row", nested, $"nesting := some (1, {claims[nested].Enclosing + 1})",
+                "nesting") +
+            Rejects("rejects_a_top_level_class_claimed_nested", 0, "nesting := some (1, 2)", "nesting") +
+            Rejects("rejects_an_interface_claimed_a_class", face, "kind := .classType", "kind") +
+            Rejects("rejects_another_base_definition", last,
+                $"base := .named {MetadataTokens.GetToken(MetadataTokens.TypeDefinitionHandle(3))} [] []", "base");
+    }
+
+    /// <summary>
+    /// A library with `count` public classes that each own a field and extend `System.Object`, then an enum, a
+    /// struct, an interface, a class nested in the first class and a class that extends the first class; each of
+    /// the last five owns one field and the last owns the final rows of the Field table.
+    /// </summary>
+    static byte[] SyntheticTypes(int count)
+    {
+        var metadata = new MetadataBuilder();
+        metadata.AddAssembly(metadata.GetOrAddString("Synthetic"), new Version(1, 2, 3, 4), default, default, default,
+            AssemblyHashAlgorithm.Sha1);
+        metadata.AddModule(0, metadata.GetOrAddString("Synthetic.dll"), metadata.GetOrAddGuid(Guid.Empty), default,
+            default);
+        var runtime = metadata.AddAssemblyReference(metadata.GetOrAddString("System.Runtime"), new Version(10, 0, 0, 0),
+            default, default, default, default);
+        TypeReferenceHandle SystemType(string name) =>
+            metadata.AddTypeReference(runtime, metadata.GetOrAddString("System"), metadata.GetOrAddString(name));
+        var objectType = SystemType("Object");
+        var enumType = SystemType("Enum");
+        var valueType = SystemType("ValueType");
+        var signature = new BlobBuilder();
+        new BlobEncoder(signature).Field().Type().Int32();
+        var fieldSignature = metadata.GetOrAddBlob(signature);
+        var fields = 0;
+        var typeNamespace = metadata.GetOrAddString("Synthetic");
+        TypeDefinitionHandle Define(TypeAttributes attributes, bool nested, string name, EntityHandle baseType,
+            int owned)
+        {
+            var first = MetadataTokens.FieldDefinitionHandle(fields + 1);
+            for (var index = 0; index < owned; index++)
+                metadata.AddFieldDefinition(FieldAttributes.Public, metadata.GetOrAddString("F" + (fields + index)),
+                    fieldSignature);
+            fields += owned;
+            return metadata.AddTypeDefinition(attributes, nested ? default : typeNamespace,
+                metadata.GetOrAddString(name), baseType, first, MetadataTokens.MethodDefinitionHandle(1));
+        }
+        metadata.AddTypeDefinition(default, default, metadata.GetOrAddString("<Module>"), default,
+            MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
+        var firstClass = Define(TypeAttributes.Public, false, "C0", objectType, 1);
+        for (var index = 1; index < count; index++)
+            Define(TypeAttributes.Public, false, "C" + index, objectType, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Sealed, false, "Small", enumType, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.SequentialLayout, false, "Pair",
+            valueType, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract, false, "IShape", default, 1);
+        var nestedClass = Define(TypeAttributes.NestedPublic, true, "Inner", objectType, 1);
+        metadata.AddNestedType(nestedClass, firstClass);
+        Define(TypeAttributes.Public, false, "Derived", firstClass, 2);
+        var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
+            new BlobBuilder());
+        var image = new BlobBuilder();
+        builder.Serialize(image);
+        return image.ToArray();
     }
 
     /// <summary>
