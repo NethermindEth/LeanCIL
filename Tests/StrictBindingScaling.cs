@@ -582,8 +582,8 @@ partial class Program
             AssemblyHashAlgorithm.Sha1);
         metadata.AddModule(0, metadata.GetOrAddString("Synthetic.dll"), metadata.GetOrAddGuid(Guid.Empty), default,
             default);
-        var runtime = metadata.AddAssemblyReference(metadata.GetOrAddString("System.Runtime"), new Version(10, 0, 0, 0),
-            default, default, default, default);
+        var runtime = metadata.AddAssemblyReference(metadata.GetOrAddString("System.Runtime"),
+            new Version(10, 0, 0, 0), default, default, default, default);
         TypeReferenceHandle SystemType(string name) =>
             metadata.AddTypeReference(runtime, metadata.GetOrAddString("System"), metadata.GetOrAddString(name));
         var objectType = SystemType("Object");
@@ -613,7 +613,8 @@ partial class Program
         Define(TypeAttributes.Public | TypeAttributes.Sealed, false, "Small", enumType, 1);
         Define(TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.SequentialLayout, false, "Pair",
             valueType, 1);
-        Define(TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract, false, "IShape", default, 1);
+        Define(TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract, false, "IShape", default,
+            1);
         var nestedClass = Define(TypeAttributes.NestedPublic, true, "Inner", objectType, 1);
         metadata.AddNestedType(nestedClass, firstClass);
         Define(TypeAttributes.Public, false, "Derived", firstClass, 2);
