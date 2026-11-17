@@ -74,7 +74,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("elements", [16, 64, 256], false), ("typedelements", [16, 64, 256], false),
     ("typedsteps", [16, 64, 256], false), ("addresses", [16, 64, 256], false),
     ("addresssteps", [16, 64, 256], false), ("instance", [16, 64, 256], false), ("virtual", [1, 16, 64], false),
-    ("intrinsiccalls", [16, 64, 256], false)
+    ("intrinsiccalls", [16, 64, 256], false), ("structfields", [16, 64, 256], false),
+    ("structfieldscontract", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -155,6 +156,9 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // the receiver's class last, so each call reads one runtime type fact and looks its class up in the table.
 // The intrinsic calls body computes `Math.Max` of its two int64 arguments and pops it per cycle, so each
 // call reads that its pc has no link and the runtime model fact of its pc, a scalar intrinsic.
+// The struct fields body loads and pops the int64 field at byte 8 of the struct its byref argument
+// addresses, then stores its int64 argument there, per cycle; the contract body is the same body under
+// contract stepping. Each access reads the field's address and its load or write from supplied facts.
 // The addresses body forms a writable and a readonly address of one int32 element of its array argument
 // and pops each, per cycle, each stepped by a fact derived from the element fact and the generated shape
 // fact; the address steps body steps the same body by one supplied fact per address.
@@ -187,6 +191,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
         ".ldarg 1", ".ldarg 1", $".stelem_any ({Int32Type})", ".ldarg 2", ".ldarg 1", ".ldarg 2", ".ldarg 1",
         $".ldelem_any ({PairType})", $".stelem_any ({PairType})"], [".ldc_i4 0", ".ret"]),
+    "structfields" or "structfieldscontract" => ([], [".ldarg 0", ".fieldAt 8 8", ".pop", ".ldarg 0", ".ldarg 1",
+        ".setFieldAt 8 8"], [".ldc_i4 0", ".ret"]),
     "addresses" or "addresssteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelema ({Int32Type}) false", ".pop",
         ".ldarg 0", ".ldarg 1", ".nop", $".ldelema ({Int32Type}) true", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
@@ -302,7 +308,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
     {
-        "contract" or "loop" or "loopfacts" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup" =>
+        "contract" or "loop" or "loopfacts" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup"
+            or "structfieldscontract" =>
             "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
@@ -624,6 +631,31 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [.object (.address object)] memory =
                   .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [formed, located, loaded]
+            """,
+        "structfields" => $$"""
+            /-- Every struct field load and store reads its address and memory access from supplied facts. -/
+            theorem checked (memory : Memory) (target field : Reference) (word : CIL.W64)
+                (formed : form memory target = .ok target)
+                (located : add memory target 1 (BitVec.ofNat 64 8) = .ok field)
+                (loaded : loadValue memory (.address field) 8 false = .ok (.i64 word))
+                (written : write memory field (numberBytes word.toNat 8) ordinaryAccessAlignment = .ok memory) :
+                invoke [body] {{operations.Length + 1}} 0
+                  [.reference (.address target), .scalar (.i64 word)] memory =
+                  .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [formed, located, loaded, written]
+            """,
+        "structfieldscontract" => $$"""
+            /-- Contract stepping reads each struct field access from the same supplied facts. -/
+            theorem checked (memory : Memory) (target field : Reference) (word : CIL.W64)
+                (formed : form memory target = .ok target)
+                (located : add memory target 1 (BitVec.ofNat 64 8) = .ok field)
+                (loaded : loadValue memory (.address field) 8 false = .ok (.i64 word))
+                (written : write memory field (numberBytes word.toNat 8) ordinaryAccessAlignment = .ok memory) :
+                WP (Execution (fun fuel => invoke [body] fuel 0
+                  [.reference (.address target), .scalar (.i64 word)] memory))
+                  (fun (final, values) => final = memory /\ values = [.scalar (.i32 0)]) := by
+              cil_contract_steps [formed, located, loaded, written]
+              exact And.intro rfl rfl
             """,
         "objectconstructors" => $$"""
             /-- Every call of the `System.Object` constructor consumes the receiver and keeps the memory. -/
