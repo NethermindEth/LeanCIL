@@ -4,6 +4,7 @@ import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.GuardCalls
+import CIL.Extraction.Prefixes
 import CIL.Resolution
 
 /-!
@@ -985,6 +986,46 @@ theorem readOnlySiteWindow_eq (raw : RawMethod) :
   rfl
 
 #print axioms readOnlySiteWindow_eq
+
+/-- In a body where no branch enters the instruction after a prefix, the readonly rule's
+    branch-entry checks refuse nothing, so it accepts what it accepts with no branch targets. -/
+theorem readOnlySiteWindow_prefixEntryFree {code : List RawInstruction}
+    (free : PrefixEntryFree code) (pc : Nat) (instruction : RawInstruction)
+    (emitted : Instruction) (fetched : code[pc]? = some instruction) :
+    readOnlySiteWindow (code[·]?) (fun target => code.any (branchesTo target)) pc instruction
+        emitted =
+      readOnlySiteWindow (code[·]?) (fun _ => false) pc instruction emitted := by
+  have readOnlyPrefix : isPrefixOpcode 65054 = true := by decide
+  unfold readOnlySiteWindow
+  by_cases readOnly : instruction.opcode = 65054
+  · have entry := free pc instruction fetched (readOnly ▸ readOnlyPrefix)
+    simp [readOnly, entry]
+  · simp only [readOnly, beq_iff_eq, ite_false]
+    split
+    · rcases pc with _ | previousPc
+      · simp
+      · cases previous : code[previousPc]? with
+        | none => simp [previous]
+        | some before =>
+          by_cases follows : before.opcode = 65054
+          · have entry := free previousPc before previous (follows ▸ readOnlyPrefix)
+            simp [previous, follows, entry]
+          · have unprefixed : (before.opcode == 65054) = false := by simpa using follows
+            simp [previous, unprefixed]
+    · rfl
+
+#print axioms readOnlySiteWindow_prefixEntryFree
+
+/-- A readonly prefix the rule accepts has no branch entering the address after it. -/
+theorem readOnlySiteWindow_untargeted {rawAt : Nat → Option RawInstruction}
+    {targeted : Nat → Bool} {pc : Nat} {instruction : RawInstruction} {emitted : Instruction}
+    (accepted : readOnlySiteWindow rawAt targeted pc instruction emitted = true)
+    (readOnly : instruction.opcode = 65054) : targeted (pc + 1) = false := by
+  simp only [readOnlySiteWindow, readOnly, beq_self_eq_true, ite_true, Bool.and_eq_true,
+    Bool.not_eq_true'] at accepted
+  exact accepted.2
+
+#print axioms readOnlySiteWindow_untargeted
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, satisfy the readonly rule

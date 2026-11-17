@@ -1,12 +1,14 @@
 import CIL.Extraction.ValueDecoding
 import CIL.Extraction.Translation
+import CIL.Extraction.Prefixes
 
 /-!
 # Methods decoded from raw definitions
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
-instruction of the instantiated definition as `Instruction.ofRaw` decodes it, a hole where no
-family admits the opcode yet, a type test naming the type argument, a field access naming the
+instruction of the instantiated definition as `Instruction.ofRaw` decodes it after the
+instruction before it, a hole where no family admits the opcode yet, a type test naming the
+type argument, a field access naming the
 instantiated field, a call or construction naming the instantiated method, the frame, homes and
 signature from the same definition, and the link table the extraction states, which the call
 check ties to each raw site.
@@ -20,19 +22,19 @@ translator output.
 namespace CIL.Extraction
 
 /-- The method a raw definition denotes at `arguments`: each instruction of its instantiated
-    code as `Instruction.ofRaw` decodes it, frame and signature from the same definition,
-    homes over every pc, the link table `links`, and no static sites or opaque vector locals.
-    The table is not read here; `ManagedCallsValid` ties each entry to its raw site. Every
-    instruction
-    decodes, so `none` means the instantiation failed (an explicit receiver signature has none),
-    a parameter, local or homed argument type has no storage or slot kind, or the code fails the
-    argument rule of the evidence check, `validateArgumentOpAt`, at some pc. -/
+    code as `Instruction.ofRaw` decodes it after the instruction before it, frame and signature
+    from the same definition, homes over every pc, the link table `links`, and no static sites
+    or opaque vector locals. The table is not read here; `ManagedCallsValid` ties each entry to
+    its raw site. Every instruction decodes, so `none` means the instantiation failed (an
+    explicit receiver signature has none), a parameter, local or homed argument type has no
+    storage or slot kind, or the code fails the argument rule of the evidence check,
+    `validateArgumentOpAt`, at some pc. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (source : RawMethod) (arguments : List TypeExpr) :
     Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
   let storage ← closedArguments environment.rawLayouts closed
-  let code := closed.code.map Instruction.ofRaw
+  let code := Instruction.ofRawCode none closed.code
   let localKinds ← storage.locals.mapM (storageKind environment.layouts)
   let reachable := storage.code.map fun _ => true
   let parameterHomes ← expectedHomes environment.layouts storage reachable
@@ -77,6 +79,41 @@ theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : B
 
 #print axioms BodyDecodes.code
 
+/-- No branch of a method whose body decodes enters the instruction after a prefix. -/
+theorem BodyDecodes.prefixEntryFree {pins : List AssemblyPin} {pin : AssemblyPin}
+    {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
+    (decodes : BodyDecodes pins pin body method arguments signature) :
+    PrefixEntryFree method.code := by
+  obtain ⟨decoded, checks, sameCode, _⟩ := BodyDecodes.code decodes
+  exact sameCode ▸ checkBody_prefixEntryFree checks
+
+#print axioms BodyDecodes.prefixEntryFree
+
+/-- The closed code of a method's evidence has no branch into the instruction after a prefix:
+    its body decodes, and instantiation keeps every opcode and branch destination. -/
+theorem MethodEvidenceValid.prefixEntryFree {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    PrefixEntryFree item.closed.code := by
+  obtain ⟨specialized, -, -, -, -, -, -, -, -, -, -, -, -, -, decodes, -, -⟩ := valid
+  exact instantiateMethod_prefixEntryFree specialized.1 decodes.prefixEntryFree
+
+#print axioms MethodEvidenceValid.prefixEntryFree
+
+/-- The instantiated code of a definition whose body the check accepts, read from that body,
+    has no branch into the instruction after a prefix. -/
+theorem checkBody_instantiated_prefixEntryFree {layouts : List RawLayout} {body : BodyEvidence}
+    {original closed : RawMethod} {arguments : List TypeExpr} {decoded : DecodedBody}
+    (checked : checkBody body original arguments = .ok decoded)
+    (instantiated : instantiateMethod layouts
+      { original with code := decoded.code, initLocals := decoded.initLocals } arguments =
+        some closed) :
+    PrefixEntryFree closed.code :=
+  instantiateMethod_prefixEntryFree instantiated (checkBody_prefixEntryFree checked)
+
+#print axioms checkBody_instantiated_prefixEntryFree
+
 /-- For a body that decodes to `original`, the method of the bytes is the method of the
     definition. -/
 theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : AssemblyPin}
@@ -111,7 +148,7 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
   -- The argument rule either refuses the code or leaves the decoded method as it was built.
   split at built
   · cases built
-    simp only [Instruction.ofRawAt, List.getElem?_map]
+    exact Instruction.ofRawCode_getElem? closed.code pc
   · simp at built
 
 #print axioms Method.ofRaw?_code

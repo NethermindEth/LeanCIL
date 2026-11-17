@@ -128,6 +128,17 @@ instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, bo
 per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
 at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
 
+It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
+bodies of 500, 2,000 and 8,000 instructions, whose segments each hold a `readonly.` prefix, its
+`ldelema`, a `pop` and a branch to the prefix of the next segment, and decides the readonly rule
+at every pc of the same body. It fails when the cost per instruction of either at 2,000 or 8,000
+exceeds 1.25 times the cost at the size before, or when the prefix rule costs more than the
+readonly rule at any size. The prefix rule tests bits of a mask of the branch destinations built
+in one pass and costs about 1,380 heartbeats per instruction at every size. The readonly rule,
+whose `Std.TreeSet` of destinations costs the logarithm of the body to build and to read, costs
+about 15,900, 19,300 and 23,200. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
+
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or
