@@ -57,9 +57,11 @@ private def arithmetic : List (Nat × Instruction) := [
   (215, .add_ovf_un), (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf),
   (219, .sub_ovf_un), (65025, .ceq), (65026, .cgt), (65027, .cgt_un),
   (65028, .clt), (65029, .clt_un)]
-example : arithmetic.all (fun (opcode, operation) => scalarOpMatches none (i opcode) [.word32, .word32] operation) = true := by decide
+example : arithmetic.all (fun (opcode, operation) =>
+    scalarOpMatches none (i opcode) [.word32, .word32] operation) = true := by decide
 example : arithmetic.all (fun (opcode, _operation) =>
-    !scalarOpMatches none (i opcode) [.word32, .word32] (if opcode == 88 then .sub else .add)) = true := by decide
+    !scalarOpMatches none (i opcode) [.word32, .word32] (if opcode == 88 then .sub else .add)) =
+      true := by decide
 example : scalarOpMatches none (i 101) [.word64] .neg = true := by decide
 example : scalarOpMatches none (i 102) [.word64] .not = true := by decide
 example : scalarOpMatches none (i 101) [.word64] .not = false := by decide
@@ -90,7 +92,8 @@ private def conversions : List (Nat × Instruction) := [
   (183, .conv_ovf .i4), (184, .conv_ovf .u4), (185, .conv_ovf .i8), (186, .conv_ovf .u8),
   (209, .conv_u2), (210, .conv_u1), (211, .conv_i), (212, .conv_ovf .i), (213, .conv_ovf .u),
   (224, .conv_u)]
-example : conversions.all (fun (opcode, operation) => scalarOpMatches none (i opcode) [.word64] operation) = true := by decide
+example : conversions.all (fun (opcode, operation) =>
+    scalarOpMatches none (i opcode) [.word64] operation) = true := by decide
 example : scalarOpMatches none (i 106) [.word32] .conv_u8 = false := by decide
 example : scalarOpMatches none (i 133) [.word32] (.conv_ovf .i8) = false := by decide
 example : scalarOpMatches none (i 133) [.word32] (.conv_ovf_un .u8) = false := by decide
@@ -141,17 +144,25 @@ private theorem scalarTableExact :
 
 example : scalarOpMatches none (i 21) [] (.ldc_i4 (BitVec.ofInt 32 (-1))) = true := by decide
 example : scalarOpMatches none (i 30) [] (.ldc_i4 8) = true := by decide
-example : scalarOpMatches none (i 31 (.integer (-128))) [] (.ldc_i4 (BitVec.ofInt 32 (-128))) = true := by decide
+example : scalarOpMatches none (i 31 (.integer (-128))) []
+    (.ldc_i4 (BitVec.ofInt 32 (-128))) = true := by decide
 example : scalarOpMatches none (i 31 (.integer 128)) [] (.ldc_i4 128) = false := by decide
-example : scalarOpMatches none (i 32 (.integer (-2147483648))) [] (.ldc_i4 2147483648) = true := by decide
+example : scalarOpMatches none (i 32 (.integer (-2147483648))) []
+    (.ldc_i4 2147483648) = true := by decide
 example : scalarOpMatches none (i 32 (.integer 2147483648)) []
     (.ldc_i4 2147483648) = false := by decide
-example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) [] (.ldc_i8 9223372036854775808) = true := by decide
-example : scalarOpMatches none (i 33 (.integer 9223372036854775807)) [] (.ldc_i8 9223372036854775807) = true := by decide
-example : scalarOpMatches none (i 33 (.integer (-1))) [] (.ldc_i8 18446744073709551615) = true := by decide
-example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) [] (.ldc_i8 0) = false := by decide
-example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) [] (.ldc_i8 9223372036854775809) = false := by decide
-example : scalarOpMatches none (i 33 (.integer 9223372036854775808)) [] (.ldc_i8 9223372036854775808) = false := by decide
+example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) []
+    (.ldc_i8 9223372036854775808) = true := by decide
+example : scalarOpMatches none (i 33 (.integer 9223372036854775807)) []
+    (.ldc_i8 9223372036854775807) = true := by decide
+example : scalarOpMatches none (i 33 (.integer (-1))) []
+    (.ldc_i8 18446744073709551615) = true := by decide
+example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) []
+    (.ldc_i8 0) = false := by decide
+example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) []
+    (.ldc_i8 9223372036854775809) = false := by decide
+example : scalarOpMatches none (i 33 (.integer 9223372036854775808)) []
+    (.ldc_i8 9223372036854775808) = false := by decide
 example : scalarOpMatches none (i 33) [] (.ldc_i8 0) = false := by decide
 
 private def addRaw := raw [i 2, i 3, i 88, i 42]
