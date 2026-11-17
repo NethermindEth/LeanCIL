@@ -1010,11 +1010,8 @@ void DecodeCosts()
     Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
 }
 
-// The heartbeats `decide +kernel` adds to deciding that no branch of a body of 500, 2000 and 8000 instructions enters
-// the instruction after a prefix, and to deciding the readonly rule at every pc of the same body. The prefix rule tests
-// bits of a mask of branch destinations built in one pass, so four times the instructions may cost at most
-// `AllowedLocalGrowth` more per instruction, and as it replaces the readonly rule's entry checks it may cost no more
-// than that rule, whose `Std.TreeSet` of destinations costs the logarithm of the body at each lookup.
+// Deciding prefix entry over the destination mask must stay within `AllowedLocalGrowth` per instruction from 500 to
+// 8000 instructions and cost no more than the readonly rule over the same body.
 void PrefixEntryCosts()
 {
     const int SegmentLength = 4;
