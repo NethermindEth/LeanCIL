@@ -462,11 +462,12 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   restriction, plus readonly `GetReference` results for nonempty, empty and out-of-extent views and
   field loads, field addresses and rejected field stores through restricted references. It shows
   that `ScalarFlowValid` rejects a writable address under a prefix and a prefix with an operand,
-  and leaves a branch into the prefixed address to `PrefixEntryFree`, which refuses it. Against a
+  and leaves a branch into the prefixed address, or into a live instruction after a dead
+  `readonly.`, to `PrefixEntryFree`, which refuses it. Against a
   readonly and a writable address body the check accepts, it shows that the check refuses a forged
   flag or element type, a final `readonly.`, a second `readonly.`, a `nop` or an `ldelem` after
   `readonly.`, and `ldelema` after `unaligned.`, and that a call after `readonly.` has no
-  decoding. Both run in the `evidence` suite.
+  decoding and the `readonly.` before it is refused at its own site. Both run in the `evidence` suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
   initialization and copies. It rejects missing initialization assumptions, mutable fields,
