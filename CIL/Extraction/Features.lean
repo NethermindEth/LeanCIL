@@ -185,9 +185,8 @@ def platformConstant (site : CallSite) : Option W32 := do
 /-- `ldsfld` of the System.Runtime `BitConverter` static Boolean `IsLittleEndian`. Valid
     profiles are little-endian, so the load is the constant 1. -/
 def platformField (instruction : RawInstruction) : Option W32 :=
-  if instruction.opcode == 126 && instruction.operand ==
-      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean")
-        name!"IsLittleEndian" true
+  if instruction.opcode == 126 && instruction.operand == .field littleEndianField.owner
+      littleEndianField.index littleEndianField.type littleEndianField.name true
   then some 1 else none
 
 /-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.

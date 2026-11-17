@@ -58,9 +58,6 @@ theorem opaque_edges : opaqueLocalIndices { raw with
   decide +kernel
 #print axioms opaque_edges
 
-/-- A one-byte unsigned static field descriptor. -/
-def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, "", 1, false⟩
-
 /-- The matching raw static field load. -/
 def load : RawInstruction :=
   ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") name!"Value" true⟩
@@ -68,6 +65,9 @@ def load : RawInstruction :=
 /-- The field `load` names. -/
 def loaded : FieldRef :=
   { owner := .void, index := 0, type := .atom runtimeScope "System.Byte", name := name!"Value" }
+
+/-- A one-byte unsigned static field descriptor of `loaded`. -/
+def descriptor : StaticDescriptor := ⟨0, loaded, [0], none, some false, 1, false⟩
 
 /-- An emitted scalar load with caller-provided static metadata. -/
 def body (sites : List (Nat × StaticDescriptor)) : Method := {

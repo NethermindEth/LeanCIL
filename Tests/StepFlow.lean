@@ -42,10 +42,11 @@ example {r : Reference}
     (h : step body (.call (Tests.callee 1)) pc args frame stack m =
       .ok (.construct 2 args stack frame' r .word64 m')) :
     False := by
-  obtain ⟨_, _, plain⟩ := step_call_action h
-  rw [if_neg (by decide)] at plain
-  obtain ⟨_, _, _, contradiction⟩ := plain
-  cases contradiction
+  rcases step_call_action h with ⟨_, _, plain⟩ | ⟨_, _, _, _, contradiction⟩
+  · rw [if_neg (by decide)] at plain
+    obtain ⟨_, _, _, contradiction⟩ := plain
+    cases contradiction
+  · cases contradiction
 
 example {constructor : CIL.Extraction.MethodRef} {size}
     (linked : body.linkAt pc = some (.aggregate 2 size))

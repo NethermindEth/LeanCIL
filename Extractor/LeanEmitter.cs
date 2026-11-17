@@ -57,27 +57,27 @@ internal static class LeanEmitter
         };
     }
     // An opaque value names no initializer; its zero bytes fix only the load width.
-    static StaticSite OpaqueSite(int pc, StaticValues.Value value) =>
-        new(pc, StaticIdentity.Of(value.Field), value.Field.FullName, value.Bytes,
+    static StaticSite OpaqueSite(int pc, FieldRef reference, StaticValues.Value value) =>
+        new(pc, StaticIdentity.Of(value.Field), reference, value.Bytes,
             new OpaqueStaticValue(StaticValues.ScalarSign(value.Field)));
 
-    static StaticSite SiteOf(Instruction i, int pc, MethodDefinition method,
+    static StaticSite SiteOf(Instruction i, int pc, FieldRef reference, MethodDefinition method,
         IReadOnlyDictionary<MethodDefinition, int> methodIndices, FeatureProfile profile)
     {
         if (StaticValues.IsLoad(i))
         {
             var value = StaticValues.Resolve((FieldReference)i.Operand, method.Module, profile.Architecture);
-            if (value.Opaque) return OpaqueSite(pc, value);
+            if (value.Opaque) return OpaqueSite(pc, reference, value);
             int? initializer = value.Initializer is null
                 ? null : methodIndices.GetValueOrDefault(value.Initializer, -1);
             if (initializer < 0)
                 throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
-            return new(pc, StaticIdentity.Of(value.Field), value.Field.FullName, value.Bytes,
+            return new(pc, StaticIdentity.Of(value.Field), reference, value.Bytes,
                 new InitializedStaticValue(StaticValues.ScalarSign(value.Field), initializer, value.Arguments,
                     value.Literal, value.Construct));
         }
         FieldDefinition field = StaticData.Validate((FieldReference)i.Operand, method.Module);
-        return new(pc, StaticIdentity.Of(field), field.FullName, field.InitialValue,
+        return new(pc, StaticIdentity.Of(field), reference, field.InitialValue,
             new StaticDataBlock(StaticData.Alignment(field)));
     }
 
@@ -237,7 +237,8 @@ internal static class LeanEmitter
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
-                .Select(s => SiteOf(s.i, s.pc, m, methodIndices, profile))];
+                .Select(s => SiteOf(s.i, s.pc, genericEvidence.FieldReferenceOf(m, s.pc), m, methodIndices,
+                    profile))];
             var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, opaqueLocals, homes, sites,
                 genericEvidence.Declared(m));
             // The table is derived from the operations, so it needs no renumbering beside the code.
@@ -265,13 +266,17 @@ internal static class LeanEmitter
             // A call names the method its raw operand names; a constrained one also the type the definition just
             // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)
-                if (ops[pc] is Call { Kind: not CallKind.Instance } call)
-                    ops[pc] = call with
+                ops[pc] = ops[pc] switch
+                {
+                    Call { Kind: not CallKind.Instance } call => call with
                     {
                         Site = genericEvidence.MethodReferenceOf(m, pc),
                         ConstrainedType = call.Constrained
                             ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
-                    };
+                    },
+                    ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
+                    var operation => operation
+                };
             if (collectTemplates)
                 templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // A class field access names its operand's definition, so stepping reads that operand's shape fact.
@@ -313,6 +318,8 @@ internal static class LeanEmitter
             // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
             // in time linear in the body, so a stepping proof reads a link without evaluating the table lookup.
             lean.AppendLine($"cil_instruction_equations method{n}");
+            // A modelled call's step reads its model from the fact the command states for its pc.
+            if (ops.Any(op => op is ModelCall)) lean.AppendLine($"cil_runtime_models method{n}");
             (string Field, string Value)[] facts =
             [
                 ("profile", "profile"), ("locals", $"[{frame.LocalsLean}]"),
@@ -344,7 +351,8 @@ internal static class LeanEmitter
         {
             FeatureEvidence.EmitTheorem(lean, n);
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
-                $"specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
+                $"specializedMethods imports (Extraction.callModelled method{n}) " +
+                $"(Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
                 $"method{n}Closed) method{n}Reachable method{n} := {Decide}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
@@ -355,6 +363,8 @@ internal static class LeanEmitter
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
+        lean.AppendLine("theorem static_identities_validated : Extraction.StaticIdentitiesValid program " +
+            "(methodEvidence.map (·.body)) := " + Decide);
         for (int n = 0; n < methods.Length; n++)
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
@@ -389,7 +399,8 @@ internal static class LeanEmitter
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
         lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
             "assemblies methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
+        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated");
+        lean.AppendLine("    statics_validated static_identities_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");

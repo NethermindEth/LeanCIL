@@ -171,8 +171,8 @@ Console.WriteLine("PASS template tail calls take the callee parameter of the pro
 // parameters too, whatever index each profile gives them.
 object Entry(string identity, int method) => Create("ManagedTarget", identity, method);
 object InitializedSite(int initializer) => Create("StaticSite", 0, Create("StaticIdentityRecord", "id", "asm", "fld"),
-    "fld", Listed(typeof(byte), []), Create("InitializedStaticValue", null, initializer, Listed(typeof(string), []),
-        null, false));
+    Create("FieldRef", "T", 0, "U", ValueName()), Listed(typeof(byte), []),
+    Create("InitializedStaticValue", null, initializer, Listed(typeof(string), []), null, false));
 string SharedBody(string name, Func<int, object> caller)
 {
     var directory = Path.Combine(root, name);

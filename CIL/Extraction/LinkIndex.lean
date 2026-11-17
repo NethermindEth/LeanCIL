@@ -219,6 +219,71 @@ theorem readHead_dropBelow (query : Nat) (table : List (Nat × Link)) (lower : N
 
 #print axioms readHead_dropBelow
 
+/-- In a table ascending from `lower`, every entry up to position `last` has a key at most that
+    entry's. -/
+theorem keysAscend_take_le {α : Type} : ∀ (entries : List (Nat × α)) (lower last : Nat)
+    (bound : Nat × α), keysAscend lower entries = true → entries[last]? = some bound →
+      ∀ entry ∈ entries.take (last + 1), entry.1 ≤ bound.1
+  | [], _, _, _, _, found => by simp at found
+  | (key, value) :: rest, lower, last, bound, ascending, found => by
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    cases last with
+    | zero =>
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst found
+      simp
+    | succ last =>
+      simp only [List.getElem?_cons_succ] at found
+      have later := keysAscend_bound rest (key + 1) ascending.2 bound (List.mem_of_getElem? found)
+      intro entry member
+      simp only [List.take_succ_cons, List.mem_cons] at member
+      rcases member with rfl | member
+      · simp only
+        omega
+      · exact keysAscend_take_le rest (key + 1) last bound ascending.2 found entry member
+
+#print axioms keysAscend_take_le
+
+/-- What is left of an ascending table after any prefix ascends from some bound. -/
+theorem keysAscend_drop {α : Type} : ∀ (entries : List (Nat × α)) (lower count : Nat),
+    keysAscend lower entries = true → ∃ bound, keysAscend bound (entries.drop count) = true
+  | [], _, _, _ => ⟨0, by simp [keysAscend]⟩
+  | _ :: _, lower, 0, ascending => ⟨lower, ascending⟩
+  | (key, _) :: rest, _, count + 1, ascending => by
+    simp only [keysAscend, Bool.and_eq_true] at ascending
+    exact keysAscend_drop rest (key + 1) count ascending.2
+
+#print axioms keysAscend_drop
+
+/-- Over an ascending table, the link of `query` is read from the head of the table, so a pc
+    before its first block needs no other entry. -/
+theorem linkAt_eq_readHead {body : Method} (ascending : keysAscend 0 body.links = true)
+    (query : Nat) : body.linkAt query = readHead query (dropBelow query body.links) :=
+  (readHead_dropBelow query body.links 0 ascending).symm
+
+#print axioms linkAt_eq_readHead
+
+/-- Over an ascending table, when the entry at `previous` has a key below `query`, the link of
+    `query` is read from `suffix`, the table after that entry, so it walks no earlier entry. -/
+theorem linkAt_eq_readHead_suffix {body : Method} (ascending : keysAscend 0 body.links = true)
+    {previous query : Nat} {last : Nat × Link} {suffix : List (Nat × Link)}
+    (placed : body.links.drop (previous + 1) = suffix) (found : body.links[previous]? = some last)
+    (below : last.1 < query) : body.linkAt query = readHead query (dropBelow query suffix) := by
+  obtain ⟨bound, rest⟩ := keysAscend_drop body.links 0 (previous + 1) ascending
+  rw [placed] at rest
+  rw [readHead_dropBelow query suffix bound rest, Method.linkAt, ← placed]
+  have earlier := keysAscend_take_le body.links 0 previous last ascending found
+  conv => lhs; rw [← List.take_append_drop (previous + 1) body.links]
+  simp only [linkLookup, List.find?_append]
+  rw [show (List.take (previous + 1) body.links).find? (fun entry => entry.1 == query) = none from
+    List.find?_eq_none.mpr fun entry member => by
+      have := earlier entry member
+      simp only [beq_iff_eq]
+      omega]
+  rfl
+
+#print axioms linkAt_eq_readHead_suffix
+
 /-- While `table` is what is left of an ascending `full` after dropping below `previous`, the
     walk reads each query as a scan of `full` would, in whatever order the queries come. -/
 theorem linkWalk_eq (full : List (Nat × Link)) (ascending : keysAscend 0 full = true)

@@ -923,8 +923,8 @@ compose.
 
 An export that can run after its tables are loaded, including a repeated call, should take
 `StaticWorldValid published memory` as its precondition and restate it for the final memory in
-its postcondition. `published` lists literal descriptors (identity, assembly identity, field
-name and bytes) in an interface module. A published descriptor that differs from the extracted
+its postcondition. `published` lists literal descriptors (identity, the field as the reading
+instruction names it, and bytes) in an interface module. A published descriptor that differs from the extracted
 one leaves the author proof unprovable, so no separate equality audit is needed.
 `StaticIdentitiesAbsent` suits only a first-use contract: after the first call the field is
 loaded and the premise is false.

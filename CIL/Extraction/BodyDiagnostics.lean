@@ -24,7 +24,9 @@ def describeBodyFailure (signature : String) (body : BodyEvidence) (method : Raw
   let lead := s!"Method {signature}: the decoded method does not match its body bytes or metadata"
   match checkBody body method arguments with
   | .error error => s!"{lead}: {repr error}"
-  | .ok decoded => s!"{lead}: {bodyDifference decoded method} differ"
+  | .ok decoded =>
+    if decoded.statics != body.statics then s!"{lead}: the recorded static field tokens differ"
+    else s!"{lead}: {bodyDifference decoded method} differ"
 
 open Lean Elab Tactic Meta in
 /-- Prove `bodyMatches body method arguments = true` with the kernel, naming the method and the

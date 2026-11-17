@@ -522,12 +522,14 @@ method and the bytes.
 | `decodedProgram?_eq_some` | Turns `BodiesDecode` into `decodedProgram? profile environment evidence = some program` |
 | `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
-| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call |
+| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |
 
 An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
 `(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
-for a method defined from its decoder. The proof of `decodedProgram?_eq_some` adds one
+for a method defined from its decoder, and `site` its `ManagedCallsValid` premise from
+`Extracted.method{n}_calls_validated` of the caller and its instruction and link premises from a
+`bind_call` site's `call` and `link` facts. The proof of `decodedProgram?_eq_some` adds one
 constructor per record, so its cost is linear in the methods of the extraction
 ([scaling](performance/InstructionLookups.md)).
 A summary whose bound names another token, or whose record's bytes decode to another method, does
@@ -1191,6 +1193,30 @@ one `Relocatable` property per slot, so libraries may export contracts of differ
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so
 a collision can make a proof fail and cannot prove a false statement.
+
+## Carry a summary to other programs
+
+`CIL.Safety.ProgramClosure` takes out of a program the methods one method reaches, so that a
+summary proved there binds wherever those methods appear:
+
+- `Program.closure program root` is `some (lib, indices)`: the methods `root` reaches through link
+  tables, renumbered from `root` at 0, and the index in `program` of each. It is `none` when a
+  link of a reached method enters a method outside them. A search over n methods with e link
+  callees in a program of P methods costs O(n * P + e) kernel steps; the
+  [lookup scaling suite](performance/InstructionLookups.md) pins that cost.
+- `Program.closure_closed` gives `Closed lib`, and `Program.closure_relocates` gives
+  `RelocatesInto lib program` at the indices, with `root` first.
+- `Program.closureEvidence` reads the closure's records from the program's, with their links
+  renumbered; `Program.closureEvidence_decodes` says they decode to `lib` when the program's
+  records decode to `program`. `Method.ofBody?_relocate` makes this hold: decoding never reads
+  the links, so records with relocated links decode to the relocated methods.
+- `MethodContract.Holds.restrict` carries a contract proved in `program` to the closure, where
+  `DecodedSummary.of_decoded` binds it to the closure's record.
+- `RelocatesInto.of_decoded` places `lib` in a target program whose records decode, at the
+  indices `f` gives, to the relocated library methods. A map may send two library methods to
+  one index when both decode to the method there: a call into either runs the method both denote.
+- `DecodedSummary.relocate` carries a summary over `lib` to the method `f` places in the target,
+  bound to the target's record there when it names the same pinned method and type arguments.
 
 ## Reuse framework contracts
 

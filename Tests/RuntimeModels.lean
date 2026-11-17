@@ -1,5 +1,7 @@
 import CIL.Safety.Execution
 import CIL.Extraction.RuntimeModels
+import CIL.Extraction.UnsafeCalls
+import CIL.Extraction.KernelEquation
 import Tests.Support
 
 /-!
@@ -233,7 +235,8 @@ example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 false)) = true
   decide +kernel
 example : catalog.siteAgrees {} (site bigMul) (.memory (.divRemOut 64)) = false := by
   decide +kernel
-example : catalog.siteAgrees {} (site bigMul) (.call bigMul) = false := by decide +kernel
+-- A call keeps its operand; `ManagedCallsValid` decides whether a model or a link enters it.
+example : catalog.siteAgrees {} (site bigMul) (.call bigMul) = true := by decide +kernel
 example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 true)) = false := by
   decide +kernel
 
@@ -288,13 +291,93 @@ example : ModelTable :=
   model_table% [ModelEntry.exact .call bigMul (.memory (.bigMul64 false)),
     ModelEntry.exact .call bigMul (.memory (.bigMul64 true))]
 
--- The runtime table is empty, so it models no call, and a method's calls keep their call.
+-- The runtime table models the exact `System.Object` constructor under `call` and nothing else.
+example : runtimeModel {} .call objectConstructorMethod = some .objectConstructor := by
+  decide +kernel
 example : runtimeModel {} .call bigMul = none := by decide +kernel
+example : runtimeModel {} .newobj objectConstructorMethod = none := by decide +kernel
+example : runtimeModel {} .call
+    { objectConstructorMethod with owner := .atom "Fixture" "System.Object" } = none := by
+  decide +kernel
+/-- `System.Object` as another assembly declares it. -/
+private def coreObject : TypeExpr := .atom "System.Private.CoreLib" "System.Object"
+example : runtimeModel {} .call { objectConstructorMethod with owner := coreObject } = none := by
+  decide +kernel
+example : runtimeModel {} .call { objectConstructorMethod with hasThis := false } = none := by
+  decide +kernel
+example : runtimeModel {} .call { objectConstructorMethod with parameters := [word] } = none := by
+  decide +kernel
 example : RuntimeModelsAgree (method
     (site bigMul)) [true]
     { body with code := [.call (Tests.callee 3) {}], links := [(0, .direct 7)] } := by
   decide +kernel
 
+-- An entry filed under `newobj` does not model a `call` of its method.
+example : ModelTable.find
+    (model_table% [ModelEntry.exact .newobj objectConstructorMethod .objectConstructor])
+    {} .call objectConstructorMethod = none := by decide +kernel
+
+/-- A body whose only instruction is `emitted`, with the link table `links`. -/
+private def emitting (emitted : CIL.Instruction) (links : List (Nat × CIL.Link)) : CIL.Method :=
+  { body with code := [emitted], links }
+
+-- A model site keeps its call and states no link; a link there, or another emission, is refused.
+example :
+    ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod)) [true]
+    (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
+example : ¬ ManagedCallsValid [⟨[], method (site bigMul)⟩] [] (callModelled body)
+    (method (site objectConstructorMethod)) [true]
+    (emitting (.call objectConstructorMethod {}) [(0, .direct 0)]) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod))
+    [true] (emitting .pop []) := by decide +kernel
+example : ¬ RuntimeModelsAgree (method (site objectConstructorMethod)) [true]
+    (emitting .nop []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod))
+    [true] (emitting (.call objectConstructorMethod { tail := true }) []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site objectConstructorMethod))
+    [true] (emitting (.call bigMul {}) []) := by decide +kernel
+
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method ⟨0, 40, .call {
+      method := objectConstructorMethod, target := .managed 0, typeArguments := [],
+      parameterCount := 0, returnsValue := false }⟩) [true]
+    (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
+
+-- `pop` stands for no model, so a model site does not emit it, and no call site of any opcode
+-- emits it, since it would drop the call.
+example :
+    ¬ RuntimeModelsAgree (method (site objectConstructorMethod)) [true] (emitting .pop []) := by
+  decide +kernel
+example : callEmitsNoPop (site objectConstructorMethod) .pop = false := by decide
+example : callEmitsNoPop (site bigMul) .pop = false := by decide
+example :
+    callEmitsNoPop (site { objectConstructorMethod with hasThis := false } 111) .pop = false := by
+  decide
+example : callEmitsNoPop (site bigMul 115) .pop = false := by decide
+example : callEmitsNoPop ⟨0, 38, .none⟩ .pop = true := by decide
+example :
+    callEmitsNoPop (site objectConstructorMethod) (.call objectConstructorMethod {}) = true := by
+  decide
+-- The method check applies the rule: a live call emitting `pop` fails it, the same call emitting
+-- its call passes, and a raw `pop` still emits `pop`.
+example : ¬ UnsafeCallsValid [] (method (site bigMul)) [true] [.pop] := by decide +kernel
+example : UnsafeCallsValid [] (method (site bigMul)) [true] [.call bigMul {}] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (method (site objectConstructorMethod)) [true] [.pop] := by
+  decide +kernel
+example : UnsafeCallsValid [] (method ⟨0, 38, .none⟩) [true] [.pop] := by decide +kernel
+
+-- An external call the table does not model needs a link.
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site bigMul)) [true]
+    (emitting (.call bigMul {}) []) := by decide +kernel
+
 end Table
+
+/-- The receiver an object constructor call consumes. -/
+private def receiver : Value := .object (.address ⟨0, 0⟩)
+
+/-- A call of the `System.Object` constructor at a pc with no link steps as `pop` does. -/
+example : step { body with code := [.call CIL.Extraction.objectConstructorMethod {}] }
+    (.call CIL.Extraction.objectConstructorMethod {}) 0 [] frame [receiver] heapMemory =
+      step body .pop 0 [] frame [receiver] heapMemory := by
+  cil_kernel_rfl
 
 end Tests.RuntimeModels
