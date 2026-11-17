@@ -168,16 +168,7 @@ theorem sliceMatches_of_metadataRowsBound {images : List PinnedImage}
       | error error => simp [found, bind, Except.bind, ok] at one
       | ok image =>
         refine Exists.intro image (And.intro rfl ?_)
-        have imageMember : List.Mem image prepared := by
-          unfold located at found
-          cases selected : prepared.find?
-              (fun image => image.identity == slice.assembly.identity) with
-          | none => simp [selected] at found
-          | some selectedImage =>
-            have same : selectedImage = image := by
-              simpa [selected, pure, Except.pure] using found
-            subst image
-            exact List.mem_of_find?_eq_some selected
+        have imageMember : List.Mem image prepared := mem_of_located found
         have contents : sliceContentsBound image slice = .ok () := by
           cases result : sliceContentsBound image slice with
           | error error => simp [found, result, bind, Except.bind, ok] at one
