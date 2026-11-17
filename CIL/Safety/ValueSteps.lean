@@ -257,13 +257,15 @@ dsimproc [cil_step] reduceMethodLinkAt (CIL.Method.linkAt _ _) := fun read => do
   return .done link
 
 open Lean Meta in
-/-- The runtime model of a closed call in a method literal or a literal environment, by evaluating
-    the table; a named body's call is left for its `cil_runtime_models` fact. -/
+/-- The runtime model of a call of a closed method in a method literal or under an environment
+    that is not a named body's, by evaluating the table; a named body's call is left for its
+    `cil_runtime_models` fact. An environment that is a variable decides every entry whose
+    resolution does not read it, and leaves the read of any other unevaluated. -/
 dsimproc [cil_step] reduceRuntimeModel (CIL.Extraction.runtimeModel _ _ _) := fun read => do
-  let_expr CIL.Extraction.runtimeModel environment _ _ := read | return .continue
+  let_expr CIL.Extraction.runtimeModel environment opcode method := read | return .continue
   if let some body := environment.app1? ``CIL.Method.environment then
     unless (← instantiateMVars body).isAppOf ``CIL.Method.mk do return .continue
-  if read.hasFVar || read.hasMVar then return .continue
+  if opcode.hasFVar || opcode.hasMVar || method.hasFVar || method.hasMVar then return .continue
   let resolved ← withDefault <| whnf read
   match_expr resolved with
   | Option.none _ => return .done resolved

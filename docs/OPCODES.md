@@ -756,6 +756,8 @@ exception handlers are not modelled.
 The corresponding static `Min`, `Max` and `Clamp` methods on `sbyte`, `byte`, `short`,
 `ushort`, `int`, `uint`, `long`, `ulong`, `nint` and `nuint` use the same operations.
 Signed types also admit `Abs` and `Sign`, with the same overflow behavior and `int` sign result.
+A call of any of these helpers keeps its `call`, which runs the scalar intrinsic the runtime model
+table gives its method reference.
 
 `System.Math.BigMul(ulong, ulong, out ulong)` returns the high 64 bits of the unsigned product
 and writes the low 64 bits through the checked output reference. The destination must be live,

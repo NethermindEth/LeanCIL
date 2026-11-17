@@ -178,7 +178,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
   case call method prefixes =>
     cases tail : prefixes.tail
     · simp [CIL.Instruction.continues, tail]
-    · simp only [step, tail, ite_true] at h
+    · simp only [step, observedCall, tail, ite_true] at h
       repeat' first
         | contradiction
         | exact resumes.elim

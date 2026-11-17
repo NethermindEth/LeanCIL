@@ -464,7 +464,7 @@ def newobjStep (link : Option CIL.Link) (owner : CIL.Extraction.TypeExpr) (argc 
   | _ => .error unlinkedCall
 
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
-    bits are rejected before dispatch. -/
+    bits are rejected before dispatch, and a call in the arm of its link. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
@@ -588,21 +588,24 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .ldelema element readOnly, _ =>
     let (memory, values) ← elementAddressInstruction (body.elementShape element) readOnly stack m
     return .next (pc + 1) values frame memory
-  -- A call enters the body its pc links to; a pc with no link runs the runtime model its
-  -- operand names, which leaves no frame for a `tail.` call to retire.
+  -- A call enters the body its pc links to once its method's arguments are specified; a pc with
+  -- no link runs the runtime model its operand names, which checks the operands it observes and
+  -- leaves no frame for a `tail.` call to retire.
   | .call method prefixes, _ =>
     match body.linkAt pc with
-    | some (.direct callee) =>
-      if prefixes.tail then
-        if stack.length != method.argumentCount then .error .invalidState else
-          return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
-      else if stack.length < method.argumentCount then .error .invalidState else
-        let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
-        return .call callee arguments (stack.drop method.argumentCount) m
     | none =>
       if prefixes.tail then .error unlinkedCall else
         modelStep (CIL.Extraction.runtimeModel body.environment .call method) body pc frame stack m
-    | some _ => .error unlinkedCall
+    | some link => observedCall method.argumentCount stack fun _ => do
+      match link with
+      | .direct callee =>
+        if prefixes.tail then
+          if stack.length != method.argumentCount then .error .invalidState else
+            return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
+        else if stack.length < method.argumentCount then .error .invalidState else
+          let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
+          return .call callee arguments (stack.drop method.argumentCount) m
+      | _ => .error unlinkedCall
   -- A construction allocates what the link at its pc states and enters the constructor it names.
   | .newobj constructor, _ =>
     newobjStep (body.linkAt pc) constructor.owner constructor.parameters.length frame stack m

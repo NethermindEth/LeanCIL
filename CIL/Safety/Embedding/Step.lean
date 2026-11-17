@@ -414,17 +414,6 @@ theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPr
   plain_cases
   rw [context.link]
   split at h
-  · rename_i linked
-    try simp only [linked]
-    by_cases tail : prefixes.tail = true
-    · by_cases short : (stack.length != method.argumentCount) = true
-      · simp [tail, short] at h
-      · simp only [tail, short, ↓reduceIte] at h ⊢
-        lockstep
-    · by_cases short : stack.length < method.argumentCount
-      · simp [tail, short] at h
-      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-        lockstep
   · rename_i unlinked
     try simp only [unlinked]
     by_cases tail : prefixes.tail = true
@@ -435,7 +424,21 @@ theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPr
       simp only [FrameAction.relabel]
       rw [context.next (by simp [CIL.Instruction.continues, tail])]
       exact modelStep_move context.profile h
-  · cases h
+  · rename_i link linked
+    try simp only [linked]
+    dsimp only [observedCall] at h ⊢
+    obtain ⟨observed, h⟩ := observer_ok h
+    simp only [observed, Bool.false_eq_true, ↓reduceIte]
+    cases link <;> try cases h
+    by_cases tail : prefixes.tail = true
+    · by_cases short : (stack.length != method.argumentCount) = true
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte] at h ⊢
+        lockstep
+    · by_cases short : stack.length < method.argumentCount
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+        lockstep
 
 #print axioms step_relabel_call
 
@@ -1164,15 +1167,6 @@ theorem step_raise_call (method : CIL.Extraction.MethodRef) (prefixes : CallPref
   plain_cases
   rw [context.link]
   split at h
-  · rename_i linked
-    try simp only [linked]
-    by_cases tail : prefixes.tail = true
-    · simp only [tail, ↓reduceIte] at h ⊢
-      exact h
-    · by_cases short : stack.length < method.argumentCount
-      · simp [tail, short] at h
-      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-        raise_lockstep
   · rename_i unlinked
     try simp only [unlinked]
     by_cases tail : prefixes.tail = true
@@ -1180,7 +1174,19 @@ theorem step_raise_call (method : CIL.Extraction.MethodRef) (prefixes : CallPref
     · simp only [tail, Bool.false_eq_true, ↓reduceIte] at h ⊢
       rw [context.environment]
       exact modelStep_move_error context.profile h
-  · simp [unlinkedCall] at h
+  · rename_i link linked
+    try simp only [linked]
+    dsimp only [observedCall] at h ⊢
+    obtain ⟨observed, h⟩ := observer_thrown h
+    simp only [observed, Bool.false_eq_true, ↓reduceIte]
+    cases link <;> try (simp [unlinkedCall] at h; done)
+    by_cases tail : prefixes.tail = true
+    · simp only [tail, ↓reduceIte] at h ⊢
+      exact h
+    · by_cases short : stack.length < method.argumentCount
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+        raise_lockstep
 
 #print axioms step_raise_call
 

@@ -214,20 +214,36 @@ section InstructionEquations
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
 /-- A call enters the method its link names, after checking the arguments its method takes,
-    deepest first, and a call without a link runs its method's runtime model, as `callStep`
-    says. -/
+    deepest first, and a call without a link runs its method's runtime model, which checks the
+    operands it observes, as `callStep` says. -/
 @[cil_step] theorem step_call_eq (method : Extraction.MethodRef) (prefixes : CallPrefixes)
     (stack : List Value) :
     step body (.call method prefixes) pc args frame stack memory =
-      if unspecifiedOperands method.argumentCount stack then
+      if (body.linkAt pc).isSome && unspecifiedOperands method.argumentCount stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else callStep (body.linkAt pc) method.argumentCount prefixes.tail
         (fun _ => modelStep (Extraction.runtimeModel body.environment .call method) body pc frame
           stack memory) stack memory := by
-  simp only [step, observerCount, callStep]
-  rfl
+  simp only [step, observerCount, guard_operands_zero, Bool.false_eq_true, ite_false, callStep]
+  cases body.linkAt pc with
+  | none => rfl
+  | some link => cases link <;> rfl
 
 #print axioms step_call_eq
+
+/-- The step of a linked call is the one before a call left its operands to its model: the
+    same argument check, at the same point before the arm's other faults. -/
+theorem step_call_linked {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {link : CIL.Link} (linked : body.linkAt pc = some link) (stack : List Value) :
+    step body (.call method prefixes) pc args frame stack memory =
+      if unspecifiedOperands method.argumentCount stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else callStep (some link) method.argumentCount prefixes.tail
+        (fun _ => .error unlinkedCall) stack memory := by
+  rw [step_call_eq, linked]
+  cases link <;> rfl
+
+#print axioms step_call_linked
 
 /-- A plain call checks its arguments, deepest first, and leaves the rest of the stack for the
     caller's continuation. -/
@@ -280,20 +296,32 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 #print axioms callStep_none_tail
 
 /-- A call whose pc states no link, outside `tail.`, runs the runtime model `found` gives its
-    method after checking the arguments that method takes. Stepping selects it once the link and
-    model facts are known, so the kernel checks one application instead of rewriting `callStep`. -/
+    method, which checks the operands it observes. Stepping selects it once the link and model
+    facts are known, so the kernel checks one application instead of rewriting `callStep`. -/
 theorem step_call_model {method : Extraction.MethodRef} {prefixes : CallPrefixes}
     {model : CIL.RuntimeModel} (link : body.linkAt pc = none)
     (found : Extraction.runtimeModel body.environment .call method = some model)
     (direct : prefixes.tail = false) (stack : List Value) :
     step body (.call method prefixes) pc args frame stack memory =
-      if unspecifiedOperands method.argumentCount stack then
-        .error (.unsupported "Instruction observes unspecified vector bits")
-      else modelStep (some model) body pc frame stack memory := by
+      modelStep (some model) body pc frame stack memory := by
   rw [step_call_eq, link, direct, found]
   rfl
 
 #print axioms step_call_model
+
+/-- A call without a link whose method's model is an intrinsic steps as that intrinsic, which
+    decides itself which operand bits it reads. -/
+theorem step_call_intrinsic {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {operation : CIL.Intrinsic} {argc : Nat} (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.intrinsic operation argc))
+    (direct : prefixes.tail = false) :
+    step body (.call method prefixes) pc args frame stack memory =
+      step body (.intrinsic operation argc) pc args frame stack memory := by
+  rw [step_call_model (link := link) (found := found) (direct := direct)]
+  rfl
+
+#print axioms step_call_intrinsic
 
 /-- A call whose pc links `callee` directly enters it, as `callStep` says; the model it would
     run without a link is never read. Stepping selects it once the link fact is known. -/

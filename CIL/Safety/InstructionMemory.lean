@@ -80,7 +80,7 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
   (stack.take count).any Value.hasUnspecified
 
 /-- Operands an op observes or exposes across a method boundary; `step` rejects the op when
-    any of them has unspecified bits. -/
+    any of them has unspecified bits. A call counts none, since the arm of its link checks. -/
 def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf
@@ -106,7 +106,6 @@ def observerCount : CIL.Instruction → Nat
   | .stsfld _ => 1
   -- Method boundaries
   | .ret => 1
-  | .call method _ => method.argumentCount
   | .callInstance _ argc | .callVirtual _ argc => argc
   | .newobj constructor => constructor.parameters.length
   | .managed (.call signature _ _) => signature.parameters.length + 1
@@ -117,6 +116,8 @@ def observerCount : CIL.Instruction → Nat
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
   | .ldc_i8 _ | .ldnull | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unadmitted _ => 0
+  -- A linked call checks its method's arguments, and a call's model the operands it observes.
+  | .call .. => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/
 def checkedAt (reference : ManagedReference) (width : Nat) (result : Checked α) :

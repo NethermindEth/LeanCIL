@@ -202,26 +202,30 @@ def callOpcode? : Nat → Option CallOpcode
 
 /-- A raw instruction and its emission agree with `catalog`: at a `call` or `newobj` an
     emission other than a call stands for exactly the model the table gives the site's method. A
-    call keeps its operand, and `ManagedCallsValid` decides whether a model or a link enters it. -/
+    call keeps its operand, and `ManagedCallsValid` decides whether a model or a link enters it;
+    a model the table gives its method must be available in `profile`. -/
 def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnvironment)
-    (raw : RawInstruction) (emitted : Instruction) : Bool :=
+    (profile : FeatureProfile) (raw : RawInstruction) (emitted : Instruction) : Bool :=
   match callOpcode? raw.opcode, raw.operand, emitted with
-  | some _, .call _, .call .. => true
+  | some opcode, .call site, .call .. =>
+    (catalog.table.find environment opcode site.method).all (·.available profile)
   | some opcode, .call site, _ =>
     catalog.table.find environment opcode site.method == catalog.lowered emitted
   | _, _, _ => true
 
 /-- Every live call site of `closed` emits in `code` the model `catalog` gives it, so a model
-    emission is tied to the method it stands for and not only to its stack effect. -/
-def ModelsAgree (catalog : ModelCatalog) (environment : LayoutEnvironment) (closed : RawMethod)
-    (reachable : List Bool) (code : List Instruction) : Prop :=
+    emission is tied to the method it stands for and not only to its stack effect, and a kept call
+    of a modelled method is available in `profile`. -/
+def ModelsAgree (catalog : ModelCatalog) (environment : LayoutEnvironment)
+    (profile : FeatureProfile) (closed : RawMethod) (reachable : List Bool)
+    (code : List Instruction) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
-  all3 (fun raw live emitted => !live || catalog.siteAgrees environment raw emitted)
+  all3 (fun raw live emitted => !live || catalog.siteAgrees environment profile raw emitted)
     closed.code reachable code = true
 
-instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (closed : RawMethod)
-    (reachable : List Bool) (code : List Instruction) :
-    Decidable (ModelsAgree catalog environment closed reachable code) :=
+instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (profile : FeatureProfile)
+    (closed : RawMethod) (reachable : List Bool) (code : List Instruction) :
+    Decidable (ModelsAgree catalog environment profile closed reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
 end CIL.Extraction

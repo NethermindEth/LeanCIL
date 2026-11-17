@@ -68,6 +68,8 @@ internal static class ExceptionLint
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
                 Operation operation = InstructionTranslation.Translate(instruction, method, methodIndices,
                     methodIndex, instructions, profile, nativeOperands, parameterHomes);
+                // A modelled call raises what the operation its model runs as raises.
+                if (operation is ModelCall call) operation = call.Model;
                 foreach (ExceptionType named in RuntimeExceptions(operation))
                     sites.Add(new(method.FullName, instruction.Offset, named,
                         "interpreter operation: " + operation.ToLean()));
@@ -111,7 +113,6 @@ internal static class ExceptionLint
 
     static IEnumerable<ExceptionType> RuntimeExceptions(Operation operation)
     {
-
         if (operation is Divide divide)
         {
             yield return ExceptionType.DivideByZero;

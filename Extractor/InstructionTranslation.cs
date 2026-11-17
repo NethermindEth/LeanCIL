@@ -159,8 +159,8 @@ internal static class InstructionTranslation
         if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;
-            if (i.OpCode.Code == Code.Call
-                && RuntimeModels.ObjectConstructor(r)) return new ModelCall();
+            if (i.OpCode.Code == Code.Call && RuntimeModels.CallModel(r, profile) is { } model)
+                return new ModelCall(model);
             if (RuntimeModel(r, profile) is { } modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);

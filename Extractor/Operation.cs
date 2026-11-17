@@ -317,9 +317,10 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
 
 /// <summary>
 /// A call of a runtime method that the Lean model table models from its raw operand, <see cref="Site"/>: it keeps
-/// the CIL call and states no link, so the interpreter runs the model the operand names.
+/// the CIL call and states no link, so the interpreter runs the model the operand names. The extractor's analyses
+/// read <paramref name="Model"/>, the operation the model runs as, in place of the call.
 /// </summary>
-internal sealed record ModelCall : Operation
+internal sealed record ModelCall(Operation Model) : Operation
 {
     /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
     internal MethodRef? Site { get; init; }

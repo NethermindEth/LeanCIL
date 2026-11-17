@@ -14,14 +14,14 @@ namespace CIL.Safety
 
 set_option maxRecDepth 4096
 
-/-- A binary operation applied to broadcast operands, followed by a lane extraction. -/
+/-- A binary operation applied to broadcast operands, followed by a call that extracts a lane. -/
 @[cil_code] def broadcastBinaryMethod (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (declared : DeclaredSignature) (environment : LayoutEnvironment) : Method := {
   profile := profile, returnsValue := true, locals := [], declared := declared,
   environment := environment
   code := [.ldarg 0, .intrinsic (.vector (.create64 256)) 1,
     .ldarg 1, .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 operation) 2,
-    .ldc_i4 lane, .intrinsic (.vector (.extract64 256)) 2, .ret] }
+    .ldc_i4 lane, .call Extraction.getElement256Method {}, .ret] }
 
 /-- Broadcasting a word does not observe any unspecified bits. -/
 theorem checked_broadcast256 (word : W64) :
@@ -148,10 +148,10 @@ theorem checked_broadcast_andNot (left right : W64) :
   profile := profile, returnsValue := true, locals := [.v128 0], declared := declared,
   environment := environment
   localKinds := [.vector128], opaqueVectorLocals := [0]
-  code := [.ldarg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0,
+  code := [.ldarg 1, .call Extraction.createScalarUnsafeMethod {}, .stloc 0,
     .ldarg 0, .intrinsic (.vector (.create64 256)) 1, .ldloc 0,
     .intrinsic (.avx2 operation) 2, .ldc_i4 lane,
-    .intrinsic (.vector (.extract64 256)) 2, .ret] }
+    .call Extraction.getElement256Method {}, .ret] }
 
 /-- Creating an unsafe scalar vector records only the low lane. -/
 theorem checked_scalarUnsafe (word : W64) :
