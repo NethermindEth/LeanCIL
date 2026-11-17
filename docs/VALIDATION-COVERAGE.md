@@ -863,6 +863,11 @@ CountCallsSummary proves `Loops.CountCalls` twice: by stepping `Decrement` at th
 loop, and from a `DecodedSummary` of it. `Tests/SummaryCalls.cs` refuses that loop with a summary
 that bounds `Decrement`'s result without stating it, at the invariant, and with a summary claimed
 for the caller's own token, at the site check.
+VectorSummary proves `DivisionIntrinsics.UnsafeLowNext` twice: by stepping `UnsafeLow`, whose
+`Vector128.CreateScalarUnsafe` and `GetElement` calls run through their runtime models, and from a
+`DecodedSummary` of it. `Tests/SummaryCalls.cs` refuses that summary for a record of `UnsafeLow`
+whose original is forged to read the other lane, so that it claims a body other than its pinned
+bytes.
 `Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
 `Tests/ProgramClosures.cs` proves the contract of a method whose two callees have the same body
 once in its extraction, carries it to the method's closure and binds it there as a

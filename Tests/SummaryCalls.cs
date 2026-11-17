@@ -19,7 +19,8 @@ using System.Text.RegularExpressions;
 
 // Calls::Mutate{n} stores its argument in a local and passes the local by reference to Mutate n times. The proof of
 // each size states the result twice: by stepping every call, and from Mutate's decoded summary at each call. The
-// summary of Decrement in the loop of Examples.Loops::CountCalls is checked against mutations of its own.
+// summary of Decrement in the loop of Examples.Loops::CountCalls is checked against mutations of its own, and the
+// summary of the vector callee Examples.DivisionIntrinsics::UnsafeLow against a forged original.
 int[] sizes = [1, 4, 16];
 // Most times as much as a call costs through the summary from 1 to 4 calls that it may cost from 4 to 16.
 const double AllowedCallGrowth = 1.6;
@@ -140,6 +141,35 @@ var rejected = new RejectedEvidence(Path.Combine(directory, "Rejected"));
 rejected.Add(forged, "PASS a forged original of Mutate fails its body check, its contract and its decoded summary",
     "the decoded method does not match its body bytes or metadata", "unsolved goals",
     "mutate_summary depends on sorryAx");
+
+// With the original of UnsafeLow forged to read lane 1 of the vector, its record claims a body other than its pinned
+// bytes, so the body check refuses it and the decoded summary of Examples/Proofs/VectorSummary.lean rests on sorryAx.
+var vectorProof = File.ReadAllText(At("Examples/Proofs/VectorSummary.lean"));
+var lowSummary = vectorProof[vectorProof.IndexOf("/-- `UnsafeLow` returns its argument", StringComparison.Ordinal)..
+    vectorProof.IndexOf("/-- The caller returns its argument plus one and keeps the caller memory, applying",
+        StringComparison.Ordinal)];
+var vectorExtraction = Path.Combine(directory, "VectorSummary");
+Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples",
+    "System.UInt64 Examples.DivisionIntrinsics::UnsafeLowNext(System.UInt64)", vectorExtraction));
+var forgedLow = Path.Combine(proofs, "ForgedUnsafeLow.lean");
+File.WriteAllText(forgedLow, ForgeDecodedOriginal(File.ReadAllText(Path.Combine(vectorExtraction, "Extracted.lean")),
+    1, "opcode := 22,", "opcode := 23,") + $$"""
+
+    import Lean
+    import CIL
+    import CIL.MethodIdentity
+    namespace ForgedSummary
+    open CIL CIL.Safety CIL.Extraction
+    bind_method low lowBody := "System.UInt64 Examples.DivisionIntrinsics::UnsafeLow(System.UInt64)"
+    {{lowSummary}}
+    open Lean in
+    run_cmd do
+      if (← collectAxioms ``low_summary).contains ``sorryAx then
+        throwError "low_summary depends on sorryAx"
+    end ForgedSummary
+    """);
+rejected.Add(forgedLow, "PASS a forged original of UnsafeLow fails its body check and its decoded summary",
+    "the decoded method does not match its body bytes or metadata", "low_summary depends on sorryAx");
 rejected.Check();
 
 // How many times as much the caller costs per call between its last two sizes as between its first two. At 1, 4 and
