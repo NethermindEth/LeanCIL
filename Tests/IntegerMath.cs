@@ -152,7 +152,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     // The helper keeps its call, which steps as the scalar intrinsic its model fact names.
     var instruction = "(body := Extracted.method0)";
     var callStep = $"  rw [CIL.Safety.step_call_intrinsic (link := Extracted.method0_link{argc}) " +
-        $"(found := Extracted.method0_model{argc}) (direct := rfl) (specified := rfl)]\n";
+        $"(found := Extracted.method0_model{argc}) (direct := rfl)]\n";
     var argumentsLean = string.Join(" ", variables);
     var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
     string ForCase(string expression)

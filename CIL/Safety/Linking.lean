@@ -267,7 +267,7 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
           cases virtualTarget m table receiver <;> rfl
         all_goals rfl
     all_goals
-      simp only [step, CIL.Method.linkAt_relocate]
+      simp only [step, observedCall, CIL.Method.linkAt_relocate]
       rw [apply_ite (Except.map (FrameAction.relocate f))]
       refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
       rcases body.linkAt pc with _ | link

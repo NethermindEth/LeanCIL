@@ -35,7 +35,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.length = (if body.returnsValue then 1 else 0) ∧
       values.any Value.hasUnspecified = false := by
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+  unfold step observedCall intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject at executed
   dsimp only at executed
   generalize narrowing : body.returnNarrow = narrow at executed
@@ -134,28 +134,33 @@ theorem step_call_known {body : CIL.Method} {method : Extraction.MethodRef}
   simp only [step] at executed
   split at executed
   · cases executed
-  · rename_i known
-    split at executed <;> try (cases executed; done)
-    rotate_left
-    · split at executed
-      · cases executed
-      · obtain ⟨_, _, called⟩ := modelStep_next executed
-        cases called
-    split at executed
-    · split at executed
-      · cases executed
-      · cases checked : stack.reverse.mapM (checkedValue memory) <;>
-          simp [checked, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
-    split at executed
+  split at executed
+  · split at executed
     · cases executed
-    · cases checked : (stack.take method.argumentCount).reverse.mapM (checkedValue memory) with
-      | error fault => simp [checked, Bind.bind, Except.bind] at executed
-      | ok checkedArgs =>
-        simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure,
-          Except.ok.injEq, FrameAction.call.injEq] at executed
-        obtain ⟨_, rfl, rfl, rfl⟩ := executed
-        rw [(checkedValues_valid _ _ _ checked).1]
-        simpa [unspecifiedOperands, observerCount] using known
+    · obtain ⟨_, _, called⟩ := modelStep_next executed
+      cases called
+  rename_i link _
+  unfold observedCall at executed
+  split at executed
+  · cases executed
+  rename_i known
+  cases link <;> try (first | (cases executed; done) | (simp at executed; done))
+  dsimp only at executed
+  split at executed
+  · split at executed
+    · cases executed
+    · cases checked : stack.reverse.mapM (checkedValue memory) <;>
+        simp [checked, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  split at executed
+  · cases executed
+  · cases checked : (stack.take method.argumentCount).reverse.mapM (checkedValue memory) with
+    | error fault => simp [checked, Bind.bind, Except.bind] at executed
+    | ok checkedArgs =>
+      simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure,
+        Except.ok.injEq, FrameAction.call.injEq] at executed
+      obtain ⟨_, rfl, rfl, rfl⟩ := executed
+      rw [(checkedValues_valid _ _ _ checked).1]
+      simpa [unspecifiedOperands] using known
 
 #print axioms step_call_known
 end CIL.Safety

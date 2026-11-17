@@ -532,5 +532,10 @@ example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame
       [int32 (-2147483648)] heapMemory =
     step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-2147483648)]
       heapMemory := by cil_kernel_rfl
+-- A modelled call leaves unspecified operands to its model, so it faults as the intrinsic does.
+example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
+      [.scalar (.v128Low64 7), int32 1] heapMemory =
+    step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame
+      [.scalar (.v128Low64 7), int32 1] heapMemory := by cil_kernel_rfl
 
 end Tests.RuntimeModels

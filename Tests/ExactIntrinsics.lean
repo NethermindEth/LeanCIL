@@ -307,10 +307,13 @@ theorem unspecified_return (body : Method) (memory : Safety.Memory) (frame : Saf
       .error (.unsupported "Instruction observes unspecified vector bits") := rfl
 #print axioms unspecified_return
 
-theorem unspecified_call (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
+theorem unspecified_call (body : Method) (link : Link) (linked : body.linkAt 0 = some link)
+    (memory : Safety.Memory) (frame : Safety.Frame) :
     Safety.step body (.call (Tests.callee 2)) 0 [] frame [.scalar (.i64 0), .scalar (.v128Low64 7)]
       memory =
-      .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+      .error (.unsupported "Instruction observes unspecified vector bits") := by
+  simp only [Safety.step, Safety.observerCount, linked]
+  rfl
 #print axioms unspecified_call
 
 theorem unspecified_call_rest (memory : Safety.Memory) (frame : Safety.Frame) :

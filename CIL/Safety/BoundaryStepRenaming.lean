@@ -378,24 +378,26 @@ private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
       (step sourceBody (.call method prefixes) pc arguments sourceFrame stack source)
       (step targetBody (.call method prefixes) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map, metadata.linkAt pc,
+  have unobserved : unspecifiedOperands 0 stack = false := rfl
+  simp only [step, observerCount, unobserved, Bool.false_eq_true, ite_false,
+    observedCall, mapping.unspecifiedOperands, List.length_map, metadata.linkAt pc,
     metadata.environment, ← List.map_take, ← List.map_drop, ← List.map_reverse]
-  by_cases guard : unspecifiedOperands (observerCount (.call method prefixes)) stack = true
-  · simp only [guard, ite_true]
-    exact .error _
-  · simp only [guard, Bool.false_eq_true, ite_false]
-    generalize sourceBody.linkAt pc = link
-    rcases link with _ | link
-    · dsimp only
-      by_cases tail : prefixes.tail = true
-      · simp only [tail, ite_true]
-        exact .error _
-      simp only [tail, Bool.false_eq_true, ite_false]
-      cases found : CIL.Extraction.runtimeModel sourceBody.environment .call method with
-      | none => exact .error _
-      | some model =>
-        exact runtimeModel_stepRenamed found related frames sourceBody targetBody metadata pc
-          stack bounds
+  generalize sourceBody.linkAt pc = link
+  rcases link with _ | link
+  · dsimp only
+    by_cases tail : prefixes.tail = true
+    · simp only [tail, ite_true]
+      exact .error _
+    simp only [tail, Bool.false_eq_true, ite_false]
+    cases found : CIL.Extraction.runtimeModel sourceBody.environment .call method with
+    | none => exact .error _
+    | some model =>
+      exact runtimeModel_stepRenamed found related frames sourceBody targetBody metadata pc
+        stack bounds
+  · by_cases guard : unspecifiedOperands method.argumentCount stack = true
+    · simp only [guard, ite_true]
+      exact .error _
+    simp only [guard, Bool.false_eq_true, ite_false]
     cases link <;> try exact .error _
     rename_i callee
     try dsimp only

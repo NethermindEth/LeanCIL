@@ -107,9 +107,18 @@ namespace CIL.Safety
 #print axioms guard_starg
 @[cil_guard] theorem guard_ldarga (index : Nat) : observerCount (.ldarga index) = 0 := rfl
 #print axioms guard_ldarga
+/-- A call observes no operand before dispatch; the arm of its link checks them. -/
 @[cil_guard] theorem guard_call (method : Extraction.MethodRef) (prefixes : CallPrefixes) :
-    observerCount (.call method prefixes) = method.argumentCount := rfl
+    observerCount (.call method prefixes) = 0 := rfl
 #print axioms guard_call
+/-- A linked call checks its method's arguments. -/
+@[cil_guard] theorem guard_call_linked (link : CIL.Link) (observed : Bool) :
+    ((some link).isSome && observed) = observed := rfl
+#print axioms guard_call_linked
+/-- A call without a link leaves its operands to the model it runs. -/
+@[cil_guard] theorem guard_call_unlinked (observed : Bool) :
+    ((none : Option CIL.Link).isSome && observed) = false := rfl
+#print axioms guard_call_unlinked
 @[cil_guard] theorem guard_newobj (constructor : CIL.Extraction.MethodRef) :
     observerCount (.newobj constructor) = constructor.parameters.length := rfl
 #print axioms guard_newobj

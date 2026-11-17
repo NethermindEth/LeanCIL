@@ -265,8 +265,8 @@ width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and 
   reads the link and a linked call never mentions the model; `step_call_eq` remains for a call
   whose link no fact decides. `cil_checked_steps` steps a call without a link on in the same
   method, as any instruction that continues there. `step_call_intrinsic` rewrites such a call
-  whose model is an intrinsic to the step of that intrinsic, on a stack whose operands are all
-  specified.
+  whose model is an intrinsic to the step of that intrinsic, since a call without a link checks
+  only the operands its model observes.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies

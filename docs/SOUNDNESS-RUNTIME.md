@@ -64,7 +64,9 @@ arguments and emitted operation. Floating-point equality and unspecified-lane ob
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers
 proved independent of the upper lane: reinterpretation, lane-zero extraction and the count operands
 of the admitted AVX2 logical shifts. Reinterpretation preserves uncertainty. Other observations,
-byte stores, bitcasts, returns and call/constructor arguments reject unspecified bits. Internal
+byte stores, bitcasts, returns, constructor arguments and the arguments of a linked call reject
+unspecified bits. A call without a link checks only the operands its runtime model observes, so a
+call modelled as an intrinsic reads its operands as that intrinsic does. Internal
 dup/pop and eligible opaque locals may forward them. `invoke_return_known` and `step_call_known`
 state the boundary guarantees; a contract cannot expose an unknown lane as a concrete value.
 
