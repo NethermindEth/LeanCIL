@@ -70,8 +70,8 @@ partial class Program
         var proof = BindingImage.PagedDigestTheorem(file, skipCompileCheck: true);
         var definitions = BindingImage.Definitions(file);
         var lemmas = Regex.Matches(proof, @"(?m)^set_option debug\.skipKernelTC true in\ntheorem hash\d+ ").Count;
-        var longest = Regex.Matches(definitions, @"(?s)def page\d+ : List Nat := \[(.*?)\]")
-            .Max(page => page.Groups[1].Value.Split(",\n").Length);
+        var longest = PageChunkCount().Matches(definitions).Max(page => int.Parse(page.Groups[1].Value,
+            System.Globalization.CultureInfo.InvariantCulture));
         if (lemmas != 4 || longest > 64)
             throw new InvalidOperationException(
                 $"Digest proof is not one lemma per page: {lemmas} lemmas, {longest} chunks");
@@ -94,8 +94,9 @@ partial class Program
         var file = new byte[210 * 4096 - 17];
         new Random(11).NextBytes(file);
         var path = Path.Combine(root, "LargeDigest.lean");
-        File.WriteAllText(path, "import StrictBinding.Sha256\n\nnamespace Large\n\n" + BindingImage.Definitions(file) +
-            "\n" + BindingImage.PagedDigestTheorem(file, skipCompileCheck: true) + "end Large\n");
+        File.WriteAllText(path, "import StrictBinding.Sha256\nimport CIL.Extraction.ByteLiterals\n\n" +
+            "namespace Large\n\n" + BindingImage.Definitions(file) + "\n" +
+            BindingImage.PagedDigestTheorem(file, skipCompileCheck: true) + "end Large\n");
         var run = Execute(["lake", "env", "lean", path], cwd: package);
         if (run.Code != 0)
             throw new InvalidOperationException("A digest of 210 pages did not elaborate: " + run.Output);
@@ -284,6 +285,7 @@ partial class Program
     /// <summary>A program that prints the description of an image the audit decodes, one fact per line.</summary>
     static string DescribeModule(byte[] file) => $$"""
         import StrictBinding.Dump
+        import CIL.Extraction.ByteLiterals
 
         namespace StrictDescribe
 
@@ -312,4 +314,7 @@ partial class Program
                 Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(path)))!)))
             .FirstOrDefault() ?? throw new FileNotFoundException("No .NET 11 reference pack under " + packs);
     }
+
+    [GeneratedRegex(@"(?m)^def page\d+ : List Nat := CIL\.Extraction\.fixedDigitsWithin 512 (\d+) ")]
+    private static partial Regex PageChunkCount();
 }

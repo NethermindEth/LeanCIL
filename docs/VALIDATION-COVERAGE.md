@@ -170,7 +170,10 @@ workflow.
   operands, must cost the kernel at most 1.15 times as much per byte as at the size before, both
   for a fold over the bytes and for the body check. The kernel's caches hash a numeral by its low
   64 bits, so the same bodies written as separate numerals joined by `++` cost about twice as much
-  per byte at each doubling. Tests/ScalarEvidence.lean requires the same
+  per byte at each doubling. Tests/StrictBindingScaling.cs proves the SHA-256 digest of a 4 KB
+  image page whose 64-byte chunks all end in the same eight bytes within 1.1 times the heartbeats
+  of the same page with random ends; written as one numeral per chunk, it costs 22 times as much.
+  Tests/ScalarEvidence.lean requires the same
   refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
   elaborator at two method sizes.
   Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user

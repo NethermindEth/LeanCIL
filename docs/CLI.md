@@ -339,7 +339,10 @@ is reconfirmed exactly when a theorem stating it passed the joint audit. Supplie
 pin or checked claim uses are listed as unused and not covered. Successful reports include the
 digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
 
-Generated image modules hold checked SHA-256 theorems. The image association theorem ties each
+Generated image modules hold checked SHA-256 theorems. Each page of an image is one
+`CIL.Extraction.fixedDigitsWithin` term that splits a code joined from numerals of at most 256
+bytes into the page's 64-byte chunks, so chunks that end in the same bytes cost the kernel no more
+than others. The image association theorem ties each
 pinned identity to its image. `StrictBinding.BodiesBound` relates the method evidence to the
 bytes at the offsets decoded from the PE container and MethodDef rows.
 `StrictBinding.MetadataRowsBound` checks each metadata block the evidence carries against the

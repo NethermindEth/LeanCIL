@@ -258,8 +258,9 @@ Console.WriteLine("PASS equal digests share an image module and retain both iden
 var imageModule = "BindingAudit.I" + digest;
 var imageSource = ModuleSource(session, imageModule);
 var sourceText = File.ReadAllText(imageSource);
-var digit = sourceText.IndexOf("  0x", StringComparison.Ordinal) + 4;
-if (digit < 4) throw new InvalidOperationException("Missing image byte literal");
+var page = sourceText.IndexOf("def page0 : List Nat := ", StringComparison.Ordinal);
+var digit = page < 0 ? -1 : sourceText.IndexOf("0x", page, StringComparison.Ordinal) + 2;
+if (digit < 2) throw new InvalidOperationException("Missing image byte literal");
 File.WriteAllText(imageSource, sourceText[..digit] + (sourceText[digit] == '0' ? '1' : '0') +
     sourceText[(digit + 1)..]);
 Compile(imageSource);

@@ -23,6 +23,9 @@ partial class Program
     /// <summary>The most a check of fixed claims may cost more, as a multiple, at 16 times the TypeDef rows.</summary>
     const double MaximumTableGrowth = 1.15;
 
+    /// <summary>The most a page of chunks with equal ends may cost, as a multiple of one with random ends.</summary>
+    const double MaximumEqualTailGrowth = 1.1;
+
     /// <summary>
     /// Body-check heartbeats grow linearly with claims and cover decoding the image once per page.
     /// The fixture's heartbeat count is the fixed cost subtracted from each larger case.
@@ -40,7 +43,8 @@ partial class Program
                     $"{BindingPageSize(methods)}, not {pages} x {size}");
         Console.WriteLine("PASS the body proof pages at about 250 methods up to 8 pages");
         var package = FixturePackage();
-        Run(["lake", "build", "StrictBinding.Evidence"], package, progress: "Building the strict binding library");
+        Run(["lake", "build", "StrictBinding.Evidence", "StrictBinding.Sha256"], package,
+            progress: "Building the strict binding library");
         CheckGeneratedPagedModulesElaborate(root, package);
         CheckAssemblyBlockScaling(root, package);
         CheckSliceRowsScaling(root, package);
@@ -48,6 +52,7 @@ partial class Program
         CheckMetadataPageScaling(root, package);
         CheckMetadataRowsModuleScaling(root, package);
         CheckTypeDefinitionScaling(root, package);
+        CheckEqualTailPageCost(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -412,15 +417,56 @@ partial class Program
     /// </summary>
     static long[] CheckHeartbeats(string path, string package, int cases, string subject)
     {
+        var counts = HeartbeatCounts(path, package, 3 * cases, subject);
+        return [.. Enumerable.Range(0, cases).Select(index =>
+            counts[3 * index + 2] - 2 * counts[3 * index + 1] + counts[3 * index])];
+    }
+
+    /// <summary>The heartbeat counts a module reports, of which there must be `reports`, with no sorryAx.</summary>
+    static long[] HeartbeatCounts(string path, string package, int reports, string subject)
+    {
         // Without the flag the kernel checks on another thread and its heartbeats go uncounted.
         var output = Run(["lake", "env", "lean", "-DElab.async=false", "-M", "8192", path], cwd: package);
         var counts = output.Split('\n').Select(line => line.Trim())
             .Where(line => line.Length > 0 && line.All(char.IsAsciiDigit))
             .Select(line => long.Parse(line, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-        if (counts.Length != 3 * cases || output.Contains("sorryAx", StringComparison.Ordinal))
+        if (counts.Length != reports || output.Contains("sorryAx", StringComparison.Ordinal))
             throw new InvalidOperationException($"Unchecked {subject}:\n{output}");
-        return [.. Enumerable.Range(0, cases).Select(index =>
-            counts[3 * index + 2] - 2 * counts[3 * index + 1] + counts[3 * index])];
+        return counts;
+    }
+
+    /// <summary>
+    /// The kernel-checked digest proof of a page whose 64 chunks all end in the same 8 bytes costs about what the
+    /// proof of the same page with random ends costs. The kernel's caches hash a numeral by its low 64 bits, so
+    /// separate chunk numerals that end alike would collide there and make the hash quadratic in the chunks.
+    /// </summary>
+    static void CheckEqualTailPageCost(string root, string package)
+    {
+        const int pageBytes = 4096;
+        const int chunkBytes = 64;
+        const int tailBytes = 8;
+        const byte tail = 0xA5;
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats\n";
+        var distinct = new byte[pageBytes];
+        new Random(13).NextBytes(distinct);
+        var equal = (byte[])distinct.Clone();
+        for (var end = chunkBytes; end <= pageBytes; end += chunkBytes)
+            equal.AsSpan(end - tailBytes, tailBytes).Fill(tail);
+        (string Name, byte[] Bytes)[] pages = [("RandomEnds", distinct), ("EqualEnds", equal)];
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "EqualTailPage.lean");
+        File.WriteAllText(path, "import StrictBinding.Sha256\nimport CIL.Extraction.ByteLiterals\n\n" + report +
+            string.Concat(pages.Select(page =>
+                $"namespace {page.Name}\n\n{BindingImage.Definitions(page.Bytes)}\n" +
+                BindingImage.PagedDigestTheorem(page.Bytes, skipCompileCheck: false) +
+                $"end {page.Name}\n\n{report}")));
+        var counts = HeartbeatCounts(path, package, pages.Length + 1, "digest proofs of one page");
+        var (randomEnds, equalEnds) = (counts[1] - counts[0], counts[2] - counts[1]);
+        var measured = $"{equalEnds} heartbeats with equal ends, {randomEnds} with random ends";
+        if (randomEnds <= 0 || (double)equalEnds / randomEnds > MaximumEqualTailGrowth)
+            throw new InvalidOperationException($"The digest proof of one page costs {measured}");
+        Console.WriteLine($"PASS a page whose chunks end alike costs its digest proof what another page costs " +
+            $"({measured})");
     }
 
     /// <summary>
@@ -872,6 +918,7 @@ partial class Program
             .Select(index => $"(.succ bodiesOf{index} "));
         return $$"""
             import StrictBinding.Bind
+            import CIL.Extraction.ByteLiterals
 
             namespace Scaling
 

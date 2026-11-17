@@ -86,43 +86,18 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         return (metadata, collection.Tables(), collection.Assemblies());
     }
 
-    /// <summary>The most bytes one numeral of a byte literal holds: the elaborator parses a numeral in time quadratic
-    /// in its digits.</summary>
-    const int LiteralChunkBytes = 256;
-
     /// <summary>
     /// A Lean byte list as one <c>CIL.Extraction.fixedBytes</c> literal: its length and its big-endian code, as
-    /// <see cref="AppendCode"/> writes it. The elaborator reads numerals where a list literal costs a numeral and a
-    /// constructor per byte; the qualified names resolve wherever the text is pasted.
+    /// <see cref="NumeralCode.Append"/> writes it. The elaborator reads numerals where a list literal costs a numeral
+    /// and a constructor per byte; the qualified names resolve wherever the text is pasted.
     /// </summary>
     internal static string Bytes(IEnumerable<byte> bytes)
     {
         var data = bytes.ToArray();
         if (data.Length == 0) return "[]";
         var text = new StringBuilder($"(CIL.Extraction.fixedBytes {data.Length} ");
-        AppendCode(text, data);
+        NumeralCode.Append(text, data);
         return text.Append(')').ToString();
-    }
-
-    /// <summary>
-    /// The big-endian code of <paramref name="data"/>: one hexadecimal numeral of at most
-    /// <see cref="LiteralChunkBytes"/> bytes, or the codes of its first half of numerals and of the rest joined by
-    /// <c>Nat.lor</c> and <c>Nat.shiftLeft</c>. One joined term keeps numerals with equal low bytes from colliding in
-    /// the kernel's caches, which hash a numeral by its low 64 bits.
-    /// </summary>
-    static void AppendCode(StringBuilder text, ReadOnlySpan<byte> data)
-    {
-        if (data.Length <= LiteralChunkBytes)
-        {
-            text.Append("0x").Append(Convert.ToHexString(data));
-            return;
-        }
-        var highBytes = (data.Length + LiteralChunkBytes - 1) / LiteralChunkBytes / 2 * LiteralChunkBytes;
-        text.Append("(Nat.lor (Nat.shiftLeft ");
-        AppendCode(text, data[..highBytes]);
-        text.Append(CultureInfo.InvariantCulture, $" {8 * (data.Length - highBytes)}) ");
-        AppendCode(text, data[highBytes..]);
-        text.Append(')');
     }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>
