@@ -277,11 +277,12 @@ static partial class StrictBindingFacts
 
     /// <summary>
     /// A slice an extraction could carry for an image, as a Lean `CIL.Extraction.MetadataSlice`: the assembly block,
-    /// every row of the tables a slice carries with MethodDef RVAs zeroed, and the entries the rows other than Field
-    /// rows name. A heap cell holds the key of its entry, numbered as in <see cref="AssemblyBlock"/> over the slice's
-    /// entries, 0 for offset 0, and the omitted-entry marker for an entry only Field rows name.
+    /// every row of the tables a slice carries with MethodDef RVAs zeroed, or only the rows whose tokens
+    /// <paramref name="tokens"/> holds, and the entries the rows other than Field rows name. A heap cell holds the key
+    /// of its entry, numbered as in <see cref="AssemblyBlock"/> over the slice's entries, 0 for offset 0, and the
+    /// omitted-entry marker for an entry only Field rows name.
     /// </summary>
-    internal static string Slice(byte[] file)
+    internal static string Slice(byte[] file, IReadOnlySet<int>? tokens = null)
     {
         using PEReader pe = new(ImmutableArray.Create(file));
         var reader = pe.GetMetadataReader();
@@ -294,10 +295,11 @@ static partial class StrictBindingFacts
             var size = reader.GetTableRowSize(table);
             for (var number = 1; number <= reader.GetTableRowCount(table); number++)
             {
+                var handle = MetadataTokens.EntityHandle(table, number);
+                if (tokens is not null && !tokens.Contains(MetadataTokens.GetToken(handle))) continue;
                 var row = file.AsSpan(metadata + reader.GetTableMetadataOffset(table) + (number - 1) * size, size)
                     .ToArray();
                 if (table == TableIndex.MethodDef) Array.Clear(row, 0, RvaBytes);
-                var handle = MetadataTokens.EntityHandle(table, number);
                 var cells = HeapCells(reader, handle);
                 var widths = cells.Sum(cell => cell.Blob ? blobWidth : stringWidth);
                 rows.Add((MetadataTokens.GetToken(handle), row, cells, HeapColumnsAt(table) ?? size - widths));

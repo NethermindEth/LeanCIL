@@ -116,9 +116,9 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
         ordinary.Output.Contains("BindingAudit", StringComparison.Ordinal))
         throw new InvalidOperationException("Default binding output or work changed: " + ordinary.Output);
     var deep = Execute([.. verify, "--deep-checks", digestFile]);
-    if (deep.Code != 0 || !deep.Stdout.Contains("body-bytes: reconfirmed", StringComparison.Ordinal) ||
-        !deep.Stdout.Contains("StrictBinding sources:", StringComparison.Ordinal) ||
-        deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 12)
+    string[] reconfirmed = ["body-bytes", "metadata-rows"];
+    if (deep.Code != 0 || !deep.Stdout.Contains("StrictBinding sources:", StringComparison.Ordinal) ||
+        deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 11)
         throw new InvalidOperationException("Deep binding text is incomplete: " + deep.Output);
     string[] factNames =
     [
@@ -128,7 +128,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     ];
     foreach (var fact in factNames)
         if (!ordinary.Stdout.Contains(fact + ": trusted", StringComparison.Ordinal) ||
-            !deep.Stdout.Contains(fact + (fact == "body-bytes" ? ": reconfirmed" : ": not covered"),
+            !deep.Stdout.Contains(fact + (reconfirmed.Contains(fact) ? ": reconfirmed" : ": not covered"),
                 StringComparison.Ordinal))
             throw new InvalidOperationException("Binding text omitted wire name " + fact);
     Console.WriteLine("PASS default and deep binding text");

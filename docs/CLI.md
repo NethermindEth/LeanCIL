@@ -9,7 +9,7 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 | `leancil extract` | Validate a method and its reachable calls and translate them to Lean | [Extract](#extract) |
 | `leancil blockers` | Report everything that stops `extract` for a list of methods | [Report extraction blockers](#report-extraction-blockers) |
 | `leancil check` | Compare extraction artifacts with their assembly and settings | [Check](#check) |
-| `leancil verify --deep-checks` | Reconfirm in the kernel that an extraction's method bodies are the bytes of assembly files with stated digests | [Deep verification](#deep-verification) |
+| `leancil verify --deep-checks` | Reconfirm in the kernel that an extraction's method bodies and carried metadata rows are those of assembly files with stated digests | [Deep verification](#deep-verification) |
 | `leancil new-proof` | Write a starting proof with marked holes | [Start a proof](#start-a-proof) |
 | `leancil verify` | Check, kernel-replay and audit one theorem | [Verify](#verify) |
 | `leancil verify-batch` | Verify many requests in one session | [Batch verification](CONSUMERS.md#batch-verification) |
@@ -333,17 +333,26 @@ rebuild. Each request must explicitly supply the option; saved verification sett
 deep-check input. Batch verification, gates, watch and workspace reject the option.
 
 The report lists twelve binding facts. Default verification lists them as `trusted` and performs
-no image binding work. Deep verification reconfirms `body-bytes` and the digests of pinned images;
-the other eleven facts remain `not covered`, with a reason for each. Supplied images that no pin
-or checked claim uses are listed as unused and not covered. Successful reports include the digest
-file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
+no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows` and the
+digests of pinned images; the other ten facts remain `not covered`, with a reason for each. A fact
+is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
+pin or checked claim uses are listed as unused and not covered. Successful reports include the
+digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
 
 Generated image modules hold checked SHA-256 theorems. The image association theorem ties each
-pinned identity to its image, and `StrictBinding.BodiesBound` relates the method evidence to the
-bytes at the offsets decoded from the PE container and MethodDef rows. Bodies are checked in
-pages of about 250 methods, capped at eight pages. These theorems join the extraction certificate
-and the selected proof for kernel replay, expected-type checks and axiom checks. Source, artifact,
-identity and toolchain guards run before successful publication.
+pinned identity to its image. `StrictBinding.BodiesBound` relates the method evidence to the
+bytes at the offsets decoded from the PE container and MethodDef rows.
+`StrictBinding.MetadataRowsBound` checks each metadata block the evidence carries against the
+pinned image its identity names: its table header, Assembly row, table rows and `#Strings`,
+`#Blob` and `#US` entries are the image's, with MethodDef RVAs zeroed, under one numbering of the
+`#Strings` and `#Blob` offsets per heap for the table rows and another for the Assembly row. The
+assembly identity, key token, core library, links, the `#GUID` heap, the `Module` table and the
+RVAs of MethodDefs outside the evidence are not part of that check. Both facts are checked in pages
+of about 250 methods, capped at eight pages, and each page decodes the pinned images again; the
+metadata check also checks each distinct Assembly block once, in one more lemma. These
+theorems join the extraction certificate and the selected proof for kernel replay, expected-type
+checks and axiom checks. Source, artifact, identity and toolchain guards run before successful
+publication.
 
 A failed request produces no successful certificate. Once selection and pin matching succeed,
 its failure report includes all facts and matched images. A named rejected binding theorem marks
@@ -354,7 +363,13 @@ and have no binding payload. A failed attempt never reports a fact as trusted or
 
 The image decoder supports metadata tables through `0x2C`, without pointer or edit-and-continue
 tables, and the `#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams. Unsupported image structure
-rejects the request. Deep verification repeats its binding work on each request.
+rejects the request. A deep request reuses the generated modules of an earlier successful request
+in the same certified environment, with the same StrictBinding sources, toolchain, pins and
+generated sources, which hold the image bytes, and the same bytes of every compiled module they
+import, transitively, outside the Lean toolchain: the extraction, StrictBinding and `CIL`
+modules. It skips their build and kernel replay but still audits every deep theorem's type and
+axioms against the current extraction. Under `--proof-root` the key also binds the certified
+library.
 
 ## Start a proof
 

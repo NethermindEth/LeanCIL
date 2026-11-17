@@ -16,7 +16,7 @@ if (args is ["--request-scaling"])
     foreach (var count in new[] { 16, 128, 1024 })
     {
         BindingImagePin[] pins = [.. Enumerable.Range(0, count).Select(index =>
-            new BindingImagePin("Identity" + index, index.ToString("x64"), []))];
+            new BindingImagePin("Identity" + index, Sha256Digest.Parse(index.ToString("x64"), "a test pin"), []))];
         BindingPlan plan = new("", pins, 0);
         var json = JsonSerializer.Serialize(BindingRequests(plan).Select(request => request.Audit), AuditJson);
         Console.WriteLine($"PASS {count} pins serialized in {json.Length} characters");
@@ -161,6 +161,7 @@ ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared Stric
 File.WriteAllText(bindingSource, bindingSourceText);
 verification.PrepareBindingLibrary(package);
 Console.WriteLine("PASS binding preparation reuses the selected library and rejects artifact and source mutations");
+CheckClosureWork();
 var proofSource = Path.Combine(session, "Proof.lean");
 File.WriteAllText(proofSource, """
     import Extracted
@@ -243,7 +244,8 @@ using var missing = JsonDocument.Parse(manifest.ToJsonString());
 ExpectFailure(() => inputs.MatchPins(missing.RootElement), "No line of");
 Console.WriteLine("PASS every reference requires a consumer-stated digest");
 
-var same = new BindingImagePin("First", digest, inputs.Images[0].Bytes.ToArray());
+var same = new BindingImagePin("First", Sha256Digest.Parse(digest, "the test image"),
+    inputs.Images[0].Bytes.ToArray());
 BindingPlan shared = new("", [same, same with { Identity = "Second" }], 0);
 var sharedSource = ImagesModuleSource(shared);
 if (sharedSource.Split("import " + same.Module).Length != 2 ||
@@ -277,4 +279,39 @@ void ExpectFailure(Action action, string marker)
     try { action(); }
     catch (Exception error) when (error.Message.Contains(marker, StringComparison.Ordinal)) { return; }
     throw new InvalidOperationException("Expected failure: " + marker);
+}
+
+// A request reads headers in one launch; after the first, it reads and hashes only the session's own modules,
+// so a warm request's work does not grow with the certified part of its closure.
+void CheckClosureWork()
+{
+    int? sessionHeaders = null;
+    foreach (var (label, import) in new[] { ("small", "CIL.Identity"), ("medium", "CIL.Instructions"),
+        ("large", "StrictBinding") })
+    {
+        var directory = Path.Combine(session, "Closure" + label);
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "Root.lean"), "import " + import + "\n");
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var cold = verification.DeepImportClosure(session, search, directory);
+        var coldWork = verification.deepClosureWork;
+        var coldSeconds = started.Elapsed.TotalSeconds;
+        started.Restart();
+        var warm = verification.DeepImportClosure(session, search, directory);
+        var warmWork = verification.deepClosureWork;
+        Directory.Delete(directory, true);
+        var certified = cold.Keys.Count(name => verification.baseModules!.ContainsKey(name));
+        sessionHeaders ??= warmWork.Headers;
+        if (!Same(cold, warm) || certified == 0 || coldWork.Launches != 2 || warmWork.Launches != 1 ||
+            warmWork.Hashed != cold.Count - certified || coldWork.Hashed < warmWork.Hashed ||
+            label == "small" && coldWork.Hashed != cold.Count ||
+            warmWork.Headers != sessionHeaders || label == "small" && coldWork.Headers <= warmWork.Headers)
+            throw new InvalidOperationException(
+                $"Deep import closure work changed for {label}: {coldWork}, {warmWork}");
+        Console.WriteLine($"PASS a {label} deep import closure binds {cold.Count} parts, {certified} certified: " +
+            $"cold {coldWork.Launches} launches, {coldWork.Headers} headers, {coldWork.Hashed} parts " +
+            $"({coldWork.HashedBytes} bytes) hashed in {coldSeconds:F1}s; warm {warmWork.Launches} launch, " +
+            $"{warmWork.Headers} headers, {warmWork.Hashed} parts ({warmWork.HashedBytes} bytes) hashed in " +
+            $"{started.Elapsed.TotalSeconds:F1}s");
+    }
 }

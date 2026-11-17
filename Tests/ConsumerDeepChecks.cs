@@ -8,7 +8,10 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include MultiAssemblyFixture.cs
+#:include DeepImportChecks.cs
 
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 long previousAllocated = 0;
@@ -199,9 +202,97 @@ try
         throw new InvalidOperationException("Ordinary consumer verification prepared deep checks.");
     var ordinaryReceipts = ProofReceipts();
     if (ordinaryReceipts.Count == 0) throw new InvalidOperationException("Ordinary proof receipt was not published.");
+    foreach (var entry in DeepResults()) Directory.Delete(entry, true);
+    var deepHits = verification.deepCacheHits;
     CheckDeep(Verify(verification));
     RequireOrdinaryReceipts();
+    if (verification.deepCacheHits != deepHits || DeepResults().Length != 1)
+        throw new InvalidOperationException("A cold consumer deep request did not publish one deep result.");
+    RequireDeepImports(verification.deepImports, "consumer");
     Console.WriteLine("PASS consumer joint deep audit preserves ordinary result receipts");
+    bool reusedAudit = false;
+    CheckDeep(Verify(verification, stage: stage => reusedAudit |= stage == "theorem audit"));
+    if (verification.deepCacheHits != deepHits + 1 || !reusedAudit)
+        throw new InvalidOperationException("An unchanged consumer deep request did not reuse its result.");
+    Console.WriteLine("PASS an unchanged consumer deep request reuses its result and runs the theorem audit");
+    var beforeImportChange = Receipts();
+    var importToken = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + importToken + "\n");
+    ExpectFailure(() => Verify(verification, stage: stage =>
+    {
+        if (stage != "deep-check sources") return;
+        SameLengthChange(Path.Combine(ConsumerSession(importToken),
+            ".lake/packages/leancil_generated/.lake/build/lib/lean/Extracted.olean"));
+    }), "Deep-check artifact changed");
+    RequireNoPublication(beforeImportChange);
+    if (verification.deepCacheHits != deepHits + 1)
+        throw new InvalidOperationException("A consumer deep result was restored over a changed imported module.");
+    Console.WriteLine("PASS a same-length consumer extraction change with its write time restored is not restored");
+    var deepEntry = DeepResults().Single();
+    var cachedBodies = Path.Combine(deepEntry, "files", "BindingAudit", "Bodies.olean");
+    var forged = Path.Combine(fixture.Root, "ConsumerWrongBodies.olean");
+    var forgeToken = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + forgeToken + "\n");
+    var beforeLateFailure = Receipts();
+    // A changed generated source misses, so this cold request fails at its last check after build and replay.
+    ExpectFailure(() => Verify(verification, stage: stage =>
+    {
+        if (stage is not ("deep-check sources" or "theorem audit")) return;
+        var generated = Path.Combine(ConsumerSession(forgeToken), ".deep-checks", "BindingAudit", "Bodies.lean");
+        if (stage == "deep-check sources")
+        {
+            var source = File.ReadAllText(generated);
+            var start = source.IndexOf("theorem bodies :", StringComparison.Ordinal);
+            if (start < 0) throw new InvalidOperationException("Missing generated bodies theorem.");
+            File.WriteAllText(generated, source[..start] + "theorem bodies : StrictBinding.BodiesBound images [] := " +
+                "StrictBinding.claimsHold_nil Bodies.prepared\n#print axioms bodies\nend BindingAudit\n");
+        }
+        if (stage == "theorem audit" && !File.Exists(forged))
+            File.Copy(Path.ChangeExtension(generated, ".olean"), forged);
+    }), "Theorem statement mismatch");
+    if (!File.Exists(forged)) throw new InvalidOperationException("The forged body module was not built.");
+    RequireNoPublication(beforeLateFailure);
+    if (verification.deepCacheHits != deepHits + 1 || DeepResults().Single() != deepEntry)
+        throw new InvalidOperationException("A cold consumer deep request that failed late published a result.");
+    Console.WriteLine("PASS a cold consumer deep request rejected by its theorem audit publishes nothing");
+    File.Copy(forged, cachedBodies, true);
+    var deepManifest = JsonSerializer.SerializeToUtf8Bytes(CacheFiles(Path.Combine(deepEntry, "files")));
+    File.WriteAllBytes(Path.Combine(deepEntry, "receipt.json"), deepManifest);
+    File.WriteAllBytes(Path.Combine(deepEntry, "receipt.hmac"), HMACSHA256.HashData(verification.ReceiptKey,
+        Encoding.UTF8.GetBytes(Path.GetFileName(deepEntry)).Concat(deepManifest).ToArray()));
+    var beforeForged = Receipts();
+    ExpectFailure(() => Verify(verification), "Theorem statement mismatch");
+    RequireNoPublication(beforeForged);
+    if (verification.deepCacheHits != deepHits + 2)
+        throw new InvalidOperationException("The forged consumer deep result was not restored.");
+    Console.WriteLine("PASS the consumer theorem audit rejects an authenticated restored module stating another fact");
+    // A same-length change with its timestamp restored must fail the receipt's content hashes.
+    SameLengthChange(cachedBodies);
+    var changedBodies = File.ReadAllBytes(cachedBodies);
+    // A source changed after the result is staged fails the publication check, so the staged copy is discarded.
+    var publicationToken = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + publicationToken + "\n");
+    var beforePublication = Receipts();
+    bool publicationReached = false;
+    ExpectFailure(() => Verify(verification, stage: stage =>
+    {
+        if (stage != "deep result publication") return;
+        publicationReached = true;
+        File.AppendAllText(Path.Combine(ConsumerSession(publicationToken), ".deep-checks", "BindingAudit",
+            "Bodies.lean"), "\n");
+    }), "Deep-check source changed");
+    if (!publicationReached) throw new InvalidOperationException("The deep result publication stage was not reached.");
+    RequireNoPublication(beforePublication);
+    if (verification.deepCacheHits != deepHits + 2 || DeepResults().Single() != deepEntry ||
+        !File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies))
+        throw new InvalidOperationException("A staged consumer deep result was published after a failed check.");
+    Console.WriteLine("PASS a staged consumer deep result is discarded when a later stability check fails");
+    CheckDeep(Verify(verification));
+    if (verification.deepCacheHits != deepHits + 2 || verification.AuthenticatedSuccess(Path.GetFileName(deepEntry))
+            is null || File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies))
+        throw new InvalidOperationException("A rebuilt consumer deep result did not replace the changed entry.");
+    Console.WriteLine("PASS a changed cached consumer deep module runs cold and its rebuilt result replaces " +
+        "the entry");
     if (args is ["--positive"]) return;
     var combinedRun = new DeepCheckRun(inputs);
     var combinedOriginalProof = File.ReadAllBytes(proof);
@@ -241,6 +332,8 @@ try
     RequireNoPublication(combinedReceipts);
     Console.WriteLine("PASS consumer original-input mutation precedes named rejection attribution");
     if (args is ["--diagnostics"]) return;
+    // Without a deep result the fallback must replay the generated modules themselves.
+    foreach (var entry in DeepResults()) Directory.Delete(entry, true);
     using (Program restored = new())
     {
         var replay = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY");
@@ -273,9 +366,11 @@ try
             !File.ReadAllText(Path.Combine(trace, fallback.GetProperty("transcript").GetString()!))
                 .Contains("BindingAudit.Bodies", StringComparison.Ordinal))
             throw new InvalidOperationException("Fallback did not replay the body-check module successfully.");
+        if (restored.deepCacheHits != 0)
+            throw new InvalidOperationException("A consumer without a deep result restored one.");
     }
     RequireOrdinaryReceipts();
-    Console.WriteLine("PASS fresh consumer with restored support runs fallback deep audit");
+    Console.WriteLine("PASS fresh consumer with restored support and no deep result runs fallback deep audit");
     using (Program viewed = new() { viewsStatement = true })
     {
         CheckDeep(Verify(viewed));
@@ -511,16 +606,26 @@ void CheckExportMutation(bool originalProofMutation = false)
 
 static void CheckDeep(Report report)
 {
+    BindingFact[] audited = [BindingFact.BodyBytes, BindingFact.MetadataRows];
     if (report.binding.mode != BindingMode.Deep || report.binding.facts.Length != 12 ||
-        report.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed ||
-        report.binding.facts.Where(fact => fact.id != BindingFact.BodyBytes)
-            .Any(fact => fact.status != BindingStatus.NotCovered))
+        report.binding.facts.Any(fact => fact.status !=
+            (audited.Contains(fact.id) ? BindingStatus.Reconfirmed : BindingStatus.NotCovered)))
         throw new InvalidOperationException("Consumer deep report has incorrect binding coverage.");
 }
 
 SortedDictionary<string, string> Receipts() => Directory.Exists(SuccessCacheRoot)
     ? HashFiles(Directory.EnumerateFiles(SuccessCacheRoot, "receipt.*", SearchOption.AllDirectories)
         .Select(path => (path, path))) : new(StringComparer.Ordinal);
+
+// The consumer session whose staged proof carries `token`.
+static string ConsumerSession(string token) => Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+    .Single(directory => File.Exists(Path.Combine(directory, "LeanCILProof.lean")) &&
+        File.ReadAllText(Path.Combine(directory, "LeanCILProof.lean")).Contains(token, StringComparison.Ordinal));
+
+// Published deep results, the only entries that hold generated binding modules.
+string[] DeepResults() => Directory.Exists(SuccessCacheRoot)
+    ? [.. Directory.EnumerateDirectories(SuccessCacheRoot)
+        .Where(entry => Directory.Exists(Path.Combine(entry, "files", "BindingAudit")))] : [];
 
 SortedDictionary<string, string> ProofReceipts() => Directory.Exists(SuccessCacheRoot)
     ? HashFiles(Directory.EnumerateFiles(SuccessCacheRoot, "report.json", SearchOption.AllDirectories)

@@ -9,6 +9,7 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include GeneratedEvidence.cs
+#:include DeepImportChecks.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -208,12 +209,64 @@ void CheckInterfaceReuse()
         deepReport.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed)
         throw new InvalidOperationException("Consumer deep verification did not check the imported caller body.");
     Console.WriteLine("PASS consumer deep audit checks the caller with an independently audited published interface");
+    RequireDeepImports(deepConsumer.deepImports, "published-interface consumer");
+    var reuseHits = deepConsumer.deepCacheHits;
+    deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null, null,
+        deepInputs);
+    if (deepConsumer.deepCacheHits != reuseHits + 1)
+        throw new InvalidOperationException("An unchanged published-interface deep request did not reuse its result.");
+    Console.WriteLine("PASS an unchanged published-interface deep request reuses its result");
+    // Neither module is in the deep import closure, so a restored result meets the change only in later guards.
+    foreach (var changedModule in new[] { "ExtractedImports", interfaceModule })
+    {
+        var changeToken = Guid.NewGuid().ToString("N");
+        File.AppendAllText(proof, "\n-- " + changeToken + "\n");
+        var beforeChange = Receipts();
+        var publications = deepConsumer.publishedSuccess.Count;
+        var hits = deepConsumer.deepCacheHits;
+        bool changed = false;
+        string? diagnostic = null;
+        try
+        {
+            deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null,
+                stage =>
+                {
+                    // The key is read after this stage, so the change meets the restore decision.
+                    if (stage != "deep-check sources" || changed) return;
+                    var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                        .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
+                            File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
+                                .Contains(changeToken, StringComparison.Ordinal));
+                    SameLengthChange(Path.Combine(session, ".lake/packages/leancil_generated/.lake/build/lib/lean",
+                        changedModule + ".olean"));
+                    changed = true;
+                }, deepInputs);
+        }
+        catch (Exception error) when (error is InvalidOperationException or InvalidDataException &&
+            error.Message.Contains("changed", StringComparison.Ordinal)) { diagnostic = error.Message; }
+        var afterChange = Receipts();
+        if (!changed || diagnostic is null || deepConsumer.deepCacheHits != hits + 1 ||
+            File.Exists(Path.Combine(selected.output, "verified.json")) ||
+            deepConsumer.publishedSuccess.Count != publications || !Same(beforeChange, afterChange))
+            throw new InvalidOperationException("A same-length change to " + changedModule +
+                " beside a restored deep result was not rejected without receipts: " + diagnostic + "; restored " +
+                (deepConsumer.deepCacheHits - hits) + ", report " +
+                File.Exists(Path.Combine(selected.output, "verified.json")) + ", published " +
+                string.Join(", ", deepConsumer.publishedSuccess.Skip(publications)) + ", changed " +
+                string.Join(", ", beforeChange.Keys.Union(afterChange.Keys).Where(path =>
+                    beforeChange.GetValueOrDefault(path) != afterChange.GetValueOrDefault(path))));
+        Console.WriteLine("PASS a same-length " + changedModule + " change beside a restored deep result is " +
+            "rejected without receipts: " + diagnostic.Split('\n')[0]);
+    }
     var token = Guid.NewGuid().ToString("N");
     File.AppendAllText(proof, "\n-- " + token + "\n");
-    SortedDictionary<string, string> Receipts() => Directory.Exists(SuccessCacheRoot)
-        ? HashFiles(Directory.EnumerateFiles(SuccessCacheRoot, "receipt.*", SearchOption.AllDirectories)
-            .Select(path => (path, path))) : new(StringComparer.Ordinal);
+    // Other sessions on the machine share the success cache, so only this driver's own entries are compared.
+    SortedDictionary<string, string> Receipts() => HashFiles(deepConsumer.publishedSuccess
+        .Distinct(StringComparer.Ordinal).SelectMany(key => new[] { "receipt.json", "receipt.hmac" }
+            .Select(name => Path.Combine(SuccessCacheRoot, key, name)))
+        .Where(File.Exists).Select(path => (path, path)));
     var receipts = Receipts();
+    var publishedBefore = deepConsumer.publishedSuccess.Count;
     bool mutated = false;
     bool rejected = false;
     try
@@ -237,7 +290,7 @@ void CheckInterfaceReuse()
     catch (InvalidOperationException error) when (error.Message.Contains("Compiled artifacts changed",
         StringComparison.Ordinal)) { rejected = true; }
     if (!mutated || !rejected || File.Exists(Path.Combine(selected.output, "verified.json")) ||
-        !Same(receipts, Receipts()))
+        deepConsumer.publishedSuccess.Count != publishedBefore || !Same(receipts, Receipts()))
         throw new InvalidOperationException(
             "Changed published interface escaped deep inventory or published a receipt.");
     Console.WriteLine("PASS consumer deep audit rejects a new published-interface companion without receipts");

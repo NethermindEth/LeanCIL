@@ -244,8 +244,11 @@ instance fields), public key tokens (the hash of a key is not computed in the ke
 implementation, interface and closure digests that a generic import identity carries (no check
 recomputes them from the library image), imported implementation definitions, raw layout
 content, dispatch catalog completeness, static data bytes and generic parameter constraints.
-[Deep verification](CLI.md#deep-verification) does not reconfirm public key tokens or import
-identities either: it reports both as not covered. `check` hashes each assembly and regenerates
+[Deep verification](CLI.md#deep-verification) reconfirms each body at its RVA and each carried
+row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets per heap and with
+MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
+`Module` table and the RVAs of MethodDefs outside the evidence are not part of that check. It does
+not reconfirm public key tokens or import identities: it reports both as not covered. `check` hashes each assembly and regenerates
 the extraction, so the rows are a deterministic function of hashed inputs.
 ### Folded instruction patterns
 
