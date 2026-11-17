@@ -1,11 +1,15 @@
 import CIL.Extraction.Lockstep
 import Init.Omega
+import Lean
 
 /-!
 # Certificate successor lookup
 
 A balanced index serves branch targets, while adjacent successor states are read directly
 from the remaining certificate. The lookup theorem preserves the list-based validation rules.
+`program_index% values` writes `FlowIndex.ofList values` out as a literal whose leaves are the
+list's own cell terms, so a definition states an index once and the kernel checks it equal to
+`ofList` by comparing those terms, never by unfolding them.
 -/
 
 namespace CIL.Extraction
@@ -105,6 +109,43 @@ theorem FlowIndex.get?_ofList (values : List α) (index : Nat) :
     (FlowIndex.build_spec values.length values.length values (Nat.le_refl _) (Nat.le_refl _)).2 index
 
 #print axioms FlowIndex.get?_ofList
+
+open Lean Meta in
+/-- The cells of a list term, unfolded until its spine is literal; the cells stay as written. -/
+def literalCells (list : Expr) : MetaM (Array Expr) := do
+  let mut cells := #[]
+  let mut rest ← whnf list
+  repeat
+    match_expr rest with
+    | List.cons _ head tail =>
+      cells := cells.push head
+      rest ← whnf tail
+    | List.nil _ => return cells
+    | _ => throwError "the list does not unfold to literal cells: {rest}"
+  return cells
+
+open Lean Meta in
+/-- The literal index `FlowIndex.build` makes of `cells`, split at the same middles. -/
+partial def literalFlowIndex (type : Expr) (cells : Array Expr) : Expr :=
+  if cells.size = 0 then mkApp (mkConst ``FlowIndex.empty) type
+  else if cells.size = 1 then mkApp2 (mkConst ``FlowIndex.leaf) type cells[0]!
+  else
+    let middle := cells.size / 2
+    mkApp4 (mkConst ``FlowIndex.branch) type (mkNatLit middle)
+      (literalFlowIndex type (cells.extract 0 middle))
+      (literalFlowIndex type (cells.extract middle cells.size))
+
+open Lean Meta Elab Term in
+/-- `program_index% values` is `FlowIndex.ofList values` written out as a literal tree whose
+    leaves are the cell terms of `values`, so the kernel never measures or splits the list. -/
+elab "program_index% " values:term : term => do
+  let list ← instantiateMVars (← elabTerm values none)
+  synthesizeSyntheticMVarsNoPostponing
+  let list ← instantiateMVars list
+  let listType ← whnf (← inferType list)
+  let some type := listType.app1? ``List
+    | throwError "program_index%: {list} is not a list"
+  return literalFlowIndex type (← literalCells list)
 
 /-- Check parallel lists using the next certificate entry for fallthrough edges. -/
 def all3Flow (check : (Nat → Option β) → α → β → γ → Bool)

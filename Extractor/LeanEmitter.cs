@@ -408,6 +408,14 @@ internal static class LeanEmitter
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
+        // One index of the program, checked once, serves every closure and run that reads it.
+        lean.AppendLine($"def programLength : Nat := {methods.Length}");
+        lean.AppendLine("theorem programLength_eq : programLength = program.length := by cil_kernel_rfl");
+        lean.AppendLine("def programIndex : Extraction.FlowIndex Method := program_index% program");
+        lean.AppendLine("theorem programIndex_eq : programIndex = Extraction.FlowIndex.ofList program := " +
+            "by cil_kernel_rfl");
+        lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
+        lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
         var classViews = ClassViews.Views(fieldAccesses);
         var views = ClassViews.Emit(fieldAccesses, classViews);
         if (views.Length > 0)

@@ -266,19 +266,34 @@ command. It fails when the heartbeats per record grow more than 1.25 times from 
 next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
 with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
 
-The suite decides with `decide +kernel` the closure of method 0 in three shapes of program: a chain
-of 8, 32 and 128 methods each calling the next, whose closure is the whole program; one method
-whose link table enters seven others 32, 128 and 512 times; and a closure of four methods at the
-start of a program of 128, 512 and 2,048 methods. A search over n methods with e link callees in
-a program of P methods reads each method by its index in the list and gives each callee one packed
-table entry, so it costs O(n * P + e). The suite fails when, in any shape, the heartbeats each
-added unit of n * P + e costs grow more than 1.15 times from the first two sizes to the last two.
-The chain costs about 90,400, 437,300 and 3,533,900 heartbeats, so each added unit of n * P costs
-0.57 times as much at the larger sizes; the fan costs about 2,400 heartbeats per added callee and
-the long program about 255 per added method at every size. The chain grows with the square of
-its methods because its closure is the whole program. A search that folded over its state instead
-cost 2.33 times as much per callee from 128 to 512 callees as from 32 to 128. Run this row alone
-with `dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
+The suite decides with `decide +kernel` the closure of method 0 in four shapes of program: a chain
+of 8, 32 and 128 methods each calling the next, whose closure is the whole program; the same chain
+at 128, 256 and 512 methods, the scale of the largest closures of the corpus; one method whose
+link table enters seven others 32, 128 and 512 times; and a closure of four methods at the start
+of a program of 128, 512 and 2,048 methods. Each program states its index with `program_index%`,
+as an extraction does, and the closure is decided as `closureWith` over that index. A search over
+n methods with e link callees in a program of P methods reads each method from the index and
+gives each callee one packed table entry, so it costs O(n * log P + e). The suite fails when, in
+any shape, the heartbeats each added unit of n * log P + e costs grow more than 1.15 times from
+the first two sizes to the last two, and checks that the bound refuses the n * P of list reads
+in a growing whole-program closure.
+
+| Shape | Sizes | Through the index | Through the list |
+| --- | --- | --- | --- |
+| chain | 8 / 32 / 128 | 87,394 / 335,656 / 1,422,953 | 90,395 / 437,519 / 3,533,840 |
+| long chain | 128 / 256 / 512 | 1,422,542 / 3,013,064 / 6,568,957 | not measured |
+| fan | 32 / 128 / 512 | 140,799 / 367,218 / 1,273,057 | 144,084 / 370,459 / 1,276,182 |
+| tail | 128 / 512 / 2,048 | 55,819 / 58,512 / 61,237 | 81,699 / 179,818 / 571,795 |
+
+The chain through the list grows with the square of its methods, since its closure is the whole
+program; through the index each added unit costs 0.84 times as much at the larger sizes, and the
+long chain 1.02 times. The suite fails unless the tail, a closure of four methods, costs less
+through the index than through the list at every size. Stating the index of the tail programs,
+with its length and its lookup theorem, costs 260,137, 857,704 and 3,248,483 heartbeats, about
+1,600 to 2,000 per method once, and the suite fails when that cost per method grows more than
+1.15 times. A search that folded over its state instead cost 2.33 times as much per callee from
+128 to 512 callees as from 32 to 128. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
 
 ## Reference figures
 

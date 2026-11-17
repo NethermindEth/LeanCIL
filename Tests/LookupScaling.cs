@@ -1238,45 +1238,73 @@ void DecodedProgramCosts()
     Console.WriteLine($"PASS proving a decoded program costs {measured} heartbeats per record");
 }
 
-// A closure search reads each of its n methods by index from a program of P methods and gives each of the e callees
-// their link tables enter one packed table entry, so it costs O(n * P + e) kernel steps. Each shape grows one term:
-// a chain whose closure is the whole program grows n * P, one method calling seven others grows e, and a closure of
-// four methods at the start of a longer program grows P. A search that folded over its state instead costs time
-// quadratic in e.
+// A closure search reads each of its n methods from a program index stated once and gives each of the e callees their
+// link tables enter one packed table entry, so it costs O(n * log P + e) kernel steps in a program of P methods. Each
+// shape grows one term: a chain whose closure is the whole program grows n * log P, up to the corpus scale of several
+// hundred methods, one method calling seven others grows e, and a closure of four methods at the start of a longer
+// program grows log P alone. Reading each method from the list instead costs n * P, which the tail pays in P and which
+// the row also measures; folding over the search state costs time quadratic in e. Stating the index costs O(P) once.
 void ClosureCosts()
 {
     var closureDirectory = At("artifacts/LookupScaling/Closures");
     Directory.CreateDirectory(closureDirectory);
-    // Four times the units of n * P + e may cost at most this much more per unit.
+    // Four times the units may cost at most this much more per unit.
     const double AllowedClosureGrowth = 1.15;
+    int[][] Chain(int size) => [.. Enumerable.Range(0, size).Select(int[] (index) =>
+        index + 1 < size ? [index + 1] : [])];
     ClosureShape[] shapes =
     [
-        new("chain", [8, 32, 128], size => [.. Enumerable.Range(0, size).Select(int[] (index) =>
-            index + 1 < size ? [index + 1] : [])], size => size, size => size - 1),
+        new("chain", [8, 32, 128], Chain, size => size, size => size - 1),
+        new("longchain", [128, 256, 512], Chain, size => size, size => size - 1),
         new("fan", [32, 128, 512], size => [[.. Enumerable.Range(0, size).Select(index => 1 + index % 7)],
             .. Enumerable.Repeat(Array.Empty<int>(), 7)], _ => 8, size => size),
         new("tail", [128, 512, 2048], size => [[1], [2], [3], .. Enumerable.Repeat(Array.Empty<int>(), size - 3)],
             _ => 4, _ => 3)
     ];
+    // The list form of the long chain costs tens of millions of heartbeats at 512, so only the others measure it.
+    bool ListMeasured(ClosureShape shape) => shape.Name != "longchain";
     string Statement(ClosureShape shape, int size)
     {
         var program = shape.Program(size);
+        var name = shape.Name + size;
+        var expected = $"some [{string.Join(", ", Enumerable.Range(0, shape.Methods(size)))}]";
+        var list = ListMeasured(shape)
+            ? $"#kernel_cost \"list closure {shape.Name} {size}\" (({name}.closure 0).map Prod.snd = {expected})\n"
+            : "";
+        // The tail programs also state their index as an extraction does, between two heartbeat marks.
+        var stated = shape.Name != "tail" ? "" : $$"""
+            #heartbeat_mark "index {{size}} start"
+            /-- The length of the {{name}} program. -/
+            def {{name}}Length : Nat := {{program.Length}}
+            theorem {{name}}Length_eq : {{name}}Length = {{name}}.length := by cil_kernel_rfl
+            theorem {{name}}Index_eq : {{name}}Index = FlowIndex.ofList {{name}} := by cil_kernel_rfl
+            theorem {{name}}Index_get? (index : Nat) : {{name}}Index.get? index = {{name}}[index]? := by
+              rw [{{name}}Index_eq]; exact FlowIndex.get?_ofList {{name}} index
+            #heartbeat_mark "index {{size}} end"
+
+            """;
         return $$"""
             /-- The {{shape.Name}} program of size {{size}}. -/
-            def {{shape.Name}}{{size}} : Program :=
+            def {{name}} : Program :=
               [{{string.Join(", ", program.Select(callees => $"stub [{string.Join(", ", callees)}]"))}}]
-            #kernel_cost "closure {{shape.Name}} {{size}}"
-              (({{shape.Name}}{{size}}.closure 0).map Prod.snd =
-                some [{{string.Join(", ", Enumerable.Range(0, shape.Methods(size)))}}])
+            /-- The index of the {{name}} program. -/
+            def {{name}}Index : FlowIndex Method := program_index% {{name}}
+            {{stated}}#kernel_cost "closure {{shape.Name}} {{size}}"
+              ((closureWith {{name}}Index.get? {{program.Length}} 0).map Prod.snd = {{expected}})
+            {{list}}
             """;
     }
     var path = Path.Combine(closureDirectory, "Closures.lean");
     File.WriteAllText(path, $$"""
         import CIL.Safety.ProgramClosure
+        import CIL.Extraction.KernelEquation
         set_option maxRecDepth 100000
         set_option maxHeartbeats 0
-        open CIL Lean Elab Command
+        open CIL CIL.Extraction Lean Elab Command
         {{KernelCostCommand}}
+        /-- Logs the heartbeats spent so far, so two marks give the cost of the commands between them. -/
+        elab "#heartbeat_mark " label:str : command => do
+          logInfo m!"mark {label.getString} {← IO.getNumHeartbeats}"
         /-- A method whose link table enters `callees` in order, one call pc each. -/
         def stub (callees : List Nat) : Method :=
           { code := [], locals := [], returnsValue := false,
@@ -1285,27 +1313,61 @@ void ClosureCosts()
         """ + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.ClosureCost().Matches(output).ToDictionary(
-        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => (match.Groups[1].Value.Length > 0, match.Groups[2].Value,
+            int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[4].Value, CultureInfo.InvariantCulture));
+    var marks = LookupPatterns.HeartbeatMark().Matches(output).ToDictionary(
+        match => (int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), match.Groups[2].Value),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != shapes.Sum(shape => shape.Sizes.Length) || costs.Values.Min() < KernelDecisionFloor)
+    var tail = shapes.Single(shape => shape.Name == "tail");
+    if (costs.Count != shapes.Sum(shape => shape.Sizes.Length * (ListMeasured(shape) ? 2 : 1)) ||
+        costs.Values.Min() < KernelDecisionFloor || marks.Count != 2 * tail.Sizes.Length)
         throw new InvalidOperationException("Missing closure costs:\n" + output);
+    string Measured(ClosureShape shape, bool list) => string.Join(", ", shape.Sizes.Select(size =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[(list, shape.Name, size)]} at {size}")));
     foreach (var shape in shapes)
     {
-        var units = shape.Sizes.Select(size =>
-            (double)shape.Methods(size) * shape.Program(size).Length + shape.Edges(size)).ToArray();
+        var units = shape.Sizes.Select(size => shape.Methods(size) *
+            Math.Ceiling(Math.Log2(shape.Program(size).Length)) + shape.Edges(size)).ToArray();
         if (ClosureGrowth(units, [.. units.Select(unit => unit * unit)]) <= AllowedClosureGrowth)
-            throw new InvalidOperationException($"The {shape.Name} bound accepts a cost quadratic in n * P + e");
-        var growth = ClosureGrowth(units, [.. shape.Sizes.Select(size => (double)costs[(shape.Name, size)])]);
-        var measured = string.Join(", ", shape.Sizes.Select(size =>
-            string.Create(CultureInfo.InvariantCulture, $"{costs[(shape.Name, size)]} at {size}")));
+            throw new InvalidOperationException($"The {shape.Name} bound accepts a cost quadratic in n * log P + e");
+        // A whole-program closure of a growing program that read each method from the list would cost n * P, which
+        // the bound must refuse.
+        var listReads = shape.Sizes.Select(size =>
+            (double)shape.Methods(size) * shape.Program(size).Length + shape.Edges(size)).ToArray();
+        if (shape.Program(shape.Sizes[0]).Length < shape.Program(shape.Sizes[^1]).Length &&
+            shape.Sizes.All(size => shape.Methods(size) == shape.Program(size).Length) &&
+            ClosureGrowth(units, listReads) <= AllowedClosureGrowth)
+            throw new InvalidOperationException($"The {shape.Name} bound accepts list reads of its methods");
+        var growth = ClosureGrowth(units, [.. shape.Sizes.Select(size => (double)costs[(false, shape.Name, size)])]);
         if (growth > AllowedClosureGrowth)
             throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-                $"The {shape.Name} closure costs {measured} heartbeats; its cost per unit of n * P + e grows " +
-                $"{growth:F2} times, more than {AllowedClosureGrowth}"));
+                $"The {shape.Name} closure costs {Measured(shape, false)} heartbeats; its cost per unit of " +
+                $"n * log P + e grows {growth:F2} times, more than {AllowedClosureGrowth}"));
+        var read = ListMeasured(shape) ? $", and {Measured(shape, true)} read from the list" : "";
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-            $"PASS the {shape.Name} closure costs {measured} heartbeats, {growth:F2} times as much per unit of " +
-            $"n * P + e between its last sizes as between its first"));
+            $"PASS the {shape.Name} closure costs {Measured(shape, false)} heartbeats, {growth:F2} times as much per " +
+            $"unit of n * log P + e between its last sizes as between its first{read}"));
     }
+    // A closure of a few methods must cost less through the index than through the list at every program size.
+    foreach (var size in tail.Sizes)
+        if (costs[(false, "tail", size)] >= costs[(true, "tail", size)])
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"The tail closure of {size} costs {costs[(false, "tail", size)]} heartbeats through the index, " +
+                $"not less than {costs[(true, "tail", size)]} through the list"));
+    // Stating the index, its length and its lookup theorem costs time linear in P.
+    var programs = tail.Sizes.Select(size => (double)size).ToArray();
+    var stating = tail.Sizes.Select(size => (double)(marks[(size, "end")] - marks[(size, "start")])).ToArray();
+    var statingGrowth = ClosureGrowth(programs, stating);
+    var statingMeasured = string.Join(", ", tail.Sizes.Select(size => string.Create(CultureInfo.InvariantCulture,
+        $"{marks[(size, "end")] - marks[(size, "start")]} at {size}")));
+    if (statingGrowth > AllowedClosureGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Stating the program index costs {statingMeasured} heartbeats; its cost per method grows " +
+            $"{statingGrowth:F2} times, more than {AllowedClosureGrowth}"));
+    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        $"PASS stating the program index costs {statingMeasured} heartbeats, {statingGrowth:F2} times as much per " +
+        $"method between its last sizes as between its first"));
 }
 
 // How many times as much each added unit costs between the last two sizes as between the first two.
@@ -2943,6 +3005,9 @@ static partial class LookupPatterns
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedProgram();
 
-    [GeneratedRegex(@"\bclosure (chain|fan|tail) ([0-9]+) (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"\b(list )?closure (chain|longchain|fan|tail) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ClosureCost();
+
+    [GeneratedRegex(@"\bmark index ([0-9]+) (start|end) ([0-9]+)")]
+    internal static partial Regex HeartbeatMark();
 }

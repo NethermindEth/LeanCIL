@@ -51,10 +51,13 @@ theorem bodies_decode :
 #print axioms bodies_decode
 
 /-- The methods `AddTwo` reaches, renumbered from `AddTwo` at 0, with their indices here. -/
-def closure : Program × List Nat := (Extracted.program.closure addTwo).getD ([], [])
+def closure : Program × List Nat :=
+  (closureWith Extracted.programIndex.get? Extracted.programLength addTwo).getD ([], [])
 
 /-- The closure of `AddTwo` is found. -/
-theorem closure_found : Extracted.program.closure addTwo = some closure := by cil_kernel_rfl
+theorem closure_found : Extracted.program.closure addTwo = some closure := by
+  rw [Program.closure_eq_closureWith Extracted.programIndex_get? Extracted.programLength_eq]
+  cil_kernel_rfl
 #print axioms closure_found
 
 /-- The closure holds `AddTwo`, then its callees in the order its link table enters them. -/

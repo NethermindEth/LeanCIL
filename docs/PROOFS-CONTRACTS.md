@@ -1205,9 +1205,14 @@ summary proved there binds wherever those methods appear:
 
 - `Program.closure program root` is `some (lib, indices)`: the methods `root` reaches through link
   tables, renumbered from `root` at 0, and the index in `program` of each. It is `none` when a
-  link of a reached method enters a method outside them. A search over n methods with e link
-  callees in a program of P methods costs O(n * P + e) kernel steps; the
-  [lookup scaling suite](performance/InstructionLookups.md) pins that cost.
+  link of a reached method enters a method outside them. It is `closureWith (program[·]?)
+  program.length root`, which reads each method from the list, so a search over n methods with
+  e link callees in a program of P methods costs O(n * P + e) kernel steps. An extraction states
+  `Extracted.programIndex`, a literal index of its methods, with `Extracted.programLength` and
+  `Extracted.programIndex_get?`; rewriting by
+  `Program.closure_eq_closureWith Extracted.programIndex_get? Extracted.programLength_eq`
+  before `cil_kernel_rfl` or `decide +kernel` brings the search to O(n * log P + e). The
+  [lookup scaling suite](performance/InstructionLookups.md) pins both costs.
 - `Program.closure_closed` gives `Closed lib`, and `Program.closure_relocates` gives
   `RelocatesInto lib program` at the indices, with `root` first.
 - `Program.closureEvidence` reads the closure's records from the program's, with their links

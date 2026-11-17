@@ -1,6 +1,7 @@
 import CIL.RuntimeModel
 import CIL.Extraction.Generics
 import CIL.Extraction.Lockstep
+import CIL.Extraction.FlowIndex
 import CIL.Extraction.MetadataBytes
 
 /-!
@@ -85,15 +86,6 @@ where
     | [] => true
     | entry :: rest => !rest.any (entry.sameSlot ·) && distinct rest
 
-open Lean Meta Elab Term in
-/-- The entries of a list term, unfolded until its cells are literal. -/
-private partial def listCells (list : Expr) : MetaM (Array Expr) := do
-  let list ← whnf list
-  match_expr list with
-  | List.cons _ head tail => return #[head] ++ (← listCells tail)
-  | List.nil _ => return #[]
-  | _ => throwError "model table: the entries do not unfold to a list: {list}"
-
 open Lean Meta in
 /-- The literal balanced tree of key-ordered groups, split as `SearchTree.ofSorted` splits. -/
 private partial def literalTree (groups : Array (Nat × Array Expr)) : MetaM Expr := do
@@ -118,7 +110,7 @@ elab "model_table% " entries:term : term => do
     (mkApp (mkConst ``ModelTable.slotsDistinct) list)
   unless distinct do throwError "model table: two entries share an opcode, owner and name"
   let mut keyed : Array (Nat × Expr) := #[]
-  for cell in ← listCells list do
+  for cell in ← literalCells list do
     keyed := keyed.push
       (← unsafe evalExpr Nat (mkConst ``Nat) (mkApp (mkConst ``ModelEntry.key) cell), cell)
   let mut groups : Array (Nat × Array Expr) := #[]

@@ -38,4 +38,18 @@ theorem partitions :
   decide +kernel
 #print axioms partitions
 
+/-- A named cell, which `program_index%` writes into its leaf as written. -/
+def cell : Nat := 7
+
+/-- `program_index%` writes the index `ofList` builds, split at the same middles, for lists with
+    none, one, an odd and an even number of cells. -/
+theorem literal_indices :
+    (program_index% ([] : List Nat)) = FlowIndex.ofList [] ∧
+    (program_index% [cell]) = FlowIndex.ofList [cell] ∧
+    (program_index% [10, 20, 30]) = .branch 1 (.leaf 10) (.branch 1 (.leaf 20) (.leaf 30)) ∧
+    (program_index% [10, 20, 30]) = FlowIndex.ofList [10, 20, 30] ∧
+    (program_index% [10, 11, 12, 13, 14, 15, 16, 17]) =
+      FlowIndex.ofList [10, 11, 12, 13, 14, 15, 16, 17] := by
+  decide +kernel
+#print axioms literal_indices
 end Tests.FlowIndex

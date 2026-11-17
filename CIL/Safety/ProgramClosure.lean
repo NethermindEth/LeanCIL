@@ -4,11 +4,13 @@ import CIL.Safety.DecodedSummary
 /-!
 # Closures of a method and their transfer between programs
 
-`Program.closure` takes out of a program the methods a root reaches through link tables,
-renumbered from the root at 0, and keeps them only when every link of the renumbered methods
-enters one of them. The result is closed (`Program.closure_closed`) and relocates back into its
-program (`Program.closure_relocates`), and `Program.closureEvidence` gives the evidence records
-that decode to it. A contract proved for a program carries to its closure
+`Program.closure` takes out of a program the methods a root reaches through link tables, renumbered
+from the root at 0, and keeps them only when every link of the renumbered methods enters one of
+them. The result is closed (`Program.closure_closed`) and relocates back into its program
+(`Program.closure_relocates`), and `Program.closureEvidence` gives the evidence records that decode
+to it. `Program.closure` reads each method from the list; `closureWith` takes any lookup, and
+`Program.closure_eq_closureWith` lets a proof decide a closure over an index of the program, such as
+`Extracted.programIndex`, instead. A contract proved for a program carries to its closure
 (`MethodContract.Holds.restrict`), and `DecodedSummary.relocate` carries a summary proved over a
 closure to any program that holds the closure's methods at relocated indices
 (`RelocatesInto.of_decoded`).
@@ -175,34 +177,38 @@ def ClosureSearch.reachAll : ClosureSearch → List Nat → ClosureSearch
       reachAll ⟨width, packedSet width slots callee (count + 1),
         packedSet width indices count callee, count + 1, found, front, callee :: back⟩ rest
 
-/-- `search` after visiting `index` of `program` with `front` left in the queue; with nothing
-    queued when `program` has no method there. -/
-def ClosureSearch.visit (program : Program) (search : ClosureSearch) (index : Nat)
+/-- `search` after visiting the method `lookup` gives at `index`, with `front` left in the
+    queue; with nothing queued when `lookup` gives no method there. -/
+def ClosureSearch.visit (lookup : Nat → Option Method) (search : ClosureSearch) (index : Nat)
     (front : List Nat) : ClosureSearch :=
-  match program[index]? with
+  match lookup index with
   | some method =>
     ClosureSearch.reachAll { search with front := front, found := (index, method) :: search.found }
       method.callees
   | none => { search with front := [], back := [] }
 
-/-- `search` after visiting at most `fuel` queued methods of `program`. -/
-def ClosureSearch.run (program : Program) : Nat → ClosureSearch → ClosureSearch
+/-- `search` after visiting at most `fuel` queued methods `lookup` gives. -/
+def ClosureSearch.run (lookup : Nat → Option Method) : Nat → ClosureSearch → ClosureSearch
   | 0, search => search
   | fuel + 1, search =>
     match search.front with
-    | index :: front => (search.visit program index front).run program fuel
+    | index :: front => (search.visit lookup index front).run lookup fuel
     | [] =>
       match search.back.reverse with
-      | index :: front => ({ search with back := [] }.visit program index front).run program fuel
+      | index :: front => ({ search with back := [] }.visit lookup index front).run lookup fuel
       | [] => search
 
-/-- The search of `program` from `root`, which holds position 0. Each visit takes a new
-    position, so as many visits as `program` has methods reach every method. -/
-def Program.closureSearch (program : Program) (root : Nat) : ClosureSearch :=
-  let width := program.length.log2 + 1
-  ClosureSearch.run program program.length
+/-- The search from `root`, which holds position 0, of the `length` methods `lookup` gives. Each
+    visit takes a new position, so `length` visits reach every method. -/
+def closureSearchWith (lookup : Nat → Option Method) (length root : Nat) : ClosureSearch :=
+  let width := length.log2 + 1
+  ClosureSearch.run lookup length
     { width, slots := packedSet width 0 root 1, indices := root, count := 1, found := [],
       front := [root], back := [] }
+
+/-- The search of `program` from `root`, reading each method by its index in the list. -/
+def Program.closureSearch (program : Program) (root : Nat) : ClosureSearch :=
+  closureSearchWith (program[·]?) program.length root
 
 /-- The position `search` gave program index `callee`. -/
 def ClosureSearch.position (search : ClosureSearch) (callee : Nat) : Nat :=
@@ -221,17 +227,35 @@ def ClosureSearch.consistent (search : ClosureSearch) (root : Nat) : Bool :=
     visits.all fun visited => visited.2.callees.all fun callee =>
       search.position callee < search.count && search.indexAt (search.position callee) == callee
 
-/-- The methods `root` reaches in `program` through link tables, renumbered from `root` at 0,
-    with the index in `program` of each; `none` unless every link of the renumbered methods enters
-    one of them. A search over `n` methods with `e` link callees reads each method by its index
-    in the list, so it costs `O(n * P + e)` list steps in a program of `P` methods, with one packed
-    table operation per callee. -/
-def Program.closure (program : Program) (root : Nat) : Option (Program × List Nat) :=
-  let search := program.closureSearch root
+/-- The methods `root` reaches through link tables among the `length` methods `lookup` gives,
+    renumbered from `root` at 0, with the index of each; `none` unless every link of the
+    renumbered methods enters one of them. A search over `n` methods with `e` link callees reads
+    each method once through `lookup` and gives each callee one packed table operation. -/
+def closureWith (lookup : Nat → Option Method) (length root : Nat) :
+    Option (Program × List Nat) :=
+  let search := closureSearchWith lookup length root
   if search.consistent root then
     some (search.found.reverse.map fun visited => visited.2.relocate search.position,
       search.found.reverse.map Prod.fst)
   else none
+
+/-- The methods `root` reaches in `program`, as `closureWith` takes them. Read through the list,
+    a closure of `n` methods costs `O(n * P)` list steps in a program of `P` methods; through
+    an index of the program, `closure_eq_closureWith` brings that to `O(n * log P)`. -/
+def Program.closure (program : Program) (root : Nat) : Option (Program × List Nat) :=
+  closureWith (program[·]?) program.length root
+
+/-- A lookup that gives each method of `program` at its index, with the program's length, takes
+    the same closure as the list does. -/
+theorem Program.closure_eq_closureWith {program : Program} {lookup : Nat → Option Method}
+    {length : Nat} (agrees : ∀ index, lookup index = program[index]?)
+    (counted : length = program.length) (root : Nat) :
+    program.closure root = closureWith lookup length root := by
+  have same : lookup = (program[·]?) := funext agrees
+  subst same counted
+  rfl
+
+#print axioms Program.closure_eq_closureWith
 
 /-- The records of the methods `Program.closure` takes out of `program`, in closure order, each
     with its links renumbered as the closure renumbers them. -/
@@ -260,7 +284,7 @@ theorem ClosureSearch.reachAll_found :
 /-- A visit records only the program's own method at the visited index. -/
 theorem ClosureSearch.visit_sound {program : Program} {search : ClosureSearch}
     (sound : search.Sound program) (index : Nat) (front : List Nat) :
-    (search.visit program index front).Sound program := by
+    (search.visit (program[·]?) index front).Sound program := by
   unfold ClosureSearch.visit
   split
   · next method found =>
@@ -276,7 +300,7 @@ theorem ClosureSearch.visit_sound {program : Program} {search : ClosureSearch}
 /-- A search of `program` from a sound start visits only the program's own methods. -/
 theorem ClosureSearch.run_sound (program : Program) :
     ∀ (fuel : Nat) (search : ClosureSearch), search.Sound program →
-      (search.run program fuel).Sound program
+      (search.run (program[·]?) fuel).Sound program
   | 0, _, sound => sound
   | fuel + 1, search, sound => by
     unfold ClosureSearch.run
@@ -297,7 +321,7 @@ theorem Program.closure_eq_some {program lib : Program} {root : Nat} {indices : 
       lib = (program.closureSearch root).found.reverse.map
         (fun visited => visited.2.relocate (program.closureSearch root).position) ∧
       indices = (program.closureSearch root).found.reverse.map Prod.fst := by
-  unfold Program.closure at closure
+  unfold Program.closure closureWith at closure
   dsimp only at closure
   split at closure
   · next consistent =>
