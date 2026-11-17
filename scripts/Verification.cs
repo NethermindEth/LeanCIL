@@ -2557,17 +2557,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 UseEntry(cached);
             }
+            // Every branch that opens a certified library without building it traces the open, timed from here.
+            var openStarted = DateTimeOffset.UtcNow;
+            var openElapsed = Stopwatch.StartNew();
+            void TraceOpen() => Trace("Opening certified Lean verification library", openStarted, library,
+                openElapsed.Elapsed, 0, "", [library]);
             // A supplied certified library is not a local cache, so --rebuild-library still uses it.
             if (!string.IsNullOrWhiteSpace(supplied))
             {
-                var openStarted = DateTimeOffset.UtcNow;
-                var openElapsed = Stopwatch.StartNew();
                 library = Path.GetFullPath(supplied);
                 manifest = SuppliedLibraryManifest(library, suppliedDigest, libraryKey, sources)
                     ?? throw new InvalidOperationException("Certified library identity or integrity mismatch");
                 certifiedFingerprintsSha = manifest.GetValueOrDefault(CertifiedFingerprintsName);
                 libraryBuild = "certified-artifact";
-                Trace("Opening certified Lean verification library", openStarted, library, openElapsed.Elapsed, 0, "", [library]);
+                TraceOpen();
             }
             else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) &&
                 ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)) &&
@@ -2578,6 +2581,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 library = cached;
                 manifest = cachedManifest;
                 libraryBuild = "cache";
+                TraceOpen();
             }
             else if (!fresh && DownloadReleasedLibrary(cached, libraryKey))
             {
@@ -2585,6 +2589,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 library = cached;
                 manifest = ReadManifest(cached) ?? throw new InvalidDataException("Missing downloaded library manifest");
                 libraryBuild = "release";
+                TraceOpen();
             }
             else if (!fresh && closureRoots is not null &&
                 ClosureLibrary(cacheRoot, libraryKey, sources, closureRoots) is { } closure)
@@ -2595,6 +2600,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 libraryStamps = closure.Stamps;
                 libraryBuild = closure.Built ? "closure" : "closure-cache";
                 publishedEntry = closure.Built;
+                if (!closure.Built) TraceOpen();
             }
             else
             {
