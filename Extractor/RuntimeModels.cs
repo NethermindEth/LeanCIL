@@ -143,6 +143,11 @@ internal static class RuntimeModels
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
+        if (VectorModel(reference) is { } vector)
+        {
+            ValidateSignature(reference, profile.Architecture);
+            return vector;
+        }
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||
             !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
@@ -220,6 +225,26 @@ internal static class RuntimeModels
     ];
 
     private static readonly Dictionary<string, Operation> ScalarOperations = BuildScalarOperations();
+    // The vector helpers a call keeps, each of the exact intrinsics assembly: CreateScalarUnsafe of a ulong and
+    // GetElement of a ulong lane of a 128- or 256-bit vector.
+    static Operation? VectorModel(MethodReference reference)
+    {
+        var convention = reference is GenericInstanceMethod
+            ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
+        if (reference.HasThis || reference.CallingConvention != convention ||
+            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics)) return null;
+        string signature = reference.FullName;
+        if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
+            return new VectorCreateScalarUnsafe64();
+        foreach (int width in new[] { 128, 256 })
+        {
+            string element = $"!!0 {Intrinsics}.Vector{width}::GetElement<System.UInt64>";
+            if (signature == $"{element}({Vector(width, "!!0")},System.Int32)")
+                return Hardware($".vector (.extract64 {width})", 2);
+        }
+        return null;
+    }
+
     private static readonly Dictionary<string, ScalarIntrinsic> IntegerMathCalls = BuildIntegerMathCalls();
 
     // Each helper has one model under System.Math and under the integer type that declares it; an unsigned type
@@ -570,8 +595,6 @@ internal static class RuntimeModels
             return Finish(".avx512DQ .moveMask512", 1, Feature.Avx512DQ);
         if (signature == $"{V512UInt64} {Intrinsics}.Vector512::Create({V256UInt64},{V256UInt64})")
             return Finish(".vector .combine256", 2);
-        if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
-            return Require(new VectorCreateScalarUnsafe64());
         if (VectorFromByteSpan(signature) is { } load) return load;
         if (Vector128ByteTransfer(signature) is { } transfer) return transfer;
         foreach (int width in new[] { 128, 256 })
@@ -589,8 +612,6 @@ internal static class RuntimeModels
                     return Finish($".vector (.{op} {width})", 2);
             if (signature == $"{genericVector} {owner}::LessThan<System.Int64>({genericVector},{genericVector})")
                 return Finish($".vector (.lt64 {width})", 2);
-            if (signature == $"!!0 {owner}::GetElement<System.UInt64>({genericVector},System.Int32)")
-                return Finish($".vector (.extract64 {width})", 2);
             foreach ((string method, string target) in new[] { ("AsByte", "System.Byte"), ("AsUInt32", "System.UInt32"),
                 ("AsInt64", "System.Int64"), ("AsDouble", "System.Double"), ("AsUInt64", "System.UInt64"),
                 ("AsInt32", "System.Int32"), ("AsSingle", "System.Single") })

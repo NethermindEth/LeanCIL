@@ -356,10 +356,12 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     model.StepRenamed :=
   CIL.Extraction.runtimeModel_yields (property := CIL.RuntimeModel.StepRenamed)
     (by
-      simp only [CIL.Extraction.modelEntries, List.mem_cons, forall_eq_or_imp,
-        CIL.Extraction.objectConstructorEntry, CIL.Extraction.ModelEntry.exact_yields]
-      exact ⟨objectConstructor_stepRenamed,
-        CIL.Extraction.integerMathEntries_yields intrinsic_stepRenamed⟩) found
+      intro entry member
+      simp only [CIL.Extraction.modelEntries, List.mem_append, List.mem_cons] at member
+      rcases member with (rfl | member) | member
+      · exact CIL.Extraction.ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
+      · exact CIL.Extraction.vectorEntries_yields intrinsic_stepRenamed entry member
+      · exact CIL.Extraction.integerMathEntries_yields intrinsic_stepRenamed entry member) found
 
 #print axioms runtimeModel_stepRenamed
 

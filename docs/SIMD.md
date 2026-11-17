@@ -58,6 +58,9 @@ the model's semantics and makes no claim about how a JIT implements them.
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not accept `double` as a source for these casts |
 
+A `CreateScalarUnsafe` or `GetElement` call keeps its `call`, which runs the vector operation the
+runtime model table gives its method reference; every other row is emitted as its operation.
+
 No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and the [vector storage](OPCODES.md#vector-storage-and-fields) instructions, and there is no general vector load/store API coverage beyond the byte-span `Create` and `Vector128<byte>` `LoadUnsafe`/`StoreUnsafe` rows. `Vector256.Create<ulong>(ReadOnlySpan<ulong>)` and the other element types of `LoadUnsafe`/`StoreUnsafe` are not mapped. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE

@@ -1,6 +1,7 @@
 import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.IntegerMath
+import CIL.Extraction.VectorModels
 
 /-!
 # Runtime model resolution
@@ -16,7 +17,8 @@ emissions its model stands for in `runtimeCatalog`.
 namespace CIL.Extraction
 
 /-- The runtime methods with a model. -/
-def modelEntries : List ModelEntry := objectConstructorEntry :: integerMathEntries
+def modelEntries : List ModelEntry :=
+  objectConstructorEntry :: vectorEntries ++ integerMathEntries
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -34,8 +36,8 @@ def callModelled (body : Method) (method : MethodRef) : Bool :=
 /-- Every entry of the runtime table is one of `modelEntries`. -/
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
-  simp [runtimeModels, SearchTree.toList, modelEntries, integerMathEntries, mathOperations,
-    mathIntegers, IntegerMath.signedOnly]
+  simp [runtimeModels, SearchTree.toList, modelEntries, vectorEntries, integerMathEntries,
+    mathOperations, mathIntegers, IntegerMath.signedOnly]
 
 #print axioms runtimeModels_entries
 

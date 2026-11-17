@@ -70,7 +70,8 @@ call modelled as an intrinsic reads its operands as that intrinsic does. Interna
 dup/pop and eligible opaque locals may forward them. `invoke_return_known` and `step_call_known`
 state the boundary guarantees; a contract cannot expose an unknown lane as a concrete value.
 
-`OpaqueLocalsValid` requires a reachable admitted producer and independently recomputes eligibility
+`OpaqueLocalsValid` requires a reachable call whose runtime model is `CreateScalarUnsafe` and
+independently recomputes eligibility
 from raw local uses, excluding address-taken locals. Opaque by-value helper parameters are unsupported.
 Agreement between the permitted consumers and the actual JIT remains a runtime assumption.
 See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory](COMPILER-COVERAGE.md).
@@ -83,7 +84,8 @@ and states no link, and the checked interpreter runs the model when the pc has n
 unlinked call the table does not model. `RuntimeModelsAgree` requires each live call site that
 emits a model in place of its call to emit exactly the model the table gives its reference, and a
 site the table does not model to emit none of the models the table accounts for. The table holds
-the `System.Object` constructor and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and
+the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of
+`Vector128` and `Vector256`, and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and
 `Sign` of `System.Math` and of each integer type that declares them, whose calls keep their
 calls, so the table accounts for no lowered emission. A helper entry gives the scalar intrinsic of
 its integer type only to a static, non-generic reference of that owner and exact runtime

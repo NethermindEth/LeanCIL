@@ -223,16 +223,22 @@ private def call10 : CallSite := {
   target := .external (scope ++ "::System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
     System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)"),
   typeArguments := [], parameterCount := 1, returnsValue := true }
+-- `CreateScalarUnsafe` keeps its call, so its intrinsic is refused at every site, its own too.
 example : ExactIntrinsicsValid (raw call10) [true]
+    (body [.call call10.method {}]) := by decide +kernel
+example : ¬ ExactIntrinsicsValid (raw call10) [true]
+    (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
+example : ¬ ExactIntrinsicsValid (raw call0) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call10) [true]
-    (body [.intrinsic (.vector .createScalarUnsafe64) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call10 with method.hasThis := true }) [true]
-    (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call10 with target := .external "forged" }) [true]
-    (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call10 with target := .external "forged" }) [true]
-    (body [.intrinsic (.vector (.createScalar64 128)) 1]) := by decide +kernel
+    (body [.intrinsic (.vector (.extract64 128)) 2]) := by decide +kernel
+-- The table states what the site may emit instead.
+example : call10.method = createScalarUnsafeMethod := by decide +kernel
+example : ¬ ModelsAgree runtimeCatalog {} profile (raw call10) [true]
+    [.intrinsic (.vector (.createScalar64 128)) 1] := by decide +kernel
+example : ¬ ModelsAgree runtimeCatalog {} profile
+    (raw { call10 with target := .external "forged" }) [true]
+    [.intrinsic (.vector (.createScalar64 128)) 1] := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call0 with parameterCount := 1 }) [true]
     (body [.intrinsic (.vector (.band 256)) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call0) [true]
@@ -241,8 +247,6 @@ example : ¬ ExactIntrinsicsValid (raw call4) [true]
     (body [.intrinsic (.avx2 .shl64) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call6) [true]
     (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call10) [true]
-    (body [.intrinsic (.vector (.createScalar64 128)) 1]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call0) [true]
     { body [.intrinsic (.avx2 .band) 2] with profile := .scalar } := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call6) [true]
@@ -257,7 +261,10 @@ example : ¬ ExactIntrinsicsValid (raw call0) [true]
 
 private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
-private def localBody : Method := { body [.intrinsic (.vector .createScalarUnsafe64) 1] with locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0] }
+private def createsBody : Method := body [.call createScalarUnsafeMethod {}]
+private def localBody : Method :=
+  { createsBody with
+      locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0] }
 example : OpaqueLocalsValid withLocal localBody := by decide +kernel
 example : OpaqueLocalsValid withLocal { localBody with code := [], opaqueVectorLocals := [] }
     := by decide +kernel
@@ -269,8 +276,11 @@ example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 18, .local 0⟩] 
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 65037, .local 0⟩] } localBody
     := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal
-    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1, .ldloca 0] } := by
+    { localBody with code := [.call createScalarUnsafeMethod {}, .ldloca 0] } := by
   decide +kernel
+-- The intrinsic alone no longer stands for the call, so it claims no opaque local.
+example : ¬ OpaqueLocalsValid withLocal
+    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1] } := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] }
     := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by decide +kernel
@@ -592,14 +602,14 @@ private def wordSignature : DeclaredSignature :=
 /-- A layout environment with one entry, as an extraction that reads a struct records. -/
 private def emittedEnvironment : LayoutEnvironment := { layouts := #[⟨⟨4, []⟩, 4⟩] }
 
-/-- `Avx2.And` of two broadcasts, then lane 0, in the form an extraction emits. -/
+/-- `Avx2.And` of two broadcasts, then a call for lane 0, in the form an extraction emits. -/
 private def emittedAnd : Method :=
   { profile := profile, returnsValue := true, locals := [], localKinds := [],
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
     code := [.ldarg 0, .intrinsic (.vector (.create64 256)) 1, .ldarg 1,
       .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
-      .intrinsic (.vector (.extract64 256)) 2, .ret] }
+      .call getElement256Method {}, .ret] }
 
 example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 4)] := by
@@ -611,9 +621,9 @@ private def emittedShift : Method :=
   { profile := profile, returnsValue := true, locals := [.v128 0], localKinds := [.vector128],
     opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
-    code := [.ldarg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0, .ldarg 0,
+    code := [.ldarg 1, .call createScalarUnsafeMethod {}, .stloc 0, .ldarg 0,
       .intrinsic (.vector (.create64 256)) 1, .ldloc 0, .intrinsic (.avx2 .shl64Count) 2,
-      .ldc_i4 0, .intrinsic (.vector (.extract64 256)) 2, .ret] }
+      .ldc_i4 0, .call getElement256Method {}, .ret] }
 
 example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 9223372036854775808)] := by
