@@ -160,17 +160,24 @@ workflow.
   literals over 32 bytes split into 32-byte ones to keep lines short, proves in the kernel that
   each kind of literal equals its list literal, proves its body check with the kernel, rejects a
   changed byte of the body literal, and requires the elaborator's decide to refuse the check within
-  a small heartbeat budget. Its cost rows write literals as the extractor does, in numerals of at
-  most 256 bytes. Elaborating the literal of a body of 16384, 65536 and 262144 `nop`s must stay
-  within 4.5 times the heartbeats and, taking the fastest of three runs, 8 times the time at 4 times
-  the body, and within 200 heartbeats per byte; a numeral parse quadratic in its digits grows 16
-  times. Body-checking the literal of a body of 128, 512 and 2048 `nop`s must stay within 4.5
-  times the heartbeats at 4 times the body. Tests/ScalarEvidence.lean requires the same
+  a small heartbeat budget. Its cost rows write literals as the extractor does, one code joined
+  from numerals of at most 256 bytes. Elaborating the literal of a body of 16384, 65536 and 262144
+  `nop`s must stay within 4.5 times the heartbeats and, taking the fastest of three runs, 8 times
+  the time at 4 times the body, and within 200 heartbeats per byte; a numeral parse quadratic in
+  its digits grows 16 times. Body-checking the literal of a body of 128, 512 and 2048 `nop`s must stay within 4.5
+  times the heartbeats at 4 times the body. Bodies of 5, 10, 20 and 40 KB of `ldc.i4` and `pop`
+  pairs, once with every 256-byte numeral ending in the same eight `nop`s and once with random
+  operands, must cost the kernel at most 1.15 times as much per byte as at the size before, both
+  for a fold over the bytes and for the body check. The kernel's caches hash a numeral by its low
+  64 bits, so the same bodies written as separate numerals joined by `++` cost about twice as much
+  per byte at each doubling. Tests/ScalarEvidence.lean requires the same
   refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
   elaborator at two method sizes.
   Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
   string and field tokens and for 25 and 100 call tokens, for the whole extraction and for
-  `Extracted.method0_calls_validated` alone, within 1.15 times.
+  `Extracted.method0_calls_validated` alone, within 1.15 times, and the body check's cost per
+  instruction for a method of 125, 500 and 1,000 string tokens, within 1.1 times of the size
+  before.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one

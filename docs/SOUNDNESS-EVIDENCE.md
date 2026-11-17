@@ -120,11 +120,12 @@ assembly's identity with its pin, lists the identity of every pinned assembly (`
 `Extracted.assemblies`) and names the identity each of its slices spells.
 
 Every byte list of this evidence (body bytes, rows, heap entries, header bytes and UTF-8 names) is written
-as `CIL.Extraction.fixedBytes count 0x...` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
-and one hexadecimal numeral holding the bytes big-endian, with a list longer than 256 bytes written as such
-literals of at most 256 bytes joined by `++`. Elaborating a numeral costs a few allocations, where a list
-literal costs a numeral and a constructor per byte; the kernel computes the list when a check reads it,
-splitting each numeral in halves down to words of eight bytes, and the checks see the same list values.
+as `CIL.Extraction.fixedBytes count code` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
+and one number holding the bytes big-endian. The code of a list of at most 256 bytes is one hexadecimal numeral,
+and a longer list's code joins numerals of at most 256 bytes with `Nat.lor` and `Nat.shiftLeft`. Elaborating a
+numeral costs a few allocations, where a list literal costs a numeral and a constructor per byte; the kernel
+computes the list when a check reads it, splitting the code in halves down to words of eight bytes, and the
+checks see the same list values.
 
 ### Names tied to bytes by equations
 
