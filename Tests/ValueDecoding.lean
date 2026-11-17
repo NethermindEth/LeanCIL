@@ -179,7 +179,7 @@ theorem ofRaw?_exact :
       (Instruction.ofRaw? none raw).isNone || Instruction.valueOpcode raw.opcode) = true ∧
     probes.all (fun raw => !Instruction.valueOpcode raw.opcode ||
       named.any (·.1.opcode == raw.opcode)) = true ∧
-    named.all (fun (raw, expected) => valueEncodingMatches raw expected) = true := by
+    named.all (fun (raw, expected) => valueEncodingMatches none raw expected) = true := by
   decide +kernel
 
 /-- info: 'Tests.ValueDecoding.ofRaw?_exact' depends on axioms: [propext] -/
@@ -275,7 +275,7 @@ def mutations : List (RawInstruction × Instruction) := [
 
 /-- No mutation matches its raw instruction. -/
 theorem mutations_rejected :
-    mutations.all (fun (raw, emitted) => !valueEncodingMatches raw emitted) = true := by
+    mutations.all (fun (raw, emitted) => !valueEncodingMatches none raw emitted) = true := by
   decide +kernel
 
 /-- info: 'Tests.ValueDecoding.mutations_rejected' depends on axioms: [propext] -/
@@ -289,21 +289,24 @@ private def words : ScalarKind := .array .signed32
     refused, an opcode of a kind emits no typed form, and a typed opcode emits its token's element
     type rather than a kind. -/
 theorem element_emission_exact :
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
-    scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
+    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
+    scalarEmissionMatches #[] none none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
       true ∧
-    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
-    scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem_any int32) =
+    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
+    scalarEmissionMatches #[] none none ⟨0, 163, .type int32⟩ [.word32, words]
+      (.ldelem_any int32) =
       true ∧
-    scalarEmissionMatches #[] none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+    scalarEmissionMatches #[] none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
       (.stelem_any int32) = true ∧
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem_any int32) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words]
+    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words]
+      (.ldelem_any int32) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 158, .none⟩ [.word32, .word32, words]
       (.stelem_any int32) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem .i4) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 163, .type int32⟩ [.word32, words]
+      (.ldelem .i4) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
       (.stelem .i4) = false := by
   decide +kernel
 
