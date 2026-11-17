@@ -2593,6 +2593,7 @@ partial class Program
                     {
                         // Only a result replayed against the certified CIL modules may be restored without replay.
                         var deepPublication = baseUnchanged ? StageDeepResult(deep, deepStaging) : null;
+                        Stage([i], "deep result publication");
                         PublishSupport();
                         RequireDeepStable();
                         if (deepPublication is not null) PublishSuccess(deep.ResultKey!, deepPublication);

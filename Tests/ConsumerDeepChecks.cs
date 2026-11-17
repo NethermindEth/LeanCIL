@@ -269,6 +269,24 @@ try
     // A same-length change with its timestamp restored must fail the receipt's content hashes.
     SameLengthChange(cachedBodies);
     var changedBodies = File.ReadAllBytes(cachedBodies);
+    // A source changed after the result is staged fails the publication check, so the staged copy is discarded.
+    var publicationToken = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + publicationToken + "\n");
+    var beforePublication = Receipts();
+    bool publicationReached = false;
+    ExpectFailure(() => Verify(verification, stage: stage =>
+    {
+        if (stage != "deep result publication") return;
+        publicationReached = true;
+        File.AppendAllText(Path.Combine(ConsumerSession(publicationToken), ".deep-checks", "BindingAudit",
+            "Bodies.lean"), "\n");
+    }), "Deep-check source changed");
+    if (!publicationReached) throw new InvalidOperationException("The deep result publication stage was not reached.");
+    RequireNoPublication(beforePublication);
+    if (verification.deepCacheHits != deepHits + 2 || DeepResults().Single() != deepEntry ||
+        !File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies))
+        throw new InvalidOperationException("A staged consumer deep result was published after a failed check.");
+    Console.WriteLine("PASS a staged consumer deep result is discarded when a later stability check fails");
     CheckDeep(Verify(verification));
     if (verification.deepCacheHits != deepHits + 2 || verification.AuthenticatedSuccess(Path.GetFileName(deepEntry))
             is null || File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies))
