@@ -1616,7 +1616,7 @@ void ModelTableCosts()
         def code{{count}} : List Instruction :=
           [{{string.Join(", ", Enumerable.Range(0, count).Select(Emitted))}}]
         #kernel_cost "model agreement {{count}}"
-          (ModelsAgree catalog {} raw{{count}} (List.replicate {{count}} true) code{{count}})
+          (ModelsAgree catalog {} .scalar raw{{count}} (List.replicate {{count}} true) code{{count}})
         """;
     var path = Path.Combine(tableDirectory, "ModelTables.lean");
     File.WriteAllText(path, $$"""
