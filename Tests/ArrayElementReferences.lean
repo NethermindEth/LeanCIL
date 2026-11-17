@@ -59,7 +59,7 @@ theorem expired_element_rejected :
 
 /-- A same-width element token does not justify a different typed element address. -/
 theorem wrong_address_token :
-    CIL.Extraction.scalarOpMatches
+    CIL.Extraction.scalarOpMatches none
       ⟨0, 143, .type (.atom CIL.Extraction.runtimeScope "System.Int32")⟩
       [.word32, .array .signed32] (.memory (.arrayAddress .unsigned32)) = false := by decide +kernel
 #print axioms wrong_address_token

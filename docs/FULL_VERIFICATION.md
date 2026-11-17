@@ -85,8 +85,10 @@ privileges: macros, `initialize` and `run_cmd` can read and write any file the
 verifier can, start processes, and use the network. Hash checks do not restrict that code.
 The verifier snapshots the inputs, caller artifacts and module resolution once
 before and once after each run that elaborates producer-derived code. Caller
-artifacts are compared by size and modification time rather than hashed. These
-snapshots detect accidental mutation only; they omit the trusted toolchain. Run
+artifacts are compared by SHA-256 content hash, so a same-length rewrite that
+restores the modification time is detected. Producer-derived code can still change
+a file and restore it between two checks, so these snapshots detect accidental
+mutation only; they omit the trusted toolchain. Run
 full verification of an untrusted bundle in an isolated environment: a
 read-only toolchain, extractor and caller, no network, and a workspace
 discarded afterwards.

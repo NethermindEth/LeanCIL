@@ -192,14 +192,16 @@ private def arrayEmission : Instruction → Bool
   | _ => false
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode: a
-    decoded opcode emits its decoding, and a typed one the operation its element gives. -/
-private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind)
-    (emitted : Instruction) : Bool :=
+    decoded opcode emits its decoding after `previous`, the raw instruction before it, and a
+    typed one the operation its element gives. -/
+private def arrayMatches (previous : Option RawInstruction) (instruction : RawInstruction)
+    (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if instruction.opcode == 141 then
     match instruction.operand, stack, emitted with
     | .type token, length :: _, .newarr element => length ∈ [.word32, .native] && token == element
     | _, _, _ => false
-  else if Instruction.valueOpcode instruction.opcode then valueEncodingMatches instruction emitted
+  else if Instruction.valueOpcode instruction.opcode then
+    valueEncodingMatches previous instruction emitted
   else
   match arrayStep instruction stack, emitted with
   | some (some (.arrayAddress element _), _), .memory (.arrayAddress actual _) =>
@@ -283,12 +285,12 @@ private def referenceAddition : ScalarKind → ScalarKind → Bool
   | .reference, offset | offset, .reference => offset ∈ [.word32, .native]
   | _, _ => false
 
-/-- A covered opcode emits exactly the encoding its operand kinds imply. -/
-def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
-    (emitted : Instruction) :
-    Bool :=
+/-- A covered opcode after `previous`, the raw instruction before it, emits exactly the
+    encoding its operand kinds imply. -/
+def scalarOpMatches (previous : Option RawInstruction) (instruction : RawInstruction)
+    (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if instruction.opcode == 141 || arrayCovered instruction.opcode || arrayEmission emitted then
-    arrayMatches instruction stack emitted
+    arrayMatches previous instruction stack emitted
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
@@ -390,14 +392,14 @@ private def classFieldSite (instruction : RawInstruction) (emitted : Instruction
   | _ => false
 
 /-- `ldfld`, `ldflda` and `stfld` of a class instance field emit the instruction the raw one
-    decodes to, naming the field its operand names, on an object or null receiver. A stored
-    class or class array must be an object or null, a stored value array one of the field's
-    element, and a stored integer of the field's stack kind (`word32` up to 4 bytes, `word64`
-    or `native` for 8), so `classFieldStore` never meets a word of the other width; the step
-    resolves the slot and faults on a field type without one. -/
-private def classFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
-    (emitted : Instruction) : Bool :=
-  valueEncodingMatches instruction emitted && match emitted, stack with
+    decodes to after `previous`, naming the field its operand names, on an object or null
+    receiver. A stored class or class array must be an object or null, a stored value array one
+    of the field's element, and a stored integer of the field's stack kind (`word32` up to 4
+    bytes, `word64` or `native` for 8), so `classFieldStore` never meets a word of the other
+    width; the step resolves the slot and faults on a field type without one. -/
+private def classFieldMatches (previous : Option RawInstruction) (instruction : RawInstruction)
+    (stack : List ScalarKind) (emitted : Instruction) : Bool :=
+  valueEncodingMatches previous instruction emitted && match emitted, stack with
   | .ldfld _, receiver :: _ | .ldflda _, receiver :: _ => receiver ∈ [.object, .nullObject]
   | .stfld field, value :: receiver :: _ =>
     receiver ∈ [.object, .nullObject] &&
@@ -416,9 +418,10 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
 
 /-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
     `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
-    word, a size constant or an exact runtime query may emit a scalar operation. -/
+    word, a size constant or an exact runtime query may emit a scalar operation. `previous` is
+    the raw instruction before `instruction`, `none` at the first pc. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
-    (instruction : RawInstruction)
+    (previous : Option RawInstruction) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
@@ -449,14 +452,15 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     | .address .. => instruction.opcode == 65030
     | .call .. => instruction.opcode == 41
   else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
-  else if arrayEmission emitted then arrayMatches instruction stack emitted
+  else if arrayEmission emitted then arrayMatches previous instruction stack emitted
   else if instruction.opcode == 114 ||
       (match emitted with | .memory (.stringLiteral _) => true | _ => false) then
     stringLiteralMatches role instruction emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
-  else if classFieldSite instruction emitted then classFieldMatches instruction stack emitted
-  else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
+  else if classFieldSite instruction emitted then
+    classFieldMatches previous instruction stack emitted
+  else if scalarCovered instruction.opcode then scalarOpMatches previous instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | _, .ldc_i4 bits => sizeConstant instruction bits ||
         platformField instruction == some bits ||
@@ -1048,7 +1052,7 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnly pc instruction emitted &&
       indirectSiteWindow rawAt pc instruction emitted &&
-      scalarEmissionMatches layouts role instruction stack emitted &&
+      scalarEmissionMatches layouts role (rawBefore rawAt pc) instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted locals ||
       match scalarTransfer raw instruction stack role context locals,
           featureSuccessors role pc instruction feature.stack with
@@ -1138,7 +1142,8 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
 
 #print axioms ScalarFlowValid_iff_list
 
-/-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies. -/
+/-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies
+    after the raw instruction before it. -/
 theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : RawMethod}
     {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Instruction}
@@ -1149,7 +1154,8 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
     (featureAt : features[pc]? = some (some feature))
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
-    scalarEmissionMatches layouts role instruction stack emitted = true := by
+    scalarEmissionMatches layouts role (rawBefore (raw.code[·]?) pc) instruction stack emitted =
+      true := by
   have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
       some ((instruction, role), pc) := by
     simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
@@ -1159,7 +1165,7 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
   rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
   have checked := all3_at sites pairAt statesAt emittedAt
   simp only [checkScalarSite, Bool.and_eq_true] at checked
-  exact checked.1.2
+  simpa only [rawBefore, FlowIndex.get?_ofList] using checked.1.2
 
 #print axioms ScalarFlowValid.instruction_checked
 

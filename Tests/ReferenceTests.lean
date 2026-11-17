@@ -118,24 +118,24 @@ theorem scalar_equality_unchanged :
 
 /-- An object null cannot serve as a metadata-proven managed reference in a comparison. -/
 theorem object_null_pointer_mix_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 65025, .none⟩ [.reference, .nullObject] .ceq = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 65025, .none⟩ [.reference, .nullObject] .ceq = false :=
   by decide +kernel
 #print axioms object_null_pointer_mix_rejected
 
 /-- The equality certificate checks the operation, not just its stack effect. -/
 theorem changed_reference_comparison_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 65025, .none⟩ [.reference, .reference] .clt = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 65025, .none⟩ [.reference, .reference] .clt = false :=
   by decide +kernel
 #print axioms changed_reference_comparison_rejected
 
 /-- The null literal cannot be replaced by a numeric zero with the same stack effect. -/
 theorem numeric_null_forgery_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 20, .none⟩ [] (.ldc_i4 0) = false := by decide +kernel
+    CIL.Extraction.scalarOpMatches none ⟨0, 20, .none⟩ [] (.ldc_i4 0) = false := by decide +kernel
 #print axioms numeric_null_forgery_rejected
 
 /-- The truth-branch certificate binds the original target. -/
 theorem changed_reference_branch_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 45, .target 4⟩ [.reference] (.brtrue 3) = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 45, .target 4⟩ [.reference] (.brtrue 3) = false :=
   by decide +kernel
 #print axioms changed_reference_branch_rejected
 
@@ -215,15 +215,15 @@ theorem readonly_derived_store_faults :
 
 /-- Only int32/native offsets certify in either order; pointer sums and reversed subtraction fail. -/
 theorem reference_arithmetic_kinds :
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .word32]
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.reference, .word32]
       (.add) = true ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .native]
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.reference, .native]
       (.add) = true ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .word64]
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.reference, .word64]
       (.add) = false ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .reference]
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.reference, .reference]
       (.add) = false ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .word32] .sub = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.reference, .word32] .sub = false :=
   by decide +kernel
 #print axioms reference_arithmetic_kinds
 
@@ -252,11 +252,11 @@ theorem reference_add_byte_offsets (body : CIL.Method) (pc : Nat) (args : List V
 
 /-- Reference addition rejects memory-model substitution and a spurious encoded operand. -/
 theorem reference_add_encoding :
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.word32, .reference] .add = true ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.native, .reference] .add = true ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.word32, .reference]
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.word32, .reference] .add = true ∧
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.native, .reference] .add = true ∧
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.word32, .reference]
       (.memory (.add 1 true)) = false ∧
-    CIL.Extraction.scalarOpMatches ⟨0, 88, .target 1⟩ [.word32, .reference] .add = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 88, .target 1⟩ [.word32, .reference] .add = false :=
   by decide +kernel
 #print axioms reference_add_encoding
 

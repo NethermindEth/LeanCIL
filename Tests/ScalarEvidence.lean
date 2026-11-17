@@ -57,19 +57,21 @@ private def arithmetic : List (Nat × Instruction) := [
   (215, .add_ovf_un), (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf),
   (219, .sub_ovf_un), (65025, .ceq), (65026, .cgt), (65027, .cgt_un),
   (65028, .clt), (65029, .clt_un)]
-example : arithmetic.all (fun (opcode, operation) => scalarOpMatches (i opcode) [.word32, .word32] operation) = true := by decide
+example : arithmetic.all (fun (opcode, operation) =>
+    scalarOpMatches none (i opcode) [.word32, .word32] operation) = true := by decide
 example : arithmetic.all (fun (opcode, _operation) =>
-    !scalarOpMatches (i opcode) [.word32, .word32] (if opcode == 88 then .sub else .add)) = true := by decide
-example : scalarOpMatches (i 101) [.word64] .neg = true := by decide
-example : scalarOpMatches (i 102) [.word64] .not = true := by decide
-example : scalarOpMatches (i 101) [.word64] .not = false := by decide
-example : scalarOpMatches (i 88 (.integer 0)) [.word64, .word64] .add = false := by decide
-example : scalarOpMatches (i 88) [.other, .other] .add = false := by decide
-example : scalarOpMatches (i 88) [.reference, .word32] .add = true := by decide
-example : scalarOpMatches (i 88) [.native, .word64] .add = false := by decide
-example : scalarOpMatches (i 88) [.word32, .native] .add = true := by decide
-example : scalarOpMatches (i 88) [.word64, .word64] .sub = false := by decide
-example : scalarOpMatches (i 88) [.word32, .native] .sub = false := by decide
+    !scalarOpMatches none (i opcode) [.word32, .word32] (if opcode == 88 then .sub else .add)) =
+      true := by decide
+example : scalarOpMatches none (i 101) [.word64] .neg = true := by decide
+example : scalarOpMatches none (i 102) [.word64] .not = true := by decide
+example : scalarOpMatches none (i 101) [.word64] .not = false := by decide
+example : scalarOpMatches none (i 88 (.integer 0)) [.word64, .word64] .add = false := by decide
+example : scalarOpMatches none (i 88) [.other, .other] .add = false := by decide
+example : scalarOpMatches none (i 88) [.reference, .word32] .add = true := by decide
+example : scalarOpMatches none (i 88) [.native, .word64] .add = false := by decide
+example : scalarOpMatches none (i 88) [.word32, .native] .add = true := by decide
+example : scalarOpMatches none (i 88) [.word64, .word64] .sub = false := by decide
+example : scalarOpMatches none (i 88) [.word32, .native] .sub = false := by decide
 
 private def arithmeticFlagMutations : List (Nat × Instruction) := [
   (91, .div_un), (91, .rem), (91, .rem_un), (92, .div), (92, .rem_un), (92, .rem),
@@ -77,7 +79,7 @@ private def arithmeticFlagMutations : List (Nat × Instruction) := [
   (214, .add_ovf_un), (215, .add_ovf), (216, .mul_ovf_un), (217, .mul_ovf),
   (218, .sub_ovf_un), (219, .sub_ovf)]
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
-    !scalarOpMatches (i opcode) [.word64, .word64] operation) = true := by decide
+    !scalarOpMatches none (i opcode) [.word64, .word64] operation) = true := by decide
 
 private def conversions : List (Nat × Instruction) := [
   (103, .conv_i1), (104, .conv_i2), (105, .conv_i4), (106, .conv_i8), (109, .conv_u4),
@@ -90,13 +92,14 @@ private def conversions : List (Nat × Instruction) := [
   (183, .conv_ovf .i4), (184, .conv_ovf .u4), (185, .conv_ovf .i8), (186, .conv_ovf .u8),
   (209, .conv_u2), (210, .conv_u1), (211, .conv_i), (212, .conv_ovf .i), (213, .conv_ovf .u),
   (224, .conv_u)]
-example : conversions.all (fun (opcode, operation) => scalarOpMatches (i opcode) [.word64] operation) = true := by decide
-example : scalarOpMatches (i 106) [.word32] .conv_u8 = false := by decide
-example : scalarOpMatches (i 133) [.word32] (.conv_ovf .i8) = false := by decide
-example : scalarOpMatches (i 133) [.word32] (.conv_ovf_un .u8) = false := by decide
-example : scalarOpMatches (i 133) [.word32] .conv_i8 = false := by decide
-example : scalarOpMatches (i 106) [.word32] (.conv_ovf .i8) = false := by decide
-example : scalarOpMatches (i 183) [.word64] (.conv_ovf .i2) = false := by decide
+example : conversions.all (fun (opcode, operation) =>
+    scalarOpMatches none (i opcode) [.word64] operation) = true := by decide
+example : scalarOpMatches none (i 106) [.word32] .conv_u8 = false := by decide
+example : scalarOpMatches none (i 133) [.word32] (.conv_ovf .i8) = false := by decide
+example : scalarOpMatches none (i 133) [.word32] (.conv_ovf_un .u8) = false := by decide
+example : scalarOpMatches none (i 133) [.word32] .conv_i8 = false := by decide
+example : scalarOpMatches none (i 106) [.word32] (.conv_ovf .i8) = false := by decide
+example : scalarOpMatches none (i 183) [.word64] (.conv_ovf .i2) = false := by decide
 -- A native-sized opcode and its 64-bit sibling have the same semantics but distinct constructors,
 -- so the decoded opcode is recoverable from the emitted instruction.
 private def nativeSiblings : List (Nat × Instruction) := [
@@ -104,7 +107,7 @@ private def nativeSiblings : List (Nat × Instruction) := [
   (139, .conv_ovf_un .u8), (185, .conv_ovf .i), (212, .conv_ovf .i8), (186, .conv_ovf .u),
   (213, .conv_ovf .u8), (106, .conv_i), (211, .conv_i8)]
 example : nativeSiblings.all (fun (opcode, operation) =>
-    !scalarOpMatches (i opcode) [.word64] operation) = true := by decide +kernel
+    !scalarOpMatches none (i opcode) [.word64] operation) = true := by decide +kernel
 
 /-- The ECMA-335 III constructor of each division, overflow-checked, wrapping arithmetic and
     integer conversion opcode with two stack operands. -/
@@ -131,7 +134,7 @@ private def tableMismatches (kind : ScalarKind) : List (Nat × Instruction) :=
   let stacks := binaryTable.map (fun _ => [kind, kind]) ++ unaryTable.map fun _ => [kind]
   (table.zip stacks).zipIdx.flatMap fun (((opcode, _), stack), row) =>
     table.zipIdx.filterMap fun ((_, candidate), column) =>
-      if scalarOpMatches (i opcode) stack candidate == (row == column) then none
+      if scalarOpMatches none (i opcode) stack candidate == (row == column) then none
       else some (opcode, candidate)
 /-- Each opcode accepts exactly its own constructor among all 43, at both word widths, so every
     constructor has its opcode and rejects every sibling. -/
@@ -139,19 +142,28 @@ private theorem scalarTableExact :
     tableMismatches .word64 = [] ∧ tableMismatches .word32 = [] := by decide +kernel
 #print axioms scalarTableExact
 
-example : scalarOpMatches (i 21) [] (.ldc_i4 (BitVec.ofInt 32 (-1))) = true := by decide
-example : scalarOpMatches (i 30) [] (.ldc_i4 8) = true := by decide
-example : scalarOpMatches (i 31 (.integer (-128))) [] (.ldc_i4 (BitVec.ofInt 32 (-128))) = true := by decide
-example : scalarOpMatches (i 31 (.integer 128)) [] (.ldc_i4 128) = false := by decide
-example : scalarOpMatches (i 32 (.integer (-2147483648))) [] (.ldc_i4 2147483648) = true := by decide
-example : scalarOpMatches (i 32 (.integer 2147483648)) [] (.ldc_i4 2147483648) = false := by decide
-example : scalarOpMatches (i 33 (.integer (-9223372036854775808))) [] (.ldc_i8 9223372036854775808) = true := by decide
-example : scalarOpMatches (i 33 (.integer 9223372036854775807)) [] (.ldc_i8 9223372036854775807) = true := by decide
-example : scalarOpMatches (i 33 (.integer (-1))) [] (.ldc_i8 18446744073709551615) = true := by decide
-example : scalarOpMatches (i 33 (.integer (-9223372036854775808))) [] (.ldc_i8 0) = false := by decide
-example : scalarOpMatches (i 33 (.integer (-9223372036854775808))) [] (.ldc_i8 9223372036854775809) = false := by decide
-example : scalarOpMatches (i 33 (.integer 9223372036854775808)) [] (.ldc_i8 9223372036854775808) = false := by decide
-example : scalarOpMatches (i 33) [] (.ldc_i8 0) = false := by decide
+example : scalarOpMatches none (i 21) [] (.ldc_i4 (BitVec.ofInt 32 (-1))) = true := by decide
+example : scalarOpMatches none (i 30) [] (.ldc_i4 8) = true := by decide
+example : scalarOpMatches none (i 31 (.integer (-128))) []
+    (.ldc_i4 (BitVec.ofInt 32 (-128))) = true := by decide
+example : scalarOpMatches none (i 31 (.integer 128)) [] (.ldc_i4 128) = false := by decide
+example : scalarOpMatches none (i 32 (.integer (-2147483648))) []
+    (.ldc_i4 2147483648) = true := by decide
+example : scalarOpMatches none (i 32 (.integer 2147483648)) []
+    (.ldc_i4 2147483648) = false := by decide
+example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) []
+    (.ldc_i8 9223372036854775808) = true := by decide
+example : scalarOpMatches none (i 33 (.integer 9223372036854775807)) []
+    (.ldc_i8 9223372036854775807) = true := by decide
+example : scalarOpMatches none (i 33 (.integer (-1))) []
+    (.ldc_i8 18446744073709551615) = true := by decide
+example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) []
+    (.ldc_i8 0) = false := by decide
+example : scalarOpMatches none (i 33 (.integer (-9223372036854775808))) []
+    (.ldc_i8 9223372036854775809) = false := by decide
+example : scalarOpMatches none (i 33 (.integer 9223372036854775808)) []
+    (.ldc_i8 9223372036854775808) = false := by decide
+example : scalarOpMatches none (i 33) [] (.ldc_i8 0) = false := by decide
 
 private def addRaw := raw [i 2, i 3, i 88, i 42]
 private def addFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 1]
@@ -1061,42 +1073,49 @@ example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
     (fieldCode (.ldfld { next with index := 0 })) := by decide
 example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
     (fieldCode (.ldfld { next with owner := account })) := by decide
-example : scalarEmissionMatches #[] none (i 123 nextField) [.object] (.ldfld value) = false := by
+example : scalarEmissionMatches #[] none none (i 123 nextField) [.object]
+    (.ldfld value) = false := by
   decide
-example : scalarEmissionMatches #[] none (i 123 valueField) [.object] (.ldfld next) = false := by
+example : scalarEmissionMatches #[] none none (i 123 valueField) [.object]
+    (.ldfld next) = false := by
   decide
 -- A store to a class-typed field takes an object or null as its value; a load is no store.
-example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
+example : scalarEmissionMatches #[] none none (i 125 nextField) [.object, .object]
     (.stfld next) = true := by decide
-example : scalarEmissionMatches #[] none (i 125 nextField) [.nullObject, .object]
+example : scalarEmissionMatches #[] none none (i 125 nextField) [.nullObject, .object]
     (.stfld next) = true := by decide
-example : scalarEmissionMatches #[] none (i 125 nextField) [.word64, .object]
+example : scalarEmissionMatches #[] none none (i 125 nextField) [.word64, .object]
     (.stfld next) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
+example : scalarEmissionMatches #[] none none (i 125 nextField) [.object, .object]
     (.ldfld next) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
+example : scalarEmissionMatches #[] none none (i 125 valueField) [.word64, .object]
     (.stfld next) = false := by decide
 -- The receiver of a field access is an object or null.
-example : scalarEmissionMatches #[] none (i 123 valueField) [.word64] (.ldfld value) = false := by
+example : scalarEmissionMatches #[] none none (i 123 valueField) [.word64]
+    (.ldfld value) = false := by
   decide
-example : scalarEmissionMatches #[] none (i 123 valueField) [.reference] (.ldfld value) = false :=
+example : scalarEmissionMatches #[] none none (i 123 valueField) [.reference]
+    (.ldfld value) = false :=
   by decide
-example : scalarEmissionMatches #[] none (i 124 valueField) [.word64] (.ldflda value) = false := by
+example : scalarEmissionMatches #[] none none (i 124 valueField) [.word64]
+    (.ldflda value) = false := by
   decide
-example : scalarEmissionMatches #[] none (i 124 valueField) [.reference] (.ldflda value) = false :=
+example : scalarEmissionMatches #[] none none (i 124 valueField) [.reference]
+    (.ldflda value) = false :=
   by decide
-example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
+example : scalarEmissionMatches #[] none none (i 125 valueField) [.word64, .object]
     (.stfld value) = true := by decide
-example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .word64]
+example : scalarEmissionMatches #[] none none (i 125 valueField) [.word64, .word64]
     (.stfld value) = false := by decide
 -- `ldflda` of a class field is decoded; its step faults, since an object field has no address.
-example : scalarEmissionMatches #[] none (i 124 valueField) [.object] (.ldflda value) = true := by
+example : scalarEmissionMatches #[] none none (i 124 valueField) [.object]
+    (.ldflda value) = true := by
   decide
 /-- Whether a `stfld` of a `Scope.Node` field at raw index 0 holding `type` admits a stored
     `value` of that kind. -/
 private def storesInto (type : TypeExpr) (value : ScalarKind) : Bool :=
-  scalarEmissionMatches #[] none (i 125 (.field node 0 type name!"value" false)) [value, .object]
-    (.stfld { owner := node, index := 0, type, name := name!"value" })
+  scalarEmissionMatches #[] none none (i 125 (.field node 0 type name!"value" false))
+    [value, .object] (.stfld { owner := node, index := 0, type, name := name!"value" })
 /-- The runtime primitive type `name`. -/
 private def primitive (name : String) : TypeExpr := .atom runtime name
 -- A stored integer has the field's stack kind, `int32` up to 4 bytes and `int64` or native for
@@ -1123,42 +1142,43 @@ private def items : FieldRef :=
 private def samplesField : RawOperand := .field node 1 (.array word) name!"samples" false
 private def samples : FieldRef :=
   { owner := node, index := 1, type := .array word, name := name!"samples" }
-example : scalarEmissionMatches #[] none (i 123 itemsField) [.object] (.ldfld items) = true := by
+example : scalarEmissionMatches #[] none none (i 123 itemsField) [.object]
+    (.ldfld items) = true := by
   decide
-example : scalarEmissionMatches #[] none (i 125 itemsField) [.nullObject, .object]
+example : scalarEmissionMatches #[] none none (i 125 itemsField) [.nullObject, .object]
     (.stfld items) = true := by decide
-example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+example : scalarEmissionMatches #[] none none (i 123 samplesField) [.object]
     (.ldfld items) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 samplesField)
+example : scalarEmissionMatches #[] none none (i 125 samplesField)
     [.object, .object] (.stfld samples) = false := by decide
 -- A value-array field names its element type; it stores only an array of that element.
-example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+example : scalarEmissionMatches #[] none none (i 123 samplesField) [.object]
     (.ldfld samples) = true := by decide
-example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+example : scalarEmissionMatches #[] none none (i 123 samplesField) [.object]
     (.ldfld { samples with type := .array (.atom runtime "System.Int64") }) = false := by
   decide
-example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
+example : scalarEmissionMatches #[] none none (i 123 samplesField) [.object]
     (.ldfld { samples with index := 0 }) = false := by decide
-example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
+example : scalarEmissionMatches #[] none none (i 123 itemsField) [.object]
     (.ldfld samples) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .unsigned64, .object]
+example : scalarEmissionMatches #[] none none (i 125 samplesField) [.array .unsigned64, .object]
     (.stfld samples) = true := by decide
-example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .signed32, .object]
+example : scalarEmissionMatches #[] none none (i 125 samplesField) [.array .signed32, .object]
     (.stfld samples) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 samplesField) [.object, .object]
+example : scalarEmissionMatches #[] none none (i 125 samplesField) [.object, .object]
     (.stfld samples) = false := by decide
 
 -- `ldstr` loads exactly its own text, nothing else loads a literal, and a folded throw's
 -- message emits nothing.
-example : scalarEmissionMatches #[] none (i 114 (.text "a")) []
+example : scalarEmissionMatches #[] none none (i 114 (.text "a")) []
     (.memory (.stringLiteral "a")) = true := by decide
-example : scalarEmissionMatches #[] none (i 114 (.text "a")) []
+example : scalarEmissionMatches #[] none none (i 114 (.text "a")) []
     (.memory (.stringLiteral "b")) = false := by decide
-example : scalarEmissionMatches #[] none (i 0) [] (.memory (.stringLiteral "a")) = false := by
+example : scalarEmissionMatches #[] none none (i 0) [] (.memory (.stringLiteral "a")) = false := by
   decide
-example : scalarEmissionMatches #[] (some .interior) (i 114 (.text "a")) []
+example : scalarEmissionMatches #[] (some .interior) none (i 114 (.text "a")) []
     (.memory (.stringLiteral "a")) = false := by decide
-example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := by decide
+example : scalarEmissionMatches #[] none none (i 114 (.text "a")) [] .nop = false := by decide
 
 -- A guard emission comes only from its exact call: the type argument fixes width and signedness,
 -- and another owner, overload or type argument emits nothing.
@@ -1299,7 +1319,7 @@ private theorem branch_encoding_cases :
 #print axioms branch_encoding_cases
 
 example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
-    scalarEmissionMatches #[] none (i 88) [.word64, .word64] .add = true :=
+    scalarEmissionMatches #[] none none (i 88) [.word64, .word64] .add = true :=
   valid.instruction_checked (pc := 2) rfl rfl rfl rfl rfl
 
 #print axioms external_call_validated

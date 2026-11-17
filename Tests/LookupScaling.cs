@@ -988,7 +988,7 @@ void DecodeCosts()
             namespace ValueDecodingCost
             {{ValueBody(instructions)}}
             #kernel_cost "decode {{instructions}}"
-              (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
+              (raw.zip code).all (fun pair => valueEncodingMatches none pair.1 pair.2) = true
             end ValueDecodingCost
             """ + "\n");
         var package = FixturePackage();
@@ -1010,11 +1010,8 @@ void DecodeCosts()
     Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
 }
 
-// The heartbeats `decide +kernel` adds to deciding that no branch of a body of 500, 2000 and 8000 instructions enters
-// the instruction after a prefix, and to deciding the readonly rule at every pc of the same body. The prefix rule tests
-// bits of a mask of branch destinations built in one pass, so four times the instructions may cost at most
-// `AllowedLocalGrowth` more per instruction, and as it replaces the readonly rule's entry checks it may cost no more
-// than that rule, whose `Std.TreeSet` of destinations costs the logarithm of the body at each lookup.
+// Deciding prefix entry over the destination mask must stay within `AllowedLocalGrowth` per instruction from 500 to
+// 8000 instructions and cost no more than the readonly rule over the same body.
 void PrefixEntryCosts()
 {
     const int SegmentLength = 4;
@@ -2365,6 +2362,7 @@ if (incrementRatio > AllowedChainIncrementRatio)
 
 // The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
 // or without a `readonly.` prefix, and branch to the next segment, less those of stating the same certificate.
+// Each instruction carries the byte offset extraction writes, so no two sites present the kernel the same check.
 long ArrayAddressCost(bool prefixed, int sites)
 {
     var flag = prefixed ? "true" : "false";
@@ -2376,15 +2374,20 @@ long ArrayAddressCost(bool prefixed, int sites)
         open CIL CIL.Extraction
         def intType : TypeExpr := .atom runtimeScope "System.Int32"
         def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+        def bytes (prefixed : Bool) : Nat := if prefixed then 12 else 10
         def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
-          [⟨0, 2, .none⟩, ⟨0, 3, .none⟩] ++ (if prefixed then [⟨0, 65054, .none⟩] else []) ++
-            [⟨0, 143, .type intType⟩, ⟨0, 38, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+          let base := index * bytes prefixed
+          let address := base + bytes prefixed - 8
+          [⟨base, 2, .none⟩, ⟨base + 1, 3, .none⟩] ++
+            (if prefixed then [⟨base + 2, 65054, .none⟩] else []) ++
+            [⟨address, 143, .type intType⟩, ⟨address + 5, 38, .none⟩,
+              ⟨address + 6, 43, .target ((index + 1) * width prefixed)⟩]
         def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
           token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
           callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
           parameters := [.array intType, intType], locals := [], initLocals := true, maxStack := 2,
           genericParameters := [],
-          code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+          code := (List.range sites).flatMap (segment prefixed) ++ [⟨sites * bytes prefixed, 42, .none⟩] }
         def featureSegment (prefixed : Bool) : FeatureCertificate :=
           [some ⟨[], []⟩, some ⟨[none], []⟩] ++
             (if prefixed then [some ⟨[none, none], []⟩] else []) ++
@@ -2431,7 +2434,7 @@ IndirectAccessCosts();
 
 // The kernel heartbeats of the feature and scalar certificates of a body whose segments each copy a block, with or
 // without an `unaligned.` prefix, and branch to the next segment, less those of stating them. The indirect access
-// rule reads the instructions next to each site from an index built once per body.
+// rule reads the instructions next to each site from an index built once per body. Instructions carry byte offsets.
 void IndirectAccessCosts()
 {
     var accessDirectory = At("artifacts/LookupScaling/IndirectAccess");
@@ -2447,16 +2450,20 @@ void IndirectAccessCosts()
             open CIL CIL.Extraction
             def word : TypeExpr := .atom runtimeScope "System.UInt64"
             def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+            def bytes (prefixed : Bool) : Nat := if prefixed then 10 else 7
             def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
-              [⟨0, 2, .none⟩, ⟨0, 2, .none⟩, ⟨0, 2, .none⟩] ++
-                (if prefixed then [⟨0, 65042, .integer 1⟩] else []) ++
-                [⟨0, 65047, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+              let base := index * bytes prefixed
+              let copy := base + bytes prefixed - 4
+              [⟨base, 2, .none⟩, ⟨base + 1, 2, .none⟩, ⟨base + 2, 2, .none⟩] ++
+                (if prefixed then [⟨base + 3, 65042, .integer 1⟩] else []) ++
+                [⟨copy, 65047, .none⟩, ⟨copy + 2, 43, .target ((index + 1) * width prefixed)⟩]
             def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
               token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
               callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
               parameters := [word], locals := [], initLocals := true, maxStack := 3,
               genericParameters := [],
-              code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+              code := (List.range sites).flatMap (segment prefixed) ++
+                [⟨sites * bytes prefixed, 42, .none⟩] }
             def featureSegment (prefixed : Bool) : FeatureCertificate :=
               [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[none, none], []⟩] ++
                 (if prefixed then [some ⟨[none, none, none], []⟩] else []) ++
@@ -2562,16 +2569,19 @@ Console.WriteLine(
 // it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
 // `ldloca`; native-int locals take a method address and are
 // consumed by `calli`, which makes each a pointer local. The check is the scalar certificate, or for pointer
-// locals also the closed argument storage.
+// locals also the closed argument storage. Instructions carry byte offsets.
 long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
 {
     var pointers = slots == LocalSlots.Pointer;
     var addressed = slots == LocalSlots.Addressed;
     var slotType = pointers ? "System.IntPtr" : "System.Int32";
     var kind = pointers ? ".methodPointer signature" : ".word32";
-    var push = pointers ? "⟨0, 65030, .call handler⟩" : "⟨0, 22, .none⟩";
-    var load = addressed ? "⟨0, 18, .local index⟩" : "⟨0, 17, .local index⟩";
-    var consume = pointers ? "⟨0, 41, .indirectCall .void [] false false 0⟩" : "⟨0, 38, .none⟩";
+    var push = pointers ? "65030, .call handler" : "22, .none";
+    var load = addressed ? "18, .local index" : "17, .local index";
+    var consume = pointers ? "41, .indirectCall .void [] false false 0" : "38, .none";
+    // ldftn and calli carry a four-byte token; ldc.i4.0 and pop are one byte, and the local forms two.
+    var pushBytes = pointers ? 6 : 1;
+    var consumeBytes = pointers ? 5 : 1;
     var loaded = addressed ? ".reference" : "kind";
     var pushed = pointers ? ".managed (.address ⟨⟨\"Scaling\", 2, []⟩, 0⟩ signature)" : ".ldc_i4 0";
     var emittedLoad = addressed ? ".ldloca index" : ".ldloc index";
@@ -2590,14 +2600,17 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
             target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩
         def kind : ScalarKind := {{kind}}
+        def bytes : Nat := {{pushBytes + 4 + consumeBytes}}
         def segment (index : Nat) : List RawInstruction :=
-          [{{push}}, ⟨0, 19, .local index⟩, {{load}}, {{consume}}]
+          let base := index * bytes
+          [⟨base, {{push}}⟩, ⟨base + {{pushBytes}}, 19, .local index⟩, ⟨base + {{pushBytes + 2}}, {{load}}⟩,
+            ⟨base + {{pushBytes + 4}}, {{consume}}⟩]
         def raw (slots : Nat) : RawMethod := {
           token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
           callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
           parameters := [], locals := List.replicate slots slotType, initLocals := true, maxStack := 1,
           genericParameters := [],
-          code := (List.range slots).flatMap segment ++ [⟨0, 42, .none⟩] }
+          code := (List.range slots).flatMap segment ++ [⟨slots * bytes, 42, .none⟩] }
         def features (slots : Nat) : FeatureCertificate :=
           (List.replicate slots [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[], []⟩, some ⟨[none], []⟩]).flatten ++
             [some ⟨[], []⟩]

@@ -2,7 +2,8 @@ import StrictBinding.Evidence
 import Tests.StrictBinding.Fixture
 import Tests.StrictBinding.Mutation
 
-/-! Method metadata pages compose over one image preparation and reject a false later page. -/
+/-! Method metadata pages compose over one image preparation, and the distinct Assembly blocks
+    reject a false block of a later method. -/
 
 namespace Tests.StrictBinding.Metadata
 
@@ -51,6 +52,11 @@ theorem composed_pages : ClaimsHold methodMetadataBound pinned claims :=
     (.succ second_page (.succ first_page .zero))
 #print axioms composed_pages
 
+/-- Each distinct Assembly block the two methods carry belongs to its selected image. -/
+theorem blocks : ClaimsHold assemblyBlockBound pinned (assemblyBlocks claims) := by
+  decide +kernel
+#print axioms blocks
+
 /-- Page results bind the metadata fields of evidence records to selected image bytes. -/
 theorem evidence_from_pages (left right : MethodEvidence)
     (leftMetadata : left.body.metadata = first) (rightMetadata : right.body.metadata = second) :
@@ -60,8 +66,11 @@ theorem evidence_from_pages (left right : MethodEvidence)
           Exists fun image => And (located images slice.assembly.identity = .ok image)
             (SliceMatches image slice)) := by
   apply sliceMatches_of_metadataRowsBound
-  simpa only [MetadataRowsBound, metadataClaims, claims, List.map_cons, List.map_nil,
-    leftMetadata, rightMetadata] using composed_pages
+  have carried : metadataClaims [left, right] = claims := by
+    simp only [metadataClaims, claims, List.map_cons, List.map_nil, leftMetadata, rightMetadata]
+  unfold MetadataRowsBound
+  rw [carried]
+  exact And.intro blocks composed_pages
 #print axioms evidence_from_pages
 
 /-- The second method falsely carries another version's row for its referenced assembly. -/
@@ -70,10 +79,16 @@ private def falseSecond : MethodMetadata :=
       assembly := { StrictFixture.assemblyBlock with
         assemblyRow := flipAt StrictFixture.assemblyBlock.assemblyRow 4 1 } }] }
 
-/-- A valid first page cannot make a changed Assembly row on the second page pass. -/
-theorem rejects_false_second_page :
-    failsWith (checkAll methodMetadataBound pinned (claimPage [first, falseSecond] 1 1))
+/-- The changed block keeps the fixture's identity yet stays a distinct block to check, since
+    blocks are compared whole. -/
+theorem keeps_blocks_of_one_identity : (assemblyBlocks [first, falseSecond]).length = 3 := by
+  decide +kernel
+#print axioms keeps_blocks_of_one_identity
+
+/-- A valid block of the first method cannot make a changed Assembly row of the second pass. -/
+theorem rejects_false_second_block :
+    failsWith (checkAll assemblyBlockBound pinned (assemblyBlocks [first, falseSecond]))
       (.rowMismatch assemblyToken) = true := by decide +kernel
-#print axioms rejects_false_second_page
+#print axioms rejects_false_second_block
 
 end Tests.StrictBinding.Metadata

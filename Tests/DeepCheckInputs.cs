@@ -19,9 +19,18 @@ try
     File.WriteAllBytes(Path.Combine(root, "second.dll"), original);
     var source = $"{digest.ToUpperInvariant()}  first image.dll\r\n{digest} *second.dll\n";
     var inputs = Read(source);
-    Require(inputs.Images.Count == 2 && inputs.Digest == Hash(Encoding.UTF8.GetBytes(source)), "File snapshot hash");
+    Require(inputs.Images.Count == 2 && inputs.Digest.ToString() == Hash(Encoding.UTF8.GetBytes(source)),
+        "File snapshot hash");
     var pins = inputs.MatchPins(Identity(digest, [digest, digest], "Unrelated, Version=1.0.0.0"));
-    Require(pins.Count == 3 && pins.All(pin => pin.Image.Digest == digest), "Digest matching ignores names");
+    Require(pins.Count == 3 && pins.All(pin => pin.Image.Digest.ToString() == digest),
+        "Digest matching ignores names");
+    var stated = Sha256Digest.Parse(digest.ToUpperInvariant(), "a test digest");
+    Require(stated == Sha256Digest.Parse(digest, "a test digest") && stated == Sha256Digest.Of(original) &&
+        stated.ToString() == digest && new HashSet<Sha256Digest> { stated, Sha256Digest.Of(original) }.Count == 1,
+        "A digest stated in either case is one 32-byte value with lowercase text");
+    var changed = digest[..^1] + (digest[^1] == '0' ? '1' : '0');
+    Require(Sha256Digest.Parse(changed, "a test digest") != stated, "One changed digit is another digest");
+    Reject(() => Sha256Digest.Parse(digest.AsSpan()[..^1], "a test digest"), "Invalid SHA-256 digest");
     Require(Read(source + $"{digest}  ./first image.dll\n").Images.Count == 2, "Identical duplicate paths");
     Reject(() => Read(source + $"{new string('0', 64)}  first image.dll\n"), "Conflicting SHA-256");
     Reject(() => inputs.MatchPins(Identity(new string('0', 64), [])), "No line");
@@ -31,7 +40,7 @@ try
     Reject(() => Read(source), "SHA-256 of");
     Require(inputs.Images.All(image => image.Bytes.SequenceEqual(original)), "Retained image snapshot");
     File.WriteAllText(file, "changed");
-    Require(inputs.Digest == Hash(Encoding.UTF8.GetBytes(source)), "Retained digest file hash");
+    Require(inputs.Digest.ToString() == Hash(Encoding.UTF8.GetBytes(source)), "Retained digest file hash");
     File.WriteAllBytes(file, [0xc3, 0x28]);
     Reject(() => DeepCheckInputs.Read(file), null);
     Reject(() => Read($"{digest}  missing.dll\n"), "Could not find file");
@@ -94,7 +103,7 @@ try
         }
         reads.Sort();
         var identity = Identity(hashes[0], hashes.Skip(1).ToArray());
-        Require(request.MatchPins(identity).Select(pin => pin.Image.Digest).SequenceEqual(hashes),
+        Require(request.MatchPins(identity).Select(pin => pin.Image.Digest.ToString()).SequenceEqual(hashes),
             "Distinct digests with the same display name match distinct images");
         for (var warm = 0; warm < 10; warm++) request.MatchPins(identity);
         List<double> measurements = [];

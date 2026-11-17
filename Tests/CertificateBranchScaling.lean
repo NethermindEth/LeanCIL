@@ -10,13 +10,15 @@ set_option maxHeartbeats 0
 namespace CertificateBranchScaling
 open CIL CIL.Extraction
 
-/-- A void method with distinct branch targets in reverse order. -/
+/-- A void method with distinct branch targets in reverse order, each two-byte `br.s` at its own
+    offset. -/
 def raw (count : Nat) : RawMethod := {
   token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
   genericParameters := [],
-  code := (List.range count).map (fun pc => ⟨pc, 43, .target (count - pc)⟩) ++ [⟨0, 42, .none⟩] }
+  code := (List.range count).map (fun pc => ⟨2 * pc, 43, .target (count - pc)⟩) ++
+    [⟨2 * count, 42, .none⟩] }
 
 /-- The feature certificate contains an empty stack at every site. -/
 def features (count : Nat) : FeatureCertificate :=

@@ -20,7 +20,7 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
 | `exportsprotected` | SDK-built protected static export, separately compiled derived caller and rehashed visibility mismatch rejection |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
-| `exportsresolution` | Same loaded files and changed loaded module |
+| `exportsresolution` | Same loaded files, changed loaded module and same-length caller artifact rewrite |
 | `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
 | `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
 | `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
@@ -46,7 +46,7 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 ### Case ledger
 
-- The base ledger has 49 cases: 22 core, 3 protected, 2 callback, 2 resolution and 20 full cases.
+- The base ledger has 50 cases: 22 core, 3 protected, 2 callback, 3 resolution and 20 full cases.
   Each partition rejects an omitted, repeated or unexpected completion.
 - The artifact-mode rejection runs after consumer requests that succeed, so it checks removal of
   a successful report that a request wrote.
@@ -56,11 +56,11 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   standalone and discovery partitions cannot enter it.
 - `exportsstatics`, `exportsfullstatics`, `exportstransitive`, `exportstransitiveoutcomes`,
   `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with
-  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 49
+  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 50
   base case IDs, and a standalone fixture cannot use an empty base completion ledger to claim
   coverage.
 - `exportsdiscovery` records one separate `discovery.fixture` completion after the child
-  succeeds; the child's behaviors are outside the 49 base cases. The partition builds the
+  succeeds; the child's behaviors are outside the 50 base cases. The partition builds the
   producer library and creates its proof packages and publication. The child builds, extracts
   and verifies its own caller and needs no baseline caller artifact or verified report. The
   partition runs no core caller verification, restrictions, callbacks or full cases.

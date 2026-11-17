@@ -46,12 +46,30 @@ def SliceMatches (image : PreparedImage) (slice : MetadataSlice) : Prop :=
     (And (RowsMatch image slice.rows slice.strings slice.blobs)
       (UserStringsMatch image slice.userStrings))
 
-/-- The Assembly block, rows and carried heaps checked against one prepared image.
-    Cost is the assembly and row checks plus the user-string entries and bytes compared. -/
-def sliceBound (image : PreparedImage) (slice : MetadataSlice) : Except AuditError Unit := do
-  assemblyBound image slice.assembly
+/-- The rows and carried heaps of a slice checked against one prepared image, without its
+    Assembly block. Cost is the row check plus the user-string entries and bytes compared. -/
+def sliceContentsBound (image : PreparedImage) (slice : MetadataSlice) :
+    Except AuditError Unit := do
   rowsBound image slice.rows slice.strings slice.blobs
   userStringsBound image slice.userStrings
+
+/-- The Assembly block, rows and carried heaps checked against one prepared image.
+    Cost is the assembly check plus the cost of `sliceContentsBound`. -/
+def sliceBound (image : PreparedImage) (slice : MetadataSlice) : Except AuditError Unit := do
+  assemblyBound image slice.assembly
+  sliceContentsBound image slice
+
+/-- A successful Assembly block check and contents check bind the whole slice to the image. -/
+theorem sliceMatches_of_bounds {image : PreparedImage} {slice : MetadataSlice}
+    (bounded : image.view.Bounded) (assembly : assemblyBound image slice.assembly = .ok ())
+    (contents : sliceContentsBound image slice = .ok ()) : SliceMatches image slice := by
+  cases except_bind_ok contents with
+  | intro value checks =>
+    exact And.intro (assemblyMatches_of_assemblyBound bounded assembly)
+      (And.intro (rowsMatch_of_rowsBound bounded checks.1)
+        (userStringsMatch_of_userStringsBound bounded checks.2))
+
+#print axioms sliceMatches_of_bounds
 
 /-- Success binds the assembly block, rows and all carried heaps to the prepared image. -/
 theorem sliceMatches_of_sliceBound {image : PreparedImage} {slice : MetadataSlice}
@@ -59,11 +77,8 @@ theorem sliceMatches_of_sliceBound {image : PreparedImage} {slice : MetadataSlic
     SliceMatches image slice := by
   cases except_bind_ok bound with
   | intro value results =>
-    cases except_bind_ok results.2 with
-    | intro value checks =>
-      exact And.intro (assemblyMatches_of_assemblyBound bounded results.1)
-        (And.intro (rowsMatch_of_rowsBound bounded checks.1)
-          (userStringsMatch_of_userStringsBound bounded checks.2))
+    cases value
+    exact sliceMatches_of_bounds bounded results.1 results.2
 
 #print axioms sliceMatches_of_sliceBound
 

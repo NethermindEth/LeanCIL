@@ -33,7 +33,8 @@ Expect(() => DeepCheckRun.Claim(inputs, holder), "already used");
 Expect(() => holder.Begin(identity), "one claimed request");
 var attempt = holder.Attempt!;
 Expect(() => attempt.RequireIdentity(identity with { Sha256 = new string('b', 64) }), "identity changed");
-Expect(() => attempt.RejectImage(new string('b', 64), "unknown"), "Unknown deep-check image");
+Expect(() => attempt.RejectImage(Sha256Digest.Parse(new string('b', 64), "a test digest"), "unknown"),
+    "Unknown deep-check image");
 Expect(() => attempt.RejectFact((BindingFact)100, "unknown"), "Unknown binding fact");
 Expect(() => attempt.RejectFact(BindingFact.BodyBytes, " "), "reason");
 var incomplete = attempt.Failure("kernel replay", "resource limit");
@@ -41,7 +42,7 @@ Require(incomplete.images.Length == 2 && incomplete.images.All(result =>
     result.status == FailureReports.BindingFailureStatus.NotCovered), "Duplicate digest identities are retained");
 Require(incomplete.facts.Select(fact => fact.id).SequenceEqual(Enum.GetValues<BindingFact>().Select(fact =>
     JsonSerializer.SerializeToElement(fact).GetString())), "Every fact uses its existing wire name in order");
-attempt.RejectImage(Sha(image), "digest theorem rejected");
+attempt.RejectImage(Sha256Digest.Parse(Sha(image), "the test image"), "digest theorem rejected");
 var rejected = attempt.Failure("theorem audit", "rejected");
 Require(rejected.images.All(result => result.status == FailureReports.BindingFailureStatus.Failed) &&
     rejected.facts.All(result => result.status == FailureReports.BindingFailureStatus.NotCovered),
@@ -112,7 +113,8 @@ Console.WriteLine("PASS joined request-set validation precedes named failure att
 var scales = new[] { 64, 256, 1024 }.Select(count =>
 {
     DeepCheckInputs.Pin[] pins = [.. Enumerable.Range(0, count).Select(index =>
-        new DeepCheckInputs.Pin("Identity" + index, new("", index.ToString("x64"), [])))];
+        new DeepCheckInputs.Pin("Identity" + index,
+            new("", Sha256Digest.Parse(index.ToString("x64"), "a test pin"), [])))];
     var scaled = new DeepCheckAttempt(inputs, identity.Sha256, pins);
     foreach (var pin in pins) scaled.RejectImage(pin.Image.Digest, "rejected");
     return (Count: count, Attempt: scaled);
