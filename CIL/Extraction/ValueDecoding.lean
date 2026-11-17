@@ -17,7 +17,9 @@ generic body decodes like its original with each type test and typed array instr
 instantiated type, each call and construction of the instantiated method, and each class field
 access at the same owner with its held type instantiated (`Instruction.ofRaw?_substitute_field`).
 `Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw opcode,
-exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
+exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`). Both take the raw
+instruction before the decoded one, where a prefix would stand, and `Instruction.ofRawCode`
+decodes code in one pass that carries it (`Instruction.ofRawCode_getElem?`).
 -/
 
 namespace CIL.Extraction
@@ -201,8 +203,11 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
     gives, when its opcode is `call`, and its construction when its opcode is `newobj`; any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
     operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can write one where
-    this admits nothing. -/
-def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
+    this admits nothing. `_previous` is the raw instruction before `raw`, `none` at the first pc,
+    where a prefix that `raw` takes would stand; no decoded instruction takes a prefix, so the
+    decoding does not depend on it. -/
+def Instruction.ofRaw? (_previous : Option RawInstruction) (raw : RawInstruction) :
+    Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
   match raw.operand with
   | .type type => Instruction.ofType? raw.opcode type
@@ -312,8 +317,8 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | _, _ => none
 
 /-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
-theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : Instruction}
-    (decoded : Instruction.ofRaw? raw = some instruction) :
+theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {raw : RawInstruction}
+    {instruction : Instruction} (decoded : Instruction.ofRaw? previous raw = some instruction) :
     Instruction.valueOpcode raw.opcode = true := by
   cases opcodeValue : Instruction.valueOpcode raw.opcode
   · unfold Instruction.ofRaw? at decoded
@@ -337,24 +342,25 @@ theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : 
 
 /-- No raw instruction decodes to a hole: a hole is what `Instruction.ofRaw` writes where
     `ofRaw?` admits nothing. -/
-theorem Instruction.ofRaw?_ne_unadmitted (raw : RawInstruction) (opcode : Nat) :
-    Instruction.ofRaw? raw ≠ some (.unadmitted opcode) := fun decoded =>
+theorem Instruction.ofRaw?_ne_unadmitted (previous : Option RawInstruction) (raw : RawInstruction)
+    (opcode : Nat) : Instruction.ofRaw? previous raw ≠ some (.unadmitted opcode) := fun decoded =>
   Bool.false_ne_true (Option.filter_eq_some_iff.mp decoded).2
 
 #print axioms Instruction.ofRaw?_ne_unadmitted
 
-/-- The instruction a raw instruction denotes: its value decoding where `ofRaw?` admits one,
-    and otherwise a hole carrying the raw opcode, which faults when stepped. -/
-def Instruction.ofRaw (raw : RawInstruction) : Instruction :=
-  (Instruction.ofRaw? raw).getD (.unadmitted raw.opcode)
+/-- The instruction a raw instruction after `previous` denotes: its value decoding where `ofRaw?`
+    admits one, and otherwise a hole carrying the raw opcode, which faults when stepped. -/
+def Instruction.ofRaw (previous : Option RawInstruction) (raw : RawInstruction) : Instruction :=
+  (Instruction.ofRaw? previous raw).getD (.unadmitted raw.opcode)
 
 /-- Decoding gives a hole exactly when `ofRaw?` admits nothing, and the hole carries the raw
     opcode; an instruction `ofRaw?` admits is never a hole. -/
-theorem Instruction.ofRaw_eq_unadmitted_iff (raw : RawInstruction) (opcode : Nat) :
-    Instruction.ofRaw raw = .unadmitted opcode ↔
-      Instruction.ofRaw? raw = none ∧ opcode = raw.opcode := by
+theorem Instruction.ofRaw_eq_unadmitted_iff (previous : Option RawInstruction)
+    (raw : RawInstruction) (opcode : Nat) :
+    Instruction.ofRaw previous raw = .unadmitted opcode ↔
+      Instruction.ofRaw? previous raw = none ∧ opcode = raw.opcode := by
   unfold Instruction.ofRaw
-  cases decoded : Instruction.ofRaw? raw with
+  cases decoded : Instruction.ofRaw? previous raw with
   | none =>
     simp only [Option.getD_none, Instruction.unadmitted.injEq, true_and]
     exact eq_comm
@@ -362,23 +368,23 @@ theorem Instruction.ofRaw_eq_unadmitted_iff (raw : RawInstruction) (opcode : Nat
     simp only [Option.getD_some, reduceCtorEq, false_and, iff_false]
     intro hole
     subst hole
-    exact Instruction.ofRaw?_ne_unadmitted raw opcode decoded
+    exact Instruction.ofRaw?_ne_unadmitted previous raw opcode decoded
 
 #print axioms Instruction.ofRaw_eq_unadmitted_iff
 
 /-- An instruction `ofRaw?` admits decodes to itself. -/
-theorem Instruction.ofRaw_of_ofRaw? {raw : RawInstruction} {instruction : Instruction}
-    (decoded : Instruction.ofRaw? raw = some instruction) :
-    Instruction.ofRaw raw = instruction := by
+theorem Instruction.ofRaw_of_ofRaw? {previous : Option RawInstruction} {raw : RawInstruction}
+    {instruction : Instruction} (decoded : Instruction.ofRaw? previous raw = some instruction) :
+    Instruction.ofRaw previous raw = instruction := by
   rw [Instruction.ofRaw, decoded, Option.getD_some]
 
 #print axioms Instruction.ofRaw_of_ofRaw?
 
 /-- An opcode outside the value opcodes decodes to a hole carrying it. -/
-theorem Instruction.ofRaw_of_not_valueOpcode {raw : RawInstruction}
-    (outside : Instruction.valueOpcode raw.opcode = false) :
-    Instruction.ofRaw raw = .unadmitted raw.opcode := by
-  cases decoded : Instruction.ofRaw? raw with
+theorem Instruction.ofRaw_of_not_valueOpcode {previous : Option RawInstruction}
+    {raw : RawInstruction} (outside : Instruction.valueOpcode raw.opcode = false) :
+    Instruction.ofRaw previous raw = .unadmitted raw.opcode := by
+  cases decoded : Instruction.ofRaw? previous raw with
   | none => rw [Instruction.ofRaw, decoded, Option.getD_none]
   | some _ =>
     rw [Instruction.valueOpcode_of_ofRaw? decoded] at outside
@@ -386,10 +392,43 @@ theorem Instruction.ofRaw_of_not_valueOpcode {raw : RawInstruction}
 
 #print axioms Instruction.ofRaw_of_not_valueOpcode
 
-/-- The instruction at `pc` of raw code as `Instruction.ofRaw` decodes it; `none` past the end
-    of the code. -/
+/-- The raw instruction before `pc` that `rawAt` gives; `none` at the first pc, which has no
+    instruction before it. -/
+def rawBefore (rawAt : Nat → Option RawInstruction) (pc : Nat) : Option RawInstruction :=
+  if pc == 0 then none else rawAt (pc - 1)
+
+/-- The instruction at `pc` of raw code as `Instruction.ofRaw` decodes it after the instruction
+    before it; `none` past the end of the code. -/
 def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat) : Option Instruction :=
-  code[pc]?.map Instruction.ofRaw
+  code[pc]?.map (Instruction.ofRaw (rawBefore (code[·]?) pc))
+
+/-- Raw code as `Instruction.ofRaw` decodes each instruction after the one before it, `previous`
+    before the first; one pass over the code. -/
+def Instruction.ofRawCode : Option RawInstruction → List RawInstruction → List Instruction
+  | _, [] => []
+  | previous, raw :: rest =>
+    Instruction.ofRaw previous raw :: Instruction.ofRawCode (some raw) rest
+
+/-- Decoding code in one pass gives at each pc what `Instruction.ofRawAt` decodes there. -/
+theorem Instruction.ofRawCode_getElem? (code : List RawInstruction) (pc : Nat) :
+    (Instruction.ofRawCode none code)[pc]? = Instruction.ofRawAt code pc := by
+  suffices walked : ∀ (code : List RawInstruction) (previous : Option RawInstruction) (pc : Nat),
+      (Instruction.ofRawCode previous code)[pc]? =
+        code[pc]?.map (Instruction.ofRaw (if pc == 0 then previous else code[pc - 1]?)) by
+    rw [walked]
+    rfl
+  intro code
+  induction code with
+  | nil => intro previous pc; rfl
+  | cons raw rest walkedRest =>
+    intro previous pc
+    cases pc with
+    | zero => rfl
+    | succ pc =>
+      rw [Instruction.ofRawCode, List.getElem?_cons_succ, walkedRest, List.getElem?_cons_succ]
+      cases pc <;> rfl
+
+#print axioms Instruction.ofRawCode_getElem?
 
 /-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
     value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
@@ -514,17 +553,17 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
     a call or construction names, or through a field operand: an operand that is none of these
     decodes as before, and an instruction on a type operand or a call site decodes exactly when the
     original does, to the instruction of the same opcode on the substituted type or call site. -/
-theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOperand}
-    {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
+theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : RawInstruction}
+    {operand : RawOperand} {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
     (unnamed : FieldRef.ofOperand? raw.operand = none) :
-    Instruction.ofRaw? { raw with operand } =
+    Instruction.ofRaw? previous { raw with operand } =
       match raw.operand, operand with
       | .type _, .type type =>
-        (Instruction.ofRaw? raw).bind fun _ => Instruction.ofType? raw.opcode type
+        (Instruction.ofRaw? previous raw).bind fun _ => Instruction.ofType? raw.opcode type
       | .call _, .call site =>
-        (Instruction.ofRaw? raw).bind fun _ => Instruction.ofCallSite? raw.opcode site
-      | _, _ => Instruction.ofRaw? raw := by
+        (Instruction.ofRaw? previous raw).bind fun _ => Instruction.ofCallSite? raw.opcode site
+      | _, _ => Instruction.ofRaw? previous raw := by
   obtain ⟨sameKind, sameType, sameCall, sameField, unchanged⟩ :=
     substituteOperand_mentionsType substituted
   obtain ⟨offset, opcode, original⟩ := raw
@@ -565,14 +604,15 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
 /-- Instantiation keeps a class field operand's owner, an object type that no argument
     replaces, and substitutes its held type; the instantiated instruction decodes to the class
     field instruction of the same opcode over the substituted reference. -/
-theorem Instruction.ofRaw?_substitute_field {raw : RawInstruction} {operand : RawOperand}
+theorem Instruction.ofRaw?_substitute_field {previous : Option RawInstruction}
+    {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     {scope name : String} {index : Nat} {held : TypeExpr} {fieldName : MetadataName}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
     (named : raw.operand = .field (.object scope name) index held fieldName false) :
     ∃ closed, substituteStorageType layouts arguments held = some closed ∧
       operand = .field (.object scope name) index closed fieldName false ∧
-      Instruction.ofRaw? { raw with operand } =
+      Instruction.ofRaw? previous { raw with operand } =
         Instruction.classField? raw.opcode
           { owner := .object scope name, index, type := closed, name := fieldName } := by
   obtain ⟨offset, opcode, original⟩ := raw
@@ -599,16 +639,16 @@ end CIL
 
 namespace CIL.Extraction
 
-/-- Whether `emitted` is exactly what `raw` decodes to. -/
+/-- Whether `emitted` is exactly what `raw` decodes to with no prefix before it. -/
 def valueEncodingMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
-  match Instruction.ofRaw? raw with
+  match Instruction.ofRaw? none raw with
   | some decoded => decoded.sameValue emitted
   | none => false
 
 /-- A matching value encoding is exactly the decoded instruction. -/
 theorem valueEncodingMatches_sound {raw : RawInstruction} {emitted : Instruction}
     (matched : valueEncodingMatches raw emitted = true) :
-    Instruction.ofRaw? raw = some emitted := by
+    Instruction.ofRaw? none raw = some emitted := by
   unfold valueEncodingMatches at matched
   split at matched
   · next decoded decodes => rw [decodes, Instruction.sameValue_eq matched]
