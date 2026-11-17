@@ -398,6 +398,7 @@ void CheckDeepResultReuse()
         Console.WriteLine("PASS the theorem audit rejects an authenticated restored module that states another fact");
 
         SameLengthChange(cachedBodies);
+        var changedBodies = File.ReadAllBytes(cachedBodies);
         var previousReplay = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY");
         (Report Report, string[] AfterDeepChecks, string Output, int DeepHits, int ProofHits) rebuilt;
         try
@@ -410,7 +411,8 @@ void CheckDeepResultReuse()
         Require(rebuilt.DeepHits == 0 && rebuilt.AfterDeepChecks.Contains("kernel replay") &&
             rebuilt.AfterDeepChecks.Contains("theorem audit") && SameFacts(rebuilt.Report),
             "A same-length change to a cached deep module with its timestamp restored was restored");
-        Require(DeepRun(image, selector, proof, output, inputs).DeepHits == 1,
+        Require(verification.AuthenticatedSuccess(Path.GetFileName(entry)) is not null &&
+            !File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies),
             "A rebuilt deep result did not replace the changed entry");
         Console.WriteLine("PASS a changed cached deep module runs a complete cold deep audit and is replaced");
 

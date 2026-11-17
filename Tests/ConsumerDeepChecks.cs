@@ -233,6 +233,8 @@ try
     var forged = Path.Combine(fixture.Root, "ConsumerWrongBodies.olean");
     var forgeToken = Guid.NewGuid().ToString("N");
     File.AppendAllText(proof, "\n-- " + forgeToken + "\n");
+    var beforeLateFailure = Receipts();
+    // A changed generated source misses, so this cold request fails at its last check after build and replay.
     ExpectFailure(() => Verify(verification, stage: stage =>
     {
         if (stage is not ("deep-check sources" or "theorem audit")) return;
@@ -249,6 +251,10 @@ try
             File.Copy(Path.ChangeExtension(generated, ".olean"), forged);
     }), "Theorem statement mismatch");
     if (!File.Exists(forged)) throw new InvalidOperationException("The forged body module was not built.");
+    RequireNoPublication(beforeLateFailure);
+    if (verification.deepCacheHits != deepHits + 1 || DeepResults().Single() != deepEntry)
+        throw new InvalidOperationException("A cold consumer deep request that failed late published a result.");
+    Console.WriteLine("PASS a cold consumer deep request rejected by its theorem audit publishes nothing");
     File.Copy(forged, cachedBodies, true);
     var deepManifest = JsonSerializer.SerializeToUtf8Bytes(CacheFiles(Path.Combine(deepEntry, "files")));
     File.WriteAllBytes(Path.Combine(deepEntry, "receipt.json"), deepManifest);
@@ -262,20 +268,12 @@ try
     Console.WriteLine("PASS the consumer theorem audit rejects an authenticated restored module stating another fact");
     // A same-length change with its timestamp restored must fail the receipt's content hashes.
     SameLengthChange(cachedBodies);
-    var beforeLateFailure = Receipts();
-    ExpectFailure(() => Verify(verification, stage: stage =>
-    {
-        if (stage == "theorem audit") throw new InvalidDataException("Late consumer deep failure");
-    }), "Late consumer deep failure");
-    RequireNoPublication(beforeLateFailure);
-    if (verification.deepCacheHits != deepHits + 2)
-        throw new InvalidOperationException("A changed cached consumer deep module was restored.");
+    var changedBodies = File.ReadAllBytes(cachedBodies);
     CheckDeep(Verify(verification));
-    CheckDeep(Verify(verification));
-    if (verification.deepCacheHits != deepHits + 3)
+    if (verification.deepCacheHits != deepHits + 2 || verification.AuthenticatedSuccess(Path.GetFileName(deepEntry))
+            is null || File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies))
         throw new InvalidOperationException("A rebuilt consumer deep result did not replace the changed entry.");
-    Console.WriteLine("PASS a changed cached consumer deep module runs cold, a late failure publishes nothing, " +
-        "and the rebuilt result is reused");
+    Console.WriteLine("PASS a changed cached consumer deep module runs cold and its rebuilt result replaces the entry");
     if (args is ["--positive"]) return;
     var combinedRun = new DeepCheckRun(inputs);
     var combinedOriginalProof = File.ReadAllBytes(proof);
