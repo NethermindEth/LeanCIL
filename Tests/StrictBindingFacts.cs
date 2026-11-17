@@ -501,7 +501,8 @@ static partial class StrictBindingFacts
 
     /// <summary>
     /// The page and image definitions of a fixture image of at most one page: its 64-byte chunks listed, each split
-    /// into its high and low 32 bytes, so that each line of the checked-in module stays within the line width.
+    /// into its high and low 32 bytes, so that each line of the checked-in module stays within the line width. The
+    /// page is the same list of the same type that the audit reads through the same reader as a generated page.
     /// </summary>
     static string FixturePage(byte[] file)
     {

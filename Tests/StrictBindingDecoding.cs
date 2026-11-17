@@ -94,7 +94,7 @@ partial class Program
         var file = new byte[210 * 4096 - 17];
         new Random(11).NextBytes(file);
         var path = Path.Combine(root, "LargeDigest.lean");
-        File.WriteAllText(path, "import StrictBinding.Sha256\nimport CIL.Extraction.ByteLiterals\n\n" +
+        File.WriteAllText(path, "import StrictBinding.Sha256\nimport CIL.Extraction.FixedDigits\n\n" +
             "namespace Large\n\n" + BindingImage.Definitions(file) + "\n" +
             BindingImage.PagedDigestTheorem(file, skipCompileCheck: true) + "end Large\n");
         var run = Execute(["lake", "env", "lean", path], cwd: package);
@@ -285,7 +285,7 @@ partial class Program
     /// <summary>A program that prints the description of an image the audit decodes, one fact per line.</summary>
     static string DescribeModule(byte[] file) => $$"""
         import StrictBinding.Dump
-        import CIL.Extraction.ByteLiterals
+        import CIL.Extraction.FixedDigits
 
         namespace StrictDescribe
 

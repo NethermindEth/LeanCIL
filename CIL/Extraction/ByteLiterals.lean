@@ -1,4 +1,5 @@
 import CIL.Identity
+import CIL.Extraction.FixedDigits
 
 /-!
 # Byte literals
@@ -11,38 +12,13 @@ quadratic in its digits, and the kernel keys its caches by a hash that reads onl
 of a numeral, so separate numerals with equal last bytes would collide there. A numeral costs the
 elaborator a few allocations, where a list literal costs a numeral and a cons per byte. The kernel
 recovers the list by splitting the code in halves down to words of at most eight digits, so a
-decode takes a linear number of steps. `fixedDigitsWithin` splits a code into digits of any width,
-and `fixedDigitsWithin_eq_fixedDigits` ties it to the digit lists of `CIL.Identity`.
+decode takes a linear number of steps. `fixedDigitsWithin` splits a code into digits of any width;
+the splitter is defined in [FixedDigits](FixedDigits.lean), and this module proves what it reads:
+`fixedDigitsWithin_eq_fixedDigits` ties it to the digit lists of `CIL.Identity`.
 -/
 
 namespace CIL.Extraction
 open CIL
-
-/-- The most digits the decoder reads from one word without splitting it further. -/
-def wordDigitCount : Nat := 8
-
-/-- The low `count` digits of `width` bits of `word`, most significant first, followed by
-    `tail`. -/
-def wordDigits (width : Nat) : Nat → Nat → List Nat → List Nat
-  | 0, _, tail => tail
-  | count + 1, word, tail =>
-    wordDigits width count (Nat.shiftRight word width)
-      (Nat.mod word (Nat.shiftLeft 1 width) :: tail)
-
-/-- The low `count` digits of `width` bits of `code`, most significant first, followed by
-    `tail`; each of the `depth` levels halves a code longer than a word. -/
-def fixedDigitsWithin (width : Nat) : Nat → Nat → Nat → List Nat → List Nat
-  | 0, count, code, tail => wordDigits width count code tail
-  | depth + 1, count, code, tail =>
-    bif Nat.ble count wordDigitCount then wordDigits width count code tail
-    else
-      let low := Nat.div count 2
-      let lowBits := Nat.mul width low
-      fixedDigitsWithin width depth (Nat.sub count low) (Nat.shiftRight code lowBits)
-        (fixedDigitsWithin width depth low (Nat.mod code (Nat.shiftLeft 1 lowBits)) tail)
-
-/-- The `count` bytes that `code` holds big-endian, as the extractor writes a byte list. -/
-def fixedBytes (count code : Nat) : List Nat := fixedDigitsWithin 8 count count code []
 
 /-- Reading the digits of a word back appends the word to the code read. -/
 theorem wordDigits_spec (width : Nat) : ∀ (count word : Nat) (tail : List Nat) (start : Nat),

@@ -463,4 +463,28 @@ run_cmd do
       previousBody := body
       previousSize := size
 
+/-! ## The splitter's import closure -/
+
+open Lean in
+/-- The modules `root` imports, directly or through other modules, in an environment that has
+    imported it. -/
+partial def importClosure (env : Environment) (root : Name) : NameSet :=
+  let rec visit (seen : NameSet) (module : Name) : NameSet :=
+    match env.getModuleIdx? module with
+    | none => seen
+    | some index =>
+      (env.header.moduleData[index.toNat]!.imports.map (·.module)).foldl
+        (fun seen imported => if seen.contains imported then seen
+          else visit (seen.insert imported) imported) seen
+  visit {} root
+
+open Lean Elab Command in
+-- An image module imports only the splitter; a `Lean` import there costs every such module.
+run_cmd do
+  unless ((← getEnv).getModuleIdx? `CIL.Extraction.FixedDigits).isSome do
+    throwError "CIL.Extraction.FixedDigits is not imported here"
+  let closure := importClosure (← getEnv) `CIL.Extraction.FixedDigits
+  if let some leanModule := closure.toList.find? (`Lean).isPrefixOf then
+    throwError "CIL.Extraction.FixedDigits imports {leanModule}, a module of Lean"
+
 end Tests.BodyLiteral

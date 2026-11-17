@@ -455,7 +455,7 @@ partial class Program
         (string Name, byte[] Bytes)[] pages = [("RandomEnds", distinct), ("EqualEnds", equal)];
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, "EqualTailPage.lean");
-        File.WriteAllText(path, "import StrictBinding.Sha256\nimport CIL.Extraction.ByteLiterals\n\n" + report +
+        File.WriteAllText(path, "import StrictBinding.Sha256\nimport CIL.Extraction.FixedDigits\n\n" + report +
             string.Concat(pages.Select(page =>
                 $"namespace {page.Name}\n\n{BindingImage.Definitions(page.Bytes)}\n" +
                 BindingImage.PagedDigestTheorem(page.Bytes, skipCompileCheck: false) +
@@ -729,7 +729,7 @@ partial class Program
     /// <summary>
     /// A library with `count` classes that each own a field and extend `System.Object`, the odd ones nested in the
     /// first, then an enum, a struct, an interface, a class nested in the first class, a `System.Enum` that extends
-    /// `System.ValueType`, a second class nested in the first, a class that extends `List<int>` and a class that
+    /// `System.ValueType`, a second class nested in the first, a class that extends `List&lt;int&gt;` and a class that
     /// extends the first class. Each of the last eight owns one field, and the last owns the final two rows of the
     /// Field table.
     /// </summary>
@@ -918,7 +918,7 @@ partial class Program
             .Select(index => $"(.succ bodiesOf{index} "));
         return $$"""
             import StrictBinding.Bind
-            import CIL.Extraction.ByteLiterals
+            import CIL.Extraction.FixedDigits
 
             namespace Scaling
 

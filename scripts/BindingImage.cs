@@ -37,7 +37,7 @@ static class BindingImage
 
     /// <summary>
     /// The page and image definitions of a file, in the namespace the caller has opened; the module must import
-    /// `CIL.Extraction.ByteLiterals`. Each page splits one code of its zero-padded bytes into its chunks, so chunks
+    /// `CIL.Extraction.FixedDigits`. Each page splits one code of its zero-padded bytes into its chunks, so chunks
     /// that end in the same bytes are not separate numerals that collide in the kernel's caches.
     /// </summary>
     internal static string Definitions(byte[] file)
