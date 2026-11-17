@@ -229,7 +229,13 @@ instructions and construct and pop a class instance per cycle, each `newobj` rea
 one supplied allocation fact and entering a constructor that returns. The object-constructor
 bodies have 16, 64 and 256 instructions and call the `System.Object` constructor on their object
 argument per cycle, each call reading that its pc has no link and the runtime model its pc's
-`cil_runtime_models` fact states. The elements bodies have 16,
+`cil_runtime_models` fact states. The intrinsic-calls bodies have 14, 62 and 254 instructions and
+call `Math.Max` on their two `int64` arguments and pop the result per cycle, each call reading the
+same two facts and then stepping as its scalar intrinsic. The instance bodies have 16, 64 and 256
+instructions and make one receiver-checked instance call on their object argument per cycle into a
+method that returns at once. The virtual bodies make 16 virtual calls on it through a dispatch
+table of 1, 16 or 64 classes, the receiver's class last, each call reading one supplied runtime
+type fact and looking the class up in the table. The elements bodies have 16,
 64 and 256 instructions and per cycle load and pop an `int32` element of their array argument and
 store their index argument into it, each access reading one supplied element fact. The
 typed-elements bodies have 16, 58 and 254 instructions and per cycle do the same through `ldelem`

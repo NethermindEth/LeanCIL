@@ -1,5 +1,6 @@
 import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
+import CIL.Extraction.IntegerMath
 
 /-!
 # Runtime model resolution
@@ -15,7 +16,7 @@ emissions its model stands for in `runtimeCatalog`.
 namespace CIL.Extraction
 
 /-- The runtime methods with a model. -/
-def modelEntries : List ModelEntry := [objectConstructorEntry]
+def modelEntries : List ModelEntry := objectConstructorEntry :: integerMathEntries
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -33,7 +34,8 @@ def callModelled (body : Method) (method : MethodRef) : Bool :=
 /-- Every entry of the runtime table is one of `modelEntries`. -/
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
-  simp [runtimeModels, SearchTree.toList, modelEntries]
+  simp [runtimeModels, SearchTree.toList, modelEntries, integerMathEntries, mathOperations,
+    mathIntegers, IntegerMath.signedOnly]
 
 #print axioms runtimeModels_entries
 
@@ -48,17 +50,6 @@ theorem runtimeModel_yields {property : RuntimeModel → Prop}
 
 #print axioms runtimeModel_yields
 
-/-- No model of the runtime table consults the profile, so `Instruction.ProfileAgreement` says
-    nothing of calls; an entry whose model does must extend it. -/
-theorem runtimeModel_readsProfile {environment : LayoutEnvironment} {opcode : CallOpcode}
-    {method : MethodRef} {model : RuntimeModel}
-    (found : runtimeModel environment opcode method = some model) :
-    model.readsProfile = false :=
-  runtimeModel_yields (property := fun model => model.readsProfile = false)
-    (by simp [modelEntries, objectConstructorEntry, RuntimeModel.readsProfile]) found
-
-#print axioms runtimeModel_readsProfile
-
 /-- The runtime models with the emissions they account for: none, since a call of a modelled
     method keeps its call. -/
 def runtimeCatalog : ModelCatalog where
@@ -68,10 +59,10 @@ def runtimeCatalog : ModelCatalog where
 /-- Each live call site of a method keeps its call or emits the runtime model its method
     reference stands for. -/
 def RuntimeModelsAgree (closed : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
-  ModelsAgree runtimeCatalog method.environment closed reachable method.code
+  ModelsAgree runtimeCatalog method.environment method.profile closed reachable method.code
 
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (RuntimeModelsAgree closed reachable method) :=
-  inferInstanceAs (Decidable (ModelsAgree _ _ _ _ _))
+  inferInstanceAs (Decidable (ModelsAgree _ _ _ _ _ _))
 
 end CIL.Extraction

@@ -152,7 +152,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // method that returns at once, through the link its instruction implies. The virtual body makes
 // `VirtualSites` virtual calls on it through a named dispatch table whose size is the row's size, with
 // the receiver's class last, so each call reads one runtime type fact and looks its class up in the table.
-// The intrinsic calls body computes `Math.Max` of its two int64 arguments and pops it per cycle.
+// The intrinsic calls body computes `Math.Max` of its two int64 arguments and pops it per cycle, so each
+// call reads that its pc has no link and the runtime model fact of its pc, a scalar intrinsic.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
@@ -176,8 +177,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
         [".ldc_i4 0", ".ret"]),
     "instance" => ([], [".ldarg 0", ".callInstance 1 1"], [".ldc_i4 0", ".ret"]),
     "virtual" => ([], [".ldarg 0", ".callVirtual dispatch 1"], [".ldc_i4 0", ".ret"]),
-    "intrinsiccalls" => ([], [".ldarg 0", ".ldarg 1", ".intrinsic (.scalar (.math .max 64 true)) 2", ".pop"],
-        [".ldarg 0", ".ret"]),
+    "intrinsiccalls" => ([], [".ldarg 0", ".ldarg 1", ".call maxMethod {}", ".pop"], [".ldarg 0", ".ret"]),
     "elements" => ([], [".ldarg 0", ".ldarg 1", ".ldelem .i4", ".pop", ".ldarg 0", ".ldarg 1",
         ".ldarg 1", ".stelem .i4"], [".ldc_i4 0", ".ret"]),
     "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
@@ -286,6 +286,12 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         @[cil_code] def dispatch : List (CIL.Extraction.TypeExpr × Nat) :=
           [{{string.Join(", ", Enumerable.Range(0, requested).Select(entry => $"({VirtualClass(entry)}, 1)"))}}]
         """ + "\n" : "";
+    var maxDefinition = workload == "intrinsiccalls" ? $$"""
+        /-- `Math.Max(long, long)`, which the runtime table models as a scalar intrinsic. -/
+        def maxMethod : CIL.Extraction.MethodRef :=
+          { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"Max", hasThis := false,
+            genericArity := 0, returnType := {{Int64Type}}, parameters := [{{Int64Type}}, {{Int64Type}}] }
+        """ + "\n" : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -298,6 +304,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "objects" or "objectconstructors" or "instance" or "virtual" =>
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         "elements" => "import CIL.Safety.ArrayContents\n",
+        "intrinsiccalls" => "import CIL.Safety.ResolutionFacts\n",
         "typedelements" or "typedsteps" => "import CIL.Safety.ArrayContents\nimport CIL.Safety.ResolutionFacts\n",
         _ => ""
     };
@@ -361,7 +368,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        {{fieldDefinitions}}{{staticField}}{{callDefinitions}}{{dispatchDefinition}}{{bodyDefinition}}
+        {{fieldDefinitions}}{{staticField}}{{callDefinitions}}{{dispatchDefinition}}{{maxDefinition}}{{bodyDefinition}}
         """ + "\n" + (workload is "calls" or "tablecalls" ? """
         /-- The callee every call of the calls body enters; it returns its argument. -/
         def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
@@ -374,7 +381,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         /-- The instance method every call of the instance and virtual bodies enters; it returns at once. -/
         def instanceMethod : CIL.Method := { locals := [], returnsValue := false, code := [.ret] }
         cil_instruction_equations instanceMethod
-        """ + "\n" : "") + (workload == "objectconstructors" ? """
+        """ + "\n" : "") + (workload is "objectconstructors" or "intrinsiccalls" ? """
         cil_runtime_models body
         """ + "\n" : "") + (workload is "arguments" or "homes" or "typedelements" or "typedsteps" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl

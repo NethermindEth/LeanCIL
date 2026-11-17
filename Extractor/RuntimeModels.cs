@@ -135,6 +135,22 @@ internal static class RuntimeModels
         reference.DeclaringType is { FullName: "System.Object" } owner &&
         ExactScope(owner, PlatformAssemblies.SystemRuntime);
 
+    /// <summary>
+    /// The operation a call of a method the Lean model table models runs as, or null. Such a call keeps its call:
+    /// the <c>System.Object</c> constructor pops its receiver, and each integer helper of <c>System.Math</c> or of
+    /// the integer type that declares it runs as its scalar intrinsic.
+    /// </summary>
+    internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
+    {
+        if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
+        if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
+            reference.CallingConvention != MethodCallingConvention.Default ||
+            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
+            !IntegerMathCalls.TryGetValue(reference.FullName, out var model)) return null;
+        ValidateSignature(reference, profile.Architecture);
+        return model;
+    }
+
     internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (ReferenceQueries.Constant(reference, profile.Architecture) is int constant)
@@ -204,6 +220,25 @@ internal static class RuntimeModels
     ];
 
     private static readonly Dictionary<string, Operation> ScalarOperations = BuildScalarOperations();
+    private static readonly Dictionary<string, ScalarIntrinsic> IntegerMathCalls = BuildIntegerMathCalls();
+
+    // Each helper has one model under System.Math and under the integer type that declares it; an unsigned type
+    // has no Abs or Sign.
+    private static Dictionary<string, ScalarIntrinsic> BuildIntegerMathCalls()
+    {
+        var calls = new Dictionary<string, ScalarIntrinsic>(StringComparer.Ordinal);
+        foreach (var (type, width, signed) in MathIntegers)
+        foreach (var (name, function, arity) in MathOperations)
+        {
+            if (!signed && arity == 1) continue;
+            var result = name == "Sign" ? "System.Int32" : type;
+            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
+            var model = Scalar(function, width, signed, arity);
+            calls.Add($"{result} System.Math::{name}({parameters})", model);
+            calls.Add($"{result} {type}::{name}({parameters})", model);
+        }
+        return calls;
+    }
 
     // Match exact non-generic static signatures, including the defining assembly.
     private static Operation? Scalar(MethodReference reference)
@@ -244,16 +279,6 @@ internal static class RuntimeModels
         foreach (var (type, width, signed) in MathIntegers)
             operations.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
                 Scalar(ScalarFunction.DivRem, width, signed, 2));
-        foreach (var (type, width, signed) in MathIntegers)
-        foreach (var (name, function, arity) in MathOperations)
-        {
-            if (!signed && arity == 1) continue;
-            var result = name == "Sign" ? "System.Int32" : type;
-            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-            var model = Scalar(function, width, signed, arity);
-            operations.Add($"{result} System.Math::{name}({parameters})", model);
-            operations.Add($"{result} {type}::{name}({parameters})", model);
-        }
         foreach (var (type, width) in RotatableWords)
         {
             foreach (var (name, function) in Rotations)

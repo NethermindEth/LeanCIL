@@ -295,6 +295,21 @@ theorem step_call_model {method : Extraction.MethodRef} {prefixes : CallPrefixes
 
 #print axioms step_call_model
 
+/-- A call without a link whose method's model is an intrinsic steps as that intrinsic, on a
+    stack whose operands have no unspecified bits. -/
+theorem step_call_intrinsic {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {operation : CIL.Intrinsic} {argc : Nat} (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.intrinsic operation argc))
+    (direct : prefixes.tail = false)
+    (specified : unspecifiedOperands method.argumentCount stack = false) :
+    step body (.call method prefixes) pc args frame stack memory =
+      step body (.intrinsic operation argc) pc args frame stack memory := by
+  rw [step_call_model (link := link) (found := found) (direct := direct), specified]
+  rfl
+
+#print axioms step_call_intrinsic
+
 /-- A call whose pc links `callee` directly enters it, as `callStep` says; the model it would
     run without a link is never read. Stepping selects it once the link fact is known. -/
 theorem step_call_direct {method : Extraction.MethodRef} {prefixes : CallPrefixes}

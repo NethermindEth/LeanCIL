@@ -819,7 +819,8 @@ internal static class MetadataValidation
                             !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
                                 "The receiver must be a local address followed by at most three simple argument pushes.");
-                        if (instruction.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(reference)) return;
+                        if (instruction.OpCode.Code == Code.Call &&
+                            RuntimeModels.CallModel(reference, profile) is not null) return;
                         if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);

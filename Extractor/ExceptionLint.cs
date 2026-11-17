@@ -70,7 +70,8 @@ internal static class ExceptionLint
                     methodIndex, instructions, profile, nativeOperands, parameterHomes);
                 foreach (ExceptionType named in RuntimeExceptions(operation))
                     sites.Add(new(method.FullName, instruction.Offset, named,
-                        "interpreter operation: " + operation.ToLean()));
+                        "interpreter operation: " + (operation is ModelCall call
+                            ? "call modelled as " + call.Model.ToLean() : operation.ToLean())));
             }
         }
         ExceptionType[] modeled = sites.Select(site => site.Exception).Distinct()
@@ -111,8 +112,11 @@ internal static class ExceptionLint
 
     static IEnumerable<ExceptionType> RuntimeExceptions(Operation operation)
     {
-
-        if (operation is Divide divide)
+        if (operation is ModelCall call)
+        {
+            foreach (var exception in RuntimeExceptions(call.Model)) yield return exception;
+        }
+        else if (operation is Divide divide)
         {
             yield return ExceptionType.DivideByZero;
             if (divide.Signed) yield return ExceptionType.Overflow;
