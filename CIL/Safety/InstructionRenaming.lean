@@ -208,6 +208,29 @@ theorem Memory.Renamed.typedElementInstructionResult {mapping : AllocationRenami
   | unsupported reason => cases store <;> exact .error _
 #print axioms Memory.Renamed.typedElementInstructionResult
 
+/-- An element address is the address of the mapped element and relates the memories. -/
+theorem Memory.Renamed.elementAddressInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (shape : CIL.ElementShape)
+    (readOnly : Bool) (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (elementAddressInstruction shape readOnly stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (elementAddressInstruction shape readOnly stack source)
+      (elementAddressInstruction shape readOnly (stack.map mapping.value) target) := by
+  cases shape with
+  | value element =>
+    simp only [elementAddressInstruction] at observable ⊢
+    unfold arrayAddress at observable ⊢
+    split at observable
+    element_result
+  | method signature => exact .error _
+  | reference element => exact .error _
+  | unsupported reason => exact .error _
+#print axioms Memory.Renamed.elementAddressInstructionResult
+
 set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
 theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}

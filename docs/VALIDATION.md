@@ -237,6 +237,11 @@ and `stelem` with an `int32` type operand, then copy one struct element of a sec
 itself. The stepper evaluates each typed access from supplied element facts and takes the element
 shape from the body's layouts; the generated shape facts are in scope and leave the cost
 unchanged. The typed-steps bodies are the same bodies with one supplied step fact per access.
+The addresses bodies have 11, 56 and 254 instructions and per cycle form and pop a writable and a
+`readonly.` address of an `int32` element of their array argument, each `ldelema` stepped by the
+fact `step_ldelema_of_element` derives from one supplied element fact and the generated shape
+fact of the body. The address-steps bodies are the same bodies with one supplied step fact per
+address.
 The suite uses the proof-cost measuring frontend, with three sequential proof compilations and a
 header-only baseline per scalar, memory, reference, table, accumulate, locals, calls and table-calls
 body up to 256 instructions, and one compilation for every other body.

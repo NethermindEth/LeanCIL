@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.Prefixes
 
 /-!
 # Value opcodes decoded from raw instructions
@@ -117,24 +117,36 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (88 <= opcode && opcode <= 106) || opcode == 109 || opcode == 110 || opcode == 115 ||
     opcode == 116 ||
     opcode == 117 || (123 <= opcode && opcode <= 125) || (130 <= opcode && opcode <= 139) ||
-    opcode == 141 || opcode == 142 || (144 <= opcode && opcode <= 151) ||
+    opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
-    opcode == 224 || (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
+    opcode == 224 || (65025 <= opcode && opcode <= 65029) ||
+    (65033 <= opcode && opcode <= 65039) || opcode == 65054
 
-/-- The instruction `opcode` denotes on the type operand `type`: the class type test `castclass`
-    (116) or `isinst` (117), or the array instruction `newarr` (141), `ldelem` (163) or
-    `stelem` (164) of that element type. -/
-def Instruction.ofType? (opcode : Nat) (type : TypeExpr) : Option Instruction :=
+/-- `ldelema` (143) of the element type `type` after `previous`: a read-only address after
+    `readonly.`, which it takes, and nothing after any other prefix. -/
+def Instruction.ldelemaAfter? (previous : Option RawInstruction) (type : TypeExpr) :
+    Option Instruction :=
+  if previous.any fun before => before.opcode == 65054 then some (.ldelema type true)
+  else if previous.any fun before => isPrefixOpcode before.opcode then none
+  else some (.ldelema type false)
+
+/-- The instruction `opcode` denotes on the type operand `type` after `previous`: the class
+    type test `castclass` (116) or `isinst` (117), or the array instruction `newarr` (141),
+    `ldelem` (163), `stelem` (164) or `ldelema` (143) of that element type. -/
+def Instruction.ofType? (previous : Option RawInstruction) (opcode : Nat) (type : TypeExpr) :
+    Option Instruction :=
   if opcode == 116 then some (.castclass type) else if opcode == 117 then some (.isinst type)
   else if opcode == 141 then some (.newarr type) else if opcode == 163 then some (.ldelem_any type)
-  else if opcode == 164 then some (.stelem_any type) else none
+  else if opcode == 164 then some (.stelem_any type)
+  else if opcode == 143 then Instruction.ldelemaAfter? previous type else none
 
-/-- Only `castclass` (116), `isinst` (117), `newarr` (141), `ldelem` (163) and `stelem` (164)
-    denote an instruction on a type operand. -/
-theorem Instruction.ofType?_opcode {opcode : Nat} {type : TypeExpr} {instruction : Instruction}
-    (named : Instruction.ofType? opcode type = some instruction) :
-    opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 := by
+/-- Only `castclass` (116), `isinst` (117), `newarr` (141), `ldelem` (163), `stelem` (164)
+    and `ldelema` (143) denote an instruction on a type operand. -/
+theorem Instruction.ofType?_opcode {previous : Option RawInstruction} {opcode : Nat}
+    {type : TypeExpr} {instruction : Instruction}
+    (named : Instruction.ofType? previous opcode type = some instruction) :
+    opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 ∨ opcode = 143 := by
   unfold Instruction.ofType? at named
   revert named
   cases castclass : opcode == 116
@@ -142,9 +154,11 @@ theorem Instruction.ofType?_opcode {opcode : Nat} {type : TypeExpr} {instruction
     · cases allocation : opcode == 141
       · cases load : opcode == 163
         · cases store : opcode == 164
-          · intro named
-            first | cases named | simp at named
-          · exact fun _ => .inr (.inr (.inr (.inr (beq_iff_eq.mp store))))
+          · cases address : opcode == 143
+            · intro named
+              first | cases named | simp at named
+            · exact fun _ => .inr (.inr (.inr (.inr (.inr (beq_iff_eq.mp address)))))
+          · exact fun _ => .inr (.inr (.inr (.inr (.inl (beq_iff_eq.mp store)))))
         · exact fun _ => .inr (.inr (.inr (.inl (beq_iff_eq.mp load))))
       · exact fun _ => .inr (.inr (.inl (beq_iff_eq.mp allocation)))
     · exact fun _ => .inr (.inl (beq_iff_eq.mp isinst))
@@ -203,14 +217,20 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
     gives, when its opcode is `call`, and its construction when its opcode is `newobj`; any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
     operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can write one where
-    this admits nothing. `_previous` is the raw instruction before `raw`, `none` at the first pc,
-    where a prefix that `raw` takes would stand; no decoded instruction takes a prefix, so the
-    decoding does not depend on it. -/
-def Instruction.ofRaw? (_previous : Option RawInstruction) (raw : RawInstruction) :
+    this admits nothing.
+
+    `previous` is the raw instruction before `raw`, `none` at the first pc. An instruction
+    after a prefix it does not take does not decode. `ldelema` takes `readonly.` and records
+    it, so after `readonly.` only `ldelema` decodes, and `ldelema` after any other prefix does
+    not. `readonly.` decodes to `nop`, and not after any prefix. The integer `ldind` and `stind`
+    forms take `unaligned.` and decode as without it, since the model accesses memory at
+    alignment 1; decoding reads no other prefix yet. -/
+def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction) :
     Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
+  if (previous.any fun before => before.opcode == 65054) && raw.opcode != 143 then none else
   match raw.operand with
-  | .type type => Instruction.ofType? raw.opcode type
+  | .type type => Instruction.ofType? previous raw.opcode type
   | .field (.object _ _) _ _ _ false =>
     (FieldRef.ofOperand? raw.operand).bind (Instruction.classField? raw.opcode)
   | .call site => Instruction.ofCallSite? raw.opcode site
@@ -314,6 +334,9 @@ def Instruction.ofRaw? (_previous : Option RawInstruction) (raw : RawInstruction
   | 65028, .none => some .clt | 65029, .none => some .clt_un
   -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
   | 65039, .none => some .localloc
+  -- The prefix its consumer records.
+  | 65054, .none => if previous.any fun before => isPrefixOpcode before.opcode then none
+    else some .nop
   | _, _ => none
 
 /-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
@@ -321,21 +344,21 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
     {instruction : Instruction} (decoded : Instruction.ofRaw? previous raw = some instruction) :
     Instruction.valueOpcode raw.opcode = true := by
   cases opcodeValue : Instruction.valueOpcode raw.opcode
-  · unfold Instruction.ofRaw? at decoded
-    split at decoded
-    · rcases Instruction.ofType?_opcode (Option.filter_eq_some_iff.mp decoded).1
-        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
-        rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp
-        (Option.filter_eq_some_iff.mp decoded).1
-      rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
-        rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-    · rcases Instruction.ofCallSite?_opcode (Option.filter_eq_some_iff.mp decoded).1
-        with opcodeIs | opcodeIs <;>
-        rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-    · rw [opcodeValue, Bool.not_false, Bool.or_true,
-        ite_eq_left_of_eq_true _ _ (eq_true rfl)] at decoded
-      cases decoded
+  · have found := (Option.filter_eq_some_iff.mp decoded).1
+    split at found
+    · cases found
+    · split at found
+      · rcases Instruction.ofType?_opcode found
+          with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+          rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
+      · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+        rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+          rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
+      · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs <;>
+          rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
+      · rw [opcodeValue, Bool.not_false, Bool.or_true,
+          ite_eq_left_of_eq_true _ _ (eq_true rfl)] at found
+        cases found
   · rfl
 
 #print axioms Instruction.valueOpcode_of_ofRaw?
@@ -347,6 +370,70 @@ theorem Instruction.ofRaw?_ne_unadmitted (previous : Option RawInstruction) (raw
   Bool.false_ne_true (Option.filter_eq_some_iff.mp decoded).2
 
 #print axioms Instruction.ofRaw?_ne_unadmitted
+
+/-- `readonly.` decodes only without an operand, and to `nop`. -/
+theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : RawInstruction}
+    {decoded : Instruction} (readOnly : raw.opcode = 65054)
+    (decodes : Instruction.ofRaw? previous raw = some decoded) :
+    raw.operand = .none ∧ decoded = .nop := by
+  obtain ⟨offset, opcode, operand⟩ := raw
+  dsimp only at readOnly
+  subst readOnly
+  have found := (Option.filter_eq_some_iff.mp decodes).1
+  split at found
+  · cases found
+  · split at found
+    · rcases Instruction.ofType?_opcode found
+        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;> cases opcodeIs
+    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
+    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs <;> cases opcodeIs
+    · cases operand
+      case none =>
+        have prefixNop : (if (previous.any fun before => isPrefixOpcode before.opcode) = true
+            then none else some Instruction.nop) = some decoded := found
+        split at prefixNop
+        · cases prefixNop
+        · cases prefixNop
+          exact ⟨rfl, rfl⟩
+      all_goals cases found
+
+#print axioms Instruction.ofRaw?_readOnly
+
+/-- `ldelema` decodes to an element address that is read-only exactly when `previous` is
+    `readonly.`. -/
+theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : RawInstruction}
+    {decoded : Instruction} (address : raw.opcode = 143)
+    (decodes : Instruction.ofRaw? previous raw = some decoded) :
+    ∃ type, decoded = .ldelema type (previous.any fun before => before.opcode == 65054) := by
+  obtain ⟨offset, opcode, operand⟩ := raw
+  dsimp only at address
+  subst address
+  have found := (Option.filter_eq_some_iff.mp decodes).1
+  split at found
+  · cases found
+  · split at found
+    · rename_i type _
+      have after : Instruction.ldelemaAfter? previous type = some decoded := found
+      unfold Instruction.ldelemaAfter? at after
+      refine ⟨type, ?_⟩
+      split at after
+      · rename_i prefixed
+        cases after
+        simp [prefixed]
+      · rename_i unprefixed
+        split at after
+        · cases after
+        · cases after
+          simp [unprefixed]
+    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
+    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs <;> cases opcodeIs
+    · cases operand <;> cases found
+
+#print axioms Instruction.ofRaw?_ldelema
 
 /-- The instruction a raw instruction after `previous` denotes: its value decoding where `ofRaw?`
     admits one, and otherwise a hole carrying the raw opcode, which faults when stepped. -/
@@ -525,6 +612,9 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
     match emitted with | .ldelem_any actual => expected == actual | _ => false
   | .stelem_any expected =>
     match emitted with | .stelem_any actual => expected == actual | _ => false
+  | .ldelema expected readOnly => match emitted with
+    | .ldelema actual actualReadOnly => expected == actual && readOnly == actualReadOnly
+    | _ => false
   -- Class field instructions compare the field they name.
   | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
   | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
@@ -560,7 +650,8 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
     Instruction.ofRaw? previous { raw with operand } =
       match raw.operand, operand with
       | .type _, .type type =>
-        (Instruction.ofRaw? previous raw).bind fun _ => Instruction.ofType? raw.opcode type
+        (Instruction.ofRaw? previous raw).bind fun _ =>
+          Instruction.ofType? previous raw.opcode type
       | .call _, .call site =>
         (Instruction.ofRaw? previous raw).bind fun _ => Instruction.ofCallSite? raw.opcode site
       | _, _ => Instruction.ofRaw? previous raw := by
@@ -572,21 +663,27 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
   case type before =>
     cases operand
     case type type =>
-      show Option.filter _ (Instruction.ofType? opcode type) =
-        (Option.filter _ (Instruction.ofType? opcode before)).bind fun _ =>
-          Instruction.ofType? opcode type
-      unfold Instruction.ofType?
-      cases opcode == 116 <;> cases opcode == 117 <;> cases opcode == 141 <;>
-        cases opcode == 163 <;> cases opcode == 164 <;> rfl
+      show Option.filter _ (if _ then none else Instruction.ofType? previous opcode type) =
+        (Option.filter _ (if _ then none else Instruction.ofType? previous opcode before)).bind
+          fun _ => Instruction.ofType? previous opcode type
+      split
+      · rfl
+      · unfold Instruction.ofType? Instruction.ldelemaAfter?
+        cases opcode == 116 <;> cases opcode == 117 <;> cases opcode == 141 <;>
+          cases opcode == 163 <;> cases opcode == 164 <;> cases opcode == 143 <;>
+          cases previous.any (fun before => before.opcode == 65054) <;>
+          cases previous.any (fun before => isPrefixOpcode before.opcode) <;> rfl
     all_goals exact absurd sameType Bool.false_ne_true
   case call before =>
     cases operand
     case call site =>
-      show Option.filter _ (Instruction.ofCallSite? opcode site) =
-        (Option.filter _ (Instruction.ofCallSite? opcode before)).bind fun _ =>
-          Instruction.ofCallSite? opcode site
-      unfold Instruction.ofCallSite?
-      cases opcode == 40 <;> cases opcode == 115 <;> rfl
+      show Option.filter _ (if _ then none else Instruction.ofCallSite? opcode site) =
+        (Option.filter _ (if _ then none else Instruction.ofCallSite? opcode before)).bind
+          fun _ => Instruction.ofCallSite? opcode site
+      split
+      · rfl
+      · unfold Instruction.ofCallSite?
+        cases opcode == 40 <;> cases opcode == 115 <;> rfl
     all_goals exact absurd sameCall Bool.false_ne_true
   -- Any other original either is unchanged or, like its substitute, is refused by the guard.
   all_goals first
@@ -602,14 +699,16 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
 #print axioms Instruction.ofRaw?_substitute
 
 /-- Instantiation keeps a class field operand's owner, an object type that no argument
-    replaces, and substitutes its held type; the instantiated instruction decodes to the class
-    field instruction of the same opcode over the substituted reference. -/
+    replaces, and substitutes its held type; the instantiated instruction, which no `readonly.`
+    precedes, decodes to the class field instruction of the same opcode over the substituted
+    reference. -/
 theorem Instruction.ofRaw?_substitute_field {previous : Option RawInstruction}
     {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     {scope name : String} {index : Nat} {held : TypeExpr} {fieldName : MetadataName}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
-    (named : raw.operand = .field (.object scope name) index held fieldName false) :
+    (named : raw.operand = .field (.object scope name) index held fieldName false)
+    (untaken : (previous.any fun before => before.opcode == 65054) = false) :
     ∃ closed, substituteStorageType layouts arguments held = some closed ∧
       operand = .field (.object scope name) index closed fieldName false ∧
       Instruction.ofRaw? previous { raw with operand } =
@@ -625,7 +724,8 @@ theorem Instruction.ofRaw?_substitute_field {previous : Option RawInstruction}
     Option.some.injEq] at closedOwner
   subst closedOwner
   refine ⟨closed, holdsClosed, rfl, ?_⟩
-  show Option.filter _ (Instruction.classField? opcode _) = _
+  show Option.filter _ (if _ then none else Instruction.classField? opcode _) = _
+  simp only [untaken, Bool.false_and, Bool.false_eq_true, ite_false]
   unfold Instruction.classField?
   split
   · rfl

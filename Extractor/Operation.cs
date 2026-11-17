@@ -569,6 +569,18 @@ internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, s
             "A typed element access is rendered before its element type is attached")})";
 }
 
+/// <summary>
+/// An <c>ldelema</c> of the element type <paramref name="Element"/>, the raw operand's type expression, whose inline
+/// storage is <paramref name="Storage"/>; <paramref name="ReadOnly"/> records a <c>readonly.</c> prefix.
+/// </summary>
+internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, string? Element = null) : Operation
+{
+    // Translation does not see the layout table the term indexes, so the emitter attaches it.
+    internal override string Render(Func<int, string> calleeName) =>
+        $".ldelema ({Element ?? throw new InvalidOperationException(
+            "An element address is rendered before its element type is attached")}) {(ReadOnly ? "true" : "false")}";
+}
+
 /// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
 internal sealed record ReferenceElementAccess(bool Store) : Operation
 {

@@ -556,6 +556,19 @@ theorem step_relabel_stelem_any (element : Extraction.TypeExpr) :
 
 #print axioms step_relabel_stelem_any
 
+/-- An element address reads its element's shape from the layouts, which relabeling keeps. -/
+theorem step_relabel_ldelema (element : Extraction.TypeExpr) (readOnly : Bool) :
+    StepRelabel (.ldelema element readOnly) := by
+  plain_cases
+  simp only [CIL.Method.elementShape, context.environment] at h ⊢
+  dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+  repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+  cases h
+  simp only [FrameAction.relabel]
+  rw [context.next rfl]
+
+#print axioms step_relabel_ldelema
+
 theorem step_relabel_ldtoken (operand : TokenOperand) : StepRelabel (.ldtoken operand) := by
   cases operand
   plain_cases
@@ -883,6 +896,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case ldsflda field => exact step_relabel_ldsflda field
   case ldelem_any element => exact step_relabel_ldelem_any element
   case stelem_any element => exact step_relabel_stelem_any element
+  case ldelema element readOnly => exact step_relabel_ldelema element readOnly
   case ldtoken operand => exact step_relabel_ldtoken operand
   case stsfld field => exact step_relabel_stsfld field
   case ret => exact step_relabel_ret
@@ -1535,7 +1549,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticAddress_congr context.statics]
     raise_lockstep
-  case ldelem_any | stelem_any =>
+  case ldelem_any | stelem_any | ldelema =>
     plain_cases
     simp only [CIL.Method.elementShape, context.environment] at h ⊢
     dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢

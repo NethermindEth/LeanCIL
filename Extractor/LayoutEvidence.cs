@@ -206,8 +206,7 @@ internal sealed class LayoutEvidence
                 var access = instruction.OpCode.Code switch
                 {
                     Code.Ldobj => "load", Code.Stobj => "store", Code.Initobj => "initialize",
-                    Code.Cpobj => "copy", Code.Sizeof => "sizeOf",
-                    Code.Ldelema => "arrayElement", _ => null
+                    Code.Cpobj => "copy", Code.Sizeof => "sizeOf", _ => null
                 };
                 if (access is not null) uses.Add($".size {pc} {Index(type)} .{access}");
             }

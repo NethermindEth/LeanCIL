@@ -83,13 +83,19 @@ foreach (var name in new[] { "Element", "Read", "Write" })
         """);
     evidence.Add(proof, "PASS certified readonly reference composition: " + name);
     if (name != "Element") continue;
-    const string target = ".arrayAddress .signed32 false";
-    if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing readonly mutation target");
+    // The address flag is decoded from the raw prefix, so a writable forgery drops the prefix from the raw body,
+    // which its bytes bind.
+    if (!source.Contains("cil_decoded_method method0 ", StringComparison.Ordinal))
+        throw new Exception("Readonly element address is not decoded from its body");
+    const string target = "opcode := 65054, operand := .none }";
+    var body = NarrowEvidence(source, "method0_body_validated");
+    if (!body.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing readonly mutation target");
     var forged = Path.Combine(root, "ForgedWritable.lean");
-    File.WriteAllText(forged, source.Replace(target, ".arrayAddress .signed32 true", StringComparison.Ordinal));
+    File.WriteAllText(forged, body.Replace(target, "opcode := 0, operand := .none }", StringComparison.Ordinal));
     var rejection = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
-    if (rejection.Code == 0 || !rejection.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
-        throw new Exception("Writable forgery did not fail scalar validation: " + rejection.Output);
+    const string bodyDecisionFailed = "the decoded method does not match its body bytes or metadata";
+    if (rejection.Code == 0 || !rejection.Output.Contains(bodyDecisionFailed, StringComparison.Ordinal))
+        throw new Exception("Writable forgery did not fail body decoding: " + rejection.Output);
 }
 foreach (var mutation in new[] { "separated", "branch", "dead-branch" })
 {

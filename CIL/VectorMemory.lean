@@ -167,8 +167,6 @@ inductive MemoryOp where
   | spanSlice (explicitLength : Bool) | spanReadOnly
   /-- A span view over supplied reference-free array storage, without allocation or copying. -/
   | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
-  /-- A checked element address retains allocation provenance without granting authority. -/
-  | arrayAddress (element : ArrayElement) (writable : Bool := true)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
   /-- `ldstr`: the interned string object the caller bound to `text`. No operation reads its
@@ -212,7 +210,6 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .spanSingleReference .. => 1
   | .arraySpan _ _ range => range.argumentCount
   | .spanReinterpret .. | .spanReadOnly => 1
-  | .arrayAddress .. => 2
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
   | .nullRef | .stringLiteral _ | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue .. | .createSpan _

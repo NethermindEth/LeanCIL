@@ -237,10 +237,10 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
       (otherMemoryInstruction operation stack n) := by
-  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress
+  unfold CIL.Safety.otherMemoryInstruction
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
-    same.arrayElement, same.loadTransfer]
+    same.loadTransfer]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -479,6 +479,23 @@ theorem Memory.Equivalent.typedElementInstruction {m n : Memory} (same : m.Equiv
        exact .ok ⟨related, rfl⟩)
     | split
 #print axioms Memory.Equivalent.typedElementInstruction
+
+/-- An element address takes its element from the shape and gives the same reference over
+    equivalent memories. -/
+theorem Memory.Equivalent.elementAddressInstruction {m n : Memory} (same : m.Equivalent n)
+    (shape : CIL.ElementShape) (readOnly : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (elementAddressInstruction shape readOnly stack m)
+      (elementAddressInstruction shape readOnly stack n) := by
+  unfold CIL.Safety.elementAddressInstruction
+  split
+  all_goals try unfold CIL.Safety.arrayAddress
+  all_goals try simp only [same.arrayElement]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.elementAddressInstruction
 
 /-- Aligned transfers retain exact access failures and the existing typed transfer equivalence. -/
 theorem Memory.Equivalent.pointerTransferInstruction {m n : Memory} (same : m.Equivalent n)

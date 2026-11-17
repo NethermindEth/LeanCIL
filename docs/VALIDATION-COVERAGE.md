@@ -437,20 +437,25 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   indices, initialization, authority, invalid extents, local storage and neighboring-byte
   preservation. Both run in the `evidence` suite.
 - `Tests/ArrayElementReferences.cs` checks compiled `ldelema` returns, helper reads and writes
-  against runtime behavior, preserving neighboring contents and rejecting a forged element type.
+  against runtime behavior, preserving neighboring contents and rejecting a forged element type at
+  the raw token the address is decoded from.
   `Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
   references and address formation without granting memory authority. Both run in the `evidence`
   suite.
 - `Tests/ReadOnlyArrayReferences.cs` inserts `readonly.` prefixes into compiled fixtures,
   checks returned and locally stored references, and proves that caller stores fail despite
-  writable backing memory. It rejects independently forged writable evidence, separated prefixes
-  and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
+  writable backing memory. It rejects a raw body with the prefix removed, whose bytes body decoding
+  refuses, separated prefixes and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
   read access and rejection of an adapter that would remove the restriction, plus readonly
   `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
   addresses and rejected field stores through restricted references. It evaluates the readonly
   rule of `ScalarFlowValid` at single sites, which rejects a writable address under a prefix, a
-  prefix with an operand and both sites of a branch to the address. Both run in the `evidence`
-  suite.
+  prefix with an operand and both sites of a branch to the address. Against a readonly and a
+  writable address body that both the windowed check and the check with no readonly window
+  accept, it shows that both refuse a forged flag or element type, a final `readonly.`, a second
+  `readonly.`, a `nop` or an `ldelem` after `readonly.`, and `ldelema` after `unaligned.`; that a
+  call after `readonly.` has no decoding; and that a branch into the prefixed address passes the
+  check with no window but not `PrefixEntryFree`. Both run in the `evidence` suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
   initialization and copies. It rejects missing initialization assumptions, mutable fields,
@@ -596,7 +601,7 @@ These tests cover preparation:
 | Aggregate/vector fills (`AggregateSpanFill`) | Five compiled aggregate, Vector128/256/512 and aliased-source wrappers check repeated values, initialization masks, unknown-lane rejection, empty views, write authority and neighboring bytes. Independent evidence mutations reject changed aggregate/vector widths and clear/fill flags. |
 | Span constructors (`SpanConstructors`) | Single-reference and pointer constructors cover primitive, aggregate and integer-vector elements, mutable/readonly views and in-place local initialization without readable bytes. Empty getters and explicit default resets cover returns, helper calls and empty slices. Vector-field aggregate layouts are checked on x64 and ARM64; evidence mutations reject changed widths, capabilities and aggregate identities. Wrong scoped reset types and branches into reset folds are rejected. |
 | Span reference parameters (`SpanReferences`, `SpanReferenceContracts`, `SpanReferenceWordContract`, `SpanReferenceSecondContract`) | `in` and `ref readonly` span parameters cover loops, indexing, slicing, element writes, copies, forwarding, caller-side local, parameter and temporary addresses, closed generic helpers, a struct constructor, field reads and field addresses through writable and readonly aggregate elements, and `MemoryMarshal.GetReference` of readonly views, including a byte-order read and `Unsafe.Add`, `Subtract` and `AddByteOffset` offsets and an advancing cursor loop that stay readonly; symbolic `Contents` contracts prove an indexed read, a first-word read and a second-word read through `Unsafe.Add`. Kernel fixtures check expired backing storage, readonly element stores, writes and field stores through readonly `GetReference` results and their offsets against writable controls, one-past, beyond-end and negative readonly offsets, empty and out-of-extent readonly views and forged reference arguments. Evidence mutations reject a span-valued raw argument and a load in place of a span copy; rebinding, addressing or storing to the parameter, writable span parameters (including a generic helper's `ref` span and a generic definition stripped of its readonly markers), span reference returns and indirect copy sources are rejected during extraction. |
-| Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations. |
+| Supplied aggregate/vector arrays (`AggregateArrays`, `AggregateArrayStorage`) | Typed element addresses, writable and after an inserted `readonly.`, loads/stores, lengths, span conversions and data references cover reference-free structs and integer vectors over existing storage. Kernel fixtures check masks, authority, bounds, lifetime and readonly views; independent evidence mutations reject changed element descriptors and operations and a readonly struct address whose raw prefix is removed. |
 | Closed generic structs (`GenericLayouts`) | Sequential same-assembly reference-free instantiations cover nested layouts, fields, direct instance methods and constructors through checked owner substitution and ordinary aggregate storage. Unsupported reference-bearing, open, non-sequential and interface/reference-constrained generic layouts remain rejected. |
 | Byte-order span transfers (`BinarySpans`) | Compiled wrappers exercise all 64 signed/unsigned 16-, 32-, 64-bit and native integer read/write/try endian overloads, short spans, read/write authority and uninitialized reads. Evidence mutations reject altered widths, endian choices, signedness and try behavior. |
 | No-read view observations (`ViewAccessors`) | Span emptiness, pinnable references, `MemoryMarshal.GetReference` of writable and readonly spans and array data references cover empty/default/readonly views, empty and null arrays and observations without readable bytes or byte authority. Evidence mutations reject mismatched accessors and capabilities. |

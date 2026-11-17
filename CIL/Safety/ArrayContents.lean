@@ -9,9 +9,10 @@ import CIL.Safety.BufferContents
 An array argument is an `ArrayView` whose bytes are the span `view.storage`, so the facts a
 method needs of its elements are `SpanContents` over that span. `SpanContents.array_load`
 turns them into the element reference and loaded value of an in-bound index; a null array
-has no elements, so the bound alone rules it out. `step_ldelem_of_element` and
-`step_arrayAddress_of_element` step `ldelem` and `ldelema` from those facts, and
-`arrayLoad_of_element` reads a typed `ldelem` once it steps to `arrayLoad`;
+has no elements, so the bound alone rules it out. `step_ldelem_of_element` steps `ldelem`
+and `step_ldelema_of_element` an `ldelema` of the element's shape from those facts, and
+`arrayLoad_of_element` and `arrayAddress_of_element` read a typed `ldelem` and an `ldelema`
+once they step to `arrayLoad` and `arrayAddress`;
 `arrayElement_formed` lets a method return the element address. A loop indexing the array
 names the element it stores to with `arrayElement_of_access` and steps `stelem` with
 `step_stelem_narrow_of_write` or `step_stelem_wide_of_write`, or a typed `stelem` with
@@ -123,24 +124,43 @@ theorem step_ldelem_of_element (kind : CIL.NumericKind) {memory : Memory} {view 
 
 #print axioms step_ldelem_of_element
 
-/-- `ldelema` of an element of the array's own element type pushes the element's address. -/
-theorem step_arrayAddress_of_element {memory : Memory} {view : ArrayView} {index : CIL.Value}
-    {element : CIL.ArrayElement} {position : Nat} {reference : Reference}
+/-- `ldelema` of an element of the array's own element type gives the element's address,
+    read-only unless `writable`. -/
+theorem arrayAddress_of_element {memory : Memory} {view : ArrayView} {index : CIL.Value}
+    {element : CIL.ArrayElement} {position : Nat} {reference : Reference} (writable : Bool)
     (typed : view.elementType = element) (indexed : arrayIndex index = some position)
     (found : arrayElement memory view position element.width = .ok reference) :
-    ∀ body pc args frame rest,
-      step body (.memory (.arrayAddress element)) pc args frame
-        (.scalar index :: .array view :: rest) memory =
-        .ok (.next (pc + 1) (.reference (.address reference) :: rest) frame memory) := by
-  intro body pc args frame rest
-  rw [step_memory_eq]
+    ∀ rest, arrayAddress element writable (.scalar index :: .array view :: rest) memory =
+      .ok (memory, (if writable then .reference (.address reference)
+        else .readOnlyReference (.address reference)) :: rest) := by
+  intro rest
   cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
     subst indexed <;>
-    simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, Value.hasUnspecified,
-      CIL.Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction,
-      arrayAddress, arrayIndex, typed, found, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    simp [arrayAddress, arrayIndex, typed, found, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_arrayAddress_of_element
+#print axioms arrayAddress_of_element
+
+/-- `ldelema` of a type the method's layouts give the array's own element shape pushes the
+    element's address, read-only exactly when the instruction is. -/
+theorem step_ldelema_of_element {body : CIL.Method} {type : CIL.Extraction.TypeExpr}
+    {memory : Memory} {view : ArrayView} {index : CIL.Value} {element : CIL.ArrayElement}
+    {position : Nat} {reference : Reference} (readOnly : Bool)
+    (shape : body.elementShape type = .value element) (typed : view.elementType = element)
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position element.width = .ok reference) :
+    ∀ pc args frame rest, step body (.ldelema type readOnly) pc args frame
+        (.scalar index :: .array view :: rest) memory =
+      .ok (.next (pc + 1) ((if readOnly then .readOnlyReference (.address reference)
+        else .reference (.address reference)) :: rest) frame memory) := by
+  intro pc args frame rest
+  rw [step_ldelema_eq, shape]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;> cases readOnly <;>
+    simp [unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
+      elementAddressInstruction, arrayAddress, arrayIndex, typed, found, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+
+#print axioms step_ldelema_of_element
 
 /-- An element address an array access returns forms in the same memory, so a method may
     return it. -/

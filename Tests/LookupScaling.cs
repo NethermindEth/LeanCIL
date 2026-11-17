@@ -1038,7 +1038,7 @@ void PrefixEntryCosts()
                 ⟨start + 3, 43, .target (start + {{SegmentLength}})⟩]
             /-- The instructions the translator emits for one segment. -/
             def codeSegment (index : Nat) : List Instruction :=
-              [.nop, .memory (.arrayAddress .signed32 false), .pop, .br ({{SegmentLength}} * (index + 1))]
+              [.nop, .ldelema intType true, .pop, .br ({{SegmentLength}} * (index + 1))]
             /-- A body of {{instructions}} raw instructions. -/
             def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
             /-- The {{instructions}} emitted instructions of the body. -/
@@ -2402,7 +2402,7 @@ long ArrayAddressCost(bool prefixed, int sites)
           (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
         def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
           [.ldarg 0, .ldarg 1] ++ (if prefixed then [.nop] else []) ++
-            [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
+            [.ldelema intType prefixed, .pop, .br ((index + 1) * width prefixed)]
         def code (prefixed : Bool) (sites : Nat) : List Instruction :=
           (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
         """ + "\n";
