@@ -89,8 +89,7 @@ resolves it; it holds the extraction, StrictBinding and `CIL` modules and no con
 `ExtractedImports` or proof module. A restored result skips build and kernel replay of the
 generated modules, since its publisher replayed those bytes against the same imported bytes;
 their theorem audit runs on every request. Under `--proof-root` the environment is the verifier
-and the certified library, and a package that shadows a `CIL` module replays a restored result
-and publishes none.
+and the certified library.
 
 The single-file verifier's support audit key binds the audit schema, verification policy,
 certified library identity, extraction identity digest, ordered support imports and support

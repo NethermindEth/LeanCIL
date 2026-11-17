@@ -369,7 +369,7 @@ generated sources, which hold the image bytes, and the same bytes of every compi
 import, transitively, outside the Lean toolchain: the extraction, StrictBinding and `CIL`
 modules. It skips their build and kernel replay but still audits every deep theorem's type and
 axioms against the current extraction. Under `--proof-root` the key also binds the certified
-library, and a package that shadows a `CIL` module replays a restored result and publishes none.
+library.
 
 ## Start a proof
 
