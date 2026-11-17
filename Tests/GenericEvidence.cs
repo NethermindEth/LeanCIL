@@ -231,6 +231,9 @@ RejectBody(0, "altered-token-operand-byte", bodyTheorem, "method0Bytes",
 // A count one short of the digits keeps the code but drops its leading byte, the body header.
 RejectBody(0, "altered-literal-count", bodyTheorem, "method0Bytes",
     line => ChangeByte(line, $$"""({{literalHead}})(\d+)( 0x)""", -1));
+// An instantiation head states its signature's value-type marker, which must agree with the argument's head.
+RejectBody(6, "wrong-instantiation-marker", "method1_body_validated", "method1Body",
+    line => line.Replace("kind := .external (some true)", "kind := .external (some false)"));
 RejectBody(0, "altered-token-table-key", bodyTheorem, "method0Body",
     line => ChangeByte(line, @"(\()(\d+)(, \.call)", 1));
 RejectBody(0, "altered-token-table-operand", bodyTheorem, "method0Body",

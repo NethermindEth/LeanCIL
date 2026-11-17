@@ -61,6 +61,9 @@ name = "Tests.MetadataBinding"
 name = "Tests.ImportedFieldIndex"
 
 [[lean_lib]]
+name = "Tests.OpaqueClassFields"
+
+[[lean_lib]]
 name = "Tests.StaticFieldSites"
 
 [[lean_lib]]

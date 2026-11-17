@@ -99,10 +99,11 @@ def userStringMatches (index : MetadataIndex) (token : Nat) (text : String) :
 
 /-! ## Types -/
 
-/-- The scope an extractor type spells for its head: the atom's, object's or constructor's, or
-    the scope an aggregate or enum identity starts with. -/
+/-- The scope an extractor type spells for its head: the atom's, object's or generic
+    definition's, or the scope an aggregate or enum identity starts with. -/
 def TypeExpr.headScope : TypeExpr → Option String
-  | .atom scope _ | .object scope _ | .constructor scope _ => some scope
+  | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
+    some scope
   | .apply applied _ => applied.headScope
   | _ => none
 

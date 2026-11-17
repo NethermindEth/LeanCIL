@@ -348,6 +348,13 @@ runtime type the model never inspects. Fields of generic parameter type or a mod
 rejected, as are fields holding multi-dimensional arrays, whose shape a slot cannot recover from
 the allocation it names.
 
+Such a field names a generic class instance as an `apply` chain over a class head
+(`TypeExpr.objectConstructor`), which binding checks against a class, interface or delegate
+definition, and `object` as `System.Object` of the primitive assembly. A load of either pushes the
+stack kind `opaque`, which only a store into a field of either type, `castclass`, `isinst` and a
+null test take, so the reference reaches a receiver, an admitted class field or an array operation
+only through a type test, which checks its runtime type.
+
 `System.String` of `System.Runtime`, matched exactly, is the one such class that is also admitted
 as the type of an argument, a local and a result ([StringValues](../Examples/Proofs/StringValues.lean),
 [StringLabel](../Examples/Proofs/StringLabel.lean)). A string is an object reference on the stack

@@ -310,7 +310,7 @@ theorem endian_field_as_static_load_rejected :
 
 /-- `V` of `Box<int>` as an instruction names it. -/
 private def boxedField : FieldRef :=
-  { owner := .apply (.constructor pin.identity "Box`1") int32, index := 0, type := int32,
+  { owner := .apply (.objectConstructor pin.identity "Box`1") int32, index := 0, type := int32,
     name := name!"V" }
 
 /-- Whether decoding the body accessing `V` of `Box<int>` with `opcode` fails on the refusal of

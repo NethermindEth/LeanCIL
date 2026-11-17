@@ -372,12 +372,15 @@ private def genericFieldType (table : LayoutTable) : TypeExpr → Option FieldTy
 
 /-- Closed generic identities retain the scope and ordering of every supported argument. -/
 def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option String := do
-      let .constructor scope name := owner | none
+      let (scope, name) ← match owner with
+        | .constructor scope name | .objectConstructor scope name => some (scope, name)
+        | _ => none
       let names ← arguments.mapM fun argument => match argument with
         | .atom scope name => some (scope ++ "::" ++ name)
         | .enum identity _ | .aggregate identity _ =>
           some identity
-        | .apply (.constructor scope name) (.atom elementScope element) =>
+        | .apply (.constructor scope name) (.atom elementScope element)
+        | .apply (.objectConstructor scope name) (.atom elementScope element) =>
           some (scope ++ "::" ++ name ++ "<" ++ elementScope ++ "::" ++ element ++ ">")
         | _ => none
       return scope ++ "::" ++ name ++ "<" ++ String.intercalate "," names ++ ">"

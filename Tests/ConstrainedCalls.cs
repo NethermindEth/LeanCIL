@@ -276,7 +276,7 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
 
 // The receiver's catalog lists the interface instantiated at its own type argument; listing another
 // instantiation leaves the slot unimplemented.
-const string narrowWidth = "interfaces := [.apply (.constructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
+const string narrowWidth = "interfaces := [.apply (.objectConstructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
     "PublicKeyToken=null\" \"Examples.IWidth\\u00601\") (.atom Extraction.runtimeScope \"System.UInt32\")";
 if (widthNarrow?.Contains(narrowWidth, StringComparison.Ordinal) != true)
     throw new Exception("Missing generic receiver interface mutation target");

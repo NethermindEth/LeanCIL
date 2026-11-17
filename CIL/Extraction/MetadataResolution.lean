@@ -759,6 +759,14 @@ def objectNamed (named : NamedType) : Bool :=
   named.pinned && named.kind == .classType ||
     named.scope == runtimeScopeBytes && named.name == systemStringName
 
+/-- Whether a generic definition of this kind is a reference type, when the metadata decides it:
+    a class or interface of a carried slice or a reference the signature marks as a class is one,
+    a struct, an enum or a reference the signature marks as a value type is not. -/
+def TypeKind.reference? : TypeKind → Option Bool
+  | .classType | .interfaceType | .external (some false) => some true
+  | .valueType | .enumType _ | .external (some true) => some false
+  | .external none => none
+
 /-- A value type, or an external type that may be one. -/
 def valueLike : TypeKind → Bool
   | .valueType | .external (some true) | .external none => true
@@ -845,8 +853,11 @@ def appliedAdmits (frame : Frame) : Nat → NamedType → ResolvedList → TypeE
   | fuel + 1, head, arguments, expr =>
     match appliedArguments expr with
     | (.constructor scope name, expected) =>
-      bytesOf scope == head.scope && bytesOf name == head.name &&
-        argumentsAdmit frame fuel arguments expected
+      head.kind.reference? == some false && bytesOf scope == head.scope &&
+        bytesOf name == head.name && argumentsAdmit frame fuel arguments expected
+    | (.objectConstructor scope name, expected) =>
+      head.kind.reference? == some true && bytesOf scope == head.scope &&
+        bytesOf name == head.name && argumentsAdmit frame fuel arguments expected
     | _ => false
 
 /-- Whether each resolved argument is named by the matching extractor type. -/
@@ -880,6 +891,8 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
     match type, expr with
     | .named named, .object scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind
+    | .primitive 0x1C, .object scope name =>
+      frame.corlib == some (bytesOf scope) && bytesOf name == systemObjectName
     | _, _ => false
 
 end CIL.Extraction

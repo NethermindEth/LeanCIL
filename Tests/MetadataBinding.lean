@@ -439,9 +439,9 @@ theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
 
 /-- `Lib.Holder<!!0>` and `System.Lazy<!!0>` as a method with one type parameter names them. -/
 private def holderOfMethodParameter : TypeExpr :=
-  .apply (.constructor libScope "Lib.Holder`1") (.parameter 0)
+  .apply (.objectConstructor libScope "Lib.Holder`1") (.parameter 0)
 private def lazyOfMethodParameter : TypeExpr :=
-  .apply (.constructor runtimeScope "System.Lazy`1") (.parameter 0)
+  .apply (.objectConstructor runtimeScope "System.Lazy`1") (.parameter 0)
 
 /-- Each closed instantiation of a generic class has its own statics, so a static field named
     through `Lib.Holder<!!0>`, whose row a pinned slice carries, or through the external
@@ -795,11 +795,14 @@ private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   (.szarray (.primitive 8), .array int32Atom),
   (.szarray (.named (namedIn "L" "N" .classType true)), .array (.object "L" "N")),
   -- Instances: a value-like one as an aggregate, its arguments scoped when the head is
-  -- carried, and any instance as an `apply` chain.
+  -- carried, and any instance as an `apply` chain over a head of its kind.
   (instanceOf .valueType, .aggregate "L::G`1<System.Int32>" 0),
   (instanceOf .valueType true, .aggregate "L::G`1<C::System.Int32>" 0),
-  (instanceOf .classType, .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf .classType, .apply (.objectConstructor "L" "G`1") int32Atom),
+  (instanceOf .interfaceType, .apply (.objectConstructor "L" "G`1") int32Atom),
+  (instanceOf (.external (some false)), .apply (.objectConstructor "L" "G`1") int32Atom),
   (instanceOf .valueType, .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf (.external (some true)), .apply (.constructor "L" "G`1") int32Atom),
   -- Function pointers, with the calling convention and receiver flags.
   (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),
     .functionPointer int32Atom (.signatureParameter int32Atom .void) 0 false false),
@@ -849,9 +852,17 @@ private def refusedPairings : List (ResolvedType × TypeExpr) := [
   -- Instances.
   (instanceOf .valueType true, .aggregate "L::G`1<System.Int32>" 0),
   (instanceOf .classType, .aggregate "L::G`1<System.Int32>" 0),
-  (instanceOf .classType, .apply (.constructor "L" "G`1") (.atom "C" "System.UInt32")),
-  (instanceOf .classType, .apply (.constructor "K" "G`1") int32Atom),
-  (instanceOf .classType, .constructor "L" "G`1"),
+  (instanceOf .classType, .apply (.objectConstructor "L" "G`1") (.atom "C" "System.UInt32")),
+  (instanceOf .classType, .apply (.objectConstructor "K" "G`1") int32Atom),
+  (instanceOf .classType, .objectConstructor "L" "G`1"),
+  -- A head of the other kind, and a kind the metadata leaves open.
+  (instanceOf .classType, .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf .interfaceType, .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf (.external (some false)), .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf .valueType, .apply (.objectConstructor "L" "G`1") int32Atom),
+  (instanceOf (.external (some true)), .apply (.objectConstructor "L" "G`1") int32Atom),
+  (instanceOf (.external none), .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf (.external none), .apply (.objectConstructor "L" "G`1") int32Atom),
   (instanceOf .classType, .atom "L" "G`1<System.Int32>"),
   -- Function pointers.
   (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),

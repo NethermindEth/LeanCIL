@@ -28,6 +28,9 @@ inductive ScalarKind where
   | word32 | word64 | native | reference | nullObject | other
   /-- A class instance reference of an admitted object type. -/
   | object
+  /-- A class reference loaded from a field of an `opaqueFieldType`, of a class the model does
+      not name: only a store into such a field, a type test or a null test takes it. -/
+  | opaque
   | array (element : ArrayElement)
   | enumSpan (element : ArrayElement) (writable : Bool) (reference : Bool)
   | methodPointer (signature : ManagedSignature)
@@ -391,6 +394,13 @@ private def classFieldSite (instruction : RawInstruction) (emitted : Instruction
   | .ldfld _ | .ldflda _ | .stfld _ => true
   | _ => false
 
+/-- The kinds a class instance field holding references stores: an opaque reference or null in
+    a generic class instance, also an object in `System.Object`, an object or null otherwise. -/
+private def storedReferences (type : TypeExpr) : List ScalarKind :=
+  if type.objectApplication then [.opaque, .nullObject]
+  else if opaqueFieldType type then [.opaque, .object, .nullObject]
+  else [.object, .nullObject]
+
 /-- `ldfld`, `ldflda` and `stfld` of a class instance field emit the instruction the raw one
     decodes to after `previous`, naming the field its operand names, on an object or null
     receiver. A stored class or class array must be an object or null, a stored value array one
@@ -403,7 +413,7 @@ private def classFieldMatches (previous : Option RawInstruction) (instruction : 
   | .ldfld _, receiver :: _ | .ldflda _, receiver :: _ => receiver ∈ [.object, .nullObject]
   | .stfld field, value :: receiver :: _ =>
     receiver ∈ [.object, .nullObject] &&
-      (!referenceFieldType field.type || value ∈ [.object, .nullObject]) &&
+      (!referenceFieldType field.type || value ∈ storedReferences field.type) &&
       (valueArrayFieldElement field.type).all (fun declared => value == .array declared) &&
       ((objectFieldShape field.type).isNone || storageCompatible value (scalarType field.type))
   | _, _ => false
@@ -429,7 +439,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if let some (opcode, type) := typeTestSource emitted then
     match instruction.operand, stack with
     | .type target, value :: _ =>
-      instruction.opcode == opcode && type == target && value ∈ [.object, .nullObject]
+      instruction.opcode == opcode && type == target && value ∈ [.object, .opaque, .nullObject]
     | _, _ => false
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
@@ -512,7 +522,8 @@ private def joinBytes (separator : List UInt8) : List (List UInt8) → List UInt
     method type parameter, `&` and `*` suffixes, and `<...>` for generic arguments. -/
 private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   | .void => some (signatureBytes "System.Void")
-  | .atom _ name | .constructor _ name | .object _ name => some (signatureBytes name)
+  | .atom _ name | .constructor _ name | .objectConstructor _ name | .object _ name =>
+    some (signatureBytes name)
   | type@(.aggregate ..) => signatureBytes <$> spanElementName type
   -- Enum names cannot contain generic owner arguments.
   | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
@@ -753,7 +764,10 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [124, 127] then some .reference
     -- `ldfld` and `ldsfld`, then `ldobj`.
     else if instruction.opcode == 123 || instruction.opcode == 126 then
-      let .field _ _ type _ _ := instruction.operand | none
+      let .field owner _ type _ static := instruction.operand | none
+      if instruction.opcode == 123 && !static && owner matches .object .. &&
+          opaqueFieldType type then
+        return .opaque
       return scalarType type
     else if instruction.opcode == 113 then
       let .type type := instruction.operand | none
@@ -825,13 +839,14 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if opcode == 116 || opcode == 117 then
     match instruction.operand, stack with
     | .type (.object ..), value :: tail =>
-      if value ∈ [.object, .nullObject] then return .object :: tail
+      if value ∈ [.object, .opaque, .nullObject] then return .object :: tail
     | _, _ => pure ()
   if opcode == 20 then
     if instruction.operand == .none then return .nullObject :: stack else none
   if opcode ∈ [44, 45, 57, 58] then
     let value :: tail := stack | none
-    if numeric value || value ∈ [.reference, .nullObject, .object] then return tail else none
+    if numeric value || value ∈ [.reference, .nullObject, .object, .opaque] then return tail
+    else none
   if compareBranch opcode then
     let right :: left :: tail := stack | none
     if compatibleBinary left right || referenceComparison opcode left right then return tail else none

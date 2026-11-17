@@ -9,7 +9,8 @@ internal static class NativeOperands
 {
     internal enum Kind
     {
-        Other, Word32, Word64, Native, Reference, NullObject, Object, MethodPointer, MethodTable, NativeMethodTable,
+        Other, Word32, Word64, Native, Reference, NullObject, Object, Opaque, MethodPointer, MethodTable,
+        NativeMethodTable,
         ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
         ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter, ArrayComposite
     }
@@ -119,6 +120,10 @@ internal static class NativeOperands
             MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 => Kind.Word32,
         _ => Kind.Other
     };
+
+    // A reference of a generic class instance or System.Object, which only a store, a type test or a null test takes.
+    static bool UnnamedClassField(FieldReference field) =>
+        OpaqueClassField(field) && FieldType(field) is GenericInstanceType or { MetadataType: MetadataType.Object };
 
     // An object reference whose class is outside the model; it only ever reaches a field, a test or a comparison.
     static bool OpaqueClassField(FieldReference field) =>
@@ -313,6 +318,7 @@ internal static class NativeOperands
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Slot(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
                                 FeatureConstants.Local(instruction)),
+                        Code.Ldfld when UnnamedClassField((FieldReference)instruction.Operand) => Kind.Opaque,
                         Code.Ldfld when OpaqueClassField((FieldReference)instruction.Operand) => Kind.Object,
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj or Code.Ldelem_Any or Code.Castclass or Code.Isinst =>

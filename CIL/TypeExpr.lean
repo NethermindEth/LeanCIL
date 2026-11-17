@@ -54,7 +54,12 @@ inductive TypeExpr where
       (hasThis explicitThis : Bool)
   /-- One parameter in a function-pointer signature; the parameter chain ends in `.void`. -/
   | signatureParameter (head tail : TypeExpr)
+  /-- The generic definition of a value type, by its exact scope and name; an `apply` chain over
+      it is a value type instance. -/
   | constructor (scope name : String)
+  /-- The generic definition of a class, interface or delegate, by its exact scope and name; an
+      `apply` chain over it is a reference type instance. -/
+  | objectConstructor (scope name : String)
   | apply (constructor argument : TypeExpr)
   /-- A class on the checked heap, by its exact scope and name: a class of a pinned assembly or
       `System.String`, or, as the type a class instance field holds, any class or interface,
@@ -77,6 +82,13 @@ def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .apply constructor argument => do
     return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
   | type => some type
+
+/-- Whether the type is an `apply` chain over the generic definition of a class, interface or
+    delegate, so that a value of it is an object reference. -/
+def TypeExpr.objectApplication : TypeExpr → Bool
+  | .apply (.objectConstructor _ _) _ => true
+  | .apply head _ => head.objectApplication
+  | _ => false
 
 /-- Ordered candidate buckets retain every matching metadata entry. -/
 def groupIndex {α κ : Type} [Ord κ] (key : α → κ) :
@@ -137,6 +149,8 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
     keyBytes "signatureParameter" :: typeKeyInto head (typeKeyInto tail rest)
   | .constructor scope name, rest =>
     keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
+  | .objectConstructor scope name, rest =>
+    keyBytes "objectConstructor" :: keyBytes scope :: keyBytes name :: rest
   | .apply constructor argument, rest =>
     keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
   | .object scope name, rest =>

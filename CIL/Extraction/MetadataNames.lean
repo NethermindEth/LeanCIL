@@ -86,7 +86,8 @@ theorem metadataChars_eq (value : String) : metadataChars value = value.toList :
 
 /-- A named type as its referencing scope and full name. -/
 def namedType : TypeExpr → Option (List Char × List Char)
-  | .atom scope name | .constructor scope name => leaf (metadataChars scope) (metadataChars name)
+  | .atom scope name | .constructor scope name | .objectConstructor scope name =>
+    leaf (metadataChars scope) (metadataChars name)
   | .aggregate identity _ | .enum identity _ => do
     let (scope, name) ← splitIdentity [] (metadataChars identity)
     leaf scope name
@@ -95,7 +96,8 @@ def namedType : TypeExpr → Option (List Char × List Char)
 /-- The fast metadata decoder retains the original named-type rule, including Unicode. -/
 theorem namedType_eq_original (type : TypeExpr) : namedType type =
     match type with
-    | .atom scope name | .constructor scope name => leaf scope.toList name.toList
+    | .atom scope name | .constructor scope name | .objectConstructor scope name =>
+      leaf scope.toList name.toList
     | .aggregate identity _ | .enum identity _ => do
       let (scope, name) ← splitIdentity [] identity.toList
       leaf scope name
@@ -104,9 +106,9 @@ theorem namedType_eq_original (type : TypeExpr) : namedType type =
 
 #print axioms namedType_eq_original
 
-/-- A named type's plain full name; an atom's or constructor's scope is left undecoded. -/
+/-- A named type's plain full name; an atom's or generic definition's scope is left undecoded. -/
 def plainTypeName : TypeExpr → Option (List Char)
-  | .atom _ name | .constructor _ name =>
+  | .atom _ name | .constructor _ name | .objectConstructor _ name =>
     let name := metadataChars name
     if plainName name then some name else none
   | type => Prod.snd <$> namedType type

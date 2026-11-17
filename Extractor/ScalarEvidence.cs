@@ -13,6 +13,7 @@ internal static class ScalarEvidence
         NativeOperands.Kind.Reference => ".reference",
         NativeOperands.Kind.NullObject => ".nullObject",
         NativeOperands.Kind.Object => ".object",
+        NativeOperands.Kind.Opaque => ".opaque",
         _ => Arrays.StackKind(value.Kind)?.ToLean() ?? ".other"
     };
 
