@@ -196,11 +196,18 @@ partial class Program
             .Select(path => (path, path)));
 
     /// <summary>Hashes the exact compiled module families, enumerating each containing directory once.</summary>
-    static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts)
+    static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts) =>
+        HashFiles(ModuleFamilyParts(artifacts).Select(path => (path, path)));
+
+    /// <summary>
+    /// Every part of each compiled module family: the module's `.olean` and each file beside it named by that
+    /// file and a further extension. A family whose module file is missing is refused.
+    /// </summary>
+    static List<string> ModuleFamilyParts(IEnumerable<string> artifacts)
     {
         var families = artifacts.Select(Path.GetFullPath)
             .GroupBy(artifact => Path.GetDirectoryName(artifact)!, LocationComparer);
-        List<(string Name, string Path)> files = [];
+        List<string> files = [];
         foreach (var family in families)
         {
             var expected = family.ToHashSet(LocationComparer);
@@ -216,10 +223,10 @@ partial class Program
                 var end = marker + ".olean".Length;
                 if ((end == filename.Length || filename[end] == '.') &&
                     expected.Contains(Path.Combine(family.Key, filename[..end])))
-                    files.Add((path, path));
+                    files.Add(path);
             }
         }
-        return HashFiles(files);
+        return files;
     }
 
     /// <summary>
@@ -327,6 +334,19 @@ partial class Program
     SortedDictionary<string, string>? deepImports;
 
     /// <summary>
+    /// The work the last deep import closure did: header-reader launches, compiled headers read, module parts
+    /// hashed and the bytes those parts hold.
+    /// </summary>
+    internal readonly record struct DeepClosureWork(int Launches, int Headers, int Hashed, long HashedBytes);
+
+    DeepClosureWork deepClosureWork;
+
+    // The library guard holds certified files to the bytes read here, so each is read once per process.
+    readonly Dictionary<string, string[]> certifiedHeaders = new(LocationComparer);
+    readonly Dictionary<string, string> certifiedPartHashes = new(LocationComparer);
+    readonly Dictionary<string, string[]> generatedImports = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The content hash of every compiled module part the modules generated below `directory` import,
     /// transitively, by its name below its search root. Each import resolves as Lean resolves it: to the first
     /// root of `leanPath` that holds it, then to the toolchain, whose modules the toolchain key binds.
@@ -334,35 +354,64 @@ partial class Program
     SortedDictionary<string, string> DeepImportClosure(string session, string leanPath, string directory)
     {
         var toolchain = Path.GetFullPath(Path.Combine(Toolchain, "lib", "lean"));
+        var certified = library is null ? null : Path.GetFullPath(Path.Combine(library, ".lake/build/lib/lean"));
+        if (certified is not null) RequireUnchangedLibrary();
+        bool Certified(string root) => certified is not null && LocationComparer.Equals(root, certified);
         Dictionary<string, (string Root, string Path)> compiled = new(StringComparer.Ordinal);
         foreach (var root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(Path.GetFullPath)
             .Where(root => !LocationComparer.Equals(root, toolchain) && Directory.Exists(root)))
             foreach (var path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
                 compiled.TryAdd(ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/')), (root, path));
-        SortedDictionary<string, string> generated = new(Directory
-            .EnumerateFiles(directory, "*.lean", SearchOption.AllDirectories)
+        int launches = 0;
+        var generated = Directory.EnumerateFiles(directory, "*.lean", SearchOption.AllDirectories)
             .ToDictionary(path => Path.ChangeExtension(Path.GetRelativePath(session, path), null)
-                .Replace(Path.DirectorySeparatorChar, '.'), File.ReadAllText), StringComparer.Ordinal);
-        var headers = ConsumerModuleImports(session, compiled.ToDictionary(pair => pair.Key, pair => pair.Value.Path));
-        var pending = new Queue<string>(ContractModuleImports(session, generated).Values
-            .SelectMany(imports => imports).Where(module => !generated.ContainsKey(module)));
+                .Replace(Path.DirectorySeparatorChar, '.'), File.ReadAllText, StringComparer.Ordinal);
+        var unparsed = generated.Where(pair => !generatedImports.ContainsKey(ContentKey(pair.Value))).ToArray();
+        if (unparsed.Length != 0)
+        {
+            launches++;
+            var parsed = ContractModuleImports(session, new(unparsed.ToDictionary(), StringComparer.Ordinal));
+            foreach (var (module, source) in unparsed) generatedImports[ContentKey(source)] = parsed[module];
+        }
+        // One launch reads every header this process has not read from the certified library.
+        var unread = compiled.Where(pair => !Certified(pair.Value.Root) || !certifiedHeaders.ContainsKey(pair.Value.Path))
+            .ToDictionary(pair => pair.Key, pair => pair.Value.Path);
+        var read = unread.Count == 0 ? [] : ConsumerModuleImports(session, unread);
+        if (unread.Count != 0) launches++;
+        foreach (var (module, imports) in read)
+            if (Certified(compiled[module].Root)) certifiedHeaders[compiled[module].Path] = imports;
+        var pending = new Queue<string>(generated.Values.SelectMany(source => generatedImports[ContentKey(source)])
+            .Where(module => !generated.ContainsKey(module)));
         HashSet<string> closure = new(StringComparer.Ordinal);
         while (pending.TryDequeue(out var module))
         {
             if (!closure.Add(module)) continue;
-            if (compiled.ContainsKey(module)) foreach (var imported in headers[module]) pending.Enqueue(imported);
+            if (compiled.TryGetValue(module, out var found))
+                foreach (var imported in read.TryGetValue(module, out var imports) ? imports
+                    : certifiedHeaders[found.Path]) pending.Enqueue(imported);
             else if (!File.Exists(Path.Combine(toolchain,
                 module.Replace('.', Path.DirectorySeparatorChar) + ".olean")))
                 throw new InvalidDataException("Deep-check import is not compiled: " + module);
         }
-        Dictionary<string, string> roots = new(LocationComparer);
-        foreach (var (root, path) in closure.Where(compiled.ContainsKey).Select(module => compiled[module]))
-            roots[Path.GetDirectoryName(Path.GetFullPath(path))!] = root;
-        // Companion parts lie beside their module, so each part is named below its module's root.
-        return new(BindingArtifactHashes(closure.Where(compiled.ContainsKey).Select(module => compiled[module].Path))
-            .ToDictionary(pair => Path.GetRelativePath(roots[Path.GetDirectoryName(pair.Key)!], pair.Key)
-                .Replace('\\', '/'), pair => pair.Value), StringComparer.Ordinal);
+        Dictionary<string, string> names = new(LocationComparer);
+        List<string> unhashed = [];
+        List<string> certifiedUnhashed = [];
+        foreach (var (root, olean) in closure.Where(compiled.ContainsKey).Select(module => compiled[module]))
+            // Companion parts lie beside their module, so each part is named below its module's root.
+            foreach (var part in ModuleFamilyParts([olean]))
+            {
+                names[part] = Path.GetRelativePath(root, part).Replace('\\', '/');
+                if (!Certified(root)) unhashed.Add(part);
+                else if (!certifiedPartHashes.ContainsKey(part)) certifiedUnhashed.Add(part);
+            }
+        var hashed = HashFiles(unhashed.Concat(certifiedUnhashed).Select(part => (part, part)));
+        foreach (var part in certifiedUnhashed) certifiedPartHashes[part] = hashed[part];
+        deepClosureWork = new(launches, unread.Count, hashed.Count,
+            hashed.Keys.Sum(part => new FileInfo(part).Length));
+        return new(names.ToDictionary(pair => pair.Value,
+            pair => hashed.TryGetValue(pair.Key, out var hash) ? hash : certifiedPartHashes[pair.Key]),
+            StringComparer.Ordinal);
     }
 
     /// <summary>
