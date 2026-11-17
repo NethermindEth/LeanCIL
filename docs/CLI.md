@@ -805,10 +805,10 @@ certifies every proof and proof dependency for one framework version, and buildi
 several minutes. It is cached in the directory `LEANCIL_CACHE_DIR` names, by default
 `<local application data>/LeanCIL/libraries`, under a key of the framework sources, toolchain
 and platform. A cache miss first prints one line saying what is being built and kernel-replayed
-and where later runs reuse it from. A run that uses a library it did not build, supplied, cached or
-downloaded, opens it after hashing its files against its manifest and traces the stage `Opening
-certified Lean verification library`; a run under `--force-full-verify` opens a cached entry the same
-way.
+and where later runs reuse it from. A run that uses a library it did not build, whether supplied,
+cached, or downloaded and kernel-replayed into the cache, checks the library's files against its
+manifest and traces the stage `Opening certified Lean verification library`; a run under
+`--force-full-verify` opens a cached entry the same way.
 
 An entry of a whole library holds about 1.2 GB; a closure entry holds only its modules. Every
 `verify`, `workspace` and `watch` process that reads an entry in place records its use in the
