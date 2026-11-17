@@ -457,17 +457,16 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
 - `Tests/ReadOnlyArrayReferences.cs` inserts `readonly.` prefixes into compiled fixtures,
   checks returned and locally stored references, and proves that caller stores fail despite
   writable backing memory. It rejects a raw body with the prefix removed, whose bytes body decoding
-  refuses, separated prefixes and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
-  read access and rejection of an adapter that would remove the restriction, plus readonly
-  `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
-  addresses and rejected field stores through restricted references. It evaluates the readonly
-  rule of `ScalarFlowValid` at single sites, which rejects a writable address under a prefix, a
-  prefix with an operand and both sites of a branch to the address. Against a readonly and a
-  writable address body that both the windowed check and the check with no readonly window
-  accept, it shows that both refuse a forged flag or element type, a final `readonly.`, a second
-  `readonly.`, a `nop` or an `ldelem` after `readonly.`, and `ldelema` after `unaligned.`; that a
-  call after `readonly.` has no decoding; and that a branch into the prefixed address passes the
-  check with no window but not `PrefixEntryFree`. Both run in the `evidence` suite.
+  refuses, separated prefixes and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean`
+  also checks alias updates, read access and rejection of an adapter that would remove the
+  restriction, plus readonly `GetReference` results for nonempty, empty and out-of-extent views and
+  field loads, field addresses and rejected field stores through restricted references. It shows
+  that `ScalarFlowValid` rejects a writable address under a prefix and a prefix with an operand,
+  and leaves a branch into the prefixed address to `PrefixEntryFree`, which refuses it. Against a
+  readonly and a writable address body the check accepts, it shows that the check refuses a forged
+  flag or element type, a final `readonly.`, a second `readonly.`, a `nop` or an `ldelem` after
+  `readonly.`, and `ldelema` after `unaligned.`, and that a call after `readonly.` has no
+  decoding. Both run in the `evidence` suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
   initialization and copies. It rejects missing initialization assumptions, mutable fields,
