@@ -20,7 +20,7 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
 | `exportsprotected` | SDK-built protected static export, separately compiled derived caller and rehashed visibility mismatch rejection |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
-| `exportsresolution` | Same loaded files and changed loaded module |
+| `exportsresolution` | Same loaded files, changed loaded module and same-length caller artifact rewrite |
 | `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
 | `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
 | `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
@@ -32,7 +32,7 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and assertions |
-| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a chain of Top, App and library independently composes the table reader with its static-world premise |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt, with a private library cache that the first forced run meets empty and builds into, and the last meets holding the library and opens, tracing the open; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a chain of Top, App and library independently composes the table reader with its static-world premise |
 | `exportstransitive` | A chain of App, A and B, and a four-node diamond where A and C share B; full mode rechecks each selected export despite warm receipts, rejects changed deployment pins and cycles before building, rejects forged dependency composition, and detects B changing staged A before A builds |
 | `exportstransitiveoutcomes` | A chain of App, C, A and B independently preserves normal returns and the named exceptional outcome through three forwarders |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the six-argument discovery fixture |
@@ -46,7 +46,7 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 ### Case ledger
 
-- The base ledger has 49 cases: 22 core, 3 protected, 2 callback, 2 resolution and 20 full cases.
+- The base ledger has 50 cases: 22 core, 3 protected, 2 callback, 3 resolution and 20 full cases.
   Each partition rejects an omitted, repeated or unexpected completion.
 - The artifact-mode rejection runs after consumer requests that succeed, so it checks removal of
   a successful report that a request wrote.
@@ -56,11 +56,11 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   standalone and discovery partitions cannot enter it.
 - `exportsstatics`, `exportsfullstatics`, `exportstransitive`, `exportstransitiveoutcomes`,
   `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with
-  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 49
+  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 50
   base case IDs, and a standalone fixture cannot use an empty base completion ledger to claim
   coverage.
 - `exportsdiscovery` records one separate `discovery.fixture` completion after the child
-  succeeds; the child's behaviors are outside the 49 base cases. The partition builds the
+  succeeds; the child's behaviors are outside the 50 base cases. The partition builds the
   producer library and creates its proof packages and publication. The child builds, extracts
   and verifies its own caller and needs no baseline caller artifact or verified report. The
   partition runs no core caller verification, restrictions, callbacks or full cases.

@@ -207,6 +207,7 @@ partial class Program : IDisposable
     int extractionCacheHits;
     int proofCacheHits;
     int supportCacheHits;
+    int deepCacheHits;
     SortedDictionary<string, string>? certifiedModules;
 
     byte[]? receiptKey;
@@ -292,10 +293,14 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
 
+    /// <summary>The success cache keys this process has published, so its own entries are told from others'.</summary>
+    internal readonly List<string> publishedSuccess = [];
+
     // The cache only saves work: a full disk warns instead of failing a verified result.
     void PublishSuccess(string key, string source, string? family = null)
     {
         if (!UseSuccessCache) return;
+        lock (publishedSuccess) publishedSuccess.Add(key);
         try { PublishCertified(key, source, family); }
         catch (IOException error)
         {
@@ -2552,17 +2557,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 UseEntry(cached);
             }
+            // Every branch that opens a certified library without building it traces the open, timed from here.
+            var openStarted = DateTimeOffset.UtcNow;
+            var openElapsed = Stopwatch.StartNew();
+            void TraceOpen() => Trace("Opening certified Lean verification library", openStarted, library,
+                openElapsed.Elapsed, 0, "", [library]);
             // A supplied certified library is not a local cache, so --rebuild-library still uses it.
             if (!string.IsNullOrWhiteSpace(supplied))
             {
-                var openStarted = DateTimeOffset.UtcNow;
-                var openElapsed = Stopwatch.StartNew();
                 library = Path.GetFullPath(supplied);
                 manifest = SuppliedLibraryManifest(library, suppliedDigest, libraryKey, sources)
                     ?? throw new InvalidOperationException("Certified library identity or integrity mismatch");
                 certifiedFingerprintsSha = manifest.GetValueOrDefault(CertifiedFingerprintsName);
                 libraryBuild = "certified-artifact";
-                Trace("Opening certified Lean verification library", openStarted, library, openElapsed.Elapsed, 0, "", [library]);
+                TraceOpen();
             }
             else if (!fresh && CertifiedLocalLibrary(cached, libraryKey) &&
                 ReadManifest(cached) is { } cachedManifest && Same(sources, LibrarySources(cachedManifest)) &&
@@ -2573,6 +2581,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 library = cached;
                 manifest = cachedManifest;
                 libraryBuild = "cache";
+                TraceOpen();
             }
             else if (!fresh && DownloadReleasedLibrary(cached, libraryKey))
             {
@@ -2580,6 +2589,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 library = cached;
                 manifest = ReadManifest(cached) ?? throw new InvalidDataException("Missing downloaded library manifest");
                 libraryBuild = "release";
+                TraceOpen();
             }
             else if (!fresh && closureRoots is not null &&
                 ClosureLibrary(cacheRoot, libraryKey, sources, closureRoots) is { } closure)
@@ -2590,6 +2600,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 libraryStamps = closure.Stamps;
                 libraryBuild = closure.Built ? "closure" : "closure-cache";
                 publishedEntry = closure.Built;
+                if (!closure.Built) TraceOpen();
             }
             else
             {
@@ -4373,7 +4384,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         /// <summary>Each body is the image's bytes at the offset the section table maps its MethodDef RVA to.
         /// </summary>
         BodyBytes,
-        /// <summary>The carried table header, rows and heap entries are the image's bytes at their positions.
+        /// <summary>
+        /// Each carried metadata block's table header, Assembly row, table rows and heap entries are the image's,
+        /// with MethodDef RVAs zeroed, under one numbering of the #Strings and #Blob offsets per heap for the table
+        /// rows and another for the Assembly row. The identity, key token, corlib, links, #GUID, the Module table
+        /// and the RVAs of MethodDefs outside the evidence are not part of it.
         /// </summary>
         MetadataRows,
         /// <summary>Each platform type relied on is the value type, class or enum the extraction took it for.
@@ -4841,7 +4856,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             {
                 stage?.Invoke("deep checks");
                 deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
-                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"));
+                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"), extractedKey);
+                if (deep.Restored)
+                {
+                    deepCacheHits++;
+                    CacheProgress("certified deep checks: " + entry);
+                }
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next,
                     [.. deep.Modules.Where(module => module != "Extracted")
@@ -4984,7 +5004,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .. proofRestored ? Array.Empty<string>() : ["Proof"]];
             // Replaying every module from the extraction to the proof lets the audit read that environment without a
             // second import. ExtractedImports imports Extracted from outside the set, which a joint replay rejects.
-            string[] replay = unreplayed.Length == 0 || importModules.Length > 0 ? unreplayed :
+            // The audit imports restored deep modules, so a full replay could not give it a fused environment.
+            string[] replay = unreplayed.Length == 0 || importModules.Length > 0 ||
+                deep?.Restored == true ? unreplayed :
                 ["Extracted", .. selected.Where(module => !SelectionModules.IsSymbols(module)),
                     .. symbols ? ["ExtractedSymbols", .. selected.Where(SelectionModules.IsSymbols)]
                         : Array.Empty<string>(),
@@ -4998,7 +5020,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 if (deep.Requests.Any(request => request.Audit.name == theorem))
                     throw new InvalidOperationException(
                         "Proof theorem collides with a deep-check request: " + theorem);
-                replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                // Restored deep modules were replayed by the run that published them, in the same keyed environment.
+                if (!deep.Restored) replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
                 auditModules = [.. auditModules.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
                 proofAudits = [proofAudits[0], .. deep.Requests.Select(request => request.Audit)];
             }
@@ -5150,8 +5173,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             RequireImplementationImports(extraction);
             var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
                 deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
-                    new(bindingSourcesKey!, File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(),
-                        Sha(LeanExecutable))),
+                    deep!.Requests, new(bindingSourcesKey!,
+                        File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(), Sha(LeanExecutable))),
                 libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),
@@ -5162,9 +5185,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireDeepStable();
+            var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);
             if (!proofRestored && deep is not null) PublishProof();
             if (deep is not null && extractionPublication is not null)
                 PublishSuccess(extractedKey, extractionPublication);
+            if (deepPublication is not null) PublishSuccess(deep!.ResultKey!, deepPublication);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             completesLibrary = libraryModules is not null;
             standaloneCachePromotion = completesLibrary && deep is null && UseSuccessCache

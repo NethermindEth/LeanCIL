@@ -65,7 +65,6 @@ private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bo
   | .load, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual false)
   | .store, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual true) =>
     width == size && actual == alignment
-  | .arrayElement, .memory (.arrayAddress (.aggregate _ width) _)
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
   | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
   | .load, .memory (.marshalRead (.snapshot (.aggregate width)) _)

@@ -95,8 +95,10 @@ contents.array_load valid scalar bound, gives the element's address
 `step_ldelem_of_element` steps an integer `ldelem.*` from those two facts. A typed `ldelem` of
 an integer, enum, `bool` or `char` element steps to `arrayLoad` at the width its element type's
 shape gives, which `arrayLoad_of_element` rewrites from the same two facts, and
-`step_arrayAddress_of_element` steps `ldelema` from the address; `arrayElement_formed` forms
-that address, so a helper may return it. An index outside the array throws, which a
+`step_ldelema_of_element` steps an `ldelema` whose type the method's layouts give that element
+shape from the address, writable or read-only as a `readonly.` prefix records, and
+`arrayAddress_of_element` gives the same reference once it steps to `arrayAddress`;
+`arrayElement_formed` forms that address, so a helper may return it. An index outside the array throws, which a
 precondition bounding the index rules out.
 
 A loop indexing the array reads it the way a span loop does, through the storage span: the caller's

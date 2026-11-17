@@ -12,6 +12,7 @@ internal static class Reachability
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
+        InstructionPrefixes.ValidateEntry(method);
         MemoryPrefixes.Validate(method);
         TailCalls.ValidateStructure(method);
         var instructions = method.Body.Instructions;

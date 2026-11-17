@@ -2134,7 +2134,13 @@ partial class Program
                 Directory.CreateDirectory(deepRoot);
                 leanPath += Path.PathSeparator + deepRoot;
                 deep = BuildDeepSession(deepRoot, leanPath, extractedPaths[0],
-                    extractions[members[0]], matchedPins!, () => Stage(proceeding, "deep-check sources"));
+                    extractions[members[0]], matchedPins!, () => Stage(proceeding, "deep-check sources"),
+                    ConsumerDeepEnvironment());
+                if (deep.Restored)
+                {
+                    deepCacheHits++;
+                    CacheProgress("certified consumer deep checks: " + requests[members[0]].Theorem);
+                }
                 importDirectories = [.. importDirectories, deepRoot];
                 artifactSnapshots = [.. artifactSnapshots.Select(snapshot =>
                     (snapshot.Directory, Artifacts: DirectoryArtifacts(snapshot.Directory))),
@@ -2243,11 +2249,17 @@ partial class Program
             // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
             var extractionDependent = graph is null ? new HashSet<string>(StringComparer.Ordinal)
                 : DependentModules(graph, ["Extracted", "ExtractedSymbols"]);
-            var replayTargets = discovered.Where(module =>
-                !baseUnchanged || extractionDependent.Contains(module.Name) ||
-                (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
+            // A restored deep result was replayed against these Extracted bytes and certified library, which a
+            // package shadowing a CIL module would no longer import, so it is replayed again then.
+            HashSet<string> restoredDeep = deep is { Restored: true } && baseUnchanged
+                ? [.. deep.Modules.Where(module => module != "Extracted")] : [];
+            var replayTargets = discovered.Where(module => !restoredDeep.Contains(module.Name) &&
+                (!baseUnchanged || extractionDependent.Contains(module.Name) ||
+                    (!module.Certified && !portableSupport.Contains(module.Name))))
+                .Select(module => module.Name).ToArray();
             if (deep is not null)
-                replayTargets = [.. replayTargets.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                replayTargets = [.. replayTargets.Concat(deep.Modules.Where(module => !restoredDeep.Contains(module)))
+                    .Distinct(StringComparer.Ordinal)];
             Dictionary<int, AuditedOleans>? combinedAudits = null;
             bool jointReplayRejected = false;
             bool jointReplaySucceeded = false;
@@ -2553,7 +2565,7 @@ partial class Program
                 var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
                     requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i],
                     deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
-                        new(bindingSourcesKey!,
+                        deep!.Requests, new(bindingSourcesKey!,
                             File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
                             Sha(LeanExecutable))),
                     libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
@@ -2576,8 +2588,17 @@ partial class Program
                     Recheck([i]);
                     if (!Live(i)) continue;
                     RequireDeepStable();
-                    PublishSupport();
-                    RequireDeepStable();
+                    var deepStaging = Path.Combine(Path.GetTempPath(), "leancil-deep-" + Guid.NewGuid().ToString("N"));
+                    try
+                    {
+                        // Only a result replayed against the certified CIL modules may be restored without replay.
+                        var deepPublication = baseUnchanged ? StageDeepResult(deep, deepStaging) : null;
+                        Stage([i], "deep result publication");
+                        PublishSupport();
+                        RequireDeepStable();
+                        if (deepPublication is not null) PublishSuccess(deep.ResultKey!, deepPublication);
+                    }
+                    finally { if (Directory.Exists(deepStaging)) Directory.Delete(deepStaging, true); }
                 }
                 if (deep is null) PublishSuccess(proofKeys[i], receipt);
                 if (last[locations[i]] == i)

@@ -9,9 +9,11 @@ literal; the longer ones are split into 32-byte literals here to keep lines shor
 `bodyMatches` is irreducible, so the elaborator's `decide` refuses it at once, within a small
 heartbeat budget, and only kernel evaluation decides it. Fixtures that build their evidence with a
 function must use kernel evaluation too, since the elaborator would evaluate the builder by name
-without sharing. The cost rows at the end write literals as the extractor does, in numerals of at
-most 256 bytes, and bound how the heartbeats and time of elaborating one and the heartbeats of
-body-checking one grow with the number of bytes, and what elaborating one costs per byte.
+without sharing. The cost rows at the end write literals as the extractor does, one code joined
+from numerals of at most 256 bytes, and bound how the heartbeats and time of elaborating one and
+the heartbeats of body-checking one grow with the number of bytes, and what elaborating one costs
+per byte. Bodies of 5 to 20 KB whose numerals all end in the same eight bytes, and bodies of
+random operands, bound how a fold over the bytes and the body check grow per byte.
 -/
 
 namespace Tests.BodyLiteral
@@ -271,6 +273,10 @@ theorem other_full_name_is_rejected :
 
 /-! ## Cost of a byte literal -/
 
+/-- The fat header of a body with `Add`'s stack depth, no locals and `codeSize` bytes of code. -/
+def fatHeader (codeSize : Nat) : List Nat :=
+  [0x03, 0x30, 8, 0, codeSize % 256, codeSize / 256 % 256, codeSize / 65536 % 256, 0, 0, 0, 0, 0]
+
 /-- `Add`'s decoded method with its code replaced by `count` `nop`s and a `ret`. -/
 def nopMethod (count : Nat) : RawMethod :=
   { method0Original with
@@ -278,14 +284,55 @@ def nopMethod (count : Nat) : RawMethod :=
         { offset := offset, opcode := 0, operand := .none }) ++
       [{ offset := count, opcode := 42, operand := .none }] }
 
-/-- The bytes of `nopMethod count`: a fat header with `Add`'s stack depth and no locals. -/
+/-- The bytes of `nopMethod count`. -/
 def nopBody (count : Nat) : List Nat :=
-  let codeSize := count + 1
-  [0x03, 0x30, 8, 0, codeSize % 256, codeSize / 256 % 256, codeSize / 65536 % 256, 0] ++
-    [0, 0, 0, 0] ++ List.replicate count 0 ++ [0x2A]
+  fatHeader (count + 1) ++ List.replicate count 0 ++ [0x2A]
 
 /-- The most bytes the extractor writes in one numeral. -/
 def literalChunkBytes : Nat := 256
+
+/-- The bytes at the end of every numeral of a byte literal that the equal-tail bodies fill with
+    `nop`s: the kernel keys a numeral by its low 64 bits. -/
+def literalTailBytes : Nat := 8
+
+/-- The bytes of an `ldc.i4` and `pop` pair. -/
+def pairBytes : Nat := 6
+
+/-- The next value of a linear congruential generator below `2 ^ 31`, so an `ldc.i4` operand
+    is never negative. -/
+def nextSeed (seed : Nat) : Nat := (seed * 1103515245 + 12345) % 2 ^ 31
+
+/-- Code from byte `offset` of `codeSize`: pairs of an `ldc.i4` of a pseudo-random value
+    and a `pop`, `nop`s where no pair fits, and a final `ret`. With `equalTails` no pair
+    covers the last `literalTailBytes` bytes of a numeral of the body, so every numeral of the
+    body ends in the same bytes. -/
+def pairCode (equalTails : Bool) (codeSize : Nat) : Nat → Nat → Nat → List RawInstruction
+  | 0, _, _ => []
+  | fuel + 1, offset, seed =>
+    let position := ((fatHeader codeSize).length + offset) % literalChunkBytes
+    if codeSize ≤ offset + 1 then [{ offset := offset, opcode := 0x2A, operand := .none }]
+    else if offset + pairBytes < codeSize &&
+        (!equalTails || position + pairBytes ≤ literalChunkBytes - literalTailBytes) then
+      { offset := offset, opcode := 0x20, operand := .integer seed } ::
+        { offset := offset + 5, opcode := 0x26, operand := .none } ::
+          pairCode equalTails codeSize fuel (offset + pairBytes) (nextSeed seed)
+    else
+      { offset := offset, opcode := 0, operand := .none } ::
+        pairCode equalTails codeSize fuel (offset + 1) seed
+
+/-- `Add`'s decoded method with its code replaced by the `pairCode` of a body of `size`
+    bytes. -/
+def pairMethod (equalTails : Bool) (size : Nat) : RawMethod :=
+  let codeSize := size - (fatHeader 0).length
+  { method0Original with code := pairCode equalTails codeSize codeSize 0 1 }
+
+/-- The bytes of `pairMethod equalTails size`. -/
+def pairBody (equalTails : Bool) (size : Nat) : List Nat :=
+  let code := (pairMethod equalTails size).code
+  fatHeader (size - (fatHeader 0).length) ++ code.flatMap fun instruction =>
+    match instruction.operand with
+    | .integer value => instruction.opcode :: (List.range 4).map (value.toNat / 256 ^ · % 256)
+    | _ => [instruction.opcode]
 
 /-- `bytes` cut into consecutive pieces of `literalChunkBytes`, the last one shorter. -/
 partial def literalChunks : List Nat → List (List Nat)
@@ -293,17 +340,37 @@ partial def literalChunks : List Nat → List (List Nat)
   | bytes => bytes.take literalChunkBytes :: literalChunks (bytes.drop literalChunkBytes)
 
 open Lean in
-/-- `bytes` as the extractor writes them: `fixedBytes` literals of at most `literalChunkBytes`
-    bytes, joined by `++` nested to the right. -/
-def chunkedLiteral (bytes : List Nat) : MacroM Term := do
-  let chunks := (literalChunks bytes).map fun chunk =>
+/-- The code of `chunks` as the extractor writes it: one numeral, or the codes of the first half
+    of the chunks and of the rest joined by `Nat.lor` and `Nat.shiftLeft`. -/
+partial def joinedCode (chunks : List (List Nat)) : MacroM Term := do
+  match chunks with
+  | [chunk] =>
     let code := chunk.foldl (fun code byte => code * 256 + byte) 0
-    (chunk.length, Syntax.mkNumLit ("0x" ++ String.ofList (Nat.toDigits 16 code)))
-  match chunks.reverse with
-  | [] => `([])
-  | (count, code) :: earlier =>
-    earlier.foldlM (init := ← `(fixedBytes $(quote count) $code)) fun rest (count, code) =>
-      `(fixedBytes $(quote count) $code ++ $rest)
+    pure (Syntax.mkNumLit ("0x" ++ String.ofList (Nat.toDigits 16 code)))
+  | _ =>
+    let high := chunks.take (chunks.length / 2)
+    let low := chunks.drop (chunks.length / 2)
+    let lowBits := 8 * (low.map List.length).sum
+    `(Nat.lor (Nat.shiftLeft $(← joinedCode high) $(quote lowBits)) $(← joinedCode low))
+
+open Lean in
+/-- `bytes` as the extractor writes them: one `fixedBytes` literal whose code joins numerals of
+    at most `literalChunkBytes` bytes. -/
+def chunkedLiteral (bytes : List Nat) : MacroM Term := do
+  if bytes.isEmpty then `([]) else
+    `(fixedBytes $(quote bytes.length) $(← joinedCode (literalChunks bytes)))
+
+open Lean Elab Command Meta in
+/-- The heartbeats of the kernel deciding `claim`, a `Bool` equal to `true`. -/
+def kernelHeartbeats (claim : Term) : CommandElabM Nat := do
+  let statement ← liftTermElabM do
+    instantiateMVars (← Term.elabTermAndSynthesize claim (some (mkSort 0)))
+  let proof := mkApp2 (mkConst ``Eq.refl [1]) (mkConst ``Bool) (mkConst ``Bool.true)
+  let start ← IO.getNumHeartbeats
+  match Kernel.check (← getEnv) {} (Expr.letE `checked statement proof (.bvar 0) false) with
+  | .error error => throwKernelException error
+  | .ok _ => pure ()
+  return (← IO.getNumHeartbeats) - start
 
 /-- How much more a heartbeat cost may be at four times the bytes, as a numerator over 2: linear
     growth with headroom for measurement noise. -/
@@ -322,6 +389,13 @@ def timedRuns : Nat := 3
 
 /-- Elaboration time below which a size is not compared with the next: scheduler noise. -/
 def timeFloorNanos : Nat := 20000000
+
+/-- The sizes of the pair bodies, each twice the one before: 5, 10 and 20 KB. -/
+def pairBodySizes : List Nat := [5120, 10240, 20480]
+
+/-- The most a byte of a pair body may cost the kernel at twice the bytes, in percent of its cost
+    at the size before: a cost quadratic in the numerals doubles per byte. -/
+def pairGrowthPercent : Nat := 115
 
 open Lean Elab Command Meta in
 set_option maxHeartbeats 0 in
@@ -352,23 +426,41 @@ run_cmd do
       throwError "byte literal elaboration time grew faster than its bytes"
     previousHeartbeats := heartbeats
     previousNanos := nanos
-  let proof := mkApp2 (mkConst ``Eq.refl [1]) (mkConst ``Bool) (mkConst ``Bool.true)
   let mut previousCheck := 0
   for count in [128, 512, 2048] do
     let bytes := nopBody count
     let literal ← liftMacroM (chunkedLiteral bytes)
-    let statement ← liftTermElabM do
-      let claim ← `(bodyMatches { method0Body with bytes := $literal } (nopMethod $(quote count))
-        [] = true)
-      instantiateMVars (← Term.elabTermAndSynthesize claim (some (mkSort 0)))
-    let start ← IO.getNumHeartbeats
-    match Kernel.check (← getEnv) {} (Expr.letE `checked statement proof (.bvar 0) false) with
-    | .error error => throwKernelException error
-    | .ok _ => pure ()
-    let check := (← IO.getNumHeartbeats) - start
+    let check ← kernelHeartbeats (← `(bodyMatches { method0Body with bytes := $literal }
+      (nopMethod $(quote count)) [] = true))
     logInfo m!"body check of a byte literal: {bytes.length} bytes, {check} heartbeats"
     if previousCheck != 0 && check * 2 > previousCheck * growthBound then
       throwError "the body check of a byte literal grew faster than its bytes"
     previousCheck := check
+  -- Numerals with equal last bytes collide in the kernel's caches, so a body whose numerals all
+  -- end alike costs a comparison per pair of them unless its code is one joined term.
+  for equalTails in [true, false] do
+    let kind := if equalTails then "equal-tail" else "random"
+    let mut previousFold := 0
+    let mut previousBody := 0
+    let mut previousSize := 0
+    for size in pairBodySizes do
+      let bytes := pairBody equalTails size
+      let literal ← liftMacroM (chunkedLiteral bytes)
+      let fold ← kernelHeartbeats
+        (← `((List.foldl (· + ·) 0 $literal == $(quote bytes.sum)) = true))
+      let body ← kernelHeartbeats (← `(bodyMatches { method0Body with bytes := $literal }
+        (pairMethod $(quote equalTails) $(quote size)) [] = true))
+      logInfo m!"{kind} byte literal: {bytes.length} bytes, fold {fold} and body check {body} \
+        heartbeats"
+      if previousSize != 0 &&
+          fold * previousSize * 100 > previousFold * size * pairGrowthPercent then
+        throwError "the fold of a byte literal with {kind} numerals grew faster than its bytes"
+      if previousSize != 0 &&
+          body * previousSize * 100 > previousBody * size * pairGrowthPercent then
+        throwError "the body check of a byte literal with {kind} numerals grew faster than its \
+          bytes"
+      previousFold := fold
+      previousBody := body
+      previousSize := size
 
 end Tests.BodyLiteral

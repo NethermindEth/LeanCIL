@@ -171,7 +171,7 @@ example : [CIL.MemoryOp.observeView .spanEmpty, .binaryRead 4 false false false,
     .zeroGuard .negative 32 true, .comparisonGuard .greaterThan 32 true].all
       CIL.MemoryOp.callReached := rfl
 example : [CIL.MemoryOp.copyBlock 1, .initBlock 1, .load128, .load256, .load512, .store128,
-    .store256, .store512, .arrayAddress element, .stringLiteral ""].any
+    .store256, .store512, .stringLiteral ""].any
       CIL.MemoryOp.callReached = false := rfl
 
 

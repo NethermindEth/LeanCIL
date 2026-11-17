@@ -199,6 +199,10 @@ inductive Instruction where
   /-- `stelem` of the declared element type `element`: a store into an element of the storage
       the method's layouts give that type. -/
   | stelem_any (element : Extraction.TypeExpr)
+  /-- `ldelema` of the declared element type `element`: the address of an element of the
+      storage the method's layouts give that type, read-only when `readOnly` records a
+      `readonly.` prefix. -/
+  | ldelema (element : Extraction.TypeExpr) (readOnly : Bool)
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)

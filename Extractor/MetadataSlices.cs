@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
+using System.Text;
 using Mono.Cecil;
 using MemberReference = Mono.Cecil.MemberReference;
 using TypeReference = Mono.Cecil.TypeReference;
@@ -90,19 +91,38 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
     const int LiteralChunkBytes = 256;
 
     /// <summary>
-    /// A Lean byte list as <c>CIL.Extraction.fixedBytes</c> literals of at most <see cref="LiteralChunkBytes"/> bytes,
-    /// each its length and one big-endian hexadecimal numeral, joined by <c>++</c>. The elaborator reads one numeral
-    /// where a list literal costs a numeral and a constructor per byte; the qualified name resolves wherever the text
-    /// is pasted.
+    /// A Lean byte list as one <c>CIL.Extraction.fixedBytes</c> literal: its length and its big-endian code, as
+    /// <see cref="AppendCode"/> writes it. The elaborator reads numerals where a list literal costs a numeral and a
+    /// constructor per byte; the qualified names resolve wherever the text is pasted.
     /// </summary>
     internal static string Bytes(IEnumerable<byte> bytes)
     {
         var data = bytes.ToArray();
         if (data.Length == 0) return "[]";
-        var chunks = data.Chunk(LiteralChunkBytes)
-            .Select(chunk => $"CIL.Extraction.fixedBytes {chunk.Length} 0x{Convert.ToHexString(chunk)}").ToArray();
-        // `++` associates to the left, which copies every prefix again; nesting to the right copies each chunk once.
-        return "(" + string.Join(" ++ (", chunks) + new string(')', chunks.Length);
+        var text = new StringBuilder($"(CIL.Extraction.fixedBytes {data.Length} ");
+        AppendCode(text, data);
+        return text.Append(')').ToString();
+    }
+
+    /// <summary>
+    /// The big-endian code of <paramref name="data"/>: one hexadecimal numeral of at most
+    /// <see cref="LiteralChunkBytes"/> bytes, or the codes of its first half of numerals and of the rest joined by
+    /// <c>Nat.lor</c> and <c>Nat.shiftLeft</c>. One joined term keeps numerals with equal low bytes from colliding in
+    /// the kernel's caches, which hash a numeral by its low 64 bits.
+    /// </summary>
+    static void AppendCode(StringBuilder text, ReadOnlySpan<byte> data)
+    {
+        if (data.Length <= LiteralChunkBytes)
+        {
+            text.Append("0x").Append(Convert.ToHexString(data));
+            return;
+        }
+        var highBytes = (data.Length + LiteralChunkBytes - 1) / LiteralChunkBytes / 2 * LiteralChunkBytes;
+        text.Append("(Nat.lor (Nat.shiftLeft ");
+        AppendCode(text, data[..highBytes]);
+        text.Append(CultureInfo.InvariantCulture, $" {8 * (data.Length - highBytes)}) ");
+        AppendCode(text, data[highBytes..]);
+        text.Append(')');
     }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>

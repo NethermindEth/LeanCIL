@@ -101,13 +101,13 @@ theorem interior_before_end :
 
 /-- Pointer subtraction cannot be certified as scalar addition. -/
 theorem changed_subtraction_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.native, .reference] .add = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.native, .reference] .add = false :=
   by decide +kernel
 #print axioms changed_subtraction_rejected
 
 /-- A difference must retain the exact raw subtraction operation. -/
 theorem difference_encoding :
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .reference] .sub = true :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.reference, .reference] .sub = true :=
   by decide +kernel
 #print axioms difference_encoding
 
@@ -148,7 +148,7 @@ theorem identical_position_not_less :
 
 /-- Signed ordering cannot be certified from managed-reference operand kinds. -/
 theorem signed_order_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 65028, .none⟩ [.reference, .reference] .clt = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 65028, .none⟩ [.reference, .reference] .clt = false :=
   by decide +kernel
 #print axioms signed_order_rejected
 /-- Expired storage cannot participate in a pointer difference. -/
@@ -161,7 +161,7 @@ theorem expired_difference_rejected :
 
 /-- Integer-minus-pointer is not a pointer operation. -/
 theorem reversed_operands_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .native] .sub = false :=
+    CIL.Extraction.scalarOpMatches none ⟨0, 89, .none⟩ [.reference, .native] .sub = false :=
   by decide +kernel
 #print axioms reversed_operands_rejected
 

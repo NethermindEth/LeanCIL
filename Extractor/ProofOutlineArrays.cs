@@ -53,8 +53,8 @@ internal static partial class ProofOutline
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
             extraction.Emitted[index].Frame.HasNoLocals && ops is
                 [Arg { Index: 0 }, Arg { Index: 1 },
-                    Memory { Operation: ArrayAddress { ReadOnly: false } address }, Return] &&
-            address.Element == element
+                    ElementAddress { ReadOnly: false } address, Return] &&
+            address.Storage == element
             ? method : null;
     }
 
@@ -133,7 +133,7 @@ internal static partial class ProofOutline
         lean.Line("  rintro ⟨values, index⟩ initial ⟨valid, typed, elements, contents, bound⟩");
         lean.Line("  obtain ⟨item, found, _⟩ := contents.array_load valid (by decide) bound");
         lean.Line("  refine MethodContract.Holds.intro initial item ?_ (Confined.refl _ _) ⟨rfl, found⟩");
-        lean.Line("  cil_checked_steps [step_arrayAddress_of_element (index := .i32 index) typed rfl found, " +
+        lean.Line("  cil_checked_steps [arrayAddress_of_element true (index := .i32 index) typed rfl found, " +
             "valid,");
         lean.Line("    arrayElement_formed found, leaveFrame]");
         lean.Line();

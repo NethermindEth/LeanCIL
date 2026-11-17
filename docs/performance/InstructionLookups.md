@@ -63,6 +63,15 @@ theorem only assembles the conjuncts' theorems, so it costs about 260,000 heartb
 length; a conjunct stated through another term than `CIL.Extraction.MethodEvidenceValid` states
 makes the elaborator reduce the whole decoded body, about 390,000 heartbeats per instruction.
 
+The suite also measures the body obligation of one method that passes 125, 500 and 1,000 distinct
+string literals to another method, less the same file with the proof left open, per instruction of
+the method's 2n + 2. A body over 256 bytes is one `CIL.Extraction.fixedBytes` literal whose code
+joins numerals of at most 256 bytes, and the check costs about 88,900, 92,700 and 99,800
+heartbeats per instruction. The suite fails when the cost per instruction is more than 1.1 times
+the cost at the size before. The kernel's caches hash a numeral by its low 64 bits, so numerals
+with equal last bytes collide there: the same bodies written as separate numerals joined by `++`
+cost about 89,600, 136,300 and 201,500 heartbeats per instruction.
+
 The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
 characters long and differ only in their last character, less the same statement closed with
 `sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and
@@ -122,11 +131,24 @@ size to the next. Run this row alone with
 
 The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
 and 512 array element addresses, each followed by a branch, with and without a `readonly.`
-prefix, less the heartbeats of stating the same certificate. It fails when the cost per address
+prefix, less the heartbeats of stating the same certificate. Each instruction of these bodies, as
+of the local bodies whose `ScalarFlowValid` is checked below, carries the byte offset extraction
+writes for it. It fails when the cost per address
 at 256 or 512 exceeds 1.15 times the cost at 128. The readonly rule reads neighbouring
 instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, both built once
-per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
+per body, and measures 1.03 for plain and 1.06 for prefixed addresses. A rule that scans the body
 at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
+
+It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
+bodies of 500, 2,000 and 8,000 instructions, whose segments each hold a `readonly.` prefix, its
+`ldelema`, a `pop` and a branch to the prefix of the next segment, and decides the readonly rule
+at every pc of the same body. It fails when the cost per instruction of either at 2,000 or 8,000
+exceeds 1.25 times the cost at the size before, or when the prefix rule costs more than the
+readonly rule at any size. The prefix rule tests bits of a mask of the branch destinations built
+in one pass and costs about 1,380 heartbeats per instruction at every size. The readonly rule,
+whose `Std.TreeSet` of destinations costs the logarithm of the body to build and to read, costs
+about 15,900, 19,300 and 23,100. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
 
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
@@ -136,8 +158,8 @@ address and are consumed by `calli`, which makes each a pointer local. For the p
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
 `FlowIndex` and pointer locals from a `Std.TreeSet`, built once per body, as does the closed
-argument storage. They measure 1.01 for loaded, 1.12 for addressed and 1.08 for pointer locals,
-and 1.20 for the closed argument storage, whose set lookups cost the logarithm of the locals.
+argument storage. They measure 1.02 for loaded, 1.02 for addressed and 1.07 for pointer locals,
+and 1.17 for the closed argument storage, whose set lookups cost the logarithm of the locals.
 Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
 and 2.33.
 

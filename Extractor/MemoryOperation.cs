@@ -28,15 +28,6 @@ internal sealed record OtherMemory : MemoryOperation
 }
 
 /// <summary>
-/// The address of an array element. <paramref name="ReadOnly"/> says the address follows a readonly prefix, which
-/// the term spells with a trailing flag.
-/// </summary>
-internal sealed record ArrayAddress(Arrays.Element Element, bool ReadOnly) : MemoryOperation
-{
-    internal override string ToLean() => $"(.arrayAddress {Element.Expression}" + (ReadOnly ? " false)" : ")");
-}
-
-/// <summary>
 /// The pointer addition of a reference and an offset scaled by <paramref name="Stride"/>. A negative stride is
 /// its two's complement.
 /// </summary>

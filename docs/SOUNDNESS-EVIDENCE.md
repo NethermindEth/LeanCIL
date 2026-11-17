@@ -35,9 +35,12 @@ validated layouts.
 
 Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
 `ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes, and so must
-each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `stelem`, `ldelem.ref` and
-`stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed access takes its
-element's width from the element shape of the method's checked layouts. Each `ldobj`
+each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `stelem`, `ldelema`,
+`ldelem.ref` and `stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed
+access or element address takes its element's width from the element shape of the method's checked
+layouts. An `ldelema` decodes read-only exactly when `readonly.` precedes it, and `readonly.`
+decodes to `nop`; no instruction but `ldelema` decodes after `readonly.`, and the scalar check also
+refuses a translated instruction there (`readOnlyDecodedMatches`). Each `ldobj`
 and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
 the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
@@ -72,7 +75,11 @@ against the metadata it carries ([Metadata binding](#metadata-binding)):
 - A branch must land on the first byte of an instruction inside the body, and its operand
   becomes that instruction's index. A target outside the body, inside an instruction or on the
   instruction after a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`, `no.`,
-  `readonly.`) is an error.
+  `readonly.`) is an error, whether or not any path reaches the branch. Decoded code therefore
+  satisfies `PrefixEntryFree` over instruction indices (`checkBody_prefixEntryFree`), and so
+  does the instantiated code of every method whose evidence is valid
+  (`MethodEvidenceValid.prefixEntryFree`). The extractor refuses such a body with the blocker
+  "Branch enters the instruction after a prefix".
 - A token operand is read from the four bytes in the body, looked up in the table, and must
   belong to a metadata table the opcode accepts. A token has one entry, and a field access names
   a static or instance field as its opcode requires.
@@ -116,11 +123,12 @@ assembly's identity with its pin, lists the identity of every pinned assembly (`
 `Extracted.assemblies`) and names the identity each of its slices spells.
 
 Every byte list of this evidence (body bytes, rows, heap entries, header bytes and UTF-8 names) is written
-as `CIL.Extraction.fixedBytes count 0x...` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
-and one hexadecimal numeral holding the bytes big-endian, with a list longer than 256 bytes written as such
-literals of at most 256 bytes joined by `++`. Elaborating a numeral costs a few allocations, where a list
-literal costs a numeral and a constructor per byte; the kernel computes the list when a check reads it,
-splitting each numeral in halves down to words of eight bytes, and the checks see the same list values.
+as `CIL.Extraction.fixedBytes count code` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
+and one number holding the bytes big-endian. The code of a list of at most 256 bytes is one hexadecimal numeral,
+and a longer list's code joins numerals of at most 256 bytes with `Nat.lor` and `Nat.shiftLeft`. Elaborating a
+numeral costs a few allocations, where a list literal costs a numeral and a constructor per byte; the kernel
+computes the list when a check reads it, splitting the code in halves down to words of eight bytes, and the
+checks see the same list values.
 
 ### Names tied to bytes by equations
 
@@ -240,8 +248,11 @@ instance fields), public key tokens (the hash of a key is not computed in the ke
 implementation, interface and closure digests that a generic import identity carries (no check
 recomputes them from the library image), imported implementation definitions, raw layout
 content, dispatch catalog completeness, static data bytes and generic parameter constraints.
-[Deep verification](CLI.md#deep-verification) does not reconfirm public key tokens or import
-identities either: it reports both as not covered. `check` hashes each assembly and regenerates
+[Deep verification](CLI.md#deep-verification) reconfirms each body at its RVA and each carried
+row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets per heap and with
+MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
+`Module` table and the RVAs of MethodDefs outside the evidence are not part of that check. It does
+not reconfirm public key tokens or import identities: it reports both as not covered. `check` hashes each assembly and regenerates
 the extraction, so the rows are a deterministic function of hashed inputs.
 ### Folded instruction patterns
 

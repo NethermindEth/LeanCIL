@@ -84,7 +84,10 @@ if (seen.Count != methods.Count)
 
 File.WriteAllText(Path.Combine(directory, "methods.json"),
     JsonSerializer.Serialize(new { skipped, methods = results }, new JsonSerializerOptions { WriteIndented = true }));
-string[] rows = [$"skipped\t{skipped}", .. results.SelectMany(Rows).Order(StringComparer.Ordinal)];
+// A corpus with no admitted method would pass with nothing inspected.
+if (results.Count == 0)
+    throw new InvalidDataException("The admission report admits no corpus method, so no body was inspected.");
+string[] rows = [.. results.SelectMany(Rows).Order(StringComparer.Ordinal)];
 if (update) File.WriteAllText(baselinePath, string.Concat(rows.Select(row => row + "\n")));
 var baseline = File.ReadAllLines(baselinePath).Where(line => line.Length != 0).ToArray();
 var removed = baseline.Except(rows, StringComparer.Ordinal).ToArray();

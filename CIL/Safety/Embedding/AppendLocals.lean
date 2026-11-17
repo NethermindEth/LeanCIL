@@ -1367,6 +1367,17 @@ theorem step_appendLocals_stelem_any (element : CIL.Extraction.TypeExpr) :
 
 #print axioms step_appendLocals_stelem_any
 
+/-- An `ldelema` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldelema (element : CIL.Extraction.TypeExpr) (readOnly : Bool) :
+    StepAppendLocals (.ldelema element readOnly) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+
+#print axioms step_appendLocals_ldelema
+
 /-- `ldtoken` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldtoken (operand : CIL.TokenOperand) :
     StepAppendLocals (.ldtoken operand) := by
@@ -1472,6 +1483,7 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case newarr element => exact step_appendLocals_newarr element
     case ldelem_any element => exact step_appendLocals_ldelem_any element
     case stelem_any element => exact step_appendLocals_stelem_any element
+    case ldelema element readOnly => exact step_appendLocals_ldelema element readOnly
     case nop =>
       exact step_appendLocals_nop
     case neg =>

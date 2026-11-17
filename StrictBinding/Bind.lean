@@ -63,6 +63,21 @@ def located (prepared : List PreparedImage) (identity : String) :
   | some image => pure image
   | none => throw (.unpinned identity)
 
+/-- The image `located` selects is one of the prepared images. -/
+theorem mem_of_located {prepared : List PreparedImage} {identity : String}
+    {image : PreparedImage} (found : located prepared identity = .ok image) :
+    image ∈ prepared := by
+  unfold located at found
+  cases selected : prepared.find? (·.identity == identity) with
+  | none => simp [selected] at found
+  | some selectedImage =>
+    have same : selectedImage = image := by
+      simpa [selected, pure, Except.pure] using found
+    subst image
+    exact List.mem_of_find?_eq_some selected
+
+#print axioms mem_of_located
+
 /-- A claim that the bytes of a method body, its header and its code, belong to the assembly
     `identity`, as the body of the method that `token` names. -/
 structure BodyClaim where

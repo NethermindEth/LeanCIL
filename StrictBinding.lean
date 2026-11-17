@@ -10,6 +10,8 @@ import StrictBinding.Evidence
 import StrictBinding.Reads
 import StrictBinding.Rows
 import StrictBinding.Slice
+import StrictBinding.Sorted
+import StrictBinding.TypeDefs
 
 /-!
 # Deep verification

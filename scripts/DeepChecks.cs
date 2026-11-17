@@ -2,8 +2,8 @@ using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 
-// Deep verification checks that the method bodies of an extraction are the bytes of
-// assembly files whose SHA-256 digests the caller states.
+// Deep verification checks that the method bodies and carried metadata rows of an extraction are
+// those of assembly files whose SHA-256 digests the caller states.
 partial class Program
 {
     /// <summary>One call's retained inputs and attempt, available to its caller after a failure.</summary>
@@ -42,19 +42,19 @@ partial class Program
     sealed class DeepCheckAttempt
     {
         readonly FailureReports.BindingFailureDigest digests;
-        readonly (string Identity, string Digest)[] images;
-        readonly HashSet<string> imageDigests;
-        readonly Dictionary<string, string> rejectedImages = new(StringComparer.Ordinal);
+        readonly (string Identity, Sha256Digest Digest)[] images;
+        readonly HashSet<Sha256Digest> imageDigests;
+        readonly Dictionary<Sha256Digest, string> rejectedImages = [];
         readonly Dictionary<BindingFact, string> rejectedFacts = [];
         internal string IdentitySha256 { get; }
 
         internal DeepCheckAttempt(DeepCheckInputs inputs, string identitySha256,
             IReadOnlyList<DeepCheckInputs.Pin> pins)
         {
-            digests = new(inputs.Path, inputs.Digest);
+            digests = new(inputs.Path, inputs.Digest.ToString());
             IdentitySha256 = identitySha256;
             images = [.. pins.Select(pin => (pin.Identity, pin.Image.Digest))];
-            imageDigests = images.Select(image => image.Digest).ToHashSet(StringComparer.Ordinal);
+            imageDigests = [.. images.Select(image => image.Digest)];
         }
 
         internal void RequireIdentity(ExtractionIdentity identity)
@@ -64,7 +64,7 @@ partial class Program
                 throw new InvalidDataException("Deep-check extraction identity changed.");
         }
 
-        internal void RejectImage(string digest, string reason)
+        internal void RejectImage(Sha256Digest digest, string reason)
         {
             if (!imageDigests.Contains(digest)) throw new ArgumentException("Unknown deep-check image.");
             ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -84,7 +84,8 @@ partial class Program
             var incomplete = "verification did not complete: " + stage +
                 (string.IsNullOrWhiteSpace(diagnostic) ? "" : ": " + diagnostic);
             return new(digests,
-                [.. images.Select(image => new FailureReports.BindingFailureImage(image.Identity, image.Digest,
+                [.. images.Select(image => new FailureReports.BindingFailureImage(image.Identity,
+                    image.Digest.ToString(),
                     rejectedImages.ContainsKey(image.Digest) ? FailureReports.BindingFailureStatus.Failed
                         : FailureReports.BindingFailureStatus.NotCovered,
                     rejectedImages.GetValueOrDefault(image.Digest) ?? incomplete))],
@@ -100,14 +101,14 @@ partial class Program
     abstract record BindingSubject
     {
         internal sealed record Fact(BindingFact Value) : BindingSubject;
-        internal sealed record Image(string Digest) : BindingSubject;
+        internal sealed record Image(Sha256Digest Digest) : BindingSubject;
     }
 
     /// <summary>An assembly file the extraction read, with the digest the caller must confirm.</summary>
-    sealed record BindingImagePin(string Identity, string Sha256, byte[] Bytes)
+    sealed record BindingImagePin(string Identity, Sha256Digest Digest, byte[] Bytes)
     {
         /// <summary>The generated module that holds the file's bytes, named by its full digest.</summary>
-        internal string Module => "BindingAudit.I" + Sha256;
+        internal string Module => "BindingAudit.I" + Digest;
 
         internal string Theorem => Module + ".digest";
     }
@@ -115,10 +116,14 @@ partial class Program
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
     sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods);
 
-    /// <summary>Artifacts and requests that must join the caller's extraction and proof audit.</summary>
+    /// <summary>
+    /// Artifacts and requests that must join the caller's extraction and proof audit. A contribution with a result
+    /// key may be published once the run succeeds; a restored one holds artifacts an earlier run replayed.
+    /// </summary>
     sealed record DeepSessionContribution(string[] Modules, BindingTargets Targets,
         SortedDictionary<string, string> Artifacts, SortedDictionary<string, string> Hashes,
-        SortedDictionary<string, string> SourceHashes, string SourceDirectory)
+        SortedDictionary<string, string> SourceHashes, string SourceDirectory, string? ResultKey = null,
+        bool Restored = false)
     {
         internal BindingRequest[] Requests => Targets.Requests;
 
@@ -191,11 +196,18 @@ partial class Program
             .Select(path => (path, path)));
 
     /// <summary>Hashes the exact compiled module families, enumerating each containing directory once.</summary>
-    static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts)
+    static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts) =>
+        HashFiles(ModuleFamilyParts(artifacts).Select(path => (path, path)));
+
+    /// <summary>
+    /// Every part of each compiled module family: the module's `.olean` and each file beside it named by that
+    /// file and a further extension. A family whose module file is missing is refused.
+    /// </summary>
+    static List<string> ModuleFamilyParts(IEnumerable<string> artifacts)
     {
         var families = artifacts.Select(Path.GetFullPath)
             .GroupBy(artifact => Path.GetDirectoryName(artifact)!, LocationComparer);
-        List<(string Name, string Path)> files = [];
+        List<string> files = [];
         foreach (var family in families)
         {
             var expected = family.ToHashSet(LocationComparer);
@@ -211,21 +223,26 @@ partial class Program
                 var end = marker + ".olean".Length;
                 if ((end == filename.Length || filename[end] == '.') &&
                     expected.Contains(Path.Combine(family.Key, filename[..end])))
-                    files.Add((path, path));
+                    files.Add(path);
             }
         }
-        return HashFiles(files);
+        return files;
     }
 
-    /// <summary>Builds deep modules against the caller's existing extraction in its verification session.</summary>
+    /// <summary>
+    /// Builds deep modules against the caller's existing extraction in its verification session. Given the key of
+    /// the certified environment and extraction, restores modules an earlier successful run built and replayed for
+    /// the same generated sources instead.
+    /// </summary>
     DeepSessionContribution BuildDeepSession(string session, string leanPath, string extractedOlean,
-        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins, Action? sourcesReady = null)
+        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins, Action? sourcesReady = null,
+        string? environment = null)
     {
         session = Path.GetFullPath(session);
         extractedOlean = Path.GetFullPath(extractedOlean);
         if (!File.Exists(extractedOlean)) throw new FileNotFoundException("Missing extraction module", extractedOlean);
         var extractedHashes = BindingArtifactHashes([extractedOlean]);
-        Dictionary<string, byte[]> bytes = new(StringComparer.Ordinal);
+        Dictionary<Sha256Digest, byte[]> bytes = [];
         var pins = matchedPins.Select(pin =>
         {
             if (!bytes.TryGetValue(pin.Image.Digest, out var snapshot))
@@ -242,7 +259,17 @@ partial class Program
         WriteBindingSources(plan);
         sourcesReady?.Invoke();
         var sources = BindingSourceHashes(directory);
-        var failures = BuildBindingModules(plan, leanPath);
+        // Replay is the only kernel check of the generated modules, so a restored result must bind every import.
+        var imports = environment is null ? null : DeepImportClosure(session, leanPath, directory);
+        deepImports = imports;
+        var resultKey = environment is null || imports is null ? null : DeepResultKey(environment,
+            bindingSourcesKey ?? throw new InvalidOperationException("StrictBinding has not been prepared"),
+            bindingPreparation?.Toolchain ??
+                throw new InvalidOperationException("StrictBinding has not been prepared"),
+            imports, Relative(directory, sources), pins, targets.Requests);
+        var restored = resultKey is not null && RestoreSuccess(resultKey, session);
+        Dictionary<string, string> failures = restored ? new(StringComparer.Ordinal)
+            : BuildBindingModules(plan, leanPath);
         if (failures.Count != 0)
             throw new InvalidOperationException("Deep-check module build failed: " +
                 string.Join("; ", failures.Select(pair => pair.Key + ": " + pair.Value)));
@@ -257,48 +284,255 @@ partial class Program
         if (!Same(extractedHashes, BindingArtifactHashes([extractedOlean])))
             throw new InvalidDataException("Deep-check artifact changed: " + extractedOlean);
         DeepSessionContribution contribution = new(modules, targets, artifacts,
-            BindingArtifactHashes(artifacts.Values), sources, directory);
+            BindingArtifactHashes(artifacts.Values), sources, directory, resultKey, restored);
         contribution.RequireStable();
         return contribution;
+
+        static SortedDictionary<string, string> Relative(string root, SortedDictionary<string, string> hashes) =>
+            new(hashes.ToDictionary(pair => Path.GetRelativePath(root, pair.Key).Replace('\\', '/'),
+                pair => pair.Value), StringComparer.Ordinal);
     }
 
-    /// <summary>The facts established by a complete, stable joint deep audit.</summary>
-    static BindingSection DeepBindingSection(DeepCheckInputs inputs, IReadOnlyList<DeepCheckInputs.Pin> pins,
-        StatementSources sources)
+    /// <summary>
+    /// The key of a deep result: the certified environment and extraction it was checked in, the prepared
+    /// StrictBinding sources and toolchain, the compiled modules the generated modules import transitively, and
+    /// the generated sources, pins and requests. The generated sources hold the image bytes, identities and page size.
+    /// </summary>
+    static string DeepResultKey(string environment, string bindingSources, string toolchain,
+        SortedDictionary<string, string> imports, SortedDictionary<string, string> sources,
+        IReadOnlyList<BindingImagePin> pins, IReadOnlyList<BindingRequest> requests) =>
+        ContentKey(JsonSerializer.Serialize(new
+        {
+            format = "deep-result-v1",
+            environment,
+            bindingSources,
+            toolchain,
+            imports,
+            sources,
+            pins = pins.Select(pin => new { identity = pin.Identity, digest = pin.Digest.ToString() }),
+            requests = requests.Select(request => new
+            {
+                module = request.Module,
+                audit = request.Audit,
+                fact = (request.Subject as BindingSubject.Fact)?.Value,
+                image = (request.Subject as BindingSubject.Image)?.Digest.ToString()
+            })
+        }));
+
+    /// <summary>
+    /// The environment a consumer's deep modules build in, beyond the compiled imports their key binds: the
+    /// verifier and the certified library.
+    /// </summary>
+    string ConsumerDeepEnvironment() => ContentKey(JsonSerializer.Serialize(new
     {
-        var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet(StringComparer.Ordinal);
+        format = "consumer-deep-environment-v2",
+        policy = VerificationPolicy,
+        library = libraryKey ?? throw new InvalidOperationException("The certified library is not selected")
+    }));
+
+    /// <summary>The compiled import closure the key of the last keyed deep session bound.</summary>
+    SortedDictionary<string, string>? deepImports;
+
+    /// <summary>
+    /// The work the last deep import closure did: header-reader launches, compiled headers read, module parts
+    /// hashed and the bytes those parts hold.
+    /// </summary>
+    internal readonly record struct DeepClosureWork(int Launches, int Headers, int Hashed, long HashedBytes);
+
+    DeepClosureWork deepClosureWork;
+
+    // The library guard holds certified files to the bytes read here, so each is read once per process.
+    readonly Dictionary<string, string[]> certifiedHeaders = new(LocationComparer);
+    readonly Dictionary<string, string> certifiedPartHashes = new(LocationComparer);
+    readonly Dictionary<string, string[]> generatedImports = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The content hash of every compiled module part the modules generated below `directory` import,
+    /// transitively, by its name below its search root. Each import resolves as Lean resolves it: to the first
+    /// root of `leanPath` that holds it, then to the toolchain, whose modules the toolchain key binds.
+    /// </summary>
+    SortedDictionary<string, string> DeepImportClosure(string session, string leanPath, string directory)
+    {
+        var toolchain = Path.GetFullPath(Path.Combine(Toolchain, "lib", "lean"));
+        var certified = library is null ? null : Path.GetFullPath(Path.Combine(library, ".lake/build/lib/lean"));
+        if (certified is not null) RequireUnchangedLibrary();
+        bool Certified(string root) => certified is not null && LocationComparer.Equals(root, certified);
+        Dictionary<string, (string Root, string Path)> compiled = new(StringComparer.Ordinal);
+        foreach (var root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(Path.GetFullPath)
+            .Where(root => !LocationComparer.Equals(root, toolchain) && Directory.Exists(root)))
+            foreach (var path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
+                compiled.TryAdd(ModuleName(Path.GetRelativePath(root, path).Replace('\\', '/')), (root, path));
+        int launches = 0;
+        var generated = Directory.EnumerateFiles(directory, "*.lean", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.ChangeExtension(Path.GetRelativePath(session, path), null)
+                .Replace(Path.DirectorySeparatorChar, '.'), File.ReadAllText, StringComparer.Ordinal);
+        var unparsed = generated.Where(pair => !generatedImports.ContainsKey(ContentKey(pair.Value))).ToArray();
+        if (unparsed.Length != 0)
+        {
+            launches++;
+            var parsed = ContractModuleImports(session, new(unparsed.ToDictionary(), StringComparer.Ordinal));
+            foreach (var (module, source) in unparsed) generatedImports[ContentKey(source)] = parsed[module];
+        }
+        // One launch reads every header this process has not read from the certified library.
+        var unread = compiled
+            .Where(pair => !Certified(pair.Value.Root) || !certifiedHeaders.ContainsKey(pair.Value.Path))
+            .ToDictionary(pair => pair.Key, pair => pair.Value.Path);
+        var read = unread.Count == 0 ? [] : ConsumerModuleImports(session, unread);
+        if (unread.Count != 0) launches++;
+        foreach (var (module, imports) in read)
+            if (Certified(compiled[module].Root)) certifiedHeaders[compiled[module].Path] = imports;
+        var pending = new Queue<string>(generated.Values.SelectMany(source => generatedImports[ContentKey(source)])
+            .Where(module => !generated.ContainsKey(module)));
+        HashSet<string> closure = new(StringComparer.Ordinal);
+        while (pending.TryDequeue(out var module))
+        {
+            if (!closure.Add(module)) continue;
+            if (compiled.TryGetValue(module, out var found))
+                foreach (var imported in read.TryGetValue(module, out var imports) ? imports
+                    : certifiedHeaders[found.Path]) pending.Enqueue(imported);
+            else if (!File.Exists(Path.Combine(toolchain,
+                module.Replace('.', Path.DirectorySeparatorChar) + ".olean")))
+                throw new InvalidDataException("Deep-check import is not compiled: " + module);
+        }
+        Dictionary<string, string> names = new(LocationComparer);
+        List<string> unhashed = [];
+        List<string> certifiedUnhashed = [];
+        foreach (var (root, olean) in closure.Where(compiled.ContainsKey).Select(module => compiled[module]))
+            // Companion parts lie beside their module, so each part is named below its module's root.
+            foreach (var part in ModuleFamilyParts([olean]))
+            {
+                names[part] = Path.GetRelativePath(root, part).Replace('\\', '/');
+                if (!Certified(root)) unhashed.Add(part);
+                else if (!certifiedPartHashes.ContainsKey(part)) certifiedUnhashed.Add(part);
+            }
+        var hashed = HashFiles(unhashed.Concat(certifiedUnhashed).Select(part => (part, part)));
+        foreach (var part in certifiedUnhashed) certifiedPartHashes[part] = hashed[part];
+        deepClosureWork = new(launches, unread.Count, hashed.Count,
+            hashed.Keys.Sum(part => new FileInfo(part).Length));
+        return new(names.ToDictionary(pair => pair.Value,
+            pair => hashed.TryGetValue(pair.Key, out var hash) ? hash : certifiedPartHashes[pair.Key]),
+            StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Copies the generated modules a keyed deep contribution built into a new directory below
+    /// `staging`, checking each copy against the audited hashes, for publication once the run succeeds.
+    /// Restored and unkeyed contributions stage nothing.
+    /// </summary>
+    static string? StageDeepResult(DeepSessionContribution deep, string staging)
+    {
+        if (deep.ResultKey is null || deep.Restored) return null;
+        deep.RequireStable();
+        var root = Path.GetDirectoryName(deep.SourceDirectory)!;
+        var publication = Path.Combine(staging, "deep-cache");
+        Directory.CreateDirectory(publication);
+        foreach (var (path, hash) in deep.Hashes)
+        {
+            var generated = Path.GetRelativePath(deep.SourceDirectory, path);
+            if (generated.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(generated)) continue;
+            var target = Path.Combine(publication, Path.GetRelativePath(root, path));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(path, target);
+            if (Sha(target) != hash) throw new InvalidDataException("Deep-check artifact changed: " + path);
+        }
+        return publication;
+    }
+
+    /// <summary>
+    /// The facts and images of a complete, stable joint deep audit, read from the subjects of the requests that
+    /// audit passed: each subject is reconfirmed by its request's theorem, and every fact no request names is not
+    /// covered for its recorded reason.
+    /// </summary>
+    static BindingSection DeepBindingSection(DeepCheckInputs inputs, IReadOnlyList<DeepCheckInputs.Pin> pins,
+        IReadOnlyList<BindingRequest> audited, StatementSources sources)
+    {
+        Dictionary<BindingFact, string> factTheorems = [];
+        Dictionary<Sha256Digest, string> imageTheorems = [];
+        foreach (var request in audited)
+        {
+            var distinct = request.Subject switch
+            {
+                BindingSubject.Fact fact => factTheorems.TryAdd(fact.Value, request.Audit.name),
+                BindingSubject.Image image => imageTheorems.TryAdd(image.Digest, request.Audit.name),
+                _ => true
+            };
+            if (!distinct) throw new InvalidOperationException("Two deep-check requests name one subject: " +
+                request.Audit.name);
+        }
+        var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet();
         ImageResult[] images =
         [
-            .. pins.Select(pin => new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned,
-                BindingStatus.Reconfirmed, "BindingAudit.I" + pin.Image.Digest + ".digest", null)),
+            .. pins.Select(pin => imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
+                ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
+                    BindingStatus.Reconfirmed, theorem, null)
+                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
+                    BindingStatus.NotCovered, null,
+                    "no checked theorem states the digest of this image")),
             .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
-                new ImageResult(image.Path, image.Digest, ImageRole.Unused, BindingStatus.NotCovered, null,
+                new ImageResult(image.Path, image.Digest.ToString(), ImageRole.Unused, BindingStatus.NotCovered, null,
                     "no extraction pin or checked binding claim names this image"))
         ];
         BindingFactResult[] facts = [.. Enum.GetValues<BindingFact>().Select(fact =>
-            fact == BindingFact.BodyBytes
-                ? new BindingFactResult(fact, BindingStatus.Reconfirmed, "BindingAudit.bodies", null)
-                : new BindingFactResult(fact, BindingStatus.NotCovered, null, fact switch
-                {
-                    BindingFact.MetadataRows =>
-                        "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
-                    BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
-                    BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
-                    BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
-                    BindingFact.ObjectFields => "no check reads System.Object fields from an image",
-                    BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
-                    BindingFact.DispatchCatalogs => "no check reads the types of an image",
-                    BindingFact.StaticData => "no check reads static data from the image",
-                    BindingFact.GenericConstraints => "no check reads constraints from the image",
-                    BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
-                    BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
-                    _ => throw new InvalidOperationException("Missing binding fact result: " + fact)
-                }))];
-        return new(BindingMode.Deep, new(inputs.Path, inputs.Digest), sources, images, facts);
+            factTheorems.TryGetValue(fact, out var theorem)
+                ? new BindingFactResult(fact, BindingStatus.Reconfirmed, theorem, null)
+                : new BindingFactResult(fact, BindingStatus.NotCovered, null, NotCoveredReason(fact)))];
+        return new(BindingMode.Deep, new(inputs.Path, inputs.Digest.ToString()), sources, images, facts);
     }
+
+    /// <summary>Why a deep run that audited no theorem about a fact does not cover it.</summary>
+    static string NotCoveredReason(BindingFact fact) => fact switch
+    {
+        BindingFact.BodyBytes => "no checked theorem binds the method bodies to the pinned images",
+        BindingFact.MetadataRows =>
+            "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
+        BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
+        BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
+        BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
+        BindingFact.ObjectFields => "no check reads System.Object fields from an image",
+        BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
+        BindingFact.DispatchCatalogs => "no check reads the types of an image",
+        BindingFact.StaticData => "no check reads static data from the image",
+        BindingFact.GenericConstraints => "no check reads constraints from the image",
+        BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
+        BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
+        _ => throw new InvalidOperationException("Missing binding fact reason: " + fact)
+    };
 
     const string ImagesModule = "BindingAudit.Images";
     const string BodiesModule = "BindingAudit.Bodies";
+    const string MetadataRowsModule = "BindingAudit.MetadataRows";
+
+    /// <summary>The facts proved page by page over the method evidence, in the order their modules build.</summary>
+    static readonly BindingFact[] PagedFacts = [BindingFact.BodyBytes, BindingFact.MetadataRows];
+
+    /// <summary>
+    /// A paged fact's generated module and the namespace of its pages; the theorem that states it, the proposition
+    /// it states about `BindingAudit.images` and `Extracted.methodEvidence`, and the check and claims its pages
+    /// read; the lemma its proposition conjoins before the pages, proved once over the whole evidence, if any; and
+    /// the module title, summary and theorem docstring.
+    /// </summary>
+    static (string Module, string Pages, string Theorem, string Proposition, string Check, string Claims,
+        (string Theorem, string Proposition, string Docstring)? Once, string Title, string Summary, string Statement)
+        PagedFact(BindingFact fact) => fact switch
+    {
+        BindingFact.BodyBytes => (BodiesModule, "Bodies", "bodies", "StrictBinding.BodiesBound",
+            "StrictBinding.bodyClaimBound", "StrictBinding.bodyClaims", null, "Method bodies in the pinned images",
+            "Every method body of the extraction's evidence is the bytes at the place the MethodDef row of its\n" +
+            "token gives in the pinned image of its assembly",
+            "The method bodies of `Extracted.methodEvidence` are in the pinned images."),
+        BindingFact.MetadataRows => (MetadataRowsModule, "MetadataRows", "metadataRows",
+            "StrictBinding.MetadataRowsBound", "StrictBinding.methodMetadataBound", "StrictBinding.metadataClaims",
+            ("blocks", "StrictBinding.ClaimsHold StrictBinding.assemblyBlockBound images\n" +
+                "    (StrictBinding.assemblyBlocks (StrictBinding.metadataClaims Extracted.methodEvidence))",
+                "Each distinct Assembly block of the evidence is the pinned image's."),
+            "Method metadata in the pinned images",
+            "Every metadata block of the extraction's evidence holds the table header, Assembly row, table rows\n" +
+            "and heap entries of the pinned image its identity names, under one numbering of the #Strings and\n" +
+            "#Blob offsets per heap and with MethodDef RVAs zeroed, each distinct Assembly block checked once",
+            "The metadata blocks of `Extracted.methodEvidence` belong to the pinned images."),
+        _ => throw new ArgumentOutOfRangeException(nameof(fact), fact, "Not a paged binding fact")
+    };
 
     /// <summary>The method bodies per page until the page cap applies; each page is one kernel evaluation.</summary>
     const int PageMethodsTarget = 250;
@@ -433,11 +667,12 @@ partial class Program
     /// <summary>Writes one image module per digest and retains every pinned identity association.</summary>
     static void WriteBindingSources(BindingPlan plan)
     {
-        foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
+        foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
-        File.WriteAllText(ModuleSource(plan.Output, BodiesModule), BodiesModuleSource(plan.Methods,
-            BindingPageSize(plan.Methods)));
+        foreach (var fact in PagedFacts)
+            File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
+                plan.Methods, BindingPageSize(plan.Methods)));
     }
 
     static string ModuleSource(string directory, string module) =>
@@ -462,7 +697,7 @@ partial class Program
 
     static string ImagesModuleSource(BindingPlan plan)
     {
-        var imports = string.Concat(plan.Images.DistinctBy(image => image.Sha256)
+        var imports = string.Concat(plan.Images.DistinctBy(image => image.Digest)
             .Select(image => $"import {image.Module}\n"));
         var entries = string.Join(",\n   ", plan.Images.Select(image =>
             $"{{ identity := {LeanString(image.Identity)}, image := {image.Module}.image }}"));
@@ -500,47 +735,64 @@ partial class Program
     }
 
     /// <summary>
-    /// The bodies module: one theorem per page of methods, each its own kernel evaluation, and `bodies`, which the
-    /// kernel-checked composition `claimsHold_of_pages` derives for the whole evidence. The composition
-    /// needs the pages to number enough to cover the evidence and to be the first pages in order, so no method is
-    /// skipped, repeated or reordered.
+    /// The module of a paged fact: one theorem per page of the claims the method evidence makes, each its own kernel
+    /// evaluation, and the fact's theorem, which the kernel-checked composition `claimsHold_of_pages` derives for
+    /// the whole evidence. The composition needs the pages to number enough to cover the evidence and to be the
+    /// first pages in order, so no claim is skipped, repeated or reordered.
     /// </summary>
-    static string BodiesModuleSource(int methods, int size)
+    static string PagedFactModuleSource(BindingFact fact, int methods, int size)
     {
+        var paged = PagedFact(fact);
         var pages = BindingPageCount(methods, size);
         var lemmas = string.Concat(Enumerable.Range(0, pages).Select(page => $$"""
             set_option debug.skipKernelTC true in
-            /-- The bodies of page {{page}} of the claims are in the pinned images. -/
-            theorem page{{page}} : StrictBinding.ClaimsHold StrictBinding.bodyClaimBound images
-                (StrictBinding.claimPage (StrictBinding.bodyClaims Extracted.methodEvidence) {{size}} {{page}}) := by
+            /-- The claims of page {{page}} hold in the pinned images. -/
+            theorem page{{page}} : StrictBinding.ClaimsHold {{paged.Check}} images
+                (StrictBinding.claimPage ({{paged.Claims}} Extracted.methodEvidence) {{size}} {{page}}) := by
               decide +kernel
 
 
             """));
-        var chain = string.Concat(Enumerable.Range(0, pages).Reverse().Select(page => $"(.succ page{page} "));
+        var chain = string.Concat(Enumerable.Range(0, pages).Reverse()
+            .Select(page => $"(.succ {paged.Pages}.page{page} "));
+        var composed = $"StrictBinding.claimsHold_of_pages (size := {size}) (count := {pages}) " +
+            $"{paged.Pages}.prepared\n    (by decide +kernel) {chain}.zero{new string(')', pages)}";
+        var once = paged.Once is { } whole ? $$"""
+            set_option debug.skipKernelTC true in
+            /-- {{whole.Docstring}} -/
+            theorem {{whole.Theorem}} : {{whole.Proposition}} := by
+              decide +kernel
+
+
+            """ : "";
+        var proof = paged.Once is { } conjoined
+            ? $"And.intro {paged.Pages}.{conjoined.Theorem}\n  " +
+                $"({composed.Replace("\n", "\n  ", StringComparison.Ordinal)})"
+            : composed;
         return $$"""
             import BindingAudit.Images
             import Extracted
             import StrictBinding.Evidence
 
             /-!
-            # Method bodies in the pinned images
+            # {{paged.Title}}
 
-            Every method body of the extraction's evidence is the bytes at the place the MethodDef row of its
-            token gives in the pinned image of its assembly, proved page by page. The preparation and
-            each page lemma are kernel-checked when this module is replayed.
+            {{paged.Summary}}, proved page by page. The preparation and each page lemma are kernel-checked
+            when this module is replayed.
             -/
 
             namespace BindingAudit
+            namespace {{paged.Pages}}
 
             set_option debug.skipKernelTC true in
             /-- The pinned images decode and spell the identities they are pinned under. -/
             theorem prepared : StrictBinding.ok (StrictBinding.prepare images) = true := by decide +kernel
 
-            {{lemmas}}/-- The method bodies of `Extracted.methodEvidence` are in the pinned images. -/
-            theorem bodies : StrictBinding.BodiesBound images Extracted.methodEvidence :=
-              StrictBinding.claimsHold_of_pages (size := {{size}}) (count := {{pages}}) prepared
-                (by decide +kernel) {{chain}}.zero{{new string(')', pages)}}
+            {{once}}{{lemmas}}end {{paged.Pages}}
+
+            /-- {{paged.Statement}} -/
+            theorem {{paged.Theorem}} : {{paged.Proposition}} images Extracted.methodEvidence :=
+              {{proof}}
 
             end BindingAudit
             """;
@@ -565,8 +817,13 @@ partial class Program
         static object Const(string name, params int[] levels) =>
             levels.Length == 0 ? new { @const = name } : new { @const = name, levels };
         static object App(params object[] parts) => new { app = parts };
-        static JsonElement Nat(string hex) => JsonDocument.Parse("{\"nat\":" +
-            BigInteger.Parse("0" + hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + "}").RootElement;
+        static JsonElement Nat(Sha256Digest digest)
+        {
+            Span<byte> bytes = stackalloc byte[Sha256Digest.Length];
+            digest.CopyTo(bytes);
+            var value = new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
+            return JsonDocument.Parse("{\"nat\":" + value.ToString(CultureInfo.InvariantCulture) + "}").RootElement;
+        }
         var pinned = Const("StrictBinding.PinnedImage");
         var images = new
         {
@@ -580,18 +837,18 @@ partial class Program
             }
         };
         var imagesEq = App(Const("Eq", 1), App(Const("List", 0), pinned), Const("BindingAudit.images"), images);
-        var bodies = App(Const("StrictBinding.BodiesBound"), Const("BindingAudit.images"),
-            Const("Extracted.methodEvidence"));
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
-            new(BodiesModule, new("BindingAudit.bodies", bodies, ApprovedAxioms),
-                new BindingSubject.Fact(BindingFact.BodyBytes)),
-            .. plan.Images.DistinctBy(image => image.Sha256).Select(image => new BindingRequest(image.Module,
+            .. PagedFacts.Select(fact => (Fact: fact, Paged: PagedFact(fact))).Select(item => new BindingRequest(
+                item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
+                    Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
+                new BindingSubject.Fact(item.Fact))),
+            .. plan.Images.DistinctBy(image => image.Digest).Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
-                App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Sha256)),
-                ApprovedAxioms), new BindingSubject.Image(image.Sha256)))
+                App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Digest)),
+                ApprovedAxioms), new BindingSubject.Image(image.Digest)))
         ];
     }
 
@@ -610,13 +867,14 @@ partial class Program
             return result.Code == 0 ? null : BindingDiagnostic(result.Output);
         }
         Dictionary<string, string> failures = new(StringComparer.Ordinal);
-        foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
+        foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             if (Build(image.Module) is { } error) failures[image.Module] = "build: " + error;
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        if (failures.ContainsKey(ImagesModule)) failures[BodiesModule] = "build: " + ImagesModule + " did not build";
-        else if (Build(BodiesModule) is { } bodiesError) failures[BodiesModule] = "build: " + bodiesError;
+        foreach (var module in PagedFacts.Select(fact => PagedFact(fact).Module))
+            if (failures.ContainsKey(ImagesModule)) failures[module] = "build: " + ImagesModule + " did not build";
+            else if (Build(module) is { } pagedError) failures[module] = "build: " + pagedError;
         return failures;
     }
 

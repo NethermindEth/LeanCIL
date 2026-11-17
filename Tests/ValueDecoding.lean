@@ -142,7 +142,9 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog),
   -- Array allocations and element accesses that name their element type.
   (⟨0, 141, .type int32⟩, .newarr int32), (⟨0, 163, .type int32⟩, .ldelem_any int32),
-  (⟨0, 164, .type int32⟩, .stelem_any int32),
+  (⟨0, 164, .type int32⟩, .stelem_any int32), (⟨0, 143, .type int32⟩, .ldelema int32 false),
+  -- The `readonly.` prefix, which only `ldelema` takes.
+  (⟨0, 65054, .none⟩, .nop),
   -- Calls and constructions, whose target the link at their pc gives.
   (⟨0, 40, .call callSite⟩, .call callSite.method),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
@@ -179,16 +181,58 @@ theorem ofRaw?_exact :
       (Instruction.ofRaw? none raw).isNone || Instruction.valueOpcode raw.opcode) = true ∧
     probes.all (fun raw => !Instruction.valueOpcode raw.opcode ||
       named.any (·.1.opcode == raw.opcode)) = true ∧
-    named.all (fun (raw, expected) => valueEncodingMatches raw expected) = true := by
+    named.all (fun (raw, expected) => valueEncodingMatches none raw expected) = true := by
   decide +kernel
 
 /-- info: 'Tests.ValueDecoding.ofRaw?_exact' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms ofRaw?_exact
 
--- No decoded instruction takes a prefix, so an instruction after one decodes as without it.
-example (previous : Option RawInstruction) (raw : RawInstruction) :
-    Instruction.ofRaw? previous raw = Instruction.ofRaw? none raw := rfl
+/-- The alignments an `unaligned.` prefix states. -/
+private def alignments : List Int := [1, 2, 4]
+
+/-- Every indirect load and store opcode the decoder admits, with the instruction it gives. -/
+private def indirectAccesses : List (RawInstruction × Instruction) := [
+  (⟨1, 70, .none⟩, .ldind .i1), (⟨1, 71, .none⟩, .ldind .u1), (⟨1, 72, .none⟩, .ldind .i2),
+  (⟨1, 73, .none⟩, .ldind .u2), (⟨1, 74, .none⟩, .ldind .i4), (⟨1, 75, .none⟩, .ldind .u4),
+  (⟨1, 76, .none⟩, .ldind .i8), (⟨1, 77, .none⟩, .ldind .i), (⟨1, 82, .none⟩, .stind .i1),
+  (⟨1, 83, .none⟩, .stind .i2), (⟨1, 84, .none⟩, .stind .i4), (⟨1, 85, .none⟩, .stind .i8),
+  (⟨1, 223, .none⟩, .stind .i)]
+
+/-- After `unaligned.` of each alignment, every indirect load and store decodes to the
+    instruction it decodes to alone, so the instruction carries no alignment. -/
+theorem unaligned_indirect_unchanged :
+    indirectAccesses.all (fun (raw, decoded) => alignments.all fun alignment =>
+      Instruction.ofRaw? (some ⟨0, 65042, .integer alignment⟩) raw == some decoded) = true := by
+  decide +kernel
+#print axioms unaligned_indirect_unchanged
+
+/-- The `readonly.` prefix with no operand, the form it takes. -/
+private def readOnlyPrefix : RawInstruction := ⟨0, 65054, .none⟩
+
+/-- Each prefix other than `readonly.`, with an operand of the form it takes. -/
+private def otherPrefixes : List RawInstruction :=
+  [⟨0, 65042, .integer 1⟩, ⟨0, 65043, .none⟩, ⟨0, 65044, .none⟩, ⟨0, 65046, .type int32⟩,
+    ⟨0, 65049, .integer 1⟩]
+
+/-- `ldelema` records whether `readonly.` precedes it and decodes after no other prefix, and
+    `readonly.` decodes to `nop` after no prefix at all. -/
+theorem prefixed_address :
+    (Instruction.ofRaw? (some readOnlyPrefix) ⟨1, 143, .type int32⟩ ==
+        some (.ldelema int32 true) &&
+      otherPrefixes.all (fun before =>
+        (Instruction.ofRaw? (some before) ⟨1, 143, .type int32⟩).isNone) &&
+      (readOnlyPrefix :: otherPrefixes).all (fun before =>
+        (Instruction.ofRaw? (some before) ⟨1, 65054, .none⟩).isNone)) = true := by
+  decide +kernel
+#print axioms prefixed_address
+
+/-- After `readonly.`, no probe decodes except `ldelema`, whatever its operand. -/
+theorem readOnly_only_address :
+    probes.all (fun raw => raw.opcode == 143 ||
+      (Instruction.ofRaw? (some readOnlyPrefix) raw).isNone) = true := by
+  decide +kernel
+#print axioms readOnly_only_address
 
 /-- Emitted instructions that differ from what the raw instruction decodes to: a constant out of
     its form's range, another operand, or another constructor with the same stack effect. -/
@@ -231,6 +275,8 @@ def mutations : List (RawInstruction × Instruction) := [
   -- Another element type than the token names, the other direction, or a missing token.
   (⟨0, 141, .type int32⟩, .newarr dog), (⟨0, 163, .type int32⟩, .ldelem_any dog),
   (⟨0, 163, .type int32⟩, .stelem_any int32), (⟨0, 164, .type int32⟩, .ldelem_any int32),
+  (⟨0, 143, .type int32⟩, .ldelema dog false), (⟨0, 143, .type int32⟩, .ldelema int32 true),
+  (⟨0, 143, .none⟩, .ldelema int32 false), (⟨0, 65054, .integer 0⟩, .nop),
   (⟨0, 163, .none⟩, .ldelem_any int32), (⟨0, 148, .none⟩, .ldelem_any int32),
   (⟨0, 158, .none⟩, .stelem_any int32), (⟨0, 141, .none⟩, .newarr int32),
   -- Another field, another access to the field, a static field or a field of a struct.
@@ -256,7 +302,7 @@ def mutations : List (RawInstruction × Instruction) := [
 
 /-- No mutation matches its raw instruction. -/
 theorem mutations_rejected :
-    mutations.all (fun (raw, emitted) => !valueEncodingMatches raw emitted) = true := by
+    mutations.all (fun (raw, emitted) => !valueEncodingMatches none raw emitted) = true := by
   decide +kernel
 
 /-- info: 'Tests.ValueDecoding.mutations_rejected' depends on axioms: [propext] -/
@@ -270,21 +316,24 @@ private def words : ScalarKind := .array .signed32
     refused, an opcode of a kind emits no typed form, and a typed opcode emits its token's element
     type rather than a kind. -/
 theorem element_emission_exact :
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
-    scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
+    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
+    scalarEmissionMatches #[] none none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
       true ∧
-    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
-    scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem_any int32) =
+    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
+    scalarEmissionMatches #[] none none ⟨0, 163, .type int32⟩ [.word32, words]
+      (.ldelem_any int32) =
       true ∧
-    scalarEmissionMatches #[] none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+    scalarEmissionMatches #[] none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
       (.stelem_any int32) = true ∧
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem_any int32) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 158, .none⟩ [.word32, .word32, words]
+    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words]
+      (.ldelem_any int32) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 158, .none⟩ [.word32, .word32, words]
       (.stelem_any int32) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 163, .type int32⟩ [.word32, words] (.ldelem .i4) = false ∧
-    scalarEmissionMatches #[] none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 163, .type int32⟩ [.word32, words]
+      (.ldelem .i4) = false ∧
+    scalarEmissionMatches #[] none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
       (.stelem .i4) = false := by
   decide +kernel
 
@@ -351,7 +400,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 83, undecoded 25 of 108 constructors -/
+/-- info: decoded 84, undecoded 25 of 109 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

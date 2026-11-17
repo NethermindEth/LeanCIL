@@ -403,6 +403,28 @@ attribute [cil_step] CIL.ArrayElement.width CIL.ArrayElement.signed CIL.ArrayEle
 
 #print axioms step_stelem_any_eq
 
+/-- `ldelema` addresses an element by the shape the method's layouts give its element type. -/
+@[cil_step] theorem step_ldelema_eq (element : CIL.Extraction.TypeExpr) (readOnly : Bool)
+    (stack : List Value) :
+    step body (.ldelema element readOnly) pc args frame stack memory =
+      if unspecifiedOperands 2 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, values) ←
+          elementAddressInstruction (body.elementShape element) readOnly stack memory
+        return .next (pc + 1) values frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_ldelema_eq
+
+/-- A value element's address is the reference `arrayAddress` gives, read-only after the
+    prefix. -/
+@[cil_step] theorem elementAddressInstruction_value (element : CIL.ArrayElement)
+    (readOnly : Bool) (stack : List Value) :
+    elementAddressInstruction (.value element) readOnly stack memory =
+      arrayAddress element (!readOnly) stack memory := rfl
+
 /-- `ldfld` reads the field as the body resolves it, behind the unspecified-bits guard.
     Stepping uses this form only while the field's shape is unknown, and the equations of
     `ObjectSteps` once it is known. -/

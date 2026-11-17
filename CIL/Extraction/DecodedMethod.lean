@@ -1,5 +1,6 @@
 import CIL.Extraction.ValueDecoding
 import CIL.Extraction.Translation
+import CIL.Extraction.Prefixes
 
 /-!
 # Methods decoded from raw definitions
@@ -77,6 +78,55 @@ theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : B
   · exact absurd matched Bool.false_ne_true
 
 #print axioms BodyDecodes.code
+
+/-- No branch of a method whose body decodes enters the instruction after a prefix. -/
+theorem BodyDecodes.prefixEntryFree {pins : List AssemblyPin} {pin : AssemblyPin}
+    {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
+    (decodes : BodyDecodes pins pin body method arguments signature) :
+    PrefixEntryFree method.code := by
+  obtain ⟨decoded, checks, sameCode, _⟩ := BodyDecodes.code decodes
+  exact sameCode ▸ checkBody_prefixEntryFree checks
+
+#print axioms BodyDecodes.prefixEntryFree
+
+/-- The closed code of a method's evidence has no branch into the instruction after a prefix:
+    its body decodes, and instantiation keeps every opcode and branch destination. -/
+theorem MethodEvidenceValid.prefixEntryFree {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    PrefixEntryFree item.closed.code := by
+  obtain ⟨specialized, -, -, -, -, -, -, -, -, -, -, -, -, -, decodes, -, -⟩ := valid
+  exact instantiateMethod_prefixEntryFree specialized.1 decodes.prefixEntryFree
+
+#print axioms MethodEvidenceValid.prefixEntryFree
+
+/-- The scalar flow of a method's evidence holds with no readonly window: its closed code has no
+    branch into the instruction after a prefix. -/
+theorem MethodEvidenceValid.scalarFlowValid_decodedReadOnly {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    ScalarFlowValidWith (fun _ _ _ => true) rawLayouts.toArray item.closed item.featureStates
+      item.scalarStates method.code := by
+  have free := valid.prefixEntryFree
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, scalar, -, -, -, -⟩ := valid
+  exact (ScalarFlowValid_iff_decodedReadOnly free).mp scalar
+
+#print axioms MethodEvidenceValid.scalarFlowValid_decodedReadOnly
+
+/-- The instantiated code of a definition whose body the check accepts, read from that body,
+    has no branch into the instruction after a prefix. -/
+theorem checkBody_instantiated_prefixEntryFree {layouts : List RawLayout} {body : BodyEvidence}
+    {original closed : RawMethod} {arguments : List TypeExpr} {decoded : DecodedBody}
+    (checked : checkBody body original arguments = .ok decoded)
+    (instantiated : instantiateMethod layouts
+      { original with code := decoded.code, initLocals := decoded.initLocals } arguments =
+        some closed) :
+    PrefixEntryFree closed.code :=
+  instantiateMethod_prefixEntryFree instantiated (checkBody_prefixEntryFree checked)
+
+#print axioms checkBody_instantiated_prefixEntryFree
 
 /-- For a body that decodes to `original`, the method of the bytes is the method of the
     definition. -/

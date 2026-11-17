@@ -100,7 +100,7 @@ def observerCount : CIL.Instruction → Nat
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .stind _ | .copyObject _ => 2
   | .ldlen => 1
-  | .ldelem _ | .ldelem_ref | .ldelem_any _ => 2
+  | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
   | .stelem _ | .stelem_ref | .stelem_any _ => 3
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
   | .stsfld _ => 1
@@ -813,7 +813,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
-  | .arrayAddress element writable, _ => arrayAddress element writable stack memory
   -- Spans
   | .spanEmpty width writable, rest =>
     let view : SpanView := ⟨.null, 0, width, writable⟩
@@ -1086,6 +1085,15 @@ def typedElementInstruction (shape : ElementShape) (store : Bool) (stack : List 
   | .method _, false, .scalar _ :: .object .null :: _ => .error (.thrown .nullReference)
   | .unsupported reason, _, _ => .error (.unsupported reason)
   | _, _, _ => .error .invalidState
+
+/-- `ldelema` of an element of `shape`: the reference `arrayAddress` gives for a value
+    element, read-only when `readOnly`. Class, method-table and unsupported shapes fault. -/
+def elementAddressInstruction (shape : ElementShape) (readOnly : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match shape with
+  | .value element => arrayAddress element (!readOnly) stack memory
+  | .unsupported reason => .error (.unsupported reason)
+  | _ => .error .invalidState
 
 /-- `ldfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
     receiver gives way to the word, object reference or array reference the slot keeps. A null

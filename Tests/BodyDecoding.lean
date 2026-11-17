@@ -278,6 +278,15 @@ theorem rejects_branch_to_the_instruction_after_a_prefix :
   decide +kernel
 #print axioms rejects_branch_to_the_instruction_after_a_prefix
 
+/-- A branch after the final `ret`, which no path reaches, into the instruction after a
+    `volatile.` prefix: the rule covers every branch of the body, so decoded code always
+    satisfies `PrefixEntryFree`. -/
+theorem rejects_unreachable_branch_after_a_prefix :
+    failsWith (evidence [0x1E, 0x2A, 0xFE, 0x13, 0x4A, 0x2A, 0x2B, 0xFC])
+      (.branchIntoPrefixed 5 3) = true := by
+  decide +kernel
+#print axioms rejects_unreachable_branch_after_a_prefix
+
 /-- A `switch` case that reaches the instruction after a `readonly.` prefix. -/
 theorem rejects_switch_target_after_a_prefix :
     failsWith (evidence [0x36, 0x45, 0x01, 0, 0, 0, 0x03, 0, 0, 0, 0x2A, 0xFE, 0x1E, 0x2A])

@@ -585,6 +585,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .stelem_any element, _ =>
     let (memory, values) ← typedElementInstruction (body.elementShape element) true stack m
     return .next (pc + 1) values frame memory
+  | .ldelema element readOnly, _ =>
+    let (memory, values) ← elementAddressInstruction (body.elementShape element) readOnly stack m
+    return .next (pc + 1) values frame memory
   -- A call enters the body its pc links to once its method's arguments are specified; a pc with
   -- no link runs the runtime model its operand names, which checks the operands it observes and
   -- leaves no frame for a `tail.` call to retire.
