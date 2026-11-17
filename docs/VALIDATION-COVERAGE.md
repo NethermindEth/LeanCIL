@@ -165,7 +165,7 @@ workflow.
   `nop`s must stay within 4.5 times the heartbeats and, taking the fastest of three runs, 8 times
   the time at 4 times the body, and within 200 heartbeats per byte; a numeral parse quadratic in
   its digits grows 16 times. Body-checking the literal of a body of 128, 512 and 2048 `nop`s must stay within 4.5
-  times the heartbeats at 4 times the body. Bodies of 5, 10, 20 and 40 KB of `ldc.i4` and `pop`
+  times the heartbeats at 4 times the body. Bodies of 5, 10 and 20 KB of `ldc.i4` and `pop`
   pairs, once with every 256-byte numeral ending in the same eight `nop`s and once with random
   operands, must cost the kernel at most 1.15 times as much per byte as at the size before, both
   for a fold over the bytes and for the body check. The kernel's caches hash a numeral by its low

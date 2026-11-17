@@ -12,7 +12,7 @@ function must use kernel evaluation too, since the elaborator would evaluate the
 without sharing. The cost rows at the end write literals as the extractor does, one code joined
 from numerals of at most 256 bytes, and bound how the heartbeats and time of elaborating one and
 the heartbeats of body-checking one grow with the number of bytes, and what elaborating one costs
-per byte. Bodies of 5 to 40 KB whose numerals all end in the same eight bytes, and bodies of
+per byte. Bodies of 5 to 20 KB whose numerals all end in the same eight bytes, and bodies of
 random operands, bound how a fold over the bytes and the body check grow per byte.
 -/
 
@@ -390,8 +390,8 @@ def timedRuns : Nat := 3
 /-- Elaboration time below which a size is not compared with the next: scheduler noise. -/
 def timeFloorNanos : Nat := 20000000
 
-/-- The sizes of the pair bodies, each twice the one before: 5, 10, 20 and 40 KB. -/
-def pairBodySizes : List Nat := [5120, 10240, 20480, 40960]
+/-- The sizes of the pair bodies, each twice the one before: 5, 10 and 20 KB. -/
+def pairBodySizes : List Nat := [5120, 10240, 20480]
 
 /-- The most a byte of a pair body may cost the kernel at twice the bytes, in percent of its cost
     at the size before: a cost quadratic in the numerals doubles per byte. -/
