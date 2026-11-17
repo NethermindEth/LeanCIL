@@ -117,6 +117,7 @@ import CIL.Safety.OutcomeContract
 import CIL.Safety.RuntimeExceptions
 import CIL.Safety.Imports
 import CIL.Safety.Linking
+import CIL.Safety.ProgramClosure
 import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn

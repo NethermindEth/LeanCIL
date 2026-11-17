@@ -295,28 +295,79 @@ private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
           exact .error _
 #print axioms Memory.Renamed.stepCallVirtual
 
+/-- Running `model` for a call without a link transports under every allocation renaming:
+    related bodies, memories, frames and stacks step to related results. -/
+def _root_.CIL.RuntimeModel.StepRenamed (model : CIL.RuntimeModel) : Prop :=
+  ∀ {indices : LocalIndexMap} {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop}
+    {source target : Memory} {sourceFrame targetFrame : Frame},
+    Memory.Renamed mapping scopes source target →
+    Frame.Renamed indices mapping scopes sourceFrame targetFrame →
+    ∀ (sourceBody targetBody : CIL.Method), StepMetadata sourceBody targetBody →
+    ∀ (pc : Nat) (stack : List Value), (∀ value ∈ stack, value.Below mapping.sourceLimit) →
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (modelStep (some model) sourceBody pc sourceFrame stack source)
+      (modelStep (some model) targetBody pc targetFrame (stack.map mapping.value) target)
+
+/-- The `System.Object` constructor's model drops the receiver alike on both sides. -/
+theorem objectConstructor_stepRenamed : CIL.RuntimeModel.objectConstructor.StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ pc
+    stack _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel]
+  split
+  · exact .error _
+  cases stack with
+  | nil => exact .error _
+  | cons value rest => exact .ok (.next related frames)
+
+#print axioms objectConstructor_stepRenamed
+
+/-- Every model of the runtime table transports under a renaming; an entry adds its model's
+    case here. -/
+theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
+    {opcode : CIL.CallOpcode} {method : CIL.Extraction.MethodRef} {model : CIL.RuntimeModel}
+    (found : CIL.Extraction.runtimeModel environment opcode method = some model) :
+    model.StepRenamed :=
+  CIL.Extraction.runtimeModel_yields (property := CIL.RuntimeModel.StepRenamed)
+    (by
+      simp only [CIL.Extraction.modelEntries, CIL.Extraction.objectConstructorEntry,
+        List.mem_singleton, forall_eq, CIL.Extraction.ModelEntry.exact_yields]
+      exact objectConstructor_stepRenamed) found
+
+#print axioms runtimeModel_stepRenamed
+
 /-- A direct call transports as a call or, under `tail.`, as a tail call: both bodies link its
-    pc to the same callee, so both runs enter it with related arguments or fault alike. -/
+    pc to the same callee, so both runs enter it with related arguments or fault alike. Without a
+    link both run the model one environment gives its method, which continues at the next pc. -/
 private theorem Memory.Renamed.stepCall {indices : LocalIndexMap}
     {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
     {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceBody targetBody : CIL.Method) (method : CIL.Extraction.MethodRef)
     (prefixes : CIL.CallPrefixes) (pc : Nat)
-    (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
+    (metadata : StepMetadata sourceBody targetBody)
     (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.call method prefixes) pc arguments sourceFrame stack source)
       (step targetBody (.call method prefixes) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map, linked,
-    ← List.map_take, ← List.map_drop, ← List.map_reverse]
+  simp only [step, mapping.unspecifiedOperands, List.length_map, metadata.linkAt pc,
+    metadata.environment, ← List.map_take, ← List.map_drop, ← List.map_reverse]
   by_cases guard : unspecifiedOperands (observerCount (.call method prefixes)) stack = true
   · simp only [guard, ite_true]
     exact .error _
   · simp only [guard, Bool.false_eq_true, ite_false]
     generalize sourceBody.linkAt pc = link
     rcases link with _ | link
-    · exact .error _
+    · dsimp only
+      by_cases tail : prefixes.tail = true
+      · simp only [tail, ite_true]
+        exact .error _
+      simp only [tail, Bool.false_eq_true, ite_false]
+      cases found : CIL.Extraction.runtimeModel sourceBody.environment .call method with
+      | none => exact .error _
+      | some model =>
+        exact runtimeModel_stepRenamed found related frames sourceBody targetBody metadata pc
+          stack bounds
     cases link <;> try exact .error _
     rename_i callee
     try dsimp only
@@ -444,8 +495,8 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       exact related.managedStep frames native _ pc stack bounds observable
   by_cases direct : ∃ method prefixes, operation = .call method prefixes
   · rcases direct with ⟨method, prefixes, rfl⟩
-    exact related.stepCall sourceBody targetBody method prefixes pc (metadata.linkAt pc)
-      arguments stack bounds
+    exact related.stepCall frames sourceBody targetBody method prefixes pc metadata arguments
+      stack bounds
   by_cases receiverChecked : ∃ callee argc, operation = .callInstance callee argc
   · rcases receiverChecked with ⟨callee, argc, rfl⟩
     exact related.stepCallInstance formed sourceBody targetBody callee argc pc

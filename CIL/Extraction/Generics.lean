@@ -627,26 +627,83 @@ def validateManagedCallWith (methodCount : Nat)
     | .call .. | .callInstance .. => false
     | _ => true
 
-/-- Whether `link` is a link an instruction other than a construction can have at its pc: a
-    `.direct` one for a `call`, whose operand names a method, and the link its program index
-    implies for any other. -/
-def _root_.CIL.Instruction.linkFits (emitted : Instruction) (link : Option Link) : Bool :=
+/-- Whether `link` is a link an instruction other than a construction can have at its pc, where
+    `modelled` says which methods a runtime model stands for: none for a `call` of such a method,
+    whose operand names its model, a `.direct` one for any other `call`, and the link its program
+    index implies for any other instruction. -/
+def _root_.CIL.Instruction.linkFits (modelled : MethodRef → Bool) (emitted : Instruction)
+    (link : Option Link) : Bool :=
   match emitted with
-  | .call .. => (link matches some (.direct _))
+  | .call method _ => match link with
+    | some (.direct _) => !modelled method
+    | none => modelled method
+    | some _ => false
   | _ => link == emitted.link?
+
+/-- A live call that states no link keeps the call its raw site makes: a `call` of an external
+    method, naming the site's own method, with no prefix. A dead one passes. -/
+def validateModelCall (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
+  !live || match raw.opcode, raw.operand, emitted with
+  | 40, .call site, .call method prefixes =>
+    (site.target matches .external _) && method == site.method && !prefixes.tail &&
+      prefixes.constrained.isNone
+  | _, _, _ => false
+
+/-- Whether `raw` is a `call` of a method that `modelled` gives a runtime model. -/
+def modelledCallSite (modelled : MethodRef → Bool) (raw : RawInstruction) : Bool :=
+  match raw.opcode, raw.operand with
+  | 40, .call site => modelled site.method
+  | _, _ => false
 
 /-- `link` is what the method's link table gives this pc. A construction is checked with it by
     `validateConstructionWith`. Any other instruction must fit it, live or not, so a key sits only
-    at a pc that reads a link and each call-family pc other than a construction has one, and must
-    pass `validateManagedCallWith` with it. -/
-def validateLinkedCallWith (methodCount : Nat)
+    at a pc that reads a link, a call has one exactly when `modelled` gives its method no model,
+    and every other call-family pc has one. A call without a link must pass
+    `validateModelCall`, and any other instruction `validateManagedCallWith` with its link; a
+    live call of a modelled method emits nothing but its call. -/
+def validateLinkedCallWith (modelled : MethodRef → Bool) (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
   match emitted.constructor? with
   | some constructor => validateConstructionWith methods raw live link constructor
   | none =>
-    emitted.linkFits link &&
-      validateManagedCallWith methodCount methods imports raw live link emitted
+    -- The arms decide `Instruction.linkFits` in the same match, since a second match on the
+    -- instruction costs the kernel about 700 heartbeats at every pc.
+    match emitted, link with
+    | .call method _, none => modelled method && validateModelCall raw live emitted
+    | .call method _, some (.direct _) => !modelled method &&
+        ((!live || !modelledCallSite modelled raw) &&
+          validateManagedCallWith methodCount methods imports raw live link emitted)
+    | .call .., some _ => false
+    | _, _ => link == emitted.link? &&
+        ((!live || !modelledCallSite modelled raw) &&
+          validateManagedCallWith methodCount methods imports raw live link emitted)
+
+/-- A pc other than a construction that passes the linked call rule fits its link. -/
+theorem validateLinkedCallWith_linkFits {modelled : MethodRef → Bool} {methodCount : Nat}
+    {methods : Nat → Option SpecializedMethod} {imports : Nat → Option ImportSlot}
+    {raw : RawInstruction} {live : Bool} {link : Option Link} {emitted : Instruction}
+    (unnamed : emitted.constructor? = none)
+    (checked : validateLinkedCallWith modelled methodCount methods imports raw live link emitted =
+      true) :
+    emitted.linkFits modelled link = true := by
+  simp only [validateLinkedCallWith, unnamed] at checked
+  split at checked
+  · simp only [Bool.and_eq_true] at checked
+    simp [Instruction.linkFits, checked.1]
+  · simp only [Bool.and_eq_true] at checked
+    simp [Instruction.linkFits, checked.1]
+  · simp at checked
+  · rename_i noModel _ noOther
+    simp only [Bool.and_eq_true] at checked
+    unfold Instruction.linkFits
+    split
+    · cases link with
+      | none => exact (noModel _ _ rfl rfl).elim
+      | some _ => exact (noOther _ _ _ rfl rfl).elim
+    · exact checked.1
+
+#print axioms validateLinkedCallWith_linkFits
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -659,23 +716,28 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
 
 /-- The linked call rule stated against the original lists. -/
-def validateLinkedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
-  validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
+def validateLinkedCall (modelled : MethodRef → Bool) (methods : List SpecializedMethod)
+    (imports : List ImportSlot) (raw : RawInstruction) (live : Bool) (link : Option Link)
+    (emitted : Instruction) : Bool :=
+  validateLinkedCallWith modelled methods.length (methods[·]?) (imports[·]?) raw live link
+    emitted
 
 /-- The emitted link table's keys ascend and are pcs of the emitted code, and each pc is checked
     with the link the table gives it, read by one walk beside the code; so the table gives every
     `call` pc a `.direct` link, every live construction a link `validateConstructionWith`
     accepts, every other call-family pc the link its instruction implies, and has no key at a pc
-    that reads none. Every call emitted at a live call site of `raw` binds to the method table or
-    an import slot, and no other instruction emits a call. An external site may instead emit a
-    non-call translation, which other validators check. -/
+    that reads none. A call has no link exactly when `modelled` gives its method a runtime model,
+    and then keeps its raw site's call of an external method. Every other call emitted at a live
+    call site of `raw` binds to the method table or an import slot, and no other instruction
+    emits a call. An external site may instead emit a non-call translation, which other validators
+    check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
+    (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
+    Prop :=
   keysAscend 0 emitted.links = true ∧
   emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  all3 (fun instruction (live, link) op => validateLinkedCallWith methods.length
+  all3 (fun instruction (live, link) op => validateLinkedCallWith modelled methods.length
       (FlowIndex.ofList methods).get? (FlowIndex.ofList imports).get? instruction live link op)
     raw.code (reachable.zip (linkWalk emitted.links emitted.links 0
       (List.range emitted.code.length))) emitted.code = true
@@ -684,12 +746,13 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
     link a scan of the table gives each pc: indexed lookups and links read beside the code lose
     no evidence the scans accept and admit none they reject. -/
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
-    (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
-    ManagedCallsValid methods imports raw reachable emitted ↔
+    (imports : List ImportSlot) (modelled : MethodRef → Bool) (raw : RawMethod)
+    (reachable : List Bool) (emitted : Method) :
+    ManagedCallsValid methods imports modelled raw reachable emitted ↔
       keysAscend 0 emitted.links = true ∧
       emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-      all3 (fun instruction (live, link) op => validateLinkedCallWith methods.length
+      all3 (fun instruction (live, link) op => validateLinkedCallWith modelled methods.length
           (methods[·]?) (imports[·]?) instruction live link op)
         raw.code (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))
         emitted.code = true := by
@@ -714,15 +777,17 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
 #print axioms ManagedCallsValid_iff_original
 
 /-- An admitted body gives every pc of an instruction other than a construction a link the
-    instruction fits: a `.direct` link at a `call` and the link its program index implies
-    elsewhere, so a step of such an instruction never takes the `unlinkedCall` branch. -/
+    instruction fits: no link at a `call` of a modelled method, a `.direct` link at any other
+    `call` and the link its program index implies elsewhere, so a step of such an instruction
+    never takes the `unlinkedCall` branch for want of a link. -/
 theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
-    {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods imports raw reachable emitted) {pc : Nat}
+    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted) {pc : Nat}
     {op : Instruction} (found : emitted.code[pc]? = some op) (implied : op.constructs = false) :
-    op.linkFits (emitted.linkAt pc) = true := by
+    op.linkFits modelled (emitted.linkAt pc) = true := by
   obtain ⟨_, _, statesLength, codeLength, checks⟩ :=
-    (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
+    (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
   have inside : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
   obtain ⟨instruction, rawFound⟩ :
       ∃ instruction, raw.code[pc]? = some instruction :=
@@ -734,25 +799,25 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
   have checked := all3_at checks rawFound paired found
   have unnamed : op.constructor? = none := by
     simpa [Instruction.constructs] using implied
-  simp only [validateLinkedCallWith, unnamed, Bool.and_eq_true] at checked
-  exact checked.1
+  exact validateLinkedCallWith_linkFits unnamed checked
 
 #print axioms ManagedCallsValid.linkFits
 
 /-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
     link enters has that token and the site's type arguments. -/
 theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
-    {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods imports raw reachable emitted) {pc target token : Nat}
-    {method : MethodRef} {prefixes : CallPrefixes} {instruction : RawInstruction}
-    {site : CallSite}
+    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
+    {instruction : RawInstruction} {site : CallSite}
     (found : emitted.code[pc]? = some (.call method prefixes))
     (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
     (operand : instruction.operand = .call site) (managed : site.target = .managed token)
     (linked : emitted.linkAt pc = some (.direct target)) :
     ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
       callee.arguments = site.typeArguments := by
-  obtain ⟨_, _, _, _, checks⟩ := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
+  obtain ⟨_, _, _, _, checks⟩ := (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
   have inside : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
   have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc]? =
       some (true, some (.direct target)) := by
@@ -761,7 +826,7 @@ theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
   simp only [validateLinkedCallWith, Instruction.constructor?, validateManagedCallWith,
     managedCallTarget, operand, managed, Bool.not_true, Bool.false_eq_true, ite_false,
     Bool.and_eq_true] at checked
-  obtain ⟨_, checked⟩ := checked
+  obtain ⟨_, _, checked⟩ := checked
   by_cases opcode : instruction.opcode = 40
   · simp only [opcode, ite_true] at checked
     cases selected : methods[target]? with
@@ -773,36 +838,20 @@ theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
 
 #print axioms ManagedCallsValid.callee_token
 
-instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
-    (reachable : List Bool) (emitted : Method) :
-    Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
+instance (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
+    Decidable (ManagedCallsValid methods imports modelled raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
-
-/-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
-    Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
-macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
-  `(tactic| first
-    | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_, ?_, ?_⟩
-       · decide +kernel
-       · decide +kernel
-       · rfl
-       · rfl
-       · simp [all3, validateLinkedCallWith, Instruction.constructor?, Instruction.linkFits,
-           validateManagedCallWith, validateConstructionWith, managedCallTarget, calleeMatchesSite,
-           callOperandMatches, Method.linkAt, linkLookup,
-           $[$facts:term],*] <;>
-           decide +kernel)
-    | decide +kernel)
 
 /-- Every live pc passes the linked call rule with the link the table gives it. -/
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {raw : RawMethod} {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
-    validateLinkedCall methods imports raw.code[pc] reachable[pc.val]! (emitted.linkAt pc.val)
-      (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
+    {modelled : MethodRef → Bool} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    (pc : Fin raw.code.length) :
+    validateLinkedCall modelled methods imports raw.code[pc] reachable[pc.val]!
+      (emitted.linkAt pc.val) (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
   obtain ⟨_, _, statesLength, codeLength, checks⟩ :=
-    (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
+    (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
   have live : pc.val < reachable.length := statesLength ▸ pc.isLt
   have present : pc.val < emitted.code.length := codeLength ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]

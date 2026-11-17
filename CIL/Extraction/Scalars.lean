@@ -3,7 +3,6 @@ import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
-import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.GuardCalls
 import CIL.Extraction.Prefixes
 import CIL.Resolution
@@ -67,11 +66,12 @@ def scalarType : TypeExpr → ScalarKind
   | _ => .other
 
 /-- The stack kind of the receiver of an instance method declared by `owner`: an object
-    reference for a class, a byref for a value type. -/
+    reference for a class or `System.Object`, a byref for a value type. -/
 def receiverKind (owner : TypeExpr) : ScalarKind :=
   match owner with
   | .object .. => .object
-  | _ => scalarType (.byref owner)
+  | _ => if owner == .atom runtimeScope "System.Object" then .object
+    else scalarType (.byref owner)
 
 private def numeric (kind : ScalarKind) : Bool := kind ∈ [.word32, .word64, .native]
 
@@ -881,7 +881,6 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
         if let some (type, read, _) := unsafeValueCall instruction then
         (if read then [] else [scalarType type]) ++ [.reference] else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
-      if objectConstructorCall instruction then [.object] else
       if nullGuardCall instruction then [.object, .object] else
       if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome

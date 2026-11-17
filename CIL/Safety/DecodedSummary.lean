@@ -117,10 +117,12 @@ theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Inp
     {arguments : List TypeExpr}
     (summary : DecodedSummary program evidence profile environment index pin token arguments
       contract)
-    {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {caller : CIL.Method}
+    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {caller : CIL.Method}
     {pc siteToken : Nat} {method : MethodRef} {prefixes : CallPrefixes}
     {instruction : RawInstruction} {site : CallSite}
-    (calls : ManagedCallsValid (specializationTable evidence) imports raw reachable caller)
+    (calls :
+      ManagedCallsValid (specializationTable evidence) imports modelled raw reachable caller)
     (found : caller.code[pc]? = some (.call method prefixes))
     (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
     (operand : instruction.operand = .call site) (managed : site.target = .managed siteToken)

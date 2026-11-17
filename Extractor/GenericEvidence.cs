@@ -201,8 +201,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             field.DeclaringType is GenericInstanceType instance
             ? GenericStructs.Substitute((field.Resolve() ?? throw new InvalidDataException(
                 "Unresolved generic field: " + field.FullName)).FieldType, instance) : field.FieldType;
-        if (field.DeclaringType.Scope is ModuleDefinition ||
-            PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
+        if (Carried(field))
         {
             var resolved = field.Resolve();
             index = layouts.Metadata.FieldIndex(field.DeclaringType, resolved, isStatic);
@@ -219,11 +218,25 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
             fieldType = fields[index].Type;
         }
+        // Lean refuses such an operand at every pc, reachable or not, so the access is a stated blocker.
+        else if (!(instruction.OpCode.Code == Code.Ldsfld && FeatureProfile.PlatformField(field) is not null))
+            throw new InvalidDataException(
+                $"IL_{instruction.Offset:x4}: Unsupported field access: {field.FullName}\n" +
+                "  Its owner has no carried definition, so no metadata row gives the field's position.");
         // A class field of a type outside the model holds an object reference like an admitted one.
         var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
             ? ObjectType(fieldType) : Type(fieldType);
         return (Type(field.DeclaringType), index, heldType, isStatic);
     }
+
+    // A carried slice defines the field: its owner is in the method's module or a pinned assembly.
+    static bool Carried(FieldReference field) => field.DeclaringType.Scope is ModuleDefinition ||
+        PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null;
+
+    // The static accesses whose field a carried row defines, which the Lean decoder records by instruction index.
+    static bool BoundStatic(Instruction instruction) =>
+        instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken &&
+        instruction.Operand is FieldReference field && Carried(field);
 
     /// <summary>
     /// The typed reference of the field operand at <paramref name="pc"/> in <paramref name="method"/>, the owner,
@@ -537,7 +550,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
             var translated = instruction.OpCode.Code switch
             {
-                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false },
+                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
                 Code.Newobj => operations[pc] is Newobj,
                 _ => true
             };
@@ -594,11 +607,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var instructions = new InstructionIndex(original);
         var operands = new List<(uint Token, string Key, string Operand)>();
         var positions = new Dictionary<uint, int>();
+        var statics = new List<string>();
         for (var index = 0; index < original.Body.Instructions.Count; index++)
         {
             var instruction = original.Body.Instructions[index];
             if (!HasToken(instruction.OpCode)) continue;
             var token = TokenOperand(original, body, instruction);
+            if (BoundStatic(instruction)) statics.Add($"({index}, {token})");
             var site = admitted.Body.Instructions[index];
             // An external identity is a materialized name at a reachable site and a literal at an unreachable
             // one. The literal spelling names the operand, so two sites share a token only if it agrees.
@@ -640,11 +655,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             (rest, index) => $"(Extraction.AllIdentified.cons assembly{index}_identified {rest})");
         var arguments = MethodSpecialization.Arguments(admitted);
         var instantiation = arguments.Count == 0 ? "" : $", instantiation := {List(arguments.Select(Resolved))}";
+        var staticTokens = statics.Count == 0 ? "" : $", statics := {List(statics)}";
         return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
             $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
             $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
-            $"pinned := pinnedIndex{instantiation} }}",
+            $"pinned := pinnedIndex{instantiation}{staticTokens} }}",
             identified, $"method{number}_tables_valid");
     }
 

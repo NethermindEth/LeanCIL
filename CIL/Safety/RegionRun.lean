@@ -95,12 +95,13 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           have resume := continues (Instruction.continues_of_linked linked (by
             intro method prefixes equal
             subst op
-            obtain ⟨_, _, chosen⟩ := step_call_action hs
-            cases tail : prefixes.tail
-            · rfl
-            · simp only [tail, ite_true] at chosen
-              obtain ⟨_, _, impossible⟩ := chosen
-              cases impossible) (by
+            rcases step_call_action hs with ⟨_, _, chosen⟩ | ⟨_, _, _, _, impossible⟩
+            · cases tail : prefixes.tail
+              · rfl
+              · simp only [tail, ite_true] at chosen
+                obtain ⟨_, _, impossible⟩ := chosen
+                cases impossible
+            · cases impossible) (by
             intro signature catalog equal
             subst op
             obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs
@@ -142,12 +143,13 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           have resume := continues (Instruction.continues_of_linked linked (by
             intro method prefixes equal
             subst op
-            obtain ⟨_, _, chosen⟩ := step_call_action hs
-            cases tail : prefixes.tail
-            · rfl
-            · simp only [tail, ite_true] at chosen
-              obtain ⟨_, _, impossible⟩ := chosen
-              cases impossible) (by
+            rcases step_call_action hs with ⟨_, _, chosen⟩ | ⟨_, _, _, _, impossible⟩
+            · cases tail : prefixes.tail
+              · rfl
+              · simp only [tail, ite_true] at chosen
+                obtain ⟨_, _, impossible⟩ := chosen
+                cases impossible
+            · cases impossible) (by
             intro signature catalog equal
             subst op
             obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs

@@ -90,4 +90,11 @@ structure FieldRef where
   name : MetadataName
   deriving DecidableEq, Repr
 
+/-- System.Runtime's `BitConverter.IsLittleEndian`, the one static field of a type no carried
+    slice defines that a body may name: `ldsfld` of it is the profile's endianness, never a static
+    load. -/
+def littleEndianField : FieldRef :=
+  { owner := .atom runtimeScope "System.BitConverter", index := 0,
+    type := .atom runtimeScope "System.Boolean", name := name!"IsLittleEndian" }
+
 end CIL.Extraction

@@ -163,8 +163,11 @@ private def formsMethod : RawMethod :=
     instr 23 0x7B someField, instr 28 0xD0 (.call writeLineSite), instr 33 0xD0 staticField,
     instr 38 0x2A]
 
+/-- The forms decode with the static field `ldtoken` recorded at its index, and not without it. -/
 theorem other_operand_forms_decode :
-    bodyMatches (evidence formsBytes formsOperands) formsMethod [] = true := by decide +kernel
+    bodyMatches { evidence formsBytes formsOperands with statics := [(7, tokens.totalField)] }
+      formsMethod [] = true ∧
+    bodyMatches (evidence formsBytes formsOperands) formsMethod [] = false := by decide +kernel
 #print axioms other_operand_forms_decode
 
 /-- A branch to a `volatile.` prefix enters the prefixed instruction at its first prefix. -/

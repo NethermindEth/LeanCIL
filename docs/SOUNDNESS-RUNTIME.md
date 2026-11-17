@@ -75,9 +75,17 @@ See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory]
 
 `runtimeModel` resolves the typed method reference of a `call` or `newobj` through a table of
 model entries, searched by method name; at the leaf the entry's name, opcode and owner head are
-compared and the entry resolves the whole reference. `RuntimeModelsAgree` requires each live call
-site to emit exactly the model the table gives its reference, and a site the table does not model
-to emit none of the models the table accounts for. The table is empty. The per-family
+compared and the entry resolves the whole reference. A `call` the table models keeps its call
+and states no link, and the checked interpreter runs the model when the pc has no link;
+`ManagedCallsValid` requires every other `call` to state a `.direct` link and rejects an
+unlinked call the table does not model. `RuntimeModelsAgree` requires each live call site that
+emits a model in place of its call to emit exactly the model the table gives its reference, and a
+site the table does not model to emit none of the models the table accounts for. The table holds
+the `System.Object` constructor, whose call keeps its call, so the table accounts for no lowered
+emission; `ManagedCallsValid` requires a live call of a modelled method to keep its call, and
+`UnsafeCallsValid` rejects `pop` at every `call`, `calli`, `callvirt` or `newobj` site, where it
+would drop the call. A proof about the models the table gives (`Extraction.runtimeModel_yields`)
+holds for each entry's models, so an entry adds one case to it. The per-family
 certificates tie most model emissions to their call; `bigMul64`, `divRemOut`, `bitcastByteBool`,
 `bitcastValue`, `createSpan`, `spanReference` and the intrinsics outside the exact intrinsic
 certificate are tied to their call by stack effect only.
@@ -193,8 +201,12 @@ runtime implementations.
 ### Static storage
 
 RVA storage is immutable and extraction-bound. Static keys hash full assembly/field identities;
-hash injectivity is not assumed: extraction/import checks reject collisions, and composed full
-verification proves `linkChecked`. Raw `link` alone supplies no collision guarantee.
+hash injectivity is not assumed. Within one extraction, `TranslationValid` requires each identity
+to name exactly one field and each field to have one identity, by the metadata row its token
+resolves to (`StaticIdentitiesValid`). Across imports, extraction/import checks reject
+collisions, and composed full verification proves `linkChecked`, which compares the linked
+descriptors and fails with the first `StaticCollision`. Raw `link` alone supplies no collision
+guarantee.
 
 An RVA field's descriptor alignment is its packing. The extractor checks the RVA, and that its
 section's virtual address and file offset agree modulo 8; the runtime premise is that CoreCLR
@@ -279,8 +291,9 @@ class, inherited fields included. `newobj` of an abstract class is rejected by n
 constructor's chained call to its base's constructor is an ordinary instance `call` with the new
 instance as receiver ([DerivedObject](../Examples/Proofs/DerivedObject.lean)).
 Inside an admitted constructor, `call System.Object::.ctor()` with the exact `System.Runtime`
-scope only pops the receiver: the runtime's constructor has no effect on an instance, and Lean
-rechecks that exact target wherever `.pop` stands for a call. No frame owns
+scope stays a call with no link, and its runtime model only consumes the receiver: the runtime's
+constructor has no effect on an instance. The model entry matches that exact method reference, so
+a constructor of another scope or signature has no model. No frame owns
 an instance, so leaving the method that created it never expires it: an instance lives as long
 as a reference can observe it, which is the reachability the collector maintains.
 

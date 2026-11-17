@@ -279,11 +279,15 @@ A proof that steps through a call or a construction reads the link at its pc.
 `cil_instruction_equations` states that read as `body_link{pc} : body.linkAt pc = some link` for
 each call site, so no proof walks the table. For a body that keeps the table its code implies, the
 fact comes from the instruction equation of its pc through `Method.linkAt_of_instruction`; such a
-table has no entry at a `call` or `newobj`, which then faults. For an explicit table, as an
+table has no entry at a `call` or `newobj`, and the command states `body.linkAt pc = none` at a
+`call`, which then runs its method's runtime model or faults. For an explicit table, as an
 extraction, a template or a body that calls or constructs writes, the command checks once
 that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
 table's entry
-(`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
+(`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. At
+a `call` the table does not key, the command states `body.linkAt pc = none` from the suffix of the
+block where that pc would sit (`Extraction.linkAt_eq_readHead_suffix`), after the entry before
+that block, whose key is below the pc, so the kernel walks at most two blocks of the table. The
 `cil_code` simp set unfolds an extracted method's named link `methodNLinkPC` to its constructor.
 For a pc without a call the table is read by its listed keys, which costs the number of calls and
 never gets stuck (`Method.linkAt_of_unlisted`). A template whose table a feature flag decides

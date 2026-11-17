@@ -18,7 +18,8 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 
 // Calls::Mutate{n} stores its argument in a local and passes the local by reference to Mutate n times. The proof of
-// each size states the result twice: by stepping every call, and from Mutate's decoded summary at each call.
+// each size states the result twice: by stepping every call, and from Mutate's decoded summary at each call. The
+// summary of Decrement in the loop of Examples.Loops::CountCalls is checked against mutations of its own.
 int[] sizes = [1, 4, 16];
 // Most times as much as a call costs through the summary from 1 to 4 calls that it may cost from 4 to 16.
 const double AllowedCallGrowth = 1.6;
@@ -76,10 +77,42 @@ foreach (var measure in new[] { "heartbeats", "kernelHeartbeats" })
 // The contract of Mutate without its write, and a caller that leaves Mutate's precondition unproved, are refused
 // with an error in the declaration that needs them.
 var mutate1 = File.ReadAllText(Path.Combine(proofs, "Mutate1.lean"));
-RejectedProof("Footprint", Changed(mutate1, "  footprint := fun (place, _) => [(place, 8)]", "  footprint _ := []"),
-    "mutate_holds", "unsolved goals");
-RejectedProof("Precondition", Changed(mutate1, "frame0.snapshots.read_word64 (index := 0) rfl rfl⟩", "?_⟩"),
-    "correctness", "unsolved goals");
+ProofTarget mutateTarget = new(assembly, "Fixture", "System.UInt64 Calls::Mutate1(System.UInt64)");
+RejectedProof("Mutate1Footprint", Changed(mutate1, "  footprint := fun (place, _) => [(place, 8)]",
+    "  footprint _ := []"), mutateTarget, "mutate_holds", "unsolved goals");
+RejectedProof("Mutate1Precondition", Changed(mutate1, "frame0.snapshots.read_word64 (index := 0) rfl rfl⟩", "?_⟩"),
+    mutateTarget, "correctness", "unsolved goals");
+
+// In the loop of CountCalls, a summary of Decrement that bounds its result without stating it still proves the
+// call and the measure, and leaves the invariant unproved. A summary claimed for CountCalls' own token at the index
+// the call enters is refused where the site check reads the call's token.
+var countCalls = File.ReadAllText(At("Examples/Proofs/CountCallsSummary.lean"));
+ProofTarget countTarget = new(At("Examples/Assembly/bin/Examples.dll"), "Examples",
+    "System.UInt32 Examples.Loops::CountCalls(System.UInt32)");
+var weakened = Changed(Changed(Changed(countCalls, "  post x _ _ v := v = x - 1",
+        "  post x _ _ v := x ≠ 0 → v.toNat < x.toNat"),
+    "refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl",
+    "refine MethodContract.Holds.intro m (x - 1) ?_ (Confined.refl _ m) measure_falls"), """
+        cil_loop_call summary.holds x at decrementSite
+        -- The frame of the memory before the call is stale once `calledFrame` holds.
+        clear frame
+        cil_loop_recurse recurse (x - 1, count + 1)
+        case invariant =>
+          show count + 1 + (x - 1) = value
+    """, """
+        cil_loop_call keeping summary.holds x at decrementSite
+        -- The frame of the memory before the call is stale once `calledFrame` holds.
+        clear frame
+        cil_loop_recurse recurse (output, count + 1)
+        case invariant =>
+          show count + 1 + output = value
+    """);
+weakened = Changed(weakened, "    case measure => exact measure_falls zero\n#print axioms terminates\n",
+    "    case measure => exact returned zero\n#print axioms terminates\n");
+RejectedProof("CountCallsWeakPost", weakened, countTarget, "terminates", "omega could not prove the goal",
+    at: "bv_omega");
+RejectedProof("CountCallsOtherToken", Changed(countCalls, "    token = Extracted.method1Original.token ∧",
+    "    token = Extracted.method0Original.token ∧"), countTarget, "decrement_named", "Application type mismatch");
 
 // With the original of Mutate forged to subtract, the body check refuses the record and Mutate's contract fails,
 // so its decoded summary rests on sorryAx.
@@ -121,19 +154,18 @@ static string Changed(string text, string before, string after) =>
         ? text.Replace(before, after, StringComparison.Ordinal)
         : throw new InvalidOperationException("Expected one occurrence of: " + before);
 
-// Verifies `text` as the proof of Mutate1 and requires it to fail with an error inside `theorem` whose message
-// contains `diagnostic`, so an unrelated failure cannot pass as the rejection.
-void RejectedProof(string name, string text, string theorem, string diagnostic)
+// Verifies `text` as the proof of `target` and requires it to fail with an error inside `theorem`, on the line `at`
+// when given, whose message contains `diagnostic`, so an unrelated failure cannot pass as the rejection.
+void RejectedProof(string name, string text, ProofTarget target, string theorem, string diagnostic, string? at = null)
 {
-    var proof = Path.Combine(proofs, $"Mutate1{name}.lean");
+    var proof = Path.Combine(proofs, $"{name}.lean");
     File.WriteAllText(proof, text);
     var lines = text.Split('\n');
     var start = Array.FindIndex(lines, line => line.StartsWith($"theorem {theorem} ", StringComparison.Ordinal)) + 1;
     var end = Array.FindIndex(lines, line => line == $"#print axioms {theorem}") + 1;
     try
     {
-        verification.Verify(assembly, "Fixture", "System.UInt64 Calls::Mutate1(System.UInt64)", proof,
-            Path.Combine(directory, $"Mutate1{name}"));
+        verification.Verify(target.Assembly, target.Library, target.Entry, proof, Path.Combine(directory, name));
     }
     catch (InvalidOperationException error)
     {
@@ -142,14 +174,16 @@ void RejectedProof(string name, string text, string theorem, string diagnostic)
             .Select(match => (Line: int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
                 Message: match.Groups[2].Value)).ToArray();
         if (start == 0 || end == 0 || !located.Any(found => found.Line >= start && found.Line <= end &&
+                (at is null || lines[found.Line - 1].Trim() == at) &&
                 found.Message.Contains(diagnostic, StringComparison.Ordinal)))
-            throw new InvalidOperationException(
-                $"Expected {diagnostic} in {theorem} ({start}-{end}):\n{error.Message}");
-        Console.WriteLine($"PASS {name.ToLowerInvariant()} mutation refused in {theorem}");
+            throw new InvalidOperationException($"Expected {diagnostic} in {theorem} ({start}-{end})" +
+                (at is null ? "" : " at " + at) + $":\n{error.Message}");
+        Console.WriteLine($"PASS {name} refused in {theorem}");
         return;
     }
-    throw new InvalidOperationException($"The {name.ToLowerInvariant()} mutation of Mutate1 was accepted");
+    throw new InvalidOperationException($"{name} was accepted");
 }
+
 
 // One public caller per size, each passing the same local to the private Mutate as often as its name says.
 static string FixtureSource(int[] sizes)
@@ -345,3 +379,6 @@ static string MutateProof(int calls) => $$"""
     end ExampleProof
 
     """;
+
+// The assembly, library and entry a rejected proof is verified against.
+record ProofTarget(string Assembly, string Library, string Entry);
