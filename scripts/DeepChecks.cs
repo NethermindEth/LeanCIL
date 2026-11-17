@@ -375,7 +375,8 @@ partial class Program
             foreach (var (module, source) in unparsed) generatedImports[ContentKey(source)] = parsed[module];
         }
         // One launch reads every header this process has not read from the certified library.
-        var unread = compiled.Where(pair => !Certified(pair.Value.Root) || !certifiedHeaders.ContainsKey(pair.Value.Path))
+        var unread = compiled
+            .Where(pair => !Certified(pair.Value.Root) || !certifiedHeaders.ContainsKey(pair.Value.Path))
             .ToDictionary(pair => pair.Key, pair => pair.Value.Path);
         var read = unread.Count == 0 ? [] : ConsumerModuleImports(session, unread);
         if (unread.Count != 0) launches++;

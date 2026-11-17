@@ -273,7 +273,8 @@ try
     if (verification.deepCacheHits != deepHits + 2 || verification.AuthenticatedSuccess(Path.GetFileName(deepEntry))
             is null || File.ReadAllBytes(cachedBodies).SequenceEqual(changedBodies))
         throw new InvalidOperationException("A rebuilt consumer deep result did not replace the changed entry.");
-    Console.WriteLine("PASS a changed cached consumer deep module runs cold and its rebuilt result replaces the entry");
+    Console.WriteLine("PASS a changed cached consumer deep module runs cold and its rebuilt result replaces " +
+        "the entry");
     if (args is ["--positive"]) return;
     var combinedRun = new DeepCheckRun(inputs);
     var combinedOriginalProof = File.ReadAllBytes(proof);

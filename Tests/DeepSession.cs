@@ -306,7 +306,8 @@ void CheckClosureWork()
             warmWork.Hashed != cold.Count - certified || coldWork.Hashed < warmWork.Hashed ||
             label == "small" && coldWork.Hashed != cold.Count ||
             warmWork.Headers != sessionHeaders || label == "small" && coldWork.Headers <= warmWork.Headers)
-            throw new InvalidOperationException($"Deep import closure work changed for {label}: {coldWork}, {warmWork}");
+            throw new InvalidOperationException(
+                $"Deep import closure work changed for {label}: {coldWork}, {warmWork}");
         Console.WriteLine($"PASS a {label} deep import closure binds {cold.Count} parts, {certified} certified: " +
             $"cold {coldWork.Launches} launches, {coldWork.Headers} headers, {coldWork.Hashed} parts " +
             $"({coldWork.HashedBytes} bytes) hashed in {coldSeconds:F1}s; warm {warmWork.Launches} launch, " +
