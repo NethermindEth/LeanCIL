@@ -99,30 +99,36 @@ internal static class Arrays
     /// <summary>
     /// A numeric element load or store: its width, whether a load sign-extends, and the step lemma a proof outline
     /// cites for it. <paramref name="Kind"/> is the opcode's suffix, or null for a typed access naming its element
-    /// by token.
+    /// by token, which steps from <paramref name="Shape"/>, the shape fact of its element type.
     /// </summary>
-    internal sealed record NumericAccess(int Width, bool Signed, bool Store, NumericKind? Kind)
+    internal sealed record NumericAccess(int Width, bool Signed, bool Store, NumericKind? Kind, string? Shape = null)
     {
         /// <summary>The lemma stepping a load of an element whose address and load succeed.</summary>
         internal string LoadLemma =>
-            Kind is { } kind ? $"step_ldelem_of_element {kind.Term()}" : "arrayLoad_of_element";
+            Kind is { } kind ? $"step_ldelem_of_element {kind.Term()}" : $"step_ldelem_any_of_element {Typed} rfl";
 
         /// <summary>The lemma stepping a store into an element whose write succeeds.</summary>
         internal string StoreLemma => (Kind, Width) switch
         {
             ({ } kind, 8) => $"step_stelem_wide_of_write {kind.Term()}",
             ({ } kind, _) => $"step_stelem_narrow_of_write {kind.Term()}",
-            (null, 8) => "arrayStore_i64_of_write",
-            _ => "arrayStore_of_write"
+            (null, 8) => $"step_stelem_any_of_wide_write {Typed} rfl",
+            _ => $"step_stelem_any_of_write {Typed} rfl"
         };
+
+        string Typed => Shape ?? throw new InvalidOperationException("A typed element access has no shape fact");
     }
 
-    /// <summary>The numeric element access <paramref name="op"/> performs, or null when it performs none.</summary>
-    internal static NumericAccess? Numeric(Operation op) => op switch
+    /// <summary>The numeric element access <paramref name="op"/> performs, or null when it performs none. A typed
+    /// access names the shape fact <paramref name="shapeOf"/> gives its element type, and is null when that gives
+    /// none.</summary>
+    internal static NumericAccess? Numeric(Operation op, Func<string, string?>? shapeOf = null) => op switch
     {
         ArrayElementAccess access => new(access.Width, access.Signed, access.Store, access.Kind),
         TypedElementAccess { Storage: { Kind: not NativeOperands.Kind.ArrayComposite } storage } typed =>
-            new(storage.Width, storage.Signed, typed.Store, null),
+            (typed.Element is { } element ? shapeOf?.Invoke(element) : null) is var shape &&
+                (shapeOf is null || shape is not null)
+                ? new(storage.Width, storage.Signed, typed.Store, null, shape) : null,
         _ => null
     };
 

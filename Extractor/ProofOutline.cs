@@ -16,6 +16,32 @@ internal static partial class ProofOutline
         ClassViews.View[] Views, string Architecture,
         ComputedLayout[] Layouts);
 
+    /// <summary>The shape fact `cil_resolution_facts` declares for each element type method `index` names, by the
+    /// element term its operations carry, numbered in order of first appearance as that command numbers the raw
+    /// operands; none when an element instruction carries no term, as the numbering is then unknown.</summary>
+    /// <remarks>An operand with an element storage renders as the raw operand does; one without, such as a class
+    /// element the raw code names unlike its array, leaves the numbering unknown.</remarks>
+    internal static Func<string, string?> ShapeFacts(Extraction extraction, int index)
+    {
+        var emitted = extraction.Emitted[index];
+        var order = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var pc = 0; pc < emitted.Opcodes.Length; pc++)
+        {
+            if (emitted.Opcodes[pc] is not (0x8D or 0x8F or 0xA3 or 0xA4)) continue;
+            if (emitted.Operations[pc] switch
+                {
+                    NewArray allocation => allocation.Element,
+                    TypedElementAccess { Storage: not null } access => access.Element,
+                    ElementAddress address => address.Element,
+                    _ => null
+                } is not { } element)
+                return _ => null;
+            order.TryAdd(element, order.Count);
+        }
+        return element => order.TryGetValue(element, out var shape)
+            ? $"Extracted.method{index}_elementShape{shape}" : null;
+    }
+
     /// <summary>The emitted operations as the outline reads them, over frame slots: a homed argument's load, store and
     /// address are those of its home's slot, which follows the declared locals, as the step equations state. Each
     /// such operation still renders as the argument instruction the body holds.</summary>

@@ -18,9 +18,9 @@ struct or vector element from its transfer. `arrayLoad_of_element` and
 `arrayElement_formed` lets a method return the element address. A loop indexing the array
 names the element it stores to with `arrayElement_of_access` and steps `stelem` with
 `step_stelem_narrow_of_write` or `step_stelem_wide_of_write`, or a typed `stelem` with
-`step_stelem_any_of_write` or `step_stelem_any_of_transfer`, and reads one that steps to
-`arrayStore` with `arrayStore_of_write`; `SpanView.length_bounded` of the storage span lets its
-signed bound test read as unsigned.
+`step_stelem_any_of_write`, `step_stelem_any_of_wide_write` or `step_stelem_any_of_transfer`,
+and reads one that steps to `arrayStore` with `arrayStore_of_write`; `SpanView.length_bounded` of
+the storage span lets its signed bound test read as unsigned.
 -/
 
 namespace CIL.Safety
@@ -356,6 +356,29 @@ theorem step_stelem_any_of_write {body : CIL.Method} {type : CIL.Extraction.Type
       CIL.Value.hasUnspecified, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_stelem_any_of_write
+
+/-- A typed `stelem` of an 8-byte word into a numeric element whose write succeeds leaves that
+    write's memory. -/
+theorem step_stelem_any_of_wide_write {body : CIL.Method} {type : CIL.Extraction.TypeExpr}
+    {memory after : Memory} {view : ArrayView} {index : CIL.Value} {element : CIL.ArrayElement}
+    {position : Nat} {reference : Reference} {bits : CIL.W64}
+    (shape : body.elementShape type = .value element) (numeric : element.composite = false)
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position 8 = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat 8) 1 = .ok after)
+    (wide : element.width = 8 := by decide) :
+    ∀ pc args frame rest, step body (.stelem_any type) pc args frame
+        (.scalar (.i64 bits) :: .scalar index :: .array view :: rest) memory =
+      .ok (.next (pc + 1) rest frame after) := by
+  intro pc args frame rest
+  have stored := arrayStore_i64_of_write indexed found written rest
+  rw [step_stelem_any_eq, shape]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [typedElementInstruction, numeric, wide, unspecifiedOperands, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_stelem_any_of_wide_write
 
 /-- A typed `stelem` of a specified value into a struct or vector element whose transfer succeeds
     leaves that transfer's memory. -/

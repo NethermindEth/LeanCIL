@@ -27,7 +27,8 @@ internal static partial class ProofOutline
             spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return)
             return null;
         if (ops.Length == 4 &&
-            Arrays.Numeric(ops[2]) is { Store: false, Signed: false } load && load.Width == array.Width)
+            Arrays.Numeric(ops[2], ShapeFacts(extraction, 0)) is { Store: false, Signed: false } load &&
+            load.Width == array.Width)
             return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
@@ -83,8 +84,8 @@ internal static partial class ProofOutline
         {
             lean.Line("    refine ⟨CIL.executionBound Extracted.program 0, ?final, ?results, ?run, ?postcondition⟩");
             lean.Line("    case run =>");
-            lean.Line($"      cil_checked_steps [{access.Load!.LoadLemma} (index := .i32 {index.Name}) rfl {element}");
-            lean.Line($"        {loaded}, {array.Name}Valid]");
+            lean.Line($"      cil_checked_steps [{access.Load!.LoadLemma}");
+            lean.Line($"        (index := .i32 {index.Name}) rfl {element} {loaded}, {array.Name}Valid]");
         }
         else
         {

@@ -183,8 +183,11 @@ internal static partial class ProofOutline
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     /// <remarks>With `throws`, for a callee, a path may end in a throw, which its contract's `pre` must exclude.
     /// </remarks>
+    /// <remarks>`shapes` names the shape fact of each element type the walked method's typed accesses name.
+    /// </remarks>
     sealed class ObjectWalk(Specification spec, Operation[] ops, FieldViews views, Func<int, Callee?> callees,
-        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null, bool throws = false)
+        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null, bool throws = false,
+        Func<string, string?>? shapes = null)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
@@ -316,7 +319,8 @@ internal static partial class ProofOutline
                 {
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear, numericHomes, stubs, throws) { Objects = Objects, Arrays = Arrays,
+                        views, callees, linear, numericHomes, stubs, throws, shapes)
+                    { Objects = Objects, Arrays = Arrays,
                         Slots = Slots, Stored = Stored, ArrayApart = ArrayApart,
                         stores = stores, fieldMemory = fieldMemory,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
@@ -591,7 +595,8 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
                         $"(.address {values.Array.Name})", Array: values.Array));
                 }
-                else if (LeanCIL.Arrays.Numeric(op) is { Store: false, Width: 4 or 8, Signed: false } elementLoad)
+                else if (LeanCIL.Arrays.Numeric(op, shapes) is
+                    { Store: false, Width: 4 or 8, Signed: false } elementLoad)
                 {
                     var index = Pop();
                     if (Pop() is not Values { Array.Words: { } array } ||
@@ -1144,7 +1149,7 @@ internal static partial class ProofOutline
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
             var walk = new ObjectWalk(spec, SlotOperations(extraction.Emitted[index]), views, _ => null,
-                numericHomes: HasNumericObjectHomes(method), throws: splits);
+                numericHomes: HasNumericObjectHomes(method), throws: splits, shapes: ShapeFacts(extraction, index));
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.
             if (!walk.Run(pc => Location(method, pc)) || walk.Flattened.Any(step => step is CallStep) ||
@@ -1203,7 +1208,8 @@ internal static partial class ProofOutline
         var summaries = new Dictionary<int, Callee?>();
         Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
             : summaries[index] = Summarize(extraction, index, names.Claim("callee" + index, "callee" + index), views);
-        var walk = new ObjectWalk(spec, body.Operations, views, Summary, linear: true);
+        var walk = new ObjectWalk(spec, body.Operations, views, Summary, linear: true,
+            shapes: ShapeFacts(extraction, 0));
         if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null) &&
             walk.Arrays.Count == 0)
             spec.Plan = walk.Plan();

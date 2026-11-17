@@ -142,6 +142,9 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("ArrayReadInt32", "PrimitiveArrays::ReadInt32(int[],int)", "buffers"),
     ("ArrayReadUInt64", "PrimitiveArrays::ReadUInt64(ulong[],int)", "buffers"),
     ("ArrayRead", "ArrayElementReferences::Read(int[],int)", "buffers"),
+    // A generic read specialized to a word, whose typed `ldelem` steps from the element type's shape fact.
+    ("TypedReadUInt32", "PrimitiveArrays::ReadGeneric(T[],int)", "buffers"),
+    ("TypedReadUInt64", "PrimitiveArrays::ReadGeneric(T[],int)", "buffers"),
     ("ArraySum", "Loops::SumIndexed(ulong[])", "buffers"),
     ("ArrayFill", "Loops::FillIndexed(uint[],uint)", "buffers"),
     // The receiver of a class instance method beside the array it indexes.
@@ -162,6 +165,12 @@ var catalog = new (string Name, string Selector, string Group)[]
     // A struct array argument no field names: its element is a definition whose identity spans two lines.
     ("PairLength",
         "AggregateArrays::ConstructedLength(Examples.AggregateArrays/Pair[],System.Int32,System.Int32)", "buffers")
+};
+// The type arguments a generic entry is extracted at.
+var typeArguments = new Dictionary<string, string[]>(StringComparer.Ordinal)
+{
+    ["TypedReadUInt32"] = ["--type-argument", "System.UInt32"],
+    ["TypedReadUInt64"] = ["--type-argument", "System.UInt64"]
 };
 var outlined = catalog.Where(entry => (group is null || entry.Group == group) &&
     (cases is null || cases.Contains(entry.Name, StringComparer.Ordinal))).ToArray();
@@ -192,7 +201,8 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
     var scratch = Path.Combine(outlineRoot, name);
     Directory.CreateDirectory(scratch);
     var extraction = Path.Combine(scratch, "Extraction");
-    Run(Extract("extract", assembly, "Examples", selector, extraction));
+    Run([.. Extract("extract", assembly, "Examples", selector, extraction),
+        .. typeArguments.GetValueOrDefault(name, [])]);
     var outline = Path.Combine(scratch, "Proof.lean");
     Run(Cli("new-proof", extraction, outline));
     Run(Cli("new-proof", extraction, Path.Combine(scratch, "Again.lean")));

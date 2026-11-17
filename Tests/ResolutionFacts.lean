@@ -2,6 +2,7 @@ import CIL.Resolution
 import CIL.Safety.ValueSteps
 import CIL.Safety.StepTransport
 import CIL.Extraction.Translation
+import CIL.Safety.ArrayContents
 
 /-!
 # Declared narrowing
@@ -916,6 +917,25 @@ example : arrays.elementShape (.aggregate "Examples.Point" 0) =
 #guard_msgs in #print axioms arrays_elementShape4
 /-- info: 'Tests.ResolutionFacts.arrays_elementShape5' depends on axioms: [propext] -/
 #guard_msgs in #print axioms arrays_elementShape5
+
+-- A shape fact steps a typed store of its width: the `int32` shape a four-byte one and a `uint64`
+-- shape an eight-byte one, which the `int32` shape cannot step.
+open CIL.Safety in
+example {memory after : Safety.Memory} {view : ArrayView} {index : W32} {reference : Reference}
+    {bits : W32} (found : arrayElement memory view index.toNat 4 = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat 4) 1 = .ok after) : True := by
+  have := step_stelem_any_of_write (index := .i32 index) arrays_elementShape0 rfl rfl found written
+  trivial
+open CIL.Safety in
+example {memory after : Safety.Memory} {view : ArrayView} {index : W32} {reference : Reference}
+    {bits : W64} (found : arrayElement memory view index.toNat 8 = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat 8) 1 = .ok after) : True := by
+  have := step_stelem_any_of_wide_write (index := .i32 index)
+    (Method.elementShape_primitive arrays .uint64) rfl rfl found written
+  fail_if_success
+    have := step_stelem_any_of_wide_write (index := .i32 index)
+      arrays_elementShape0 rfl rfl found written
+  trivial
 
 -- One fact per distinct element type, not per instruction: `int32` is named twice, and the
 -- `int64` operand of an opcode that names no element type has no fact.

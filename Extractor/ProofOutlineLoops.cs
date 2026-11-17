@@ -178,6 +178,7 @@ internal static partial class ProofOutline
             index == 0 ? "" : (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         readonly MethodDefinition method = extraction.Methods[0];
+        readonly Func<string, string?> shapes = ShapeFacts(extraction, 0);
         readonly FieldViews views = new(extraction);
         readonly List<Slot> slots = [];
         readonly List<Component> components = [];
@@ -1594,7 +1595,7 @@ internal static partial class ProofOutline
                 stack.Add(new Number($"(BitVec.ofNat 32 {count})", 4,
                     Stacked: $".scalar (.i32 ((BitVec.ofNat 64 {count}).setWidth 32))"));
             }
-            else if (Arrays.Numeric(op) is { Store: false, Signed: false } arrayLoad &&
+            else if (Arrays.Numeric(op, shapes) is { Store: false, Signed: false } arrayLoad &&
                 stack.Count >= 2 && stack[^2] is WordArrayArgument read)
             {
                 if (stack[^1] is not Number { Width: 4, Narrow: false } index || current is null ||
@@ -1608,7 +1609,7 @@ internal static partial class ProofOutline
                 stack.Add(new Number(ElementRead(read.Array, arrayLoad, index.Term, state.Facts),
                     read.Array.Width));
             }
-            else if (Arrays.Numeric(op) is { Store: true } arrayStore &&
+            else if (Arrays.Numeric(op, shapes) is { Store: true } arrayStore &&
                 stack.Count >= 3 && stack[^3] is WordArrayArgument stores)
             {
                 var width = arrayStore.Width;
@@ -1745,7 +1746,8 @@ internal static partial class ProofOutline
             lean.Line($"{indent}  ({name}Checked.within wellFormed frame{apart}).contents.array_load");
             lean.Line($"{indent}    (frame.caller_array_valid wellFormed {name}Valid) (by decide) {name}Bound");
             lean.Line($"{indent}have {name}Step :=");
-            lean.Line($"{indent}  {load.LoadLemma} (index := .i32 {index}) rfl {name}Found {name}Loaded");
+            lean.Wrapped($"{indent}  {load.LoadLemma}", $"(index := .i32 {index}) rfl {name}Found {name}Loaded".Terms(),
+                "");
             // The step pushes the element through `numericOfWidth`, which these unfold to the element itself.
             facts.AddRange(new[] { name + "Step", "numericOfWidth", "BitVec.ofNat_toNat" }
                 .Where(fact => !facts.Contains(fact)));
@@ -1779,7 +1781,8 @@ internal static partial class ProofOutline
             lean.Line($"{indent}  (by simpa [numberBytes_length] using {name}Within)");
             lean.Line($"{indent}  (by simpa [Reference.element_allocation] using {name}Below)");
             lean.Line($"{indent}have {name}Step :=");
-            lean.Line($"{indent}  {store.StoreLemma} (index := .i32 {index}) rfl {name}Element {name}Wrote");
+            lean.Wrapped($"{indent}  {store.StoreLemma}",
+                $"(index := .i32 {index}) rfl {name}Element {name}Wrote".Terms(), "");
             return name + "Step";
         }
 

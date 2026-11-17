@@ -447,7 +447,14 @@ internal static partial class ProofOutline
             lean.Line();
             var subject = Symbolic ? "its result and the caller's memory" : "its result";
             lean.Quiet();
-            lean.Line($"/-- Replace with what `{Method.Name}` guarantees about {subject}. -/");
+            // A specialized method's name carries its type arguments, so the sentence may need two lines.
+            var guarantee = $"/-- Replace with what `{Method.Name}` guarantees about {subject}. -/";
+            if (guarantee.Length <= 100) lean.Line(guarantee);
+            else
+            {
+                lean.Line($"/-- Replace with what `{Method.Name}` guarantees about");
+                lean.Line($"    {subject}. -/");
+            }
             var results = Binders.Concat(Symbolic ? [("initial", "Memory"), ("final", "Memory")] : []);
             if (Result is not null) results = results.Append(("result", Result.Lean));
             lean.Wrapped("def Postcondition", Grouped(results), ": Prop := sorry");
@@ -633,7 +640,7 @@ internal static partial class ProofOutline
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
         var walk = new ObjectWalk(spec, body.Operations, views, summarized, numericHomes: numericHomes,
-            stubs: Stubbed);
+            stubs: Stubbed, shapes: ShapeFacts(extraction, 0));
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));
