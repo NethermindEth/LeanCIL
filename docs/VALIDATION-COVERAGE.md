@@ -720,8 +720,8 @@ The outline suites check `new-proof` outlines:
     element of the span it is passed, one summing and one filling an array by index, and three
     slicing a span local, which sum a span and an array and fill an array;
   - straight-line methods with `bool`, narrow, writable span and array parameters, a `bool`
-    result, unsigned and signed checked adds, a bit count and splits on unsigned and signed word
-    tests;
+    result, unsigned and signed checked adds, a `BitOperations` bit count and the same count an
+    integer type declares, each stepped whole, and splits on unsigned and signed word tests;
   - straight-line methods over class instances, string fields and arrays of class references,
     including element facts carried across element and field stores and an array the method
     allocates;

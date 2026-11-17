@@ -51,6 +51,9 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("Narrow", "Arguments::Narrow(byte)", "control"),
     ("ReverseI16", "Bits::ReverseI16(short)", "control"),
     ("PowerU32", "Bits::PowerU32(uint)", "control"),
+    // A bit count of BitOperations and the same count an integer type declares.
+    ("Population64", "Bits::Population64(ulong)", "control"),
+    ("PopulationU32", "Bits::PrimitivePopulationU32(uint)", "control"),
     ("Deposit", "Account::Deposit(System.UInt64)", "objects"),
     ("Headroom", "Account::get_Headroom()", "objects"),
     ("SetLimit", "Objects::SetLimit(Examples.Account,System.UInt32)", "objects"),
@@ -1961,6 +1964,17 @@ if (Selected("ArraySum"))
             admitsNull.Output);
     Console.WriteLine("PASS an indexed loop's outline states the null exclusion, and a precondition without it " +
         "fails naming null");
+}
+
+foreach (var name in new[] { "Population64", "PopulationU32" })
+{
+    if (!Selected(name)) continue;
+    // A bit-count call steps as its total intrinsic, so the outline takes the whole body in one run.
+    var countOutline = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
+    if (countOutline.Contains("-- not outlined:", StringComparison.Ordinal) ||
+        !countOutline.Contains("case run => cil_checked_steps", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} outline does not step its bit-count calls:\n" + countOutline);
+    Console.WriteLine($"PASS the {name} outline steps its bit-count calls");
 }
 
 if (Selected("ReceiverArraySum"))

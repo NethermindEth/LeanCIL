@@ -101,7 +101,7 @@ internal static partial class ProofOutline
                         op is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI }
                             ? 64
                         : op is StackOperation { Kind: StackOpcode.ConvU4 or StackOpcode.ConvI4 }
-                            or ScalarIntrinsic { Result: 32 } ? 32
+                            or ModelCall { Model: ScalarIntrinsic { Result: 32 } } ? 32
                         : word.Bits));
                 }
                 else return null;

@@ -23,12 +23,12 @@ internal static partial class ProofOutline
 
         internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
 
-        /// <summary>An operation that steps without a branch, a call, a fault or memory: arithmetic, conversions
-        /// and the bit counts, which are total.</summary>
+        /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions and the
+        /// bit-count calls, which step as their total intrinsic.</summary>
         internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
             operation is Return ? plainReturn : operation is Arg load ? MethodArguments.Plain(method, load.Index) :
             operation is Constant { Width: 32 or 64 } or
-            ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
+            ModelCall { Model: ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } } or
             StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
                 or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
                 StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 or StackOpcode.ConvU4 or
