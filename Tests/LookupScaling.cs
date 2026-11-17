@@ -168,7 +168,7 @@ const long TypeDecisionLimit = 9_500;
 // `decide +kernel` costs about 2,000 heartbeats for any statement; less means the decision was not measured.
 const long KernelDecisionFloor = 2_000;
 // Bodies of these many array element addresses. A readonly rule that scans the body at every address costs
-// about 1.5 times as much per address at each doubling; the indexed rule costs about 1.1 times as much at 512.
+// about 1.5 times as much per address at each doubling.
 const int FewAddresses = 128;
 const int MoreAddresses = 256;
 const int ManyAddresses = 512;
@@ -1011,13 +1011,13 @@ void DecodeCosts()
 }
 
 // Deciding prefix entry over the destination mask must stay within `AllowedLocalGrowth` per instruction from 500 to
-// 8000 instructions and cost no more than the readonly rule over the same body.
+// 8000 instructions.
 void PrefixEntryCosts()
 {
     const int SegmentLength = 4;
     var directory = At("artifacts/LookupScaling/PrefixEntry");
     Directory.CreateDirectory(directory);
-    var samples = new List<(int Instructions, long Prefix, long Window)>();
+    var samples = new List<(int Instructions, long Cost)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
         var path = Path.Combine(directory, $"Instructions{instructions}.lean");
@@ -1036,48 +1036,26 @@ void PrefixEntryCosts()
               let start := {{SegmentLength}} * index
               [⟨start, 65054, .none⟩, ⟨start + 1, 143, .type intType⟩, ⟨start + 2, 38, .none⟩,
                 ⟨start + 3, 43, .target (start + {{SegmentLength}})⟩]
-            /-- The instructions the translator emits for one segment. -/
-            def codeSegment (index : Nat) : List Instruction :=
-              [.nop, .ldelema intType true, .pop, .br ({{SegmentLength}} * (index + 1))]
             /-- A body of {{instructions}} raw instructions. -/
             def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
-            /-- The {{instructions}} emitted instructions of the body. -/
-            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
             #kernel_cost "prefix entry {{instructions}}"
               prefixEntryFreeWith (branchTargetMask raw).testBit 0 raw = true
-            #kernel_cost "readonly window {{instructions}}"
-              (let rawAt := (FlowIndex.ofList raw).get?
-               let targeted := (Std.TreeSet.ofList (branchTargets raw) compare).contains
-               (raw.zipIdx.zip code).all fun ((instruction, pc), emitted) =>
-                 readOnlySiteWindow rawAt targeted pc instruction emitted) = true
             end PrefixEntryCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var costs = LookupPatterns.PrefixEntry().Matches(output)
-            .ToDictionary(match => match.Groups[1].Value,
-                match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture), StringComparer.Ordinal);
-        if (!costs.TryGetValue("prefix entry", out var prefix) ||
-            !costs.TryGetValue("readonly window", out var window))
-            throw new InvalidOperationException($"Missing the prefix entry costs:\n{output}");
-        samples.Add((instructions, prefix, window));
+        var cost = LookupPatterns.PrefixEntry().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the prefix entry cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
-    string Measured(Func<(int Instructions, long Prefix, long Window), long> cost) => string.Join("; ",
-        samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
-            $"{(double)cost(sample) / sample.Instructions:F1} at {sample.Instructions}")));
-    bool Grows(Func<(int Instructions, long Prefix, long Window), long> cost)
-    {
-        var perInstruction = samples.Select(sample => (double)cost(sample) / sample.Instructions).ToArray();
-        return samples.Any(sample => cost(sample) < KernelDecisionFloor) ||
-            perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth);
-    }
-    var measured = $"{Measured(sample => sample.Prefix)} heartbeats per instruction, against " +
-        $"{Measured(sample => sample.Window)} for the readonly rule";
-    if (Grows(sample => sample.Prefix) || Grows(sample => sample.Window) ||
-        samples.Any(sample => sample.Prefix > sample.Window))
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
         throw new InvalidOperationException(
-            $"Deciding prefix entry costs {measured}; the limit is {AllowedLocalGrowth} times the cost per " +
-            "instruction at the size before, and no more than the readonly rule at each size.");
-    Console.WriteLine($"PASS deciding prefix entry costs {measured}");
+            $"Deciding prefix entry costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS deciding prefix entry costs {measured} heartbeats per instruction");
 }
 
 // The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
@@ -2907,7 +2885,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedDefinition();
 
-    [GeneratedRegex(@"(prefix entry|readonly window) [0-9]+ (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"prefix entry [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex PrefixEntry();
 
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]

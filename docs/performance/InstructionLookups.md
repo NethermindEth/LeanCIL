@@ -134,20 +134,16 @@ and 512 array element addresses, each followed by a branch, with and without a `
 prefix, less the heartbeats of stating the same certificate. Each instruction of these bodies, as
 of the local bodies whose `ScalarFlowValid` is checked below, carries the byte offset extraction
 writes for it. It fails when the cost per address
-at 256 or 512 exceeds 1.15 times the cost at 128. The readonly rule reads neighbouring
-instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, both built once
-per body, and measures 1.03 for plain and 1.06 for prefixed addresses. A rule that scans the body
-at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
+at 256 or 512 exceeds 1.15 times the cost at 128. The check streams the raw instruction before
+each site with the site (`predecessors`) and measures 1.01 for plain and 1.02 for prefixed
+addresses.
 
 It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
 bodies of 500, 2,000 and 8,000 instructions, whose segments each hold a `readonly.` prefix, its
-`ldelema`, a `pop` and a branch to the prefix of the next segment, and decides the readonly rule
-at every pc of the same body. It fails when the cost per instruction of either at 2,000 or 8,000
-exceeds 1.25 times the cost at the size before, or when the prefix rule costs more than the
-readonly rule at any size. The prefix rule tests bits of a mask of the branch destinations built
-in one pass and costs about 1,380 heartbeats per instruction at every size. The readonly rule,
-whose `Std.TreeSet` of destinations costs the logarithm of the body to build and to read, costs
-about 15,900, 19,300 and 23,100. Run this row alone with
+`ldelema`, a `pop` and a branch to the prefix of the next segment. It fails when the cost per
+instruction at 2,000 or 8,000 exceeds 1.25 times the cost at the size before. The rule tests bits
+of a mask of the branch destinations built in one pass and costs about 1,380 heartbeats per
+instruction at every size. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
 
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
@@ -158,7 +154,7 @@ address and are consumed by `calli`, which makes each a pointer local. For the p
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
 `FlowIndex` and pointer locals from a `Std.TreeSet`, built once per body, as does the closed
-argument storage. They measure 1.02 for loaded, 1.02 for addressed and 1.07 for pointer locals,
+argument storage. They measure 1.01 for loaded, 1.01 for addressed and 1.07 for pointer locals,
 and 1.17 for the closed argument storage, whose set lookups cost the logarithm of the locals.
 Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
 and 2.33.
