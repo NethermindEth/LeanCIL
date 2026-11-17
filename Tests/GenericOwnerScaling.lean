@@ -1,7 +1,8 @@
 import Tests.MetadataBuilder
 import Lean
 
-/-! Scaling checks for metadata generic owner indexing and owner lookups. -/
+/-! Scaling checks for metadata generic owner indexing and owner lookups, for owners with a
+    parameter and for owners shown by their neighbours to have none. -/
 
 namespace Tests.GenericOwnerScaling
 
@@ -34,25 +35,42 @@ private def checksOwners (count : Nat) : Bool :=
   | .ok accepted => accepted
   | .error _ => false
 
+/-- Build the shared tables once and read that no parameter names each of `count` methods,
+    each bracketed by the parameters of two adjacent types. -/
+private def checksAbsentOwners (count : Nat) : Bool :=
+  match (do
+    let metadata := metadata count
+    let index ← metadata.indexWith (← metadata.tables) []
+    (List.range count).allM fun position => do
+      let rows ← index.genericParameters 0 (tokenOf Table.methodDef (position + 1))
+      pure rows.isEmpty) with
+  | .ok accepted => accepted
+  | .error _ => false
+
+/-- The kernel checks timed, each with the label its report uses. -/
+private def timedChecks : List (String × Lean.Name) :=
+  [("Generic owner", ``checksOwners), ("Absent owner", ``checksAbsentOwners)]
+
 open Lean Meta Elab Command in
 run_cmd do
   let allowedFourfoldGrowth := 6
-  let mut previous := 0
-  for count in [128, 512, 2048] do
-    let (statement, proof) ← liftTermElabM do
-      let statement ← mkEq (mkApp (mkConst ``checksOwners) (mkNatLit count))
-        (mkConst ``Bool.true)
-      let proof ← mkEqRefl (mkConst ``Bool.true)
-      pure (statement, proof)
-    let start ← IO.getNumHeartbeats
-    let checked := Expr.letE `checked statement proof (.bvar 0) false
-    match Kernel.check (← getEnv) {} checked with
-    | .error error => throwKernelException error
-    | .ok _ => pure ()
-    let cost := (← IO.getNumHeartbeats) - start
-    if previous != 0 && cost > previous * allowedFourfoldGrowth then
-      throwError "Generic owner cost grew from {previous} to {cost} for four times the owners"
-    logInfo m!"Generic owner checks: {count} owners, {cost} heartbeats"
-    previous := cost
+  for (label, check) in timedChecks do
+    let mut previous := 0
+    for count in [128, 512, 2048] do
+      let (statement, proof) ← liftTermElabM do
+        let statement ← mkEq (mkApp (mkConst check) (mkNatLit count))
+          (mkConst ``Bool.true)
+        let proof ← mkEqRefl (mkConst ``Bool.true)
+        pure (statement, proof)
+      let start ← IO.getNumHeartbeats
+      let checked := Expr.letE `checked statement proof (.bvar 0) false
+      match Kernel.check (← getEnv) {} checked with
+      | .error error => throwKernelException error
+      | .ok _ => pure ()
+      let cost := (← IO.getNumHeartbeats) - start
+      if previous != 0 && cost > previous * allowedFourfoldGrowth then
+        throwError "{label} cost grew from {previous} to {cost} for four times the owners"
+      logInfo m!"{label} checks: {count} owners, {cost} heartbeats"
+      previous := cost
 
 end Tests.GenericOwnerScaling

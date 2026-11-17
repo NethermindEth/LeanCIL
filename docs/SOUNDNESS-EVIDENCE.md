@@ -225,6 +225,14 @@ What `MetadataResolution` and `MetadataBinding` check:
   requires an implicit receiver outside the parameter list. Instantiation also refuses this
   flag, including for methods decoded directly from raw definitions.
   The `RVA` and `ParamList` columns are not read.
+- Generic parameter counts come from `GenericParam` rows. An owner's carried rows must form its
+  whole zero-based run. An owner with none carried must be shown to have none by its neighbours in
+  the table, which ECMA-335 requires sorted by coded owner: the first carried row above the
+  owner's coded value is row 1 or follows a carried row below it, or the table's last row lies
+  below it, or the table is empty. A `TypeDef` or pinned `TypeRef` that names a type alone, a
+  class's base, and the declaring type of a `Field` or `MethodDef` token used as an operand
+  have no generic parameters, and the head of a generic instance has one per argument. A type
+  outside the carried slices has no rows to count.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a

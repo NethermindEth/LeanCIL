@@ -456,6 +456,16 @@ def find? : SearchTree α → Nat → Option α
     | .gt => find? right wanted
     | .eq => some value
 
+/-- The entry with the least key above `wanted`. -/
+def above? : SearchTree α → Nat → Option (Nat × α)
+  | .leaf, _ => none
+  | .node left key value right, wanted =>
+    if wanted < key then
+      match above? left wanted with
+      | some entry => some entry
+      | none => some (key, value)
+    else above? right wanted
+
 /-- The entries in ascending key order. -/
 def toList : SearchTree α → List (Nat × α)
   | .leaf => []
@@ -509,7 +519,8 @@ structure IndexTables where
   instanceBefore : SearchTree Nat
   /-- For each carried TypeDef whose fields are all carried, its number of instance fields. -/
   instanceTotal : SearchTree Nat
-  /-- Each owner's first carried generic parameter token and number of carried parameters. -/
+  /-- Each owner's first carried generic parameter token and number of carried parameters, keyed
+      by the owner's coded value (`genericOwnerCode`), the order of the `GenericParam` table. -/
   genericOwners : SearchTree (Nat × Nat)
   deriving DecidableEq, Repr
 
@@ -970,13 +981,18 @@ theorem sortBy_perm {α : Type} (before : α → α → Bool) :
 
 #print axioms sortBy_perm
 
-/-- Index every carried generic parameter by its decoded owner in O(n log n) time. -/
+/-- The `TypeOrMethodDef` coded value of a `TypeDef` or `MethodDef` owner token, the key
+    ECMA-335 requires the `GenericParam` table to be sorted by. -/
+def genericOwnerCode (owner : Nat) : Nat :=
+  tokenRow owner * 2 + if metadataTableOf owner == Table.methodDef then 1 else 0
+
+/-- Index every carried generic parameter by the coded value of its owner in O(n log n) time. -/
 private def genericOwnerEntries (index : MetadataIndex) :
     Except MetadataError (SearchTree (Nat × Nat)) := do
   let entries ← index.rows.toList.foldlM (fun found (token, _) => do
     if metadataTableOf token != Table.genericParam then return found
     let parameter ← index.genericParam token
-    return (parameter.owner, token) :: found) []
+    return (genericOwnerCode parameter.owner, token) :: found) []
   let ordered := sortPairs entries
   SearchTree.ofEntries (genericOwnerGroups ordered)
 

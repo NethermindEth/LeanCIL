@@ -617,6 +617,106 @@ theorem checks_all_carried_generic_parameters :
 #guard_msgs in
 #print axioms checks_all_carried_generic_parameters
 
+/-- An owner's parameter count over parameter rows given as a number and a coded owner, with
+    the rows at `omitted` left out; with `absentOnly`, only the check that no row names it. -/
+private def ownerResult (parameters : List (Nat × Nat)) (owner : Nat) (omitted : List Nat := [])
+    (absentOnly := false) : Option Nat :=
+  match (do
+    let metadata := parameterWorld parameters
+    let metadata := { metadata with
+      rows := metadata.rows.filter fun (token, _) =>
+        !(metadataTableOf token == Table.genericParam && omitted.contains (tokenRow token)) }
+    let index ← metadata.indexWith (← metadata.tables) []
+    if absentOnly then do index.noGenericParameters owner; pure 0
+    else do pure (← index.genericParameters 0 owner).length) with
+  | .ok count => some count
+  | .error _ => none
+
+/-- `TypeDef 2` (coded 4) and `MethodDef 2` (coded 5) as owners. -/
+private def typeTwo : Nat := 0x02000002
+private def methodTwo : Nat := 0x06000002
+
+/-- An owner with no carried parameter has none only where its neighbours show it: the first
+    carried row above its coded value is row 1 or follows a carried row below it, or the last
+    row lies below it, or the table is empty. Coded values order a `TypeDef` before the
+    `MethodDef` of the same row number. -/
+theorem checks_absent_generic_parameters_by_neighbours :
+    ownerResult [] typeTwo = some 0 ∧
+    ownerResult [(0, 6)] typeTwo = some 0 ∧
+    ownerResult [(0, 2)] typeTwo = some 0 ∧
+    ownerResult [(0, 2)] typeTwo [1] = none ∧
+    ownerResult [(0, 2), (0, 6)] typeTwo = some 0 ∧
+    ownerResult [(0, 2), (0, 6)] typeTwo [1] = none ∧
+    ownerResult [(0, 2), (0, 3), (0, 6)] typeTwo [2] = none ∧
+    ownerResult [(0, 4), (0, 6)] typeTwo (absentOnly := true) = none ∧
+    ownerResult [(0, 4)] typeTwo (absentOnly := true) = none ∧
+    ownerResult [(0, 5)] typeTwo = some 0 ∧ ownerResult [(0, 5)] methodTwo = some 1 ∧
+    ownerResult [(0, 4)] methodTwo = some 0 ∧ ownerResult [(0, 4)] typeTwo = some 1 ∧
+    ownerResult [(0, 4), (0, 5)] typeTwo [1] = none ∧
+    ownerResult [(0, 2), (0, 4), (0, 6)] typeTwo [2] = none := by decide +kernel
+#print axioms checks_absent_generic_parameters_by_neighbours
+
+/-- A slice with the generic class `Holder`1` and the class `Plain`, each declaring one static
+    `int`; gives the tokens of `Holder`, its field, `Plain` and its field. -/
+private def arityWorld : Step (Nat × Nat × Nat × Nat) := do
+  let runtimeName ← string "System.Runtime"
+  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let objectName ← string "Object"
+  let systemName ← string "System"
+  let _ ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
+  let moduleName ← string "<Module>"
+  let _ ← row Table.typeDef [0, moduleName, 0, 0, 1, 1]
+  let intField ← blob [0x06, 0x08]
+  let holderName ← string "Holder`1"
+  let holder ← row Table.typeDef [1, holderName, 0, 1 * 4 + 1, 1, 1]
+  let parameterName ← string "T"
+  let _ ← row Table.genericParam [0, 0, (holder - 0x02000000) * 2, parameterName]
+  let heldName ← string "V"
+  let held ← row Table.field [0x0016, heldName, intField]
+  link linkDeclaring held 0 holder
+  let plainName ← string "Plain"
+  let plain ← row Table.typeDef [1, plainName, 0, 1 * 4 + 1, 2, 1]
+  let valueName ← string "W"
+  let value ← row Table.field [0x0016, valueName, intField]
+  link linkDeclaring value 0 plain
+  pure (holder, held, plain, value)
+
+private def arity : MetadataSlice × Nat × Nat × Nat × Nat :=
+  build arityWorld (bytesOf "T") ownIdentity
+
+private def holder : Nat := arity.2.1
+private def held : Nat := arity.2.2.1
+private def plain : Nat := arity.2.2.2.1
+private def plainValue : Nat := arity.2.2.2.2
+
+/-- Whether a step over the environment of the arity slice succeeds. -/
+private def arityAccepts {α : Type} (step : MetadataEnv → Except MetadataError α) : Bool :=
+  match (do step (MetadataEnv.ofSlices [← arity.1.index])) with
+  | .ok _ => true
+  | .error _ => false
+
+/-- One `int` argument, and two. -/
+private def oneInt : SigList := .cons (.primitive 8) .nil
+private def twoInts : SigList := .cons (.primitive 8) oneInt
+
+/-- A generic definition is named only as an instance with one argument per parameter: not as
+    a type alone, through a type token, or as the owner of a field token, and a non-generic one
+    takes no arguments. -/
+theorem generic_definitions_take_their_arguments :
+    arityAccepts (·.resolve 0 (.named false plain)) = true ∧
+    arityAccepts (·.resolve 0 (.named false holder)) = false ∧
+    arityAccepts (·.resolve 0 (.genericInst false holder oneInt)) = true ∧
+    arityAccepts (·.resolve 0 (.genericInst false holder .nil)) = false ∧
+    arityAccepts (·.resolve 0 (.genericInst false holder twoInts)) = false ∧
+    arityAccepts (·.resolve 0 (.genericInst false plain oneInt)) = false ∧
+    arityAccepts (·.resolveToken 0 plain) = true ∧
+    arityAccepts (·.resolveToken 0 holder) = false ∧
+    arityAccepts (·.fieldSite plainValue) = true ∧
+    arityAccepts (·.fieldSite held) = false := by decide +kernel
+#print axioms generic_definitions_take_their_arguments
+
 /-- Class receivers are objects; value and enum receivers are managed references. -/
 theorem accepts_matching_receivers :
     (receiverIdentity "Object" false true true).isOk = true ∧
