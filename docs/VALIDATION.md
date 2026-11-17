@@ -246,9 +246,10 @@ type fact and looking the class up in the table. The elements bodies have 16,
 store their index argument into it, each access reading one supplied element fact. The
 typed-elements bodies have 16, 58 and 254 instructions and per cycle do the same through `ldelem`
 and `stelem` with an `int32` type operand, then copy one struct element of a second array onto
-itself. The stepper evaluates each typed access from supplied element facts and takes the element
-shape from the body's layouts; the generated shape facts are in scope and leave the cost
-unchanged. The typed-steps bodies are the same bodies with one supplied step fact per access.
+itself. Each typed access steps by the fact `step_ldelem_any_of_element`,
+`step_stelem_any_of_write`, `step_ldelem_any_of_transfer` or `step_stelem_any_of_transfer`
+derives from supplied element facts and the generated shape fact of the body. The typed-steps
+bodies are the same bodies with one supplied step fact per access.
 The addresses bodies have 11, 56 and 254 instructions and per cycle form and pop a writable and a
 `readonly.` address of an `int32` element of their array argument, each `ldelema` stepped by the
 fact `step_ldelema_of_element` derives from one supplied element fact and the generated shape

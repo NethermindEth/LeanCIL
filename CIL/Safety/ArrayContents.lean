@@ -9,15 +9,18 @@ import CIL.Safety.BufferContents
 An array argument is an `ArrayView` whose bytes are the span `view.storage`, so the facts a
 method needs of its elements are `SpanContents` over that span. `SpanContents.array_load`
 turns them into the element reference and loaded value of an in-bound index; a null array
-has no elements, so the bound alone rules it out. `step_ldelem_of_element` steps `ldelem`
-and `step_ldelema_of_element` an `ldelema` of the element's shape from those facts, and
-`arrayLoad_of_element` and `arrayAddress_of_element` read a typed `ldelem` and an `ldelema`
-once they step to `arrayLoad` and `arrayAddress`;
+has no elements, so the bound alone rules it out. `step_ldelem_of_element` steps `ldelem`,
+`step_ldelem_any_of_element` a typed `ldelem` and `step_ldelema_of_element` an `ldelema` of
+the element's shape from those facts, and `step_ldelem_any_of_transfer` a typed `ldelem` of a
+struct or vector element from its transfer. `arrayLoad_of_element` and
+`arrayAddress_of_element` read a typed `ldelem` and an `ldelema` once they step to
+`arrayLoad` and `arrayAddress`;
 `arrayElement_formed` lets a method return the element address. A loop indexing the array
 names the element it stores to with `arrayElement_of_access` and steps `stelem` with
 `step_stelem_narrow_of_write` or `step_stelem_wide_of_write`, or a typed `stelem` with
-`arrayStore_of_write`; `SpanView.length_bounded` of the storage span lets its signed bound
-test read as unsigned.
+`step_stelem_any_of_write` or `step_stelem_any_of_transfer`, and reads one that steps to
+`arrayStore` with `arrayStore_of_write`; `SpanView.length_bounded` of the storage span lets its
+signed bound test read as unsigned.
 -/
 
 namespace CIL.Safety
@@ -162,6 +165,49 @@ theorem step_ldelema_of_element {body : CIL.Method} {type : CIL.Extraction.TypeE
 
 #print axioms step_ldelema_of_element
 
+/-- A typed `ldelem` of a type the method's layouts give a numeric element shape pushes the
+    value the element's load reads. -/
+theorem step_ldelem_any_of_element {body : CIL.Method} {type : CIL.Extraction.TypeExpr}
+    {memory : Memory} {view : ArrayView} {index : CIL.Value} {element : CIL.ArrayElement}
+    {position : Nat} {reference : Reference} {value : CIL.Value}
+    (shape : body.elementShape type = .value element) (numeric : element.composite = false)
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position element.width = .ok reference)
+    (loaded : loadValue memory (.address reference) element.width element.signed = .ok value) :
+    ∀ pc args frame rest, step body (.ldelem_any type) pc args frame
+        (.scalar index :: .array view :: rest) memory =
+      .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro pc args frame rest
+  rw [step_ldelem_any_eq, shape]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [typedElementInstruction, numeric, unspecifiedOperands, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, arrayLoad, arrayIndex, found, loaded, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+
+#print axioms step_ldelem_any_of_element
+
+/-- A typed `ldelem` of a type the method's layouts give a struct or vector element shape pushes
+    the snapshot the element's transfer reads. -/
+theorem step_ldelem_any_of_transfer {body : CIL.Method} {type : CIL.Extraction.TypeExpr}
+    {memory : Memory} {view : ArrayView} {index : CIL.Value} {element : CIL.ArrayElement}
+    {position : Nat} {value : CIL.Value}
+    (shape : body.elementShape type = .value element) (composite : element.composite = true)
+    (indexed : arrayIndex index = some position)
+    (transferred : ∀ rest, arrayTransferInstruction element false
+      (.scalar index :: .array view :: rest) memory = .ok (memory, .scalar value :: rest)) :
+    ∀ pc args frame rest, step body (.ldelem_any type) pc args frame
+        (.scalar index :: .array view :: rest) memory =
+      .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro pc args frame rest
+  rw [step_ldelem_any_eq, shape]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [typedElementInstruction, composite, unspecifiedOperands, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, transferred, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_ldelem_any_of_transfer
+
 /-- An element address an array access returns forms in the same memory, so a method may
     return it. -/
 theorem arrayElement_formed {memory : Memory} {view : ArrayView} {index width : Nat}
@@ -287,6 +333,51 @@ theorem step_stelem_wide_of_write (kind : CIL.NumericKind) {memory after : Memor
       Except.pure]
 
 #print axioms step_stelem_wide_of_write
+
+/-- A typed `stelem` of a 1-, 2- or 4-byte word into a numeric element whose write succeeds
+    leaves that write's memory. -/
+theorem step_stelem_any_of_write {body : CIL.Method} {type : CIL.Extraction.TypeExpr}
+    {memory after : Memory} {view : ArrayView} {index : CIL.Value} {element : CIL.ArrayElement}
+    {position : Nat} {reference : Reference} {bits : CIL.W32}
+    (shape : body.elementShape type = .value element) (numeric : element.composite = false)
+    (indexed : arrayIndex index = some position)
+    (found : arrayElement memory view position element.width = .ok reference)
+    (written : write memory reference (numberBytes bits.toNat element.width) 1 = .ok after)
+    (narrow : element.width = 1 ∨ element.width = 2 ∨ element.width = 4 := by decide) :
+    ∀ pc args frame rest, step body (.stelem_any type) pc args frame
+        (.scalar (.i32 bits) :: .scalar index :: .array view :: rest) memory =
+      .ok (.next (pc + 1) rest frame after) := by
+  intro pc args frame rest
+  have stored := arrayStore_of_write indexed found written narrow rest
+  rw [step_stelem_any_eq, shape]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [typedElementInstruction, numeric, unspecifiedOperands, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, stored, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms step_stelem_any_of_write
+
+/-- A typed `stelem` of a specified value into a struct or vector element whose transfer succeeds
+    leaves that transfer's memory. -/
+theorem step_stelem_any_of_transfer {body : CIL.Method} {type : CIL.Extraction.TypeExpr}
+    {memory after : Memory} {view : ArrayView} {index : CIL.Value} {element : CIL.ArrayElement}
+    {position : Nat} {value : CIL.Value}
+    (shape : body.elementShape type = .value element) (composite : element.composite = true)
+    (indexed : arrayIndex index = some position) (specified : value.hasUnspecified = false)
+    (transferred : ∀ rest, arrayTransferInstruction element true
+      (.scalar value :: .scalar index :: .array view :: rest) memory = .ok (after, rest)) :
+    ∀ pc args frame rest, step body (.stelem_any type) pc args frame
+        (.scalar value :: .scalar index :: .array view :: rest) memory =
+      .ok (.next (pc + 1) rest frame after) := by
+  intro pc args frame rest
+  rw [step_stelem_any_eq, shape]
+  cases index <;> simp only [arrayIndex, reduceCtorEq, Option.some.injEq] at indexed <;>
+    subst indexed <;>
+    simp [typedElementInstruction, composite, unspecifiedOperands, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, transferred, Bind.bind, Except.bind, Pure.pure, Except.pure] <;>
+    exact specified
+
+#print axioms step_stelem_any_of_transfer
 
 /-- `values` are the elements of a span over the whole array in either access mode, which shares
     its storage extent. -/

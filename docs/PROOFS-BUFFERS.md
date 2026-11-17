@@ -94,7 +94,10 @@ contents.array_load valid scalar bound, gives the element's address
 `arrayElement memory values index width = .ok item` and its load, the element's value.
 `step_ldelem_of_element` steps an integer `ldelem.*` from those two facts. A typed `ldelem` of
 an integer, enum, `bool` or `char` element steps to `arrayLoad` at the width its element type's
-shape gives, which `arrayLoad_of_element` rewrites from the same two facts, and
+shape gives, which `arrayLoad_of_element` rewrites from the same two facts.
+`step_ldelem_any_of_element` steps that typed `ldelem` from the two facts and the shape fact
+`cil_resolution_facts` declares for its type, and `step_ldelem_any_of_transfer` steps one of a
+struct or vector element from the shape fact and its `arrayTransferInstruction` fact.
 `step_ldelema_of_element` steps an `ldelema` whose type the method's layouts give that element
 shape from the address, writable or read-only as a `readonly.` prefix records, and
 `arrayAddress_of_element` gives the same reference once it steps to `arrayAddress`;
@@ -109,8 +112,10 @@ array holds `SpanWritable` authority over `values.storage` instead; with the arr
 bound into the element `arrayElement` returns. `step_stelem_narrow_of_write` steps a one-, two- or
 four-byte `stelem.*` to the written memory, `step_stelem_wide_of_write` steps `stelem.i8` and
 `stelem.i`, and a typed `stelem` steps to `arrayStore`, which `arrayStore_of_write` and
-`arrayStore_i64_of_write` rewrite. The bound test compares the index with `values.Length` as
-signed words; `SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
+`arrayStore_i64_of_write` rewrite. `step_stelem_any_of_write` steps a one-, two- or four-byte
+typed `stelem` from the shape fact and the write, and `step_stelem_any_of_transfer` one of a
+struct or vector element from the shape fact and its transfer. The bound test compares the index
+with `values.Length` as signed words; `SpanView.length_bounded` of the storage span keeps the length below `2 ^ 31`, and
 `toInt_ofNat_of_lt`, which `cil_loop_obligation` applies, reads that comparison as unsigned.
 
 Converting the whole array to a span, as `ReadOnlySpan<T> rest = values` does, pushes

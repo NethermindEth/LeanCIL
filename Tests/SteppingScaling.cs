@@ -680,9 +680,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   (.scalar pair :: .scalar (.i32 index) :: .array pairs :: rest) memory = .ok (memory, rest)) :
                 invoke [body] {{operations.Length + 1}} 0 [.array view, .scalar (.i32 index), .array pairs]
                   memory = .ok (memory, [.scalar (.i32 0)]) := by
-              have loadFact := arrayLoad_of_element (index := .i32 index) rfl found loaded
-              have storeFact := arrayStore_of_write (index := .i32 index) rfl found written
-              cil_checked_steps [valid, pairsValid, loadFact, storeFact, specified, pairLoaded, pairStored]
+              have load := step_ldelem_any_of_element (index := .i32 index) body_elementShape0 rfl rfl
+                found loaded
+              have store := step_stelem_any_of_write (index := .i32 index) body_elementShape0 rfl rfl
+                found written
+              have pairLoad := step_ldelem_any_of_transfer (index := .i32 index) body_elementShape1 rfl rfl
+                pairLoaded
+              have pairStore := step_stelem_any_of_transfer (index := .i32 index) body_elementShape1 rfl rfl
+                specified pairStored
+              cil_checked_steps [valid, pairsValid, load, store, pairLoad, pairStore]
             """,
         "typedsteps" => $$"""
             /-- Every typed access steps by one supplied fact, and every store keeps the memory. -/
