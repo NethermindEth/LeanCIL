@@ -63,6 +63,15 @@ theorem only assembles the conjuncts' theorems, so it costs about 260,000 heartb
 length; a conjunct stated through another term than `CIL.Extraction.MethodEvidenceValid` states
 makes the elaborator reduce the whole decoded body, about 390,000 heartbeats per instruction.
 
+The suite also measures the body obligation of one method that passes 125, 500 and 1,000 distinct
+string literals to another method, less the same file with the proof left open, per instruction of
+the method's 2n + 2. A body over 256 bytes is one `CIL.Extraction.fixedBytes` literal whose code
+joins numerals of at most 256 bytes, and the check costs about 88,900, 92,700 and 99,800
+heartbeats per instruction. The suite fails when the cost per instruction is more than 1.1 times
+the cost at the size before. The kernel's caches hash a numeral by its low 64 bits, so numerals
+with equal last bytes collide there: the same bodies written as separate numerals joined by `++`
+cost about 89,600, 136,300 and 201,500 heartbeats per instruction.
+
 The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
 characters long and differ only in their last character, less the same statement closed with
 `sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and

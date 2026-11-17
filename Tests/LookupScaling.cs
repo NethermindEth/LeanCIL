@@ -2130,6 +2130,7 @@ const double AllowedBodyGrowth = 1.1;
 int[] chainLengths = [8, 32, 128];
 int[] bulkSizes = [125, 500];
 int[] fieldCounts = [10, 100, 200];
+int[] stringTokenCounts = [125, 500, 1000];
 var bodySource = Path.Combine(directory, "BodyAssembly");
 Directory.CreateDirectory(bodySource);
 File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"),
@@ -2146,10 +2147,14 @@ string Rows(int count) =>
 string Fields(int count) =>
     $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} " +
     $"public static ulong Read{count}(Wide{count} w) => w.F{count / 2}; ";
+// A method of `count` string tokens has `2 * count + 2` instructions.
+string Strings(int count) =>
+    $"public static ulong Strings{count}(ulong x) {{ " + Join(count, index => $"Use(\"s{count}_{index}\"); ") +
+    "return x; } ";
 File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"),
     "public static class Bodies { public static void Use(string text) { } " +
     string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) +
-    string.Concat(fieldCounts.Select(Fields)) + "}");
+    string.Concat(fieldCounts.Select(Fields)) + string.Concat(stringTokenCounts.Select(Strings)) + "}");
 Run(["dotnet", "build", Path.Combine(bodySource, "Bodies.csproj"), "-c", "Release"]);
 var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
 // The index of a method in an extraction, found by the name in its signature.
@@ -2198,6 +2203,23 @@ if (rowGrowth > AllowedBodyGrowth)
     throw new Exception(FormattableString.Invariant(
         $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows ") +
         FormattableString.Invariant($"as against {bulkSizes[0]}; the limit is {AllowedBodyGrowth}."));
+// The body check of a method of many string tokens costs the same per instruction at every size: numerals of its
+// byte literal with equal low bytes would collide in the kernel's caches unless the literal is one joined code.
+var stringCosts = stringTokenCounts.Select(count =>
+    BodyCheck("Strings" + count, "Strings" + count, "Strings" + count) / (2.0 * count + 2)).ToArray();
+for (var step = 1; step < stringCosts.Length; step++)
+{
+    var growth = stringCosts[step] / stringCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS body check of a method of {stringTokenCounts[step - 1]} and {stringTokenCounts[step]} ") +
+        FormattableString.Invariant($"string tokens: {stringCosts[step - 1]:F0} and {stringCosts[step]:F0} ") +
+        FormattableString.Invariant($"heartbeats per instruction, {growth:F2} times"));
+    if (growth > AllowedBodyGrowth)
+        throw new Exception(FormattableString.Invariant(
+            $"One body check costs {growth:F2} times as much per instruction at {stringTokenCounts[step]} string ") +
+            FormattableString.Invariant(
+                $"tokens as at {stringTokenCounts[step - 1]}; the limit is {AllowedBodyGrowth}."));
+}
 // The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries, times a
 // logarithm, and is made once per method.
 long TablesCheck(string name, string method)
