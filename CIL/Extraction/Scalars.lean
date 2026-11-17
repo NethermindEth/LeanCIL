@@ -955,121 +955,42 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
       | .stloc actual => actual == index
       | _ => false) : Option Bool).getD false
 
-/-- Whether the immediately preceding raw instruction is a readonly prefix. -/
-private def followsReadOnly (raw : RawMethod) (pc : Nat) : Bool :=
-  pc > 0 && (raw.code[pc - 1]?).any (fun instruction => instruction.opcode == 65054)
+/-- The raw instruction before each pc of `code`, `none` at the first, streamed with the sites
+    so that no site looks its predecessor up. -/
+def predecessors (code : List RawInstruction) : List (Option RawInstruction) :=
+  none :: code.map some
 
-/-- A readonly prefix is inseparable from its element address, including branch entry. -/
-private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawInstruction)
-    (emitted : Instruction) : Bool :=
-  let entered (target : Nat) := raw.code.any fun source => match source.operand with
-    | .target destination => destination == target
-    | .targets destinations => destinations.contains target
-    | _ => false
-  if instruction.opcode == 65054 then
-    instruction.operand == .none &&
-      (raw.code[pc + 1]?).any (fun next => next.opcode == 143) && !entered (pc + 1)
-  else if instruction.opcode == 143 then
-    match emitted with
-    | .ldelema _ readOnly =>
-      readOnly == followsReadOnly raw pc && (!followsReadOnly raw pc || !entered pc)
-    | _ => false
-  else true
+/-- At every pc of the code, the streamed predecessor is the instruction before it. -/
+theorem predecessors_getElem? {code : List RawInstruction} {pc : Nat} (inside : pc < code.length) :
+    (predecessors code)[pc]? = some (rawBefore (code[·]?) pc) := by
+  cases pc with
+  | zero => rfl
+  | succ previousPc =>
+    have before : previousPc < code.length := by omega
+    simp [predecessors, rawBefore, List.getElem?_eq_getElem before]
 
-/-- The readonly prefix rule of `readOnlySiteMatches`, reading neighbouring raw instructions
-    through `rawAt` and branch entry through `targeted`. -/
-def readOnlySiteWindow (rawAt : Nat → Option RawInstruction) (targeted : Nat → Bool)
-    (pc : Nat) (instruction : RawInstruction) (emitted : Instruction) : Bool :=
-  if instruction.opcode == 65054 then
-    instruction.operand == .none &&
-      (rawAt (pc + 1)).any (fun next => next.opcode == 143) && !targeted (pc + 1)
-  else if instruction.opcode == 143 then
-    -- `pc - 1` saturates at 0, so the first instruction never follows a prefix.
-    let prefixed := pc > 0 && (rawAt (pc - 1)).any (fun previous => previous.opcode == 65054)
-    match emitted with
-    | .ldelema _ readOnly => readOnly == prefixed && (!prefixed || !targeted pc)
-    | _ => false
-  else true
-
-/-- An index of the body and its branch destinations, each built once, decide the readonly
-    rule exactly as scanning the body at every site does. -/
-theorem readOnlySiteWindow_eq (raw : RawMethod) :
-    readOnlySiteWindow (FlowIndex.ofList raw.code).get?
-      (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
-      readOnlySiteMatches raw := by
-  have rawAt : (FlowIndex.ofList raw.code).get? = (raw.code[·]?) :=
-    funext (FlowIndex.get?_ofList raw.code)
-  have targeted : (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
-      fun target => raw.code.any (branchesTo target) := by
-    funext target
-    rw [Std.TreeSet.contains_ofList, branchTargets_contains]
-  rw [rawAt, targeted]
-  rfl
-
-#print axioms readOnlySiteWindow_eq
-
-/-- In a body where no branch enters the instruction after a prefix, the readonly rule's
-    branch-entry checks refuse nothing, so it accepts what it accepts with no branch targets. -/
-theorem readOnlySiteWindow_prefixEntryFree {code : List RawInstruction}
-    (free : PrefixEntryFree code) (pc : Nat) (instruction : RawInstruction)
-    (emitted : Instruction) (fetched : code[pc]? = some instruction) :
-    readOnlySiteWindow (code[·]?) (fun target => code.any (branchesTo target)) pc instruction
-        emitted =
-      readOnlySiteWindow (code[·]?) (fun _ => false) pc instruction emitted := by
-  have readOnlyPrefix : isPrefixOpcode 65054 = true := by decide
-  unfold readOnlySiteWindow
-  by_cases readOnly : instruction.opcode = 65054
-  · have entry := free pc instruction fetched (readOnly ▸ readOnlyPrefix)
-    simp [readOnly, entry]
-  · simp only [readOnly, beq_iff_eq, ite_false]
-    split
-    · rcases pc with _ | previousPc
-      · simp
-      · cases previous : code[previousPc]? with
-        | none => simp [previous]
-        | some before =>
-          by_cases follows : before.opcode = 65054
-          · have entry := free previousPc before previous (follows ▸ readOnlyPrefix)
-            simp [previous, follows, entry]
-          · have unprefixed : (before.opcode == 65054) = false := by simpa using follows
-            simp [previous, unprefixed]
-    · rfl
-
-#print axioms readOnlySiteWindow_prefixEntryFree
-
-/-- A readonly prefix the rule accepts has no branch entering the address after it. -/
-theorem readOnlySiteWindow_untargeted {rawAt : Nat → Option RawInstruction}
-    {targeted : Nat → Bool} {pc : Nat} {instruction : RawInstruction} {emitted : Instruction}
-    (accepted : readOnlySiteWindow rawAt targeted pc instruction emitted = true)
-    (readOnly : instruction.opcode = 65054) : targeted (pc + 1) = false := by
-  simp only [readOnlySiteWindow, readOnly, beq_self_eq_true, ite_true, Bool.and_eq_true,
-    Bool.not_eq_true'] at accepted
-  exact accepted.2
-
-#print axioms readOnlySiteWindow_untargeted
+#print axioms predecessors_getElem?
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    agree with the feature stack depth, emit the right encoding, satisfy the readonly rule
-    `readOnly` and the indirect access rule over the raw instructions `rawAt` gives, and give
-    every successor, which must be reachable, exactly the resulting stack kinds, with local slots
-    read through `locals`. -/
+    agree with the feature stack depth, emit the right encoding after `previous`, the raw
+    instruction before it, satisfy the indirect access rule over the raw instructions `rawAt`
+    gives, and give every successor, which must be reachable, exactly the resulting stack kinds,
+    with local slots read through `locals`. -/
 private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
-    (context : NativeDispatchContext) (locals : ScalarLocals)
-    (readOnly : Nat → RawInstruction → Instruction → Bool) (rawAt : Nat → Option RawInstruction)
+    (context : NativeDispatchContext) (locals : ScalarLocals) (rawAt : Nat → Option RawInstruction)
     (successor : List ScalarKind → Nat → Bool) :
-    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
-      Instruction → Bool
+    ((RawInstruction × Option FoldRole) × Option RawInstruction) × Nat → Option FeatureState →
+      Option (List ScalarKind) → Instruction → Bool
   | _, none, none, .unadmitted _ => true
-  | ((instruction, role), pc), some feature, some stack, emitted =>
+  | (((instruction, role), previous), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with
         | some (.spanConstructor index constructor) => match emitted with
           | .initializeSpanLocal actual operation => index == actual && spanConstructorMatches constructor operation
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
-      readOnly pc instruction emitted &&
       indirectSiteWindow rawAt pc instruction emitted &&
-      scalarEmissionMatches layouts role (rawBefore rawAt pc) instruction stack emitted &&
+      scalarEmissionMatches layouts role previous instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted locals ||
       match scalarTransfer raw instruction stack role context locals,
           featureSuccessors role pc instruction feature.stack with
@@ -1079,10 +1000,8 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
   | _, _, _, _ => false
 
 /-- The scalar certificate covers exactly the feature-reachable pcs, starts with an empty
-    stack, and passes every site check, with `readOnly` as the readonly rule at each reachable
-    pc. -/
-def ScalarFlowValidWith (readOnly : Nat → RawInstruction → Instruction → Bool)
-    (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
+    stack, and passes every site check. -/
+def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
   let context := nativeDispatchContext raw
   let locals := ScalarLocals.indexed raw context
@@ -1091,27 +1010,13 @@ def ScalarFlowValidWith (readOnly : Nat → RawInstruction → Instruction → B
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite layouts raw context locals readOnly rawAt
+      checkScalarSite layouts raw context locals rawAt
         (fun after target => match lookup target with
           | some (some _, incoming) => incoming == some after
           | _ => false) instruction feature stack emitted)
     (.ofList (features.zip certificate)) 0
-    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx (features.zip certificate) code = true
-
-/-- The scalar certificate covers exactly the feature-reachable pcs, starts with an empty
-    stack, and passes every site check, with the readonly window as the readonly rule. -/
-def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
-    (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
-  ScalarFlowValidWith
-    (readOnlySiteWindow (FlowIndex.ofList raw.code).get?
-      (Std.TreeSet.ofList (branchTargets raw.code) compare).contains)
-    layouts raw features certificate code
-
-instance (readOnly : Nat → RawInstruction → Instruction → Bool) (layouts : Array RawLayout)
-    (raw : RawMethod) (features : FeatureCertificate) (certificate : ScalarCertificate)
-    (code : List Instruction) :
-    Decidable (ScalarFlowValidWith readOnly layouts raw features certificate code) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+    ((raw.code.zip (foldRoles raw.locals raw.code)).zip (predecessors raw.code)).zipIdx
+    (features.zip certificate) code = true
 
 instance (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate)
@@ -1140,8 +1045,8 @@ theorem scalarSuccessor_zip (features : FeatureCertificate)
 
 #print axioms scalarSuccessor_zip
 
-/-- Streaming scalar validation preserves all list-indexed site checks and lengths, with the
-    readonly rule scanning the body and local slots read from the metadata lists at each site. -/
+/-- Streaming scalar validation preserves all list-indexed site checks and lengths, with local
+    slots read from the metadata lists at each site. -/
 theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
     (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Instruction) :
@@ -1150,25 +1055,26 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
       raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
       all3 (fun (instruction, feature) stack emitted =>
           checkScalarSite layouts raw (nativeDispatchContext raw)
-            (ScalarLocals.ofLists raw (nativeDispatchContext raw)) (readOnlySiteMatches raw)
+            (ScalarLocals.ofLists raw (nativeDispatchContext raw))
             (fun target => raw.code[target]?)
             (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
             instruction feature stack emitted)
-        ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
-        true := by
-  dsimp only [ScalarFlowValid, ScalarFlowValidWith]
+        (((raw.code.zip (foldRoles raw.locals raw.code)).zip (predecessors raw.code)).zipIdx.zip
+          features) certificate code = true := by
+  dsimp only [ScalarFlowValid]
   have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) :=
     funext (FlowIndex.get?_ofList raw.code)
-  rw [ScalarLocals.indexed_eq, readOnlySiteWindow_eq, rawAt,
+  rw [ScalarLocals.indexed_eq, rawAt,
     all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
   simp only [scalarSuccessor_zip]
   by_cases featureLength : raw.code.length = features.length
   · by_cases scalarLength : raw.code.length = certificate.length
     · rw [all3_zip_states _ _ _ _ _ (featureLength.symm.trans scalarLength)]
       simp only [List.length_zipIdx, List.length_zip]
-      exact Nat.le_trans (Nat.min_le_left _ _) (Nat.le_of_eq featureLength)
+      exact Nat.le_trans (Nat.min_le_left _ _)
+        (Nat.le_trans (Nat.min_le_left _ _) (Nat.le_of_eq featureLength))
     · simp [scalarLength]
   · simp [featureLength]
 
@@ -1188,183 +1094,20 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
     scalarEmissionMatches layouts role (rawBefore (raw.code[·]?) pc) instruction stack emitted =
       true := by
-  have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
-      some ((instruction, role), pc) := by
-    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
+  have inside : pc < raw.code.length := (List.getElem?_eq_some_iff.mp rawAt).1
+  have pairAt :
+      ((raw.code.zip (foldRoles raw.locals raw.code)).zip (predecessors raw.code)).zipIdx[pc]? =
+        some (((instruction, role), rawBefore (raw.code[·]?) pc), pc) := by
+    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt,
+      predecessors_getElem? inside]
   have statesAt : (features.zip certificate)[pc]? = some (some feature, some stack) :=
     List.getElem?_zip_eq_some.mpr ⟨featureAt, stackAt⟩
   have sites := valid.2.2.2.2
   rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
   have checked := all3_at sites pairAt statesAt emittedAt
   simp only [checkScalarSite, Bool.and_eq_true] at checked
-  simpa only [rawBefore, FlowIndex.get?_ofList] using checked.1.2
+  exact checked.1.2
 
 #print axioms ScalarFlowValid.instruction_checked
-
-/-- A lockstep check passes where another passes and implies it at every common index. -/
-private theorem all3_of_at {check other : α → β → γ → Bool} :
-    ∀ {as : List α} {bs : List β} {cs : List γ}, all3 other as bs cs = true →
-      (∀ (k : Nat) a b c, as[k]? = some a → bs[k]? = some b → cs[k]? = some c →
-        other a b c = true → check a b c = true) →
-      all3 check as bs cs = true
-  | a :: as, b :: bs, c :: cs, valid, lift => by
-    simp only [all3, Bool.and_eq_true] at valid ⊢
-    exact ⟨lift 0 a b c rfl rfl rfl valid.1, all3_of_at valid.2 fun k a b c foundA foundB foundC =>
-      lift (k + 1) a b c (by simpa using foundA) (by simpa using foundB) (by simpa using foundC)⟩
-  | [], [], [], _, _ => rfl
-  | [], _ :: _, _, valid, _ | _ :: _, [], _, valid, _ | [], [], _ :: _, valid, _ => by
-    simp [all3] at valid
-  | _ :: _, _ :: _, [], valid, _ => by simp [all3] at valid
-
-/-- A passing lockstep check has entries of the outer lists at every index of the middle one. -/
-private theorem all3_at_middle {check : α → β → γ → Bool} :
-    ∀ {as : List α} {bs : List β} {cs : List γ} {k : Nat} {b : β},
-      all3 check as bs cs = true → bs[k]? = some b →
-      ∃ a c, as[k]? = some a ∧ cs[k]? = some c ∧ check a b c = true
-  | a :: _, _ :: _, c :: _, 0, _, valid, found => by
-    simp only [List.getElem?_cons_zero, Option.some.injEq] at found
-    subst found
-    simp only [all3, Bool.and_eq_true] at valid
-    exact ⟨a, c, rfl, rfl, valid.1⟩
-  | _ :: _, _ :: _, _ :: _, _ + 1, _, valid, found => by
-    simp only [all3, Bool.and_eq_true] at valid
-    obtain ⟨a, c, foundA, foundC, checked⟩ := all3_at_middle valid.2 (by simpa using found)
-    exact ⟨a, c, by simpa using foundA, by simpa using foundC, checked⟩
-  | _, [], _, _, _, _, found => by simp at found
-  | [], _ :: _, _, _, _, valid, _ => by simp [all3] at valid
-  | _ :: _, _ :: _, [], _, _, valid, _ => by simp [all3] at valid
-
-/-- A site passing a readonly rule passes the site check with none. -/
-private theorem checkScalarSite_readOnlyFree {layouts : Array RawLayout} {raw : RawMethod}
-    {context : NativeDispatchContext} {locals : ScalarLocals}
-    {readOnly : Nat → RawInstruction → Instruction → Bool} {rawAt : Nat → Option RawInstruction}
-    {successor : List ScalarKind → Nat → Bool} {site : (RawInstruction × Option FoldRole) × Nat}
-    {feature : Option FeatureState} {stack : Option (List ScalarKind)} {emitted : Instruction}
-    (checked : checkScalarSite layouts raw context locals readOnly rawAt successor site feature
-      stack emitted = true) :
-    checkScalarSite layouts raw context locals (fun _ _ _ => true) rawAt successor site feature
-      stack emitted = true := by
-  rcases site with ⟨⟨instruction, role⟩, pc⟩
-  cases feature with
-  | none =>
-    revert checked
-    unfold checkScalarSite
-    split <;> simp_all
-  | some feature =>
-    cases stack with
-    | none =>
-      revert checked
-      unfold checkScalarSite
-      split <;> simp_all
-    | some stack =>
-      simp only [checkScalarSite, Bool.and_eq_true, Bool.and_true] at checked ⊢
-      simp only [checked, and_self]
-
-/-- An emission the scalar check accepts satisfies the decoded `readonly.` rule. -/
-private theorem scalarEmissionMatches_readOnly {layouts : Array RawLayout}
-    {role : Option FoldRole} {previous : Option RawInstruction} {instruction : RawInstruction}
-    {stack : List ScalarKind} {emitted : Instruction}
-    (matched : scalarEmissionMatches layouts role previous instruction stack emitted = true) :
-    readOnlyDecodedMatches previous instruction emitted = true := by
-  cases decided : readOnlyDecodedMatches previous instruction emitted
-  · unfold scalarEmissionMatches at matched
-    simp only [decided, Bool.not_false, ↓reduceIte, Bool.false_eq_true] at matched
-  · rfl
-
-/-- `readonly.` without an operand has only the fallthrough successor. -/
-private theorem featureSuccessors_readOnly {role : Option FoldRole} {pc : Nat}
-    {instruction : RawInstruction} {stack : List (Option W32)} {successors : List Nat}
-    (readOnly : instruction.opcode = 65054) (bare : instruction.operand = .none)
-    (found : featureSuccessors role pc instruction stack = some successors) :
-    successors = [pc + 1] := by
-  unfold featureSuccessors at found
-  split at found
-  · simp [bare] at found
-  · simp [readOnly] at found
-    exact found.symm
-
-/-- In code no branch enters after a prefix, removing the readonly window from the scalar check
-    admits nothing more: `readonly.` decodes only without an operand, its reachable successor is
-    the `ldelema` that alone may follow it, and `ldelema` decodes its flag from the raw
-    instruction before it. -/
-theorem ScalarFlowValid_iff_decodedReadOnly {layouts : Array RawLayout} {raw : RawMethod}
-    {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
-    (free : PrefixEntryFree raw.code) :
-    ScalarFlowValid layouts raw features certificate code ↔
-      ScalarFlowValidWith (fun _ _ _ => true) layouts raw features certificate code := by
-  unfold ScalarFlowValid ScalarFlowValidWith
-  dsimp only
-  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm, all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
-  have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) :=
-    funext (FlowIndex.get?_ofList raw.code)
-  have targeted : (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
-      fun target => raw.code.any (branchesTo target) := by
-    funext target
-    rw [Std.TreeSet.contains_ofList, branchTargets_contains]
-  rw [rawAt, targeted]
-  refine and_congr_right fun _ => and_congr_right fun _ => and_congr_right fun _ =>
-    and_congr_right fun _ => ⟨fun sites => all3_of_at sites fun _ _ _ _ _ _ _ checked =>
-      checkScalarSite_readOnlyFree checked, fun sites => all3_of_at sites ?_⟩
-  rintro k ⟨⟨instruction, role⟩, pc⟩ ⟨feature, stack⟩ emitted siteAt _ _ checked
-  cases feature with
-  | none =>
-    revert checked
-    unfold checkScalarSite
-    split <;> simp_all
-  | some feature =>
-  cases stack with
-  | none =>
-    revert checked
-    unfold checkScalarSite
-    split <;> simp_all
-  | some stack =>
-  simp only [List.getElem?_zipIdx, List.getElem?_zip_eq_some, Option.map_eq_some_iff,
-    Prod.mk.injEq, Nat.zero_add] at siteAt
-  obtain ⟨_, ⟨⟨fetched, -⟩, rfl, rfl⟩⟩ := siteAt
-  simp only [checkScalarSite, Bool.and_eq_true] at checked ⊢
-  have decoded := scalarEmissionMatches_readOnly checked.1.2
-  have window : readOnlySiteWindow (raw.code[·]?) (fun target => raw.code.any (branchesTo target))
-      k instruction emitted = true := by
-    rw [readOnlySiteWindow_prefixEntryFree free k instruction emitted (by simpa using fetched)]
-    unfold readOnlySiteWindow
-    by_cases readOnly : instruction.opcode = 65054
-    · simp only [readOnlyDecodedMatches, readOnly, Bool.and_eq_true] at decoded
-      obtain ⟨bare, -⟩ := Instruction.ofRaw?_readOnly readOnly
-        (valueEncodingMatches_sound decoded.2)
-      have flow := checked.2
-      have unfaulted : scalarStoreFault raw instruction stack emitted
-          (ScalarLocals.indexed raw (nativeDispatchContext raw)) = false := by
-        simp [scalarStoreFault, readOnly]
-      rw [unfaulted, Bool.false_or] at flow
-      split at flow
-      · rename_i after successors _ found
-        rw [featureSuccessors_readOnly readOnly bare found] at flow
-        simp only [List.all_cons, List.all_nil, Bool.and_true] at flow
-        split at flow
-        · rename_i next incoming reached
-          obtain ⟨⟨⟨following, nextRole⟩, nextPc⟩, nextEmitted, nextSite, -, nextChecked⟩ :=
-            all3_at_middle sites reached
-          simp only [List.getElem?_zipIdx, List.getElem?_zip_eq_some, Option.map_eq_some_iff,
-            Prod.mk.injEq, Nat.zero_add] at nextSite
-          obtain ⟨_, ⟨⟨nextFetched, -⟩, rfl, rfl⟩⟩ := nextSite
-          have incomingIs : incoming = some after := by simpa using flow
-          subst incomingIs
-          simp only [checkScalarSite, Bool.and_eq_true] at nextChecked
-          have follows := scalarEmissionMatches_readOnly nextChecked.1.2
-          simp only [readOnlyDecodedMatches, rawBefore, Nat.add_one_ne_zero, beq_iff_eq,
-            ↓reduceIte, Nat.add_sub_cancel, fetched, Option.all_some, readOnly, bne_self_eq_false,
-            Bool.false_or, Bool.and_eq_true] at follows
-          simp [readOnly, bare, nextFetched, follows.1]
-        · cases flow
-      · cases flow
-    · by_cases address : instruction.opcode = 143
-      · simp only [readOnlyDecodedMatches, address, Bool.and_eq_true] at decoded
-        obtain ⟨type, rfl⟩ := Instruction.ofRaw?_ldelema address
-          (valueEncodingMatches_sound decoded.2)
-        cases k <;> simp [address, rawBefore]
-      · simp [readOnly, address]
-  simp only [checked, window, and_self]
-
-#print axioms ScalarFlowValid_iff_decodedReadOnly
 
 end CIL.Extraction
