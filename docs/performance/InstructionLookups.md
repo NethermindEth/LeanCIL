@@ -122,10 +122,12 @@ size to the next. Run this row alone with
 
 The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
 and 512 array element addresses, each followed by a branch, with and without a `readonly.`
-prefix, less the heartbeats of stating the same certificate. It fails when the cost per address
+prefix, less the heartbeats of stating the same certificate. Each instruction of these bodies, as
+of the local bodies whose `ScalarFlowValid` is checked below, carries the byte offset extraction
+writes for it. It fails when the cost per address
 at 256 or 512 exceeds 1.15 times the cost at 128. The readonly rule reads neighbouring
 instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, both built once
-per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
+per body, and measures 1.01 for plain and 1.05 for prefixed addresses. A rule that scans the body
 at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
 
 It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
@@ -147,8 +149,8 @@ address and are consumed by `calli`, which makes each a pointer local. For the p
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
 `FlowIndex` and pointer locals from a `Std.TreeSet`, built once per body, as does the closed
-argument storage. They measure 1.01 for loaded, 1.12 for addressed and 1.08 for pointer locals,
-and 1.20 for the closed argument storage, whose set lookups cost the logarithm of the locals.
+argument storage. They measure 1.01 for loaded, 1.01 for addressed and 1.07 for pointer locals,
+and 1.17 for the closed argument storage, whose set lookups cost the logarithm of the locals.
 Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
 and 2.33.
 

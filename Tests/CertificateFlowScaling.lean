@@ -8,12 +8,14 @@ set_option maxHeartbeats 0
 namespace CertificateFlowScaling
 open CIL CIL.Extraction
 
-/-- A void method whose only successor at each ordinary site is fallthrough. -/
+/-- A void method whose only successor at each ordinary site is fallthrough; each one-byte nop
+    sits at its own offset, as extraction writes it. -/
 def raw (count : Nat) : RawMethod := {
   token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
-  genericParameters := [], code := List.replicate count ⟨0, 0, .none⟩ ++ [⟨0, 42, .none⟩] }
+  genericParameters := [],
+  code := (List.range count).map (fun pc => ⟨pc, 0, .none⟩) ++ [⟨count, 42, .none⟩] }
 
 /-- The feature certificate contains an empty stack at every site. -/
 def features (count : Nat) : FeatureCertificate :=
