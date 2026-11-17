@@ -535,6 +535,9 @@ constructor per record, so its cost is linear in the methods of the extraction
 ([scaling](performance/InstructionLookups.md)).
 A summary whose bound names another token, or whose record's bytes decode to another method, does
 not type-check, and `site` at a call that names another token proves `False` from the summary.
+A call that runs through a runtime model, such as `Vector128.CreateScalarUnsafe` or `GetElement`,
+has no link and enters no method of the program, so a callee that makes such calls decodes and is
+summarized like any other body.
 
 ### Pass byref arguments with ValidCall
 

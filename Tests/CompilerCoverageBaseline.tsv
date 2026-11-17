@@ -878,6 +878,7 @@ Examples:System.UInt64 Examples.DivisionIntrinsics::ShiftRight(System.UInt64,Sys
 Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeCall(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeHigh(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeLow(System.UInt64)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.DivisionIntrinsics::UnsafeLowNext(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.DivisionIntrinsics::Xor(System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.Dog::Legs()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Dog::Loudness()	A	A	A	A	A	A	A	A

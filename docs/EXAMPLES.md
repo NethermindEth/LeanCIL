@@ -50,6 +50,10 @@ sentences name the wrong implementations that each unchanged proof rejects.
   `Decrement` that `cil_loop_call` applies at that call. The file also proves that every summary
   of the index the call enters is bound to the token of `Decrement`, and refutes one bound to
   the token of `CountCalls`.
+- `VectorSummary`: `DivisionIntrinsics.UnsafeLowNext` returns its input plus one for every
+  `ulong`, proved once by stepping `UnsafeLow`, whose `Vector128.CreateScalarUnsafe` and
+  `GetElement` calls run through their runtime models, and once from a `DecodedSummary` of
+  `UnsafeLow` that the call applies without stepping its body.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the
   modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct

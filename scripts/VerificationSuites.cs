@@ -32,8 +32,8 @@ internal static class VerificationSuites
             "Add", "AddModel", "Alias", "Calls", "CallsSummary", "CertificateReuse", "Choose", "ConsumerBatchA",
             "ConsumerBatchB", "ConsumerSupportUnion", "CountCallsSummary", "DecodedAdd", "Escape", "Hardware",
             "IdentitySummary", "InitializedTypes", "LargeStruct", "PastEnd", "ProofBindingFamilies", "RepeatedSummary",
-            "StaticData", "Struct", "StructCopy", "SummaryCalls", "SupportExtractionCache", "VerificationReuse",
-            "WrongAdd"
+            "StaticData", "Struct", "StructCopy", "SummaryCalls", "SupportExtractionCache", "VectorSummary",
+            "VerificationReuse", "WrongAdd"
         ],
         ["loops"] = ["Loops", "WordArrayOutlines"],
         ["outlines-control"] = ["ProofOutlines/control"],

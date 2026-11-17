@@ -145,8 +145,8 @@ internal static class VerificationSelection
             "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "CallsSummary",
-            "CountCallsSummary", "IdentitySummary", "RepeatedSummary", "Alias", "Struct", "StructCopy",
-            "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }
+            "CountCallsSummary", "IdentitySummary", "RepeatedSummary", "VectorSummary", "Alias", "Struct",
+            "StructCopy", "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }
             .Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
         inputs["docs"].UnionWith(WalkthroughInputs(root));

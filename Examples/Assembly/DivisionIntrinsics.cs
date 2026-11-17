@@ -47,6 +47,8 @@ public static class DivisionIntrinsics
         return Avx512DQ.MoveMask(Avx512F.CompareGreaterThan(first, second));
     }
     public static ulong UnsafeLow(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(0);
+    // Calls UnsafeLow, so a proof can apply a summary of a method whose body runs vector calls.
+    public static ulong UnsafeLowNext(ulong value) => UnsafeLow(value) + 1;
     public static Vector128<ulong> UnsafeReturn(ulong value) => Vector128.CreateScalarUnsafe(value);
     public static ulong UnsafeCall(ulong value) => ReadLow(Vector128.CreateScalarUnsafe(value));
     private static ulong ReadLow(Vector128<ulong> value) => value.GetElement(0);

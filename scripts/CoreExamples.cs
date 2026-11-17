@@ -12,6 +12,7 @@ partial class Program
         ["CountCallsSummary"] = "System.UInt32 Examples.Loops::CountCalls(System.UInt32)",
         ["IdentitySummary"] = "System.UInt64 Examples.GenericMethods::Identity64(System.UInt64)",
         ["RepeatedSummary"] = "System.UInt64 Examples.GenericMethods::Repeated(System.UInt64)",
+        ["VectorSummary"] = "System.UInt64 Examples.DivisionIntrinsics::UnsafeLowNext(System.UInt64)",
         ["Alias"] = "System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)",
         ["Struct"] = "System.UInt64 Examples.Arithmetic::Struct(System.UInt64)",
         ["StructCopy"] = "System.UInt64 Examples.Arithmetic::StructCopy(System.UInt64)",
