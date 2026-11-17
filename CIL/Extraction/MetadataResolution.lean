@@ -348,6 +348,16 @@ def MetadataIndex.genericParameters (index : MetadataIndex) (position owner : Na
         (run.zipIdx.all fun (entry, number) => entry.number == number) then .ok run
     else .error (.unresolvedMember owner)
 
+/-- The generic parameters of a `MethodDef` whose signature declares `declared` of them. A
+    signature without the GENERIC flag declares none, as ECMA-335 requires of the method's rows,
+    so a method with no carried run and no link has none without neighbours; carried rows are
+    checked as for any owner. -/
+def MetadataIndex.methodGenericParameters (index : MetadataIndex)
+    (position method declared : Nat) : Except MetadataError (List GenericParamRow) :=
+  if declared == 0 && (index.genericOwners.find? (genericOwnerCode method)).isNone &&
+      (index.link linkGenericParams method).isNone then .ok []
+  else index.genericParameters position method
+
 /-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
     underlying type of its instance field, one that extends `System.ValueType` is a value
     type, and any other type is a class. The base counts only when its own reference names a

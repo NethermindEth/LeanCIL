@@ -690,7 +690,7 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
       method.callingConvention != convention % 0x20 then throw (.methodMismatch method.token)
   let ownerToken ← env.declaringType 0 method.token
   let owner ← typeDefNamed env 0 resolveFuel ownerToken
-  let methodParameters ← index.genericParameters 0 method.token
+  let methodParameters ← index.methodGenericParameters 0 method.token signature.genericArity
   let ownerParameters ← index.genericParameters 0 ownerToken
   if methodParameters.length != signature.genericArity ||
       !flagsAgree methodParameters method.genericParameters ||

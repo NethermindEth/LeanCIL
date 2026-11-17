@@ -618,9 +618,10 @@ theorem checks_all_carried_generic_parameters :
 #print axioms checks_all_carried_generic_parameters
 
 /-- An owner's parameter count over parameter rows given as a number and a coded owner, with
-    the rows at `omitted` left out; with `absentOnly`, only the check that no row names it. -/
+    the rows at `omitted` left out; with `absentOnly`, only the check that no row names it, and
+    with `declared`, as a method whose signature declares that many. -/
 private def ownerResult (parameters : List (Nat × Nat)) (owner : Nat) (omitted : List Nat := [])
-    (absentOnly := false) : Option Nat :=
+    (absentOnly := false) (declared : Option Nat := none) : Option Nat :=
   match (do
     let metadata := parameterWorld parameters
     let metadata := { metadata with
@@ -628,7 +629,9 @@ private def ownerResult (parameters : List (Nat × Nat)) (owner : Nat) (omitted 
         !(metadataTableOf token == Table.genericParam && omitted.contains (tokenRow token)) }
     let index ← metadata.indexWith (← metadata.tables) []
     if absentOnly then do index.noGenericParameters owner; pure 0
-    else do pure (← index.genericParameters 0 owner).length) with
+    else match declared with
+      | some count => do pure (← index.methodGenericParameters 0 owner count).length
+      | none => do pure (← index.genericParameters 0 owner).length) with
   | .ok count => some count
   | .error _ => none
 
@@ -655,6 +658,16 @@ theorem checks_absent_generic_parameters_by_neighbours :
     ownerResult [(0, 4), (0, 5)] typeTwo [1] = none ∧
     ownerResult [(0, 2), (0, 4), (0, 6)] typeTwo [2] = none := by decide +kernel
 #print axioms checks_absent_generic_parameters_by_neighbours
+
+/-- A method whose signature declares no generic parameters has none without neighbours, while
+    a run carried for it is still read; one that declares parameters keeps the neighbour rule. -/
+theorem reads_an_undeclared_method_run_from_its_signature :
+    ownerResult [(0, 2), (0, 6)] methodTwo [1] (declared := some 0) = some 0 ∧
+    ownerResult [(0, 2), (0, 6)] methodTwo [1] = none ∧
+    ownerResult [(0, 2), (0, 6)] methodTwo [1] (declared := some 1) = none ∧
+    ownerResult [(0, 5)] methodTwo (declared := some 0) = some 1 ∧
+    ownerResult [(0, 5), (0, 6)] methodTwo (declared := some 1) = some 1 := by decide +kernel
+#print axioms reads_an_undeclared_method_run_from_its_signature
 
 /-- A slice with the generic class `Holder`1` and the class `Plain`, each declaring one static
     `int`; gives the tokens of `Holder`, its field, `Plain` and its field. -/

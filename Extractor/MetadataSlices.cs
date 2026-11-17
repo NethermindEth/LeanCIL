@@ -547,7 +547,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var token = original.MetadataToken.ToUInt32();
             Token(token);
             var method = Reader.GetMethodDefinition(MetadataTokens.MethodDefinitionHandle(RowOf(token)));
-            GenericRun(token, method.GetGenericParameters());
+            // A method without generic parameters has a signature without GENERIC, which Lean reads instead.
+            if (method.GetGenericParameters().Count != 0) GenericRun(token, method.GetGenericParameters());
             Arity(TokenOf(method.GetDeclaringType()));
             if (!classOwner) return;
             var owner = Reader.GetTypeDefinition(method.GetDeclaringType());
