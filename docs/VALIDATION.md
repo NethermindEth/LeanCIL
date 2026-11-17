@@ -33,6 +33,12 @@ instructions, dead prefix positions and opcodes other than `unaligned.`, and the
 methods skipped. The per-method lists are written to `artifacts/HoleCorpus/methods.json`; admission
 results are reused from the self-admission check.
 
+`dotnet run --file Tests/SelfAdmission.cs -- --lean-check` also extracts each admitted method alone and
+elaborates it against the checkout's `CIL`, printing each method Lean refuses and failing when there is
+one, which finds an admission the extractor grants and the Lean checks refuse. It is run by hand when a
+change can move verdicts between the two, never by a suite: over the roughly 3750 admitted methods it
+takes about 2.7 hours of CPU time.
+
 | Changed area | Relevant suites or checks |
 | --- | --- |
 | Extraction certificates and metadata | `evidence`, plus the affected opcode or runtime-helper suite |

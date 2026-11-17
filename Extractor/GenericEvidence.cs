@@ -78,7 +78,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         {
             if (!preserveGeneric && GenericStructs.Is(type) && layouts.Index(type) is >= 0 and var aggregate)
                 return $".aggregate {Quote(LayoutEvidence.Identity(type))} {aggregate}";
-            var result = $".constructor {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
+            var result = $"{Head(generic)} {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
             foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Type(argument)})";
             return result;
         }
@@ -94,6 +94,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
         return $".atom {Scope(type)} {Quote(type.FullName)}";
     }
+
+    // The head says whether the instances are values or references, as the signature's marker does.
+    static string Head(GenericInstanceType generic) =>
+        generic.ElementType.IsValueType ? ".constructor" : ".objectConstructor";
 
     // Signatures name an imported layout by scoped atom, as the import boundary requires; only a
     // local declaration binds it to the table entry that sizes its storage.
@@ -224,8 +228,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"IL_{instruction.Offset:x4}: Unsupported field access: {field.FullName}\n" +
                 "  Its owner has no carried definition, so no metadata row gives the field's position.");
         // A class field of a type outside the model holds an object reference like an admitted one.
-        var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
-            ? ObjectType(fieldType) : Type(fieldType);
+        var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType) &&
+            fieldType is not GenericInstanceType ? ObjectType(fieldType) : Type(fieldType);
         return (Type(field.DeclaringType), index, heldType, isStatic);
     }
 
@@ -685,21 +689,26 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     // A type argument of a generic instance as the resolved type the instance's signature names. Lean admits it
     // against the argument's type expression and spells the instance's full name from it, so only the element type
-    // code or the scope and name, and whether a generic head spells scoped arguments, are stated.
+    // code or the scope and name, and of a generic head its value-type marker and scoped spelling, are stated.
     static string Resolved(TypeReference type) => type switch
     {
         _ when type.IsPrimitive || type.MetadataType is MetadataType.String or MetadataType.Object =>
             $".primitive {(int)type.MetadataType}",
         ArrayType { IsVector: true } array => $".szarray ({Resolved(array.ElementType)})",
-        GenericInstanceType generic => $".genericInst {Named(generic.ElementType, GenericStructs.Is(generic))} " +
+        GenericInstanceType generic => $".genericInst {ResolvedHead(generic)} " +
             generic.GenericArguments.Reverse().Aggregate(".nil",
                 (rest, argument) => $"(.cons ({Resolved(argument)}) {rest})"),
-        _ => $".named {Named(type, false)}"
+        _ => $".named {Named(type, false, null)}"
     };
 
-    static string Named(TypeReference type, bool scopedArguments) =>
+    // A generic head states the value-type marker of the signature that names the instance.
+    static string ResolvedHead(GenericInstanceType generic) =>
+        Named(generic.ElementType, GenericStructs.Is(generic), generic.ElementType.IsValueType);
+
+    static string Named(TypeReference type, bool scopedArguments, bool? valueType) =>
         $"{{ scope := {Utf8(LayoutEvidence.Scope(type))}, name := {Utf8(type.FullName)}, parts := [], " +
-        $"kind := .external none, pinned := {Bool(scopedArguments)} }}";
+        $"kind := .external {(valueType is { } marker ? $"(some {Bool(marker)})" : "none")}, " +
+        $"pinned := {Bool(scopedArguments)} }}";
 
     static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
     {
@@ -812,7 +821,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             _ => TypeSubstitution.Components(type, Closed)
         };
         var specialization = owner is null ? "" :
-            $", owner := .constructor {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
+            $", owner := {Head(owner)} {Scope(owner.ElementType)} {Quote(owner.ElementType.FullName)}, " +
             $"ownerArguments := {List(owner.GenericArguments.Select(Type))}";
         return
         $"{{ token := {method.MetadataToken.ToUInt32()}, name := {Quote(method.Name)}, " +

@@ -27,39 +27,40 @@ namespace Lists
 /-- The table stream header of the `Examples` assembly. -/
 def tableHeader : List Nat :=
   [0, 0, 0, 0, 2, 0, 0, 1, 87, 223, 163, 43, 9, 30, 0, 0, 0, 250, 1, 51, 0, 22, 0, 0, 1, 0, 0, 0,
-   106, 0, 0, 0, 227, 0, 0, 0, 227, 0, 0, 0, 248, 4, 0, 0, 191, 6, 0, 0, 43, 0, 0, 0, 37, 2, 0, 0,
-   26, 0, 0, 0, 50, 1, 0, 0, 1, 0, 0, 0, 31, 0, 0, 0, 13, 0, 0, 0, 111, 0, 0, 0, 20, 0, 0, 0, 31,
-   0, 0, 0, 34, 0, 0, 0, 28, 0, 0, 0, 85, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 27, 0, 0, 0,
+   106, 0, 0, 0, 231, 0, 0, 0, 233, 0, 0, 0, 6, 5, 0, 0, 206, 6, 0, 0, 43, 0, 0, 0, 37, 2, 0, 0,
+   26, 0, 0, 0, 50, 1, 0, 0, 1, 0, 0, 0, 31, 0, 0, 0, 13, 0, 0, 0, 113, 0, 0, 0, 20, 0, 0, 0, 31,
+   0, 0, 0, 34, 0, 0, 0, 28, 0, 0, 0, 85, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 31, 0, 0, 0,
    76, 0, 0, 0, 60, 1, 0, 0, 88, 0, 0, 0]
 
 /-- The `Assembly` row of the `Examples` assembly. -/
 def assemblyRow : List Nat :=
-  [4, 128, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 52, 0, 0]
+  [4, 128, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
 
 /-- The heap entries the assembly block carries. -/
 def assemblyStrings : List ByteEntry :=
-  [(0, [0]), (13321, [69, 120, 97, 109, 112, 108, 101, 115, 0])]
+  [(0, [0]), (1, [69, 120, 97, 109, 112, 108, 101, 115, 0])]
 
 /-- The bytes of `Add`'s body. -/
 def bodyBytes : List Nat := [18, 2, 3, 88, 42]
 
 /-- The rows of `Add`'s metadata slice. -/
 def rows : List ByteEntry :=
-  [(16777235, [6, 0, 115, 57, 153, 38]), (33554505, [128, 1, 16, 0, 223, 12, 9, 52, 77, 0, 70, 0,
-   244, 1]), (33554506, [16, 1, 16, 0, 236, 57, 9, 52, 101, 0, 70, 0, 7, 2]), (100663796, [192, 68,
-   0, 0, 0, 0, 150, 0, 111, 14, 52, 10, 203, 2]), (587202561, [11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-   77, 17, 217, 23, 0, 0, 0, 0])]
+  [(16777235, [6, 0, 4, 0, 5, 0]), (33554505, [128, 1, 16, 0, 2, 0, 3, 0, 77, 0, 70, 0, 250, 1]),
+   (33554506, [16, 1, 16, 0, 255, 255, 3, 0, 101, 0, 70, 0, 16, 2]), (100663802, [0, 0, 0, 0, 0, 0,
+   150, 0, 1, 0, 1, 0, 212, 2]), (587202561, [11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 6, 0, 0,
+   0, 0, 0]), (704643081, [0, 0, 24, 0, 120, 0, 255, 255]), (704643082, [0, 0, 24, 0, 254, 0, 255,
+   255]), (704643120, [0, 0, 0, 0, 169, 3, 255, 255]), (704643121, [0, 0, 0, 0, 95, 5, 255, 255])]
 
 /-- The `#Strings` entries of `Add`'s metadata slice. -/
 def strings : List ByteEntry :=
-  [(0, [0]), (3295, [65, 114, 105, 116, 104, 109, 101, 116, 105, 99, 0]), (3695, [65, 100, 100,
-   0]), (6105, [83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 0]), (9881, [83,
-   121, 115, 116, 101, 109, 0]), (13321, [69, 120, 97, 109, 112, 108, 101, 115, 0]), (14707, [79,
-   98, 106, 101, 99, 116, 0])]
+  [(0, [0]), (1, [65, 100, 100, 0]), (2, [65, 114, 105, 116, 104, 109, 101, 116, 105, 99, 0]), (3,
+   [69, 120, 97, 109, 112, 108, 101, 115, 0]), (4, [79, 98, 106, 101, 99, 116, 0]), (5, [83, 121,
+   115, 116, 101, 109, 0]), (6, [83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101,
+   0])]
 
 /-- The `#Blob` entries of `Add`'s metadata slice. -/
 def blobs : List ByteEntry :=
-  [(2612, [5, 0, 2, 11, 11, 11]), (4429, [8, 176, 63, 95, 127, 17, 213, 10, 58])]
+  [(1, [5, 0, 2, 11, 11, 11]), (2, [8, 176, 63, 95, 127, 17, 213, 10, 58])]
 
 /-- The bytes the `Assembly` row spells. -/
 def identity : List Nat :=
@@ -90,11 +91,11 @@ def assembly0Metadata : Extraction.AssemblyMetadata :=
   { identity := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
     tableHeader :=
       (fixedBytes 32 0x000000000200000157DFA32B091E000000FA013300160000010000006A000000) ++
-      (fixedBytes 32 0xE3000000E3000000F8040000BF0600002B000000250200001A00000032010000) ++
-      (fixedBytes 32 0x010000001F0000000D0000006F000000140000001F000000220000001C000000) ++
-      (fixedBytes 32 0x550000000300000001000000040000001B0000004C0000003C01000058000000),
-    assemblyRow := (fixedBytes 22 0x04800000010000000000000000000000000009340000),
-    strings := [(0, (fixedBytes 1 0x00)), (13321, (fixedBytes 9 0x4578616D706C657300))],
+      (fixedBytes 32 0xE7000000E900000006050000CE0600002B000000250200001A00000032010000) ++
+      (fixedBytes 32 0x010000001F0000000D00000071000000140000001F000000220000001C000000) ++
+      (fixedBytes 32 0x550000000300000001000000040000001F0000004C0000003C01000058000000),
+    assemblyRow := (fixedBytes 22 0x04800000010000000000000000000000000001000000),
+    strings := [(0, (fixedBytes 1 0x00)), (1, (fixedBytes 9 0x4578616D706C657300))],
     blobs := [(0, (fixedBytes 1 0x00))] }
 
 /-- The block's byte literals are the list literals. -/
@@ -109,7 +110,7 @@ theorem assembly_literals_are_lists :
 /-- The unsigned 64-bit integer. -/
 def word : TypeExpr := .atom runtimeScope "System.UInt64"
 def method0Original : RawMethod :=
-  { token := 100663796,
+  { token := 100663802,
     owner :=
       "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.Arithmetic",
     hasThis := false, explicitThis := false, callingConvention := 0, attributes := 150,
@@ -129,19 +130,21 @@ theorem body_literal_is_list : method0Bytes = Lists.bodyBytes := by cil_kernel_r
 def method0Metadata : Extraction.MethodMetadata :=
   { own :=
       { assembly := assembly0Metadata,
-        rows := [(16777235, (fixedBytes 6 0x060073399926)),
-          (33554505, (fixedBytes 14 0x80011000DF0C09344D004600F401)),
-          (33554506, (fixedBytes 14 0x10011000EC390934650046000702)),
-          (100663796, (fixedBytes 14 0xC0440000000096006F0E340ACB02)),
-          (587202561, (fixedBytes 20 0x0B00000000000000000000004D11D91700000000))],
-        strings := [(0, (fixedBytes 1 0x00)), (3295, (fixedBytes 11 0x41726974686D6574696300)),
-          (3695, (fixedBytes 4 0x41646400)),
-          (6105, (fixedBytes 15 0x53797374656D2E52756E74696D6500)),
-          (9881, (fixedBytes 7 0x53797374656D00)), (13321, (fixedBytes 9 0x4578616D706C657300)),
-          (14707, (fixedBytes 7 0x4F626A65637400))],
-        blobs := [(2612, (fixedBytes 6 0x0500020B0B0B)),
-          (4429, (fixedBytes 9 0x08B03F5F7F11D50A3A))],
-        userStrings := [], corlib := 1, links := [⟨1, 100663796, 0, 33554505⟩] },
+        rows := [(16777235, (fixedBytes 6 0x060004000500)),
+          (33554505, (fixedBytes 14 0x80011000020003004D004600FA01)),
+          (33554506, (fixedBytes 14 0x10011000FFFF0300650046001002)),
+          (100663802, (fixedBytes 14 0x000000000000960001000100D402)),
+          (587202561, (fixedBytes 20 0x0B00000000000000000000000200060000000000)),
+          (704643081, (fixedBytes 8 0x000018007800FFFF)),
+          (704643082, (fixedBytes 8 0x00001800FE00FFFF)),
+          (704643120, (fixedBytes 8 0x00000000A903FFFF)),
+          (704643121, (fixedBytes 8 0x000000005F05FFFF))],
+        strings := [(0, (fixedBytes 1 0x00)), (1, (fixedBytes 4 0x41646400)),
+          (2, (fixedBytes 11 0x41726974686D6574696300)), (3, (fixedBytes 9 0x4578616D706C657300)),
+          (4, (fixedBytes 7 0x4F626A65637400)), (5, (fixedBytes 7 0x53797374656D00)),
+          (6, (fixedBytes 15 0x53797374656D2E52756E74696D6500))],
+        blobs := [(1, (fixedBytes 6 0x0500020B0B0B)), (2, (fixedBytes 9 0x08B03F5F7F11D50A3A))],
+        userStrings := [], corlib := 1, links := [⟨1, 100663802, 0, 33554505⟩] },
     others := [] }
 
 /-- The slice's byte literals are the list literals. -/
@@ -161,23 +164,27 @@ def method0Tables : List Extraction.IndexTables :=
 
 /-- The lookup tables as the extractor emits them. -/
 def method0TablesLiteral : List Extraction.IndexTables :=
-  [{ rows := (.node (.node (.node .leaf 16777235 (fixedBytes 6 0x060073399926) .leaf) 33554505
-       (fixedBytes 14 0x80011000DF0C09344D004600F401) .leaf) 33554506
-       (fixedBytes 14 0x10011000EC390934650046000702) (.node (.node .leaf 100663796
-       (fixedBytes 14 0xC0440000000096006F0E340ACB02) .leaf) 587202561
-       (fixedBytes 20 0x0B00000000000000000000004D11D91700000000) .leaf)),
-     strings := (.node (.node (.node .leaf 0 (fixedBytes 1 0x00) .leaf) 3295
-       (fixedBytes 11 0x41726974686D6574696300) (.node .leaf 3695 (fixedBytes 4 0x41646400) .leaf))
-       6105 (fixedBytes 15 0x53797374656D2E52756E74696D6500) (.node (.node .leaf 9881
-       (fixedBytes 7 0x53797374656D00) .leaf) 13321 (fixedBytes 9 0x4578616D706C657300) (.node
-       .leaf 14707 (fixedBytes 7 0x4F626A65637400) .leaf))),
-     blobs := (.node (.node .leaf 2612 (fixedBytes 6 0x0500020B0B0B) .leaf) 4429
-       (fixedBytes 9 0x08B03F5F7F11D50A3A) .leaf),
+  [{ rows := (.node (.node (.node (.node .leaf 16777235 (fixedBytes 6 0x060004000500) .leaf)
+       33554505 (fixedBytes 14 0x80011000020003004D004600FA01) .leaf) 33554506 (fixedBytes 14
+       0x10011000FFFF0300650046001002) (.node .leaf 100663802 (fixedBytes 14
+       0x000000000000960001000100D402) .leaf)) 587202561 (fixedBytes 20
+       0x0B00000000000000000000000200060000000000) (.node (.node (.node .leaf 704643081 (fixedBytes
+       8 0x000018007800FFFF) .leaf) 704643082 (fixedBytes 8 0x00001800FE00FFFF) .leaf) 704643120
+       (fixedBytes 8 0x00000000A903FFFF) (.node .leaf 704643121 (fixedBytes 8 0x000000005F05FFFF)
+       .leaf))),
+     strings := (.node (.node (.node .leaf 0 (fixedBytes 1 0x00) .leaf) 1 (fixedBytes 4 0x41646400)
+       (.node .leaf 2 (fixedBytes 11 0x41726974686D6574696300) .leaf)) 3 (fixedBytes 9
+       0x4578616D706C657300) (.node (.node .leaf 4 (fixedBytes 7 0x4F626A65637400) .leaf) 5
+       (fixedBytes 7 0x53797374656D00) (.node .leaf 6 (fixedBytes 15
+       0x53797374656D2E52756E74696D6500) .leaf))),
+     blobs := (.node (.node .leaf 1 (fixedBytes 6 0x0500020B0B0B) .leaf) 2 (fixedBytes 9
+       0x08B03F5F7F11D50A3A) .leaf),
      userStrings := .leaf,
-     links := (.node .leaf 4395631092 (0, 33554505) .leaf),
+     links := (.node .leaf 4395631098 (0, 33554505) .leaf),
      instanceBefore := .leaf,
      instanceTotal := (.node .leaf 33554505 0 .leaf),
-     genericOwners := .leaf }]
+     genericOwners := (.node (.node (.node .leaf 120 (704643081, 1) .leaf) 254 (704643082, 1)
+       .leaf) 937 (704643120, 1) (.node .leaf 1375 (704643121, 1) .leaf)) }]
 
 /-- The emitted tables are the ones the decoder builds from the slice. -/
 theorem tables_literal_is_built : method0TablesLiteral = method0Tables := by cil_kernel_rfl

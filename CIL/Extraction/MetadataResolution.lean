@@ -293,6 +293,61 @@ theorem base_names_spell :
   ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms base_names_spell
 
+/-! ## Generic parameter runs -/
+
+/-- The `GenericParam` rows that name `owner`, from the row its link gives while they continue. -/
+private def genericRun (index : MetadataIndex) (owner : Nat) :
+    Nat → Nat → Except MetadataError (List GenericParamRow)
+  | 0, _ => .ok []
+  | fuel + 1, row =>
+    if index.header.rows Table.genericParam < row then .ok []
+    else do
+      let entry ← index.genericParam (tokenOf Table.genericParam row)
+      if entry.owner != owner then .ok []
+      else do .ok (entry :: (← genericRun index owner fuel (row + 1)))
+
+/-- No `GenericParam` row names `owner`, given the table is sorted by coded owner as ECMA-335
+    requires: the first carried row above the owner's code is row 1 or follows a carried row
+    below it, or the table's last row lies below it, or the table has no rows. -/
+def MetadataIndex.noGenericParameters (index : MetadataIndex) (owner : Nat) :
+    Except MetadataError Unit := do
+  let code := genericOwnerCode owner
+  let codeAt (row : Nat) : Except MetadataError Nat := do
+    .ok (genericOwnerCode (← index.genericParam (tokenOf Table.genericParam row)).owner)
+  let last := index.header.rows Table.genericParam
+  let bracketed : Bool ← match index.genericOwners.above? code with
+    | some (_, (first, _)) => do
+      let above := decide (code < (← codeAt (tokenRow first)))
+      if tokenRow first == 1 then pure above
+      else do pure (above && decide ((← codeAt (tokenRow first - 1)) < code))
+    | none => if last == 0 then pure true else do pure (decide ((← codeAt last) < code))
+  if !bracketed then throw (.unresolvedMember owner)
+
+/-- The generic parameters of a `TypeDef` or `MethodDef` owner: every carried parameter of
+    the owner belongs to its contiguous zero-based run, and an owner with no carried parameter
+    has neighbours that show it has none. An optional link must name the run's first row in the
+    current metadata position. -/
+def MetadataIndex.genericParameters (index : MetadataIndex) (position owner : Nat) :
+    Except MetadataError (List GenericParamRow) := do
+  let table := metadataTableOf owner
+  if table != Table.typeDef && table != Table.methodDef then throw (.unsupportedTable owner)
+  match index.genericOwners.find? (genericOwnerCode owner) with
+  | none =>
+    if (index.link linkGenericParams owner).isSome then throw (.unresolvedMember owner)
+    index.noGenericParameters owner
+    .ok []
+  | some (first, count) => do
+    if (index.link linkGenericParams owner).any (· != (position, first)) then
+      throw (.unresolvedMember owner)
+    if first != tokenOf Table.genericParam (tokenRow first) || tokenRow first == 0 then
+      throw (.tokenOutOfScope first)
+    if 1 < tokenRow first then
+      if (← index.genericParam (first - 1)).owner == owner then throw (.unresolvedMember owner)
+    let run ← genericRun index owner (index.header.rows Table.genericParam) (tokenRow first)
+    if run.length == count &&
+        (run.zipIdx.all fun (entry, number) => entry.number == number) then .ok run
+    else .error (.unresolvedMember owner)
+
 /-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
     underlying type of its instance field, one that extends `System.ValueType` is a value
     type, and any other type is a class. The base counts only when its own reference names a
@@ -377,6 +432,28 @@ def hintAgrees : TypeKind → Option Bool → Bool
   | .classType, some valueType | .interfaceType, some valueType => !valueType
   | _, _ => true
 
+/-- The number of generic parameters of the definition a `TypeDef` token, or a `TypeRef` linked
+    to a carried slice, names. -/
+def MetadataEnv.definitionArity (env : MetadataEnv) (position token : Nat) :
+    Except MetadataError Nat := do
+  let index ← env.slice position token
+  let (linked, definition) ← match metadataTableOf token with
+    | 0x02 => pure (position, token)
+    | 0x01 =>
+      match index.link linkDefinition token with
+      | some target => pure target
+      | none => throw (.unresolvedType token)
+    | _ => throw (.unsupportedTable token)
+  .ok (← (← env.slice linked definition).genericParameters linked definition).length
+
+/-- A carried type named by a `TypeDef` or `TypeRef` token takes `arity` generic arguments:
+    none where the token names a type alone, one per argument where it heads an instance. A type
+    outside the carried slices has no definition to count. -/
+def MetadataEnv.requireArity (env : MetadataEnv) (position token : Nat) (named : NamedType)
+    (arity : Nat) : Except MetadataError Unit := do
+  if !named.pinned then return
+  if (← env.definitionArity position token) != arity then throw (.genericMismatch token)
+
 /-- The named type of a `TypeDef` or `TypeRef` token read with a value-or-class byte. -/
 def namedOf (env : MetadataEnv) (position token : Nat) (hint : Option Bool) :
     Except MetadataError NamedType := do
@@ -394,7 +471,9 @@ def resolveType (env : MetadataEnv) (position : Nat) :
   | 0, _ => .error (.unresolvedType 0)
   | _ + 1, .primitive code => .ok (.primitive code)
   | _ + 1, .named valueType token => do
-    .ok (.named (← namedOf env position token (some valueType)))
+    let named ← namedOf env position token (some valueType)
+    env.requireArity position token named 0
+    .ok (.named named)
   | _ + 1, .var index => .ok (.var index)
   | _ + 1, .mvar index => .ok (.mvar index)
   | fuel + 1, .byref element => do .ok (.byref (← resolveType env position fuel element))
@@ -402,7 +481,9 @@ def resolveType (env : MetadataEnv) (position : Nat) :
   | fuel + 1, .szarray element => do .ok (.szarray (← resolveType env position fuel element))
   | fuel + 1, .genericInst valueType token arguments => do
     let head ← namedOf env position token (some valueType)
-    .ok (.genericInst head (← resolveList env position fuel arguments))
+    let resolved ← resolveList env position fuel arguments
+    env.requireArity position token head resolved.toList.length
+    .ok (.genericInst head resolved)
   | fuel + 1, .functionPointer convention result parameters => do
     let resolved ← resolveType env position fuel result
     .ok (.functionPointer convention resolved (← resolveList env position fuel parameters))
@@ -429,7 +510,10 @@ def MetadataEnv.resolve (env : MetadataEnv) (position : Nat) (type : SigType) :
 def MetadataEnv.resolveToken (env : MetadataEnv) (position token : Nat) :
     Except MetadataError ResolvedType :=
   match metadataTableOf token with
-  | 0x02 | 0x01 => do .ok (.named (← namedOf env position token none))
+  | 0x02 | 0x01 => do
+    let named ← namedOf env position token none
+    env.requireArity position token named 0
+    .ok (.named named)
   | 0x1B => do
     let index ← env.slice position token
     let blob ← index.blob (← index.signatureOf Table.typeSpec token)
@@ -759,6 +843,14 @@ def objectNamed (named : NamedType) : Bool :=
   named.pinned && named.kind == .classType ||
     named.scope == runtimeScopeBytes && named.name == systemStringName
 
+/-- Whether a generic definition of this kind is a reference type, when the metadata decides it:
+    a class or interface of a carried slice or a reference the signature marks as a class is one,
+    a struct, an enum or a reference the signature marks as a value type is not. -/
+def TypeKind.reference? : TypeKind → Option Bool
+  | .classType | .interfaceType | .external (some false) => some true
+  | .valueType | .enumType _ | .external (some true) => some false
+  | .external none => none
+
 /-- A value type, or an external type that may be one. -/
 def valueLike : TypeKind → Bool
   | .valueType | .external (some true) | .external none => true
@@ -845,8 +937,11 @@ def appliedAdmits (frame : Frame) : Nat → NamedType → ResolvedList → TypeE
   | fuel + 1, head, arguments, expr =>
     match appliedArguments expr with
     | (.constructor scope name, expected) =>
-      bytesOf scope == head.scope && bytesOf name == head.name &&
-        argumentsAdmit frame fuel arguments expected
+      head.kind.reference? == some false && bytesOf scope == head.scope &&
+        bytesOf name == head.name && argumentsAdmit frame fuel arguments expected
+    | (.objectConstructor scope name, expected) =>
+      head.kind.reference? == some true && bytesOf scope == head.scope &&
+        bytesOf name == head.name && argumentsAdmit frame fuel arguments expected
     | _ => false
 
 /-- Whether each resolved argument is named by the matching extractor type. -/
@@ -880,6 +975,8 @@ def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : B
     match type, expr with
     | .named named, .object scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind
+    | .primitive 0x1C, .object scope name =>
+      frame.corlib == some (bytesOf scope) && bytesOf name == systemObjectName
     | _, _ => false
 
 end CIL.Extraction

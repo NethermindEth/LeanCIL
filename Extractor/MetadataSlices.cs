@@ -81,7 +81,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var collection = new Collection(pinned);
         var own = collection.SliceOf(original.Module);
         own.Method(original, classOwner);
-        foreach (var token in tokens) own.Token(token);
+        foreach (var token in tokens) own.Operand(token);
         var metadata = collection.Lean();
         return (metadata, collection.Tables(), collection.Assemblies());
     }
@@ -175,6 +175,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly HashSet<uint> fieldSignaturesAdded = [];
         readonly HashSet<uint> chainedOwners = [];
         readonly HashSet<uint> chained = [];
+        readonly HashSet<uint> arities = [];
         int corlib;
 
         internal ModuleDefinition Module => module;
@@ -303,7 +304,11 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 case Form.Type: decoder.DecodeType(ref blob); break;
                 default: decoder.DecodeMethodSpecificationSignature(ref blob); break;
             }
-            foreach (var token in collector.Tokens) Token(token, collector.OnlyModifier(token));
+            foreach (var token in collector.Tokens)
+            {
+                Token(token, collector.OnlyModifier(token));
+                if (!collector.OnlyModifier(token)) Arity(token);
+            }
         }
 
         /// <summary>Add a token with every row and heap entry the checker reads for it.</summary>
@@ -444,6 +449,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (!IsClass(definition) || definition.BaseType.IsNil) return;
             var parent = TokenOf(definition.BaseType);
             Token(parent);
+            Arity(parent);
             if ((parent >> 24) == 0x02)
                 ClassChain(parent);
             else if ((parent >> 24) == 0x01 && linked.TryGetValue((0, parent), out var target))
@@ -491,6 +497,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Signature(member.Signature,
                 member.GetKind() == MemberReferenceKind.Field ? Form.Field : Form.Method, true);
             Token(TokenOf(member.Parent));
+            Arity(TokenOf(member.Parent));
             var reference = (MemberReference)module.LookupToken(new MetadataToken(token));
             var declaring = reference.DeclaringType is GenericInstanceType generic
                 ? generic.ElementType : reference.DeclaringType;
@@ -514,6 +521,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var specification = Reader.GetMethodSpecification(MetadataTokens.MethodSpecificationHandle(RowOf(token)));
             Signature(specification.Signature, Form.Instantiation);
             Token(TokenOf(specification.Method));
+            DeclaringArity(TokenOf(specification.Method));
         }
 
         void Standalone(uint token)
@@ -540,9 +548,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Token(token);
             var method = Reader.GetMethodDefinition(MetadataTokens.MethodDefinitionHandle(RowOf(token)));
             GenericRun(token, method.GetGenericParameters());
-            var owner = Reader.GetTypeDefinition(method.GetDeclaringType());
-            GenericRun(TokenOf(method.GetDeclaringType()), owner.GetGenericParameters());
+            Arity(TokenOf(method.GetDeclaringType()));
             if (!classOwner) return;
+            var owner = Reader.GetTypeDefinition(method.GetDeclaringType());
             if (fieldsAdded.Add(TokenOf(method.GetDeclaringType())))
             {
                 FieldRows(TokenOf(method.GetDeclaringType()), owner, signatures: false);
@@ -550,16 +558,87 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             }
         }
 
-        /// <summary>The generic parameter rows of an owner, the rows around them and the link to the first.</summary>
+        /// <summary>
+        /// An operand token with what its check reads, the arity of a type it names or is declared on included.
+        /// </summary>
+        internal void Operand(uint token)
+        {
+            Token(token);
+            Arity(token);
+            DeclaringArity(token);
+        }
+
+        /// <summary>
+        /// The generic parameter rows that count the parameters of the type a <c>TypeDef</c> token, or a
+        /// <c>TypeRef</c> linked to a carried slice, names; read where the type is named or used as a base.
+        /// </summary>
+        internal void Arity(uint token)
+        {
+            if (token >> 24 == 0x01)
+            {
+                if (linked.TryGetValue((0, token), out var target))
+                    collection.At(target.Slice).Arity(target.Target);
+                return;
+            }
+            if (token >> 24 != 0x02 || !arities.Add(token)) return;
+            var definition = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(RowOf(token)));
+            GenericRun(token, definition.GetGenericParameters());
+        }
+
+        /// <summary>The arity of the type a <c>Field</c> or <c>MethodDef</c> token is declared on.</summary>
+        void DeclaringArity(uint token)
+        {
+            var declaring = (token >> 24) switch
+            {
+                0x04 => Reader.GetFieldDefinition(MetadataTokens.FieldDefinitionHandle(RowOf(token)))
+                    .GetDeclaringType(),
+                0x06 => Reader.GetMethodDefinition(MetadataTokens.MethodDefinitionHandle(RowOf(token)))
+                    .GetDeclaringType(),
+                _ => default
+            };
+            if (!declaring.IsNil) Arity(TokenOf(declaring));
+        }
+
+        /// <summary>
+        /// The generic parameter rows of an owner, the rows around them and the link to the first; for an owner
+        /// with none, the rows that show it has none.
+        /// </summary>
         void GenericRun(uint owner, GenericParameterHandleCollection parameters)
         {
-            if (parameters.Count == 0) return;
+            if (parameters.Count == 0)
+            {
+                GenericGap(owner);
+                return;
+            }
             var numbers = parameters.Select(handle => MetadataTokens.GetRowNumber(handle)).Order().ToArray();
             Link(3, owner, position, 0x2A000000 + (uint)numbers[0]);
             foreach (var number in numbers) Row(0x2A000000 + (uint)number);
             if (numbers[0] > 1) Row(0x2A000000 + (uint)numbers[0] - 1);
             if (numbers[^1] < image.Count(0x2A)) Row(0x2A000000 + (uint)numbers[^1] + 1);
         }
+
+        /// <summary>
+        /// The first generic parameter row whose owner's coded value lies above an owner's and the row before it,
+        /// or the last row when none lies above: in the owner-sorted table they bracket where its run would be.
+        /// </summary>
+        void GenericGap(uint owner)
+        {
+            var count = image.Count(0x2A);
+            var code = GenericOwnerCode(owner);
+            int low = 1, high = count + 1;
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                var parent = Reader.GetGenericParameter(MetadataTokens.GenericParameterHandle(middle)).Parent;
+                if (GenericOwnerCode(TokenOf(parent)) > code) high = middle;
+                else low = middle + 1;
+            }
+            if (low <= count) Row(0x2A000000 + (uint)low);
+            if (low > 1) Row(0x2A000000 + (uint)low - 1);
+        }
+
+        /// <summary>The <c>TypeOrMethodDef</c> coded value of a type or method token, the table's sort key.</summary>
+        static uint GenericOwnerCode(uint owner) => (owner & 0xFFFFFF) * 2 + (owner >> 24 == 0x06 ? 1u : 0u);
 
         /// <summary>The primitive types' assembly reference, which Lean names the scope of integer types by.</summary>
         internal void Finish()
@@ -757,7 +836,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             return (Tree(before), Tree(total));
         }
 
-        /// <summary>Each owner's first carried parameter and count, ordered by owner token.</summary>
+        /// <summary>Each owner's first carried parameter and count, keyed by the owner's coded value.</summary>
         string GenericOwners()
         {
             var ownerWidth = Columns(TableIndex.GenericParam)[2].Width;
@@ -767,8 +846,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 uint codedOwner = 0;
                 for (var offset = 0; offset < ownerWidth; offset++)
                     codedOwner |= (uint)bytes[4 + offset] << (8 * offset);
-                var owner = (codedOwner % 2 == 0 ? 0x02000000u : 0x06000000u) + codedOwner / 2;
-                genericOwners[owner] = genericOwners.TryGetValue(owner, out var previous)
+                genericOwners[codedOwner] = genericOwners.TryGetValue(codedOwner, out var previous)
                     ? (previous.First, previous.Count + 1) : (token, 1);
             }
             var ownerEntries = genericOwners.Select(entry =>

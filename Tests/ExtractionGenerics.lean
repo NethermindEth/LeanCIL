@@ -27,7 +27,8 @@ example : instantiateMethod [] { raw with genericParameters := [{ flags := 4, ty
 /-- `T : I<T>` closes at each argument and needs that argument's layout to list `I<argument>`. -/
 def selfConstrained : RawMethod := { raw with
   genericParameters := [{
-    flags := 24, types := [], interfaces := [.apply (.constructor "Test" "I`1") (.parameter 0)] }] }
+    flags := 24, types := [],
+    interfaces := [.apply (.objectConstructor "Test" "I`1") (.parameter 0)] }] }
 def selfLayout : RawLayout := {
   identity := "Test::A", explicit := false, packing := 0, declaredSize := 0, fields := [],
   interfaces := ["Test::I`1<Test::A>"] }

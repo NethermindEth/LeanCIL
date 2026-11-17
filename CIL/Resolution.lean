@@ -656,11 +656,17 @@ def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
   | some (.field kind) => (primitiveFieldWidth kind).map fun width => (width, signedField kind)
   | _ => none
 
-/-- A class instance field whose slot holds an object reference: one typed as an admitted class
-    or as an array of one, which is itself an object on the heap. -/
+/-- A class instance field whose slot holds an object reference: one typed as a class or as an
+    array of one, which is itself an object on the heap, or as a generic class instance. -/
 def referenceFieldType : TypeExpr → Bool
   | .object _ _ | .array (.object _ _) => true
-  | _ => false
+  | type => type.objectApplication
+
+/-- A class instance field type whose references the model never reads through: a generic class
+    instance or `System.Object`, which name no class the model lays out. -/
+def opaqueFieldType : TypeExpr → Bool
+  | .object _ name => name == ElementShape.rootObjectName
+  | type => type.objectApplication
 
 /-- The element of a class instance field typed as an array of a value type, as the evaluation
     stack records it: a struct element by its identity alone. -/

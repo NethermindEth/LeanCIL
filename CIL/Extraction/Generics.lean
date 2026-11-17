@@ -153,7 +153,7 @@ private def splitOwner : List Char → List Char → Option (List Char × List C
 
 /-- The assembly scope of an owner's generic type definition. -/
 private def ownerScope : TypeExpr → Option String
-  | .constructor scope _ => some scope
+  | .constructor scope _ | .objectConstructor scope _ => some scope
   | .apply constructor _ => ownerScope constructor
   | _ => none
 
@@ -438,8 +438,8 @@ def callOperandMatches (site : CallSite) : Instruction → Bool
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
 def managedOwner : TypeExpr → Option (String × List TypeExpr)
-  | .atom scope name | .constructor scope name | .object scope name =>
-    some (scope ++ "::" ++ name, [])
+  | .atom scope name | .constructor scope name | .objectConstructor scope name
+  | .object scope name => some (scope ++ "::" ++ name, [])
   | .aggregate identity _ => some (identity, [])
   | .apply owner argument => do
     let (identity, arguments) ← managedOwner owner

@@ -184,7 +184,7 @@ theorem default_interface_slot_rejected :
 private def boolean : TypeExpr := .atom runtimeScope "System.Boolean"
 private def allowance : TypeExpr := .aggregate "Fixture::Allowance" 0
 private def price : TypeExpr := .aggregate "Fixture::Price" 1
-private def allowanceOwner : TypeExpr := .constructor "Fixture" "IAllowance`1"
+private def allowanceOwner : TypeExpr := .objectConstructor "Fixture" "IAllowance`1"
 private def allowanceInterface : TypeExpr := .apply allowanceOwner allowance
 /-- `static virtual bool Spend<TPrice>(ref TSelf self)` with a body, on `IAllowance<Allowance>`. -/
 private def defaultSlot : DispatchMethod := {
@@ -287,14 +287,15 @@ theorem static_default_owner_rejected :
     resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
         [{ defaultSlot with ownerArguments := [price] }] }] allowance defaultSite = none ∧
     resolveConstrained [defaultConcrete, { defaultDeclared with methods :=
-        [{ defaultSlot with owner := .constructor "Other" "IAllowance`1" }] }]
+        [{ defaultSlot with owner := .objectConstructor "Other" "IAllowance`1" }] }]
       allowance defaultSite = none := by decide +kernel
 #print axioms static_default_owner_rejected
 
-private def derivedInterface : TypeExpr := .apply (.constructor "Fixture" "IRefund`1") allowance
+private def derivedInterface : TypeExpr :=
+  .apply (.objectConstructor "Fixture" "IRefund`1") allowance
 /-- `IRefund<TSelf>`'s `MethodImpl` of `IAllowance<TSelf>.Spend<TPrice>`, closed at `Allowance`. -/
 private def derivedBody : DispatchMethod := { genericOverride with
-  token := 50, owner := .constructor "Fixture" "IRefund`1", ownerArguments := [allowance] }
+  token := 50, owner := .objectConstructor "Fixture" "IRefund`1", ownerArguments := [allowance] }
 /-- `IRefund<TSelf> : IAllowance<TSelf>` re-implementing `IAllowance<TSelf>.Spend<TPrice>`. -/
 private def derivedDeclared : DispatchType := {
   identity := derivedInterface, valueType := false, interfaceType := true,

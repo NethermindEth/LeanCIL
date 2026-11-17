@@ -112,6 +112,12 @@ foreach (var handle in reader.TypeDefinitions)
         Blob(reader.GetFieldDefinition(field).Signature);
     }
 }
+// Lean counts a definition's generic parameters from its run in the `GenericParam` table, so every row is carried.
+for (var row = 1; row <= reader.GetTableRowCount(TableIndex.GenericParam); row++)
+{
+    Row(TableIndex.GenericParam, row);
+    Text(reader.GetGenericParameter(MetadataTokens.GenericParameterHandle(row)).Name);
+}
 var nestingWidth = reader.GetTableRowSize(TableIndex.NestedClass) / 2;
 for (var row = 1; row <= reader.GetTableRowCount(TableIndex.NestedClass); row++)
 {

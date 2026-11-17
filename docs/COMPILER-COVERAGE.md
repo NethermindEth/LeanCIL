@@ -82,7 +82,8 @@ The `blockers` suite also runs `leancil blockers` under the scalar profile over 
 the extractor's own `Nethermind.LeanCIL.dll`, a realistic program that changes with every PR.
 [SelfAdmission.cs](../Tests/SelfAdmission.cs) generates the manifest from the built assembly's
 metadata and compares the report with the checked-in
-[baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean.
+[baseline](../Tests/SelfAdmissionBaseline.txt), the list of admitted methods. It needs no Lean; its
+opt-in Lean check of every admitted method is described in [validation](VALIDATION.md).
 
 The gate checks admission and ignores blocker totals: it requires the admitted set to match the
 baseline exactly. A method the baseline admits that is no longer admitted, an admission the

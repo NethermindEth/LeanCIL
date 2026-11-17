@@ -77,6 +77,15 @@ def MetadataEnv.ownerOf (env : MetadataEnv) (position token : Nat) :
     Except MetadataError NamedType := do
   typeDefNamed env position resolveFuel (← env.declaringType position token)
 
+/-- The type a `Field` or `MethodDef` token used as an operand is declared on, which takes no
+    generic arguments: the token names no instance to supply them. -/
+def MetadataEnv.plainOwnerOf (env : MetadataEnv) (token : Nat) :
+    Except MetadataError NamedType := do
+  let declaring ← env.declaringType 0 token
+  let owner ← typeDefNamed env 0 resolveFuel declaring
+  env.requireArity 0 declaring owner 0
+  .ok owner
+
 /-- The type a resolved owner names: its head, with generic arguments aside. -/
 def ResolvedType.head : ResolvedType → Option NamedType
   | .named type => some type
@@ -99,10 +108,11 @@ def userStringMatches (index : MetadataIndex) (token : Nat) (text : String) :
 
 /-! ## Types -/
 
-/-- The scope an extractor type spells for its head: the atom's, object's or constructor's, or
-    the scope an aggregate or enum identity starts with. -/
+/-- The scope an extractor type spells for its head: the atom's, object's or generic
+    definition's, or the scope an aggregate or enum identity starts with. -/
 def TypeExpr.headScope : TypeExpr → Option String
-  | .atom scope _ | .object scope _ | .constructor scope _ => some scope
+  | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
+    some scope
   | .apply applied _ => applied.headScope
   | _ => none
 
@@ -144,7 +154,7 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
   let index ← env.slice 0 token
   if metadataTableOf token == Table.field then
     let row ← index.field token
-    .ok { owner := .named (← env.ownerOf 0 token), name := ← index.string row.name,
+    .ok { owner := .named (← env.plainOwnerOf token), name := ← index.string row.name,
           declared := ← env.resolveBlob 0 token row.signature, definition := some (0, token) }
   else
     let row ← index.memberRef token
@@ -168,12 +178,15 @@ def MetadataEnv.classChain (env : MetadataEnv) :
     match metadataTableOf row.extends_ with
     | 0x02 =>
       if tokenRow row.extends_ == 0 then .error (.unsupportedBase token)
+      else if (← env.definitionArity position row.extends_) != 0 then
+        .error (.unsupportedBase token)
       else do .ok ((position, row.extends_) :: (← env.classChain fuel position row.extends_))
     | 0x01 =>
       let named ← typeRefNamed env position resolveFuel row.extends_ (some false)
       if named.pinned then
         let some (linked, definition) := index.link linkDefinition row.extends_
           | throw (.unsupportedBase token)
+        if (← env.definitionArity position row.extends_) != 0 then throw (.unsupportedBase token)
         .ok ((linked, definition) :: (← env.classChain fuel linked definition))
       else if (← index.coreLibraryReference row.extends_) &&
           named.parts == [systemNamespace, objectName] then .ok []
@@ -317,7 +330,7 @@ def MetadataEnv.memberSite (env : MetadataEnv) (token : Nat) :
   | 0x06 =>
     let row ← index.methodDef token
     let signature ← env.resolveMethod 0 (← index.blob row.signature)
-    .ok { owner := .named (← env.ownerOf 0 token), name := ← index.string row.name,
+    .ok { owner := .named (← env.plainOwnerOf token), name := ← index.string row.name,
           convention := signature.1, genericArity := signature.2.1, result := signature.2.2.1,
           parameters := signature.2.2.2, definition := some (0, token), methodArguments := none }
   | 0x0A =>
@@ -531,37 +544,6 @@ def checkLocals (env : MetadataEnv) (arity signature : Nat) (locals : List TypeE
   compare 0 types locals
 
 /-! ## The method definition -/
-
-/-- The `GenericParam` rows that name `owner`, from the row its link gives while they continue. -/
-private def genericRun (index : MetadataIndex) (owner : Nat) :
-    Nat → Nat → Except MetadataError (List GenericParamRow)
-  | 0, _ => .ok []
-  | fuel + 1, row =>
-    if index.header.rows Table.genericParam < row then .ok []
-    else do
-      let entry ← index.genericParam (tokenOf Table.genericParam row)
-      if entry.owner != owner then .ok []
-      else do .ok (entry :: (← genericRun index owner fuel (row + 1)))
-
-/-- Every carried parameter of an owner belongs to its contiguous zero-based run. An optional
-    link must name its first row in the current metadata position. -/
-def MetadataIndex.genericParameters (index : MetadataIndex) (position owner : Nat) :
-    Except MetadataError (List GenericParamRow) :=
-  match index.genericOwners.find? owner with
-  | none =>
-    if (index.link linkGenericParams owner).isSome then .error (.unresolvedMember owner)
-    else .ok []
-  | some (first, count) => do
-    if (index.link linkGenericParams owner).any (· != (position, first)) then
-      throw (.unresolvedMember owner)
-    if first != tokenOf Table.genericParam (tokenRow first) || tokenRow first == 0 then
-      throw (.tokenOutOfScope first)
-    if 1 < tokenRow first then
-      if (← index.genericParam (first - 1)).owner == owner then throw (.unresolvedMember owner)
-    let run ← genericRun index owner (index.header.rows Table.genericParam) (tokenRow first)
-    if run.length == count &&
-        (run.zipIdx.all fun (entry, number) => entry.number == number) then .ok run
-    else .error (.unresolvedMember owner)
 
 /-- Whether generic parameter rows have the attribute flags the extractor states. -/
 def flagsAgree (rows : List GenericParamRow) (claimed : List GenericConstraint) : Bool :=
