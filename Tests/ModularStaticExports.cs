@@ -267,7 +267,7 @@ var bundle = Path.GetFullPath(published["fullVerificationLocator"]!.GetValue<str
 var originalLib = File.ReadAllBytes(lib);
 string[] FullCommand(string artifact, string callerSource, bool package) => [.. cli, "verify", artifact,
     "--proof", callerSource, .. package ? new[] { "--proof-root", caller } : [], "--force-full-verify"];
-void FullVerify(string artifact, string callerSource, bool package, int slots)
+string[] FullVerify(string artifact, string callerSource, bool package, int slots)
 {
     var trace = Path.Combine(root, "trace-" + Guid.NewGuid().ToString("N"));
     string? previousTrace = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
@@ -303,6 +303,7 @@ void FullVerify(string artifact, string callerSource, bool package, int slots)
         !verified.GetProperty("compositionAudit").GetString()!.Contains("linkChecked", StringComparison.Ordinal))
         throw new InvalidOperationException(
             "Full verification did not publish the checked static composition: " + verified);
+    return stages;
 }
 // Each rejection names the one check expected to fire first.
 void RejectFull(string artifact, string marker)
@@ -353,8 +354,8 @@ if (fullComposition)
         FullTransitiveStatic();
         return;
     }
-    // A private library cache meets the first forced run empty and, once the ordinary runs below have
-    // filled it, the last one warm; each must build and replay the library rather than open the entry.
+    // A private library cache meets the first forced run empty, which builds the caller's library, and the
+    // last one holding it; that run opens the hash-checked entry and must trace the open like any other.
     static bool Flag(string name) =>
         string.Equals(Environment.GetEnvironmentVariable(name), "true", StringComparison.OrdinalIgnoreCase);
     var cacheReachable = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")) &&
@@ -366,7 +367,9 @@ if (fullComposition)
     if (!cacheReachable)
         Console.WriteLine("NOTE a supplied certified library or CI keeps the local library cache unread, so the " +
             "cold and warm cache runs below both open the supplied library");
-    FullVerify(appArtifact, callerProof, package: true, slots: 1);
+    const string openStage = "Opening certified Lean verification library";
+    if (FullVerify(appArtifact, callerProof, package: true, slots: 1).Contains(openStage) && cacheReachable)
+        throw new InvalidOperationException("Precondition: the first forced run met a warm library cache.");
     Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification with a cold " +
         "library cache");
 
@@ -444,7 +447,8 @@ if (fullComposition)
         throw new InvalidOperationException("Precondition: the repeated ordinary verification restored no receipt.");
     if (cacheReachable && !CacheHoldsEntry())
         throw new InvalidOperationException("Precondition: the ordinary verification cached no certified library.");
-    FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
+    if (!FullVerify(mixedArtifact, mixedProof, package: false, slots: 2).Contains(openStage) && cacheReachable)
+        throw new InvalidOperationException("The forced run with a warm library cache did not open its entry.");
     Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two " +
         "imported slots, with a warm receipt and a warm library cache present");
     FullTransitiveStatic();
