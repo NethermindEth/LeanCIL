@@ -145,7 +145,9 @@ internal static class VerificationSuites
             "embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, " +
             "type identity equality at a cost that does not grow with the name, the method name clause of the " +
             "call operand check and the encoding of a metadata name at a per-byte cost that does not grow with " +
-            "the name, and one native method table step and one load of its first entry at a kernel cost that " +
+            "the name, the bytes of a name stored as its bytes at a per-byte cost that does not grow with the " +
+            "name and, with the name's definition, below the cost of the bytes of its literal, and one native " +
+            "method table step and one load of its first entry at a kernel cost that " +
             "does not grow with the table's entries; the managed-call check of a body with many call sites at " +
             "a per-site cost that does not grow with the call sites; the call check and the evidence theorem of " +
             "a body with no call at a per-statement and a total cost that do not grow with the body; the proof " +

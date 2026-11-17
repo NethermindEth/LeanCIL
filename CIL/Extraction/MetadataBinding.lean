@@ -574,6 +574,42 @@ def MethodNames.spelling (names : MethodNames) : Option (String × List TypeExpr
 abbrev MethodNames.Spell (names : MethodNames) (method : RawMethod) : Prop :=
   names.spelling = some (method.owner, method.objectBases)
 
+/-- Whether each base class name is the bytes of the object type at its position. -/
+def basesSpelled : List (List Nat × List Nat) → List TypeExpr → Bool
+  | [], [] => true
+  | (scope, name) :: bases, .object scopeText nameText :: types =>
+    scope == bytesOf scopeText && name == bytesOf nameText && basesSpelled bases types
+  | _, _ => false
+
+/-- Whether the names are the bytes of the owner and base classes the method states. A decision
+    over bytes, so a method whose strings are stored as bytes proves `Spell` without the kernel
+    encoding them. -/
+def MethodNames.spelledBy (names : MethodNames) (method : RawMethod) : Bool :=
+  names.owner == bytesOf method.owner && basesSpelled names.bases method.objectBases
+
+private theorem bases_of_basesSpelled : ∀ (bases : List (List Nat × List Nat))
+    (types : List TypeExpr), basesSpelled bases types = true →
+      bases.mapM (fun entry => (spelled? entry.1).bind fun scope =>
+        (spelled? entry.2).bind fun name => pure (TypeExpr.object scope name)) = some types
+  | [], [], _ => rfl
+  | (scope, name) :: bases, .object scopeText nameText :: types, spelled => by
+    simp only [basesSpelled, Bool.and_eq_true, beq_iff_eq] at spelled
+    obtain ⟨⟨rfl, rfl⟩, rest⟩ := spelled
+    simp only [List.mapM_cons, spelled?_bytesOf, Option.bind_some]
+    rw [bases_of_basesSpelled bases types rest]
+    rfl
+
+/-- Names whose bytes are those of the method's owner and base classes spell them. -/
+theorem MethodNames.spell_of_spelledBy {names : MethodNames} {method : RawMethod}
+    (spelled : names.spelledBy method = true) : names.Spell method := by
+  simp only [MethodNames.spelledBy, Bool.and_eq_true, beq_iff_eq] at spelled
+  obtain ⟨owner, bases⟩ := spelled
+  simp only [MethodNames.Spell, MethodNames.spelling, owner, spelled?_bytesOf]
+  simp only [bind]
+  rw [bases_of_basesSpelled _ _ bases]
+  rfl
+#print axioms MethodNames.spell_of_spelledBy
+
 /-- The names spell `signature`, the string a proof selects the method by. An equation between a
     string and bytes, so an extraction proves it with `cil_kernel_rfl`. -/
 abbrev MethodNames.Selects (names : MethodNames) (signature : String) : Prop :=

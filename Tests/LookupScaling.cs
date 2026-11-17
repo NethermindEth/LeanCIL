@@ -2329,6 +2329,47 @@ for (var step = 1; step < spellingLengths.Length; step++)
             FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
 }
 
+// A name stored as its bytes (`byteString`) gives `bytesOf` those bytes without encoding the name, so reading them
+// grows with the name's length and no faster, and the name's definition and one read cost less than reading the
+// bytes of its literal. Each read is measured after the same statement is stated, so its elaboration is not counted.
+const double AllowedStoredGrowth = 1.1;
+long[] StoredCosts(int length)
+{
+    var name = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+    var hex = string.Concat(name.Select(character => ((int)character).ToString("X2", CultureInfo.InvariantCulture)));
+    var sum = name.Sum(character => (int)character);
+    var literal = $"\"{name}\"";
+    string Read(string text) => $"(CIL.Extraction.bytesOf {text}).foldl (fun a b => a + b) 0 = {sum}";
+    var costs = PartHeartbeats(Path.Combine(directory, $"Stored{length}.lean"),
+        ["import CIL.Extraction.MetadataBytes\n",
+            $"def stored : String :=\n  CIL.Extraction.byteString (CIL.Extraction.fixedBytes {length} 0x{hex})\n" +
+                $"    \"{name}\" (by cil_kernel_rfl)\n",
+            $"example : Prop := {Read("stored")}\n", $"theorem reads_stored : {Read("stored")} := by decide +kernel\n",
+            $"example : Prop := {Read(literal)}\n",
+            $"theorem reads_literal : {Read(literal)} := by decide +kernel\n"]);
+    return [costs[0], costs[2] - costs[1], costs[4] - costs[3]];
+}
+var storedCosts = spellingLengths.Select(StoredCosts).ToArray();
+for (var step = 0; step < spellingLengths.Length; step++)
+{
+    var (definition, stored, literal) = (storedCosts[step][0], storedCosts[step][1], storedCosts[step][2]);
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS reading the bytes of a stored name of {spellingLengths[step]} bytes: {stored} heartbeats, ") +
+        FormattableString.Invariant($"{definition} to define it, {literal} for its literal"));
+    if (definition + stored >= literal)
+        throw new Exception(FormattableString.Invariant(
+            $"Defining and reading a stored name of {spellingLengths[step]} bytes costs {definition + stored} ") +
+            FormattableString.Invariant($"heartbeats, not below the {literal} of reading its literal."));
+    if (step == 0) continue;
+    var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
+    var growth = stored / (double)storedCosts[step - 1][1];
+    if (growth > AllowedStoredGrowth * lengthRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"Reading a stored name of {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
+            FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
+            FormattableString.Invariant($"the limit is {AllowedStoredGrowth * lengthRatio:F1}."));
+}
+
 // `indirectTarget` selects the body of a `calli` by comparing the pointer's owner with each catalog entry's, and a
 // proof decides it by `cil_kernel_rfl`: the kernel's cost grows with the owner's length and no faster.
 void IndirectTargetCosts()

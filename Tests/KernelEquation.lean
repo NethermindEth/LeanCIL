@@ -124,4 +124,29 @@ theorem spelling_inverts_bytes :
 #guard_msgs in
 #print axioms spelling_inverts_bytes
 
+
+/-- `Examples.Arithmetic` stored as its bytes: `bytesOf` of it reads them without encoding. -/
+private def arithmeticText : String :=
+  byteString arithmeticBytes "Examples.Arithmetic" ascii_name_spelled
+
+theorem stored_string_is_its_literal : arithmeticText = "Examples.Arithmetic" :=
+  byteString_eq _
+#print axioms stored_string_is_its_literal
+
+theorem stored_string_reads_its_bytes : bytesOf arithmeticText = arithmeticBytes := by
+  decide +kernel
+#print axioms stored_string_reads_its_bytes
+
+-- Bytes that are not those of the literal: the kernel refuses the string where it is defined.
+/--
+error: cil_kernel_rfl: the kernel does not accept the two sides as equal
+left:
+  spelled? (arithmeticBytes.set 1 121)
+right:
+  some "Examples.Arithmetic"
+-/
+#guard_msgs in
+private def misstoredText : String :=
+  byteString (arithmeticBytes.set 1 121) "Examples.Arithmetic" (by cil_kernel_rfl)
+
 end Tests.KernelEquation

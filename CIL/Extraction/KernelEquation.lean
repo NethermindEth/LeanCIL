@@ -198,6 +198,129 @@ theorem utf8Characters_encode : ∀ (fuel : Nat) (bytes : List Nat) (characters 
     · cases decoded
 #print axioms utf8Characters_encode
 
+/-- The character a scalar value names, when the value is at least the minimum it was encoded
+    above. Every character is a scalar value, so only the minimum can refuse it. -/
+private theorem scalar_toNat (character : Char) {minimum : Nat}
+    (above : minimum ≤ character.val.toNat) :
+    scalar minimum character.val.toNat = some character := by
+  have valid := character.valid
+  simp only [UInt32.isValidChar, Nat.isValidChar] at valid
+  have inside : (character.val.toNat < minimum || (0xD800 ≤ character.val.toNat &&
+      character.val.toNat < 0xE000) || 0x10FFFF < character.val.toNat) = false := by
+    simp only [Bool.or_eq_false_iff, decide_eq_false_iff_not, Bool.and_eq_false_iff]; omega
+  unfold scalar
+  simp only [inside, Bool.false_eq_true, ↓reduceIte]
+  exact congrArg some (Char.ofNat_toNat character)
+
+/-- The bytes of a character, read from the front of any bytes after them, give the character
+    and those bytes. -/
+private theorem utf8Character_encoded (character : Char) (rest : List Nat) :
+    ∃ first tail, encodedCharacter character ++ rest = first :: tail ∧
+      utf8Character first tail = some (character, rest) := by
+  have valid := character.valid
+  simp only [UInt32.isValidChar, Nat.isValidChar] at valid
+  generalize hv : character.val.toNat = v at valid
+  by_cases one : v ≤ 0x7F
+  · have found := scalar_toNat character (minimum := 0) (Nat.zero_le _)
+    rw [hv] at found
+    rw [encoded_scalar found]
+    simp only [one, ↓reduceIte, List.cons_append, List.nil_append]
+    refine ⟨_, _, rfl, ?_⟩
+    have small : v < 0x80 := by omega
+    have same : v % 256 = v := by omega
+    have : Char.ofNat v = character := by rw [← hv]; exact Char.ofNat_toNat character
+    simp only [utf8Character, small, ↓reduceIte, same, this]
+  by_cases two : v ≤ 0x7FF
+  · have found := scalar_toNat character (minimum := 0x80) (by omega)
+    rw [hv] at found
+    rw [encoded_scalar found]
+    simp only [one, two, ↓reduceIte, List.cons_append, List.nil_append]
+    refine ⟨_, _, rfl, ?_⟩
+    have lead : ¬ (v / 64 % 0x20 + 0xC0) % 256 < 0x80 := by omega
+    have range : (decide (0xC2 ≤ (v / 64 % 0x20 + 0xC0) % 256) &&
+        decide ((v / 64 % 0x20 + 0xC0) % 256 < 0xE0)) = true := by
+      simp only [Bool.and_eq_true, decide_eq_true_eq]; omega
+    have second : isContinuation ((v % 0x40 + 0x80) % 256) = true := by
+      simp only [isContinuation, Bool.and_eq_true, decide_eq_true_eq]; omega
+    have value : ((v / 64 % 0x20 + 0xC0) % 256 - 0xC0) * 0x40 + ((v % 0x40 + 0x80) % 256 - 0x80)
+        = v := by omega
+    simp only [utf8Character, lead, range, second, value, found, ↓reduceIte, Option.map_eq_map,
+      Option.map_some]
+  by_cases three : v ≤ 0xFFFF
+  · have found := scalar_toNat character (minimum := 0x800) (by omega)
+    rw [hv] at found
+    rw [encoded_scalar found]
+    simp only [one, two, three, ↓reduceIte, List.cons_append, List.nil_append]
+    refine ⟨_, _, rfl, ?_⟩
+    have lead : ¬ (v / 4096 % 0x10 + 0xE0) % 256 < 0x80 := by omega
+    have notTwo : (decide (0xC2 ≤ (v / 4096 % 0x10 + 0xE0) % 256) &&
+        decide ((v / 4096 % 0x10 + 0xE0) % 256 < 0xE0)) = false := by
+      simp only [Bool.and_eq_false_iff, decide_eq_false_iff_not]; omega
+    have range : (decide (0xE0 ≤ (v / 4096 % 0x10 + 0xE0) % 256) &&
+        decide ((v / 4096 % 0x10 + 0xE0) % 256 < 0xF0)) = true := by
+      simp only [Bool.and_eq_true, decide_eq_true_eq]; omega
+    have rest : (isContinuation ((v / 64 % 0x40 + 0x80) % 256) &&
+        isContinuation ((v % 0x40 + 0x80) % 256)) = true := by
+      simp only [isContinuation, Bool.and_eq_true, decide_eq_true_eq]; omega
+    have value : (((v / 4096 % 0x10 + 0xE0) % 256 - 0xE0) * 0x40 +
+        ((v / 64 % 0x40 + 0x80) % 256 - 0x80)) * 0x40 + ((v % 0x40 + 0x80) % 256 - 0x80)
+        = v := by omega
+    simp only [utf8Character, lead, notTwo, range, rest, value, found, ↓reduceIte,
+      Bool.false_eq_true, Option.map_eq_map, Option.map_some]
+  · have found := scalar_toNat character (minimum := 0x10000) (by omega)
+    rw [hv] at found
+    rw [encoded_scalar found]
+    simp only [one, two, three, ↓reduceIte, List.cons_append, List.nil_append]
+    refine ⟨_, _, rfl, ?_⟩
+    have lead : ¬ (v / 262144 % 0x08 + 0xF0) % 256 < 0x80 := by omega
+    have notTwo : (decide (0xC2 ≤ (v / 262144 % 0x08 + 0xF0) % 256) &&
+        decide ((v / 262144 % 0x08 + 0xF0) % 256 < 0xE0)) = false := by
+      simp only [Bool.and_eq_false_iff, decide_eq_false_iff_not]; omega
+    have notThree : (decide (0xE0 ≤ (v / 262144 % 0x08 + 0xF0) % 256) &&
+        decide ((v / 262144 % 0x08 + 0xF0) % 256 < 0xF0)) = false := by
+      simp only [Bool.and_eq_false_iff, decide_eq_false_iff_not]; omega
+    have range : (decide (0xF0 ≤ (v / 262144 % 0x08 + 0xF0) % 256) &&
+        decide ((v / 262144 % 0x08 + 0xF0) % 256 < 0xF5)) = true := by
+      simp only [Bool.and_eq_true, decide_eq_true_eq]; omega
+    have rest : (isContinuation ((v / 4096 % 0x40 + 0x80) % 256) &&
+        isContinuation ((v / 64 % 0x40 + 0x80) % 256) &&
+        isContinuation ((v % 0x40 + 0x80) % 256)) = true := by
+      simp only [isContinuation, Bool.and_eq_true, decide_eq_true_eq]; omega
+    have value : ((((v / 262144 % 0x08 + 0xF0) % 256 - 0xF0) * 0x40 +
+        ((v / 4096 % 0x40 + 0x80) % 256 - 0x80)) * 0x40 +
+        ((v / 64 % 0x40 + 0x80) % 256 - 0x80)) * 0x40 + ((v % 0x40 + 0x80) % 256 - 0x80)
+        = v := by omega
+    simp only [utf8Character, lead, notTwo, notThree, range, rest, value, found, ↓reduceIte,
+      Bool.false_eq_true, Option.map_eq_map, Option.map_some]
+
+/-- The encoding of characters reads back as those characters, given fuel for every byte. -/
+theorem utf8Characters_decode : ∀ (characters : List Char) (fuel : Nat),
+    (characters.flatMap fun character => (String.utf8EncodeChar character).map UInt8.toNat).length
+      ≤ fuel →
+      utf8Characters fuel
+          (characters.flatMap fun character => (String.utf8EncodeChar character).map UInt8.toNat) =
+        some characters
+  | [], fuel, _ => by cases fuel <;> rfl
+  | character :: others, fuel, enough => by
+    obtain ⟨first, tail, split, decoded⟩ := utf8Character_encoded character
+      (others.flatMap fun character => (String.utf8EncodeChar character).map UInt8.toNat)
+    have encoded : encodedCharacter character ++
+        (others.flatMap fun character => (String.utf8EncodeChar character).map UInt8.toNat) =
+        (character :: others).flatMap
+          fun character => (String.utf8EncodeChar character).map UInt8.toNat := rfl
+    rw [← encoded, split] at enough ⊢
+    have size : 0 < (encodedCharacter character).length := by
+      simp [encodedCharacter, Char.utf8Size_pos]
+    have lengths := congrArg List.length split
+    simp only [List.length_append, List.length_cons] at lengths enough
+    match fuel, enough with
+    | fuel + 1, enough =>
+      rw [utf8Characters.eq_3]
+      simp only [decoded]
+      rw [utf8Characters_decode others fuel (by omega)]
+      rfl
+#print axioms utf8Characters_decode
+
 /-- The string the bytes spell as UTF-8, or `none` when they are not well-formed UTF-8. The
     result is a `String.ofList` of characters, which the kernel compares with a literal without
     computing the literal's bytes. -/

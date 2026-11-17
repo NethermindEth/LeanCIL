@@ -1192,4 +1192,154 @@ theorem refuses_a_base_class_chain_that_does_not_end_at_object :
     rejects (programExtends 9) lib tokens.countField objectFieldOperand
       (.unsupportedBase (tokenOf Table.typeDef 2)) = true := by decide +kernel
 #print axioms refuses_a_base_class_chain_that_does_not_end_at_object
+
+/-! ## Claims that name strings stored as bytes
+
+A claim may name a `byteString`, a string stored as its bytes, where it would write a literal. The
+checks read the same value either way, so a claim naming another valid string is refused by the
+check that refuses the wrong literal, with the same error. -/
+
+/-- `System.Object`, stored as its bytes. -/
+private def objectText : String := byteString
+    [83, 121, 115, 116, 101, 109, 46, 79, 98, 106, 101, 99, 116]
+    "System.Object" (by cil_kernel_rfl)
+
+/-- `System.Console`, stored as its bytes. -/
+private def consoleText : String := byteString
+    [83, 121, 115, 116, 101, 109, 46, 67, 111, 110, 115, 111, 108, 101]
+    "System.Console" (by cil_kernel_rfl)
+
+/-- `Program`, stored as its bytes. -/
+private def programText : String := byteString
+    [80, 114, 111, 103, 114, 97, 109]
+    "Program" (by cil_kernel_rfl)
+
+/-- `Lib.Box`, stored as its bytes. -/
+private def boxText : String := byteString
+    [76, 105, 98, 46, 66, 111, 120]
+    "Lib.Box" (by cil_kernel_rfl)
+
+/-- The identity of `T`, stored as its bytes. -/
+private def ownText : String := byteString
+    [84, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 46, 48, 46, 48, 46, 48, 44, 32, 67,
+      117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97, 108, 44, 32, 80, 117, 98,
+      108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61, 110, 117, 108, 108]
+    "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" (by cil_kernel_rfl)
+
+/-- The runtime scope of version 9, stored as its bytes. -/
+private def olderRuntimeText : String := byteString
+    [83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32, 86, 101, 114, 115,
+      105, 111, 110, 61, 57, 46, 48, 46, 48, 46, 48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61,
+      110, 101, 117, 116, 114, 97, 108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111,
+      107, 101, 110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97, 51, 97]
+    "System.Runtime, Version=9.0.0.0, Culture=neutral, \
+      PublicKeyToken=b03f5f7f11d50a3a" (by cil_kernel_rfl)
+
+/-- `System.Int32`, stored as its bytes. -/
+private def int32Text : String := byteString
+    [83, 121, 115, 116, 101, 109, 46, 73, 110, 116, 51, 50]
+    "System.Int32" (by cil_kernel_rfl)
+
+/-- `System.UInt32`, stored as its bytes. -/
+private def uint32Text : String := byteString
+    [83, 121, 115, 116, 101, 109, 46, 85, 73, 110, 116, 51, 50]
+    "System.UInt32" (by cil_kernel_rfl)
+
+/-- The primitive assembly `C` of `pairFrame`, stored as its bytes. -/
+private def primitiveScopeText : String := byteString
+    [67]
+    "C" (by cil_kernel_rfl)
+
+/-- The owner of `mainMethod`, stored as its bytes. -/
+private def ownerText : String := byteString
+    [84, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 46, 48, 46, 48, 46, 48, 44, 32, 67,
+      117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97, 108, 44, 32, 80, 117, 98,
+      108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61, 110, 117, 108, 108, 58, 58, 80, 114,
+      111, 103, 114, 97, 109]
+    "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Program" (by cil_kernel_rfl)
+
+/-- A `Program` owner in `Lib`, stored as its bytes. -/
+private def libOwnerText : String := byteString
+    [76, 105, 98, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 46, 48, 46, 48, 46, 48, 44,
+      32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97, 108, 44, 32, 80, 117,
+      98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61, 110, 117, 108, 108, 58, 58, 80,
+      114, 111, 103, 114, 97, 109]
+    "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Program" (by cil_kernel_rfl)
+
+/-- Each stored string is the literal it spells. -/
+theorem stored_strings_are_their_literals :
+    objectText = "System.Object" ∧ ownerText = ownIdentity ++ "::Program" ∧
+      olderRuntimeText = "System.Runtime, Version=9.0.0.0, Culture=neutral, \
+        PublicKeyToken=b03f5f7f11d50a3a" :=
+  ⟨byteString_eq _, byteString_eq _, byteString_eq _⟩
+#print axioms stored_strings_are_their_literals
+
+/-- The type operand check accepts the stored name of the type and refuses another, as it
+    refuses the other literal. -/
+theorem type_operand_check_reads_stored_strings :
+    passes own.1 lib tokens.objectRef (.type (.atom runtimeScope objectText)) = true ∧
+    rejects own.1 lib tokens.objectRef (.type (.atom runtimeScope consoleText))
+      (.operandMismatch tokens.objectRef) = true ∧
+    rejects own.1 lib tokens.objectRef (.type (.atom runtimeScope "System.Console"))
+      (.operandMismatch tokens.objectRef) = true := by decide +kernel
+#print axioms type_operand_check_reads_stored_strings
+
+/-- The call operand check accepts the stored owner of the callee and refuses a stored owner
+    scope of another version, as it refuses that scope's literal. -/
+theorem call_operand_check_reads_stored_strings :
+    passes own.1 lib tokens.writeLine
+      (.call { writeLineSite with method.owner := .atom runtimeScope consoleText }) = true ∧
+    rejects own.1 lib tokens.writeLine
+      (.call { writeLineSite with method.owner := .atom olderRuntimeText consoleText })
+      (.scopeMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms call_operand_check_reads_stored_strings
+
+/-- The field operand check accepts the stored owner of the field and refuses another stored
+    owner, as it refuses the other literal. -/
+theorem field_operand_check_reads_stored_strings :
+    passes own.1 lib tokens.totalField
+      (.field (.atom ownText programText) 1 int32 name!"total" true) = true ∧
+    rejects own.1 lib tokens.totalField (.field (.atom ownText boxText) 1 int32 name!"total" true)
+      (.operandMismatch tokens.totalField) = true ∧
+    rejects own.1 lib tokens.totalField
+      (.field (.atom ownIdentity "Lib.Box") 1 int32 name!"total" true)
+      (.operandMismatch tokens.totalField) = true := by decide +kernel
+#print axioms field_operand_check_reads_stored_strings
+
+/-- The method definition check refuses a stored return type the row does not give, as it
+    refuses the literal. -/
+theorem method_definition_check_reads_stored_strings :
+    identityFails own.1 { mainMethod with returnType := .atom runtimeScope int32Text }
+      (.methodMismatch tokens.main) = true ∧
+    identityFails own.1 { mainMethod with returnType := .atom runtimeScope "System.Int32" }
+      (.methodMismatch tokens.main) = true := by decide +kernel
+#print axioms method_definition_check_reads_stored_strings
+
+/-- `Frame.admits` names a primitive by its stored name and refuses another stored name, as it
+    refuses the other literal. -/
+theorem admits_reads_stored_strings :
+    pairFrame.admits (.primitive 8) (.atom primitiveScopeText int32Text) = true ∧
+    pairFrame.admits (.primitive 8) (.atom primitiveScopeText uint32Text) = false ∧
+    pairFrame.admits (.primitive 8) (.atom "C" "System.UInt32") = false := by decide +kernel
+#print axioms admits_reads_stored_strings
+
+/-- The names the row of `mainMethod` gives. -/
+private def mainNames : MethodNames :=
+  match identity own.1 mainMethod with
+  | .ok names => names
+  | .error _ => {}
+
+/-- The names spell a stored owner through a comparison of bytes, and that comparison and `Spell`
+    both refuse another stored owner, as `Spell` refuses the other literal. -/
+theorem spell_reads_stored_strings : mainNames.Spell { mainMethod with owner := ownerText } :=
+  MethodNames.spell_of_spelledBy (by decide +kernel)
+#print axioms spell_reads_stored_strings
+
+theorem spell_refuses_another_stored_owner :
+    mainNames.spelledBy { mainMethod with owner := libOwnerText } = false ∧
+    !decide (mainNames.Spell { mainMethod with owner := libOwnerText }) = true ∧
+    !decide (mainNames.Spell { mainMethod with owner := libScope ++ "::Program" }) = true := by
+  decide +kernel
+#print axioms spell_refuses_another_stored_owner
+
 end Tests.MetadataBinding

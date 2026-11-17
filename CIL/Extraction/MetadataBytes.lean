@@ -548,6 +548,50 @@ theorem bytesOf_of_spelled {bytes : List Nat} {text : String}
   exact utf8Characters_encode _ _ _ decoded
 #print axioms bytesOf_of_spelled
 
+/-- Every string spells itself: a `String` holds only scalar values, so its bytes read back as the
+    string, whatever its characters. -/
+theorem spelled?_bytesOf (text : String) : spelled? (bytesOf text) = some text := by
+  obtain ⟨characters, rfl⟩ : ∃ characters, text = String.ofList characters :=
+    ⟨text.toList, String.ofList_toList.symm⟩
+  have bytes : bytesOf (String.ofList characters) =
+      characters.flatMap fun character => (String.utf8EncodeChar character).map UInt8.toNat := by
+    simp [bytesOf, String.toByteArray_ofList, List.utf8Encode, List.map_flatMap]
+  rw [spelled?, bytes, utf8Characters_decode _ _ (Nat.le_refl _)]
+  rfl
+#print axioms spelled?_bytesOf
+
+/-- Bytes that spell a string are that string's byte array. -/
+theorem byteArray_of_spelled {bytes : List Nat} {text : String}
+    (spelling : spelled? bytes = some text) :
+    (⟨(bytes.map UInt8.ofNat).toArray⟩ : ByteArray) = text.toByteArray := by
+  have stored := bytesOf_of_spelled spelling
+  subst stored
+  show _ = (⟨text.toByteArray.data⟩ : ByteArray)
+  congr 1
+  simp [bytesOf, List.map_map, Function.comp_def]
+#print axioms byteArray_of_spelled
+
+/-- The string `bytes` spell, stored as those bytes. `bytesOf` of it reads the stored bytes and
+    never encodes `text`; the kernel decides `spelling` once, where the string is defined. -/
+def byteString (bytes : List Nat) (text : String) (spelling : spelled? bytes = some text) :
+    String :=
+  { toByteArray := ⟨(bytes.map UInt8.ofNat).toArray⟩,
+    isValidUTF8 := byteArray_of_spelled spelling ▸ text.isValidUTF8 }
+
+/-- A byte-backed string is the string its bytes spell. -/
+theorem byteString_eq {bytes : List Nat} {text : String} (spelling : spelled? bytes = some text) :
+    byteString bytes text spelling = text := by
+  have stored := byteArray_of_spelled spelling
+  unfold byteString
+  revert stored spelling
+  cases text with
+  | ofByteArray data valid =>
+    intro spelling stored
+    simp only at stored
+    subst stored
+    rfl
+#print axioms byteString_eq
+
 /-- The entry of a heap map: the bytes, or `missingHeap`. -/
 def heapEntry (heap : Nat) (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) :=
