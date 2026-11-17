@@ -20,7 +20,8 @@ A `MethodContract` states what a method needs (`pre`), which bytes of pre-existi
 may change (`footprint`, enforced by `Confined`) and what it returns (`post`). `Holds` means
 every checked invocation meeting `pre` returns normally within the footprint and satisfies
 `post`. Callers compose through `run_call_of_contract` instead of re-executing the callee,
-and `Refines` derives a weaker exported contract from a proved internal one.
+and `Refines` derives a weaker exported contract from a proved internal one. `Refuted` is a
+counterexample: an input meeting `pre` whose run settles outside the contract or never ends.
 
 The tactics at the end drive proofs: `cil_contract_steps` steps the checked interpreter
 (`CIL/Safety/Execution.lean`) through a body, and `cil_contract_call` / `cil_formed_call`
@@ -362,21 +363,66 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
       (fun (final, values) =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
-/-- A located definite fault on an input meeting the precondition refutes the contract at
-    every fuel budget. Exhaustion does not refute termination, and an `unsupported` fault,
-    where the model stops covering the run, is not accepted. -/
-theorem MethodContract.not_holds_of_fault {Input Output : Type}
-    (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
-    {input : Input} {initial : Memory} {fault : LocatedFault}
-    (permitted : contract.pre input initial) (definite : fault.fault.definite ≠ false)
-    (failed : invoke program observed method (contract.args input) initial = .error fault) :
-    ¬ contract.Holds program method := by
-  intro holds
-  obtain ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input initial permitted
-  exact invoke_fault_refutes_success program observed method (contract.args input) initial
-    fault definite failed fuel (final, values) invoked
+/-- How a settled outcome of an invocation at `input` from `initial` fails `c`: any fault, or a
+    return outside the footprint or `post`. -/
+def MethodContract.Violates {Input Output : Type} (c : MethodContract Input Output)
+    (input : Input) (initial : Memory) : Except LocatedFault (Memory × List Value) → Prop
+  | .ok (final, values) =>
+    ¬ (Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
+  | .error _ => True
 
-#print axioms MethodContract.not_holds_of_fault
+/-- A counterexample to `c`: an input and memory meeting `pre` from which the method settles
+    outside the contract (a definite fault or a wrong return) or never terminates. It is evidence
+    that the method violates the contract in the model. A run that reaches an operation the model
+    does not cover (`unsupported`), or that exhausts one fuel budget, is no evidence and gives
+    no `Refuted`, although it can make `¬ c.Holds` provable. -/
+def MethodContract.Refuted {Input Output : Type} (c : MethodContract Input Output)
+    (program : CIL.Program) (method : Nat) : Prop :=
+  ∃ input initial, c.pre input initial ∧
+    Counterexample program method (c.args input) initial (c.Violates input initial)
+
+/-- A refuted contract does not hold. -/
+theorem MethodContract.Refuted.not_holds {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method : Nat}
+    (refuted : c.Refuted program method) : ¬ c.Holds program method := by
+  intro holds
+  obtain ⟨input, initial, permitted, counter⟩ := refuted
+  obtain ⟨fuel, ⟨final, values⟩, ran, returned⟩ := holds input initial permitted
+  exact counter.violates (outcome := .ok (final, values)) trivial ran returned
+
+/-- A located definite fault on an input meeting the precondition refutes the contract. -/
+theorem MethodContract.Refuted.of_fault {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method observed : Nat}
+    {input : Input} {initial : Memory} {fault : LocatedFault}
+    (permitted : c.pre input initial) (definite : fault.fault.definite ≠ false)
+    (failed : invoke program observed method (c.args input) initial = .error fault) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inl ⟨observed, _, failed, definite, trivial⟩⟩
+
+/-- A return outside the footprint or the postcondition refutes the contract. -/
+theorem MethodContract.Refuted.of_return {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method fuel : Nat}
+    {input : Input} {initial final : Memory} {values : List Value}
+    (permitted : c.pre input initial)
+    (ran : invoke program fuel method (c.args input) initial = .ok (final, values))
+    (wrong : ¬ (Confined (c.footprint input) initial final ∧
+      c.Returns input initial final values)) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inl ⟨fuel, _, ran, trivial, wrong⟩⟩
+
+/-- A run that exhausts every fuel budget on an input meeting the precondition refutes the
+    contract, which promises a return. -/
+theorem MethodContract.Refuted.of_diverges {Input Output : Type}
+    {c : MethodContract Input Output} {program : CIL.Program} {method : Nat}
+    {input : Input} {initial : Memory} (permitted : c.pre input initial)
+    (diverges : Diverges program method (c.args input) initial) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inr diverges⟩
+
+#print axioms MethodContract.Refuted.not_holds
+#print axioms MethodContract.Refuted.of_fault
+#print axioms MethodContract.Refuted.of_return
+#print axioms MethodContract.Refuted.of_diverges
 
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
 theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract Input Output}

@@ -634,16 +634,28 @@ successful snapshot copy does not establish initialization.
 
 ### Refute a contract
 
+A refutation states `MethodContract.Refuted`, `OutcomeContract.Refuted` or
+`OutcomeContract.RefutedCLR` of the contract, the program and the method, with the arguments
+`Holds` or `HoldsCLR` takes. Each carries a counterexample (`CIL.Safety.Counterexample`): an
+input and memory meeting the precondition, and either a settled outcome at some fuel that the
+contract does not allow, or fuel exhaustion at every budget (`CIL.Safety.Diverges`). Its
+`not_holds` gives the negation of the contract.
+
 | Lemma | Use |
 | --- | --- |
+| `MethodContract.Refuted.of_fault` | A checked located definite fault (`ExecutionFault.definite`) on an input meeting the precondition |
+| `MethodContract.Refuted.of_return` | A checked return outside the footprint or the postcondition |
+| `MethodContract.Refuted.of_diverges` | Fuel exhaustion at every budget, such as a loop that never exits |
+| `OutcomeContract.Refuted.of_fault`, `OutcomeContract.Refuted.of_return`, `OutcomeContract.Refuted.of_diverges` | The same for an outcome contract, where a fault other than the named exception, or any return when one is named, violates it; `OutcomeContract.RefutedCLR` has the same three for the CLR reading |
 | `invoke_ok_unique` | Ties a computed run to the contract's existential one |
 | `invoke_ok_observation_unique` | The same for one observation of the run, such as the returned values, so the refutation never compares memories |
-| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a definite fault (`ExecutionFault.definite`), so neither fuel exhaustion nor an `unsupported` fault is a witness |
 
-Every refutation lemma takes a settled outcome (`Settled`): a success, or a fault other than fuel
-exhaustion and `unsupported`. An `unsupported` fault, such as a hole (`.unadmitted`), marks a
-run the model does not cover, so these lemmas refute nothing from it, and no stepping tactic steps
-past it to a return.
+Every settled outcome is a success or a fault other than fuel exhaustion and `unsupported`
+(`Settled`). An `unsupported` fault, such as a hole (`.unadmitted`), marks a run the model does
+not cover, and one exhausted budget says nothing about a larger one, so neither is a
+counterexample, and no stepping tactic steps past a hole to a return. Such a run can still prove
+`¬ c.Holds program method`: no fuel returns. That negation is evidence of a gap in the model, not
+of a fault in the method.
 
 ## Frame class instances
 

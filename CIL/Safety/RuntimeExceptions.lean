@@ -99,6 +99,79 @@ theorem OutcomeContract.HoldsCLR.returning {Input Output : Type} {c : OutcomeCon
   rw [normal] at outcome
   exact outcome
 
+/-- How a settled outcome at `input` from `initial` fails `c` in the CLR reading: where `c` names
+    an exception, anything but a fault that surfaces as it; otherwise what
+    `MethodContract.Violates` says. -/
+def OutcomeContract.ViolatesCLR {Input Output : Type} (c : OutcomeContract Input Output)
+    (input : Input) (initial : Memory) (outcome : Except LocatedFault (Memory × List Value)) :
+    Prop :=
+  match c.raises input initial, outcome with
+  | some exception, .error fault => fault.fault.clrException ≠ some exception
+  | some _, .ok _ => True
+  | none, outcome => c.toMethodContract.Violates input initial outcome
+
+/-- A counterexample to `c` in the CLR reading: an input and memory meeting `pre` from which the
+    method settles outside the contract or never terminates. It is evidence that the method
+    violates the contract in the model; a run that reaches an operation the model does not cover
+    (`unsupported`), or that exhausts one fuel budget, is no evidence and gives no
+    `RefutedCLR`. -/
+def OutcomeContract.RefutedCLR {Input Output : Type} (c : OutcomeContract Input Output)
+    (program : CIL.Program) (method : Nat) : Prop :=
+  ∃ input initial, c.pre input initial ∧
+    Counterexample program method (c.args input) initial (c.ViolatesCLR input initial)
+
+/-- A contract refuted in the CLR reading does not hold in it. -/
+theorem OutcomeContract.RefutedCLR.not_holds {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method : Nat}
+    (refuted : c.RefutedCLR program method) : ¬ c.HoldsCLR program method := by
+  intro holds
+  obtain ⟨input, initial, permitted, counter⟩ := refuted
+  cases named : c.raises input initial with
+  | none =>
+    obtain ⟨fuel, final, values, ran, framed, returned⟩ := holds.returning permitted named
+    have wrong := counter.violates (outcome := .ok (final, values)) trivial ran
+    simp only [OutcomeContract.ViolatesCLR, MethodContract.Violates, named] at wrong
+    exact wrong ⟨framed, returned⟩
+  | some exception =>
+    obtain ⟨fuel, fault, ran, surfaced⟩ := holds.raising permitted named
+    have wrong := counter.violates (settled_of_clrException surfaced) ran
+    simp only [OutcomeContract.ViolatesCLR, named] at wrong
+    exact wrong surfaced
+
+/-- A located definite fault that does not surface as the exception `c` names, on an input
+    meeting the precondition, refutes the contract in the CLR reading. -/
+theorem OutcomeContract.RefutedCLR.of_fault {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method observed : Nat}
+    {input : Input} {initial : Memory} {fault : LocatedFault}
+    (permitted : c.pre input initial) (definite : fault.fault.definite ≠ false)
+    (failed : invoke program observed method (c.args input) initial = .error fault)
+    (wrong : c.ViolatesCLR input initial (.error fault)) : c.RefutedCLR program method :=
+  ⟨input, initial, permitted, .inl ⟨observed, _, failed, definite, wrong⟩⟩
+
+/-- A return that `c` does not allow, on an input meeting the precondition, refutes it in the
+    CLR reading. -/
+theorem OutcomeContract.RefutedCLR.of_return {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method fuel : Nat}
+    {input : Input} {initial final : Memory} {values : List Value}
+    (permitted : c.pre input initial)
+    (ran : invoke program fuel method (c.args input) initial = .ok (final, values))
+    (wrong : c.ViolatesCLR input initial (.ok (final, values))) : c.RefutedCLR program method :=
+  ⟨input, initial, permitted, .inl ⟨fuel, _, ran, trivial, wrong⟩⟩
+
+/-- A run that exhausts every fuel budget on an input meeting the precondition refutes the
+    contract in the CLR reading. -/
+theorem OutcomeContract.RefutedCLR.of_diverges {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method : Nat}
+    {input : Input} {initial : Memory} (permitted : c.pre input initial)
+    (diverges : Diverges program method (c.args input) initial) :
+    c.RefutedCLR program method :=
+  ⟨input, initial, permitted, .inr diverges⟩
+
+#print axioms OutcomeContract.RefutedCLR.not_holds
+#print axioms OutcomeContract.RefutedCLR.of_fault
+#print axioms OutcomeContract.RefutedCLR.of_return
+#print axioms OutcomeContract.RefutedCLR.of_diverges
+
 /-- Every proved `OutcomeContract.Holds` also holds in the CLR reading. -/
 theorem OutcomeContract.Holds.clr {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method : Nat} (holds : c.Holds program method) :

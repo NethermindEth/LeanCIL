@@ -117,13 +117,12 @@ def returnContract : MethodContract Unit where
   footprint _ := []
   post _ _ _ _ := True
 
-/-- A located missing-argument fault refutes the contract for all fuel budgets. -/
+/-- A located missing-argument fault refutes the contract. -/
 theorem missing_argument_refutes_contract :
-    ¬ returnContract.Holds [{ locals := [], code := [.ldarg 0, .ret], returnsValue := false }]
-      0 := by
-  apply returnContract.not_holds_of_fault (input := ()) (initial := Memory.empty)
-    (observed := 1) (fault := ⟨0, 0, .invalidState⟩) trivial (by decide)
-  rfl
+    returnContract.Refuted [{ locals := [], code := [.ldarg 0, .ret], returnsValue := false }]
+      0 :=
+  .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
+    (fault := ⟨0, 0, .invalidState⟩) trivial (by decide) rfl
 
 #print axioms missing_argument_refutes_contract
 
@@ -132,7 +131,7 @@ theorem missing_argument_refutes_contract :
 @[cil_code] def unboxHole : CIL.Method :=
   { locals := [], code := [.ldnull, .unadmitted 0xA5, .pop, .ret], returnsValue := false }
 
-/-- The run faults at the hole, and that fault is not definite, so `not_holds_of_fault` cannot
+/-- The run faults at the hole, and that fault is not definite, so `Refuted.of_fault` cannot
     refute `returnContract` from it. -/
 theorem hole_not_definite :
     invoke [unboxHole] 4 0 [] Memory.empty = .error ⟨0, 1, .unsupported "Opcode not admitted"⟩ ∧
@@ -144,9 +143,49 @@ theorem hole_not_definite :
 -- So the refutation that works for the missing argument fails at its `definite` hypothesis here.
 /-- error: Tactic `decide` proved that the proposition -/
 #guard_msgs (substring := true) in
-example : ¬ returnContract.Holds [unboxHole] 0 :=
-  returnContract.not_holds_of_fault (input := ()) (initial := Memory.empty) (observed := 4)
+example : returnContract.Refuted [unboxHole] 0 :=
+  .of_fault (input := ()) (initial := Memory.empty) (observed := 4)
     (fault := ⟨0, 1, .unsupported "Opcode not admitted"⟩) trivial (by decide) rfl
+
+/-- `returnContract` from the empty memory only. -/
+def emptyReturnContract : MethodContract Unit :=
+  { returnContract with pre := fun _ initial => initial = Memory.empty }
+
+/-- The hole's run stops at the same unsupported fault from every larger budget. -/
+theorem hole_stuck (fuel : Nat) :
+    invoke [unboxHole] (4 + fuel) 0 [] Memory.empty =
+      .error ⟨0, 1, .unsupported "Opcode not admitted"⟩ :=
+  invoke_mono _ 4 fuel 0 [] _ _ (by simp [Stable]) rfl
+
+#print axioms hole_stuck
+
+/-- The negation of the contract follows from the hole's run, although the CLR returns. -/
+theorem hole_negates : ¬ emptyReturnContract.Holds [unboxHole] 0 := by
+  intro holds
+  obtain ⟨fuel, result, ran, -⟩ := holds () Memory.empty rfl
+  have returned :=
+    invoke_mono [unboxHole] fuel 4 0 [] Memory.empty (.ok result) trivial ran
+  rw [Nat.add_comm, hole_stuck] at returned
+  cases returned
+
+#print axioms hole_negates
+
+/-- The hole's run has no settled outcome and does not diverge, so it is no counterexample. -/
+theorem hole_not_refuted : ¬ emptyReturnContract.Refuted [unboxHole] 0 := by
+  rintro ⟨_, initial, rfl, counter⟩
+  rcases counter with ⟨fuel, outcome, ran, settled, -⟩ | diverges
+  · change invoke [unboxHole] fuel 0 [] Memory.empty = outcome at ran
+    have same := invoke_mono _ fuel 4 0 [] _ _ settled.stable ran
+    rw [Nat.add_comm, hole_stuck] at same
+    subst same
+    simp [Settled] at settled
+  · obtain ⟨fault, ran, exhausted⟩ := diverges 4
+    change invoke [unboxHole] (4 + 0) 0 [] Memory.empty = _ at ran
+    rw [hole_stuck] at ran
+    cases ran
+    simp at exhausted
+
+#print axioms hole_not_refuted
 
 -- Stepping stops at pc 1, the hole, so no proof that the method returns goes through either.
 /-- run [unboxHole] fuel 0 1 [] -/

@@ -9,6 +9,8 @@ fault other than `fuelExhausted`, giving it more fuel yields the same outcome (`
 budget (`invoke_fault_refutes_success`). Fuel exhaustion and `unsupported` faults are not
 definite: the first stops a run early and the second marks an operation the model does not cover,
 so neither is evidence about the method and no refutation lemma takes one (`Settled`).
+`Counterexample` is the evidence a contract refutation carries: a settled outcome at some budget,
+or exhaustion at every budget (`Diverges`).
 -/
 
 namespace CIL.Safety
@@ -207,8 +209,56 @@ theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : 
   rw [failure] at returned
   cases returned
 
+/-- Settled invocations agree at every fuel, so a computed settled run refutes a contract; a run
+    that ends in fuel exhaustion or an `unsupported` fault is not settled, so this lemma takes
+    none. -/
+theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value}
+    {memory : Memory} {first second : Except LocatedFault (Memory × List Value)}
+    (firstSettled : Settled first) (secondSettled : Settled second)
+    (one : invoke program left method args memory = first)
+    (other : invoke program right method args memory = second) :
+    first = second := by
+  have up := invoke_mono program left right method args memory first firstSettled.stable one
+  have down := invoke_mono program right left method args memory second secondSettled.stable other
+  rw [Nat.add_comm] at down
+  exact up.symm.trans down
+
+/-- Every fuel budget ends the run in fuel exhaustion: the method never terminates. One exhausted
+    budget is no evidence of this, and a run that reaches an `unsupported` operation does not
+    diverge, since that fault stays at every larger budget. -/
+def Diverges (program : CIL.Program) (method : Nat) (args : List Value) (memory : Memory) :
+    Prop :=
+  ∀ fuel, ∃ fault, invoke program fuel method args memory = .error fault ∧
+    fault.fault = .fuelExhausted
+
+/-- Evidence that the run of `method` on `args` from `memory` ends as `violates` describes: a
+    settled outcome at some fuel that `violates` holds of, or divergence. A run that reaches an
+    operation the model does not cover, or one exhausted budget, is neither. -/
+def Counterexample (program : CIL.Program) (method : Nat) (args : List Value) (memory : Memory)
+    (violates : Except LocatedFault (Memory × List Value) → Prop) : Prop :=
+  (∃ fuel outcome, invoke program fuel method args memory = outcome ∧ Settled outcome ∧
+    violates outcome) ∨ Diverges program method args memory
+
+/-- Every settled outcome of a counterexample's run is one `violates` holds of. -/
+theorem Counterexample.violates {program : CIL.Program} {method fuel : Nat}
+    {args : List Value} {memory : Memory}
+    {violates : Except LocatedFault (Memory × List Value) → Prop}
+    {outcome : Except LocatedFault (Memory × List Value)}
+    (counter : Counterexample program method args memory violates)
+    (settled : Settled outcome) (ran : invoke program fuel method args memory = outcome) :
+    violates outcome := by
+  rcases counter with ⟨observed, witness, invoked, witnessSettled, bad⟩ | diverges
+  · rw [← invoke_unique witnessSettled settled invoked ran]
+    exact bad
+  · obtain ⟨fault, exhausted, kind⟩ := diverges fuel
+    rw [ran] at exhausted
+    subst exhausted
+    simp [Settled, kind] at settled
+
 #print axioms Settled.stable
 #print axioms invoke_mono
 #print axioms invoke_fault_refutes_success
+#print axioms invoke_unique
+#print axioms Counterexample.violates
 
 end CIL.Safety

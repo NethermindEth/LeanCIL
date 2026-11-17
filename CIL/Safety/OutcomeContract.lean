@@ -88,19 +88,75 @@ theorem OutcomeContract.Holds.normal {Input Output : Type} {c : OutcomeContract 
   fun input initial permitted =>
     WP.adequate.mpr (holds.returning permitted (never input initial permitted))
 
-/-- Settled invocations agree at every fuel, so a computed settled run refutes a contract; a run
-    that ends in fuel exhaustion or an `unsupported` fault is not settled, so this lemma takes
-    none. -/
-theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value}
-    {memory : Memory} {first second : Except LocatedFault (Memory × List Value)}
-    (firstSettled : Settled first) (secondSettled : Settled second)
-    (one : invoke program left method args memory = first)
-    (other : invoke program right method args memory = second) :
-    first = second := by
-  have up := invoke_mono program left right method args memory first firstSettled.stable one
-  have down := invoke_mono program right left method args memory second secondSettled.stable other
-  rw [Nat.add_comm] at down
-  exact up.symm.trans down
+/-- How a settled outcome at `input` from `initial` fails `c`: where `c` names an exception,
+    anything but a throw of it; otherwise what `MethodContract.Violates` says. -/
+def OutcomeContract.Violates {Input Output : Type} (c : OutcomeContract Input Output)
+    (input : Input) (initial : Memory) (outcome : Except LocatedFault (Memory × List Value)) :
+    Prop :=
+  match c.raises input initial, outcome with
+  | some exception, .error fault => fault.fault ≠ .thrown exception
+  | some _, .ok _ => True
+  | none, outcome => c.toMethodContract.Violates input initial outcome
+
+/-- A counterexample to `c`: an input and memory meeting `pre` from which the method settles
+    outside the contract or never terminates. It is evidence that the method violates the
+    contract in the model; a run that reaches an operation the model does not cover
+    (`unsupported`), or that exhausts one fuel budget, is no evidence and gives no `Refuted`. -/
+def OutcomeContract.Refuted {Input Output : Type} (c : OutcomeContract Input Output)
+    (program : CIL.Program) (method : Nat) : Prop :=
+  ∃ input initial, c.pre input initial ∧
+    Counterexample program method (c.args input) initial (c.Violates input initial)
+
+/-- A refuted outcome contract does not hold. -/
+theorem OutcomeContract.Refuted.not_holds {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method : Nat}
+    (refuted : c.Refuted program method) : ¬ c.Holds program method := by
+  intro holds
+  obtain ⟨input, initial, permitted, counter⟩ := refuted
+  cases named : c.raises input initial with
+  | none =>
+    obtain ⟨fuel, final, values, ran, framed, returned⟩ := holds.returning permitted named
+    have wrong := counter.violates (outcome := .ok (final, values)) trivial ran
+    simp only [OutcomeContract.Violates, MethodContract.Violates, named] at wrong
+    exact wrong ⟨framed, returned⟩
+  | some exception =>
+    obtain ⟨fuel, fault, ran, thrown⟩ := holds.raising permitted named
+    have wrong := counter.violates (by simp [Settled, thrown]) ran
+    simp only [OutcomeContract.Violates, named] at wrong
+    exact wrong thrown
+
+/-- A located definite fault that `c` does not name, on an input meeting the precondition,
+    refutes the contract. -/
+theorem OutcomeContract.Refuted.of_fault {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method observed : Nat}
+    {input : Input} {initial : Memory} {fault : LocatedFault}
+    (permitted : c.pre input initial) (definite : fault.fault.definite ≠ false)
+    (failed : invoke program observed method (c.args input) initial = .error fault)
+    (wrong : c.Violates input initial (.error fault)) : c.Refuted program method :=
+  ⟨input, initial, permitted, .inl ⟨observed, _, failed, definite, wrong⟩⟩
+
+/-- A return that `c` does not allow, on an input meeting the precondition, refutes it. -/
+theorem OutcomeContract.Refuted.of_return {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method fuel : Nat}
+    {input : Input} {initial final : Memory} {values : List Value}
+    (permitted : c.pre input initial)
+    (ran : invoke program fuel method (c.args input) initial = .ok (final, values))
+    (wrong : c.Violates input initial (.ok (final, values))) : c.Refuted program method :=
+  ⟨input, initial, permitted, .inl ⟨fuel, _, ran, trivial, wrong⟩⟩
+
+/-- A run that exhausts every fuel budget on an input meeting the precondition refutes the
+    contract, which promises a return or a throw. -/
+theorem OutcomeContract.Refuted.of_diverges {Input Output : Type}
+    {c : OutcomeContract Input Output} {program : CIL.Program} {method : Nat}
+    {input : Input} {initial : Memory} (permitted : c.pre input initial)
+    (diverges : Diverges program method (c.args input) initial) :
+    c.Refuted program method :=
+  ⟨input, initial, permitted, .inr diverges⟩
+
+#print axioms OutcomeContract.Refuted.not_holds
+#print axioms OutcomeContract.Refuted.of_fault
+#print axioms OutcomeContract.Refuted.of_return
+#print axioms OutcomeContract.Refuted.of_diverges
 
 /-- A callee fault reaches the caller with the same fault kind; its location may be
     relocated to the call. -/
@@ -384,7 +440,6 @@ theorem OutcomeContract.Holds.weaken {Input Output : Type}
 #print axioms run_call_raises_after_outcome
 #print axioms run_call_raises_of_contract
 #print axioms run_call_of_outcome
-#print axioms invoke_unique
 
 /-- Step a `Raises` or `RunRaises` goal through checked instructions to a `throw`,
     leaving each `.call` for `cil_outcome_raise`. -/

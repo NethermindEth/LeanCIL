@@ -95,4 +95,45 @@ example : ¬ EnsuresOutcome [spin] 0 (fun args initial => args = [] ∧ initial 
   cases ran
   simp at thrown
 
+/-! A loop that never exits refutes a contract that promises a return. A run that exhausts one
+    budget and returns from a larger one does not diverge, and neither does a run that reaches a
+    hole. -/
+
+/-- Promises a return from any memory, which `done` meets and `spin` does not. -/
+def returns : MethodContract Unit :=
+  { args := fun _ => [], pre := fun _ _ => True, footprint := fun _ => [],
+    post := fun _ _ _ _ => True }
+
+/-- Every budget exhausts `spin` from any memory. -/
+theorem spin_diverges : Diverges [spin] 0 [] m := fun fuel =>
+  ⟨⟨0, 0, .fuelExhausted⟩,
+    by change run [spin] fuel 0 0 [] _ [] m = _; exact spin_exhausts _ m fuel, rfl⟩
+#print axioms spin_diverges
+
+/-- Divergence refutes the contract, and so its negation holds. -/
+theorem spin_refuted : returns.Refuted [spin] 0 ∧ ¬ returns.Holds [spin] 0 :=
+  let refuted : returns.Refuted [spin] 0 :=
+    .of_diverges (input := ()) (initial := Memory.empty) trivial (spin_diverges Memory.empty)
+  ⟨refuted, refuted.not_holds⟩
+#print axioms spin_refuted
+
+/-- `done` exhausts the empty budget and returns from one step, so it does not diverge. -/
+theorem done_not_diverges :
+    invoke [done] 0 0 [] Memory.empty = .error ⟨0, 0, .fuelExhausted⟩ ∧
+      ¬ Diverges [done] 0 [] Memory.empty := by
+  refine ⟨rfl, fun diverges => ?_⟩
+  obtain ⟨fault, ran, -⟩ := diverges 1
+  rw [(rfl : invoke [done] 1 0 [] Memory.empty = .ok _)] at ran
+  cases ran
+#print axioms done_not_diverges
+
+/-- The hole's fault is stable, so no budget beyond it exhausts `stuck`. -/
+theorem stuck_not_diverges : ¬ Diverges [stuck] 0 [] Memory.empty := by
+  intro diverges
+  obtain ⟨fault, ran, exhausted⟩ := diverges 1
+  rw [(rfl : invoke [stuck] 1 0 [] Memory.empty = .error _)] at ran
+  cases ran
+  simp at exhausted
+#print axioms stuck_not_diverges
+
 end Tests.LoopOutcome
