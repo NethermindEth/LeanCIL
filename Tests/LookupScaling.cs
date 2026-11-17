@@ -525,8 +525,12 @@ void ElementShapeCosts()
     Directory.CreateDirectory(shapeDirectory);
     (string Name, Func<(int Size, long Facts, long Reads), long> Cost)[] measures =
         [("facts", sample => sample.Facts), ("reads", sample => sample.Reads)];
-    var byType = new[] { 8, 32, 128 }.Select(size =>
-        (Count: size, Sample: ElementShapeSample(shapeDirectory, size, size))).ToArray();
+    // Both rows include 8 types at 8 sites; a sample is elaborated once and read by every row that includes it.
+    var samples = new Dictionary<(int Types, int Sites), (int Size, long Facts, long Reads)>();
+    (int Size, long Facts, long Reads) Sample(int types, int sites) =>
+        samples.TryGetValue((types, sites), out var known) ? known
+            : samples[(types, sites)] = ElementShapeSample(shapeDirectory, types, sites);
+    var byType = new[] { 8, 32, 128 }.Select(size => (Count: size, Sample: Sample(size, size))).ToArray();
     foreach (var (name, cost) in measures)
     {
         var perElement = byType.Select(sample => (double)cost(sample.Sample) / sample.Count).ToArray();
@@ -540,7 +544,7 @@ void ElementShapeCosts()
     }
     const int SharedTypes = 8;
     var bySite = new[] { 8, 32, 128 }.Select(sites =>
-        (Count: sites, Sample: ElementShapeSample(shapeDirectory, SharedTypes, sites))).ToArray();
+        (Count: sites, Sample: Sample(SharedTypes, sites))).ToArray();
     foreach (var (name, cost) in measures)
     {
         var totals = bySite.Select(sample => (double)cost(sample.Sample)).ToArray();
@@ -1687,6 +1691,34 @@ long Heartbeats(string path, string text, bool equations = true) => Reported(pat
     return (count, output);
 }
 
+// The heartbeats of each part of one file after the first, each read between two counts and less the cost of reading
+// a count. Three counts follow the first part, so every part is read after the evaluator has run.
+long[] PartHeartbeats(string path, IReadOnlyList<string> parts)
+{
+    const string Reading = "#eval show IO Nat from IO.getNumHeartbeats\n";
+    var text = new StringBuilder(parts[0]).Append(Reading).Append(Reading).Append(Reading);
+    foreach (var part in parts.Skip(1)) text.Append(part).Append(Reading);
+    File.WriteAllText(path, text.ToString());
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException("A measured file depends on sorryAx: " + path);
+    long[] readings = [.. HeartbeatCount().Matches(output)
+        .Select(match => long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture))];
+    if (readings.Length != parts.Count + 2)
+        throw new InvalidOperationException($"Expected {parts.Count + 2} heartbeat counts in {path}:\n{output}");
+    var reading = readings[2] - readings[1];
+    return [.. Enumerable.Range(3, parts.Count - 1).Select(index => readings[index] - readings[index - 1] - reading)];
+}
+
+// The kernel heartbeats of deciding `statement` after `header`, less those of stating it, read in one file with the
+// statement first. The file closes namespace `scope`, which the header opens.
+long DecideCost(string path, string header, string statement, string scope)
+{
+    var costs = PartHeartbeats(path, [header, $"example : Prop := {statement}\n",
+        $"theorem valid : {statement} := by decide +kernel\n#print axioms valid\n", $"end {scope}\n"]);
+    return costs[1] - costs[0];
+}
+
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement
 // stepping tactics rewrite with, depend on `propext` alone, and still be fetched by `cil_code`.
 (long Count, string Output) Checked(string path, string text, string binder, string method, string equation,
@@ -2015,14 +2047,12 @@ long ComputedLookupCost(int cases)
         cil_instruction_equations body
         """ + "\n";
     var path = Path.Combine(directory, "Computed" + cases + ".lean");
-    var generated = Heartbeats(path, header, equations: false);
-    var checkedLookup = Heartbeats(path, header + $$"""
+    return PartHeartbeats(path, [header, $$"""
         /-- Each repeated segment has its addition at the same relative offset. -/
         theorem fetched (index : Fin {{cases}}) : body.code[1 + 7 * index.val + 2]? = some .add := by
           cil_lookup []
         #print axioms fetched
-        """ + "\n", equations: false);
-    return checkedLookup - generated;
+        """ + "\n"])[0];
 }
 var fourCaseCost = ComputedLookupCost(4) / 4.0;
 var sixteenCaseCost = ComputedLookupCost(16) / 16.0;
@@ -2409,13 +2439,7 @@ long ArrayAddressCost(bool prefixed, int sites)
     var statement = $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) " +
         $"(states {flag} {sites}) (code {flag} {sites})";
     var path = Path.Combine(directory, $"ArrayAddresses{(prefixed ? "Prefixed" : "")}{sites}.lean");
-    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend ArrayAddresses\n", equations: false);
-    var decided = Heartbeats(path, header + $"""
-        theorem valid : {statement} := by decide +kernel
-        #print axioms valid
-        end ArrayAddresses
-        """ + "\n", equations: false);
-    return decided - stated;
+    return DecideCost(path, header, statement, "ArrayAddresses");
 }
 foreach (var prefixed in new[] { false, true })
 {
@@ -2487,14 +2511,7 @@ void IndirectAccessCosts()
             $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
             $"(code {flag} {sites})";
         var path = Path.Combine(accessDirectory, $"Blocks{(prefixed ? "Prefixed" : "")}{sites}.lean");
-        var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend IndirectAccesses\n",
-            equations: false);
-        var decided = Heartbeats(path, header + $"""
-            theorem valid : {statement} := by decide +kernel
-            #print axioms valid
-            end IndirectAccesses
-            """ + "\n", equations: false);
-        return decided - stated;
+        return DecideCost(path, header, statement, "IndirectAccesses");
     }
     foreach (var prefixed in new[] { false, true })
     {
@@ -2546,13 +2563,7 @@ long LocalAccessCost(int accesses)
     var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {cycles}) .scalar " +
         $"(features {cycles}) (List.replicate {accesses + 1} true) (code {cycles})";
     var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
-    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalAccesses\n", equations: false);
-    var decided = Heartbeats(path, header + $"""
-        theorem valid : {statement} := by decide +kernel
-        #print axioms valid
-        end LocalAccesses
-        """ + "\n", equations: false);
-    return decided - stated;
+    return DecideCost(path, header, statement, "LocalAccesses");
 }
 var perAccess = new[] { FewLocalAccesses, MoreLocalAccesses, ManyLocalAccesses }
     .Select(accesses => (Accesses: accesses, Cost: (double)LocalAccessCost(accesses) / accesses)).ToArray();
@@ -2623,13 +2634,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
     var statement = storage ? $"(closedArguments [] (raw {count})).isSome = true"
         : $"ScalarFlowValid #[] (raw {count}) (features {count}) (states {count}) (code {count})";
     var path = Path.Combine(directory, $"{slots}{(storage ? "Storage" : "Locals")}{count}.lean");
-    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalSlots\n", equations: false);
-    var decided = Heartbeats(path, header + $"""
-        theorem valid : {statement} := by decide +kernel
-        #print axioms valid
-        end LocalSlots
-        """ + "\n", equations: false);
-    return decided - stated;
+    return DecideCost(path, header, statement, "LocalSlots");
 }
 (LocalSlots Slots, bool Storage, string Label)[] localChecks =
 [
@@ -2690,13 +2695,7 @@ long FeatureLocalCost(int count)
         $"(features {FeatureLocalSegments}) (List.replicate {FeatureLocalInstructions} true) " +
         $"(code {FeatureLocalSegments})";
     var path = Path.Combine(directory, $"FeatureLocals{count}.lean");
-    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend FeatureLocals\n", equations: false);
-    var decided = Heartbeats(path, header + $"""
-        theorem valid : {statement} := by decide +kernel
-        #print axioms valid
-        end FeatureLocals
-        """ + "\n", equations: false);
-    return decided - stated;
+    return DecideCost(path, header, statement, "FeatureLocals");
 }
 var perFeatureInstruction = new[] { FewFeatureLocals, MoreFeatureLocals, ManyFeatureLocals }
     .Select(count => (Count: count, Cost: (double)FeatureLocalCost(count) / FeatureLocalInstructions)).ToArray();
@@ -2771,13 +2770,7 @@ long KnownFactCost(int facts, int rounds)
     var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) raw .scalar features " +
         $"(List.replicate {2 * facts + 4 * rounds + 1} true) code";
     var path = Path.Combine(directory, $"KnownFacts{facts}-{rounds}.lean");
-    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend KnownFacts\n", equations: false);
-    var decided = Heartbeats(path, header + $"""
-        theorem valid : {statement} := by decide +kernel
-        #print axioms valid
-        end KnownFacts
-        """ + "\n", equations: false);
-    return decided - stated;
+    return DecideCost(path, header, statement, "KnownFacts");
 }
 // Subtract the stores alone, whose states together hold about the square of the facts.
 int[] factCounts = [FewKnownFacts, MoreKnownFacts, ManyKnownFacts];
