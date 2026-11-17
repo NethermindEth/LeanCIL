@@ -520,9 +520,6 @@ abbrev BodyDecodes (pins : List AssemblyPin) (pin : AssemblyPin) (body : BodyEvi
     body.names.Spell method ∧ body.names.Selects signature ∧
     bodyMatches body method arguments = true
 
-
-
-
 /-- Whether the instruction before `index` of `code` is a prefix; the first never is. -/
 private def followsPrefix (code : List RawInstruction) : Nat → Bool
   | 0 => false

@@ -297,6 +297,7 @@ theorem instantiateMethod_prefixEntryFree {layouts : List RawLayout} {original c
       closedAt position other otherAt
     rw [substituteOperand_branchesTo otherSubstituted] at branches
     exact clear otherSource (List.mem_of_getElem? otherSourceAt) branches
+
 #print axioms instantiateMethod_prefixEntryFree
 
 /-- A storage native dispatch chooses is a callable that never narrows, for a pointer type,
