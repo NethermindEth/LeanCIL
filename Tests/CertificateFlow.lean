@@ -4,7 +4,9 @@ import CIL.Extraction.Scalars
 # Certificate lookup regressions
 
 Forward edges, backedges, empty certificates, unreachable targets and bounds exercise the
-same feature/scalar validators used by extracted methods, including the streaming endpoint.
+same feature/scalar validators used by extracted methods, including the streaming endpoint. A
+branch or switch arm into the instruction after any prefix fails `PrefixEntryFree`, reachable or
+not, and a branch to the prefix itself does not.
 -/
 
 namespace Tests.CertificateFlow
@@ -93,5 +95,35 @@ theorem lengths_rejected :
       (forwardFeatures ++ [none])
       [true, false, false, true, false] forwardCode := by decide
 #print axioms lengths_rejected
+
+/-- Each instruction prefix, with an operand of the form it takes. -/
+private def prefixes : List RawInstruction :=
+  [⟨1, 65042, .integer 1⟩, ⟨1, 65043, .none⟩, ⟨1, 65044, .none⟩,
+    ⟨1, 65046, .type (.atom runtimeScope "System.Int32")⟩, ⟨1, 65049, .integer 1⟩,
+    ⟨1, 65054, .none⟩]
+
+/-- `branch; prefix; nop; ret`: the instruction at pc 1 modifies the one at pc 2. -/
+private def prefixed (branch modifier : RawInstruction) : List RawInstruction :=
+  [branch, modifier, ⟨2, 0, .none⟩, ⟨3, 42, .none⟩]
+
+/-- A branch or switch arm into the instruction after any prefix is refused, and so is one after
+    the final return that no path reaches; a branch to the prefix itself is accepted. -/
+theorem prefix_entry_rejected :
+    prefixes.all (fun modifier =>
+      decide (PrefixEntryFree (prefixed ⟨0, 43, .target 1⟩ modifier)) &&
+        !decide (PrefixEntryFree (prefixed ⟨0, 43, .target 2⟩ modifier)) &&
+        !decide (PrefixEntryFree (prefixed ⟨0, 69, .targets [3, 2]⟩ modifier)) &&
+        !decide (PrefixEntryFree
+          [⟨0, 42, .none⟩, modifier, ⟨2, 0, .none⟩, ⟨3, 43, .target 2⟩])) = true := by
+  decide
+#print axioms prefix_entry_rejected
+
+/-- A branch may enter the instruction after an instruction that is not a prefix, such as
+    `initobj` between the prefixes in opcode order. -/
+theorem unprefixed_entry_accepted :
+    PrefixEntryFree (prefixed ⟨0, 43, .target 2⟩ ⟨1, 0, .none⟩) ∧
+    PrefixEntryFree (prefixed ⟨0, 43, .target 2⟩
+      ⟨1, 65045, .type (.atom runtimeScope "System.Int32")⟩) := by decide
+#print axioms unprefixed_entry_accepted
 
 end Tests.CertificateFlow

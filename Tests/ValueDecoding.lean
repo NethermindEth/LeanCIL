@@ -190,6 +190,25 @@ theorem ofRaw?_exact :
 example (previous : Option RawInstruction) (raw : RawInstruction) :
     Instruction.ofRaw? previous raw = Instruction.ofRaw? none raw := rfl
 
+/-- The alignments an `unaligned.` prefix states. -/
+private def alignments : List Int := [1, 2, 4]
+
+/-- Every indirect load and store opcode the decoder admits, with the instruction it gives. -/
+private def indirectAccesses : List (RawInstruction × Instruction) := [
+  (⟨1, 70, .none⟩, .ldind .i1), (⟨1, 71, .none⟩, .ldind .u1), (⟨1, 72, .none⟩, .ldind .i2),
+  (⟨1, 73, .none⟩, .ldind .u2), (⟨1, 74, .none⟩, .ldind .i4), (⟨1, 75, .none⟩, .ldind .u4),
+  (⟨1, 76, .none⟩, .ldind .i8), (⟨1, 77, .none⟩, .ldind .i), (⟨1, 82, .none⟩, .stind .i1),
+  (⟨1, 83, .none⟩, .stind .i2), (⟨1, 84, .none⟩, .stind .i4), (⟨1, 85, .none⟩, .stind .i8),
+  (⟨1, 223, .none⟩, .stind .i)]
+
+/-- After `unaligned.` of each alignment, every indirect load and store decodes to the
+    instruction it decodes to alone, so the instruction carries no alignment. -/
+theorem unaligned_indirect_unchanged :
+    indirectAccesses.all (fun (raw, decoded) => alignments.all fun alignment =>
+      Instruction.ofRaw? (some ⟨0, 65042, .integer alignment⟩) raw == some decoded) = true := by
+  decide +kernel
+#print axioms unaligned_indirect_unchanged
+
 /-- Emitted instructions that differ from what the raw instruction decodes to: a constant out of
     its form's range, another operand, or another constructor with the same stack effect. -/
 def mutations : List (RawInstruction × Instruction) := [

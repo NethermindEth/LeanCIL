@@ -1,5 +1,6 @@
 import CIL.Extraction.Dispatch
 import CIL.Extraction.FeatureEffects
+import CIL.Extraction.Prefixes
 
 /-! Checked constrained-call instruction windows and direct-call lowering. -/
 
@@ -83,6 +84,63 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
   | some ⟨_, 65046, _⟩ | some ⟨_, 111, _⟩ => false
   | _ => true
 
+/-- The window reads branch entry only at its own pc, and only after a `constrained.` prefix past
+    the first pc, so any other target lookup agrees with it there. -/
+theorem constrainedSiteWindow_unentered (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
+    (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
+    (methods : Nat → Option SpecializedMethod)
+    (current previous next : Option RawInstruction) (live nextLive : Option Bool)
+    (emitted : Option Instruction) (link : Option Link) (targeted other : Nat → Bool) (pc : Nat)
+    (unentered : pc = 0 ∨ targeted pc = other pc ∨ previous.any (·.opcode == 65046) = false) :
+    constrainedSiteWindow resolve virtualValid castable methods current previous next live nextLive
+        emitted link targeted pc =
+      constrainedSiteWindow resolve virtualValid castable methods current previous next live
+        nextLive emitted link other pc := by
+  unfold constrainedSiteWindow
+  rcases unentered with rfl | agrees | unprefixed
+  · repeat' split
+    all_goals simp_all
+  · simp only [agrees]
+  · repeat' split
+    all_goals simp_all
+
+#print axioms constrainedSiteWindow_unentered
+
+/-- A call the rule accepts at a live pc after a `constrained.` prefix has no branch entering
+    it. -/
+theorem constrainedSiteWindow_untargeted
+    (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
+    (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
+    (methods : Nat → Option SpecializedMethod) (prefixOffset callOffset : Nat)
+    (receiver : TypeExpr) (opcode : Nat) (site : CallSite) (next : Option RawInstruction)
+    (nextLive : Option Bool) (emitted : Option Instruction) (link : Option Link)
+    (targeted : Nat → Bool) (pc : Nat) (call : opcode = 111 ∨ opcode = 40)
+    (accepted : constrainedSiteWindow resolve virtualValid castable methods
+      (some ⟨callOffset, opcode, .call site⟩) (some ⟨prefixOffset, 65046, .type receiver⟩) next
+      (some true) nextLive emitted link targeted pc = true) :
+    targeted pc = false := by
+  have typeTest : ∀ instruction opcode type, typeTestSource instruction = some (opcode, type) →
+      opcode = 116 ∨ opcode = 117 := by
+    intro instruction opcode type found
+    cases instruction <;> simp only [typeTestSource, Option.some.injEq, Prod.mk.injEq,
+      reduceCtorEq] at found
+    · exact .inl found.1.symm
+    · exact .inr found.1.symm
+  unfold constrainedSiteWindow at accepted
+  cases tested : emitted.bind typeTestSource with
+  | some test =>
+    rcases emitted with _ | instruction
+    · simp at tested
+    have := typeTest instruction test.1 test.2 (by simpa using tested)
+    simp [tested] at accepted
+    omega
+  | none =>
+    rcases call with rfl | rfl <;> simp only [tested] at accepted
+    all_goals (repeat' split at accepted)
+    all_goals simp_all
+
+#print axioms constrainedSiteWindow_untargeted
+
 /-- The instruction window supplied through arbitrary optional lookup functions. -/
 def constrainedSiteCheckWith (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
@@ -92,6 +150,33 @@ def constrainedSiteCheckWith (resolve : TypeExpr → CallSite → Option Constra
     (pc : Nat) : Bool :=
   constrainedSiteWindow resolve virtualValid castable methods (rawAt pc) (rawAt (pc - 1))
     (rawAt (pc + 1)) (liveAt pc) (liveAt (pc + 1)) (codeAt pc) (linkAt pc) targeted pc
+
+/-- In a body where no branch enters the instruction after a prefix, the constrained rule's
+    branch-entry checks refuse nothing, so it accepts what it accepts with no branch targets. -/
+theorem constrainedSiteCheckWith_prefixEntryFree
+    (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
+    (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
+    (methods : Nat → Option SpecializedMethod) {code : List RawInstruction}
+    (free : PrefixEntryFree code) (liveAt : Nat → Option Bool)
+    (codeAt : Nat → Option Instruction) (linkAt : Nat → Option Link) (pc : Nat) :
+    constrainedSiteCheckWith resolve virtualValid castable methods (code[·]?) liveAt codeAt linkAt
+        (fun target => code.any (branchesTo target)) pc =
+      constrainedSiteCheckWith resolve virtualValid castable methods (code[·]?) liveAt codeAt
+        linkAt (fun _ => false) pc := by
+  unfold constrainedSiteCheckWith
+  apply constrainedSiteWindow_unentered
+  rcases pc with _ | previousPc
+  · exact .inl rfl
+  · have constrainedPrefix : isPrefixOpcode 65046 = true := by decide
+    simp only [Nat.add_sub_cancel]
+    cases previous : code[previousPc]? with
+    | none => exact .inr (.inr (by simp))
+    | some before =>
+      by_cases constrained : before.opcode = 65046
+      · exact .inr (.inl (free previousPc before previous (constrained ▸ constrainedPrefix)))
+      · exact .inr (.inr (by simp [constrained]))
+
+#print axioms constrainedSiteCheckWith_prefixEntryFree
 
 /-- The original metadata-list rule presented through optional instruction lookups. -/
 def constrainedSiteCheck (types : List DispatchType) (methods : Nat → Option SpecializedMethod) :=
