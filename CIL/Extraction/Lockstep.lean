@@ -50,6 +50,20 @@ theorem all3_at {check : α → β → γ → Bool} :
 
 #print axioms all3_at
 
+/-- Two lockstep checks agree if they agree on every triple at a common index. -/
+theorem all3_congr_getElem? {left right : α → β → γ → Bool} :
+    ∀ (as : List α) (bs : List β) (cs : List γ),
+      (∀ (pc : Nat) a b c, as[pc]? = some a → bs[pc]? = some b → cs[pc]? = some c →
+        left a b c = right a b c) → all3 left as bs cs = all3 right as bs cs
+  | a :: as, b :: bs, c :: cs, agree => by
+    simp only [all3, agree 0 a b c rfl rfl rfl]
+    rw [all3_congr_getElem? as bs cs fun pc x y z => agree (pc + 1) x y z]
+  | [], bs, cs, _ => by cases bs <;> cases cs <;> rfl
+  | _ :: _, [], _, _ => rfl
+  | _ :: _, _ :: _, [], _ => rfl
+
+#print axioms all3_congr_getElem?
+
 /-- Mapping the middle list changes nothing when the two checks agree on each of its entries. -/
 theorem all3_map {check : α → β → γ → Bool} {mapped : α → δ → γ → Bool} (f : β → δ) :
     ∀ (as : List α) (bs : List β) (cs : List γ),

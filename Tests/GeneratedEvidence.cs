@@ -244,8 +244,9 @@ partial class Program
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
                 found++;
-                // Isolated method checks must decide the table and the uses without the extraction header.
-                if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal))
+                // Isolated layout and scalar checks decide all claims against the fixture's definitions.
+                if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : And (Extraction.ScalarFlowValid ", StringComparison.Ordinal))
                     return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
                 return match.Value;
             });

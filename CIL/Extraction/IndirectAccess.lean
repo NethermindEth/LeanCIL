@@ -67,7 +67,7 @@ private def layoutFreeTransfer (type : TypeExpr) : Bool :=
     instruction emits none of the forms `indirectEmission` names, except a call, which
     `UnsafeCallsValid` binds and which never emits an `ldind` or `stind`. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
-    (emitted : Instruction) : Bool :=
+    (emitted : Instruction) (skipEncoding := false) : Bool :=
   if !indirectOpcode instruction.opcode then
     if instruction.opcode == 40 then !(emitted matches .ldind _ | .stind _)
     else !indirectEmission emitted
@@ -81,7 +81,7 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
       -- A span `ldobj` copies nothing; extraction refuses every other operand type.
       else instruction.opcode == 113 && spanLocal type && (emitted matches .nop)
     | some alignment, opcode, .none =>
-      valueEncodingMatches previous instruction emitted ||
+      skipEncoding || valueEncodingMatches previous instruction emitted ||
         (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)
     | _, _, _ => false
 
@@ -90,11 +90,11 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
     nothing; `volatile.` is refused; every other instruction meets `indirectAccessMatches` with
     the instruction before it. -/
 def indirectSiteWindow (rawAt : Nat → Option RawInstruction) (pc : Nat)
-    (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+    (instruction : RawInstruction) (emitted : Instruction) (skipEncoding := false) : Bool :=
   match instruction.opcode with
   | 65042 =>
     (rawAt (pc + 1)).any (prefixTakes instruction) && (emitted matches .nop)
   | 65043 => false
-  | _ => indirectAccessMatches (rawBefore rawAt pc) instruction emitted
+  | _ => indirectAccessMatches (rawBefore rawAt pc) instruction emitted skipEncoding
 
 end CIL.Extraction

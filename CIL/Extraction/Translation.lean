@@ -35,6 +35,8 @@ Generated modules prove each method's evidence separately and assemble it with
 
 namespace CIL.Extraction
 
+deriving instance DecidableEq for CIL.Instruction
+
 /-- Every extracted method has exactly one record, in emitted program order. -/
 structure MethodEvidence where
   original : RawMethod
@@ -56,6 +58,8 @@ structure MethodEvidence where
   /-- The link table the extraction states for the method's call sites and constructions; the
       call check ties each entry to its raw site. -/
   links : List (Nat × Link) := []
+  /-- The scalar certificate uses the equality of the emitted and decoded code. -/
+  decoded : Bool := false
 
 /-- The pin and owner identity of every original and closed body, for attribution checks. -/
 def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=
@@ -401,7 +405,9 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
-  ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
+  (ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates
+    method.code item.decoded ∧
+    (item.decoded = true → method.code = Instruction.ofRawCode none item.closed.code)) ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
@@ -413,6 +419,17 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- A set decoded flag in a validated record binds every emitted instruction to its decoding. -/
+theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    (flag : item.decoded = true) : method.code = Instruction.ofRawCode none item.closed.code := by
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
+  exact same flag
+
+#print axioms MethodEvidenceValid.decoded_code
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

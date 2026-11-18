@@ -204,6 +204,239 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
 
 #print axioms Instruction.classField?_opcode
 
+/-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
+    value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
+def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
+  match decoded with
+  -- Stack shuffling and return.
+  | .nop => (emitted matches .nop)
+  | .dup => (emitted matches .dup)
+  | .pop => (emitted matches .pop)
+  | .ret => (emitted matches .ret)
+  -- Constants, arguments and locals compare their operand.
+  | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
+  | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
+  | .ldnull => (emitted matches .ldnull)
+  | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
+  | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
+  | .starg expected => match emitted with | .starg actual => expected == actual | _ => false
+  | .ldloc expected => match emitted with | .ldloc actual => expected == actual | _ => false
+  | .stloc expected => match emitted with | .stloc actual => expected == actual | _ => false
+  | .ldloca expected => match emitted with | .ldloca actual => expected == actual | _ => false
+  -- Branches compare their target.
+  | .br expected => match emitted with | .br actual => expected == actual | _ => false
+  | .brfalse expected => match emitted with | .brfalse actual => expected == actual | _ => false
+  | .brtrue expected => match emitted with | .brtrue actual => expected == actual | _ => false
+  | .beq expected => match emitted with | .beq actual => expected == actual | _ => false
+  | .bge expected => match emitted with | .bge actual => expected == actual | _ => false
+  | .bgt expected => match emitted with | .bgt actual => expected == actual | _ => false
+  | .ble expected => match emitted with | .ble actual => expected == actual | _ => false
+  | .blt expected => match emitted with | .blt actual => expected == actual | _ => false
+  | .bne_un expected => match emitted with | .bne_un actual => expected == actual | _ => false
+  | .bge_un expected => match emitted with | .bge_un actual => expected == actual | _ => false
+  | .bgt_un expected => match emitted with | .bgt_un actual => expected == actual | _ => false
+  | .ble_un expected => match emitted with | .ble_un actual => expected == actual | _ => false
+  | .blt_un expected => match emitted with | .blt_un actual => expected == actual | _ => false
+  | .switch expected => match emitted with | .switch actual => expected == actual | _ => false
+  -- Indirect loads and stores compare their kind.
+  | .ldind expected => match emitted with | .ldind actual => expected == actual | _ => false
+  | .stind expected => match emitted with | .stind actual => expected == actual | _ => false
+  -- Array lengths and elements compare their kind.
+  | .ldlen => (emitted matches .ldlen)
+  | .ldelem expected => match emitted with | .ldelem actual => expected == actual | _ => false
+  | .ldelem_ref => (emitted matches .ldelem_ref)
+  | .stelem expected => match emitted with | .stelem actual => expected == actual | _ => false
+  | .stelem_ref => (emitted matches .stelem_ref)
+  -- Arithmetic, bitwise operations and shifts.
+  | .add => (emitted matches .add)
+  | .sub => (emitted matches .sub)
+  | .mul => (emitted matches .mul)
+  | .div => (emitted matches .div)
+  | .div_un => (emitted matches .div_un)
+  | .rem => (emitted matches .rem)
+  | .rem_un => (emitted matches .rem_un)
+  | .and => (emitted matches .and)
+  | .or => (emitted matches .or)
+  | .xor => (emitted matches .xor)
+  | .shl => (emitted matches .shl)
+  | .shr => (emitted matches .shr)
+  | .shr_un => (emitted matches .shr_un)
+  | .neg => (emitted matches .neg)
+  | .not => (emitted matches .not)
+  -- Conversions.
+  | .conv_i1 => (emitted matches .conv_i1)
+  | .conv_i2 => (emitted matches .conv_i2)
+  | .conv_i4 => (emitted matches .conv_i4)
+  | .conv_i8 => (emitted matches .conv_i8)
+  | .conv_u1 => (emitted matches .conv_u1)
+  | .conv_u2 => (emitted matches .conv_u2)
+  | .conv_u4 => (emitted matches .conv_u4)
+  | .conv_u8 => (emitted matches .conv_u8)
+  | .conv_i => (emitted matches .conv_i)
+  | .conv_u => (emitted matches .conv_u)
+  | .conv_ovf expected => match emitted with | .conv_ovf actual => expected == actual | _ => false
+  | .conv_ovf_un expected =>
+    match emitted with | .conv_ovf_un actual => expected == actual | _ => false
+  -- Overflow-checked arithmetic and comparisons.
+  | .add_ovf => (emitted matches .add_ovf)
+  | .add_ovf_un => (emitted matches .add_ovf_un)
+  | .sub_ovf => (emitted matches .sub_ovf)
+  | .sub_ovf_un => (emitted matches .sub_ovf_un)
+  | .mul_ovf => (emitted matches .mul_ovf)
+  | .mul_ovf_un => (emitted matches .mul_ovf_un)
+  | .ceq => (emitted matches .ceq)
+  | .cgt => (emitted matches .cgt)
+  | .cgt_un => (emitted matches .cgt_un)
+  | .clt => (emitted matches .clt)
+  | .clt_un => (emitted matches .clt_un)
+  -- Type tests compare the class they test.
+  | .castclass expected =>
+    match emitted with | .castclass actual => expected == actual | _ => false
+  | .isinst expected => match emitted with | .isinst actual => expected == actual | _ => false
+  -- Typed array instructions compare the element type they name.
+  | .newarr expected => match emitted with | .newarr actual => expected == actual | _ => false
+  | .ldelem_any expected =>
+    match emitted with | .ldelem_any actual => expected == actual | _ => false
+  | .stelem_any expected =>
+    match emitted with | .stelem_any actual => expected == actual | _ => false
+  | .ldelema expected readOnly => match emitted with
+    | .ldelema actual actualReadOnly => expected == actual && readOnly == actualReadOnly
+    | _ => false
+  -- Class field instructions compare the field they name.
+  | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
+  | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
+  | .stfld expected => match emitted with | .stfld actual => expected == actual | _ => false
+  -- A call compares the method it names and its prefixes, a construction its constructor.
+  | .call expected prefixes => match emitted with
+    | .call actual actualPrefixes => expected == actual && prefixes == actualPrefixes
+    | _ => false
+  | .newobj expected => match emitted with | .newobj actual => expected == actual | _ => false
+  -- Dynamic frame storage.
+  | .localloc => (emitted matches .localloc)
+  -- Constructors outside the value family are never a decoded value.
+  | _ => false
+
+/-- An opcode result together with its reflexive value-encoding comparison. -/
+private abbrev DecodedValue := { value : Instruction // value.sameValue value = true }
+
+/-- The value emitted by an admitted opcode, with its encoding checked at the constructor. -/
+private def emit (value : Instruction)
+    (valid : value.sameValue value = true := by
+      first
+      | rfl
+      | exact Nat.beq_refl _
+      | exact decide_eq_true (Eq.refl _)
+      | exact @List.instReflBEq Nat _ ⟨Nat.beq_refl _⟩ |>.rfl) :
+    Option DecodedValue := some ⟨value, valid⟩
+
+/-- The value of an instruction with an immediate, branch, slot or absent operand. -/
+private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction) :
+    Option DecodedValue :=
+  match raw.opcode, raw.operand with
+  -- Stack shuffling and return.
+  | 0, .none => emit .nop
+  | 37, .none => emit .dup
+  | 38, .none => emit .pop
+  | 42, .none => emit .ret
+  -- Constants, with the operand ranges ECMA-335 gives each form.
+  | 20, .none => emit .ldnull
+  | 21, .none => emit (.ldc_i4 (BitVec.ofInt 32 (-1)))
+  | 31, .integer value =>
+    if -128 <= value && value < 128 then emit (.ldc_i4 (BitVec.ofInt 32 value)) else none
+  | 32, .integer value =>
+    if -(2^31) <= value && value < 2^31 then emit (.ldc_i4 (BitVec.ofInt 32 value)) else none
+  | 33, .integer value =>
+    if -(2^63) <= value && value < 2^63 then emit (.ldc_i8 (BitVec.ofInt 64 value)) else none
+  | 22, .none | 23, .none | 24, .none | 25, .none | 26, .none | 27, .none | 28, .none
+  | 29, .none | 30, .none => emit (.ldc_i4 (BitVec.ofNat 32 (raw.opcode - 22)))
+  -- Argument loads, addresses and stores; an index wider than its form encodes gives `none`.
+  | 2, .none => emit (.ldarg 0) | 3, .none => emit (.ldarg 1)
+  | 4, .none => emit (.ldarg 2) | 5, .none => emit (.ldarg 3)
+  | 14, .argument index | 65033, .argument index =>
+    if index < operandIndexBound raw.opcode then emit (.ldarg index) else none
+  | 15, .argument index | 65034, .argument index =>
+    if index < operandIndexBound raw.opcode then emit (.ldarga index) else none
+  | 16, .argument index | 65035, .argument index =>
+    if index < operandIndexBound raw.opcode then emit (.starg index) else none
+  -- Locals; `encodedLocal` validates the operand of every form and its width.
+  | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ =>
+    (encodedLocal raw).bind fun index => emit (.ldloc index)
+  | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ =>
+    (encodedLocal raw).bind fun index => emit (.stloc index)
+  | 18, _ | 65037, _ => (encodedLocal raw).bind fun index => emit (.ldloca index)
+  -- Branches, short and long forms, keep their resolved target.
+  | 43, .target target | 56, .target target => emit (.br target)
+  | 44, .target target | 57, .target target => emit (.brfalse target)
+  | 45, .target target | 58, .target target => emit (.brtrue target)
+  | 46, .target target | 59, .target target => emit (.beq target)
+  | 47, .target target | 60, .target target => emit (.bge target)
+  | 48, .target target | 61, .target target => emit (.bgt target)
+  | 49, .target target | 62, .target target => emit (.ble target)
+  | 50, .target target | 63, .target target => emit (.blt target)
+  | 51, .target target | 64, .target target => emit (.bne_un target)
+  | 52, .target target | 65, .target target => emit (.bge_un target)
+  | 53, .target target | 66, .target target => emit (.bgt_un target)
+  | 54, .target target | 67, .target target => emit (.ble_un target)
+  | 55, .target target | 68, .target target => emit (.blt_un target)
+  | 69, .targets targets => emit (.switch targets)
+  -- Integer indirect loads and stores; the floating and reference kinds decode to nothing.
+  | 70, .none => emit (.ldind .i1) | 71, .none => emit (.ldind .u1)
+  | 72, .none => emit (.ldind .i2) | 73, .none => emit (.ldind .u2)
+  | 74, .none => emit (.ldind .i4) | 75, .none => emit (.ldind .u4)
+  | 76, .none => emit (.ldind .i8) | 77, .none => emit (.ldind .i)
+  | 82, .none => emit (.stind .i1) | 83, .none => emit (.stind .i2)
+  | 84, .none => emit (.stind .i4) | 85, .none => emit (.stind .i8)
+  | 223, .none => emit (.stind .i)
+  -- Array lengths and elements; the floating kinds decode to nothing.
+  | 142, .none => emit .ldlen
+  | 144, .none => emit (.ldelem .i1) | 145, .none => emit (.ldelem .u1)
+  | 146, .none => emit (.ldelem .i2) | 147, .none => emit (.ldelem .u2)
+  | 148, .none => emit (.ldelem .i4) | 149, .none => emit (.ldelem .u4)
+  | 150, .none => emit (.ldelem .i8) | 151, .none => emit (.ldelem .i)
+  | 154, .none => emit .ldelem_ref
+  | 155, .none => emit (.stelem .i) | 156, .none => emit (.stelem .i1)
+  | 157, .none => emit (.stelem .i2) | 158, .none => emit (.stelem .i4)
+  | 159, .none => emit (.stelem .i8)
+  | 162, .none => emit .stelem_ref
+  -- Arithmetic, bitwise operations and shifts.
+  | 88, .none => emit .add | 89, .none => emit .sub | 90, .none => emit .mul
+  | 91, .none => emit .div | 92, .none => emit .div_un
+  | 93, .none => emit .rem | 94, .none => emit .rem_un
+  | 95, .none => emit .and | 96, .none => emit .or | 97, .none => emit .xor
+  | 98, .none => emit .shl | 99, .none => emit .shr | 100, .none => emit .shr_un
+  | 101, .none => emit .neg | 102, .none => emit .not
+  -- Conversions.
+  | 103, .none => emit .conv_i1 | 104, .none => emit .conv_i2
+  | 105, .none => emit .conv_i4 | 106, .none => emit .conv_i8
+  | 109, .none => emit .conv_u4 | 110, .none => emit .conv_u8
+  | 209, .none => emit .conv_u2 | 210, .none => emit .conv_u1
+  | 211, .none => emit .conv_i | 224, .none => emit .conv_u
+  -- Overflow-checked conversions from an unsigned source.
+  | 130, .none => emit (.conv_ovf_un .i1) | 131, .none => emit (.conv_ovf_un .i2)
+  | 132, .none => emit (.conv_ovf_un .i4) | 133, .none => emit (.conv_ovf_un .i8)
+  | 134, .none => emit (.conv_ovf_un .u1) | 135, .none => emit (.conv_ovf_un .u2)
+  | 136, .none => emit (.conv_ovf_un .u4) | 137, .none => emit (.conv_ovf_un .u8)
+  | 138, .none => emit (.conv_ovf_un .i) | 139, .none => emit (.conv_ovf_un .u)
+  -- Overflow-checked conversions from a signed source.
+  | 179, .none => emit (.conv_ovf .i1) | 180, .none => emit (.conv_ovf .u1)
+  | 181, .none => emit (.conv_ovf .i2) | 182, .none => emit (.conv_ovf .u2)
+  | 183, .none => emit (.conv_ovf .i4) | 184, .none => emit (.conv_ovf .u4)
+  | 185, .none => emit (.conv_ovf .i8) | 186, .none => emit (.conv_ovf .u8)
+  | 212, .none => emit (.conv_ovf .i) | 213, .none => emit (.conv_ovf .u)
+  -- Overflow-checked arithmetic.
+  | 214, .none => emit .add_ovf | 215, .none => emit .add_ovf_un
+  | 216, .none => emit .mul_ovf | 217, .none => emit .mul_ovf_un
+  | 218, .none => emit .sub_ovf | 219, .none => emit .sub_ovf_un
+  -- Comparisons.
+  | 65025, .none => emit .ceq | 65026, .none => emit .cgt | 65027, .none => emit .cgt_un
+  | 65028, .none => emit .clt | 65029, .none => emit .clt_un
+  -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
+  | 65039, .none => emit .localloc
+  -- The prefix its consumer records.
+  | 65054, .none => if previous.any fun before => isPrefixOpcode before.opcode then none
+    else emit .nop
+  | _, _ => none
+
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. A type operand gives the type test or typed array
     instruction its opcode names, an instance field of a class the field instruction its opcode
@@ -230,108 +463,7 @@ def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction)
   | .call site => Instruction.ofCallSite? previous raw.opcode site
   | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
-  match raw.opcode, raw.operand with
-  -- Stack shuffling and return.
-  | 0, .none => some .nop
-  | 37, .none => some .dup
-  | 38, .none => some .pop
-  | 42, .none => some .ret
-  -- Constants, with the operand ranges ECMA-335 gives each form.
-  | 20, .none => some .ldnull
-  | 21, .none => some (.ldc_i4 (BitVec.ofInt 32 (-1)))
-  | 31, .integer value =>
-    if -128 <= value && value < 128 then some (.ldc_i4 (BitVec.ofInt 32 value)) else none
-  | 32, .integer value =>
-    if -(2^31) <= value && value < 2^31 then some (.ldc_i4 (BitVec.ofInt 32 value)) else none
-  | 33, .integer value =>
-    if -(2^63) <= value && value < 2^63 then some (.ldc_i8 (BitVec.ofInt 64 value)) else none
-  | 22, .none | 23, .none | 24, .none | 25, .none | 26, .none | 27, .none | 28, .none
-  | 29, .none | 30, .none => some (.ldc_i4 (BitVec.ofNat 32 (raw.opcode - 22)))
-  -- Argument loads, addresses and stores; an index wider than its form encodes gives `none`.
-  | 2, .none => some (.ldarg 0) | 3, .none => some (.ldarg 1)
-  | 4, .none => some (.ldarg 2) | 5, .none => some (.ldarg 3)
-  | 14, .argument index | 65033, .argument index =>
-    if index < operandIndexBound raw.opcode then some (.ldarg index) else none
-  | 15, .argument index | 65034, .argument index =>
-    if index < operandIndexBound raw.opcode then some (.ldarga index) else none
-  | 16, .argument index | 65035, .argument index =>
-    if index < operandIndexBound raw.opcode then some (.starg index) else none
-  -- Locals; `encodedLocal` validates the operand of every form and its width.
-  | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ => Instruction.ldloc <$> encodedLocal raw
-  | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ => Instruction.stloc <$> encodedLocal raw
-  | 18, _ | 65037, _ => Instruction.ldloca <$> encodedLocal raw
-  -- Branches, short and long forms, keep their resolved target.
-  | 43, .target target | 56, .target target => some (.br target)
-  | 44, .target target | 57, .target target => some (.brfalse target)
-  | 45, .target target | 58, .target target => some (.brtrue target)
-  | 46, .target target | 59, .target target => some (.beq target)
-  | 47, .target target | 60, .target target => some (.bge target)
-  | 48, .target target | 61, .target target => some (.bgt target)
-  | 49, .target target | 62, .target target => some (.ble target)
-  | 50, .target target | 63, .target target => some (.blt target)
-  | 51, .target target | 64, .target target => some (.bne_un target)
-  | 52, .target target | 65, .target target => some (.bge_un target)
-  | 53, .target target | 66, .target target => some (.bgt_un target)
-  | 54, .target target | 67, .target target => some (.ble_un target)
-  | 55, .target target | 68, .target target => some (.blt_un target)
-  | 69, .targets targets => some (.switch targets)
-  -- Integer indirect loads and stores; the floating and reference kinds decode to nothing.
-  | 70, .none => some (.ldind .i1) | 71, .none => some (.ldind .u1)
-  | 72, .none => some (.ldind .i2) | 73, .none => some (.ldind .u2)
-  | 74, .none => some (.ldind .i4) | 75, .none => some (.ldind .u4)
-  | 76, .none => some (.ldind .i8) | 77, .none => some (.ldind .i)
-  | 82, .none => some (.stind .i1) | 83, .none => some (.stind .i2)
-  | 84, .none => some (.stind .i4) | 85, .none => some (.stind .i8)
-  | 223, .none => some (.stind .i)
-  -- Array lengths and elements; the floating kinds decode to nothing.
-  | 142, .none => some .ldlen
-  | 144, .none => some (.ldelem .i1) | 145, .none => some (.ldelem .u1)
-  | 146, .none => some (.ldelem .i2) | 147, .none => some (.ldelem .u2)
-  | 148, .none => some (.ldelem .i4) | 149, .none => some (.ldelem .u4)
-  | 150, .none => some (.ldelem .i8) | 151, .none => some (.ldelem .i)
-  | 154, .none => some .ldelem_ref
-  | 155, .none => some (.stelem .i) | 156, .none => some (.stelem .i1)
-  | 157, .none => some (.stelem .i2) | 158, .none => some (.stelem .i4)
-  | 159, .none => some (.stelem .i8)
-  | 162, .none => some .stelem_ref
-  -- Arithmetic, bitwise operations and shifts.
-  | 88, .none => some .add | 89, .none => some .sub | 90, .none => some .mul
-  | 91, .none => some .div | 92, .none => some .div_un
-  | 93, .none => some .rem | 94, .none => some .rem_un
-  | 95, .none => some .and | 96, .none => some .or | 97, .none => some .xor
-  | 98, .none => some .shl | 99, .none => some .shr | 100, .none => some .shr_un
-  | 101, .none => some .neg | 102, .none => some .not
-  -- Conversions.
-  | 103, .none => some .conv_i1 | 104, .none => some .conv_i2
-  | 105, .none => some .conv_i4 | 106, .none => some .conv_i8
-  | 109, .none => some .conv_u4 | 110, .none => some .conv_u8
-  | 209, .none => some .conv_u2 | 210, .none => some .conv_u1
-  | 211, .none => some .conv_i | 224, .none => some .conv_u
-  -- Overflow-checked conversions from an unsigned source.
-  | 130, .none => some (.conv_ovf_un .i1) | 131, .none => some (.conv_ovf_un .i2)
-  | 132, .none => some (.conv_ovf_un .i4) | 133, .none => some (.conv_ovf_un .i8)
-  | 134, .none => some (.conv_ovf_un .u1) | 135, .none => some (.conv_ovf_un .u2)
-  | 136, .none => some (.conv_ovf_un .u4) | 137, .none => some (.conv_ovf_un .u8)
-  | 138, .none => some (.conv_ovf_un .i) | 139, .none => some (.conv_ovf_un .u)
-  -- Overflow-checked conversions from a signed source.
-  | 179, .none => some (.conv_ovf .i1) | 180, .none => some (.conv_ovf .u1)
-  | 181, .none => some (.conv_ovf .i2) | 182, .none => some (.conv_ovf .u2)
-  | 183, .none => some (.conv_ovf .i4) | 184, .none => some (.conv_ovf .u4)
-  | 185, .none => some (.conv_ovf .i8) | 186, .none => some (.conv_ovf .u8)
-  | 212, .none => some (.conv_ovf .i) | 213, .none => some (.conv_ovf .u)
-  -- Overflow-checked arithmetic.
-  | 214, .none => some .add_ovf | 215, .none => some .add_ovf_un
-  | 216, .none => some .mul_ovf | 217, .none => some .mul_ovf_un
-  | 218, .none => some .sub_ovf | 219, .none => some .sub_ovf_un
-  -- Comparisons.
-  | 65025, .none => some .ceq | 65026, .none => some .cgt | 65027, .none => some .cgt_un
-  | 65028, .none => some .clt | 65029, .none => some .clt_un
-  -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
-  | 65039, .none => some .localloc
-  -- The prefix its consumer records.
-  | 65054, .none => if previous.any fun before => isPrefixOpcode before.opcode then none
-    else some .nop
-  | _, _ => none
+  (plainValue? previous raw).map Subtype.val
 
 /-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
 theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {raw : RawInstruction}
@@ -387,11 +519,11 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
         cases opcodeIs
     · cases operand
       case none =>
-        have prefixNop : (if (previous.any fun before => isPrefixOpcode before.opcode) = true
-            then none else some Instruction.nop) = some decoded := found
-        split at prefixNop
-        · cases prefixNop
-        · cases prefixNop
+        change (if previous.any (fun before => isPrefixOpcode before.opcode) then none
+          else emit .nop).map Subtype.val = some decoded at found
+        split at found
+        · cases found
+        · cases found
           exact ⟨rfl, rfl⟩
       all_goals cases found
 
@@ -514,118 +646,6 @@ theorem Instruction.ofRawCode_getElem? (code : List RawInstruction) (pc : Nat) :
 
 #print axioms Instruction.ofRawCode_getElem?
 
-/-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
-    value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
-def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
-  match decoded with
-  -- Stack shuffling and return.
-  | .nop => (emitted matches .nop)
-  | .dup => (emitted matches .dup)
-  | .pop => (emitted matches .pop)
-  | .ret => (emitted matches .ret)
-  -- Constants, arguments and locals compare their operand.
-  | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
-  | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
-  | .ldnull => (emitted matches .ldnull)
-  | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
-  | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
-  | .starg expected => match emitted with | .starg actual => expected == actual | _ => false
-  | .ldloc expected => match emitted with | .ldloc actual => expected == actual | _ => false
-  | .stloc expected => match emitted with | .stloc actual => expected == actual | _ => false
-  | .ldloca expected => match emitted with | .ldloca actual => expected == actual | _ => false
-  -- Branches compare their target.
-  | .br expected => match emitted with | .br actual => expected == actual | _ => false
-  | .brfalse expected => match emitted with | .brfalse actual => expected == actual | _ => false
-  | .brtrue expected => match emitted with | .brtrue actual => expected == actual | _ => false
-  | .beq expected => match emitted with | .beq actual => expected == actual | _ => false
-  | .bge expected => match emitted with | .bge actual => expected == actual | _ => false
-  | .bgt expected => match emitted with | .bgt actual => expected == actual | _ => false
-  | .ble expected => match emitted with | .ble actual => expected == actual | _ => false
-  | .blt expected => match emitted with | .blt actual => expected == actual | _ => false
-  | .bne_un expected => match emitted with | .bne_un actual => expected == actual | _ => false
-  | .bge_un expected => match emitted with | .bge_un actual => expected == actual | _ => false
-  | .bgt_un expected => match emitted with | .bgt_un actual => expected == actual | _ => false
-  | .ble_un expected => match emitted with | .ble_un actual => expected == actual | _ => false
-  | .blt_un expected => match emitted with | .blt_un actual => expected == actual | _ => false
-  | .switch expected => match emitted with | .switch actual => expected == actual | _ => false
-  -- Indirect loads and stores compare their kind.
-  | .ldind expected => match emitted with | .ldind actual => expected == actual | _ => false
-  | .stind expected => match emitted with | .stind actual => expected == actual | _ => false
-  -- Array lengths and elements compare their kind.
-  | .ldlen => (emitted matches .ldlen)
-  | .ldelem expected => match emitted with | .ldelem actual => expected == actual | _ => false
-  | .ldelem_ref => (emitted matches .ldelem_ref)
-  | .stelem expected => match emitted with | .stelem actual => expected == actual | _ => false
-  | .stelem_ref => (emitted matches .stelem_ref)
-  -- Arithmetic, bitwise operations and shifts.
-  | .add => (emitted matches .add)
-  | .sub => (emitted matches .sub)
-  | .mul => (emitted matches .mul)
-  | .div => (emitted matches .div)
-  | .div_un => (emitted matches .div_un)
-  | .rem => (emitted matches .rem)
-  | .rem_un => (emitted matches .rem_un)
-  | .and => (emitted matches .and)
-  | .or => (emitted matches .or)
-  | .xor => (emitted matches .xor)
-  | .shl => (emitted matches .shl)
-  | .shr => (emitted matches .shr)
-  | .shr_un => (emitted matches .shr_un)
-  | .neg => (emitted matches .neg)
-  | .not => (emitted matches .not)
-  -- Conversions.
-  | .conv_i1 => (emitted matches .conv_i1)
-  | .conv_i2 => (emitted matches .conv_i2)
-  | .conv_i4 => (emitted matches .conv_i4)
-  | .conv_i8 => (emitted matches .conv_i8)
-  | .conv_u1 => (emitted matches .conv_u1)
-  | .conv_u2 => (emitted matches .conv_u2)
-  | .conv_u4 => (emitted matches .conv_u4)
-  | .conv_u8 => (emitted matches .conv_u8)
-  | .conv_i => (emitted matches .conv_i)
-  | .conv_u => (emitted matches .conv_u)
-  | .conv_ovf expected => match emitted with | .conv_ovf actual => expected == actual | _ => false
-  | .conv_ovf_un expected =>
-    match emitted with | .conv_ovf_un actual => expected == actual | _ => false
-  -- Overflow-checked arithmetic and comparisons.
-  | .add_ovf => (emitted matches .add_ovf)
-  | .add_ovf_un => (emitted matches .add_ovf_un)
-  | .sub_ovf => (emitted matches .sub_ovf)
-  | .sub_ovf_un => (emitted matches .sub_ovf_un)
-  | .mul_ovf => (emitted matches .mul_ovf)
-  | .mul_ovf_un => (emitted matches .mul_ovf_un)
-  | .ceq => (emitted matches .ceq)
-  | .cgt => (emitted matches .cgt)
-  | .cgt_un => (emitted matches .cgt_un)
-  | .clt => (emitted matches .clt)
-  | .clt_un => (emitted matches .clt_un)
-  -- Type tests compare the class they test.
-  | .castclass expected =>
-    match emitted with | .castclass actual => expected == actual | _ => false
-  | .isinst expected => match emitted with | .isinst actual => expected == actual | _ => false
-  -- Typed array instructions compare the element type they name.
-  | .newarr expected => match emitted with | .newarr actual => expected == actual | _ => false
-  | .ldelem_any expected =>
-    match emitted with | .ldelem_any actual => expected == actual | _ => false
-  | .stelem_any expected =>
-    match emitted with | .stelem_any actual => expected == actual | _ => false
-  | .ldelema expected readOnly => match emitted with
-    | .ldelema actual actualReadOnly => expected == actual && readOnly == actualReadOnly
-    | _ => false
-  -- Class field instructions compare the field they name.
-  | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
-  | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
-  | .stfld expected => match emitted with | .stfld actual => expected == actual | _ => false
-  -- A call compares the method it names and its prefixes, a construction its constructor.
-  | .call expected prefixes => match emitted with
-    | .call actual actualPrefixes => expected == actual && prefixes == actualPrefixes
-    | _ => false
-  | .newobj expected => match emitted with | .newobj actual => expected == actual | _ => false
-  -- Dynamic frame storage.
-  | .localloc => (emitted matches .localloc)
-  -- Constructors outside the value family are never a decoded value.
-  | _ => false
-
 /-- A decoded value is the emitted instruction exactly when `sameValue` accepts the pair. -/
 theorem Instruction.sameValue_eq {decoded emitted : Instruction}
     (same : decoded.sameValue emitted = true) : emitted = decoded := by
@@ -635,6 +655,34 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
     | (split at same <;> simp_all)
 
 #print axioms Instruction.sameValue_eq
+
+/-- Every instruction produced by the partial decoder matches its own value encoding. -/
+theorem Instruction.sameValue_self_of_ofRaw? {previous : Option RawInstruction}
+    {raw : RawInstruction} {emitted : Instruction}
+    (decoded : Instruction.ofRaw? previous raw = some emitted) :
+    emitted.sameValue emitted = true := by
+  have found := (Option.filter_eq_some_iff.mp decoded).1
+  split at found
+  · cases found
+  · split at found
+    · unfold Instruction.ofType? at found
+      repeat' split at found
+      all_goals try unfold Instruction.ldelemaAfter? at found
+      all_goals repeat' split at found
+      all_goals cases found <;> simp [Instruction.sameValue]
+    · obtain ⟨_, _, found⟩ := Option.bind_eq_some_iff.mp found
+      unfold Instruction.classField? at found
+      repeat' split at found
+      all_goals cases found <;> simp [Instruction.sameValue]
+    · unfold Instruction.ofCallSite? at found
+      repeat' split at found
+      all_goals cases found <;> simp [Instruction.sameValue]
+    · split at found
+      · cases found
+      · obtain ⟨value, _, rfl⟩ := Option.map_eq_some_iff.mp found
+        exact value.property
+
+#print axioms Instruction.sameValue_self_of_ofRaw?
 
 /-- Instantiation preserves the operand information that a preceding modifier checks. -/
 private theorem invalidPredecessor_substitute {previous : Option RawInstruction}

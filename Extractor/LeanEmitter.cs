@@ -315,9 +315,13 @@ internal static class LeanEmitter
                 var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
                 var evidence = $"{method}_specialization_validated profile {linkTable}";
                 var proof = $"Eq.trans ({equality} {environment} {evidence}) {method}_decoder_eq";
+                var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
+                var code = $"Instruction.ofRawCode none {method}Closed.code";
+                var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
                 lean.AppendLine($"""
                     cil_decoded_method {method} {fields}:= {closedDecoder}
                     theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
+                    theorem {method}_decoded_code : {method}.code = {code} := {codeProof}
                     """);
             }
             else
@@ -338,7 +342,7 @@ internal static class LeanEmitter
             if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
                     $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
-            ScalarEvidence.Emit(lean, m, n, scalarCertificate);
+            ScalarEvidence.Emit(lean, m, n, scalarCertificate, decoded);
             if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
                     $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
@@ -365,15 +369,21 @@ internal static class LeanEmitter
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
-        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ",
-            Enumerable.Range(0, methods.Length).Select(n =>
-                $"{{ original := method{n}Original, body := method{n}Body, arguments := method{n}TypeArgumentsRaw, " +
-                $"closed := method{n}Closed, parameterInput := method{n}RawArguments, " +
-                $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
-                $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
-                $"dispatchTypes := method{n}DispatchTypes, links := method{n}Links, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)}, " +
-                $"signature := method{n}Signature }}")) + "]");
+        var records = Enumerable.Range(0, methods.Length).Select(n =>
+        {
+            var method = $"method{n}";
+            var fields = string.Join(", ",
+                $"original := {method}Original", $"body := {method}Body", $"arguments := {method}TypeArgumentsRaw",
+                $"closed := {method}Closed", $"parameterInput := {method}RawArguments",
+                $"reachable := {method}Reachable",
+                $"featureStates := {method}FeatureStates", $"scalarStates := {method}ScalarStates",
+                $"layoutUses := {method}LayoutUses", $"dispatchTypes := {method}DispatchTypes",
+                $"links := {method}Links",
+                $"assembly := assembly{pinned.Index(methods[n].Module)}", $"signature := {method}Signature",
+                $"decoded := {LeanText.Bool(refusals[n] is null)}");
+            return $$"""{ {{fields}} }""";
+        });
+        lean.AppendLine($"""def methodEvidence : List Extraction.MethodEvidence := [{string.Join(", ", records)}]""");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);

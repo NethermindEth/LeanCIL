@@ -653,7 +653,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw facts state &&
       (featureOpMatchesAt layouts raw role instruction emitted &&
-        indirectSiteWindow rawAt pc instruction emitted) &&
+        indirectSiteWindow rawAt pc instruction emitted false) &&
       match featureTransferAtWith layouts raw facts profile
           (calleeConstant constants (linkAt pc) emitted)
           role instruction state,

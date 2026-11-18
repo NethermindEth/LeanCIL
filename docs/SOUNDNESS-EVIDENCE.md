@@ -25,6 +25,11 @@ cannot substitute for it.
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
 | Static values | Checked execution yields emitted bytes without circular reads of the values being justified; unknown values have no initializer and are read only from the caller's binding | Initializer recognition and deployment initialization/immutability |
 
+For a method defined by its decoder, the evidence proves that its entire instruction list equals
+the decoding of the closed body. At a reachable instruction outside a fold, the scalar validator
+uses this equality for value encodings when the decoder supplies an instruction. A decoded hole
+still needs the explicit site check, as do folded sites and methods emitted as literals.
+
 Exact scalar matching covers integer literals, wrapping/checked add/subtract/multiply, signed and
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
 integer conversions and all short/long compare-and-branch encodings. Literal ranges and

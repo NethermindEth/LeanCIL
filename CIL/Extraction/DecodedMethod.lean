@@ -145,6 +145,22 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 
 #print axioms Method.ofBody?_of_decodes
 
+/-- Closed decoding preserves exactly the instruction list decoded from the closed body. -/
+theorem _root_.CIL.Method.ofClosed?_code {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {closed : RawMethod}
+    {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links closed storage = some method) :
+    method.code = Instruction.ofRawCode none closed.code := by
+  unfold Method.ofClosed? at decoded
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
+  obtain ⟨_, _, _, _, built⟩ := decoded
+  split at built
+  · cases built
+    rfl
+  · simp at built
+
+#print axioms Method.ofClosed?_code
+
 /-- Each pc of a decoded method holds what `Instruction.ofRawAt` decodes at that pc of the
     instantiated definition's code, so the method has one instruction per raw instruction and a
     type test names the type argument and a field access the instantiated field. -/
@@ -154,15 +170,11 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     (decoded : Method.ofRaw? profile environment links source arguments = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
-  unfold Method.ofRaw? Method.ofClosed? at decoded
-  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
-  obtain ⟨closed, instantiated, _, _, _, _, _, _, built⟩ := decoded
+  unfold Method.ofRaw? at decoded
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
+  obtain ⟨closed, instantiated, _, _, built⟩ := decoded
   refine ⟨closed, instantiated, fun pc => ?_⟩
-  -- The argument rule either refuses the code or leaves the decoded method as it was built.
-  split at built
-  · cases built
-    exact Instruction.ofRawCode_getElem? closed.code pc
-  · simp at built
+  rw [Method.ofClosed?_code built, Instruction.ofRawCode_getElem?]
 
 #print axioms Method.ofRaw?_code
 

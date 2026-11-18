@@ -1336,7 +1336,7 @@ private theorem branch_encoding_cases :
 
 example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
     scalarEmissionMatches #[] none none (i 88) [.word64, .word64] .add = true :=
-  valid.instruction_checked (pc := 2) rfl rfl rfl rfl rfl
+  valid.instruction_checked (pc := 2) (by decide) rfl rfl rfl rfl rfl
 
 #print axioms external_call_validated
 
@@ -1430,4 +1430,38 @@ example : (encodeBody scope addRaw).isSome = true := by decide +kernel
 example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
   decide +kernel
 example : MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence addMethod := by decide +kernel
+
+/-- The total decoder writes a hole for a reachable block initialization. -/
+private def blockInit : RawMethod :=
+  { raw [i 2, i 22, i 22, i 65048, i 42] [.byref intType] with
+    maxStack := 3, returnType := .void }
+
+/-- A reachable block initialization still requires its block emission under decoded checking. -/
+theorem decoded_block_hole_refused :
+    ¬ ScalarFlowValid #[] blockInit ([0, 1, 2, 3, 0].map unknown)
+      [some [], some [.reference], some [.word32, .reference],
+        some [.word32, .word32, .reference], some []]
+      (Instruction.ofRawCode none blockInit.code) true := by decide +kernel
+#print axioms decoded_block_hole_refused
+
+/-- A decoded addition meets the full method evidence including the code equality. -/
+theorem flagged_addition_valid :
+    let item := { addEvidence with decoded := true }
+    MethodEvidenceValid [] #[] [] [item] [] item addMethod := by decide +kernel
+#print axioms flagged_addition_valid
+
+/-- A literal load with a different owner layout cannot use decoded evidence. -/
+theorem wrong_decoded_owner_refused (item : MethodEvidence) :
+    let owner := TypeExpr.aggregate "Fixture" 0
+    let source := raw [i 123 (.field owner 0 intType (name!"Field") false)]
+    let evidence := { item with closed := source, decoded := true }
+    let field : FieldRef := ⟨.aggregate "Fixture" 1, 0, intType, name!"Field"⟩
+    ¬ MethodEvidenceValid [] #[] [] [evidence] [] evidence
+      { addMethod with code := [.ldfld field] } := by
+  intro owner source evidence field valid
+  have different : [Instruction.ldfld field] ≠ Instruction.ofRawCode none source.code := by
+    decide +kernel
+  exact different (valid.decoded_code rfl)
+#print axioms wrong_decoded_owner_refused
+
 end Tests.ScalarEvidence
