@@ -26,7 +26,7 @@ def indexedConstrained (raw : RawMethod) (reachable : List Bool) (emitted : Meth
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
     (List.range raw.code.length).all (constrainedSiteCheck [] (FlowIndex.ofList []).get?
       (FlowIndex.ofList raw.code).get? (FlowIndex.ofList reachable).get?
-      (FlowIndex.ofList emitted.code).get?
+      (FlowIndex.ofList emitted.code).get? emitted.linkAt
       (Std.TreeSet.ofList (branchTargets raw.code)).contains) = true
 
 /-- Eligible vector-local metadata. -/
