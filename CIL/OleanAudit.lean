@@ -28,6 +28,9 @@ REQUEST (JSON):
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
     "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
+Keys must be unique within each object, including keys spelled with JSON escapes.
+Each `expected` object must contain exactly `term` and the boolean `refuted`.
+A duplicate key rejects the request. An invalid comparison field gives that theorem an `error`.
 A theorem must be a `theorem` whose type matches `E` (when given) and whose axiom closure is
 in `axioms`. An `allowedModules` scope requires its declaring module and every reachable
 replay-target declaration's module to belong to that set;
@@ -73,6 +76,25 @@ Per-item failures are reported in `error`; a missing module or malformed request
 
 namespace LeanCILAudit
 open Lean
+
+open Std.Internal.Parsec Std.Internal.Parsec.String in
+/-- Checks decoded keys in each open object before JSON parsing can overwrite a duplicate. -/
+private partial def checkUniqueKeys (objects : List (Std.HashSet String)) : Parser Unit := do
+  if <- isEof then return
+  match <- any with
+  | '{' => checkUniqueKeys ({} :: objects)
+  | '}' => checkUniqueKeys (objects.drop 1)
+  | '"' =>
+    let key <- Json.Parser.str
+    ws
+    -- Only object keys are followed by a colon outside a string.
+    if (<- peek?) == some ':' then
+      if let keys :: parents := objects then
+        let (duplicate, keys) := keys.containsThenInsert key
+        if duplicate then fail s!"Duplicate JSON key: {key}"
+        return <- checkUniqueKeys (keys :: parents)
+    checkUniqueKeys objects
+  | _ => checkUniqueKeys objects
 
 /-- The declaration name written as `s`. -/
 def name (s : String) : Name := s.toName
@@ -479,12 +501,17 @@ def theorem? (env : Environment) (req : Json)
       | some (.error error) => [("termError", toJson error)]
       | none => [("termError", toJson s!"Theorem has no declaring module: {thm}")]
   if let .ok expected := req.getObjVal? "expected" then
-    -- A request that does not say which predicate it compares with is refused, not read as Holds.
+    if let .obj members := expected then
+      for (key, _) in members do
+        unless key == "term" || key == "refuted" do
+          return result (fields ++ [("error", toJson s!"Unknown comparison field: {key}")])
     let .ok refuted := expected.getObjValAs? Bool "refuted"
       | return result (fields ++
           [("error", toJson "A statement comparison states expected.refuted as a boolean")])
-    let target := (expected.getObjVal? "term").bind
-      (decodeStatement kernel ownerOf info.levelParams)
+    let .ok term := expected.getObjVal? "term"
+      | return result (fields ++
+          [("error", toJson "A statement comparison requires expected.term")])
+    let target := decodeStatement kernel ownerOf info.levelParams term
     fields := fields ++ match target.bind (if refuted then refutedAt ownerOf else pure) with
       | .ok target => match acceptsAt kernel thm info.levelParams type target with
         | none => [("matches", toJson true)]
@@ -686,7 +713,9 @@ unsafe def main (args : List String) : IO UInt32 := do
   | ["--fingerprints", input] => writeFingerprints input; return 0
   | _ => pure ()
   let [request, output] := args | throw (IO.userError "Usage: leancil-audit REQUEST RESULT")
-  let req ← IO.ofExcept (Json.parse (← IO.FS.readFile request))
+  let source <- IO.FS.readFile request
+  IO.ofExcept ((checkUniqueKeys []).run source)
+  let req <- IO.ofExcept (Json.parse source)
   let sysroot ← findSysroot
   -- Toolchain modules first: LEAN_PATH may add modules but never replace core ones.
   searchPathRef.set ((← getBuiltinSearchPath sysroot) ++ (← addSearchPathFromEnv {}))

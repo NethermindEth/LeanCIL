@@ -621,6 +621,27 @@ foreach (object expected in new object[]
     })
     Rejected(Audit("StatementVariant", [ProofTheorem("Variant.claim") with { expected = expected }]).theorems[0],
         "expected.refuted");
+var extraField = new { term = production[0].term!.Value, refuted = false, negated = true };
+Rejected(Audit("StatementVariant", [ProofTheorem("Variant.claim") with { expected = extraField }]).theorems[0],
+    "negated");
+
+void RejectDuplicate(string key, string json)
+{
+    var request = Path.Combine(root, $"duplicate-{key}.json");
+    var result = Path.ChangeExtension(request, ".result.json");
+    File.WriteAllText(request, json);
+    var audit = Execute([verification.CheckedAuditExecutable(), request, result], fixtures, fixtures,
+        environment: environment);
+    if (audit.Code == 0 || !audit.Stderr.Contains($"Duplicate JSON key: {key}", StringComparison.Ordinal))
+        throw new InvalidOperationException($"Duplicate {key}: audit exited {audit.Code}. {audit.Output}");
+}
+RejectDuplicate("refuted", $$"""
+    { "modules": ["StatementVariant"], "theorems": [{
+      "name": "Variant.claim",
+      "expected": { "term": {{production[0].term!.Value.GetRawText()}}, "refuted": true, "refuted": false }
+    }] }
+    """);
+RejectDuplicate("modules", """{ "modules": ["StatementVariant"], "modul\u0065s": ["StatementVariant"] }""");
 Console.WriteLine("PASS the kernel compares statements by unfolding, refuses weaker ones and forged constants");
 
 // A user module cannot replace a toolchain module on the audit's search path.
