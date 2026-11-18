@@ -32,6 +32,62 @@ private def rejects (ownSlice libSlice : MetadataSlice) (token : Nat) (operand :
   | .error found => found == error
   | .ok _ => false
 
+/-- A runtime MemberRef, optionally instantiated by a MethodSpec, in the calling assembly. -/
+private def memberFixture (namespace_ owner name : String) (signature : List Nat)
+    (instantiation : Option (List Nat)) :
+    MetadataSlice × Nat := build (do
+  let _ ← ownWorld
+  let reference ← row Table.typeRef [6, ← string owner, ← string namespace_]
+  let member ← row Table.memberRef [tokenRow reference * 8 + 1, ← string name, ← blob signature]
+  match instantiation with
+  | none => pure member
+  | some arguments => row Table.methodSpec [tokenRow member * 2 + 1, ← blob arguments]
+  ) (bytesOf "T") ownIdentity
+
+/-- A static external call whose closed arguments and open declaration are checked separately. -/
+private def memberCall (owner : TypeExpr) (name : MetadataName) (text identity : String)
+    (arity : Nat) (arguments : List TypeExpr) (declared : OpenSignature) (returned : TypeExpr)
+    (parameters : List TypeExpr) : CallSite :=
+  { method := { owner, name, genericArity := arity, hasThis := false,
+                methodArguments := arguments, returnType := returned, parameters },
+    name := text, target := .external (runtimeScope ++ "::" ++ identity), declared,
+    typeArguments := arguments, parameterCount := parameters.length, returnsValue := true }
+
+/-- The SizeOf call states Int32 as its only method argument. -/
+private def sizeCall (arity : Nat) (arguments : List TypeExpr) : CallSite :=
+  memberCall (.atom runtimeScope "System.Runtime.CompilerServices.Unsafe") name!"SizeOf" "SizeOf"
+    "System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()" arity arguments
+    { convention := 0x10, returnType := int32 } int32 []
+
+/-- An absent instantiation is valid for Min. A present instantiation must have positive arity. -/
+private def minCall : CallSite :=
+  memberCall (.atom runtimeScope "System.Math") name!"Min" "Min"
+    "System.Int32 System.Math::Min(System.Int32,System.Int32)" 0 []
+    { convention := 0, returnType := int32, parameters := [int32, int32] } int32 [int32, int32]
+
+example :
+    let spec := memberFixture "System.Runtime.CompilerServices" "Unsafe" "SizeOf"
+      [0x10, 2, 0, 8] (some [0x0A, 1, 8])
+    rejects spec.1 lib spec.2 (.call (sizeCall 2 [int32])) (.genericMismatch spec.2) := by
+  decide +kernel
+
+example :
+    let member := memberFixture "System.Runtime.CompilerServices" "Unsafe" "SizeOf"
+      [0x10, 1, 0, 8] none
+    rejects member.1 lib member.2 (.call (sizeCall 1 [])) (.genericMismatch member.2) := by
+  decide +kernel
+
+example :
+    let spec := memberFixture "System" "Math" "Min" [0, 2, 8, 8, 8] (some [0x0A, 0])
+    rejects spec.1 lib spec.2 (.call minCall) (.genericMismatch spec.2) := by decide +kernel
+
+example :
+    let spec := memberFixture "System.Runtime.CompilerServices" "Unsafe" "SizeOf"
+      [0x10, 1, 0, 8] (some [0x0A, 1, 8])
+    let member := memberFixture "System" "Math" "Min" [0, 2, 8, 8, 8] none
+    passes spec.1 lib spec.2 (.call (sizeCall 1 [int32])) &&
+      passes member.1 lib member.2 (.call minCall) := by decide +kernel
+
 /-- Replace the bytes of a row of a slice. -/
 private def mutateRow (slice : MetadataSlice) (token : Nat) (change : List Nat → List Nat) :
     MetadataSlice :=

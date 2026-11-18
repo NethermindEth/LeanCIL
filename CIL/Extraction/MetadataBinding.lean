@@ -383,6 +383,8 @@ def MetadataEnv.methodSite (env : MetadataEnv) (token : Nat) :
     let row ← index.methodSpec token
     let site ← env.memberSite row.method
     let arguments ← decodeMethodSpec (← index.blob row.instantiation)
+    if arguments.isEmpty || arguments.length != site.genericArity then
+      throw (.genericMismatch token)
     .ok { site with methodArguments := some (← env.resolveAll 0 arguments) }
   else env.memberSite token
 
@@ -456,6 +458,7 @@ private def parametersAdmitted (frame : Frame) : List ResolvedType → List Type
 def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite) :
     Except MetadataError TokenFacts := do
   let site ← env.methodSite token
+  if site.genericArity != 0 && site.methodArguments.isNone then throw (.genericMismatch token)
   let extracted := site.definition.isSome
   let ownerArguments := site.owner.arguments
   let ownerList := ownerArguments.getD []

@@ -236,6 +236,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   in a pinned assembly (its name, its signature and its place in its type's members) and the
   external identity of a call (the scope and Cecil's `result Owner::name(parameters)`) are
   recomputed from the bytes.
+  A call to a generic member requires a `MethodSpec` with exactly as many arguments as the
+  member declares. A call to a nongeneric member names the member directly.
   At each live modelled call, the runtime model entry also checks the member's open declaration.
   For example, the generic vector lane reader must declare its method type parameter as the result.
 - The local variable types are checked against the standalone signature the body header names.
