@@ -1321,6 +1321,18 @@ private def nestedLibWorld : Step Unit := do
 private def nestedLib : MetadataSlice :=
   (build nestedLibWorld (bytesOf "Lib") libScope).1
 
+/-- A modifier in this module is identified through its enclosing TypeDef rows. -/
+private def modifierClaim (name : String) : Bool :=
+  let checked := do
+    let env := MetadataEnv.ofSlices [← own.1.index, ← nestedLib.index]
+    let marker ← modifierNamed env 1 (tokenOf Table.typeDef 7)
+    let frame := { pairFrame with rawIndices := true }
+    pure (frame.admits (.modified true marker (.primitive 1)) (.modified true libScope name .void))
+  checked.toOption == some true
+
+example : modifierClaim "Inner" = false := by decide +kernel
+example : modifierClaim "Lib.Outer/A.Mid/Inner" := by decide +kernel
+
 /-- `T` with references to `Outer/Leaf` and `Outer/Mid/Inner` through namespace `A` at each
     nested level, linked to the definitions at the given `TypeDef` rows of `Lib`. -/
 private def nestedOwnWorld (leaf inner : Nat) : Step (Nat × Nat) := do

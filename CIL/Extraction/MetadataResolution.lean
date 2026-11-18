@@ -370,10 +370,10 @@ def typeDefKind (env : MetadataEnv) (position token : Nat) (row : TypeDefRow) :
   if parts == [systemNamespace, valueTypeName] then return .valueType
   .ok .classType
 
-/-- The named type of a `TypeDef` in the slice at `position`: its scope is that slice's
-    assembly, its name follows the `NestedClass` row for a nested type and its kind follows
-    its flags and base. -/
-def typeDefNamed (env : MetadataEnv) (position : Nat) : Nat → Nat → Except MetadataError NamedType
+/-- A local named type follows its enclosing rows. Ordinary types also bind the kind of each
+    enclosing definition. A modifier requires only the name at each level. -/
+private def readTypeDef (env : MetadataEnv) (position : Nat) (modifier : Bool) :
+    Nat → Nat → Except MetadataError NamedType
   | 0, token => .error (.unresolvedType token)
   | fuel + 1, token => do
     let index ← env.slice position token
@@ -388,10 +388,15 @@ def typeDefNamed (env : MetadataEnv) (position : Nat) : Nat → Nat → Except M
         if linked != position then throw (.unresolvedType token)
         let nested ← index.nestedClass nesting
         if nested.nested != token then throw (.unresolvedType token)
-        let enclosing ← typeDefNamed env position fuel nested.enclosing
+        let enclosing ← readTypeDef env position modifier fuel nested.enclosing
         pure (nestedName enclosing.name simple, enclosing.parts ++ [namespace_, simple])
-    let kind ← typeDefKind env position token row
-    .ok { scope := index.identity, name := name, parts := parts, kind := kind, pinned := true }
+    let kind ← if modifier then pure (.external none) else typeDefKind env position token row
+    .ok { scope := index.identity, name, parts, kind, pinned := !modifier }
+
+/-- The pinned TypeDef's name follows its enclosing rows. Its flags and base give its kind. -/
+def typeDefNamed (env : MetadataEnv) (position : Nat) :
+    Nat → Nat → Except MetadataError NamedType :=
+  readTypeDef env position false
 
 /-- The named type of a `TypeRef`. A scope that names a carried slice is resolved through the
     slice's definition link to the `TypeDef` that defines it, whose name must be the one the
@@ -415,22 +420,23 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
       if named.scope != scope || named.parts != parts then throw (.operandMismatch token)
       .ok named
 
-/-- The named type of a custom modifier. A modifier is read by its scope and name alone, so it
-    needs no link to a definition, whether or not its scope is a carried slice or the type
-    resolves. -/
+/-- Cecil qualifies each nested segment with its own namespace in a modifier's full name. -/
+private def modifierFullName : List (List Nat) → List Nat
+  | namespace_ :: simple :: rest =>
+    let name := qualifiedName namespace_ simple
+    if rest.isEmpty then name else name ++ 47 :: modifierFullName rest
+  | _ => []
+
+/-- A custom modifier names its assembly and enclosing types without requiring the definition
+    of an externally referenced modifier or the base type of a local one. -/
 def modifierNamed (env : MetadataEnv) (position token : Nat) : Except MetadataError NamedType := do
-  match metadataTableOf token with
-  | 0x01 =>
-    let (scope, name, parts) ← typeRefQualified env position resolveFuel token
-    .ok { scope := scope, name := name, parts := parts, kind := .external none, pinned := false }
-  | 0x02 =>
-    let index ← env.slice position token
-    let row ← index.typeDef token
-    let namespace_ ← index.string row.namespace_
-    let simple ← index.string row.name
-    .ok { scope := index.identity, name := qualifiedName namespace_ simple,
-          parts := [namespace_, simple], kind := .external none, pinned := false }
-  | _ => .error (.unsupportedTable token)
+  let (scope, _, parts) ← match metadataTableOf token with
+    | 0x01 => typeRefQualified env position resolveFuel token
+    | 0x02 => do
+      let named ← readTypeDef env position true resolveFuel token
+      pure (named.scope, named.name, named.parts)
+    | _ => throw (.unsupportedTable token)
+  pure { scope, name := modifierFullName parts, parts, kind := .external none, pinned := false }
 
 /-- Whether a signature's class-or-value-type byte agrees with a type found in a carried
     slice. -/

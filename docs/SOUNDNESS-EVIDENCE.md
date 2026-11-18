@@ -269,8 +269,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
   `void` return, forwarded types, module references and `AssemblyRef` rows with a public key flag.
-- A type that a signature names only as a custom modifier is read by its scope and name alone, so it needs
-  no link to a definition, whether or not its assembly is pinned or the type resolves
+- A custom modifier binds its assembly and full name, including the namespace of each nested
+  segment. A local nested `TypeDef` requires its enclosing `NestedClass` rows. A `TypeRef`
+  follows its resolution scopes and needs no link to the modifier's definition
   (`modifierNamed` in [MetadataResolution](../CIL/Extraction/MetadataResolution.lean) and the extractor's
   slice collector agree). A type used any other way keeps the link, and a pinned type that does not resolve
   there stops the extraction with `Unresolved pinned type`.
