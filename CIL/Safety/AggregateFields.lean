@@ -265,7 +265,8 @@ theorem writeSnapshot_initialized (memory : Memory) (reference : Reference)
   cases access memory reference bytes.length alignment true with
   | error => rfl
   | ok =>
-    simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, List.getElem?_map]
+    simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+      snapshotCellAt_eq, List.getElem?_map]
     congr 2
     funext allocation position
     split <;> try rfl

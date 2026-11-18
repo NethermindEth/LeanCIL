@@ -183,6 +183,10 @@ sequence-content lemmas above. Vector loads and stores preserve initialization m
 copies require readable, initialized source bytes. View creation and reinterpretation alone
 establish neither initialization nor read/write authority.
 
+After a successful `writeSnapshot`, rewrite the stored memory's cell function with
+`writeSnapshot_cells_eq`. Inside the destination it returns the source byte and its
+initialization flag. Other offsets and allocations retain their previous cells.
+
 Single-reference and pointer span constructors, empty getters and in-place local resets use the
 same views.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
