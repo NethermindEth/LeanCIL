@@ -56,8 +56,21 @@ try
     var probeScripts = File.ReadLines(At("Tests/PreparedFixtures.cs"))
         .Where(line => line.StartsWith("#:include ../scripts/", StringComparison.Ordinal))
         .Select(line => line["#:include ../".Length..]).ToArray();
-    foreach (var script in probeScripts)
-        File.Copy(At(script), Path.Combine(corpus, script));
+    // An included script may include further sources by paths relative to its own folder.
+    var copiedSources = new HashSet<string>(StringComparer.Ordinal);
+    var pendingSources = new Queue<string>(probeScripts);
+    while (pendingSources.TryDequeue(out var script))
+    {
+        var relativeSource = Path.GetRelativePath(Root, Path.GetFullPath(At(script)));
+        if (!copiedSources.Add(relativeSource)) continue;
+        var copy = Path.Combine(corpus, relativeSource);
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.Copy(At(relativeSource), copy);
+        foreach (var included in File.ReadLines(At(relativeSource))
+            .Where(line => line.StartsWith("#:include ", StringComparison.Ordinal))
+            .Select(line => line["#:include ".Length..].Trim()))
+            pendingSources.Enqueue(Path.Combine(Path.GetDirectoryName(relativeSource) ?? "", included));
+    }
     var probe = Path.Combine(corpus, "Probe.cs");
     File.WriteAllText(probe, "#!/usr/bin/env dotnet\n#:property PublishAot=false\n" +
         string.Join("\n", probeScripts.Select(script => "#:include " + script)) +
