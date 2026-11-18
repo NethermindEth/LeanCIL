@@ -2,6 +2,8 @@ import CIL.ExceptionType
 import CIL.Extraction.Folds
 import CIL.Safety.RuntimeExceptions
 
+/-! These tests check how CLR exception contracts classify observed arithmetic faults. -/
+
 namespace Tests.RuntimeExceptions
 
 open CIL.Safety
@@ -74,6 +76,37 @@ theorem wrong_outcomes (which : Case) : ¬ (contract which (wrongName which)).Ho
   have raised := holds.raising (input := ()) (initial := empty) trivial rfl
   exact RaisesCLR.not_of_invoke (by simp [Settled]) (invoked which empty)
     (by cases which <;> decide) raised
+
+/-- A contract that promises the observed CLR exception admits no counterexample. -/
+theorem not_refuted_named (which : Case) :
+    Not ((contract which (exceptionName which)).RefutedCLR [method which] 0) :=
+  fun refuted => refuted.not_holds (named_outcomes which)
+
+/--
+info: 'Tests.RuntimeExceptions.not_refuted_named' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms not_refuted_named
+
+/-- The observed arithmetic fault satisfies the named exception for every initial memory. -/
+theorem no_violation_named (which : Case) (memory : Memory) :
+    Not ((contract which (exceptionName which)).ViolatesCLR () memory
+      (invoke [method which] 4 0 (arguments which) memory)) := by
+  rw [invoked]
+  intro different
+  exact different (by cases which <;> rfl)
+
+#print axioms no_violation_named
+
+/-- The same fault refutes a contract that promises the other arithmetic exception. -/
+theorem refuted_wrong (which : Case) :
+    (contract which (wrongName which)).RefutedCLR [method which] 0 := by
+  apply OutcomeContract.RefutedCLR.of_fault (input := ()) trivial (by simp) (invoked which empty)
+  change Not ((ExecutionFault.arithmetic (arithmeticFault which)).clrException =
+    some (wrongName which))
+  cases which <;> decide
+
+#print axioms refuted_wrong
 
 def zeroDivisorMethod (remainder : Bool) : CIL.Method := {
   code := [.ldarg 0, .ldarg 1, if remainder then .rem_un else .div_un, .ret], locals := [],
