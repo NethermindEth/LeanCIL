@@ -157,7 +157,7 @@ partial class Program
     {
         var found = 0;
         var result = Regex.Replace(source,
-            @"(?m)^(?:@\[[^\r\n]*\] )?theorem (\w+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", match =>
+            @"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", match =>
             {
                 // Byte-backed identity definitions carry these checked UTF-8 witnesses.
                 if (Regex.IsMatch(match.Groups[1].Value, @"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z"))
