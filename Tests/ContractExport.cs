@@ -237,7 +237,8 @@ if (cohort != "core")
 
         CallerVerify();
         var report = JsonNode.Parse(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")))!;
-        if (report["schema"]!.GetValue<int>() != CertificateSchema || report["contractImports"]!.AsArray().Count != 1 ||
+        if (report["schema"]!.GetValue<int>() != CertificateSchema ||
+            report["contractImports"]!.AsArray().Count != 1 ||
             report["imports"]![0]!["acceptedVia"]!.GetValue<string>() != "published-certification" ||
             !report["imports"]![0]!["deploymentObligation"]!.GetValue<string>()
                 .Contains("exact implementation bytes", StringComparison.Ordinal))

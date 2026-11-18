@@ -3608,8 +3608,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (audited.refutes is not { } refutes)
         {
             if (!required) return null;
-            throw new InvalidOperationException(
-                $"{audited.name} was accepted as a refutation but states no counterexample predicate the audit reads.");
+            throw new InvalidOperationException($"{audited.name
+                } was accepted as a refutation but states no counterexample predicate the audit reads.");
         }
         if (refutes.program != program || refutes.method is not { } index || index >= methods.GetArrayLength())
         {
