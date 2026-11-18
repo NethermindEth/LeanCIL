@@ -104,7 +104,7 @@ Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the 
         "\n#eval show IO Nat from IO.getNumHeartbeats\n");
     var (peak, output) = MeasurePeakGigabytes(["lake", "env", "lean", "-DElab.async=false", kernelFile],
         FixturePackage());
-    var count = HeartbeatCount().Match(output);
+    var count = HeartbeatCount.Match(output);
     if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
     return (long.Parse(count.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), peak);
 }
@@ -337,7 +337,7 @@ void CheckDeclaredSignatureScaling()
         var path = Path.Combine(extraction, "DeclaredCost.lean");
         File.WriteAllText(path, measured);
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var counts = HeartbeatCount().Matches(output).Select(match =>
+        var counts = HeartbeatCount.Matches(output).Select(match =>
             long.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         if (counts.Length != 1 || counts[0] <= 0 ||
             !output.Contains($"'Extracted.{theorem}' does not depend on any axioms", StringComparison.Ordinal))

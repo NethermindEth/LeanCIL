@@ -509,7 +509,7 @@ using System.Text.RegularExpressions;
 public static partial class Patterns
 {
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*\z")]
-    public static partial Regex Identifier();
+    public static partial Regex Identifier { get; }
 }
 """);
 Run(["dotnet", "build", Path.Combine(regexDirectory, "Regex.csproj"), "-c", "Release"]);

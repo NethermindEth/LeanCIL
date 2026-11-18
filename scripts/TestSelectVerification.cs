@@ -86,7 +86,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         "Jobs do not start longest first");
     Require(groups.Select(group => group.Suite).Distinct().Count() == groups.Length &&
         groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
-            WorkflowPatterns.JobName().IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
+            WorkflowPatterns.JobName.IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
     // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
     const double setupSeconds = 52;
     double Wall(IEnumerable<double> jobs)
@@ -497,7 +497,7 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     const string marker = "        run: |\n";
     var start = workflow.LastIndexOf(marker, StringComparison.Ordinal);
     Require(start >= 0, "Missing workflow gate");
-    var gate = WorkflowPatterns.StepIndent().Replace(workflow[(start + marker.Length)..], "");
+    var gate = WorkflowPatterns.StepIndent.Replace(workflow[(start + marker.Length)..], "");
     string[] statuses = ["success", "failure", "cancelled", "skipped"];
     foreach (var planned in statuses)
     foreach (var selected in new[] { "true", "false", "" })
@@ -629,7 +629,7 @@ Test("each way to reach another repository is found in a scratch copy of a workf
         File.WriteAllText(copy, original);
         Require(ExternalSources.Scan(scratch, [copy]).Count == 0, "An unchanged copy must pass");
         // Strings are split so that this file does not match its own rules.
-        string checkoutStep = ExternalSources.CheckoutStep().Match(original).Value;
+        string checkoutStep = ExternalSources.CheckoutStep.Match(original).Value;
         Require(checkoutStep.Length > 0, "The workflow has no checkout step to mutate");
         string indent = checkoutStep[..checkoutStep.IndexOf('-')];
         int stepStart = original.IndexOf(checkoutStep, StringComparison.Ordinal);
@@ -696,31 +696,31 @@ static partial class ExternalSources
     };
 
     [GeneratedRegex(@"^\s*(-\s+)?repository\s*:")]
-    private static partial Regex CheckoutRepository();
+    private static partial Regex CheckoutRepository { get; }
 
     [GeneratedRegex(@"\bgit\s+(clone|submodule|remote\s+add)\b|\bgh\s+repo\s+clone\b|""(clone|submodule)""")]
-    private static partial Regex FetchRepository();
+    private static partial Regex FetchRepository { get; }
 
     [GeneratedRegex(@"(?m)^( *)- uses: actions/checkout@.*$")]
-    internal static partial Regex CheckoutStep();
+    internal static partial Regex CheckoutStep { get; }
 
     [GeneratedRegex(@"--sourc[e]\b|\bnuget\s+add\s+sourc[e]\b|<add\s+key=", RegexOptions.IgnoreCase)]
-    private static partial Regex PackageSource();
+    private static partial Regex PackageSource { get; }
 
     [GeneratedRegex(@"nuget\.org", RegexOptions.IgnoreCase)]
-    private static partial Regex NugetHost();
+    private static partial Regex NugetHost { get; }
 
     [GeneratedRegex(@"github\.com/(?!NethermindEth/LeanCIL[/""]|leanprover/elan/releases/download/v4\.2\.4/)")]
-    private static partial Regex OtherRepositoryUrl();
+    private static partial Regex OtherRepositoryUrl { get; }
 
     [GeneratedRegex(@"(path|working-directory)\s*:\s*['""]?(\.\.|/|~|[A-Za-z]:)|\bcd\s+\.\.")]
-    private static partial Regex WorkflowEscape();
+    private static partial Regex WorkflowEscape { get; }
 
     [GeneratedRegex(@"^#:(include|project)\s+(\S+)")]
-    private static partial Regex PathDirective();
+    private static partial Regex PathDirective { get; }
 
     [GeneratedRegex(@"^#:package\s+([^@\s]+)")]
-    private static partial Regex PackageDirective();
+    private static partial Regex PackageDirective { get; }
 
     /// <summary>Every workflow and every script or test source that a suite runs.</summary>
     internal static IEnumerable<string> CiFiles(string root) =>
@@ -746,17 +746,17 @@ static partial class ExternalSources
 
     private static IEnumerable<string> Broken(string root, string file, bool workflow, string line)
     {
-        if (workflow && CheckoutRepository().IsMatch(line)) yield return "checkout-repository";
-        if (workflow && WorkflowEscape().IsMatch(line)) yield return "escape";
-        if (FetchRepository().IsMatch(line)) yield return "fetch-repository";
-        if (PackageSource().IsMatch(line)) yield return "package-source";
-        if (NugetHost().IsMatch(line)) yield return "nuget-host";
-        if (OtherRepositoryUrl().IsMatch(line)) yield return "other-url";
-        var path = PathDirective().Match(line);
+        if (workflow && CheckoutRepository.IsMatch(line)) yield return "checkout-repository";
+        if (workflow && WorkflowEscape.IsMatch(line)) yield return "escape";
+        if (FetchRepository.IsMatch(line)) yield return "fetch-repository";
+        if (PackageSource.IsMatch(line)) yield return "package-source";
+        if (NugetHost.IsMatch(line)) yield return "nuget-host";
+        if (OtherRepositoryUrl.IsMatch(line)) yield return "other-url";
+        var path = PathDirective.Match(line);
         string? target = path.Success
             ? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, path.Groups[2].Value)) : null;
         if (target is not null && !Within(root, target)) yield return "directive";
-        var package = PackageDirective().Match(line);
+        var package = PackageDirective.Match(line);
         if (package.Success && !AllowedPackages.Contains(package.Groups[1].Value)) yield return "directive";
     }
 
@@ -770,9 +770,9 @@ static partial class WorkflowPatterns
 {
     /// <summary>A job name: its first suite, then the count of the suites packed with it.</summary>
     [GeneratedRegex(@"\A[a-z+-]+(\+\d+more)?\z")]
-    internal static partial Regex JobName();
+    internal static partial Regex JobName { get; }
 
     /// <summary>The indentation of a line of a step's script.</summary>
     [GeneratedRegex(@"(?m)^ {10}")]
-    internal static partial Regex StepIndent();
+    internal static partial Regex StepIndent { get; }
 }

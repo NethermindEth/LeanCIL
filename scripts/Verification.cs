@@ -1082,14 +1082,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         public void Add(string line)
         {
-            if (LakeJob().Match(line) is { Success: true } job)
+            if (LakeJob.Match(line) is { Success: true } job)
                 Volatile.Write(ref latest, $": {job.Groups[1].Value} of {job.Groups[2].Value} Lake jobs");
         }
 
         public override string ToString() => Volatile.Read(ref latest);
 
         [GeneratedRegex(@"\A(?:\S+ )?\[([0-9]+)/([0-9]+)\] ")]
-        private static partial Regex LakeJob();
+        private static partial Regex LakeJob { get; }
     }
 
     static async Task<string> CaptureOutput(StreamReader reader, TextWriter writer, ProgressSummary? summary = null,
@@ -1136,10 +1136,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// Stderr without stage progress lines, which a run prints for any stage that outlasts an interval:
     /// what remains is the command's own diagnostics.
     /// </summary>
-    internal static string WithoutStageProgress(string stderr) => StageProgressLine().Replace(stderr, "");
+    internal static string WithoutStageProgress(string stderr) => StageProgressLine.Replace(stderr, "");
 
     [GeneratedRegex(@"^(?:START|PROGRESS|END) [^\n]*(?:\n|\z)", RegexOptions.Multiline)]
-    private static partial Regex StageProgressLine();
+    private static partial Regex StageProgressLine { get; }
 
     static readonly object TraceGate = new();
     // A reused process id must not append to an earlier process's trace, which a reader treats as old.
@@ -1499,7 +1499,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         static string? OtherLibrary(List<string> table) =>
             table is ["[[lean_lib]]", var declaration] &&
-            LibraryName().Match(declaration) is { Success: true } match && match.Groups[1].Value is var name &&
+            LibraryName.Match(declaration) is { Success: true } match && match.Groups[1].Value is var name &&
             name != "CIL" && !name.StartsWith("CIL.", StringComparison.Ordinal) ? name : null;
         // A certificate must never resolve Extracted to the editor's sources.
         static bool EditorLibrary(List<string> table) =>
@@ -1516,7 +1516,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     const string EditorLibraryName = "LeanCILEditor";
 
     [GeneratedRegex(@"\Aname = ""([A-Za-z_][A-Za-z0-9_.]*)""\z")]
-    private static partial Regex LibraryName();
+    private static partial Regex LibraryName { get; }
 
     /// <summary>Copies one certified library source from the checkout; the lakefile is its library view.</summary>
     static void CopyLibrarySource(string name, string destination)
@@ -1909,37 +1909,37 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     /// <summary>The name of a certified library entry: its key.</summary>
     [GeneratedRegex(@"\A[0-9a-f]{64}\z")]
-    private static partial Regex KeyName();
+    private static partial Regex KeyName { get; }
 
     [GeneratedRegex(@"\A[0-9a-f]{64}-[0-9a-f]{64}\z")]
-    private static partial Regex SupportGeneration();
+    private static partial Regex SupportGeneration { get; }
 
     [GeneratedRegex(@"\A[0-9a-f]{64}(?:-[0-9a-f]{64})?\.(?:(?:invalid|evicted)-)?[0-9a-f]{32}\z")]
-    private static partial Regex AbandonedStaging();
+    private static partial Regex AbandonedStaging { get; }
 
     /// <summary>The names a library publisher gives a directory it is still filling or has set aside.</summary>
     [GeneratedRegex(@"\A[0-9a-f]{64}\.(?:(?:evicted|download)-)?[0-9a-f]{32}\z")]
-    private static partial Regex LibraryStaging();
+    private static partial Regex LibraryStaging { get; }
 
     /// <summary>A file beside a library entry that goes with it: a closure record or an editor pin.</summary>
     [GeneratedRegex(@"\A(?<key>[0-9a-f]{64})\.(?<kind>closure|pin-[0-9a-f]{32})\z")]
-    private static partial Regex LibrarySidecar();
+    private static partial Regex LibrarySidecar { get; }
 
     /// <summary>A file a killed publisher leaves: a download archive or a pin being written.</summary>
     [GeneratedRegex(@"\A[0-9a-f]{64}\.(?:download-[0-9a-f]{32}\.zip|pin-[0-9a-f]{32}\.tmp-[0-9a-f]{32})\z")]
-    private static partial Regex LibraryStagingFile();
+    private static partial Regex LibraryStagingFile { get; }
 
     /// <summary>A pin a pass set aside while it judged it, by the name it was given.</summary>
     [GeneratedRegex(@"\A[0-9a-f]{64}\.pin-[0-9a-f]{32}\.dead-[0-9a-f]{32}\z")]
-    private static partial Regex RetiredPin();
+    private static partial Regex RetiredPin { get; }
 
     /// <summary>The part of a retired pin's name that the pin's own name lacks.</summary>
     [GeneratedRegex(@"\.dead-[0-9a-f]{32}\z")]
-    private static partial Regex DeadPinSuffix();
+    private static partial Regex DeadPinSuffix { get; }
 
     /// <summary>The line of a framework package's lakefile that names the directory of the library.</summary>
     [GeneratedRegex(@"^srcDir = (?<path>"".*"")\r?$", RegexOptions.Multiline)]
-    private static partial Regex SourceDirectoryLine();
+    private static partial Regex SourceDirectoryLine { get; }
 
     static int supportEvicted;
     static int libraryEvicted;
@@ -2070,7 +2070,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static void PinEntry(string entry, string package)
     {
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(entry));
-        if (Path.GetDirectoryName(full) is not { } parent || !KeyName().IsMatch(Path.GetFileName(full)) ||
+        if (Path.GetDirectoryName(full) is not { } parent || !KeyName.IsMatch(Path.GetFileName(full)) ||
             !SamePath(parent, LibraryCacheRoot))
             return;
         var packageFull = Path.GetFullPath(package);
@@ -2104,7 +2104,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>The directory a framework lakefile reads the library from, or empty when it names none.</summary>
-    static string SourceDirectoryOf(string lakefile) => SourceDirectoryLine().Match(lakefile) is { Success: true } line
+    static string SourceDirectoryOf(string lakefile) => SourceDirectoryLine.Match(lakefile) is { Success: true } line
         ? JsonSerializer.Deserialize<string>(line.Groups["path"].Value) ?? "" : "";
 
     /// <summary>What a library pass did, for the stage that reports it.</summary>
@@ -2232,7 +2232,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// </summary>
     static FileInfo? RestorePin(FileInfo retired)
     {
-        var restored = Path.Combine(retired.DirectoryName!, DeadPinSuffix().Replace(retired.Name, ""));
+        var restored = Path.Combine(retired.DirectoryName!, DeadPinSuffix.Replace(retired.Name, ""));
         try
         {
             File.Move(retired.FullName, restored);
@@ -2308,14 +2308,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var restoredPins = new List<FileInfo>();
         if (library)
         {
-            foreach (var file in items.OfType<FileInfo>().Where(file => LibraryStagingFile().IsMatch(file.Name) &&
+            foreach (var file in items.OfType<FileInfo>().Where(file => LibraryStagingFile.IsMatch(file.Name) &&
                          now - file.LastWriteTimeUtc > AbandonedAfter))
                 DeleteQuietly(file.FullName);
             // A pin set aside by a pass that did not finish is judged again, by this pass's rules, at any age.
-            foreach (var file in items.OfType<FileInfo>().Where(file => RetiredPin().IsMatch(file.Name)))
+            foreach (var file in items.OfType<FileInfo>().Where(file => RetiredPin.IsMatch(file.Name)))
                 if (RestorePin(file) is { } restored) restoredPins.Add(restored);
         }
-        var sidecars = items.OfType<FileInfo>().Where(file => library && LibrarySidecar().IsMatch(file.Name))
+        var sidecars = items.OfType<FileInfo>().Where(file => library && LibrarySidecar.IsMatch(file.Name))
             .Concat(restoredPins).ToList();
         var pins = sidecars.Where(file => file.Name.Contains(".pin-", StringComparison.Ordinal))
             .ToLookup(file => file.Name[..64], StringComparer.Ordinal);
@@ -2418,7 +2418,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         foreach (var file in sidecars)
         {
             if (PassStopped(deadline, report)) return;
-            var match = LibrarySidecar().Match(file.Name);
+            var match = LibrarySidecar.Match(file.Name);
             var key = match.Groups["key"].Value;
             if (match.Groups["kind"].Value == "closure")
             {
@@ -2444,7 +2444,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static void EvictStaleSupport()
     {
         if (Interlocked.Exchange(ref supportEvicted, 1) != 0) return;
-        EvictUnused(SuccessCacheRoot, SupportGeneration(), AbandonedStaging(), SupportRetention);
+        EvictUnused(SuccessCacheRoot, SupportGeneration, AbandonedStaging, SupportRetention);
     }
 
     /// <summary>
@@ -2463,7 +2463,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var report = new PassReport();
         try
         {
-            EvictUnused(cacheRoot, KeyName(), LibraryStaging(), LibraryRetention, LibraryEntryLimit, current,
+            EvictUnused(cacheRoot, KeyName, LibraryStaging, LibraryRetention, LibraryEntryLimit, current,
                 count =>
                 {
                     stage = $"Removing up to {count} unused certified library cache " +
@@ -2788,7 +2788,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             if (!closure.Add(module)) continue;
             if (module == "CIL" || !sources.ContainsKey(ModuleSource(module))) return null;
-            foreach (Match import in SourceImport().Matches(read(ModuleSource(module))))
+            foreach (Match import in SourceImport.Matches(read(ModuleSource(module))))
                 if (IsFrameworkModule(import.Groups[1].Value)) pending.Enqueue(import.Groups[1].Value);
         }
         return [.. closure];
@@ -2828,7 +2828,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             var key = File.ReadAllText(ClosureRecord(cacheRoot, libraryKey)).Trim();
             var directory = Path.Combine(cacheRoot, key);
-            if (!KeyName().IsMatch(key) || !CertifiedLocalLibrary(directory, key) ||
+            if (!KeyName.IsMatch(key) || !CertifiedLocalLibrary(directory, key) ||
                 ReadManifest(directory) is not { } manifest) return null;
             const string extension = ".lean";
             string[] modules = [.. LibrarySources(manifest).Keys
@@ -2853,7 +2853,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (!File.Exists(record)) return;
             var key = File.ReadAllText(record).Trim();
             var directory = Path.Combine(cacheRoot, key);
-            if (KeyName().IsMatch(key) && Directory.Exists(directory) && HoldsReceipt(new DirectoryInfo(directory)))
+            if (KeyName.IsMatch(key) && Directory.Exists(directory) && HoldsReceipt(new DirectoryInfo(directory)))
             {
                 string doomed;
                 using (var hold = HoldEntryExclusively(directory))
@@ -3498,10 +3498,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // Read the module name, not the whole line: a trailing comment does not change an import.
     // Shared by standalone proofs and consumer dependency traversal.
     [GeneratedRegex(@"^[ \t]*(?:(?:public|meta)[ \t]+)*import[ \t]+(?:all[ \t]+)?([A-Za-z_][A-Za-z0-9_'.]*)(?=[ \t]*(?:--|/-|\r?$))", RegexOptions.Multiline)]
-    private static partial Regex SourceImport();
+    private static partial Regex SourceImport { get; }
 
     // Proofs opt in to PDB names and locations with `import ExtractedSymbols` or its keyed form.
-    static bool ImportsSymbols(string proof) => SourceImport().Matches(proof).Any(import =>
+    static bool ImportsSymbols(string proof) => SourceImport.Matches(proof).Any(import =>
         import.Groups[1].Value is var module && (module == "ExtractedSymbols" || SelectionModules.IsSymbols(module)));
 
     static string SymbolsFor(string output) => Path.Combine(output, "Symbols.lean") is var path && File.Exists(path) ? path
@@ -4196,7 +4196,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         foreach (var (level, text) in entries)
         {
             var label = level switch { "info" => "info", "warning" => "warning", _ => null };
-            var located = LocatedMessage().Match(text);
+            var located = LocatedMessage.Match(text);
             if (label is null || !located.Success ||
                 !LocationComparer.Equals(Path.GetFullPath(located.Groups["file"].Value, package), source))
                 continue;
@@ -4207,7 +4207,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     [GeneratedRegex(@"\A(?<file>[^\n]+?):(?<line>[0-9]+):(?<column>[0-9]+): (?<text>.*)\z", RegexOptions.Singleline)]
-    private static partial Regex LocatedMessage();
+    private static partial Regex LocatedMessage { get; }
 
     static string LeanString(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
@@ -4218,7 +4218,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// </summary>
     StatementView? ViewStatement(string directory, string olean, string leanPath, string proofSource, string theorem)
     {
-        var imports = SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value)
+        var imports = SourceImport.Matches(proofSource).Select(import => import.Groups[1].Value)
             .Concat(["Lean", "Extracted", StatementModule]).Distinct(StringComparer.Ordinal);
         var source = Path.Combine(directory, "LeanCILStatement.lean");
         var result = Path.Combine(directory, StatementViewFile);
@@ -4628,7 +4628,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (!importClosureFirst || fullImportAudit is not null || forceFullVerification ||
             extraction.Sources.Count > 0 || HasContractImports(extraction)) return null;
         static IEnumerable<string> Imports(string source) =>
-            SourceImport().Matches(source).Select(import => import.Groups[1].Value);
+            SourceImport.Matches(source).Select(import => import.Groups[1].Value);
         var proofImports = Imports(proofSource).ToArray();
         static bool Generated(string module) =>
             module is "Extracted" or "ExtractedSymbols" || SelectionModules.Is(module);
@@ -4701,7 +4701,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
         referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
         string[] selected = SelectionModules.Selected(
-            SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
+            SourceImport.Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
         IReadOnlyList<DeepCheckInputs.Pin>? matchedPins = null;
         if (deepRun is not null)
         {
@@ -5309,22 +5309,22 @@ internal static partial class LeanOutput
 
     // Lake job headers: failed, warned, informational and built.
     [GeneratedRegex(@"^(?:✖|⚠|ℹ|✔) \[\d+/\d+\] \S+ (?<module>\S+)")]
-    internal static partial Regex Job();
+    internal static partial Regex Job { get; }
 
     // The exact text Lean's runtime writes to stderr: `panic!` with its source position, runtime aborts, the C
     // array accessors, stack exhaustion and failed assertions. It counts only where a stderr line or a message
     // body starts with it, which is where the runtime writes it; the same words inside a sentence are a quote.
     [GeneratedRegex(@"\A(?:PANIC at \S+(?: \S+)?:\d+:\d+: .*|INTERNAL PANIC: .*|Error: index out of bounds\z|" +
         @"Stack overflow detected\. Aborting\.|LEAN ASSERTION VIOLATION.*)")]
-    private static partial Regex Marker();
+    private static partial Regex Marker { get; }
 
     // A Lake log entry or a Lean message that starts at a source position.
     [GeneratedRegex(@"^(?:(?:error|warning|info|trace): (?<location>.+?\.lean:\d+:\d+): |" +
         @"(?<location>.+?\.lean:\d+:\d+): (?:error|warning|info)(?:\([^)]*\))?: )")]
-    private static partial Regex Located();
+    private static partial Regex Located { get; }
 
     [GeneratedRegex(@"^(?:error|warning|info|trace): ")]
-    private static partial Regex Entry();
+    private static partial Regex Entry { get; }
 
     /// <summary>Whether `executable` is Lean, Lake or the audit executable built from Lean sources.</summary>
     internal static bool RunsLean(string executable)
@@ -5349,7 +5349,7 @@ internal static partial class LeanOutput
         foreach (var line in output.ReplaceLineEndings("\n").Split('\n'))
         {
             if (line.StartsWith(SummaryPrefix, StringComparison.Ordinal)) continue;
-            if (Job().Match(line) is { Success: true } job)
+            if (Job.Match(line) is { Success: true } job)
             {
                 (module, continued) = (job.Groups["module"].Value, null);
                 continue;
@@ -5358,16 +5358,16 @@ internal static partial class LeanOutput
             if (JsonMessage(line) is { } message)
             {
                 foreach (var text in message.Data.ReplaceLineEndings("\n").Split('\n'))
-                    if (Marker().Match(text) is { Success: true } match)
+                    if (Marker.Match(text) is { Success: true } match)
                         found.Add(new(module, message.Position, match.Value));
                 continued = null;
                 continue;
             }
-            var located = Located().Match(line);
-            var entry = located.Success ? located : Entry().Match(line);
+            var located = Located.Match(line);
+            var entry = located.Success ? located : Entry.Match(line);
             var location = located.Success ? located.Groups["location"].Value : entry.Success ? null : continued;
             // The body of a logged message starts after its level and position; any other line is read whole.
-            var internalError = Marker().Match(line[entry.Length..]);
+            var internalError = Marker.Match(line[entry.Length..]);
             if (internalError.Success) found.Add(new(module, location, internalError.Value));
             if (entry.Success) continued = internalError.Success ? location : null;
         }
@@ -5446,7 +5446,7 @@ internal sealed partial class SourceCopies(string directory)
     readonly Dictionary<string, int> observedLines = new(Program.LocationComparer);
 
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
-    private static partial Regex Location();
+    private static partial Regex Location { get; }
 
     /// <summary>
     /// Records `copy` as a copy of `original` when their bytes are equal; a copy that differs keeps its own path,
@@ -5563,7 +5563,7 @@ internal sealed partial class SourceCopies(string directory)
     /// <summary>`location`, a `file:line:column`, citing through `display` the original of a copied file.</summary>
     internal string Locate(string location, Func<string, string>? display = null)
     {
-        var match = Location().Match(location);
+        var match = Location.Match(location);
         if (!match.Success || OriginalOf(match.Groups["file"].Value) is not { } original) return location;
         var (_, line, column) = Position(match.Groups["file"].Value, int.Parse(match.Groups["line"].Value),
             int.Parse(match.Groups["column"].Value));
@@ -5585,14 +5585,14 @@ internal static partial class ObservedProof
 
     // An import command, plain or with module-system modifiers, at the start of a line.
     [GeneratedRegex(@"^[ \t]*(?:(?:public|private|meta)[ \t]+)*import\b", RegexOptions.Multiline)]
-    private static partial Regex ImportLine();
+    private static partial Regex ImportLine { get; }
 
     /// <summary>`source` with <see cref="Import"/> inserted, and the 1-based line it was inserted on.</summary>
     internal static (byte[] Bytes, int Line) Insert(byte[] source)
     {
         var preamble = source.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? Encoding.UTF8.Preamble.Length : 0;
         var text = Encoding.UTF8.GetString(source, preamble, source.Length - preamble);
-        var match = ImportLine().Match(text);
+        var match = ImportLine.Match(text);
         // A multiline `^` matches at a line start, so the match starts the import's line.
         var start = match.Success ? match.Index : 0;
         var at = preamble + Encoding.UTF8.GetByteCount(text.AsSpan(0, start));

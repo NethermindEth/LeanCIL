@@ -44,7 +44,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var site = ExtractedInstructions(source)
-        .Select(instruction => (instruction, Throw: ThrowPatterns.FoldedThrow().Match(instruction.Op)))
+        .Select(instruction => (instruction, Throw: ThrowPatterns.FoldedThrow.Match(instruction.Op)))
         .FirstOrDefault(candidate => candidate.Throw.Success);
     if (site.instruction is null) throw new InvalidOperationException($"No folded throw in {name}");
     var (method, pc, label) = (site.instruction.Method, site.instruction.Pc, site.Throw.Groups[1].Value);
@@ -234,5 +234,5 @@ Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forg
 static partial class ThrowPatterns
 {
     [GeneratedRegex(@"\A\.throw \.(\w+)\z")]
-    internal static partial Regex FoldedThrow();
+    internal static partial Regex FoldedThrow { get; }
 }

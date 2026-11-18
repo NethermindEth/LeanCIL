@@ -884,7 +884,7 @@ internal static partial class ProofOutline
         internal string Claim(string? wanted, string fallback)
         {
             // A parameter named like a generated hypothesis would be captured by the names the proof introduces.
-            var name = Regex.IsMatch(wanted ?? "", @"\A[A-Za-z][A-Za-z0-9_]*\z") && !Generated().IsMatch(wanted!)
+            var name = Regex.IsMatch(wanted ?? "", @"\A[A-Za-z][A-Za-z0-9_]*\z") && !Generated.IsMatch(wanted!)
                 ? wanted! : fallback;
             var candidate = name;
             for (var suffix = 1; !used.Add(candidate); suffix++) candidate = name + suffix;
@@ -898,7 +898,7 @@ internal static partial class ProofOutline
         @"encoded|changed|combined|formed|form|loadSigned|arrayApart|localHome|localWritten|localLoaded|" +
         @"frameFacts|below|fuel|invoked|callFormed|permitted)\d*|held\d+Final|" +
         @"(?:owned|kept|added|loaded)\d+(?:Field\d+)?(?:Signed)?)\z")]
-    private static partial Regex Generated();
+    private static partial Regex Generated { get; }
 
     /// <summary>Lean source with two-space indentation and lines kept under 100 characters.</summary>
     sealed class Writer

@@ -123,12 +123,12 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         StringComparison.Ordinal));
     var address = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.address ",
         StringComparison.Ordinal));
-    var changedTarget = ManagedPatterns.LinkTarget().Replace(call, "method := 999999");
+    var changedTarget = ManagedPatterns.LinkTarget.Replace(call, "method := 999999");
     // The link definition repeats the catalog, so these two mutations change it too and only the binding can
     // reject. A change that matched no definition would leave the links check as the only rejection.
     string Linked(string text, Func<string, string> change)
     {
-        var linked = ManagedPatterns.LinkDefinition().Replace(text, match => change(match.Value));
+        var linked = ManagedPatterns.LinkDefinition.Replace(text, match => change(match.Value));
         return linked == text ? throw new Exception("Mutation did not change a link definition") : linked;
     }
     foreach (var (mutation, theorem, before, after, marker) in new[]
@@ -152,7 +152,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         var path = Path.Combine(root, "Rejected-" + mutation + ".lean");
         var mutated = narrowed.Replace(before, after, StringComparison.Ordinal);
         if (mutation == "target")
-            mutated = Linked(mutated, link => ManagedPatterns.LinkTarget().Replace(link, "method := 999999"));
+            mutated = Linked(mutated, link => ManagedPatterns.LinkTarget.Replace(link, "method := 999999"));
         if (mutation == "identity")
             mutated = Linked(mutated, link => link.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch",
                 StringComparison.Ordinal));
@@ -233,7 +233,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         if (entry.Name != "Generic") continue;
         var call = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.call ",
             StringComparison.Ordinal));
-        var aggregate = ManagedPatterns.EmptyAggregate().Match(call).Value;
+        var aggregate = ManagedPatterns.EmptyAggregate.Match(call).Value;
         var pair = ".aggregate " + System.Text.Json.JsonSerializer.Serialize(
             module.Assembly.Name.FullName + "::Examples.IndirectValues/Pair") + " 0";
         var catalog = call.IndexOf(" } [", StringComparison.Ordinal);
@@ -247,9 +247,9 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         rejected.Add(path, "PASS distinct aggregate callable identity rejected", "ManagedCallsValid");
         foreach (var (label, pattern) in new[]
         {
-            ("calli-layout", ManagedPatterns.IndirectCallLayout()),
-            ("address-layout", ManagedPatterns.ReturnLayout()),
-            ("address-type-argument", ManagedPatterns.TypeArgumentLayout())
+            ("calli-layout", ManagedPatterns.IndirectCallLayout),
+            ("address-layout", ManagedPatterns.ReturnLayout),
+            ("address-type-argument", ManagedPatterns.TypeArgumentLayout)
         })
         {
             var match = pattern.Match(narrowed);
@@ -261,7 +261,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         }
         var local = NarrowEvidence(source, "method0_specialization_validated")
             .Replace("by constructor <;> rfl", "by decide +kernel", StringComparison.Ordinal);
-        var signature = ManagedPatterns.FunctionPointerLayout().Match(local);
+        var signature = ManagedPatterns.FunctionPointerLayout.Match(local);
         if (!signature.Success) throw new Exception("Missing callable local type");
         var invalidLocal = Path.Combine(root, "Rejected-local-layout.lean");
         File.WriteAllText(invalidLocal,
@@ -277,26 +277,26 @@ static partial class ManagedPatterns
 {
     /// <summary>A link definition of method 0, whose text repeats the catalog of its call site.</summary>
     [GeneratedRegex(@"(?m)^@\[cil_code\] def method0Link\d+ : Link := .*$")]
-    internal static partial Regex LinkDefinition();
+    internal static partial Regex LinkDefinition { get; }
 
     /// <summary>The method a link names.</summary>
     [GeneratedRegex(@"method := \d+")]
-    internal static partial Regex LinkTarget();
+    internal static partial Regex LinkTarget { get; }
 
     /// <summary>An aggregate type with no layout index beyond zero.</summary>
     [GeneratedRegex("""\.aggregate "[^"]+" 0""")]
-    internal static partial Regex EmptyAggregate();
+    internal static partial Regex EmptyAggregate { get; }
 
     // Each layout pattern captures the text before the layout index it ends with.
     [GeneratedRegex("""(\.indirectCall \(\.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex IndirectCallLayout();
+    internal static partial Regex IndirectCallLayout { get; }
 
     [GeneratedRegex("""(\.call \{[^\r\n]*?returnType := \.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex ReturnLayout();
+    internal static partial Regex ReturnLayout { get; }
 
     [GeneratedRegex("""(typeArguments := \[\.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex TypeArgumentLayout();
+    internal static partial Regex TypeArgumentLayout { get; }
 
     [GeneratedRegex("""(\.functionPointer \(\.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex FunctionPointerLayout();
+    internal static partial Regex FunctionPointerLayout { get; }
 }

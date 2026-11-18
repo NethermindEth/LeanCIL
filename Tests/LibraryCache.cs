@@ -342,7 +342,7 @@ try
             GC.Collect();
             using (var editorProbe = HoldEntryExclusively(wholeEntry))
                 if (editorProbe is not null) throw new Exception("An editor process did not hold its entry's lock");
-            if (EvictUnused(builtCache, KeyName(), LibraryStaging(), Days(7), 1, null, library: true)
+            if (EvictUnused(builtCache, KeyName, LibraryStaging, Days(7), 1, null, library: true)
                     .Contains(wholeLibraryKey) || !Directory.Exists(wholeEntry))
                 throw new Exception("A pass removed the entry an editor process was using");
         }
@@ -477,7 +477,7 @@ try
         return path;
     }
     List<string> EvictLibraries(string root, int? limit = null, string? current = null, double retentionDays = 7) =>
-        EvictUnused(root, KeyName(), LibraryStaging(), TimeSpan.FromDays(retentionDays), limit, current, library: true);
+        EvictUnused(root, KeyName, LibraryStaging, TimeSpan.FromDays(retentionDays), limit, current, library: true);
     TimeSpan Days(double days) => TimeSpan.FromDays(days);
 
     var retained = NewEvictionRoot();
@@ -541,9 +541,9 @@ try
     else Console.WriteLine("SKIP link inside an entry: no link could be made");
 
     // The names are anchored, so a name that only ends in a newline is no key.
-    if (KeyName().IsMatch(LibraryKeyOf('a') + "\n") || LibraryStaging().IsMatch(Staging('a') + "\n") ||
-        SupportGeneration().IsMatch(LibraryKeyOf('a') + "-" + LibraryKeyOf('b') + "\n") ||
-        AbandonedStaging().IsMatch(Staging('a') + "\n") || !KeyName().IsMatch(LibraryKeyOf('a')))
+    if (KeyName.IsMatch(LibraryKeyOf('a') + "\n") || LibraryStaging.IsMatch(Staging('a') + "\n") ||
+        SupportGeneration.IsMatch(LibraryKeyOf('a') + "-" + LibraryKeyOf('b') + "\n") ||
+        AbandonedStaging.IsMatch(Staging('a') + "\n") || !KeyName.IsMatch(LibraryKeyOf('a')))
         throw new Exception("A cache name pattern matched a name with a trailing newline");
     Console.WriteLine("PASS cache names match exactly");
 
@@ -811,14 +811,14 @@ try
     var vanishing = NewEvictionRoot();
     PlantEntry(vanishing, LibraryKeyOf('a'), Days(30));
     PlantEntry(vanishing, LibraryKeyOf('b'), Days(30));
-    if (EvictUnused(vanishing, KeyName(), LibraryStaging(), Days(7), 8, null, _ => Directory.Delete(vanishing, true),
+    if (EvictUnused(vanishing, KeyName, LibraryStaging, Days(7), 8, null, _ => Directory.Delete(vanishing, true),
             library: true).Count != 0)
         throw new Exception("A pass counted entries it could not remove from a root that vanished");
     var counted = NewEvictionRoot();
     PlantEntry(counted, LibraryKeyOf('a'), Days(30));
     PlantEntry(counted, LibraryKeyOf('b'), Days(30));
     var countReport = new PassReport();
-    if (EvictUnused(counted, KeyName(), LibraryStaging(), Days(7), null, null, null, true, countReport).Count != 2 ||
+    if (EvictUnused(counted, KeyName, LibraryStaging, Days(7), null, null, null, true, countReport).Count != 2 ||
         countReport.Removed != 2)
         throw new Exception("The report did not count the directories removed");
     Console.WriteLine("PASS a pin that cannot be read keeps its entry for the retention period, and no pass raises");
@@ -961,7 +961,7 @@ try
         };
         var gaveUp = new PassReport();
         List<string> stopped;
-        try { stopped = EvictUnused(slowRoot, KeyName(), LibraryStaging(), Days(7), null, null, null, true, gaveUp); }
+        try { stopped = EvictUnused(slowRoot, KeyName, LibraryStaging, Days(7), null, null, null, true, gaveUp); }
         finally { passClock = clockBefore; }
         // A read waited for until the read limit would have answered after ten seconds and been judged.
         if (!gaveUp.GaveUp || gaveUp.Unjudged != 1 || stopped.Count != 0 ||
@@ -1044,7 +1044,7 @@ try
     {
         passClock = () => clockCalls++ == 0 ? jumpStart : jumpStart.AddHours(2);
         var jumped = new PassReport();
-        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, jumped);
+        EvictUnused(unread, KeyName, LibraryStaging, Days(7), null, null, null, true, jumped);
         RequireUnreadKept("a clock that jumped");
         if (!jumped.GaveUp) throw new Exception("A pass whose clock jumped past its limit did not say so");
     }
@@ -1081,7 +1081,7 @@ try
         packageReadLimit = TimeSpan.FromSeconds(30);
         passLimit = TimeSpan.FromMilliseconds(200);
         var cutShort = new PassReport();
-        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, cutShort);
+        EvictUnused(unread, KeyName, LibraryStaging, Days(7), null, null, null, true, cutShort);
         RequireUnreadKept("a read that waited out the pass");
         if (!cutShort.GaveUp) throw new Exception("A pass whose read waited out its limit did not say so");
     }
@@ -1098,7 +1098,7 @@ try
         packageReader = _ => { holdsRead.Wait(); return ""; };
         packageReadLimit = TimeSpan.FromMilliseconds(300);
         var timedOut = new PassReport();
-        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, timedOut);
+        EvictUnused(unread, KeyName, LibraryStaging, Days(7), null, null, null, true, timedOut);
         RequireUnreadKept("a read that did not finish", staleToo: false);
         if (timedOut.Unjudged != 1) throw new Exception("A read that did not finish was not counted");
     }

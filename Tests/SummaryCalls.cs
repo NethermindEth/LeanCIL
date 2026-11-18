@@ -200,7 +200,7 @@ void RejectedProof(string name, string text, ProofTarget target, string theorem,
     catch (InvalidOperationException error)
     {
         // The session checks a copy of the proof, with the same lines, as Proof.lean.
-        var located = SummaryPatterns.ProofError().Matches(error.Message)
+        var located = SummaryPatterns.ProofError.Matches(error.Message)
             .Select(match => (Line: int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
                 Message: match.Groups[2].Value)).ToArray();
         if (start == 0 || end == 0 || !located.Any(found => found.Line >= start && found.Line <= end &&
@@ -417,5 +417,5 @@ record ProofTarget(string Assembly, string Library, string Entry);
 static partial class SummaryPatterns
 {
     [GeneratedRegex(@"Proof\.lean:(\d+):\d+: error(?:\([^)\r\n]*\))?: ([^\r\n]*)")]
-    internal static partial Regex ProofError();
+    internal static partial Regex ProofError { get; }
 }

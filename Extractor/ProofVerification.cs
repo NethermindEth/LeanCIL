@@ -52,7 +52,7 @@ partial class Program
     static void RejectRepositoryImports(string proof)
     {
         var repository = RepositoryModules();
-        var imported = SourceImport().Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
+        var imported = SourceImport.Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
             .FirstOrDefault(repository.Contains);
         if (imported is not null)
             throw new InvalidDataException($"{CliPaths.Display(proof)} imports {imported}, a LeanCIL repository " +

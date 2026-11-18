@@ -227,7 +227,7 @@ partial class Program
         string[] Lines(string text) => [.. SplitExtractionComponents(text).Sources.Values
             .Single(source => source.Contains(signature, StringComparison.Ordinal)).Split('\n')
             .Where(line => !line.StartsWith("import ", StringComparison.Ordinal))
-            .Select(line => ComponentMethodNumber().Replace(line.Trim(), "method#"))];
+            .Select(line => ComponentMethodNumber.Replace(line.Trim(), "method#"))];
         var (left, right) = (Lines(first), Lines(second));
         if (left.Length != right.Length)
             throw new Exception($"The components of {signature} have {left.Length} and {right.Length} lines.");
@@ -235,7 +235,7 @@ partial class Program
     }
 
     [GeneratedRegex(@"\bmethod[0-9]+")]
-    private static partial Regex ComponentMethodNumber();
+    private static partial Regex ComponentMethodNumber { get; }
 
     static void CheckConsumerCompilation(string[] cli, string package, string proof, string[] outputs)
     {

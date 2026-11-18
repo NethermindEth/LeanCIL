@@ -117,14 +117,14 @@ internal static partial class ClassViews
 
     /// <summary>The name C# source gives a field: an auto-property's backing field takes its property's.</summary>
     internal static string FieldName(FieldDefinition field) =>
-        BackingField().Match(field.Name) is { Success: true } backing ? backing.Groups[1].Value : field.Name;
+        BackingField.Match(field.Name) is { Success: true } backing ? backing.Groups[1].Value : field.Name;
 
     [GeneratedRegex(@"\A<([A-Za-z_][A-Za-z0-9_]*)>k__BackingField\z")]
-    private static partial Regex BackingField();
+    private static partial Regex BackingField { get; }
 
     // Metadata names may hold characters Lean identifiers cannot, such as a closure class's `<>c__DisplayClass1_0`.
     static string Identifier(string name) =>
-        LeanIdentifier().IsMatch(name) && !Keywords.Contains(name) ? name : $"«{name}»";
+        LeanIdentifier.IsMatch(name) && !Keywords.Contains(name) ? name : $"«{name}»";
 
     static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
@@ -136,5 +136,5 @@ internal static partial class ClassViews
     };
 
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*\z")]
-    private static partial Regex LeanIdentifier();
+    private static partial Regex LeanIdentifier { get; }
 }

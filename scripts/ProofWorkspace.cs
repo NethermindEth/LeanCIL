@@ -380,7 +380,7 @@ partial class Program
                 File.Delete(output);
         Console.WriteLine($"Removed editor extraction {key}: {selection.Method} ({selection.Profile})");
         foreach (var proof in selection.Proofs.Select(proof => Path.Combine(root, proof.Proof)).Where(File.Exists))
-            if (SourceImport().Matches(File.ReadAllText(proof)).Any(import => import.Groups[1].Value.EndsWith(
+            if (SourceImport.Matches(File.ReadAllText(proof)).Any(import => import.Groups[1].Value.EndsWith(
                     "." + key, StringComparison.Ordinal) && SelectionModules.Is(import.Groups[1].Value)))
                 Console.WriteLine("  " + CliPaths.Display(proof) + " imports it and now fails at that import.");
         Console.WriteLine("  Other methods' modules are unchanged and nothing was rebuilt.");
@@ -495,7 +495,7 @@ partial class Program
         Console.WriteLine("  Modules in " + CliPaths.Display(editor));
         Console.WriteLine("  Proof: " + CliPaths.Display(settings.Proof));
         // The editor resolves no plain Extracted, so a proof still naming it, or another method, fails at its import.
-        foreach (var import in SourceImport().Matches(File.ReadAllText(settings.Proof))
+        foreach (var import in SourceImport.Matches(File.ReadAllText(settings.Proof))
             .Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal))
             if (import is "Extracted" or "ExtractedSymbols" ||
                 (SelectionModules.Is(import) && !modules.Contains(import, StringComparer.Ordinal)))

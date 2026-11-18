@@ -7,7 +7,7 @@ partial class Program
     // obligation a mutation breaks is shown false, not merely unprovable by the tactic that proves it when true.
     static string KernelRefutation(string mutated, string theorem, string refutation)
     {
-        var obligation = SingleLineTheorem().Matches(mutated).FirstOrDefault(match => match.Groups[1].Value == theorem)
+        var obligation = SingleLineTheorem.Matches(mutated).FirstOrDefault(match => match.Groups[1].Value == theorem)
             ?? throw new InvalidOperationException("Missing obligation to refute: " + theorem);
         return mutated.Replace(obligation.Value,
             $"theorem {refutation} : ¬ ({obligation.Groups[2].Value}) := by decide +kernel");
@@ -35,7 +35,7 @@ partial class Program
             {
                 if (!item.Source.Contains("namespace Extracted\n", StringComparison.Ordinal))
                     throw new InvalidOperationException("Expected generated evidence: " + item.Path);
-                bodies.Add(RejectedImport().Replace(item.Source,
+                bodies.Add(RejectedImport.Replace(item.Source,
                     match => { imports.Add(match.Groups[1].Value); return ""; }));
             }
             const string isolation = """
@@ -81,7 +81,7 @@ partial class Program
             File.WriteAllText(path, source);
             var result = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
             // Lean names the file with either separator.
-            var located = LocatedDiagnostic().Matches(result.Output);
+            var located = LocatedDiagnostic.Matches(result.Output);
             Match[] diagnostics = [.. located.Where(match => match.Groups["file"].Value == path.Replace('\\', '/'))];
             if (diagnostics.Length == 0)
                 diagnostics = [.. located.Where(match => match.Groups["file"].Value == path)];
@@ -128,16 +128,16 @@ partial class Program
             for (var index = 0; index < cases.Count; index++)
             {
                 var output = errors[index].ToString();
-                var theorems = SingleLineTheorem().Matches(cases[index].Source)
+                var theorems = SingleLineTheorem.Matches(cases[index].Source)
                     .Select(match => match.Groups[1].Value)
-                    .Where(name => !CarriedWitnessName().IsMatch(name)).ToArray();
+                    .Where(name => !CarriedWitnessName.IsMatch(name)).ToArray();
                 if (!output.Contains("proved that the proposition", StringComparison.Ordinal) ||
                     !output.Contains("is false", StringComparison.Ordinal) || theorems.Length != 1)
                 {
                     unrefuted.Add(Path.GetFileName(cases[index].Path));
                     continue;
                 }
-                var body = RejectedImport().Replace(
+                var body = RejectedImport.Replace(
                     KernelRefutation(cases[index].Source, theorems[0], "kernelRefutation"),
                     match => { imports.Add(match.Groups[1].Value); return ""; });
                 refutations.Add($"namespace KernelRefuted{refutations.Count}\n{body}\n" +
@@ -160,15 +160,15 @@ partial class Program
     }
 
     [GeneratedRegex(@"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", RegexOptions.Multiline)]
-    private static partial Regex RejectedImport();
+    private static partial Regex RejectedImport { get; }
 
     // A theorem stated and proved on one line; a Lean name may end in ?, ! or '.
     [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) : ([^\r\n]*?) := [^\r\n]*(?=\r?$)")]
-    private static partial Regex SingleLineTheorem();
+    private static partial Regex SingleLineTheorem { get; }
 
     [GeneratedRegex(@"(?m)^(?<file>[^\r\n]*?):(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:")]
-    private static partial Regex LocatedDiagnostic();
+    private static partial Regex LocatedDiagnostic { get; }
 
     [GeneratedRegex(@"\AexternalIdentity|_tables_valid\z")]
-    private static partial Regex CarriedWitnessName();
+    private static partial Regex CarriedWitnessName { get; }
 }

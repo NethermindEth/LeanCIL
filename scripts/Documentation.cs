@@ -193,14 +193,14 @@ static partial class Documentation
         string? audience = null;
         for (var index = 0; index < lines.Length; index++)
         {
-            if (Patterns.Audience().Match(lines[index]) is { Success: true } declared)
+            if (Patterns.Audience.Match(lines[index]) is { Success: true } declared)
             {
                 if (audience is not null) problems.Add($"{name}:{index + 1}: a document declares one audience");
                 audience = declared.Groups["value"].Value;
                 if (audience is not (Users or Maintainers))
                     problems.Add($"{name}:{index + 1}: audience must be `{Users}` or `{Maintainers}`");
             }
-            var open = Patterns.Fence().Match(lines[index]);
+            var open = Patterns.Fence.Match(lines[index]);
             if (!open.Success)
             {
                 prose.Add(new(name, index + 1, lines[index]));
@@ -293,9 +293,9 @@ static partial class Documentation
             foreach (var line in page.Prose)
             {
                 var at = $"{line.Document}:{line.Line}";
-                foreach (Match match in Patterns.LineCitation().Matches(line.Text))
+                foreach (Match match in Patterns.LineCitation.Matches(line.Text))
                     failures.Add($"{at}: `{match.Value}` cites a source line; cite a declaration name");
-                foreach (Match match in Patterns.AnyLink().Matches(line.Text))
+                foreach (Match match in Patterns.AnyLink.Matches(line.Text))
                 {
                     references++;
                     var target = match.Groups["target"].Value;
@@ -313,7 +313,7 @@ static partial class Documentation
                     if (hash >= 0 && linked.EndsWith(".md", StringComparison.Ordinal) && File.Exists(linked) &&
                         !AnchorsOf(linked).Contains(target[(hash + 1)..]))
                         failures.Add($"{at}: `{target}` names no heading of {relative}");
-                    if (Patterns.NamedLink().Match(match.Value) is { Success: true } named &&
+                    if (Patterns.NamedLink.Match(match.Value) is { Success: true } named &&
                         Path.GetExtension(linked) is ".lean" or ".cs" && File.Exists(linked))
                     {
                         var label = named.Groups["label"].Value;
@@ -323,19 +323,19 @@ static partial class Documentation
                             failures.Add($"{at}: `{label}` -> {relative}: {problem}");
                     }
                 }
-                foreach (Match match in Patterns.CodeSpan().Matches(line.Text))
+                foreach (Match match in Patterns.CodeSpan.Matches(line.Text))
                 {
                     var span = match.Groups["span"].Value;
-                    if (Patterns.RepositoryPath().IsMatch(span))
+                    if (Patterns.RepositoryPath.IsMatch(span))
                     {
                         references++;
                         var path = span.TrimEnd('/');
                         if (!ExistsExactly(root, Join(root, path)))
                             failures.Add($"{at}: `{span}` does not exist");
                     }
-                    if (userFacing && (Unshipped(span) || Patterns.TestModule().IsMatch(span)))
+                    if (userFacing && (Unshipped(span) || Patterns.TestModule.IsMatch(span)))
                         failures.Add($"{at}: `{span}`: {UnshippedReason}");
-                    if (Patterns.CommandSpan().Match(span) is { Success: true } command)
+                    if (Patterns.CommandSpan.Match(span) is { Success: true } command)
                     {
                         references++;
                         if (!commands.Contains(command.Value))
@@ -445,8 +445,8 @@ static partial class Documentation
     /// </summary>
     internal static string[] NormalizedOutput(IEnumerable<string> lines)
     {
-        var normalized = lines.Select(line => Patterns.SourcePosition().Replace(
-            Patterns.Sha256().Replace(line.TrimEnd(), "<sha256>"), "${file}:<line>:<column>")).ToList();
+        var normalized = lines.Select(line => Patterns.SourcePosition.Replace(
+            Patterns.Sha256.Replace(line.TrimEnd(), "<sha256>"), "${file}:<line>:<column>")).ToList();
         while (normalized.Count > 0 && normalized[^1].Length == 0) normalized.RemoveAt(normalized.Count - 1);
         return [.. normalized];
     }
@@ -573,9 +573,9 @@ static partial class Documentation
         if (heading < 0)
             return [$"{document}: no `{SuiteHeading}` table lists the suites `scripts/Test.cs` accepts"];
         HashSet<string> listed = new(StringComparer.Ordinal);
-        foreach (var line in page.Prose.Skip(heading + 1).TakeWhile(line => !Patterns.Heading().IsMatch(line.Text)))
+        foreach (var line in page.Prose.Skip(heading + 1).TakeWhile(line => !Patterns.Heading.IsMatch(line.Text)))
         {
-            if (Patterns.SuiteRow().Match(line.Text) is not { Success: true } row) continue;
+            if (Patterns.SuiteRow.Match(line.Text) is not { Success: true } row) continue;
             var name = row.Groups["name"].Value;
             if (!listed.Add(name))
                 failures.Add($"{line.Document}:{line.Line}: suite `{name}` is listed twice");
@@ -623,7 +623,7 @@ static partial class Documentation
                 if (line.Trim() != "import CIL")
                     yield return $"{document}:{index + 1}: public proof fixtures must import only `CIL`";
             }
-            foreach (var name in Patterns.SimpName().Matches(line).Select(match => match.Value).Distinct())
+            foreach (var name in Patterns.SimpName.Matches(line).Select(match => match.Value).Distinct())
                 if (ProofImplementationNames.Contains(name.Split('.')[^1]))
                     yield return $"{document}:{index + 1}: `{name}` is an implementation helper, " +
                         "not part of the public proof surface";
@@ -661,8 +661,8 @@ static partial class Documentation
     internal static IEnumerable<string> SimpListProblems(string document, int firstLine, string[] lines)
     {
         var text = string.Join('\n', lines.Select(StripComment));
-        var bound = Patterns.Have().Matches(text).Select(match => match.Groups["name"].Value).ToHashSet();
-        foreach (Match call in Patterns.SimpList().Matches(text))
+        var bound = Patterns.Have.Matches(text).Select(match => match.Groups["name"].Value).ToHashSet();
+        foreach (Match call in Patterns.SimpList.Matches(text))
         {
             var start = call.Index + call.Length;
             var depth = 1;
@@ -670,7 +670,7 @@ static partial class Documentation
             for (; end < text.Length && depth > 0; end++)
                 depth += text[end] switch { '[' => 1, ']' => -1, _ => 0 };
             var line = firstLine + text[..call.Index].Count(character => character == '\n');
-            foreach (var name in Patterns.SimpName().Matches(text[start..Math.Max(start, end - 1)])
+            foreach (var name in Patterns.SimpName.Matches(text[start..Math.Max(start, end - 1)])
                          .Select(match => match.Value).Distinct())
                 if (!bound.Contains(name) && EvaluatorInternals.Any(full =>
                         full == name || full.EndsWith("." + name, StringComparison.Ordinal)))
@@ -695,10 +695,10 @@ static partial class Documentation
             var lines = File.ReadAllLines(path);
             failures.AddRange(SimpListProblems(document, 1, lines));
             if (document == PublicProofFixture) failures.AddRange(PublicProofProblems(document, lines));
-            var printed = lines.Select(line => Patterns.PrintAxioms().Match(line)).Where(match => match.Success)
+            var printed = lines.Select(line => Patterns.PrintAxioms.Match(line)).Where(match => match.Success)
                 .Select(match => match.Groups["name"].Value.Split('.')[^1]).ToHashSet(StringComparer.Ordinal);
             for (var index = 0; index < lines.Length; index++)
-                if (Patterns.Theorem().Match(lines[index]) is { Success: true } theorem &&
+                if (Patterns.Theorem.Match(lines[index]) is { Success: true } theorem &&
                     !printed.Contains(theorem.Groups["name"].Value.Split('.')[^1]))
                     failures.Add($"{document}:{index + 1}: theorem `{theorem.Groups["name"].Value}` has no " +
                         "`#print axioms` line; print its axioms after it");
@@ -717,10 +717,10 @@ static partial class Documentation
         var anchors = new HashSet<string>(StringComparer.Ordinal);
         foreach (var line in File.ReadLines(path))
         {
-            if (Patterns.ExplicitAnchor().Match(line) is { Success: true } named)
+            if (Patterns.ExplicitAnchor.Match(line) is { Success: true } named)
                 anchors.Add(named.Groups["name"].Value);
-            if (Patterns.Heading().Match(line) is not { Success: true } heading) continue;
-            var slug = Patterns.AnchorPunctuation().Replace(heading.Groups["text"].Value.Trim().ToLowerInvariant(), "")
+            if (Patterns.Heading.Match(line) is not { Success: true } heading) continue;
+            var slug = Patterns.AnchorPunctuation.Replace(heading.Groups["text"].Value.Trim().ToLowerInvariant(), "")
                 .Replace(' ', '-');
             var unique = slug;
             for (var repeat = 1; !anchors.Add(unique); repeat++) unique = $"{slug}-{repeat}";
@@ -748,7 +748,7 @@ static partial class Documentation
         var at = $"{block.Document}:{block.Line}";
         for (var offset = 0; offset < block.Lines.Length; offset++)
         {
-            if (Patterns.Import().Match(block.Lines[offset]) is { Success: true } import &&
+            if (Patterns.Import.Match(block.Lines[offset]) is { Success: true } import &&
                 ImportProblem(root, import.Groups["module"].Value, block.Kind) is { } problem)
                 yield return $"{block.Document}:{block.Line + offset}: {problem}";
             if (block.Lines[offset].Length > LeanLineLimit)
@@ -757,7 +757,7 @@ static partial class Documentation
         }
         switch (block.Kind)
         {
-            case SnippetKind.Checked when block.Lines.Any(line => Patterns.Extraction().IsMatch(StripComment(line))):
+            case SnippetKind.Checked when block.Lines.Any(line => Patterns.Extraction.IsMatch(StripComment(line))):
                 yield return $"{at}: the block needs an extraction; mark it `excerpt <path>` or `extracted`";
                 break;
             case SnippetKind.Excerpt:
@@ -765,7 +765,7 @@ static partial class Documentation
                 yield break;
         }
         for (var offset = 0; offset < block.Lines.Length; offset++)
-            foreach (Match command in Patterns.Command().Matches(StripComment(block.Lines[offset])))
+            foreach (Match command in Patterns.Command.Matches(StripComment(block.Lines[offset])))
                 if (!commands.Contains(command.Value))
                     yield return $"{block.Document}:{block.Line + offset}: `{command.Value}` {NotCommand}";
         foreach (var problem in SimpListProblems(block.Document, block.Line, block.Lines)) yield return problem;
@@ -836,7 +836,7 @@ static partial class Documentation
         var names = new HashSet<string>(StringComparer.Ordinal);
         if (!Directory.Exists(library)) return names;
         foreach (var file in Directory.EnumerateFiles(library, "*.lean", SearchOption.AllDirectories))
-            foreach (Match match in Patterns.DeclaredCommand().Matches(File.ReadAllText(file)))
+            foreach (Match match in Patterns.DeclaredCommand.Matches(File.ReadAllText(file)))
                 names.Add(match.Groups["name"].Value);
         return names;
     }
@@ -848,7 +848,7 @@ static partial class Documentation
     internal static SnippetBatch[] Snippets(IEnumerable<DocumentPage> pages)
     {
         static (string Module, int Offset)[] Imports(LeanBlock block) => block.Lines
-            .Select((line, offset) => (Patterns.Import().Match(line).Groups["module"].Value, offset))
+            .Select((line, offset) => (Patterns.Import.Match(line).Groups["module"].Value, offset))
             .Where(import => import.Item1 != "").DistinctBy(import => import.Item1).ToArray();
         var batches = new List<SnippetBatch>();
         var checkedBlocks = pages.SelectMany(page => page.Blocks).Where(block => block.Kind == SnippetKind.Checked);
@@ -864,7 +864,7 @@ static partial class Documentation
             {
                 batch.Emit($"namespace DocSnippet{++batch.Count}");
                 for (var offset = 0; offset < block.Lines.Length; offset++)
-                    batch.Emit(Patterns.Import().IsMatch(block.Lines[offset]) ? "" : block.Lines[offset],
+                    batch.Emit(Patterns.Import.IsMatch(block.Lines[offset]) ? "" : block.Lines[offset],
                         new(block.Document, block.Line + offset));
                 batch.Emit($"end DocSnippet{batch.Count}");
             }
@@ -939,7 +939,7 @@ static partial class Documentation
         IEnumerable<(string Text, bool Prose, SnippetOrigin Origin)> Texts(DocumentPage page)
         {
             foreach (var line in page.Prose)
-                foreach (Match span in Patterns.CodeSpan().Matches(line.Text))
+                foreach (Match span in Patterns.CodeSpan.Matches(line.Text))
                     yield return (span.Groups["span"].Value, true, new(line.Document, line.Line));
             foreach (var block in page.Blocks.Where(block => block.Kind is SnippetKind.Extracted
                          or SnippetKind.Illustrative))
@@ -950,7 +950,7 @@ static partial class Documentation
         foreach (var page in pages)
             foreach (var (text, prose, origin) in Texts(page))
             {
-                foreach (Match match in Patterns.LibraryName().Matches(text))
+                foreach (Match match in Patterns.LibraryName.Matches(text))
                     if (!IsModule(match.Value) && seen.Add((match.Value, origin.Document, origin.Line)))
                         yield return (CitedKind.Rooted, match.Value, origin);
                 if (!prose || Unrooted(text) is not { } kind || documented.Contains(text) ||
@@ -966,7 +966,7 @@ static partial class Documentation
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var source in sources)
-            foreach (var match in Patterns.LeanDeclaration().Matches(source).Concat(Patterns.Have().Matches(source)))
+            foreach (var match in Patterns.LeanDeclaration.Matches(source).Concat(Patterns.Have.Matches(source)))
             {
                 var name = match.Groups["name"].Value;
                 names.Add(name);
@@ -984,10 +984,10 @@ static partial class Documentation
 
     static CitedKind? Unrooted(string span)
     {
-        if (Patterns.CommandSpan().Match(span) is { Success: true } command && command.Length == span.Length)
+        if (Patterns.CommandSpan.Match(span) is { Success: true } command && command.Length == span.Length)
             return CitedKind.Keyword;
-        if (Patterns.SnakeName().IsMatch(span)) return CitedKind.Library;
-        if (!Patterns.CapitalDottedName().IsMatch(span) || Patterns.LibraryName().IsMatch(span)) return null;
+        if (Patterns.SnakeName.IsMatch(span)) return CitedKind.Library;
+        if (!Patterns.CapitalDottedName.IsMatch(span) || Patterns.LibraryName.IsMatch(span)) return null;
         var parts = span.Split('.');
         return ForeignRoots.Contains(parts[0]) || FileExtensions.Contains(parts[^1]) ? null : CitedKind.Library;
     }
@@ -1045,7 +1045,7 @@ static partial class Documentation
         var lines = output.ReplaceLineEndings("\n").Split('\n');
         for (var index = 0; index < lines.Length; index++)
         {
-            var match = Patterns.Diagnostic().Match(lines[index]);
+            var match = Patterns.Diagnostic.Match(lines[index]);
             if (!match.Success)
             {
                 if (lines[index].Contains("sorryAx", StringComparison.Ordinal))
@@ -1054,7 +1054,7 @@ static partial class Documentation
             }
             if (match.Groups["severity"].Value == "info") continue;
             var message = new StringBuilder(match.Groups["message"].Value);
-            while (index + 1 < lines.Length && !Patterns.Diagnostic().IsMatch(lines[index + 1]) &&
+            while (index + 1 < lines.Length && !Patterns.Diagnostic.IsMatch(lines[index + 1]) &&
                    lines[index + 1].Length != 0)
                 message.Append("\n    ").Append(lines[++index]);
             var line = int.Parse(match.Groups["line"].Value) - 1;
@@ -1074,7 +1074,7 @@ static partial class Documentation
         if (label.Contains('/'))
             return target.Replace('\\', '/').EndsWith("/" + label, StringComparison.Ordinal)
                 ? null : "a path label must name the linked file";
-        if (!Patterns.DottedName().IsMatch(label))
+        if (!Patterns.DottedName.IsMatch(label))
             return "the label is neither a declaration name, a quoted string nor a path";
         return target.EndsWith(".lean", StringComparison.Ordinal) ? LeanProblem(label, source)
             : CSharpProblem(label, source);
@@ -1116,10 +1116,10 @@ sealed record DeclarationSource(string Text, HashSet<string> Declarations, HashS
     {
         var text = File.ReadAllText(path);
         return new(text,
-            Names(Patterns.LeanDeclaration().Matches(text)),
-            Names(Patterns.LeanNamespace().Matches(text)),
-            Names(Patterns.CSharpType().Matches(text)),
-            Names(Patterns.CSharpMember().Matches(text).Where(declaration =>
+            Names(Patterns.LeanDeclaration.Matches(text)),
+            Names(Patterns.LeanNamespace.Matches(text)),
+            Names(Patterns.CSharpType.Matches(text)),
+            Names(Patterns.CSharpMember.Matches(text).Where(declaration =>
                 !Statements.Contains(declaration.Groups["prefix"].Value.TrimEnd().Split(' ', '\t')[^1],
                     StringComparer.Ordinal))));
     }
@@ -1131,110 +1131,110 @@ sealed record DeclarationSource(string Text, HashSet<string> Declarations, HashS
 static partial class Patterns
 {
     [GeneratedRegex(@"^<!--\s*audience:\s*(?<value>[\w-]+)\s*-->\s*$")]
-    internal static partial Regex Audience();
+    internal static partial Regex Audience { get; }
 
     [GeneratedRegex(@"^(?<indent>[ \t]*)(?<fence>`{3,}|~{3,})(?<info>[^`]*)$")]
-    internal static partial Regex Fence();
+    internal static partial Regex Fence { get; }
 
     [GeneratedRegex(@"\[(?:[^\[\]]|\[[^\]]*\])*\]\((?<target>[^)\s]+)\)")]
-    internal static partial Regex AnyLink();
+    internal static partial Regex AnyLink { get; }
 
     [GeneratedRegex(@"^#{1,6}[ \t]+(?<text>.*?)[ \t#]*$")]
-    internal static partial Regex Heading();
+    internal static partial Regex Heading { get; }
 
     [GeneratedRegex(@"^\|\s*`(?<name>[^`]+)`\s*\|")]
-    internal static partial Regex SuiteRow();
+    internal static partial Regex SuiteRow { get; }
 
     [GeneratedRegex(@"[^\w\- ]")]
-    internal static partial Regex AnchorPunctuation();
+    internal static partial Regex AnchorPunctuation { get; }
 
     [GeneratedRegex(@"<a\s+(?:id|name)=""(?<name>[^""]+)""")]
-    internal static partial Regex ExplicitAnchor();
+    internal static partial Regex ExplicitAnchor { get; }
 
     [GeneratedRegex(@"\A\[`(?<label>[^`\]]+)`\]\(")]
-    internal static partial Regex NamedLink();
+    internal static partial Regex NamedLink { get; }
 
     [GeneratedRegex(@"\[[^\]]*\.(?:lean|cs):\d[^\]]*\]\(|\]\([^)\s]*\.(?:lean|cs)#L\d")]
-    internal static partial Regex LineCitation();
+    internal static partial Regex LineCitation { get; }
 
     [GeneratedRegex(@"`(?<span>[^`\n]+)`")]
-    internal static partial Regex CodeSpan();
+    internal static partial Regex CodeSpan { get; }
 
     // A repository path whose existence a reader relies on; build outputs and patterns are not paths.
     [GeneratedRegex(@"\A(?:CIL|Examples|Tests|scripts|docs|skills|Extractor)/" +
         @"(?!(?:.*/)?(?:bin|obj)/)[\w.-]+(?:/[\w.-]+)*/?\z")]
-    internal static partial Regex RepositoryPath();
+    internal static partial Regex RepositoryPath { get; }
 
     [GeneratedRegex(@"\ATests\.[A-Z]\w*")]
-    internal static partial Regex TestModule();
+    internal static partial Regex TestModule { get; }
 
     [GeneratedRegex(@"\A(?:bind|cil)_\w+")]
-    internal static partial Regex CommandSpan();
+    internal static partial Regex CommandSpan { get; }
 
     [GeneratedRegex(@"(?<![\w.'])(?:bind|cil)_\w+")]
-    internal static partial Regex Command();
+    internal static partial Regex Command { get; }
 
     [GeneratedRegex(@"(?:""|register_simp_attr\s+|register_label_attr\s+)(?<name>(?:bind|cil)_\w+)")]
-    internal static partial Regex DeclaredCommand();
+    internal static partial Regex DeclaredCommand { get; }
 
     [GeneratedRegex(@"^\s*import\s+(?<module>[\w.]+)\s*$")]
-    internal static partial Regex Import();
+    internal static partial Regex Import { get; }
 
     [GeneratedRegex(@"\bExtracted(?:Symbols)?\.\w")]
-    internal static partial Regex Extraction();
+    internal static partial Regex Extraction { get; }
 
     [GeneratedRegex(@"(?<![\w.'])CIL(?:\.[A-Za-z_][\w'!?]*)+")]
-    internal static partial Regex LibraryName();
+    internal static partial Regex LibraryName { get; }
 
     // .NET accessor and operator names (`get_Item`, `op_Equality`) capitalise after the underscore.
     [GeneratedRegex(@"\A[a-z][a-z0-9']*(?:_[a-z0-9][A-Za-z0-9']*)+[!?]?\z")]
-    internal static partial Regex SnakeName();
+    internal static partial Regex SnakeName { get; }
 
     [GeneratedRegex(@"\A[A-Z][\w']*(?:\.[A-Za-z_][\w'!?]*)+\z")]
-    internal static partial Regex CapitalDottedName();
+    internal static partial Regex CapitalDottedName { get; }
 
     [GeneratedRegex(@"\bhave\s+(?<name>[A-Za-z_][\w']*)\s*:")]
-    internal static partial Regex Have();
+    internal static partial Regex Have { get; }
 
     // The opening bracket of a simp-family lemma list, after any `only` and configuration.
     [GeneratedRegex(@"(?<![\w.'])(?:simp|simpa|simp_all|dsimp)(?:[ \t]+only)?(?:[ \t]+\([^)\n]*\))*[ \t]*\[")]
-    internal static partial Regex SimpList();
+    internal static partial Regex SimpList { get; }
 
     [GeneratedRegex(@"(?<![\w.'])[A-Za-z_][\w']*(?:\.[A-Za-z_][\w']*)*")]
-    internal static partial Regex SimpName();
+    internal static partial Regex SimpName { get; }
 
     [GeneratedRegex(@"^[ \t]*(?:(?:private|protected)\s+)*(?:theorem|lemma)\s+(?<name>[\w'.]*[\w'])")]
-    internal static partial Regex Theorem();
+    internal static partial Regex Theorem { get; }
 
     [GeneratedRegex(@"^#print axioms\s+(?<name>[\w'.]*[\w'])\s*$")]
-    internal static partial Regex PrintAxioms();
+    internal static partial Regex PrintAxioms { get; }
 
     [GeneratedRegex(
         @"^(?<path>.+?):(?<line>\d+):(?<column>\d+): (?<severity>error|warning|info)(?:\([^)]*\))?: ?(?<message>.*)$")]
-    internal static partial Regex Diagnostic();
+    internal static partial Regex Diagnostic { get; }
 
     [GeneratedRegex(@"\A[A-Za-z_][\w']*(\.[A-Za-z_][\w']*)*\z")]
-    internal static partial Regex DottedName();
+    internal static partial Regex DottedName { get; }
 
     [GeneratedRegex(@"\b[0-9a-f]{64}\b")]
-    internal static partial Regex Sha256();
+    internal static partial Regex Sha256 { get; }
 
     // `Proof.lean:15:0`, as Lean and the tool cite a place in a source file.
     [GeneratedRegex(@"(?<file>\.(?:lean|cs)):\d+:\d+")]
-    internal static partial Regex SourcePosition();
+    internal static partial Regex SourcePosition { get; }
 
     [GeneratedRegex(@"(?m)^[ \t]*(?:@\[[^\]\n]*\]\s*)?" +
         @"(?:(?:private|protected|noncomputable|partial|unsafe|nonrec)\s+)*" +
         @"(?:theorem|lemma|def|abbrev|structure|inductive|class|instance|axiom|opaque|macro|syntax|elab)\s+" +
         @"(?<name>[\w'.]*[\w'])")]
-    internal static partial Regex LeanDeclaration();
+    internal static partial Regex LeanDeclaration { get; }
 
     [GeneratedRegex(@"(?m)^namespace\s+(?<name>[\w'.]*[\w'])\s*$")]
-    internal static partial Regex LeanNamespace();
+    internal static partial Regex LeanNamespace { get; }
 
     [GeneratedRegex(@"\b(?:class|struct|record|interface|enum)\s+(?<name>\w+)\b")]
-    internal static partial Regex CSharpType();
+    internal static partial Regex CSharpType { get; }
 
     [GeneratedRegex(@"(?m)^[ \t]*(?<prefix>(?:[\w<>\[\],.?]+[ \t]+)+)(?<name>\w+)[ \t]*(?:<[^>\n]*>)?[ \t]*\(")]
-    internal static partial Regex CSharpMember();
+    internal static partial Regex CSharpMember { get; }
 }

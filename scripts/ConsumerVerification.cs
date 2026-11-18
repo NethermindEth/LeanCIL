@@ -635,7 +635,7 @@ partial class Program
         while (pending.TryDequeue(out var path))
         {
             if (!seen.Add(path)) continue;
-            foreach (Match import in SourceImport().Matches(File.ReadAllText(path)))
+            foreach (Match import in SourceImport.Matches(File.ReadAllText(path)))
             {
                 var name = import.Groups[1].Value;
                 if (name == "ExtractedSymbols" || SelectionModules.Is(name)) yield return (name, path);
@@ -999,12 +999,12 @@ partial class Program
     sealed record ExtractionComponents(string InputHash, string Aggregate, Dictionary<string, string> Sources);
 
     [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+\r?$")]
-    private static partial Regex ExtractionRecursionDepth();
+    private static partial Regex ExtractionRecursionDepth { get; }
 
     // Components keep the extraction's own recursion depth, which follows its longest method;
     // a fixed depth would reject bodies the complete extraction compiles.
     static string ExtractionComponentContext(string source) =>
-        "namespace Extracted\nopen CIL\n" + ExtractionRecursionDepth().Match(source).Value.TrimEnd('\r') + "\n\n";
+        "namespace Extracted\nopen CIL\n" + ExtractionRecursionDepth.Match(source).Value.TrimEnd('\r') + "\n\n";
 
     // Split only the extractor's declaration boundaries. Lean still checks every imported
     // declaration and the aggregate certificate against the complete program.
@@ -1080,7 +1080,7 @@ partial class Program
 
     // Source imports schedule work only; compiled import headers decide what can be shared.
     [GeneratedRegex(@"(?<!\S)(?:(?:public|meta)\s+)*import\s+(?:all\s+)?([A-Za-z_][A-Za-z0-9_'.]*)")]
-    private static partial Regex ConsumerImportCommand();
+    private static partial Regex ConsumerImportCommand { get; }
 
     static IEnumerable<string> ConsumerSourceImports(string source)
     {
@@ -1110,7 +1110,7 @@ partial class Program
                 if (blockDepth > 0 || lineComment) text[index] = ' ';
             }
         }
-        return ConsumerImportCommand().Matches(new string(text)).Select(import => import.Groups[1].Value);
+        return ConsumerImportCommand.Matches(new string(text)).Select(import => import.Groups[1].Value);
     }
 
     static string[] ConsumerSupportCandidates(IEnumerable<string> proofs, string[] sourceDirectories,

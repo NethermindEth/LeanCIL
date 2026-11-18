@@ -46,7 +46,7 @@ internal static partial class TemplateEmitter
             }
         }
         if (positional.Count < 2) throw new ArgumentException(Usage);
-        if (name is not null && !LeanName().IsMatch(name))
+        if (name is not null && !LeanName.IsMatch(name))
             throw new ArgumentException("--namespace takes a Lean name such as Proofs.Generated: " + name);
         var output = Path.GetFullPath(positional[0]);
         var modulePath = Path.GetFullPath(module ?? Path.Combine(output, "Templates.lean"));
@@ -54,7 +54,7 @@ internal static partial class TemplateEmitter
         // The bindings import the module by its path under the output directory, a Lean source root.
         var moduleName = relative.EndsWith(".lean", StringComparison.Ordinal) ? relative[..^".lean".Length]
             .Replace('/', '.') : "";
-        if (!LeanName().IsMatch(moduleName))
+        if (!LeanName.IsMatch(moduleName))
             throw new ArgumentException("--module takes a .lean file under the output directory whose path " +
                 "names a Lean module: " + module);
         return new(output, [.. positional.Skip(1).Select(Path.GetFullPath)], name ?? "Templates", omit, modulePath,
@@ -62,7 +62,7 @@ internal static partial class TemplateEmitter
     }
 
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*\z")]
-    private static partial Regex LeanName();
+    private static partial Regex LeanName { get; }
 
     /// <summary>
     /// Writes the shared template module, one binding per extraction and <c>templates.json</c>, with LF line endings,

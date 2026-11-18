@@ -75,18 +75,18 @@ internal static partial class FailureReports
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     [GeneratedRegex(@"^LeanCIL refutes: (?<name>\S+) at (?<line>\d+):(?<column>\d+)\r?$", RegexOptions.Multiline)]
-    private static partial Regex RefutationMarker();
+    private static partial Regex RefutationMarker { get; }
 
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
-    private static partial Regex Location();
+    private static partial Regex Location { get; }
 
     // The stage line of a nested `leancil check` diagnostic.
     [GeneratedRegex(@"^  Stage: (?<stage>.+?)\r?$", RegexOptions.Multiline)]
-    private static partial Regex ChildStage();
+    private static partial Regex ChildStage { get; }
 
     // Workspace copies of the selected proof, line for line.
     [GeneratedRegex(@"\ALeanCILProof\d*\z")]
-    private static partial Regex ProofModule();
+    private static partial Regex ProofModule { get; }
 
     internal static Report Failed(string stage, Exception error, string theorem, string proof, string output, string? proofRoot) =>
         Classify(stage, error.Message, error.Data[LeanDiagnostics.HiddenModulesKey] as string[], theorem, proof, output,
@@ -100,7 +100,7 @@ internal static partial class FailureReports
         var internalErrors = LeanOutput.InternalErrors(message, hidden).Distinct().Select(error =>
         {
             var (file, line, column) = Place(error.Location, copies);
-            var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
+            var origin = error.Module is { } name && ProofModule.IsMatch(name) ? module : error.Module;
             return new Diagnostic(InternalError, null, origin ?? (file == proof ? module : null), file, line, column,
                 error.Message);
         });
@@ -108,7 +108,7 @@ internal static partial class FailureReports
         {
             var (kind, resource) = KindOf(stage, error.Lines[0]);
             var (file, line, column) = Place(error.Location, copies);
-            var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
+            var origin = error.Module is { } name && ProofModule.IsMatch(name) ? module : error.Module;
             return new Diagnostic(kind, resource, origin ?? (file == proof ? module : null), file, line, column, string.Join("\n", error.Lines));
         })).ToArray();
         string requestKind;
@@ -116,7 +116,7 @@ internal static partial class FailureReports
         if (diagnostics.Length > 0 && diagnostics[0].kind == InternalError)
             requestKind = InternalError;
         else if (stage == "extraction integrity")
-            requestKind = ChildStage().Match(message) is { Success: true } child && child.Groups["stage"].Value == "metadata and CIL validation"
+            requestKind = ChildStage.Match(message) is { Success: true } child && child.Groups["stage"].Value == "metadata and CIL validation"
                 ? UnsupportedExtraction : StaleInput;
         else if (diagnostics.Length > 0)
             (requestKind, requestResource) = (diagnostics[0].kind, diagnostics[0].resource);
@@ -140,7 +140,7 @@ internal static partial class FailureReports
     /// </summary>
     internal static Report? Refuted(string audit, string theorem, string proof, string output, string? proofRoot)
     {
-        var markers = RefutationMarker().Matches(audit);
+        var markers = RefutationMarker.Matches(audit);
         if (markers.Count != 1) return null;
         var marker = markers[0];
         return new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output, MethodOf(output),
@@ -164,7 +164,7 @@ internal static partial class FailureReports
     static (string? File, int? Line, int? Column) Place(string? location, SourceCopies? copies)
     {
         if (location is null) return (null, null, null);
-        var match = Location().Match(location);
+        var match = Location.Match(location);
         if (!match.Success) return (location, null, null);
         var (file, line, column) = (match.Groups["file"].Value, int.Parse(match.Groups["line"].Value),
             int.Parse(match.Groups["column"].Value));

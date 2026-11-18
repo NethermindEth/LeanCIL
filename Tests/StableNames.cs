@@ -23,7 +23,7 @@ static partial class StableNames
         var method = member[(separator + 2)..];
         if (nested < 0 && !method.StartsWith('<')) return signature;
         var outer = nested < 0 ? declaring : declaring[..nested];
-        var source = SourceName().Match((nested < 0 ? "" : declaring[nested..]) + "::" + method).Groups["name"].Value;
+        var source = SourceName.Match((nested < 0 ? "" : declaring[nested..]) + "::" + method).Groups["name"].Value;
         return source.Length == 0 ? $"{outer} closure classes{Generated}" : $"{outer}::{source}{Generated}";
     }
 
@@ -41,5 +41,5 @@ static partial class StableNames
     // The first nonempty bracketed name, which the compiler sets to the method it generated code for;
     // a closure class's own constructor has none and counts toward its outer type's closure classes.
     [GeneratedRegex(@"<(?<name>[^<>]+)>")]
-    private static partial Regex SourceName();
+    private static partial Regex SourceName { get; }
 }

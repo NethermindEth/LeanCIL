@@ -1122,7 +1122,7 @@ internal static partial class ProofOutline
     /// <summary>A term's words, keeping each short innermost parenthesized group such as `(by decide)` whole, as
     /// parts the writer may wrap between. A longer group splits so no part outgrows the line.</summary>
     static string[] Terms(this string term) =>
-        [.. InnermostGroup()
+        [.. InnermostGroup
             .Replace(term, group => group.Length <= ShortGroup ? group.Value.Replace(' ', Glue) : group.Value)
             .Split(' ').Select(part => part.Replace(Glue, ' '))];
 
@@ -1130,7 +1130,7 @@ internal static partial class ProofOutline
     const char Glue = '\u0001';
 
     [GeneratedRegex(@"\([^()]*\)")]
-    private static partial Regex InnermostGroup();
+    private static partial Regex InnermostGroup { get; }
 
     /// <summary>The contract of a callee whose body the walk steps with no call of its own and at most one store,
     /// or reference field loads and no store: `pre` its facts, `post` its store and its result, and its proof.

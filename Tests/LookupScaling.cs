@@ -299,7 +299,7 @@ void ReturnResolutionCosts(bool stepOnly = false)
             var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
             if (output.Contains("sorryAx", StringComparison.Ordinal))
                 throw new InvalidOperationException("Return resolution introduced an unproved theorem.");
-            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
             if (costs.Length != methods * 2)
                 throw new InvalidOperationException("Missing return resolution costs: " + output);
             long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
@@ -371,7 +371,7 @@ void ArgumentResolutionCosts()
             var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
             if (output.Contains("sorryAx", StringComparison.Ordinal))
                 throw new InvalidOperationException("Argument resolution introduced an unproved theorem.");
-            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
             if (costs.Length != 2)
                 throw new InvalidOperationException("Missing argument resolution costs: " + output);
             samples.Add((size, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
@@ -439,7 +439,7 @@ void StaticFactCosts()
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
         if (output.Contains("sorryAx", StringComparison.Ordinal))
             throw new InvalidOperationException("Static site facts introduced an unproved theorem.");
-        var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+        var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
         if (costs.Length != 2)
             throw new InvalidOperationException("Missing static site fact costs: " + output);
         samples.Add((size, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
@@ -502,7 +502,7 @@ void StaticIdentityCosts()
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
         if (output.Contains("sorryAx", StringComparison.Ordinal))
             throw new InvalidOperationException("The static identity check introduced an unproved theorem.");
-        var cost = LookupPatterns.StaticIdentities().Match(output);
+        var cost = LookupPatterns.StaticIdentities.Match(output);
         if (!cost.Success) throw new InvalidOperationException("Missing static identity cost: " + output);
         samples.Add((size, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -607,7 +607,7 @@ void ElementShapeCosts()
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     if (output.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException("Element shape facts introduced an unproved theorem.");
-    var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+    var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
     if (costs.Length != 2)
         throw new InvalidOperationException("Missing element shape costs: " + output);
     return (types, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
@@ -636,7 +636,7 @@ void ShapeResolutionCosts()
         foreach (var size in row.Sizes)
         {
             var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value);
-            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
             if (costs.Length != size + 1)
                 throw new InvalidOperationException("Missing shape resolution costs: " + output);
             long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
@@ -674,7 +674,7 @@ void LineageCosts()
     foreach (var bases in new[] { 2, 8, 32 })
     {
         var output = RunLineageFixture(lineageDirectory, bases);
-        var costs = LookupPatterns.Lineage().Matches(output).Cast<Match>().ToArray();
+        var costs = LookupPatterns.Lineage.Matches(output).Cast<Match>().ToArray();
         if (costs.Length != 2) throw new InvalidOperationException("Missing lineage costs: " + output);
         long Cost(string label) => long.Parse(costs.Single(match => match.Groups[1].Value == label).Groups[2].Value,
             CultureInfo.InvariantCulture);
@@ -848,7 +848,7 @@ void CallCheckCosts()
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
         if (output.Contains("sorryAx", StringComparison.Ordinal))
             throw new InvalidOperationException("The call check cost fixture introduced an unproved theorem.");
-        var cost = LookupPatterns.CallCheck().Match(output);
+        var cost = LookupPatterns.CallCheck.Match(output);
         if (!cost.Success) throw new InvalidOperationException("Missing the call check cost: " + output);
         samples.Add((sites, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -928,7 +928,7 @@ void ExceptionDecisionCosts()
 
         """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var costs = LookupPatterns.ExceptionDecision().Matches(output).ToDictionary(
+    var costs = LookupPatterns.ExceptionDecision.Matches(output).ToDictionary(
         match => match.Groups[1].Value,
         match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
     if (costs.Count != 8) throw new InvalidOperationException("Missing exception decision costs:\n" + output);
@@ -998,7 +998,7 @@ void DecodeCosts()
         var package = FixturePackage();
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
-        var cost = LookupPatterns.ValueDecoding().Match(output);
+        var cost = LookupPatterns.ValueDecoding.Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the value decoding cost:\n{output}");
         samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture),
             clock.ElapsedMilliseconds));
@@ -1047,7 +1047,7 @@ void PrefixEntryCosts()
             end PrefixEntryCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.PrefixEntry().Match(output);
+        var cost = LookupPatterns.PrefixEntry.Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the prefix entry cost:\n{output}");
         samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -1100,7 +1100,7 @@ void MethodDecodeCosts()
             end DecodedMethodCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.DecodedMethod().Match(output);
+        var cost = LookupPatterns.DecodedMethod.Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the decoded method cost:\n{output}");
         samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -1164,7 +1164,7 @@ void DecodedDefinitionCosts()
             end DecodedDefinitionCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.DecodedDefinition().Match(output);
+        var cost = LookupPatterns.DecodedDefinition.Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the decoded definition cost:\n{output}");
         samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -1223,7 +1223,7 @@ void DecodedProgramCosts()
             end DecodedProgramCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.DecodedProgram().Match(output);
+        var cost = LookupPatterns.DecodedProgram.Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the decoded program cost:\n{output}");
         samples.Add((records, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -1312,11 +1312,11 @@ void ClosureCosts()
         {{string.Join("\n", shapes.SelectMany(shape => shape.Sizes.Select(size => Statement(shape, size))))}}
         """ + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var costs = LookupPatterns.ClosureCost().Matches(output).ToDictionary(
+    var costs = LookupPatterns.ClosureCost.Matches(output).ToDictionary(
         match => (match.Groups[1].Value.Length > 0, match.Groups[2].Value,
             int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)),
         match => long.Parse(match.Groups[4].Value, CultureInfo.InvariantCulture));
-    var marks = LookupPatterns.HeartbeatMark().Matches(output).ToDictionary(
+    var marks = LookupPatterns.HeartbeatMark.Matches(output).ToDictionary(
         match => (int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), match.Groups[2].Value),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
     var tail = shapes.Single(shape => shape.Name == "tail");
@@ -1410,7 +1410,7 @@ void ClosedArgumentsCosts()
                 (.mk (List.replicate {{parameters}} (.field .unsigned32)) [] [.other])
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.ClosedArguments().Match(output);
+        var cost = LookupPatterns.ClosedArguments.Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the closed argument cost:\n{output}");
         samples.Add((parameters, layouts, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
     }
@@ -1494,9 +1494,9 @@ void NativeTableCosts()
             if (!cost.Success) throw new InvalidOperationException($"Missing the native table {row} cost:\n{output}");
             return long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture);
         }
-        costs.Add((entries, Measured(LookupPatterns.NativeTableStep(), "step"),
-            Measured(LookupPatterns.NativeTableLoadFirst(), "first load"),
-            Measured(LookupPatterns.NativeTableLoadLast(), "last load")));
+        costs.Add((entries, Measured(LookupPatterns.NativeTableStep, "step"),
+            Measured(LookupPatterns.NativeTableLoadFirst, "first load"),
+            Measured(LookupPatterns.NativeTableLoadLast, "last load")));
     }
     RequireConstant("one native table step", costs.Select(sample => (sample.Entries, sample.Step)).ToList());
     RequireConstant("one load of a native table's first entry",
@@ -1554,7 +1554,7 @@ Dictionary<string, long> TypeDecisionCosts()
 
         """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var costs = LookupPatterns.TypeDecision().Matches(output).ToDictionary(
+    var costs = LookupPatterns.TypeDecision.Matches(output).ToDictionary(
         match => match.Groups[1].Value, match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
     if (costs.Count != 4) throw new InvalidOperationException("Missing type identity decision costs:\n" + output);
     return costs;
@@ -1604,7 +1604,7 @@ void MetadataNameCosts()
         {{string.Join("\n", lengths.Select(Statement))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var costs = LookupPatterns.MetadataNameCost().Matches(output).ToDictionary(
+    var costs = LookupPatterns.MetadataNameCost.Matches(output).ToDictionary(
         match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
         match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
     if (costs.Count != lengths.Length)
@@ -1686,7 +1686,7 @@ void ModelTableCosts()
         {{string.Join("\n", siteCounts.Select(Sites))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var costs = LookupPatterns.ModelTableCost().Matches(output).ToDictionary(
+    var costs = LookupPatterns.ModelTableCost.Matches(output).ToDictionary(
         match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
     if (costs.Count != positions.Length * tableSizes.Length + siteCounts.Length ||
@@ -1748,7 +1748,7 @@ long Heartbeats(string path, string text, bool equations = true) => Reported(pat
 {
     var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
-    if (equations && LookupPatterns.EquationAxioms().Count(output) != 1)
+    if (equations && LookupPatterns.EquationAxioms.Count(output) != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
     return (count, output);
 }
@@ -1764,7 +1764,7 @@ long[] PartHeartbeats(string path, IReadOnlyList<string> parts)
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     if (output.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException("A measured file depends on sorryAx: " + path);
-    long[] readings = [.. HeartbeatCount().Matches(output)
+    long[] readings = [.. HeartbeatCount.Matches(output)
         .Select(match => long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture))];
     if (readings.Length != parts.Count + 2)
         throw new InvalidOperationException($"Expected {parts.Count + 2} heartbeat counts in {path}:\n{output}");
@@ -1806,22 +1806,22 @@ string WithEvidenceCosts(string extracted)
           Lean.logInfo m!"evidence {label.getString} {after - before} heartbeats"
 
         """;
-    var namespaces = LookupPatterns.ExtractedNamespace().Matches(extracted).Count;
-    var calls = LookupPatterns.CallsTheorem().Matches(extracted).Count;
-    var evidence = LookupPatterns.EvidenceTheorem().Matches(extracted).Count;
+    var namespaces = LookupPatterns.ExtractedNamespace.Matches(extracted).Count;
+    var calls = LookupPatterns.CallsTheorem.Matches(extracted).Count;
+    var evidence = LookupPatterns.EvidenceTheorem.Matches(extracted).Count;
     if (namespaces != 1 || calls != 1 || evidence != 1)
         throw new InvalidOperationException("Missing the namespace, call check or evidence theorem of method0.");
-    var labelled = LookupPatterns.ExtractedNamespace().Replace(extracted, match => Command + match.Value);
-    labelled = LookupPatterns.CallsTheorem().Replace(labelled,
+    var labelled = LookupPatterns.ExtractedNamespace.Replace(extracted, match => Command + match.Value);
+    labelled = LookupPatterns.CallsTheorem.Replace(labelled,
         match => "#evidence_cost \"calls\" in\n" + match.Value);
-    return LookupPatterns.EvidenceTheorem().Replace(labelled,
+    return LookupPatterns.EvidenceTheorem.Replace(labelled,
         match => "#evidence_cost \"assembly\" in\n" + match.Value);
 }
 
 // The heartbeats of the call check and of the evidence theorem that `WithEvidenceCosts` reports.
 (long Calls, long Assembly) EvidenceCosts(string output)
 {
-    var costs = LookupPatterns.EvidenceCost().Matches(output).ToDictionary(match => match.Groups[1].Value,
+    var costs = LookupPatterns.EvidenceCost.Matches(output).ToDictionary(match => match.Groups[1].Value,
         match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
     return costs.Count == 2 && costs.TryGetValue("calls", out var calls) &&
         costs.TryGetValue("assembly", out var assembled)
@@ -1843,11 +1843,11 @@ string WithEvidenceCosts(string extracted)
     // instruction per line after its header, and the hand-written body copies that code.
     const string Header =
         "@[cil_code] def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := ";
-    var definition = LookupPatterns.FirstTemplate().Match(templates);
-    var depth = LookupPatterns.RecursionDepth().Match(extracted);
+    var definition = LookupPatterns.FirstTemplate.Match(templates);
+    var depth = LookupPatterns.RecursionDepth.Match(extracted);
     if (!definition.Success || !depth.Success ||
         !IsDecodedMethod(extracted, 0) ||
-        !LookupPatterns.FirstEquations().IsMatch(extracted) ||
+        !LookupPatterns.FirstEquations.IsMatch(extracted) ||
         !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
         throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
     var instructions = definition.Groups[1].Captures.Count;
@@ -1977,7 +1977,7 @@ long EmbeddingCost(string name, string definitions)
           logInfo m!"{count} lemmas rechecked, {beats} kernel heartbeats"
         """ + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var cost = LookupPatterns.EmbeddingRecheck().Match(output);
+    var cost = LookupPatterns.EmbeddingRecheck.Match(output);
     if (!cost.Success || cost.Groups[1].Value == "0")
         throw new InvalidOperationException("Missing the embedding recheck cost:\n" + output);
     return long.Parse(cost.Groups[2].Value, CultureInfo.InvariantCulture);
@@ -2063,7 +2063,7 @@ CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders",
     var output = Path.Combine(directory, name);
     Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var linkLines = extracted.Split('\n').Where(line => LookupPatterns.LinkLine().IsMatch(line))
+    var linkLines = extracted.Split('\n').Where(line => LookupPatterns.LinkLine.IsMatch(line))
         .Sum(line => (long)line.Length + 1);
     if (linkLines == 0) throw new InvalidOperationException("The extraction of " + name + " has no link output.");
     var path = Path.Combine(output, "LinkAscend.lean");
@@ -2082,7 +2082,7 @@ CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders",
           logInfo m!"{(← IO.getNumHeartbeats) - start} kernel heartbeats"
         """ + "\n");
     var report = Run(["lake", "env", "lean", path], cwd: FixturePackage());
-    var beats = LookupPatterns.KernelHeartbeats().Match(report);
+    var beats = LookupPatterns.KernelHeartbeats.Match(report);
     if (!beats.Success) throw new InvalidOperationException("Missing the link key recheck cost:\n" + report);
     return (linkLines, long.Parse(beats.Groups[1].Value, CultureInfo.InvariantCulture));
 }
@@ -2172,10 +2172,10 @@ var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
 foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
 {
     ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)",
-        LookupPatterns.StringToken(), FewTokens, ManyTokens),
+        LookupPatterns.StringToken, FewTokens, ManyTokens),
     ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
-        LookupPatterns.FieldToken(), FewTokens, ManyTokens),
-    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", LookupPatterns.CallToken(), FewCalledMethods,
+        LookupPatterns.FieldToken, FewTokens, ManyTokens),
+    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", LookupPatterns.CallToken, FewCalledMethods,
         ManyCalledMethods)
 })
 {
@@ -2230,7 +2230,7 @@ var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
 // The index of a method in an extraction, found by the name in its signature.
 string MethodNumber(string extracted, string method, string name)
 {
-    return LookupPatterns.BodySignature().Matches(extracted)
+    return LookupPatterns.BodySignature.Matches(extracted)
         .FirstOrDefault(match => match.Groups["method"].Value == method)?.Groups[1].Value
         ?? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.");
 }
@@ -2268,7 +2268,7 @@ string MethodNumber(string extracted, string method, string name)
 // The line of obligation `theorem` in `narrowed`, proved by `decide +kernel` when `decided` and by an anonymous
 // constructor otherwise.
 static Match Obligation(string narrowed, string theorem, bool decided) =>
-    LookupPatterns.ProvedObligation().Matches(narrowed).FirstOrDefault(match =>
+    LookupPatterns.ProvedObligation.Matches(narrowed).FirstOrDefault(match =>
         match.Groups["name"].Value == theorem && match.Groups["decision"].Success == decided)
     ?? throw new InvalidOperationException("Missing obligation " + theorem);
 long BodyCheck(string name, string entry, string method) => BodyChecks(name, entry, method).Body;
@@ -2931,113 +2931,113 @@ record ClosureShape(string Name, int[] Sizes, Func<int, int[][]> Program, Func<i
 static partial class LookupPatterns
 {
     [GeneratedRegex(@"\bevidence (calls|assembly) ([0-9]+) heartbeats")]
-    internal static partial Regex EvidenceCost();
+    internal static partial Regex EvidenceCost { get; }
 
     [GeneratedRegex(@"(?m)^namespace Extracted\r?$")]
-    internal static partial Regex ExtractedNamespace();
+    internal static partial Regex ExtractedNamespace { get; }
 
     [GeneratedRegex(@"(?m)^theorem method0_calls_validated ")]
-    internal static partial Regex CallsTheorem();
+    internal static partial Regex CallsTheorem { get; }
 
     [GeneratedRegex(@"(?m)^theorem method0_evidence_validated ")]
-    internal static partial Regex EvidenceTheorem();
+    internal static partial Regex EvidenceTheorem { get; }
 
     [GeneratedRegex(@"closed arguments [0-9]+ [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex ClosedArguments();
+    internal static partial Regex ClosedArguments { get; }
 
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
-    internal static partial Regex ReturnResolution();
+    internal static partial Regex ReturnResolution { get; }
 
     [GeneratedRegex(@"static identities ([0-9]+) heartbeats")]
-    internal static partial Regex StaticIdentities();
+    internal static partial Regex StaticIdentities { get; }
 
     [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
-    internal static partial Regex CallCheck();
+    internal static partial Regex CallCheck { get; }
 
     [GeneratedRegex(@"lineage (rejected|located) ([0-9]+) heartbeats")]
-    internal static partial Regex Lineage();
+    internal static partial Regex Lineage { get; }
 
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
-    internal static partial Regex EmbeddingRecheck();
+    internal static partial Regex EmbeddingRecheck { get; }
 
     [GeneratedRegex(@"([0-9]+) kernel heartbeats")]
-    internal static partial Regex KernelHeartbeats();
+    internal static partial Regex KernelHeartbeats { get; }
 
     [GeneratedRegex(@"^@\[cil_code\] def method0Link")]
-    internal static partial Regex LinkLine();
+    internal static partial Regex LinkLine { get; }
 
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
-    internal static partial Regex TypeDecision();
+    internal static partial Regex TypeDecision { get; }
 
     [GeneratedRegex(@"\bname spells ([0-9]+) (-?[0-9]+) heartbeats")]
-    internal static partial Regex MetadataNameCost();
+    internal static partial Regex MetadataNameCost { get; }
 
     [GeneratedRegex(@"\bmodel (lookup first|lookup middle|lookup last|agreement) ([0-9]+) (-?[0-9]+) heartbeats")]
-    internal static partial Regex ModelTableCost();
+    internal static partial Regex ModelTableCost { get; }
 
     [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]
-    internal static partial Regex ExceptionDecision();
+    internal static partial Regex ExceptionDecision { get; }
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex NativeTableStep();
+    internal static partial Regex NativeTableStep { get; }
 
     [GeneratedRegex(@"table load first [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex NativeTableLoadFirst();
+    internal static partial Regex NativeTableLoadFirst { get; }
 
     [GeneratedRegex(@"table load last [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex NativeTableLoadLast();
+    internal static partial Regex NativeTableLoadLast { get; }
 
     [GeneratedRegex(@"decode [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex ValueDecoding();
+    internal static partial Regex ValueDecoding { get; }
 
     [GeneratedRegex(@"decoded method [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex DecodedMethod();
+    internal static partial Regex DecodedMethod { get; }
 
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex DecodedDefinition();
+    internal static partial Regex DecodedDefinition { get; }
 
     [GeneratedRegex(@"prefix entry [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex PrefixEntry();
+    internal static partial Regex PrefixEntry { get; }
 
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
-    internal static partial Regex DecodedProgram();
+    internal static partial Regex DecodedProgram { get; }
 
     [GeneratedRegex(@"\b(list )?closure (chain|longchain|fan|tail) ([0-9]+) (-?[0-9]+) heartbeats")]
-    internal static partial Regex ClosureCost();
+    internal static partial Regex ClosureCost { get; }
 
     [GeneratedRegex(@"\bmark index ([0-9]+) (start|end) ([0-9]+)")]
-    internal static partial Regex HeartbeatMark();
+    internal static partial Regex HeartbeatMark { get; }
 
     [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+")]
-    internal static partial Regex RecursionDepth();
+    internal static partial Regex RecursionDepth { get; }
 
     [GeneratedRegex(@"(?m)^cil_instruction_equations method0\r?$")]
-    internal static partial Regex FirstEquations();
+    internal static partial Regex FirstEquations { get; }
 
     [GeneratedRegex(@"_instruction[0-9]+' depends on axioms: \[propext\]")]
-    internal static partial Regex EquationAxioms();
+    internal static partial Regex EquationAxioms { get; }
 
     const string TemplateBinder = """\(profile : FeatureProfile\) \(environment : LayoutEnvironment\)""";
 
     /// <summary>The template of method 0: its header line, then one indented instruction per line.</summary>
     [GeneratedRegex($"""(?m)^@\[cil_code\] def method0 {TemplateBinder} : Method := [^\r\n]*(\r?\n  [^\r\n]*)+""")]
-    internal static partial Regex FirstTemplate();
+    internal static partial Regex FirstTemplate { get; }
 
     [GeneratedRegex("""\(\d+, \.text "[^"]*"\)""")]
-    internal static partial Regex StringToken();
+    internal static partial Regex StringToken { get; }
 
     [GeneratedRegex(@"\(\d+, \.field ")]
-    internal static partial Regex FieldToken();
+    internal static partial Regex FieldToken { get; }
 
     [GeneratedRegex(@"\(\d+, \.call ")]
-    internal static partial Regex CallToken();
+    internal static partial Regex CallToken { get; }
 
     [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies::(?<method>[^"(]*)\(""")]
-    internal static partial Regex BodySignature();
+    internal static partial Regex BodySignature { get; }
 
     const string ProofTerm = """(?:⟨[^\r\n]*⟩|(?<decision>by decide \+kernel))""";
 
     /// <summary>A one-line theorem proved by a constructor or, in its decision group, by the kernel.</summary>
     [GeneratedRegex($"""(?m)^theorem (?<name>[\w?!']+) : (?<statement>[^\r\n]*?) := {ProofTerm}\r?\n""")]
-    internal static partial Regex ProvedObligation();
+    internal static partial Regex ProvedObligation { get; }
 }

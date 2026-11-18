@@ -1043,13 +1043,13 @@ partial class Program
         static (string[] Bodies, string[] Signatures) Methods(string output)
         {
             var text = File.ReadAllText(Path.Combine(output, "Extracted.lean")).ReplaceLineEndings("\n");
-            var originals = RawDefinition().Matches(text).ToDictionary(match => match.Groups["number"].Value,
-                match => RawIdentity().Replace(match.Groups["value"].Value, ""));
-            string[] bodies = [.. MethodBody().Matches(text).Select(match =>
+            var originals = RawDefinition.Matches(text).ToDictionary(match => match.Groups["number"].Value,
+                match => RawIdentity.Replace(match.Groups["value"].Value, ""));
+            string[] bodies = [.. MethodBody.Matches(text).Select(match =>
                 match.Groups["decoded"].Success ? originals[match.Groups["decoded"].Value] : match.Value)];
             if (bodies.Length == 0)
                 throw new InvalidDataException("No method bodies in " + CliPaths.Display(output));
-            return (bodies, [.. MethodSignature().Matches(text).Select(match => match.Value)]);
+            return (bodies, [.. MethodSignature.Matches(text).Select(match => match.Value)]);
         }
         var (bodies, signatures) = Methods(production);
         var (variantBodies, variantSignatures) = Methods(variant);
@@ -1060,18 +1060,18 @@ partial class Program
     [GeneratedRegex(@"^def method\d+ : Method := .*?(?=^\S)|" +
         @"^cil_decoded_method method(?<decoded>\d+) (?:\[[^\]\n]*\] )?:= [^\n]*",
         RegexOptions.Multiline | RegexOptions.Singleline)]
-    private static partial Regex MethodBody();
+    private static partial Regex MethodBody { get; }
 
     [GeneratedRegex(@"^def method(?<number>\d+)Original : Extraction\.RawMethod := (?<value>[^\n]*)$",
         RegexOptions.Multiline)]
-    private static partial Regex RawDefinition();
+    private static partial Regex RawDefinition { get; }
 
     // The token and owner of a raw definition name its assembly, which the program relation ignores.
     [GeneratedRegex(@"\btoken := \d+, owner := ""[^""]*"", ")]
-    private static partial Regex RawIdentity();
+    private static partial Regex RawIdentity { get; }
 
     [GeneratedRegex(@"^def method\d+Signature : String := .*$", RegexOptions.Multiline)]
-    private static partial Regex MethodSignature();
+    private static partial Regex MethodSignature { get; }
 
     /// <summary>
     /// The result of `row`: its verdict, its proof's outcome, its refutation's when it has one, and how its

@@ -79,7 +79,7 @@ string Extracted(string assembly, string selector, string name)
 // The assembly block and every definition and theorem of one method's component, the decoded definition included.
 string Component(string text, int method, string name)
 {
-    var lines = IncrementalPatterns.ComponentLine().Matches(text)
+    var lines = IncrementalPatterns.ComponentLine.Matches(text)
         .Where(match => !match.Groups["method"].Success || match.Groups["method"].Value == $"{method}")
         .Select(match => match.Value.TrimEnd('\r'))
         // The composed theorem names the method's position in the whole program, which is not part of its component.
@@ -92,7 +92,7 @@ string Component(string text, int method, string name)
         : []).Concat([$"def method{method}Body :", $"theorem method{method}_body_validated :"]))
         if (!lines.Any(line => line.StartsWith(required, StringComparison.Ordinal)))
             throw new InvalidOperationException($"No `{required}` in the component of method {method}: {name}");
-    if (IncrementalPatterns.BodyAddress().IsMatch(string.Concat(lines)))
+    if (IncrementalPatterns.BodyAddress.IsMatch(string.Concat(lines)))
         throw new InvalidOperationException("Evidence holds a body address: " + name);
     return string.Join('\n', lines);
 }
@@ -114,7 +114,7 @@ Console.WriteLine("PASS lengthening or renaming one method leaves the evidence o
 // consumer that verified it once reuses it.
 var entryA = Extracted(baseline, "Workspace.Shared::EntryA(ulong)", "EntryA");
 var entryB = Extracted(baseline, "Workspace.Shared::EntryB(ulong)", "EntryB");
-string HelperIndex(string text) => IncrementalPatterns.HelperSignature().Match(text).Groups[1].Value;
+string HelperIndex(string text) => IncrementalPatterns.HelperSignature.Match(text).Groups[1].Value;
 var (helperA, helperB) = (HelperIndex(entryA), HelperIndex(entryB));
 if (helperA.Length == 0 || helperA != helperB)
     throw new InvalidOperationException($"Expected the helper at one index in both extractions: {helperA} {helperB}");
@@ -132,14 +132,14 @@ var genericA = Extracted(baseline, "Workspace.Shared::EntryGenericA(ulong)", "En
 var genericB = Extracted(baseline, "Workspace.Shared::EntryGenericB(ulong)", "EntryGenericB");
 string Instantiation(string text, string argument, string name)
 {
-    var index = IncrementalPatterns.SizeSignature().Matches(text)
+    var index = IncrementalPatterns.SizeSignature.Matches(text)
         .FirstOrDefault(match => match.Groups["argument"].Value == argument)?.Groups[1].Value
         ?? throw new InvalidOperationException($"No Size<{argument}> in {name}.");
-    return IncrementalPatterns.MethodName().Replace(Component(text, int.Parse(index), name),
+    return IncrementalPatterns.MethodName.Replace(Component(text, int.Parse(index), name),
         match => match.Groups[1].Value == index ? "method#" : match.Value);
 }
-var (uintIndexA, uintIndexB) = (IncrementalPatterns.UIntSizeSignature().Match(genericA).Groups[1].Value,
-    IncrementalPatterns.UIntSizeSignature().Match(genericB).Groups[1].Value);
+var (uintIndexA, uintIndexB) = (IncrementalPatterns.UIntSizeSignature.Match(genericA).Groups[1].Value,
+    IncrementalPatterns.UIntSizeSignature.Match(genericB).Groups[1].Value);
 if (uintIndexA == uintIndexB)
     throw new InvalidOperationException(
         "The two extractions close the helper in the same order; the case tests nothing.");
@@ -184,7 +184,7 @@ if (lateBefore == lateAfter)
     throw new InvalidOperationException(
         "A literal added to an earlier method did not move the `ldstr` operand of a later one: " +
         "the case tests nothing.");
-if (!IncrementalPatterns.FirstBody().IsMatch(lateAfter))
+if (!IncrementalPatterns.FirstBody.IsMatch(lateAfter))
     throw new InvalidOperationException("The refreshed component of Late has no body definition.");
 Console.WriteLine("PASS a literal added to one method leaves a method without literals byte-identical and refreshes " +
     "the evidence of a method whose ldstr operand moved");
@@ -193,29 +193,29 @@ Console.WriteLine("PASS a literal added to one method leaves a method without li
 static partial class IncrementalPatterns
 {
     [GeneratedRegex(@"\brva\b")]
-    internal static partial Regex BodyAddress();
+    internal static partial Regex BodyAddress { get; }
 
     [GeneratedRegex(@"(?m)^def method(\d+)Signature : String := ""[^""]*Shared::Helper\(")]
-    internal static partial Regex HelperSignature();
+    internal static partial Regex HelperSignature { get; }
 
     [GeneratedRegex(@"(?m)^def method(\d+)Signature[^\r\n]*Size\\u003CSystem.UInt32")]
-    internal static partial Regex UIntSizeSignature();
+    internal static partial Regex UIntSizeSignature { get; }
 
     [GeneratedRegex(@"(?m)^def method0Body :")]
-    internal static partial Regex FirstBody();
+    internal static partial Regex FirstBody { get; }
 
     const string MethodDeclaration =
         """(?:@\[[^\r\n]*\] )?(?:def|theorem|cil_decoded_method) method(?<method>[0-9]+)(?![0-9])""";
 
     /// <summary>The assembly block, or a declaration of the method that the method group numbers.</summary>
     [GeneratedRegex($"""(?m)^(?:def assembly\d+Metadata |{MethodDeclaration})[^\n]*$""")]
-    internal static partial Regex ComponentLine();
+    internal static partial Regex ComponentLine { get; }
 
     const string SizeArgument = """Shared::Size\\u003C(?<argument>[^"\\]*)\\u003E""";
 
     [GeneratedRegex($"""(?m)^def method(\d+)Signature : String := "[^"]*{SizeArgument}""")]
-    internal static partial Regex SizeSignature();
+    internal static partial Regex SizeSignature { get; }
 
     [GeneratedRegex("method([0-9]+)")]
-    internal static partial Regex MethodName();
+    internal static partial Regex MethodName { get; }
 }

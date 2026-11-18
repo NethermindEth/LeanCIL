@@ -519,8 +519,8 @@ static partial class StrictBindingFacts
     /// <summary>The bytes of the image a fixture module holds.</summary>
     internal static byte[] ReadImage(string module)
     {
-        var length = int.Parse(Length().Match(module).Groups[1].Value);
-        var chunks = Chunk().Matches(module).Select(match => match.Groups[1].Value + match.Groups[2].Value);
+        var length = int.Parse(Length.Match(module).Groups[1].Value);
+        var chunks = Chunk.Matches(module).Select(match => match.Groups[1].Value + match.Groups[2].Value);
         var bytes = Convert.FromHexString(string.Concat(chunks));
         return bytes[..length];
     }
@@ -530,9 +530,9 @@ static partial class StrictBindingFacts
     static string Hex(byte value) => "0x" + value.ToString("x2");
 
     [GeneratedRegex(@"length := (\d+),")]
-    private static partial Regex Length();
+    private static partial Regex Length { get; }
 
     [GeneratedRegex(@"^  joinHalves 0x([0-9a-f]{64})\n    0x([0-9a-f]{64}),?$", RegexOptions.Multiline)]
-    private static partial Regex Chunk();
+    private static partial Regex Chunk { get; }
 
 }

@@ -13,26 +13,26 @@ partial class Program
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
         if (output.Contains("sorryAx", StringComparison.Ordinal))
             throw new InvalidOperationException("A measured file depends on sorryAx: " + path);
-        var count = HeartbeatCount().Match(output);
+        var count = HeartbeatCount.Match(output);
         if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
         return (long.Parse(count.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), output);
     }
 
     // The line `#eval show IO Nat from IO.getNumHeartbeats` prints.
     [GeneratedRegex(@"(?m)^([0-9]+)\r?$")]
-    private static partial Regex HeartbeatCount();
+    private static partial Regex HeartbeatCount { get; }
 
     [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
-    private static partial Regex ResolutionFactsCommand();
+    private static partial Regex ResolutionFactsCommand { get; }
 
     [GeneratedRegex(@"\Adef method(\d+) : Method := .* code := \[\r?\z")]
-    private static partial Regex LiteralMethodHeader();
+    private static partial Regex LiteralMethodHeader { get; }
 
     const string LiteralMethodDefinition = """def method(?<number>\d+) : Method""";
     const string DecodedMethodDefinition = """cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?""";
 
     [GeneratedRegex($"""(?m)^(?:{LiteralMethodDefinition}|{DecodedMethodDefinition}) :=""")]
-    private static partial Regex DefinedMethod();
+    private static partial Regex DefinedMethod { get; }
 
     // A decoded method's definition line: its options, then its decoder over the method's own definitions.
     const string DecodedMethodHead = """(?m)^cil_decoded_method method(?<number>\d+)( \[[^\]\r\n]*\])? := """;
@@ -40,60 +40,60 @@ partial class Program
     const string DecoderInput = """method\k<number>Original method\k<number>TypeArgumentsRaw""";
 
     [GeneratedRegex($"""{DecodedMethodHead}{DecoderCall}{DecoderInput}(?=\r?$)""")]
-    private static partial Regex DecodedMethod();
+    private static partial Regex DecodedMethod { get; }
 
     [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := [^\r\n]*")]
-    private static partial Regex RawDefinition();
+    private static partial Regex RawDefinition { get; }
 
     [GeneratedRegex(@"(?m)^def method(?<number>\d+)Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ")]
-    private static partial Regex ClosedReturnType();
+    private static partial Regex ClosedReturnType { get; }
 
     [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := [^\r\n]*")]
-    private static partial Regex MethodLink();
+    private static partial Regex MethodLink { get; }
 
     [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct (\d+)\r?$")]
-    private static partial Regex DirectLink();
+    private static partial Regex DirectLink { get; }
 
     // The head of a one-line theorem, up to its proof.
     [GeneratedRegex(@"(?m)^(theorem (?<name>[\w?!']+) : [^\r\n]*?) := [^\r\n]*")]
-    private static partial Regex TheoremHead();
+    private static partial Regex TheoremHead { get; }
 
     // A theorem and its indented continuation lines; a Lean name may end in ?, ! or '.
     [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n")]
-    private static partial Regex GeneratedTheorem();
+    private static partial Regex GeneratedTheorem { get; }
 
     [GeneratedRegex(@"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z")]
-    private static partial Regex IdentityWitnessName();
+    private static partial Regex IdentityWitnessName { get; }
 
     [GeneratedRegex(@"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_spelled)\z")]
-    private static partial Regex RetainedObligationName();
+    private static partial Regex RetainedObligationName { get; }
 
     [GeneratedRegex(@"(?m)^#print axioms [^\r\n]*\r?\n")]
-    private static partial Regex AxiomsCommand();
+    private static partial Regex AxiomsCommand { get; }
 
     [GeneratedRegex(@"""(?:\\.|[^""\\])*""")]
-    private static partial Regex StringLiteral();
+    private static partial Regex StringLiteral { get; }
 
     [GeneratedRegex(@"(?m)^(?:namespace|end) Extracted\r?$")]
-    private static partial Regex ExtractedNamespaceLine();
+    private static partial Regex ExtractedNamespaceLine { get; }
 
     [GeneratedRegex(@"\bExtracted\b")]
-    private static partial Regex ExtractedWord();
+    private static partial Regex ExtractedWord { get; }
 
     [GeneratedRegex(@"(?m)^namespace Extracted\r?$")]
-    private static partial Regex NamespaceExtracted();
+    private static partial Regex NamespaceExtracted { get; }
 
     [GeneratedRegex(@"(?m)^end Extracted\r?$")]
-    private static partial Regex EndExtracted();
+    private static partial Regex EndExtracted { get; }
 
     [GeneratedRegex(@"(?m)^import [^\r\n]+\r?\n")]
-    private static partial Regex ImportCommand();
+    private static partial Regex ImportCommand { get; }
 
     [GeneratedRegex(@"(?m)^(?:namespace|end) Extracted\r?\n")]
-    private static partial Regex ExtractedNamespaceCommand();
+    private static partial Regex ExtractedNamespaceCommand { get; }
 
     [GeneratedRegex(@"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", RegexOptions.Multiline)]
-    private static partial Regex ImportedModule();
+    private static partial Regex ImportedModule { get; }
 
     /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
     sealed record ExtractedInstruction(int Method, int Pc, string Op);
@@ -105,7 +105,7 @@ partial class Program
         var lines = source.Split('\n');
         for (var line = 0; line < lines.Length; line++)
         {
-            var header = LiteralMethodHeader().Match(lines[line]);
+            var header = LiteralMethodHeader.Match(lines[line]);
             if (!header.Success) continue;
             var method = int.Parse(header.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
             // The line that closes the code list ends the definition, whatever follows it.
@@ -121,14 +121,14 @@ partial class Program
     }
 
     // An extraction's definition of method `method` from its decoder, with the field operand definitions it names.
-    static Match DecodedDefinition(string source, int method) => DecodedMethod().Matches(source)
+    static Match DecodedDefinition(string source, int method) => DecodedMethod.Matches(source)
         .FirstOrDefault(match => match.Groups["number"].Value == $"{method}") ?? Match.Empty;
 
     /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
 
     /// <summary>The numbers of the methods an extraction defines, by a literal or by its decoder.</summary>
-    static int[] DefinedMethods(string source) => [.. DefinedMethod().Matches(source)
+    static int[] DefinedMethods(string source) => [.. DefinedMethod.Matches(source)
         .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
 
     /// <summary>
@@ -139,7 +139,7 @@ partial class Program
     {
         if (!IsDecodedMethod(source, method))
             throw new InvalidOperationException($"method{method} is not defined from its decoder");
-        return RawDefinition().Matches(source)
+        return RawDefinition.Matches(source)
             .FirstOrDefault(match => match.Groups[1].Value == $"{method}")?.Value ?? "";
     }
 
@@ -185,7 +185,7 @@ partial class Program
     /// </summary>
     static string ForgeDecodedReturnType(string source, int method, string atom, string replacement)
     {
-        var closed = ClosedReturnType().Matches(source)
+        var closed = ClosedReturnType.Matches(source)
             .FirstOrDefault(match => match.Groups["number"].Value == $"{method}");
         var returnType = closed?.Groups["type"].Value ?? "";
         if (!returnType.Contains(atom, StringComparison.Ordinal))
@@ -200,7 +200,7 @@ partial class Program
     /// </summary>
     static string ForgeLink(string source, int method, int pc, string link)
     {
-        var definition = MethodLink().Matches(source).FirstOrDefault(match =>
+        var definition = MethodLink.Matches(source).FirstOrDefault(match =>
                 match.Groups[1].Value == $"{method}" && match.Groups[2].Value == $"{pc}")
             ?? throw new InvalidOperationException($"method{method} has no link at pc {pc}");
         return source[..definition.Index] + $"@[cil_code] def method{method}Link{pc} : Link := {link}" +
@@ -215,7 +215,7 @@ partial class Program
         $"method{method}Closed profile method{method}FeatureStates method{method}Reachable";
 
     /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
-    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. DirectLink().Matches(source)
+    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. DirectLink.Matches(source)
         .Where(match => match.Groups[3].Value == $"{callee}")
         .Select(match => (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
             int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))];
@@ -225,15 +225,15 @@ partial class Program
     static string NarrowEvidence(string source, string theorem)
     {
         var found = 0;
-        var result = GeneratedTheorem().Replace(source, match =>
+        var result = GeneratedTheorem.Replace(source, match =>
             {
                 // Byte-backed identity definitions carry these checked UTF-8 witnesses.
-                if (IdentityWitnessName().IsMatch(match.Groups[1].Value))
+                if (IdentityWitnessName.IsMatch(match.Groups[1].Value))
                     return match.Value;
                 // A body obligation reads its module's lookup tables through their equality with the metadata, the
                 // identity of each assembly it reaches through the assembly's own proof, and the pins through theirs.
                 if (match.Groups[1].Value != theorem &&
-                    RetainedObligationName().IsMatch(match.Groups[1].Value) &&
+                    RetainedObligationName.IsMatch(match.Groups[1].Value) &&
                     !theorem.EndsWith("_tables_valid", StringComparison.Ordinal))
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
@@ -241,8 +241,8 @@ partial class Program
                 return match.Value;
             });
         if (found != 1) throw new InvalidOperationException("Missing unique evidence obligation: " + theorem);
-        result = ResolutionFactsCommand().Replace(result, "");
-        return AxiomsCommand().Replace(result, "");
+        result = ResolutionFactsCommand.Replace(result, "");
+        return AxiomsCommand.Replace(result, "");
     }
 
     // Keep narrowed declarations and exact obligation types checked, but reuse the original
@@ -250,11 +250,11 @@ partial class Program
     static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)
     {
         // Explicit references could bypass the projected declarations and reach the original.
-        var code = StringLiteral().Replace(narrowed, "\"\"");
-        code = ExtractedNamespaceLine().Replace(code, "");
-        if (ExtractedWord().IsMatch(code))
+        var code = StringLiteral.Replace(narrowed, "\"\"");
+        code = ExtractedNamespaceLine.Replace(code, "");
+        if (ExtractedWord.IsMatch(code))
             throw new InvalidOperationException("Evidence controls require namespace-relative references.");
-        if (NamespaceExtracted().Count(narrowed) != 1 || EndExtracted().Count(narrowed) != 1)
+        if (NamespaceExtracted.Count(narrowed) != 1 || EndExtracted.Count(narrowed) != 1)
             throw new InvalidOperationException("Missing unique evidence control namespace.");
         var witnesses = new StringBuilder();
         var audits = new StringBuilder();
@@ -262,7 +262,7 @@ partial class Program
         {
             var witness = $"evidenceControl{index}_{theorem}";
             Match[] Stated(string text) =>
-                [.. TheoremHead().Matches(text).Where(match => match.Groups["name"].Value == theorem)];
+                [.. TheoremHead.Matches(text).Where(match => match.Groups["name"].Value == theorem)];
             var (originalMatches, narrowedMatches) = (Stated(original), Stated(narrowed));
             if (narrowedMatches.Length != 1 || originalMatches.Length != 1 ||
                 narrowedMatches[0].Groups[1].Value != originalMatches[0].Groups[1].Value)
@@ -276,9 +276,9 @@ partial class Program
                 narrowed[(obligation.Index + obligation.Length)..];
             audits.AppendLine($"#print axioms EvidenceControl{index}.{theorem}");
         }
-        narrowed = ImportCommand().Replace(narrowed, "");
+        narrowed = ImportCommand.Replace(narrowed, "");
         // A nested Extracted namespace can resolve missing names in the original Extracted.
-        narrowed = ExtractedNamespaceCommand().Replace(narrowed, "");
+        narrowed = ExtractedNamespaceCommand.Replace(narrowed, "");
         return witnesses + $"\nnamespace EvidenceControl{index}\nset_option autoImplicit false\n" + narrowed +
             $"\nend EvidenceControl{index}\n" + audits;
     }
@@ -302,7 +302,7 @@ partial class Program
                 if (!source.Contains("namespace Extracted\n", StringComparison.Ordinal) ||
                     !source.Contains("theorem " + cases[index].Theorem + " :", StringComparison.Ordinal))
                     throw new InvalidOperationException("Expected generated extraction evidence: " + cases[index].Path);
-                var body = ImportedModule().Replace(source, match =>
+                var body = ImportedModule.Replace(source, match =>
                 {
                     imports.Add(match.Groups[1].Value);
                     return "";

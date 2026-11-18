@@ -331,21 +331,21 @@ internal static partial class ProofCostReport
     }
 
     [GeneratedRegex("""(?ms)^\[\[lean_lib\]\][ \t]*\r?$(?<body>.*?)(?=^\[|\z)""")]
-    private static partial Regex LibraryTable();
+    private static partial Regex LibraryTable { get; }
 
     [GeneratedRegex("""^name[ \t]*=[ \t]*"(?<name>[^"]+)"$""")]
-    private static partial Regex LibraryName();
+    private static partial Regex LibraryName { get; }
 
     // Test libraries are the tables that only name a library: no source directory, roots or facets.
-    internal static string[] TestLibraries(string lakefile) => LibraryTable().Matches(lakefile)
+    internal static string[] TestLibraries(string lakefile) => LibraryTable.Matches(lakefile)
         .Select(table => table.Groups["body"].Value.Split('\n').Select(line => line.Trim())
             .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray())
-        .Where(body => body.Length == 1 && LibraryName().IsMatch(body[0]))
-        .Select(body => LibraryName().Match(body[0]).Groups["name"].Value)
+        .Where(body => body.Length == 1 && LibraryName.IsMatch(body[0]))
+        .Select(body => LibraryName.Match(body[0]).Groups["name"].Value)
         .Where(name => name != "CIL").ToArray();
 
     [GeneratedRegex("""^(?:(?:public|meta|private)[ \t]+)*import[ \t]+(?:all[ \t]+)?(?<modules>[^-/]+)""")]
-    private static partial Regex ImportLine();
+    private static partial Regex ImportLine { get; }
 
     // Imports end at the first command; comments may precede or separate them.
     internal static string[] Imports(string source)
@@ -367,7 +367,7 @@ internal static partial class ProofCostReport
                 continue;
             }
             if (line == "module" || line == "prelude") continue;
-            if (ImportLine().Match(line) is not { Success: true } import) break;
+            if (ImportLine.Match(line) is not { Success: true } import) break;
             modules.AddRange(import.Groups["modules"].Value
                 .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         }
@@ -683,7 +683,7 @@ internal static partial class ProofCostReport
         : [];
 
     [GeneratedRegex("^-[0-9a-f]+$")]
-    private static partial Regex RunSuffix();
+    private static partial Regex RunSuffix { get; }
 
     // The proof suite whose declared directory holds the output, by its path under the artifacts root.
     internal static string? Owner(string output) => VerificationSuites.ProofOutputs
@@ -692,7 +692,7 @@ internal static partial class ProofCostReport
             if (!output.StartsWith(owned, StringComparison.Ordinal)) return false;
             var rest = output[owned.Length..];
             var name = rest.Split('/')[0];
-            return rest.Length == 0 || rest[0] == '/' || RunSuffix().IsMatch(name);
+            return rest.Length == 0 || rest[0] == '/' || RunSuffix.IsMatch(name);
         }))
         .Select(suite => suite.Key).SingleOrDefault();
 

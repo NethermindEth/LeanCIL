@@ -190,7 +190,7 @@ partial class Program
     // `path(line,column): error CODE: message [project]`, as MSBuild prints compiler errors.
     [GeneratedRegex(@"^\s*(?<file>[^\s(][^(]*)\((?<line>\d+),(?<column>\d+)\): error (?<code>[A-Za-z]+\d+): " +
         @"(?<message>.*?)(?: \[[^\]]+\])?\s*$", RegexOptions.Multiline)]
-    private static partial Regex BuildError();
+    private static partial Regex BuildError { get; }
 
     /// <summary>Builds each project; the errors of the builds that failed, none when every build succeeded.</summary>
     static BuildDiagnostic[] BuildProjects(WatchSettings settings)
@@ -201,7 +201,7 @@ partial class Program
             var build = Execute(["dotnet", "build", project, "-c", settings.Configuration],
                 Path.GetDirectoryName(project));
             if (build.Code == 0) continue;
-            var errors = BuildError().Matches(build.Stdout).Select(match => new BuildDiagnostic(
+            var errors = BuildError.Matches(build.Stdout).Select(match => new BuildDiagnostic(
                     Path.GetFullPath(match.Groups["file"].Value.Trim(), Path.GetDirectoryName(project)!),
                     int.Parse(match.Groups["line"].Value), int.Parse(match.Groups["column"].Value),
                     match.Groups["code"].Value, match.Groups["message"].Value)).Distinct().ToArray();

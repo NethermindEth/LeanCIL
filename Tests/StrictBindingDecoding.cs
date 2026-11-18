@@ -69,8 +69,8 @@ partial class Program
         new Random(7).NextBytes(file);
         var proof = BindingImage.PagedDigestTheorem(file, skipCompileCheck: true);
         var definitions = BindingImage.Definitions(file);
-        var lemmas = HashLemma().Count(proof);
-        var longest = PageChunkCount().Matches(definitions).Max(page => int.Parse(page.Groups[1].Value,
+        var lemmas = HashLemma.Count(proof);
+        var longest = PageChunkCount.Matches(definitions).Max(page => int.Parse(page.Groups[1].Value,
             System.Globalization.CultureInfo.InvariantCulture));
         if (lemmas != 4 || longest > 64)
             throw new InvalidOperationException(
@@ -316,8 +316,8 @@ partial class Program
     }
 
     [GeneratedRegex(@"(?m)^def page\d+ : List Nat := CIL\.Extraction\.fixedDigitsWithin 512 (\d+) ")]
-    private static partial Regex PageChunkCount();
+    private static partial Regex PageChunkCount { get; }
 
     [GeneratedRegex(@"(?m)^set_option debug\.skipKernelTC true in\ntheorem hash\d+ ")]
-    private static partial Regex HashLemma();
+    private static partial Regex HashLemma { get; }
 }

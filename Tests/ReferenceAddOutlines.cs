@@ -102,13 +102,13 @@ partial class Program
     /// <summary>Requires a specific outline term or unsupported-shape diagnosis.</summary>
     static void RequireOutlineText(string source, string expected, string variant)
     {
-        var unwrapped = WrappedComment().Replace(source, " ");
+        var unwrapped = WrappedComment.Replace(source, " ");
         if (!unwrapped.Contains(expected, StringComparison.Ordinal))
             throw new InvalidOperationException($"{variant} outline lacks '{expected}':\n{source}");
     }
 
     // A line break and the comment marker that continues a wrapped outline comment.
     [GeneratedRegex(@"\r?\n\s*--\s*")]
-    private static partial Regex WrappedComment();
+    private static partial Regex WrappedComment { get; }
 }
 

@@ -155,7 +155,7 @@ void RequirePinned(string owner)
         "^srcDir = \"([^\"]+)\"$", RegexOptions.Multiline).Groups[1].Value;
     var pins = Directory.EnumerateFiles(Path.GetDirectoryName(required)!, Path.GetFileName(required) + ".pin-*")
         .Select(File.ReadAllText).ToArray();
-    var cached = KeyName().IsMatch(Path.GetFileName(required)) &&
+    var cached = KeyName.IsMatch(Path.GetFileName(required)) &&
         SamePath(Path.GetDirectoryName(required)!, LibraryCacheRoot);
     if (cached && !pins.Contains(frameworkPackage))
         throw new InvalidOperationException("No pin beside " + required + " names the package " + frameworkPackage);

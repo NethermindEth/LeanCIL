@@ -221,19 +221,19 @@ string ChangeLiteralByte(string line, Regex pattern, int change) => pattern.Repl
     match => match.Groups[1].Value + ((Convert.ToInt32(match.Groups[2].Value, 16) + change) % 256).ToString("X2"));
 // Sample 0 starts `ldarg.0; call <token>` under a tiny header: header, ldarg.0, call, then the token bytes.
 RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes",
-    line => ChangeLiteralByte(line, GenericPatterns.SecondByte(), 1));
+    line => ChangeLiteralByte(line, GenericPatterns.SecondByte, 1));
 RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes",
-    line => ChangeLiteralByte(line, GenericPatterns.FirstByte(), 4));
+    line => ChangeLiteralByte(line, GenericPatterns.FirstByte, 4));
 RejectBody(0, "altered-token-operand-byte", bodyTheorem, "method0Bytes",
-    line => ChangeLiteralByte(line, GenericPatterns.TokenOperandByte(), 1));
+    line => ChangeLiteralByte(line, GenericPatterns.TokenOperandByte, 1));
 // A count one short of the digits keeps the code but drops its leading byte, the body header.
 RejectBody(0, "altered-literal-count", bodyTheorem, "method0Bytes",
-    line => ChangeByte(line, GenericPatterns.LiteralCount(), -1));
+    line => ChangeByte(line, GenericPatterns.LiteralCount, -1));
 // An instantiation head states its signature's value-type marker, which must agree with the argument's head.
 RejectBody(6, "wrong-instantiation-marker", "method1_body_validated", "method1Body",
     line => line.Replace("kind := .external (some true)", "kind := .external (some false)"));
 RejectBody(0, "altered-token-table-key", bodyTheorem, "method0Body",
-    line => ChangeByte(line, GenericPatterns.CallTokenKey(), 1));
+    line => ChangeByte(line, GenericPatterns.CallTokenKey, 1));
 RejectBody(0, "altered-token-table-operand", bodyTheorem, "method0Body",
     line => line.Replace("name := \"Identity\"", "name := \"Other\""));
 RejectBody(0, "altered-instruction-offset", bodyTheorem, "method0Original",
@@ -254,16 +254,16 @@ void RejectTables(string name, string definition, Func<string, string> change)
         "method0_tables_refuted");
 }
 RejectTables("altered-metadata-row", "method0Metadata",
-    line => ChangeLiteralByte(line, GenericPatterns.MetadataRowByte(), 1));
+    line => ChangeLiteralByte(line, GenericPatterns.MetadataRowByte, 1));
 RejectTables("altered-metadata-string", "method0Metadata",
-    line => ChangeLiteralByte(line, GenericPatterns.MetadataStringByte(), 1));
+    line => ChangeLiteralByte(line, GenericPatterns.MetadataStringByte, 1));
 RejectTables("altered-lookup-row", "method0Tables",
-    line => ChangeLiteralByte(line, GenericPatterns.LookupRowByte(), 1));
+    line => ChangeLiteralByte(line, GenericPatterns.LookupRowByte, 1));
 // A leaf entry of the rows tree removed, and one added before another.
 RejectTables("missing-lookup-row", "method0Tables",
-    line => GenericPatterns.LeafRow().Replace(line, ".leaf", 1));
+    line => GenericPatterns.LeafRow.Replace(line, ".leaf", 1));
 RejectTables("extra-lookup-row", "method0Tables",
-    line => GenericPatterns.LeafRowParts().Replace(line, "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
+    line => GenericPatterns.LeafRowParts.Replace(line, "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));
 Console.WriteLine("PASS body bytes, token table and original definition reject changed bytes and operands");
@@ -275,7 +275,7 @@ Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "metho
 // each body check refutes the string a proof would select the method by.
 string SwapSignatures(string source)
 {
-    string Value(string name) => GenericPatterns.StringDefinition().Matches(source)
+    string Value(string name) => GenericPatterns.StringDefinition.Matches(source)
         .FirstOrDefault(match => match.Groups["name"].Value == name)?.Groups["value"].Value ?? "";
     var (first, second) = (Value("method0Signature"), Value("method1Signature"));
     return ChangeDefinition(ChangeDefinition(source, "method0Signature", line => line.Replace(first, second)),
@@ -434,36 +434,36 @@ static partial class GenericPatterns
     const string ByteLiteral = $$"""{{LiteralHead}}\d+ 0x""";
 
     [GeneratedRegex($$"""({{ByteLiteral}})([0-9A-F]{2})""")]
-    internal static partial Regex FirstByte();
+    internal static partial Regex FirstByte { get; }
 
     [GeneratedRegex($$"""({{ByteLiteral}}[0-9A-F]{2})([0-9A-F]{2})""")]
-    internal static partial Regex SecondByte();
+    internal static partial Regex SecondByte { get; }
 
     /// <summary>The first token byte of a body that starts with a tiny header, ldarg.0 and call.</summary>
     [GeneratedRegex($$"""({{ByteLiteral}}[0-9A-F]{2}0228)([0-9A-F]{2})""")]
-    internal static partial Regex TokenOperandByte();
+    internal static partial Regex TokenOperandByte { get; }
 
     [GeneratedRegex($$"""({{LiteralHead}})(\d+)( 0x)""")]
-    internal static partial Regex LiteralCount();
+    internal static partial Regex LiteralCount { get; }
 
     [GeneratedRegex(@"(\()(\d+)(, \.call)")]
-    internal static partial Regex CallTokenKey();
+    internal static partial Regex CallTokenKey { get; }
 
     [GeneratedRegex($$"""(rows := \[\(\d+, {{ByteLiteral}})([0-9A-F]{2})""")]
-    internal static partial Regex MetadataRowByte();
+    internal static partial Regex MetadataRowByte { get; }
 
     [GeneratedRegex($$"""(strings := \[\(0, {{LiteralHead}}1 0x00\)\), \(\d+, {{ByteLiteral}})([0-9A-F]{2})""")]
-    internal static partial Regex MetadataStringByte();
+    internal static partial Regex MetadataStringByte { get; }
 
     [GeneratedRegex($$"""(rows := .*?{{ByteLiteral}})([0-9A-F]{2})""")]
-    internal static partial Regex LookupRowByte();
+    internal static partial Regex LookupRowByte { get; }
 
     [GeneratedRegex($$"""\(\.node \.leaf \d+ {{ByteLiteral}}[0-9A-F]+\) \.leaf\)""")]
-    internal static partial Regex LeafRow();
+    internal static partial Regex LeafRow { get; }
 
     [GeneratedRegex($$"""\(\.node \.leaf (\d+) ({{ByteLiteral}}[0-9A-F]+\)) \.leaf\)""")]
-    internal static partial Regex LeafRowParts();
+    internal static partial Regex LeafRowParts { get; }
 
     [GeneratedRegex(@"(?m)^def (?<name>\w+) : String := (?<value>.*)$")]
-    internal static partial Regex StringDefinition();
+    internal static partial Regex StringDefinition { get; }
 }

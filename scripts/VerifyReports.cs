@@ -28,15 +28,15 @@ internal static partial class VerifyReports
 
     // Lean's goal display heads each goal of an `unsolved goals` error with `case <tag>` when the goal has a tag.
     [GeneratedRegex(@"^case (?<tag>\S+)$")]
-    private static partial Regex GoalCase();
+    private static partial Regex GoalCase { get; }
 
     // A manifest instruction line, `IL_0002: add`.
     [GeneratedRegex(@"\AIL_(?<offset>[0-9a-fA-F]+): (?<text>.*)\z")]
-    private static partial Regex ManifestInstruction();
+    private static partial Regex ManifestInstruction { get; }
 
     // One sequence point of `ExtractedSymbols.points`: `(pc, "file", line, column)`.
     [GeneratedRegex("""\((?<pc>\d+), (?<file>"(?:[^"\\]|\\.)*"), (?<line>\d+), (?<column>\d+)\)""")]
-    private static partial Regex SymbolPoint();
+    private static partial Regex SymbolPoint { get; }
 
     /// <summary>A visible sequence point of the PDB: the first pc it covers and its C# location.</summary>
     internal sealed record SourcePoint(int Pc, string File, int Line, int Column);
@@ -82,7 +82,7 @@ internal static partial class VerifyReports
 
     /// <summary>The obligation tags of the goals an `unsolved goals` message lists, checked against the tags.</summary>
     internal static string[] UnsolvedObligations(string message) =>
-        message.Split('\n').Select(line => GoalCase().Match(line)).Where(match => match.Success)
+        message.Split('\n').Select(line => GoalCase.Match(line)).Where(match => match.Success)
             .Select(match => match.Groups["tag"].Value)
             .Where(tag => ObligationTags.Contains(tag.Split('.')[0], StringComparer.Ordinal)).ToArray();
 
@@ -113,7 +113,7 @@ internal static partial class VerifyReports
         if (!File.Exists(path)) return null;
         return File.ReadAllLines(path).SkipWhile(line => !line.StartsWith("def points ", StringComparison.Ordinal))
             .Skip(1).TakeWhile(line => line.StartsWith("  [", StringComparison.Ordinal))
-            .Select(line => SymbolPoint().Matches(line).Select(point => new SourcePoint(
+            .Select(line => SymbolPoint.Matches(line).Select(point => new SourcePoint(
                 int.Parse(point.Groups["pc"].Value), JsonSerializer.Deserialize<string>(point.Groups["file"].Value)!,
                 int.Parse(point.Groups["line"].Value), int.Parse(point.Groups["column"].Value)))
                 .OrderBy(point => point.Pc).ToArray())
@@ -210,7 +210,7 @@ internal static partial class VerifyReports
             if (index is not null && known is null)
                 unknown["method.signature"] = "the manifest lists no method " + index;
             var line = known is { } method && pc is { } at && at >= 0 && at < method.Instructions.Length
-                ? ManifestInstruction().Match(method.Instructions[at]) : null;
+                ? ManifestInstruction.Match(method.Instructions[at]) : null;
             // The C# statement the pc belongs to starts at the last visible sequence point at or before it.
             var point = pc is { } stepped ? known?.Points?.LastOrDefault(point => point.Pc <= stepped) : null;
             record["cil"] = pc is null ? null : new JsonObject
