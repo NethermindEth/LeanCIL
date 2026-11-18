@@ -24,7 +24,7 @@ REQUEST (JSON):
   { "modules":   ["Proof", ...],
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
                     "statement": bool?, "refutation": bool?, "term": bool?,
-                    "expected": { "term": T, "refuted": bool? }?, "allowedModules": [M, ...]? }],
+                    "expected": { "term": T, "refuted": bool }?, "allowedModules": [M, ...]? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
     "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
@@ -479,7 +479,10 @@ def theorem? (env : Environment) (req : Json)
       | some (.error error) => [("termError", toJson error)]
       | none => [("termError", toJson s!"Theorem has no declaring module: {thm}")]
   if let .ok expected := req.getObjVal? "expected" then
-    let refuted := (expected.getObjValAs? Bool "refuted").toOption.getD false
+    -- A request that does not say which predicate it compares with is refused, not read as Holds.
+    let .ok refuted := expected.getObjValAs? Bool "refuted"
+      | return result (fields ++
+          [("error", toJson "A statement comparison states expected.refuted as a boolean")])
     let target := (expected.getObjVal? "term").bind
       (decodeStatement kernel ownerOf info.levelParams)
     fields := fields ++ match target.bind (if refuted then refutedAt ownerOf else pure) with

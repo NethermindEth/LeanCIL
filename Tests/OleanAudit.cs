@@ -613,6 +613,14 @@ if (unfolded.matches != true || weaker.matches != false || inlined.matches != tr
     lone.mismatch?.Contains("does not declare StatementBase.zero", StringComparison.Ordinal) != true)
     throw new InvalidOperationException("Statement comparisons: " +
         JsonSerializer.Serialize(new[] { unfolded, weaker, inlined, forged, big, near, lone }));
+// A comparison states whether it is with the counterexample predicate: a missing or non-boolean flag would compare
+// a refutation request with Holds, so the audit refuses it.
+foreach (object expected in new object[]
+    {
+        new { term = production[0].term!.Value }, new { term = production[0].term!.Value, refuted = "true" }
+    })
+    Rejected(Audit("StatementVariant", [ProofTheorem("Variant.claim") with { expected = expected }]).theorems[0],
+        "expected.refuted");
 Console.WriteLine("PASS the kernel compares statements by unfolding, refuses weaker ones and forged constants");
 
 // A user module cannot replace a toolchain module on the audit's search path.
