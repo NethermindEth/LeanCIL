@@ -269,9 +269,14 @@ static void CheckFieldReferences()
         (new($".object {scope} \"Node\"", 3, $".pointer (.object {scope} \"Node\")",
             MetadataName.OfText("quote\"back\\slash")), "quote\"back\\slash"u8.ToArray())
     ];
-    var source = new StringBuilder("""
+    var source = new StringBuilder($$"""
         import CIL.CallSite
         open CIL CIL.Extraction
+
+        /-- The extractor and the field binder use the same assembly identity. -/
+        theorem fieldRuntimeAssembly :
+            ({{PlatformAssemblies.SystemRuntime.ToLean()}} : AssemblyName) = runtimeAssembly := rfl
+        #print axioms fieldRuntimeAssembly
 
         """);
     foreach (var (reference, nameBytes) in cases)

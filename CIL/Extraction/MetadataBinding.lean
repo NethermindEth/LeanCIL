@@ -131,6 +131,8 @@ structure FieldSite where
   name : List Nat
   declared : ResolvedType
   definition : Option (Nat × Nat)
+  /-- The head token of a generic owner marked VALUETYPE in the field reference's slice. -/
+  valueHead : Option Nat := none
 
 /-- Where a field's `Field` row lives, with the checks that tie a `MemberRef` to it: the
     definition lies in the declaring type's range and has the member's name and signature. -/
@@ -158,13 +160,19 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
           declared := ← env.resolveBlob 0 token row.signature, definition := some (0, token) }
   else
     let row ← index.memberRef token
-    let owner ← env.resolveToken 0 row.parent
+    let (owner, valueHead) <- if metadataTableOf row.parent == Table.typeSpec then do
+      let signature <- index.typeSpec row.parent
+      let head := match signature with
+        | .genericInst true token _ => some token
+        | _ => none
+      pure (<- env.resolve 0 signature, head)
+    else pure (<- env.resolveToken 0 row.parent, none)
     let name ← index.string row.name
     let declared ← env.resolveBlob 0 token row.signature
     let definition ← match owner.head with
       | some head => env.fieldDefinition token head name declared
       | none => .error (.unresolvedMember token)
-    .ok { owner := owner, name := name, declared := declared, definition := definition }
+    .ok { owner, name, declared, definition, valueHead }
 
 /-- The base classes of a class definition, nearest first, as slice positions and `TypeDef`
     tokens. The chain ends at `System.Object`, named through a reference to an assembly of a
@@ -245,12 +253,20 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
     else .ok (← env.instanceIndex position definition classOwner, held, some false)
   | none =>
     -- The pair is known by its own reference, never by the slice's `corlib` number.
-    let pair := match site.owner with
-      | .genericInst head (.cons (.primitive first) (.cons (.primitive second) .nil)) =>
-        (primitiveWidth first).any (fun width => primitiveWidth second == some width) &&
-          isCorlibScope head.scope &&
-          head.parts == [systemNamespace, valueTuplePairName]
-      | _ => false
+    let pair <- match site.owner, site.valueHead with
+      | .genericInst head (.cons (.primitive first) (.cons (.primitive second) .nil)),
+          some reference => do
+        if metadataTableOf reference != Table.typeRef ||
+            head.parts != [systemNamespace, valueTuplePairName] ||
+            !(primitiveWidth first).any (fun width => primitiveWidth second == some width) then
+          pure false
+        else
+          let index <- env.slice 0 token
+          let scope := (<- index.typeRef reference).scope
+          if metadataTableOf scope == Table.assemblyRef then
+            pure ((<- index.assemblyRefName scope) == runtimeAssembly)
+          else pure false
+      | _, _ => pure false
     -- With no carried row, the reference's own signature is the item's only declaration.
     if pair then
       if site.name == firstItemName then

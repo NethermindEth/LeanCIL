@@ -15,7 +15,8 @@ parameterless `M()` that reaches `Y` of the class through `ldnull` names `Ext.Po
 the operand and fails on the `Y` token. An operand that flags `Y` static fails on its token for
 the struct and for the parameterless class method, since no carried row gives a static of
 `Ext.Point` either, and on the signature for `M(Ext.Point)`. The platform pair binds `Item1`
-and `Item2` at indices 0 and 1 for primitive arguments of equal storage width.
+and `Item2` at indices 0 and 1 for primitive arguments of equal storage width. Its signature
+must mark the head as a value type, and its TypeRef must name the exact runtime assembly.
 -/
 
 namespace Tests.ImportedFieldIndex
@@ -267,18 +268,22 @@ theorem static_flagged_access_of_y_rejected :
 /-- A fixture that returns the member tokens for Item1, Item2 and Rest in that order. -/
 private abbrev PairWorld := Step (Prod Nat (Prod Nat Nat))
 
-/-- `T` with `System.ValueTuple` over the argument type bytes `arguments` and its members
-    `Item1 : !0`, `Item2` with the signature type bytes `second` and `Rest : !0`, the last a
-    member the pair does not declare. -/
-private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01]) : PairWorld := do
-  let runtimeName ← string "System.Runtime"
-  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
-  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
+/-- A tuple with the given assembly, type marker, arity and argument bytes. Its member
+    references declare Item1 and Rest as !0 and Item2 with the signature type `second`. -/
+private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01])
+    (assembly := runtimeAssembly) (marker := 0x11) (arity := 2) : PairWorld := do
+  let name <- Tests.MetadataBuilder.stringBytes (assembly.name.bytes?.getD [])
+  let culture <- Tests.MetadataBuilder.stringBytes (assembly.culture.bytes?.getD [])
+  let publicKeyToken <- blob (assembly.publicKeyToken.elim [] fun key => fixedDigits 8 8 key [])
+  let version := assembly.version
+  let _ <- row Table.assemblyRef
+    [version.major, version.minor, version.build, version.revision, 0, publicKeyToken, name,
+     culture, 0]
   modify fun builder => { builder with corlib := 1 }
-  let tupleName ← string "ValueTuple`2"
+  let tupleName <- string s!"ValueTuple`{arity}"
   let systemName ← string "System"
   let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
-  let tupleBlob ← blob ([0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2] ++ arguments)
+  let tupleBlob <- blob ([0x15, marker, tokenRow tupleRef * 4 + 1, arity] ++ arguments)
   let tupleSpec ← row Table.typeSpec [tupleBlob]
   let parent := (tupleSpec - 0x1B000000) * 8 + 4
   let firstSignature ← blob [0x06, 0x13, 0x00]
@@ -353,7 +358,7 @@ private def itemError (world : PairWorld) (index : Nat) (owner held : TypeExpr) 
 private def tupleOwner (first second : String) (scope := runtimeScope) (layout := 0) : TypeExpr :=
   .aggregate (scope ++ "::System.ValueTuple`2<" ++ first ++ "," ++ second ++ ">") layout
 
-/-- The outer tuple holds the inner pair in its first field. -/
+/-- The inner pair uses the same head as the outer pair (TypeRef row 1, coded index 5). -/
 private def nestedWorld := pairWorldWith [0x15, 0x11, 5, 2, 0x08, 0x08, 0x08]
 
 /-- The nested tuple has its own layout after the inner pair. -/
@@ -394,5 +399,50 @@ theorem binds_equal_width_items :
     itemError bytes 0 owner (.atom runtimeScope "System.Byte") = none /\
     itemError bytes 1 owner (.atom runtimeScope "System.Boolean") = none := by decide +kernel
 #print axioms binds_equal_width_items
+
+/-- Repeating a CLASS marker in the operand cannot give the tuple a field index. -/
+theorem refuses_class_marked_pair :
+    let owner := TypeExpr.objectConstructor runtimeScope "System.ValueTuple`2"
+    itemError (pairWorldWith [8, 8] (marker := 0x12)) 0 (.apply (.apply owner int32) int32)
+      int32 = some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_class_marked_pair
+
+/-- The first item with the same assembly scope in its reference and its operand. -/
+private def scopedItem (assembly : AssemblyName) : Option MetadataError :=
+  let scope := assembly.display
+  itemError (pairWorldWith [8, 8] (assembly := assembly)) 0
+    (tupleOwner "System.Int32" "System.Int32" scope) (.atom scope "System.Int32")
+
+/-- An unsigned reference cannot name the platform pair. -/
+theorem refuses_unsigned_pair :
+    scopedItem { runtimeAssembly with publicKeyToken := none } =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_unsigned_pair
+
+/-- A different reference assembly version cannot name the platform pair. -/
+theorem refuses_other_version_pair :
+    scopedItem { runtimeAssembly with version.revision := 1 } =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_other_version_pair
+
+/-- A different core library cannot name the supported pair. -/
+theorem refuses_mscorlib_pair :
+    scopedItem { runtimeAssembly with name := name!"mscorlib" } =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_mscorlib_pair
+
+/-- A literal culture named neutral shares the empty culture's display spelling. -/
+theorem refuses_literal_neutral_culture :
+    let assembly := { runtimeAssembly with culture := name!"neutral" }
+    itemError (pairWorldWith [8, 8] (assembly := assembly)) 0 pair int32 =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_literal_neutral_culture
+
+/-- Three primitive arguments cannot use the two-item layout. -/
+theorem refuses_three_item_tuple :
+    itemError (pairWorldWith [8, 8, 8] (arity := 3)) 0
+      (.aggregate (runtimeScope ++ "::System.ValueTuple`3<System.Int32,System.Int32,System.Int32>")
+        0) int32 = some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_three_item_tuple
 
 end Tests.ImportedFieldIndex

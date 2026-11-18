@@ -840,20 +840,44 @@ def assemblySpelling (name : List Nat) (major minor build revision : Nat)
     decimalDigits 5 build ++ [46] ++ decimalDigits 5 revision ++ cultureMarker ++
     (if culture.isEmpty then neutralCulture else culture) ++ tokenMarker ++ token
 
-/-- The `AssemblyRef` row's identity. A flag other than 0 means a full public key (whose token
-    needs SHA-1) or a retargetable reference (which Cecil spells apart): both are unsupported. -/
-def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
-    Except MetadataError (List Nat) := do
-  let row ← index.assemblyRef token
+/-- Decoded identity columns shared by the typed and display forms of an assembly reference. -/
+private structure AssemblyRefParts where
+  name : List Nat
+  version : Version
+  culture : List Nat
+  publicKeyToken : List Nat
+
+/-- Supported assembly references carry an eight-byte token or no token, and zero flags. -/
+private def MetadataIndex.assemblyRefParts (index : MetadataIndex) (token : Nat) :
+    Except MetadataError AssemblyRefParts := do
+  let row <- index.assemblyRef token
   if row.flags != 0 then throw (.unsupportedAssemblyRef token)
   let name ← index.string row.name
   let culture ← index.string row.culture
   let publicToken ← index.blob row.publicKeyOrToken
-  let spelled ←
-    if publicToken.isEmpty then pure nullToken
-    else if publicToken.length == 8 then pure (hexDigits publicToken)
-    else throw (.unsupportedAssemblyRef token)
-  .ok (assemblySpelling name row.major row.minor row.build row.revision culture spelled)
+  if !publicToken.isEmpty && publicToken.length != 8 then throw (.unsupportedAssemblyRef token)
+  let version : Version := { major := row.major, minor := row.minor, build := row.build,
+                             revision := row.revision }
+  return { name, version, culture, publicKeyToken := publicToken }
+
+/-- The scoped assembly identity in the byte spelling used for slice lookup. -/
+def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
+    Except MetadataError (List Nat) := do
+  let parts <- index.assemblyRefParts token
+  let spelled := if parts.publicKeyToken.isEmpty then nullToken else hexDigits parts.publicKeyToken
+  let version := parts.version
+  return assemblySpelling parts.name version.major version.minor version.build version.revision
+    parts.culture spelled
+
+/-- The assembly identity with the original name, culture, version and big-endian token. -/
+def MetadataIndex.assemblyRefName (index : MetadataIndex) (token : Nat) :
+    Except MetadataError AssemblyName := do
+  let parts <- index.assemblyRefParts token
+  let some name := MetadataName.ofBytes? parts.name | throw (.unsupportedAssemblyRef token)
+  let some culture := MetadataName.ofBytes? parts.culture | throw (.unsupportedAssemblyRef token)
+  let some key := radixCode? 256 parts.publicKeyToken 0 | throw (.unsupportedAssemblyRef token)
+  return { name, version := parts.version, culture,
+           publicKeyToken := if parts.publicKeyToken.isEmpty then none else some key }
 
 /-- The identity an `Assembly` row spells, with the key token the assembly states. A key token is
     the SHA-1 of the public key, which the kernel does not compute: it is the stated token when

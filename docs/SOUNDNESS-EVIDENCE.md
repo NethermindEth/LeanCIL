@@ -198,9 +198,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
   allows. An instance field access needs its owner's definition in a carried slice, which gives the
-  field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its own
-  `TypeRef` names a core-library assembly and both arguments are primitive integers, booleans
-  or chars of the same storage width (1, 2, 4 or 8 bytes, including 8 for native integers).
+  field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its generic
+  signature marks the head as a value type and its own `TypeRef` names the supported
+  `System.Runtime` assembly with the exact version, culture and public key token.
+  Both arguments must be primitive integers, booleans or chars of the same storage width
+  (1, 2, 4 or 8 bytes, including 8 for native integers).
   The field references must declare `Item1` as `!0` and `Item2` as `!1`, or the check fails
   with `operandMismatch`. Any other instance field of an owner outside the
   carried slices, and any other member of the pair, fails with `unboundInstanceField`. A static

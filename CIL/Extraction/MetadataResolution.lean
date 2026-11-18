@@ -192,11 +192,6 @@ def corlibNames : List (List Nat) :=
    [83, 121, 115, 116, 101, 109, 46, 80, 114, 105, 118, 97, 116, 101, 46, 67, 111, 114, 101, 76,
     105, 98]]
 
-/-- Whether an assembly identity names an assembly of one of the core-library names, at any
-    version. -/
-def isCorlibScope (scope : List Nat) : Bool :=
-  corlibNames.any fun name => (name ++ versionMarker).isPrefixOf scope
-
 /-- Whether the `TypeRef` at `token` is scoped by a reference to an assembly of a core-library
     name: the base of a type counts as `System.Enum`, `System.ValueType` or `System.Object` only
     then. -/
@@ -516,6 +511,11 @@ def MetadataEnv.resolve (env : MetadataEnv) (position : Nat) (type : SigType) :
     Except MetadataError ResolvedType :=
   resolveType env position (resolveFuel + 2) type
 
+/-- The signature of a TypeSpec, including the marker and token of a generic head. -/
+def MetadataIndex.typeSpec (index : MetadataIndex) (token : Nat) :
+    Except MetadataError SigType := do
+  decodeTypeSpec (<- index.blob (<- index.signatureOf Table.typeSpec token))
+
 /-- The type a `TypeDef`, `TypeRef` or `TypeSpec` token names. -/
 def MetadataEnv.resolveToken (env : MetadataEnv) (position token : Nat) :
     Except MetadataError ResolvedType :=
@@ -526,8 +526,7 @@ def MetadataEnv.resolveToken (env : MetadataEnv) (position token : Nat) :
     .ok (.named named)
   | 0x1B => do
     let index ← env.slice position token
-    let blob ← index.blob (← index.signatureOf Table.typeSpec token)
-    env.resolve position (← decodeTypeSpec blob)
+    env.resolve position (<- index.typeSpec token)
   | _ => .error (.unsupportedTable token)
 
 /-! ## Spelling -/
