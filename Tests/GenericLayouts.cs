@@ -30,8 +30,29 @@ using (var source = ModuleDefinition.ReadModule(assembly))
     shadow.Fields.Add(new FieldDefinition("First", Mono.Cecil.FieldAttributes.Public, source.TypeSystem.UInt64));
     shadow.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, source.TypeSystem.UInt64));
     source.Types.Add(shadow);
+    var pair = source.GetType("Examples.GenericPair`1");
+    var closed = new GenericInstanceType(pair);
+    var word = source.TypeSystem.UInt64;
+    closed.GenericArguments.Add(word);
+    var scope = ((AssemblyNameReference)word.Scope).FullName;
+    var literal = new TypeDefinition(pair.Namespace, $"{pair.Name}<{scope}::{word.FullName}>",
+        pair.Attributes, pair.BaseType);
+    foreach (var field in pair.Fields.Where(field => !field.IsStatic))
+        literal.Fields.Add(new FieldDefinition(field.Name, field.Attributes, word));
+    source.Types.Add(literal);
+    // Both locals have the same physical layout. Their metadata identities must still be distinguishable.
+    var method = new MethodDefinition("AmbiguousLocals", Mono.Cecil.MethodAttributes.Static, source.TypeSystem.Void);
+    source.GetType("Examples.GenericLayouts").Methods.Add(method);
+    method.Body.Variables.Add(new VariableDefinition(closed));
+    method.Body.Variables.Add(new VariableDefinition(literal));
+    method.Body.GetILProcessor().Emit(OpCodes.Ret);
     source.Write(shadowImage);
 }
+var ambiguous = Execute(["dotnet", ExtractorPath, "extract", shadowImage, "GenericLayouts::AmbiguousLocals()",
+    Path.Combine(root, "AmbiguousLocals")]);
+if (ambiguous.Code == 0 || !ambiguous.Output.Contains("Ambiguous layout identity:", StringComparison.Ordinal))
+    throw new InvalidOperationException($"Expected a refusal for the ambiguous layout spelling: {ambiguous.Output}");
+Console.WriteLine("PASS extraction refuses distinct layout identities with the same spelling");
 using (var pinned = new PinnedMetadata(extractor, shadowImage))
 {
     var module = pinned.Module;

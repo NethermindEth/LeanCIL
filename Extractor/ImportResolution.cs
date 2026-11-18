@@ -388,13 +388,24 @@ internal sealed class ImportResolution : IDisposable
         return actual;
     }
 
-    internal static string LeanSlot(Binding binding) =>
-        "{ identity := " + JsonSerializer.Serialize(binding.Identity) + ", closureDigest := " + JsonSerializer.Serialize(binding.ClosureDigest) +
-        ", parameterCount := " + binding.ParameterCount + ", hasThis := false, returnsValue := " +
-        LeanText.Bool(binding.ReturnsValue) +
-        (binding.TypedSignature is null ? "" : ", signature := some (" + binding.TypedSignature.Lean + "), layouts := { published := " +
-            ImportedLayoutMetadata.RawLean(binding.PublishedLayouts) + ", actual := " + ImportedLayoutMetadata.RawLean(binding.ActualLayouts) +
-            ", computed := " + binding.ComputedLayouts + " }") + " }";
+    internal static string LeanSlot(Binding binding)
+    {
+        var identity = IdentityText.Quote(binding.Identity);
+        var digest = IdentityText.Quote(binding.ClosureDigest);
+        var metadata = $"identity := {identity}, closureDigest := {digest}";
+        var arity = $"parameterCount := {binding.ParameterCount}, hasThis := false";
+        var result = $"returnsValue := {LeanText.Bool(binding.ReturnsValue)}";
+        var typed = "";
+        if (binding.TypedSignature is { } signature)
+        {
+            var published = ImportedLayoutMetadata.RawLean(binding.PublishedLayouts);
+            var actual = ImportedLayoutMetadata.RawLean(binding.ActualLayouts);
+            var computed = binding.ComputedLayouts;
+            var layouts = $$"""{ published := {{published}}, actual := {{actual}}, computed := {{computed}} }""";
+            typed = $", signature := some ({signature.Lean}), layouts := {layouts}";
+        }
+        return $$"""{ {{metadata}}, {{arity}}, {{result}}{{typed}} }""";
+    }
 
     internal bool TryTranslate(Instruction instruction, int methodCount, [NotNullWhen(true)] out Operation? translated)
     {

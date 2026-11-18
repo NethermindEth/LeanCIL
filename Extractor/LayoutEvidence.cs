@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -29,7 +28,7 @@ internal sealed class LayoutEvidence
             var type = rawTypes[index];
             var identity = Identity(type);
             typeIndices.Add(identity, index);
-            identityTerms[index] = rawTypes.Length == 1 ? JsonSerializer.Serialize(identity) :
+            identityTerms[index] = rawTypes.Length == 1 ? IdentityText.Quote(identity) :
                 ScopedIdentityTerm(identity, Scope(type).Length + "::".Length);
         }
     }
@@ -93,8 +92,8 @@ internal sealed class LayoutEvidence
     // Layouts in one assembly share the UTF-8 encoding of its scope during kernel reduction.
     static string ScopedIdentityTerm(string identity, int boundary)
     {
-        var scope = JsonSerializer.Serialize(identity[..boundary]);
-        var name = JsonSerializer.Serialize(identity[boundary..]);
+        var scope = IdentityText.Quote(identity[..boundary]);
+        var name = IdentityText.Quote(identity[boundary..]);
         return $"({scope} ++ {name})";
     }
 
@@ -138,15 +137,19 @@ internal sealed class LayoutEvidence
             if (GenericStructs.Is(type) && type is GenericInstanceType closed)
             {
                 var serializer = new GenericEvidence(null, this);
-                genericEvidence = $"generic := some {{ owner := .constructor " +
-                    $"{JsonSerializer.Serialize(Scope(type))} {JsonSerializer.Serialize(metadata.FullName)}, " +
-                    $"arity := {metadata.GenericParameters.Count}, arguments := " +
-                    $"[{string.Join(", ", closed.GenericArguments.Select(serializer.Type))}], fields := " +
-                    $"[{string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
-                        .Select(field => serializer.Type(field.FieldType)))}], constraints := " +
-                    $"[{string.Join(", ", metadata.GenericParameters.Select(parameter =>
-                        $"({(uint)parameter.Attributes}, [{string.Join(", ", parameter.Constraints.Select(constraint =>
-                            JsonSerializer.Serialize(GenericEvidence.ConstraintType(constraint.ConstraintType))))}])"))}] }}, ";
+                var owner = $".constructor {IdentityText.Quote(Scope(type))} {IdentityText.Quote(metadata.FullName)}";
+                var arguments = string.Join(", ", closed.GenericArguments.Select(serializer.Type));
+                var parameters = $"arity := {metadata.GenericParameters.Count}, arguments := [{arguments}]";
+                var openFields = string.Join(", ", metadata.Fields.Where(field => !field.IsStatic)
+                    .Select(field => serializer.Type(field.FieldType)));
+                var constraints = metadata.GenericParameters.Select(parameter =>
+                {
+                    var names = parameter.Constraints.Select(constraint =>
+                        IdentityText.Quote(GenericEvidence.ConstraintType(constraint.ConstraintType)));
+                    return $"({(uint)parameter.Attributes}, [{string.Join(", ", names)}])";
+                });
+                var members = $"fields := [{openFields}], constraints := [{string.Join(", ", constraints)}]";
+                genericEvidence = $$"""generic := some { owner := {{owner}}, {{parameters}}, {{members}} }, """;
             }
             var fields = layouts.Fields(type).Select(field =>
                 $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
@@ -155,7 +158,7 @@ internal sealed class LayoutEvidence
             var marker = MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "";
             // An imported entry repeats its published layout, which carries no interfaces.
             var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
-                metadata.Interfaces.Select(implementation => JsonSerializer.Serialize(InterfaceIdentity(
+                metadata.Interfaces.Select(implementation => IdentityText.Quote(InterfaceIdentity(
                     GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
             var attributes = $"{genericEvidence}{kind}{auto}{marker}{interfaces}";
             var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";

@@ -19,9 +19,55 @@ using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/SequentialLayout");
 Directory.CreateDirectory(root);
+CheckIdentityLiterals();
+if (args.Contains("--identity-literals-only", StringComparer.Ordinal)) return;
 var queue = new GeneratedQueue(verification, assembly);
 if (IntPtr.Size != 8) throw new InvalidOperationException("Layout comparisons require a 64-bit runtime");
 var cases = 0;
+
+void CheckIdentityLiterals()
+{
+    var source = new System.Text.StringBuilder("import CIL.Extraction.Layout\nopen CIL\n");
+    foreach (int count in new[] { 1, 2 })
+    {
+        var output = Path.Combine(root, $"IdentityLiterals{count}");
+        Directory.CreateDirectory(output);
+        var dll = Path.Combine(output, "LayoutNames.dll");
+        using var module = ModuleDefinition.ReadModule(assembly);
+        module.Assembly.Name.Name = "Layout\U00010400";
+        var record = module.GetType("Examples.Record");
+        var method = new MethodDefinition("Sizes", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+        module.GetType("Examples.Sequential").Methods.Add(method);
+        var il = method.Body.GetILProcessor();
+        var expected = new List<string>();
+        for (int index = 0; index < count; index++)
+        {
+            var name = $"Row{char.ConvertFromUtf32(0x10400 + index)}\"\\\u0001";
+            var row = new TypeDefinition("Examples", name, record.Attributes, record.BaseType);
+            module.Types.Add(row);
+            il.Emit(OpCodes.Sizeof, row);
+            if (index != 0) il.Emit(OpCodes.Add);
+            var identity = $"{module.Assembly.Name.FullName}::Examples.{name}";
+            expected.Add($"[{string.Join(", ", identity.EnumerateRunes().Select(rune => rune.Value))}]");
+        }
+        il.Emit(OpCodes.Ret);
+        module.Write(dll);
+        Run(["dotnet", ExtractorPath, "extract", dll, "Sequential::Sizes()", output]);
+        var emitted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+        int start = emitted.IndexOf("def rawLayouts :", StringComparison.Ordinal);
+        int end = emitted.IndexOf("def computedLayouts :", start, StringComparison.Ordinal);
+        source.AppendLine($$"""
+            namespace Table{{count}}
+            {{emitted[start..end]}}
+            #guard (rawLayouts.map fun row => row.identity.toList.map Char.toNat) == [{{string.Join(", ", expected)}}]
+            end Table{{count}}
+            """);
+    }
+    var path = Path.Combine(root, "IdentityLiterals.lean");
+    File.WriteAllText(path, source.ToString());
+    Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    Console.WriteLine("PASS single and split layout identities preserve every metadata scalar");
+}
 
 void Prove(string dll, string selector, string name, IEnumerable<string> statements)
 {

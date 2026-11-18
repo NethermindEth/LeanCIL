@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Nethermind.LeanCIL;
 
 // A deployment premise, not a claim that the CIL model executes a CLR type initializer.
@@ -29,8 +27,8 @@ internal sealed record InitializationAssumption(string AssemblyIdentity, string 
     }
 
     internal static string Lean(IEnumerable<InitializationAssumption> assumptions) =>
-        "[" + string.Join(", ", assumptions.Select(item => "(" + JsonSerializer.Serialize(item.AssemblyIdentity) +
-            ", " + JsonSerializer.Serialize(item.TypeName) + ")")) + "]";
+        $"[{string.Join(", ", assumptions.Select(item =>
+            $"({IdentityText.Quote(item.AssemblyIdentity)}, {IdentityText.Quote(item.TypeName)})"))}]";
 }
 
 internal sealed record ProfileInitializationAssumptions(string Profile, InitializationAssumption[] Types);

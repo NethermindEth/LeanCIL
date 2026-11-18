@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Runtime.CompilerServices;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -72,26 +71,32 @@ internal static class ManagedPointers
         if (type.MetadataType == MetadataType.Void) return ".void";
         // Callable identity is independent of the extraction's checked layout-table ordering.
         if (MetadataValidation.IsAggregate(type, type.Module))
-            return $".aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} 0";
+            return $".aggregate {IdentityText.Quote(LayoutEvidence.Identity(type))} 0";
         if (type is GenericInstanceType generic && MetadataValidation.IntegerVectorWidth(type) is not null)
-            return $".apply (.constructor {JsonSerializer.Serialize(LayoutEvidence.Scope(generic.ElementType))} " +
-                $"{JsonSerializer.Serialize(generic.ElementType.FullName)}) " +
-                $"({TypeEvidence(generic.GenericArguments[0])})";
+        {
+            var scope = IdentityText.Quote(LayoutEvidence.Scope(generic.ElementType));
+            var name = IdentityText.Quote(generic.ElementType.FullName);
+            return $".apply (.constructor {scope} {name}) ({TypeEvidence(generic.GenericArguments[0])})";
+        }
         if (EnumTypes.IsEnum(type))
-            return $".enum {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} " +
-                $"({TypeEvidence(EnumTypes.Storage(type))})";
-        return $".atom {JsonSerializer.Serialize(LayoutEvidence.Scope(type))} " +
-            JsonSerializer.Serialize(type.FullName);
+        {
+            var identity = IdentityText.Quote(LayoutEvidence.Identity(type));
+            return $".enum {identity} ({TypeEvidence(EnumTypes.Storage(type))})";
+        }
+        return $".atom {IdentityText.Quote(LayoutEvidence.Scope(type))} {IdentityText.Quote(type.FullName)}";
     }
 
     internal static string SignatureEvidence(IMethodSignature signature) =>
         $"{{ result := {TypeEvidence(signature.ReturnType)}, parameters := " +
         $"[{string.Join(", ", signature.Parameters.Select(parameter => TypeEvidence(parameter.ParameterType)))}] }}";
 
-    internal static string IdentityEvidence(MethodDefinition method) =>
-        $"{{ owner := {JsonSerializer.Serialize(LayoutEvidence.Identity(method.DeclaringType))}, " +
-        $"token := {method.MetadataToken.ToUInt32()}, arguments := " +
-        $"[{string.Join(", ", MethodSpecialization.Arguments(method).Select(TypeEvidence))}] }}";
+    internal static string IdentityEvidence(MethodDefinition method)
+    {
+        var owner = IdentityText.Quote(LayoutEvidence.Identity(method.DeclaringType));
+        var arguments = string.Join(", ", MethodSpecialization.Arguments(method).Select(TypeEvidence));
+        var token = method.MetadataToken.ToUInt32();
+        return $$"""{ owner := {{owner}}, token := {{token}}, arguments := [{{arguments}}] }""";
+    }
 
     internal static bool SameSignature(IMethodSignature left, IMethodSignature right) =>
         !left.HasThis && !right.HasThis && !left.ExplicitThis && !right.ExplicitThis &&

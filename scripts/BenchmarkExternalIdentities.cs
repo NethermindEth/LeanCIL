@@ -7,6 +7,7 @@
 #:include BindingImage.cs
 #:include DeepCheckInputs.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
+#:include ../Extractor/IdentityText.cs
 
 using System.Diagnostics;
 using System.Security.Cryptography;

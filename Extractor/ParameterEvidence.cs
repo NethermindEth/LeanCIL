@@ -16,8 +16,10 @@ internal static class ParameterEvidence
         if (type is ByReferenceType or PointerType) return ".reference";
         if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return ".object";
         if (type is ArrayType array && MetadataValidation.IsAggregate(array.ElementType, module))
-            return $".aggregateArray {System.Text.Json.JsonSerializer.Serialize(LayoutEvidence.Identity(array.ElementType))} " +
-                layouts.Index(array.ElementType);
+        {
+            var identity = IdentityText.Quote(LayoutEvidence.Identity(array.ElementType));
+            return $".aggregateArray {identity} {layouts.Index(array.ElementType)}";
+        }
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
         if (type is GenericInstanceType span && Spans.Is(type) &&
             MetadataValidation.IsAggregate(span.GenericArguments[0], module))

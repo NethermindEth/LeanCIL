@@ -1438,6 +1438,50 @@ void LayoutIdentityCosts()
             throw new InvalidOperationException($"Layout validation exceeds its growth bound at {count} rows.");
         previousPerRow = perRow;
     }
+    SharedLayoutCost(directory);
+}
+
+void SharedLayoutCost(string directory)
+{
+    const int rowCount = 8;
+    var assembly = Path.Combine(directory, "Assembly");
+    Directory.CreateDirectory(assembly);
+    var project = Path.Combine(assembly, "SharedLayouts.csproj");
+    File.WriteAllText(project, """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+        </Project>
+        """);
+    var rows = Enumerable.Range(0, rowCount).Select(index =>
+    {
+        var field = index == 0 ? "int" : $"Row{index - 1}";
+        return $"public struct Row{index} {{ public {field} Value; }}";
+    });
+    File.WriteAllText(Path.Combine(assembly, "SharedLayouts.cs"), $$"""
+        {{string.Join("\n", rows)}}
+        public static class SharedLayouts
+        {
+            static int First(int value) => value + 1;
+            static int Second(int value) => value + 2;
+            static int Third(int value) => value + 3;
+            public static int Read(Row7 row) =>
+                Third(Second(First(row.Value.Value.Value.Value.Value.Value.Value.Value)));
+        }
+        """);
+    Run(["dotnet", "build", project, "-c", "Release"]);
+    var output = Path.Combine(directory, "Read");
+    Run(Extract("extract", Path.Combine(assembly, "bin/SharedLayouts.dll"), "SharedLayouts",
+        "SharedLayouts::Read(Row7)", output));
+    using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json")));
+    var extraction = manifest.RootElement;
+    if (extraction.GetProperty("methods").GetArrayLength() != 4 ||
+        extraction.GetProperty("layoutIdentities").GetArrayLength() != rowCount)
+        throw new InvalidOperationException("Expected four methods and eight layout rows in the cost fixture.");
+    var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var (cost, _) = CountHeartbeats(Path.Combine(directory, "SharedLayouts.lean"), source);
+    const long limit = 45_000_000;
+    Console.WriteLine($"Four methods sharing {rowCount} layouts cost {cost} whole-file heartbeats (limit {limit})");
+    if (cost > limit) throw new InvalidOperationException("Shared layout extraction exceeds its whole-file bound.");
 }
 
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.

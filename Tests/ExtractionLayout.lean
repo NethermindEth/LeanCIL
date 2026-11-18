@@ -6,6 +6,7 @@ open CIL CIL.Extraction
 
 namespace Tests.ExtractionLayout
 
+/-- The sequential leaf and its packed parent whose second field embeds the leaf. -/
 def raw : List RawLayout := [
   { identity := "Leaf", explicit := false, packing := 0, declaredSize := -1,
     fields := [⟨.unsigned8, none⟩, ⟨.unsigned32, none⟩] },

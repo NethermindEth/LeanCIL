@@ -1,6 +1,5 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
-using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
@@ -41,13 +40,13 @@ internal static class Arrays
     internal static Element? Storage(TypeReference type, string? architecture = null)
     {
         if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
-            return new($"vector {JsonSerializer.Serialize(type.FullName)} {vectorWidth}",
+            return new($"vector {IdentityText.Quote(type.FullName)} {vectorWidth}",
                 vectorWidth, false, NativeOperands.Kind.ArrayComposite, Compound: true);
         if (MetadataValidation.IsAggregate(type, type.Module))
         {
             if (MetadataValidation.IsByRefLike(type)) return null;
             var width = architecture is null ? 0 : Spans.ElementWidth(type, architecture)!.Value;
-            return new($"aggregate {JsonSerializer.Serialize(LayoutEvidence.Identity(type))} {width}",
+            return new($"aggregate {IdentityText.Quote(LayoutEvidence.Identity(type))} {width}",
                 width, false, NativeOperands.Kind.ArrayComposite, Compound: true);
         }
         if (!EnumTypes.IsEnum(type)) return Primitive(type);
@@ -57,7 +56,7 @@ internal static class Arrays
     static Element EnumStorage(TypeReference type)
     {
         var underlying = Primitive(EnumTypes.Storage(type))!;
-        var identity = JsonSerializer.Serialize(LayoutEvidence.Identity(type));
+        var identity = IdentityText.Quote(LayoutEvidence.Identity(type));
         return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}", Compound = true };
     }
 

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
@@ -111,13 +110,22 @@ internal static class ImportedLayoutMetadata
     {
         Dictionary<string, int> indices = layouts.Select((layout, index) => (layout.Identity, Index: index))
             .ToDictionary(item => item.Identity, item => item.Index, StringComparer.Ordinal);
-        return "[" + string.Join(", ", layouts.Select(layout => "{ identity := " + JsonSerializer.Serialize(layout.Identity) +
-            ", explicit := " + LeanText.Bool(layout.Explicit) + ", auto := " + LeanText.Bool(layout.Auto) +
-            ", packing := " +
-            layout.Packing + ", declaredSize := " + layout.DeclaredSize + ", fields := [" +
-            string.Join(", ", layout.Fields.Select(field => "{ type := " + (field.Storage == "aggregate" ?
-                ".aggregate " + indices[field.Type.Scope + "::" + field.Type.Name] : "." + field.Storage) +
-                ", offset := " + (field.Offset is int offset ? "some " + offset : "none") + " }")) + "] }")) + "]";
+        string Field(ContractLayoutField field)
+        {
+            var type = field.Storage == "aggregate" ? $".aggregate {indices[$"{field.Type.Scope}::{field.Type.Name}"]}"
+                : $".{field.Storage}";
+            var offset = field.Offset is int value ? $"some {value}" : "none";
+            return $$"""{ type := {{type}}, offset := {{offset}} }""";
+        }
+        var rows = layouts.Select(layout =>
+        {
+            var identity = IdentityText.Quote(layout.Identity);
+            var kind = $"explicit := {LeanText.Bool(layout.Explicit)}, auto := {LeanText.Bool(layout.Auto)}";
+            var size = $"packing := {layout.Packing}, declaredSize := {layout.DeclaredSize}";
+            var fields = string.Join(", ", layout.Fields.Select(Field));
+            return $$"""{ identity := {{identity}}, {{kind}}, {{size}}, fields := [{{fields}}] }""";
+        });
+        return $"[{string.Join(", ", rows)}]";
     }
 
     internal static string ComputedLean(ContractLayout[] layouts, ModuleDefinition selected, string architecture) =>

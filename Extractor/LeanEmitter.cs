@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -93,7 +92,7 @@ internal static class LeanEmitter
         MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts).Initial();
     static TypeReference[] LayoutTypes(MethodDefinition[] methods, MetadataValidation.LayoutContext metadata)
     {
-        TypeReference[] types = methods
+        var types = methods
             .SelectMany(m => m.Parameters.Select(p => InReferences.Parameter(p.ParameterType))
             .Concat(m.HasThis ? [MethodSpecialization.DeclaringType(m)] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(InitAccessors.Return(m.ReturnType))
@@ -108,15 +107,27 @@ internal static class LeanEmitter
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Select(t => t is ArrayType array ? array.ElementType : t)
             .Select(t => Spans.Is(t) ? ((GenericInstanceType)t).GenericArguments[0] : t)
-            .Where(metadata.IsLayout).Select(metadata.Canonical).DistinctBy(LayoutEvidence.Identity).ToArray();
+            .Where(metadata.IsLayout);
         List<TypeReference> layouts = [];
-        HashSet<string> seenLayouts = new(StringComparer.Ordinal);
-        void IncludeLayout(TypeReference type)
+        HashSet<TypeReference> seenReferences = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, StructuralSignatures.Signature> identities = new(StringComparer.Ordinal);
+        void IncludeLayout(TypeReference reference)
         {
-            if (!seenLayouts.Add(LayoutEvidence.Identity(type))) return;
+            if (!seenReferences.Add(reference)) return;
+            var spelling = LayoutEvidence.Identity(reference);
+            var signature = StructuralSignatures.Current.Type(reference);
+            if (identities.TryGetValue(spelling, out var previous))
+            {
+                if (previous != signature) throw new InvalidDataException($"Ambiguous layout identity: {spelling}");
+                return;
+            }
+            identities.Add(spelling, signature);
+            var type = metadata.Canonical(reference);
+            if (!ReferenceEquals(type, reference) && StructuralSignatures.Current.Type(type) != signature)
+                throw new InvalidDataException($"Ambiguous imported layout identity: {spelling}");
             layouts.Add(type);
             foreach (MetadataValidation.InstanceField field in metadata.Fields(type))
-                if (metadata.IsLayout(field.Type)) IncludeLayout(metadata.Canonical(field.Type));
+                if (metadata.IsLayout(field.Type)) IncludeLayout(field.Type);
         }
         foreach (TypeReference type in types) IncludeLayout(type);
         return layouts.ToArray();
@@ -246,11 +257,13 @@ internal static class LeanEmitter
             List<(int Pc, string Link)> linkEntries = [.. ops.Select((op, pc) =>
                 (Pc: pc, Link: op.Link(LeanText.MethodNumber))).Where(entry => entry.Link is not null)
                 .Select(entry => (entry.Pc, entry.Link!))];
-            lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
+            lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
-                lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
-                lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
+                var definition = IdentityText.Quote(origin.Definition);
+                var arguments = string.Join(", ", origin.TypeArguments.Select(IdentityText.Quote));
+                lean.AppendLine($"def method{n}GenericDefinition : String := {definition}");
+                lean.AppendLine($"def method{n}TypeArguments : List String := [{arguments}]");
             }
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
@@ -362,7 +375,8 @@ internal static class LeanEmitter
         // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
         lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
-        lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
+        var signatures = string.Join(", ", importBindings.Select(binding => IdentityText.Quote(binding.Identity)));
+        lean.AppendLine($"def importSignatures : List String := [{signatures}]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
         lean.AppendLine("theorem static_identities_validated : Extraction.StaticIdentitiesValid program " +

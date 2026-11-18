@@ -64,10 +64,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var hasKey = !assembly.PublicKey.IsNil && reader.GetBlobBytes(assembly.PublicKey).Length > 0;
         var keyToken = !hasKey ? ""
             : $"keyToken := {Bytes(System.Text.Encoding.ASCII.GetBytes(token))}, ";
-        return $"{{ identity := {System.Text.Json.JsonSerializer.Serialize(identity)}, {keyToken}" +
-            $"tableHeader := {Bytes(image.TableHeader())}, header := {image.DecodedHeader()}, " +
-            $"assemblyRow := {Bytes(row)}, " +
-            $"strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])} }}";
+        var headers = $"tableHeader := {Bytes(image.TableHeader())}, header := {image.DecodedHeader()}";
+        var tables = $"assemblyRow := {Bytes(row)}, strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])}";
+        return $$"""{ identity := {{IdentityText.Quote(identity)}}, {{keyToken}}{{headers}}, {{tables}} }""";
     }
 
     /// <summary>

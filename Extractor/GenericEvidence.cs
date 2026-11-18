@@ -3,7 +3,6 @@ using System.Collections.Frozen;
 using System.Globalization;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -28,7 +27,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     ModuleDefinition Original(ModuleDefinition module) => Pinned.Original(module);
 
     /// <summary>The Lean string literal of <paramref name="value"/>.</summary>
-    internal static string Quote(string value) => JsonSerializer.Serialize(value);
+    internal static string Quote(string value) => IdentityText.Quote(value);
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
     static string List(IEnumerable<string> entries) => "[" + string.Join(", ", entries) + "]";
 

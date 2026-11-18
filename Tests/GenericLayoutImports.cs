@@ -11,6 +11,7 @@
 #:include PinnedMetadata.cs
 #:include GenericImportIdentities.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
+#:include ../Extractor/IdentityText.cs
 
 using System.Reflection;
 using System.Text.Json;

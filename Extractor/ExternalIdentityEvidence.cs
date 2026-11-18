@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
@@ -16,7 +15,7 @@ internal sealed class ExternalIdentityEvidence
 
     internal string Reference(string identity, bool reachable)
     {
-        if (!reachable) return JsonSerializer.Serialize(identity);
+        if (!reachable) return IdentityText.Quote(identity);
         if (!indices.TryGetValue(identity, out var index))
         {
             index = identities.Count;
@@ -62,7 +61,7 @@ internal sealed class ExternalIdentityEvidence
                 var chunkBytes = string.Join(", ", chunk.ToArray()
                     .Select(value => value.ToString(CultureInfo.InvariantCulture)));
                 var proof = chunk.ContainsAnyInRange((byte)128, byte.MaxValue) ? "by decide +kernel" :
-                    $"by exact ({JsonSerializer.Serialize(Encoding.UTF8.GetString(chunk))}).isValidUTF8";
+                    $"by exact ({IdentityText.Quote(Encoding.UTF8.GetString(chunk))}).isValidUTF8";
                 lean.AppendLine($"def {chunkName} : ByteArray := ⟨#[{chunkBytes}]⟩");
                 lean.AppendLine($"theorem {chunkName}_valid : {chunkName}.IsValidUTF8 := {proof}");
                 lean.AppendLine($"#print axioms {chunkName}_valid");

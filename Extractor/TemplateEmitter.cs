@@ -245,7 +245,7 @@ internal static partial class TemplateEmitter
         {
             var template = templates[index];
             Line($"/-- The stable managed identity of `method{index}`. -/");
-            Line($"def method{index}Signature : String := {JsonSerializer.Serialize(template.Identity)}");
+            Line($"def method{index}Signature : String := {IdentityText.Quote(template.Identity)}");
             Line("/-- A fixed-PC template for the selected flag combinations, with explicit callee indices. -/");
             lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile) " +
                 $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");

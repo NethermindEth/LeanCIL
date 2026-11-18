@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
@@ -21,7 +20,7 @@ internal sealed record ContractType(string Kind, string Scope, string Name, Cont
     internal string Lean => Kind switch
     {
         "void" => ".void",
-        "atom" => ".atom " + JsonSerializer.Serialize(Scope) + " " + JsonSerializer.Serialize(Name),
+        "atom" => $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)}",
         "byref" when Element is not null => ".byref (" + Element.Lean + ")",
         _ => throw new InvalidDataException("Invalid imported type metadata.")
     };
@@ -36,10 +35,17 @@ internal sealed record ContractMethodSignature(ContractType Owner, string Name, 
         CallReturnType.Parameters(reference).Select(ContractType.Read).ToArray(),
         definition.Parameters.Select(parameter => (int)parameter.Attributes).ToArray());
 
-    internal string Lean => "{ owner := " + Owner.Lean + ", name := " + JsonSerializer.Serialize(Name) +
-        ", arguments := [" + string.Join(", ", Arguments.Select(type => type.Lean)) + "]" +
-        ", returnType := " + ReturnType.Lean + ", parameters := [" +
-        string.Join(", ", Parameters.Select(type => type.Lean)) + "] }";
+    internal string Lean
+    {
+        get
+        {
+            var owner = $"owner := {Owner.Lean}, name := {IdentityText.Quote(Name)}";
+            var arguments = string.Join(", ", Arguments.Select(type => type.Lean));
+            var parameters = string.Join(", ", Parameters.Select(type => type.Lean));
+            var signature = $"arguments := [{arguments}], returnType := {ReturnType.Lean}";
+            return $$"""{ {{owner}}, {{signature}}, parameters := [{{parameters}}] }""";
+        }
+    }
 }
 
 internal static class ContractMethodMetadata
