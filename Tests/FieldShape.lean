@@ -12,7 +12,7 @@ declared as a narrow signed integer; a field whose index or held type does not m
 declaration is unsupported; a class field resolves to the model slot of its index, a struct array
 element taking its size from the layout; and a method, defined or known by a hypothesis on its
 environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
-field and `ldfld` of a resolved value-type field gives the faults the step states for them, and
+field faults; a struct field steps on each receiver kind as the lowered access of its shape, and
 a field operand without a fact steps to the same literal shape a fact states.
 -/
 
@@ -24,21 +24,25 @@ open CIL CIL.Extraction
 private def scope : String := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
 /-- `T::Inner`, one `int32`; `T::Pair`, an `int16`, a `uint32` and an `Inner`; `T::Ref`, a
-    byref-like struct. -/
+    byref-like struct; `T::Lanes`, a 32-byte and a 16-byte vector and an `int32`. -/
 def rawLayouts : List RawLayout := [
   { identity := "T::Inner", explicit := false, packing := 0, declaredSize := 0,
     fields := [{ type := .signed32 }] },
   { identity := "T::Pair", explicit := false, packing := 0, declaredSize := 0,
     fields := [{ type := .signed16 }, { type := .unsigned32 }, { type := .aggregate 0 }] },
   { identity := "T::Ref", explicit := false, packing := 0, declaredSize := 0, byRefLike := true,
-    fields := [{ type := .signed32 }] }]
+    fields := [{ type := .signed32 }] },
+  { identity := "T::Lanes", explicit := false, packing := 0, declaredSize := 0,
+    fields := [{ type := .vector256 }, { type := .vector128 }, { type := .signed32 }] }]
 
 /-- The layouts CoreCLR computes for `rawLayouts`. -/
 def computedLayouts : Array ComputedLayout := #[
   ⟨{ size := 4, fields := [{ offset := 0, width := 4 }] }, 4⟩,
   ⟨{ size := 12, fields := [{ offset := 0, width := 2 }, { offset := 4, width := 4 },
     { offset := 8, width := 4, aggregate := true }] }, 4⟩,
-  ⟨{ size := 4, fields := [{ offset := 0, width := 4 }] }, 4⟩]
+  ⟨{ size := 4, fields := [{ offset := 0, width := 4 }] }, 4⟩,
+  ⟨{ size := 64, fields := [{ offset := 0, width := 32 }, { offset := 32, width := 16 },
+    { offset := 48, width := 4 }] }, 32⟩]
 
 theorem layouts_valid : LayoutsValid rawLayouts computedLayouts .x64 := by decide +kernel
 #print axioms layouts_valid
@@ -234,14 +238,97 @@ theorem class_field_address_faults (frame : Safety.Frame) (memory : Safety.Memor
   simp only [cil_step]
 #print axioms class_field_address_faults
 
--- A value-type field that the layouts resolve is never reached through `ldfld` of an object.
-theorem value_field_load_faults (frame : Safety.Frame) (memory : Safety.Memory)
+-- A struct field of an object receiver is not a memory access, so the load faults.
+theorem value_field_of_an_object_faults (frame : Safety.Frame) (memory : Safety.Memory)
     (receiver : Safety.ManagedReference) :
     Safety.step body (.ldfld highField) 0 [] frame [.object receiver] memory =
-      .error (.unsupported "Value-type field instruction") := by
+      .error (.unsupported "Not a memory instruction") := by
   simp only [cil_step, cil_code]
   rfl
-#print axioms value_field_load_faults
+#print axioms value_field_of_an_object_faults
+
+-- A struct field steps as the lowered access its shape fact states, whatever the receiver.
+theorem high_load_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.Value) :
+    Safety.step body (.ldfld highField) 0 [] frame [receiver] memory =
+      Safety.step body (.fieldAt 4 4) 0 [] frame [receiver] memory := by
+  simp only [cil_step]
+#print axioms high_load_is_lowered
+
+theorem inner_store_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+    (stack : List Safety.Value) :
+    Safety.step body (.stfld innerField) 0 [] frame stack memory =
+      Safety.step body (.setAggregateFieldAt 8 4) 0 [] frame stack memory := by
+  simp only [cil_step]
+#print axioms inner_store_is_lowered
+
+theorem high_address_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+    (stack : List Safety.Value) :
+    Safety.step body (.ldflda highField) 0 [] frame stack memory =
+      Safety.step body (.fieldAddress 4) 0 [] frame stack memory := by
+  simp only [cil_step]
+#print axioms high_address_is_lowered
+
+private def lanes : TypeExpr := .aggregate "T::Lanes" 3
+/-- A `Vector*<ulong>` of the given generic definition. -/
+private def ulongVector (definition : String) : TypeExpr :=
+  .apply (.constructor intrinsicsScope definition) (.atom runtimeScope "System.UInt64")
+
+/-- `Lanes.wide`, the 32-byte vector at offset 0. -/
+def wideField : FieldRef :=
+  { owner := lanes, index := 0, type := ulongVector "System.Runtime.Intrinsics.Vector256`1",
+    name := name!"wide" }
+/-- `Lanes.narrow`, the 16-byte vector at offset 32. -/
+def narrowField : FieldRef :=
+  { owner := lanes, index := 1, type := ulongVector "System.Runtime.Intrinsics.Vector128`1",
+    name := name!"narrow" }
+/-- `Lanes.tag`, the `int32` at offset 48. -/
+def tagField : FieldRef :=
+  { owner := lanes, index := 2, type := .atom runtimeScope "System.Int32", name := name!"tag" }
+
+cil_field_shape environment wideField
+cil_field_shape environment narrowField
+cil_field_shape environment tagField
+
+/-- A `T::Lanes` value held as a byte snapshot, as a vector bitcast leaves it. -/
+def lanesSnapshot : Safety.Value :=
+  .scalar (.snapshot (.aggregate 64) (List.replicate 64 (0, true)))
+
+-- A snapshot receiver yields its 32- and 16-byte vector fields, and faults on any other width.
+theorem snapshot_vector_fields_load (frame : Safety.Frame) (memory : Safety.Memory) :
+    (∃ value, Safety.step body (.ldfld wideField) 0 [] frame [lanesSnapshot] memory =
+      .ok (.next (0 + 1) [.scalar value] frame memory)) ∧
+    (∃ value, Safety.step body (.ldfld narrowField) 0 [] frame [lanesSnapshot] memory =
+      .ok (.next (0 + 1) [.scalar value] frame memory)) := by
+  simp only [cil_step]
+  exact ⟨⟨_, rfl⟩, ⟨_, rfl⟩⟩
+#print axioms snapshot_vector_fields_load
+
+theorem snapshot_word_field_faults (frame : Safety.Frame) (memory : Safety.Memory) :
+    Safety.step body (.ldfld tagField) 0 [] frame [lanesSnapshot] memory =
+      .error (.unsupported "Snapshot field width") := by
+  simp only [cil_step]
+  rfl
+#print axioms snapshot_word_field_faults
+
+-- A store through a readonly reference faults before any address is formed.
+theorem readonly_store_unwritable (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    Safety.step body (.stfld highField) 0 [] frame
+        [.scalar (.i32 7), .readOnlyReference receiver] memory =
+      .error (.memory .unwritable receiver 4) := by
+  simp only [cil_step]
+  rfl
+#print axioms readonly_store_unwritable
+
+-- A struct value on the stack has no address, so `ldflda` of it faults.
+theorem value_address_faults (frame : Safety.Frame) (memory : Safety.Memory)
+    (bytes : List (BitVec 8)) :
+    Safety.step body (.ldflda highField) 0 [] frame [.scalar (.aggregate bytes)] memory =
+      .error (.unsupported "Not a memory instruction") := by
+  simp only [cil_step]
+  rfl
+#print axioms value_address_faults
 
 /-- `Node.lanes` written inline under another name, which no shape fact states. -/
 def inlineLanes : FieldRef :=
@@ -265,7 +352,7 @@ theorem inline_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
 #print axioms inline_lanes_load
 
 -- With shape facts required, the operand that has none is refused instead of evaluated.
-/-- error: class field inlineLanes of a closed body has no shape fact -/
+/-- error: field inlineLanes of a closed body has no shape fact -/
 #guard_msgs in
 set_option cil.requireFieldShapeFacts true in
 example (frame : Safety.Frame) (memory : Safety.Memory) (receiver : Safety.ManagedReference) :

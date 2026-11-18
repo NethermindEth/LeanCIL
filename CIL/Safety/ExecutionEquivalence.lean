@@ -278,7 +278,9 @@ theorem Memory.Equivalent.fieldLoad {m n : Memory} (same : m.Equivalent n) (body
   unfold CIL.Safety.fieldLoad
   split
   · exact same.classFieldLoad _ _ _ _
-  all_goals exact .error _
+  · exact same.instruction _ _
+  · exact same.instruction _ _
+  · exact .error _
 #print axioms Memory.Equivalent.fieldLoad
 
 /-- Equivalent memories give an instance field store equivalent results. -/
@@ -289,8 +291,23 @@ theorem Memory.Equivalent.fieldStore {m n : Memory} (same : m.Equivalent n) (bod
   unfold CIL.Safety.fieldStore
   split
   · exact same.classFieldStore _ _ _ _
-  all_goals exact .error _
+  · exact same.instruction _ _
+  · exact same.instruction _ _
+  · exact .error _
 #print axioms Memory.Equivalent.fieldStore
+
+/-- Equivalent memories give an instance field address equivalent results. -/
+theorem Memory.Equivalent.fieldReference {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (fieldReference body field stack m)
+      (fieldReference body field stack n) := by
+  unfold CIL.Safety.fieldReference
+  split
+  · exact same.instruction _ _
+  · exact same.instruction _ _
+  · exact .error _
+  · exact .error _
+#print axioms Memory.Equivalent.fieldReference
 
 /-- Equivalent memories give a call's runtime model equivalent results. -/
 theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
@@ -442,6 +459,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.fieldStore _ _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.fieldReference _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
        obtain ⟨otherMemory, otherValues⟩ := right

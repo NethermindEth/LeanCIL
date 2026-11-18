@@ -289,8 +289,15 @@ theorem Memory.Renamed.stepFieldLoad {indices : LocalIndexMap} {mapping : Alloca
       rcases second with ⟨targetAfter, targetValues⟩
       rcases result with ⟨memories, rfl⟩
       exact .ok (.next memories frames)
-    all_goals simp only [resolved]
-    all_goals exact .error _
+    all_goals simp only [resolved] at observable ⊢
+    all_goals first
+      | exact .error _
+      | (apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+         intro first second result
+         rcases first with ⟨sourceAfter, values⟩
+         rcases second with ⟨targetAfter, targetValues⟩
+         rcases result with ⟨memories, rfl⟩
+         exact .ok (.next memories frames))
 #print axioms Memory.Renamed.stepFieldLoad
 
 /-- An instance field store writes the related field, which both bodies resolve alike. -/
@@ -329,24 +336,53 @@ theorem Memory.Renamed.stepFieldStore {indices : LocalIndexMap} {mapping : Alloc
       rcases second with ⟨targetAfter, targetValues⟩
       rcases result with ⟨memories, rfl⟩
       exact .ok (.next memories frames)
-    all_goals simp only [resolved]
-    all_goals exact .error _
+    all_goals simp only [resolved] at observable ⊢
+    all_goals first
+      | exact .error _
+      | (apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+         intro first second result
+         rcases first with ⟨sourceAfter, values⟩
+         rcases second with ⟨targetAfter, targetValues⟩
+         rcases result with ⟨memories, rfl⟩
+         exact .ok (.next memories frames))
 #print axioms Memory.Renamed.stepFieldStore
 
-/-- A field address faults alike in both bodies, which resolve the field alike. -/
+/-- An instance field address forms the related address, which both bodies resolve alike. -/
 theorem Memory.Renamed.stepFieldAddress {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed)
     (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
-    (field : CIL.Extraction.FieldRef) (pc : Nat) (arguments stack : List Value) :
+    (field : CIL.Extraction.FieldRef) (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.ldflda field) pc arguments sourceFrame stack source)) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.ldflda field) pc arguments sourceFrame stack source)
         (step targetBody (.ldflda field) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
   refine ⟨mapping, .refl mapping, ?_⟩
-  simp only [step_ldflda_eq, mapping.unspecifiedOperands, fieldAddressFault,
-    CIL.Method.fieldShape, metadata.environment]
-  split <;> cases sourceBody.environment.fieldShape field <;> exact .error _
+  have shape : targetBody.fieldShape field = sourceBody.fieldShape field := by
+    simp only [CIL.Method.fieldShape, metadata.environment]
+  simp only [step_ldflda_eq, mapping.unspecifiedOperands] at observable ⊢
+  split at observable
+  · cases observable
+  · rename_i guard
+    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    unfold fieldReference at observable ⊢
+    rw [shape]
+    cases resolved : sourceBody.fieldShape field
+    all_goals simp only [resolved] at observable ⊢
+    all_goals first
+      | exact .error _
+      | (apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+         intro first second result
+         rcases first with ⟨sourceAfter, values⟩
+         rcases second with ⟨targetAfter, targetValues⟩
+         rcases result with ⟨memories, rfl⟩
+         exact .ok (.next memories frames))
 #print axioms Memory.Renamed.stepFieldAddress
 
 /-- Stack allocation faults are resource or memory failures, never named CLR exceptions. -/

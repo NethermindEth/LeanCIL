@@ -706,6 +706,12 @@ def FieldShape.ofLayout (layout : FieldLayout) (signed : Bool) : FieldShape :=
   if layout.aggregate then .aggregate layout.offset layout.width
   else .value layout.offset layout.width signed
 
+/-- The byte offset `ldflda` adds to a struct receiver's address; `none` for a class slot,
+    whose address is never formed, and for an unsupported field. -/
+def FieldShape.structOffset? : FieldShape → Option Nat
+  | .value offset .. | .aggregate offset _ => some offset
+  | .classSlot .. | .unsupported _ => none
+
 /-- The slot of a class instance field typed `type`, apart from the size of a struct array
     element, which only the environment's layouts know. -/
 def classSlotOf (type : Extraction.TypeExpr) : Option ClassSlot :=

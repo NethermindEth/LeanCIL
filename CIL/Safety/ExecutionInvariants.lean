@@ -424,7 +424,9 @@ theorem fieldLoad_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
   unfold fieldLoad at executed
   split at executed
   · exact classFieldLoad_contract _ _ _ _ _ _ _ executed
-  all_goals cases executed
+  · exact instruction_contract _ _ _ _ _ executed
+  · exact instruction_contract _ _ _ _ _ executed
+  · cases executed
 #print axioms fieldLoad_contract
 
 /-- An instance field store that succeeds preserves checked effects and stack validity. -/
@@ -435,8 +437,23 @@ theorem fieldStore_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef
   unfold fieldStore at executed
   split at executed
   · exact classFieldStore_contract _ _ _ _ _ _ _ executed
-  all_goals cases executed
+  · exact instruction_contract _ _ _ _ _ executed
+  · exact instruction_contract _ _ _ _ _ executed
+  · cases executed
 #print axioms fieldStore_contract
+
+/-- An instance field address that succeeds preserves checked effects and stack validity. -/
+theorem fieldReference_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
+    (stack values : List Value) (memory result : Memory)
+    (executed : fieldReference body field stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold fieldReference at executed
+  split at executed
+  · exact instruction_contract _ _ _ _ _ executed
+  · exact instruction_contract _ _ _ _ _ executed
+  · cases executed
+  · cases executed
+#print axioms fieldReference_contract
 
 -- The walk splits every arm of both dispatcher matches, argument homes included.
 set_option maxHeartbeats 400000 in
@@ -500,6 +517,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         first
           | (apply fieldLoad_contract; assumption)
           | (apply fieldStore_contract; assumption)
+          | (apply fieldReference_contract; assumption)
     | solve |
         refine StepContract.of_effect ?_ ?_
         · first

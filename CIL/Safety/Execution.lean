@@ -374,32 +374,36 @@ theorem modelStep_profile_congr {moved body : CIL.Method} (profile : moved.profi
 
 #print axioms modelStep_profile_congr
 
-/-- `ldfld` of `field` as `body` resolves it: a class slot through the receiver. A field outside
-    the checked layouts and class slots faults with its reason, and a value-type field is not
-    reached through this instruction. -/
+/-- `ldfld` of `field` as `body` resolves it: a class slot through the receiver, or a struct
+    field at its checked offset and width through a reference or out of a struct value. A field
+    outside the checked layouts and class slots faults with its reason. -/
 def fieldLoad (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value)
     (memory : Memory) : ExecutionResult (Memory × List Value) :=
   match body.fieldShape field with
   | .classSlot offset slot => classFieldLoad field.owner offset slot stack memory
+  | .value offset width signed => instruction (.fieldAt offset width signed) stack memory
+  | .aggregate offset size => instruction (.aggregateFieldAt offset size) stack memory
   | .unsupported reason => .error (.unsupported reason)
-  | .value .. | .aggregate .. => .error (.unsupported "Value-type field instruction")
 
-/-- `stfld` of `field` as `body` resolves it, faulting as `fieldLoad` does. -/
+/-- `stfld` of `field` as `body` resolves it: a class slot through the receiver, or a struct
+    field at its checked offset and width through a writable reference; faults as `fieldLoad`. -/
 def fieldStore (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value)
     (memory : Memory) : ExecutionResult (Memory × List Value) :=
   match body.fieldShape field with
   | .classSlot offset slot => classFieldStore field.owner offset slot stack memory
+  | .value offset width _ => instruction (.setFieldAt offset width) stack memory
+  | .aggregate offset size => instruction (.setAggregateFieldAt offset size) stack memory
   | .unsupported reason => .error (.unsupported reason)
-  | .value .. | .aggregate .. => .error (.unsupported "Value-type field instruction")
 
-/-- The fault of `ldflda` of `field` as `body` resolves it: a class field's address is never
-    formed, and a value-type field is not reached through this instruction. The extractor
-    refuses a class field address at admission, so only a hand-written body steps one. -/
-def fieldAddressFault (body : CIL.Method) (field : CIL.Extraction.FieldRef) : ExecutionFault :=
+/-- `ldflda` of `field` as `body` resolves it: the address of a struct field at its checked
+    offset, read-only through a read-only reference. A class field's address is never formed; the
+    extractor refuses one at admission, so only a hand-written body steps one. -/
+def fieldReference (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
   match body.fieldShape field with
-  | .classSlot .. => .unsupported "Class field address"
-  | .unsupported reason => .unsupported reason
-  | .value .. | .aggregate .. => .unsupported "Value-type field instruction"
+  | .value offset .. | .aggregate offset _ => instruction (.fieldAddress offset) stack memory
+  | .classSlot .. => .error (.unsupported "Class field address")
+  | .unsupported reason => .error (.unsupported reason)
 
 /-- `localloc` of the byte count alone on the stack: fresh storage owned by `frame`, zeroed when
     `initLocals` is set. Any other stack is an invalid state. -/
@@ -553,7 +557,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .ldfld field, _ =>
     let (memory, stack) ← fieldLoad body field stack m
     return .next (pc + 1) stack frame memory
-  | .ldflda field, _ => .error (fieldAddressFault body field)
+  | .ldflda field, _ =>
+    let (memory, stack) ← fieldReference body field stack m
+    return .next (pc + 1) stack frame memory
   | .stfld field, _ =>
     let (memory, stack) ← fieldStore body field stack m
     return .next (pc + 1) stack frame memory

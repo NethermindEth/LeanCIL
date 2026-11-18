@@ -477,19 +477,21 @@ theorem step_stfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
 
 #print axioms step_stfld_eq
 
-/-- `ldflda` faults as the body's resolution of the field says, behind the guard. Stepping
+/-- `ldflda` forms the address the body resolves for the field, behind the guard. Stepping
     uses this form only while the field's shape is unknown. -/
 theorem step_ldflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
     step body (.ldflda field) pc args frame stack memory =
       if unspecifiedOperands 1 stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else .error (fieldAddressFault body field) := by
+      else do
+        let (memory, stack) ← fieldReference body field stack memory
+        return .next (pc + 1) stack frame memory := by
   simp only [step, observerCount]
   rfl
 
 #print axioms step_ldflda_eq
 
-attribute [cil_step] fieldLoad fieldStore fieldAddressFault
+attribute [cil_step] fieldLoad fieldStore fieldReference
 
 attribute [cil_step] localAllocation
 
@@ -610,6 +612,94 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
+
+/-! A struct field instruction steps as the lowered instruction of its checked shape, so the
+equations of the lowered forms state what it does on every stack. -/
+
+/-- A faulting guard faults the lowered instruction too, before it reads memory. -/
+private theorem instruction_guarded {operation : CIL.Instruction} {stack : List Value}
+    (unknown : unspecifiedOperands (observerCount operation) stack = true) :
+    instruction operation stack memory =
+      .error (.unsupported "Instruction observes unspecified vector bits") := by
+  unfold instruction
+  rw [if_pos unknown]
+
+/-- `ldfld` of a struct field of primitive or vector shape steps as `fieldAt` of its offset,
+    width and sign on every stack, faults included. -/
+theorem step_ldfld_value_eq (field : CIL.Extraction.FieldRef) (offset width : Nat)
+    (signed : Bool) (shape : body.fieldShape field = .value offset width signed)
+    (stack : List Value) :
+    step body (.ldfld field) pc args frame stack memory =
+      step body (.fieldAt offset width signed) pc args frame stack memory := by
+  rw [step_ldfld_eq, step_fieldAt_eq]
+  simp only [fieldLoad, shape, instructionStep]
+  cases observed : unspecifiedOperands 1 stack
+  · rfl
+  · rw [instruction_guarded memory (operation := .fieldAt offset width signed) observed]
+    rfl
+#print axioms step_ldfld_value_eq
+
+/-- `ldfld` of a nested struct field steps as `aggregateFieldAt` of its offset and size on
+    every stack, faults included. -/
+theorem step_ldfld_aggregate_eq (field : CIL.Extraction.FieldRef) (offset size : Nat)
+    (shape : body.fieldShape field = .aggregate offset size) (stack : List Value) :
+    step body (.ldfld field) pc args frame stack memory =
+      step body (.aggregateFieldAt offset size) pc args frame stack memory := by
+  rw [step_ldfld_eq, step_aggregateFieldAt_eq]
+  simp only [fieldLoad, shape, instructionStep]
+  cases observed : unspecifiedOperands 1 stack
+  · rfl
+  · rw [instruction_guarded memory (operation := .aggregateFieldAt offset size) observed]
+    rfl
+#print axioms step_ldfld_aggregate_eq
+
+/-- `stfld` of a struct field of primitive or vector shape steps as `setFieldAt` of its
+    offset and width on every stack, faults included. -/
+theorem step_stfld_value_eq (field : CIL.Extraction.FieldRef) (offset width : Nat)
+    (signed : Bool) (shape : body.fieldShape field = .value offset width signed)
+    (stack : List Value) :
+    step body (.stfld field) pc args frame stack memory =
+      step body (.setFieldAt offset width) pc args frame stack memory := by
+  rw [step_stfld_eq, step_setFieldAt_eq]
+  simp only [fieldStore, shape, instructionStep]
+  cases observed : unspecifiedOperands 2 stack
+  · rfl
+  · rw [instruction_guarded memory (operation := .setFieldAt offset width) observed]
+    rfl
+#print axioms step_stfld_value_eq
+
+/-- `stfld` of a nested struct field steps as `setAggregateFieldAt` of its offset and size on
+    every stack, faults included. -/
+theorem step_stfld_aggregate_eq (field : CIL.Extraction.FieldRef) (offset size : Nat)
+    (shape : body.fieldShape field = .aggregate offset size) (stack : List Value) :
+    step body (.stfld field) pc args frame stack memory =
+      step body (.setAggregateFieldAt offset size) pc args frame stack memory := by
+  rw [step_stfld_eq, step_setAggregateFieldAt_eq]
+  simp only [fieldStore, shape, instructionStep]
+  cases observed : unspecifiedOperands 2 stack
+  · rfl
+  · rw [instruction_guarded memory (operation := .setAggregateFieldAt offset size) observed]
+    rfl
+#print axioms step_stfld_aggregate_eq
+
+/-- `ldflda` of a struct field steps as `fieldAddress` of its offset on every stack, faults
+    included. -/
+theorem step_ldflda_struct_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (addressed : (body.fieldShape field).structOffset? = some offset) (stack : List Value) :
+    step body (.ldflda field) pc args frame stack memory =
+      step body (.fieldAddress offset) pc args frame stack memory := by
+  have reached : fieldReference body field stack memory =
+      instruction (.fieldAddress offset) stack memory := by
+    unfold fieldReference
+    split <;> simp_all [CIL.FieldShape.structOffset?]
+  rw [step_ldflda_eq, step_fieldAddress_eq, reached]
+  simp only [instructionStep]
+  cases observed : unspecifiedOperands 1 stack
+  · rfl
+  · rw [instruction_guarded memory (operation := .fieldAddress offset) observed]
+    rfl
+#print axioms step_ldflda_struct_eq
+
 @[cil_step] theorem step_ldc_i4_eq {value} (stack : List Value) :
     step body (.ldc_i4 value) pc args frame stack memory =
       instructionStep (.ldc_i4 value) pc frame stack memory := id rfl

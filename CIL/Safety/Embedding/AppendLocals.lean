@@ -1131,14 +1131,14 @@ theorem step_appendLocals_stfld (field : CIL.Extraction.FieldRef) :
 
 #print axioms step_appendLocals_stfld
 
-/-- A field address faults whatever the frame's local slots. -/
+/-- Instance field addresses do not inspect or change a frame's local slots. -/
 theorem step_appendLocals_ldflda (field : CIL.Extraction.FieldRef) :
     StepAppendLocals (.ldflda field) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   simp only [step]
-  split <;> rfl
+  frame_natural
 
 #print axioms step_appendLocals_ldflda
 

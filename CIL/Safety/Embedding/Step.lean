@@ -711,10 +711,13 @@ theorem step_relabel_stfld (field : CIL.Extraction.FieldRef) : StepRelabel (.stf
 
 #print axioms step_relabel_stfld
 
-/-- A field address never succeeds, so it has no successful step to match. -/
+/-- An instance field address resolves its field in the layout environment both methods
+    share. -/
 theorem step_relabel_ldflda (field : CIL.Extraction.FieldRef) : StepRelabel (.ldflda field) := by
   plain_cases
-  cases h
+  rw [show fieldReference actual field stack m = fieldReference expected field stack m by
+    simp only [fieldReference, CIL.Method.fieldShape, context.environment]]
+  lockstep
 
 #print axioms step_relabel_ldflda
 
@@ -1335,12 +1338,12 @@ theorem step_raise_stfld (field : CIL.Extraction.FieldRef) : StepRaise (.stfld f
 
 #print axioms step_raise_stfld
 
-/-- A field address faults alike in both methods, which share the field's resolution. -/
+/-- A thrown field address is thrown by the relabeled address, which resolves the field alike. -/
 theorem step_raise_ldflda (field : CIL.Extraction.FieldRef) : StepRaise (.ldflda field) := by
   plain_cases
-  rw [show fieldAddressFault actual field = fieldAddressFault expected field by
-    simp only [fieldAddressFault, CIL.Method.fieldShape, context.environment]]
-  first | exact h | raise_lockstep
+  rw [show fieldReference actual field stack m = fieldReference expected field stack m by
+    simp only [fieldReference, CIL.Method.fieldShape, context.environment]]
+  raise_lockstep
 
 #print axioms step_raise_ldflda
 

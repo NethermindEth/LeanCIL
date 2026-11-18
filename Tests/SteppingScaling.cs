@@ -158,7 +158,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // call reads that its pc has no link and the runtime model fact of its pc, a scalar intrinsic.
 // The struct fields body loads and pops the int64 field at byte 8 of the struct its byref argument
 // addresses, then stores its int64 argument there, per cycle; the contract body is the same body under
-// contract stepping. Each access reads the field's address and its load or write from supplied facts.
+// contract stepping. Each access reads the field's shape fact, then its address and its load or write
+// from supplied facts.
 // The addresses body forms a writable and a readonly address of one int32 element of its array argument
 // and pops each, per cycle, each stepped by a fact derived from the element fact and the generated shape
 // fact; the address steps body steps the same body by one supplied fact per address.
@@ -191,8 +192,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
         ".ldarg 1", ".ldarg 1", $".stelem_any ({Int32Type})", ".ldarg 2", ".ldarg 1", ".ldarg 2", ".ldarg 1",
         $".ldelem_any ({PairType})", $".stelem_any ({PairType})"], [".ldc_i4 0", ".ret"]),
-    "structfields" or "structfieldscontract" => ([], [".ldarg 0", ".fieldAt 8 8", ".pop", ".ldarg 0", ".ldarg 1",
-        ".setFieldAt 8 8"], [".ldc_i4 0", ".ret"]),
+    "structfields" or "structfieldscontract" => ([], [".ldarg 0", ".ldfld second", ".pop", ".ldarg 0", ".ldarg 1",
+        ".stfld second"], [".ldc_i4 0", ".ret"]),
     "addresses" or "addresssteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelema ({Int32Type}) false", ".pop",
         ".ldarg 0", ".ldarg 1", ".nop", $".ldelema ({Int32Type}) true", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
@@ -256,7 +257,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     {
         "arguments" => $" declared := {signature},",
         "homes" => $" declared := {signature}, parameterHomes := [{homes}],",
-        "objects" or "typedelements" or "typedsteps" => " environment := environment,",
+        "objects" or "typedelements" or "typedsteps" or "structfields" or "structfieldscontract" =>
+            " environment := environment,",
         _ => ""
     };
     var statics = workload == "statics";
@@ -332,6 +334,23 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             def counter : CIL.Extraction.FieldRef :=
               { owner := {{NodeType}}, index := 1, type := {{Int64Type}}, name := name!"count" }
             cil_field_shape environment counter
+            set_option cil.requireFieldShapeFacts true
+            """ + "\n",
+        "structfields" or "structfieldscontract" => $$"""
+            /-- A struct of two `int64` fields. -/
+            def pairLayout : CIL.Extraction.RawLayout :=
+              { identity := "Examples.Pair", explicit := false, packing := 0, declaredSize := 0,
+                fields := [{ type := .signed64 }, { type := .signed64 }] }
+            /-- The checked layout of `pairLayout`: sixteen bytes. -/
+            def pairComputed : CIL.Extraction.ComputedLayout :=
+              { layout := { size := 16, fields := [{ offset := 0, width := 8 }, { offset := 8, width := 8 }] },
+                alignment := 8 }
+            @[cil_code] def environment : CIL.LayoutEnvironment :=
+              { rawLayouts := [pairLayout], layouts := #[pairComputed] }
+            /-- The `int64` field 1 of the struct, at byte 8. -/
+            def second : CIL.Extraction.FieldRef :=
+              { owner := {{PairType}}, index := 1, type := {{Int64Type}}, name := name!"second" }
+            cil_field_shape environment second
             set_option cil.requireFieldShapeFacts true
             """ + "\n",
         "typedelements" or "typedsteps" => """

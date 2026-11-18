@@ -85,7 +85,8 @@ theorem stepTransport : StepTransport := by
       exact memories.stepFieldStore frames sourceFormed sourceBody targetBody metadata field pc
         arguments stack bounds observable
     case ldflda.refl field =>
-      exact Memory.Renamed.stepFieldAddress sourceBody targetBody metadata field pc arguments stack
+      exact memories.stepFieldAddress frames sourceFormed sourceBody targetBody metadata field pc
+        arguments stack bounds observable
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
     | exact ⟨mapping, .refl mapping,

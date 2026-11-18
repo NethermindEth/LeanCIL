@@ -675,7 +675,7 @@ theorem step_ldflda_class_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
     step body (.ldflda field) pc args frame (.object reference :: rest) memory =
       .error (.unsupported "Class field address") := by
   simp only [step_ldflda_eq, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
-    fieldAddressFault, shape]
+    fieldReference, shape]
   rfl
 
 /-- `ldfld` of a class field whose slot holds a 1-byte integer, as `step_ldfld_word_eq` states
@@ -770,11 +770,11 @@ theorem step_stfld_word_i32_4_eq (field : CIL.Extraction.FieldRef) (offset : Nat
 
 end ObjectEquations
 
-/-- When set, a closed body's class field steps only by the operand's shape fact, and evaluating
-    the shape instead is an error, so a test can require that stepping reads the fact. -/
+/-- When set, a closed body's field instruction steps only by the operand's shape fact, and
+    evaluating the shape instead is an error, so a test can require that a step reads the fact. -/
 register_option cil.requireFieldShapeFacts : Bool := {
   defValue := false
-  descr := "step a closed body's class field only by the operand's shape fact"
+  descr := "step a closed body's field instruction only by the operand's shape fact"
 }
 
 open Lean Meta in
@@ -788,7 +788,7 @@ def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
     if let some proof := shared.proof? then return (shared.expr, proof)
   unless resolver.hasFVar || resolver.hasMVar do
     if cil.requireFieldShapeFacts.get (← getOptions) then
-      throwError "class field {field} of a closed body has no shape fact"
+      throwError "field {field} of a closed body has no shape fact"
     -- A body the compiler cannot run, such as one over an axiom, is left to simp.
     let evaluated? ← try
         pure (some (toExpr (← unsafe evalExpr CIL.FieldShape (mkConst ``CIL.FieldShape) resolver)))
@@ -811,9 +811,10 @@ def fieldStep (field equation : Expr) : MetaM Simp.Step := do
   return .visit { expr := shown, proof? := some proof }
 
 open Lean Meta in
-/-- A class field load steps by the equation for the field's slot and the receiver on the
-    stack, as `fieldShapeIn` finds the slot. A load whose shape stays unknown steps to
-    `fieldLoad`, whose match a later fact can decide. -/
+/-- A field load steps by the equation for the field's shape, as `fieldShapeIn` finds it: a
+    struct field as the lowered load of its shape, and a class field by the equation for its
+    slot and the receiver on the stack. A load whose shape stays unknown steps to `fieldLoad`,
+    whose match a later fact can decide. -/
 simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expression => do
   let_expr CIL.Safety.step body operation pc args frame stack memory := expression
     | return .continue
@@ -821,6 +822,14 @@ simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expressi
   let leading := #[body, pc, args, frame, memory, field]
   let generic := mkAppN (mkConst ``step_ldfld_eq) (leading.push stack)
   let (shape, proof) ← fieldShapeIn body field
+  match shape.getAppFnArgs with
+  | (``CIL.FieldShape.value, #[offset, width, signed]) =>
+    return ← equationStep (mkAppN (mkConst ``step_ldfld_value_eq)
+      (leading ++ #[offset, width, signed, proof, stack]))
+  | (``CIL.FieldShape.aggregate, #[offset, size]) =>
+    return ← equationStep (mkAppN (mkConst ``step_ldfld_aggregate_eq)
+      (leading ++ #[offset, size, proof, stack]))
+  | _ => pure ()
   let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
   let_expr List.cons _ receiver rest := stack | equationStep generic
   let_expr Value.object reference := receiver | equationStep generic
@@ -846,9 +855,10 @@ simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expressi
   | none => equationStep generic
 
 open Lean Meta in
-/-- A class field store steps by the equation for the field's slot and the stored value and
-    receiver on the stack, as `fieldShapeIn` finds the slot. A store whose shape stays unknown
-    steps to `fieldStore`. -/
+/-- A field store steps by the equation for the field's shape, as `fieldShapeIn` finds it: a
+    struct field as the lowered store of its shape, and a class field by the equation for its
+    slot and the stored value and receiver on the stack. A store whose shape stays unknown steps
+    to `fieldStore`. -/
 simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun expression => do
   let_expr CIL.Safety.step body operation pc args frame stack memory := expression
     | return .continue
@@ -856,6 +866,14 @@ simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun express
   let leading := #[body, pc, args, frame, memory, field]
   let generic := mkAppN (mkConst ``step_stfld_eq) (leading.push stack)
   let (shape, proof) ← fieldShapeIn body field
+  match shape.getAppFnArgs with
+  | (``CIL.FieldShape.value, #[offset, width, signed]) =>
+    return ← equationStep (mkAppN (mkConst ``step_stfld_value_eq)
+      (leading ++ #[offset, width, signed, proof, stack]))
+  | (``CIL.FieldShape.aggregate, #[offset, size]) =>
+    return ← equationStep (mkAppN (mkConst ``step_stfld_aggregate_eq)
+      (leading ++ #[offset, size, proof, stack]))
+  | _ => pure ()
   let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
   let_expr List.cons _ stored below := stack | equationStep generic
   let_expr List.cons _ receiver rest := below | equationStep generic
@@ -882,8 +900,9 @@ simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun express
   | none => equationStep generic
 
 open Lean Meta in
-/-- A class field address steps to its fault, as `fieldShapeIn` finds the class slot. An
-    address whose shape stays unknown steps to `fieldAddressFault`. -/
+/-- A struct field address steps as the lowered address of its offset, and a class field
+    address to its fault, as `fieldShapeIn` finds the shape. An address whose shape stays
+    unknown steps to `fieldReference`. -/
 simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expression => do
   let_expr CIL.Safety.step body operation pc args frame stack memory := expression
     | return .continue
@@ -891,6 +910,17 @@ simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expr
   let leading := #[body, pc, args, frame, memory, field]
   let generic := mkAppN (mkConst ``step_ldflda_eq) (leading.push stack)
   let (shape, proof) ← fieldShapeIn body field
+  match shape.getAppFnArgs with
+  | (``CIL.FieldShape.value, #[offset, _, _]) | (``CIL.FieldShape.aggregate, #[offset, _]) =>
+    -- The offset fact reduces to `some offset` once the shape fact rewrites the resolution.
+    let addressed ← mkCongrArg (mkConst ``CIL.FieldShape.structOffset?) proof
+    let resolved := mkApp (mkConst ``CIL.FieldShape.structOffset?)
+      (mkApp2 (mkConst ``CIL.Method.fieldShape) body field)
+    let expected ← mkEq resolved (← mkAppM ``Option.some #[offset])
+    let addressed ← mkExpectedTypeHint addressed expected
+    return ← equationStep (mkAppN (mkConst ``step_ldflda_struct_eq)
+      (leading ++ #[offset, addressed, stack]))
+  | _ => pure ()
   let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
   let_expr List.cons _ receiver rest := stack | equationStep generic
   let_expr Value.object reference := receiver | equationStep generic
