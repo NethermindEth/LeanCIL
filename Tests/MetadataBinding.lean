@@ -946,6 +946,20 @@ theorem admits_aggregate_value_arguments :
       (.aggregate "L::S`1<L::E>" 0) := by decide +kernel
 #print axioms admits_aggregate_value_arguments
 
+/-- The matching identity of a struct closed over System.Void still has an invalid argument. -/
+theorem refuses_a_void_aggregate_argument :
+    pairFrame.admits (structOf (.primitive 0x01)) (.aggregate "L::S`1<C::System.Void>" 0) =
+      false := by decide +kernel
+#print axioms refuses_a_void_aggregate_argument
+
+/-- An enum declared inside a generic type takes its enclosing type's arguments. -/
+theorem admits_a_closed_nested_enum_argument :
+    let nestedEnum := ResolvedType.genericInst (namedIn "L" "Outer`1/E" (.enumType 8) true)
+      (.cons (.primitive 8) .nil)
+    pairFrame.admits (structOf nestedEnum)
+      (.aggregate "L::S`1<L::Outer`1/E<C::System.Int32>>" 1) = true := by decide +kernel
+#print axioms admits_a_closed_nested_enum_argument
+
 /-- An external head uses Cecil's spelling, including for arguments following a value argument. -/
 private def externalPairAdmits (argument : ResolvedType) (name : String) : Bool :=
   let pair := ResolvedType.genericInst (namedIn "L" "Pair`2" (.external (some true)))
@@ -958,7 +972,9 @@ theorem refuses_nonvalue_arguments_of_an_external_struct :
       (.named (namedIn "L" "I" .interfaceType), "I"),
       (.primitive 0x0E, "System.String"), (.primitive 0x1C, "System.Object"),
       (.szarray (.primitive 8), "System.Int32[]"), (.pointer (.primitive 8), "System.Int32*"),
-      (.byref (.primitive 8), "System.Int32&"), (.var 0, "!0"), (.mvar 0, "!!0")] :
+      (.byref (.primitive 8), "System.Int32&"), (.var 0, "!0"), (.mvar 0, "!!0"),
+      (.modified false (namedIn "L" "M" (.external none)) (.primitive 8),
+        "System.Int32 modopt(M)")] :
       List (Prod ResolvedType String)).all (fun (arg, name) => !externalPairAdmits arg name) := by
   decide +kernel
 #print axioms refuses_nonvalue_arguments_of_an_external_struct

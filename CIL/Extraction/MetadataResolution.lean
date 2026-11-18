@@ -878,10 +878,10 @@ mutual
 /-- A value argument of a closed aggregate may itself be a closed value instance. -/
 private def aggregateValueArgument : Nat -> ResolvedType -> Bool
   | 0, _ => false
-  | _ + 1, .primitive code => code != 0x0E && code != 0x1C
+  | _ + 1, .primitive code => code != 0x01 && code != 0x0E && code != 0x1C
   | _ + 1, .named named => valueLike named.kind || named.isEnum
   | fuel + 1, .genericInst head arguments =>
-    valueLike head.kind && aggregateValueArgs fuel arguments
+    (valueLike head.kind || head.isEnum) && aggregateValueArgs fuel arguments
   | _ + 1, _ => false
 
 /-- Every argument of a preclosed aggregate must have a value kind throughout its type. -/
