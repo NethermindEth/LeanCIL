@@ -3581,16 +3581,17 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     /// <summary>
     /// What a gate asks of a verified theorem's statement: its <c>term</c>, to compare other statements with, or
-    /// that the kernel accept the theorem at <c>Expected</c>, the term of another theorem, or at its negation.
+    /// that the kernel accept the theorem at <c>Expected</c>, the term of another theorem, or, when <c>Refuted</c>, at
+    /// the counterexample predicate of the contract whose <c>Holds</c> that term states.
     /// </summary>
-    sealed record StatementRequest(bool Term, string? Expected = null, bool Negated = false)
+    sealed record StatementRequest(bool Term, string? Expected = null, bool Refuted = false)
     {
         /// <summary>The audit request fields, with <c>Expected</c> as the JSON the audit decodes.</summary>
         internal AuditRequest Apply(AuditRequest audit) => audit with
         {
             term = Term,
             expected = Expected is null ? null
-                : new { term = JsonDocument.Parse(Expected).RootElement, negated = Negated }
+                : new { term = JsonDocument.Parse(Expected).RootElement, refuted = Refuted }
         };
     }
 

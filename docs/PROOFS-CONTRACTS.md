@@ -655,7 +655,8 @@ Every settled outcome is a success or a fault other than fuel exhaustion and `un
 not cover, and one exhausted budget says nothing about a larger one, so neither is a
 counterexample, and no stepping tactic steps past a hole to a return. Such a run can still prove
 `¬ c.Holds program method`: no fuel returns. That negation is evidence of a gap in the model, not
-of a fault in the method.
+of a fault in the method, so `leancil verify` rejects a requested theorem that states it (see
+[failure reports](CLI.md#failure-reports)); a lemma that states it is checked like any other.
 
 ## Frame class instances
 

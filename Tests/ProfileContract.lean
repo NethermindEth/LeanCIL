@@ -140,18 +140,16 @@ def emptyMemory : CIL.Safety.Memory :=
   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
 
 /-- The contract really depends on AVX2: on the baseline the method returns `0`. -/
-theorem baseline_rejected : ¬ avx2Contract.Holds (reprofile program baselineProfile) 0 := by
-  intro holds
-  obtain ⟨fuel, ⟨final, values⟩, invoked, -, out, encoded, returned⟩ :=
-    holds () emptyMemory trivial
+theorem baseline_rejected : avx2Contract.Refuted (reprofile program baselineProfile) 0 := by
   have baselineRun :
       CIL.Safety.invoke (reprofile program baselineProfile) 10 0 [] emptyMemory =
         Except.ok (emptyMemory, [.scalar (.i32 0)]) := by
     cil_checked_steps [reprofile, program, baselineProfile]
-  have same := invoke_ok_unique invoked baselineRun
+  refine .of_return (input := ()) (initial := emptyMemory) trivial baselineRun ?_
+  rintro ⟨-, out, encoded, returned⟩
   simp only [avx2Contract] at encoded returned
-  subst encoded returned
-  simp at same
+  subst returned
+  simp at encoded
 
 /-- An AVX-512 DQ multiply needs four flags, all of which the agreement check reads. -/
 def intrinsicProgram : Program :=

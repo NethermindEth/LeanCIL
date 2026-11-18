@@ -44,7 +44,7 @@ starts it with `Error:`. Each Lean error cites `file:line:column` in the file yo
 | `extraction` | Extracting the variant's method failed | Read `error`; run `leancil extract` on the built assembly |
 | `program comparison` | The variant's program does not relate to production's, or to its `programOf` variant's, as its `program` says | Fix the fixture case, or `program` if the change is intended |
 | `refutation template`, `proof template` | The template is missing, or its placeholders and `values` differ | Add the missing values or placeholders |
-| `statement identity` | The kernel did not accept the variant's theorem at production's statement, or its refutation at that statement's negation, or production did not verify | Read both statements in `error`; state the variant's theorem as production's, naming declarations from a module both proofs import |
+| `statement identity` | The kernel did not accept the variant's theorem at production's statement, or its refutation at that statement's `Refuted` form, production states no contract's `Holds`, or production did not verify | Read both statements in `error`; state the variant's theorem as production's, naming declarations from a module both proofs import |
 | `binding generation` | A binding catalog is invalid: a variable no placeholder uses, a placeholder without a value, a duplicate gate, conflicting sources at one path or an unsafe path | Correct the catalog entry the diagnostic names |
 
 ## failed.json
@@ -64,8 +64,8 @@ repeats the request
 | `elaboration-error` | A Lean error other than an unsolved goal or a resource limit: a failed tactic, a missing import, an unknown name | Read the error |
 | `unsolved-goal` | A tactic block left goals open, or a `--goals` run found open goals | Rerun with `--goals` |
 | `resource-limit` | Heartbeats or recursion depth ran out; `resource` names which | Confirm the method and profile first: a proof run on another method or of a false property also exhausts limits. Then split the proof or supply the missing fact |
-| `replay-or-audit-rejected` | Kernel replay or the axiom audit rejected the proof | Remove `sorry` and extra axioms |
-| `refutation` | The theorem verified, and it states `Not (contract.Holds ...)` | Report that the contract is refuted; `verified.json` certifies the refutation |
+| `replay-or-audit-rejected` | Kernel replay or the axiom audit rejected the proof, or the theorem states `Not (contract.Holds ...)` | Remove `sorry` and extra axioms; state a refutation as `contract.Refuted ...` |
+| `refutation` | The theorem verified, and it states `contract.Refuted ...`, a definite counterexample | Report that the contract is refuted; `verified.json` certifies the refutation |
 | `unclassified` | Anything else, such as a missing tool | Read `message` |
 
 An unsolved goal or a failed tactic means the proof is incomplete or the property is false, and

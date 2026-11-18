@@ -135,7 +135,9 @@ internal static partial class FailureReports
             first?.file, first?.line, first?.column, diagnostics, message, Rerun(theorem, proof, output, proofRoot));
     }
 
-    /// <summary>A refutation report when the audit marks the verified theorem as `Not (contract.Holds ...)`, else null.</summary>
+    /// <summary>
+    /// A refutation report when the audit marks the verified theorem as a contract's `Refuted`, else null.
+    /// </summary>
     internal static Report? Refuted(string audit, string theorem, string proof, string output, string? proofRoot)
     {
         var markers = RefutationMarker().Matches(audit);

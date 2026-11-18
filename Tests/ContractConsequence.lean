@@ -693,23 +693,6 @@ def sampleInput : AddInput := ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 16⟩, ⟨0, 0⟩
 
 theorem sample_pre : addPre sampleInput sample := ⟨rfl, rfl, rfl⟩
 
-theorem raises_unique {program : CIL.Program} {method : Nat} {args : List Value} {memory : Memory}
-    {one other : CIL.ExceptionType} (first : Raises program method args memory one)
-    (second : Raises program method args memory other) : one = other := by
-  obtain ⟨_, fault, ran, thrown⟩ := first
-  obtain ⟨_, fault', ran', thrown'⟩ := second
-  cases invoke_unique (by simp [Settled, thrown]) (by simp [Settled, thrown']) ran ran'
-  rw [thrown] at thrown'
-  cases thrown'
-  rfl
-
-theorem raises_not_returns {program : CIL.Program} {method fuel : Nat} {args : List Value}
-    {memory : Memory} {exception : CIL.ExceptionType} {result : Memory × List Value}
-    (raised : Raises program method args memory exception)
-    (returned : invoke program fuel method args memory = .ok result) : False := by
-  obtain ⟨_, fault, ran, thrown⟩ := raised
-  cases invoke_unique (second := .ok result) (by simp [Settled, thrown]) trivial ran returned
-
 theorem percent_returns {v : CIL.W64} (within : v ≤ 100) (m : Memory) :
     ∃ fuel final, invoke Extracted.program fuel percent [.scalar (.i64 v)] m = .ok (final, [.scalar (.i64 v)]) := by
   obtain ⟨fuel, final, values, invoked, -, out, encoded, same⟩ :=
@@ -728,14 +711,14 @@ theorem stronger_post_not_refines : ¬ percentExact.Refines percentTooStrong := 
   have bound : (100 : CIL.W64) < 100 := refines.post 100 sample sample 100 trivial (by decide) (Confined.refl _ _) rfl
   exact absurd bound (by decide)
 
-theorem stronger_post_rejected : ¬ percentTooStrong.Holds Extracted.program percent := fun holds => by
-  have outcome := holds 100 sample trivial
-  simp only [percentTooStrong, percentExact, show (100 : CIL.W64) ≤ 100 by decide, ite_true] at outcome
-  obtain ⟨fuel, final, values, invoked, -, out, rfl, bound⟩ := outcome
-  obtain ⟨fuel', final', invoked'⟩ := percent_returns (v := 100) (by decide) sample
-  have same := invoke_ok_unique invoked invoked'
-  simp only [Prod.mk.injEq, List.cons.injEq, Value.scalar.injEq, CIL.Value.i64.injEq, and_true] at same
-  rw [same.2] at bound
+theorem stronger_post_rejected : percentTooStrong.Refuted Extracted.program percent := by
+  obtain ⟨_, _, invoked⟩ := percent_returns (v := 100) (by decide) sample
+  refine .of_return (input := 100) (initial := sample) trivial invoked ?_
+  simp only [OutcomeContract.Violates, MethodContract.Violates, percentTooStrong, percentExact,
+    show (100 : CIL.W64) ≤ 100 by decide, ite_true]
+  rintro ⟨-, out, encoded, bound⟩
+  simp only [List.cons.injEq, Value.scalar.injEq, CIL.Value.i64.injEq, and_true] at encoded
+  rw [← encoded] at bound
   exact absurd (show (100 : CIL.W64) < 100 from bound) (by decide)
 
 /-- A weaker pre: `Percent(101)` raises, so it cannot be promised to return. -/
@@ -745,10 +728,11 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
   have bound : (101 : CIL.W64) ≤ 100 := refines.pre 101 sample trivial
   exact absurd bound (by decide)
 
-theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program percent := fun holds => by
-  obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 sample trivial
-  exact raises_not_returns (percent_exact.raising (input := 101)
-    (exception := .argumentOutOfRange) trivial (by decide)) invoked
+theorem weaker_pre_rejected : percentUnguarded.Refuted Extracted.program percent := by
+  obtain ⟨_, _, failed, thrown⟩ := percent_exact.raising (input := 101) (initial := sample)
+    (exception := .argumentOutOfRange) trivial (by decide)
+  exact .of_fault (input := 101) (initial := sample) trivial
+    (by simp [thrown, ExecutionFault.definite]) failed
 
 /-- A smaller footprint: `AddTo` changes `res`, which an empty footprint keeps. -/
 def addUnframed : MethodContract AddInput := { addInternal with footprint := fun _ => [] }
@@ -757,13 +741,11 @@ theorem smaller_footprint_not_refines : ¬ addInternal.Refines addUnframed := fu
   obtain ⟨_, member, _⟩ := refines.footprint sampleInput sample sample_pre _ (List.mem_singleton_self _)
   exact nomatch member
 
-theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program addTo := fun holds => by
-  obtain ⟨_, ⟨final, values⟩, invoked, framed, -⟩ := holds sampleInput sample sample_pre
-  obtain ⟨_, ⟨final', values'⟩, invoked', -, _, rfl, -, readback⟩ :=
+theorem smaller_footprint_rejected : addUnframed.Refuted Extracted.program addTo := by
+  obtain ⟨_, ⟨final, values⟩, invoked, -, _, rfl, -, readback⟩ :=
     add_internal sampleInput sample sample_pre
-  have same := congrArg Prod.fst (invoke_ok_unique invoked invoked')
-  dsimp only at same
-  subst same
+  refine .of_return (input := sampleInput) (initial := sample) sample_pre invoked ?_
+  rintro ⟨framed, -⟩
   have kept := framed.read_eq sampleInput.res (by decide) 8 1 fun _ _ => Outside.nil _ _
   have zero : read sample sampleInput.res 8 1 = .ok (numberBytes 0 8) := rfl
   rw [readback, zero] at kept
@@ -776,11 +758,12 @@ def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed := fun refines =>
   absurd (refines.raises 101 sample trivial) (by decide)
 
-theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program percent := fun holds => by
-  have renamed : Raises Extracted.program percent [.scalar (.i64 101)] sample .argument :=
-    holds.raising (input := 101) trivial (by decide)
-  exact absurd (raises_unique renamed (percent_exact.raising (input := 101)
-    (exception := .argumentOutOfRange) trivial (by decide))) (by decide)
+theorem changed_exception_rejected : percentRenamed.Refuted Extracted.program percent := by
+  obtain ⟨_, _, failed, thrown⟩ := percent_exact.raising (input := 101) (initial := sample)
+    (exception := .argumentOutOfRange) trivial (by decide)
+  refine .of_fault (input := 101) (initial := sample) trivial
+    (by simp [thrown, ExecutionFault.definite]) failed ?_
+  simp [OutcomeContract.Violates, percentRenamed, thrown]
 
 /-- The callee contract over the first word of the pair. -/
 def firstZero : MethodContract (CIL.W64 × CIL.W64) Bool :=
@@ -797,11 +780,11 @@ theorem first_not_forwarded (method : CIL.Extraction.MethodRef) :
 
 /-- What loading argument 0 would derive is false: `IsZeroSecond(0, 7)` returns `false`. -/
 theorem first_selection_rejected :
-    ¬ (firstZero.withArgs pairArgs).Holds Extracted.program isZeroSecond := fun holds => by
-  obtain ⟨_, ⟨_, _⟩, invoked, -, zero, rfl, decided⟩ := holds (0, 7) sample trivial
-  obtain ⟨_, ⟨_, _⟩, invoked', -, zero', rfl, decided'⟩ :=
+    (firstZero.withArgs pairArgs).Refuted Extracted.program isZeroSecond := by
+  obtain ⟨_, ⟨_, _⟩, invoked, -, zero', rfl, decided'⟩ :=
     is_zero_second_forwards (0, 7) sample trivial
-  have same := congrArg Prod.snd (invoke_ok_unique invoked invoked')
+  refine .of_return (input := (0, 7)) (initial := sample) trivial invoked ?_
+  rintro ⟨-, zero, same, decided⟩
   simp only [firstZero, secondZero, MethodContract.withArgs] at decided decided' same
   subst decided decided'
   exact absurd same (by decide)
@@ -813,16 +796,10 @@ def danglingArgs (v : CIL.W64) : List Value :=
 /-- Every premise but `covered` holds for `danglingArgs`, and the contract is false: the
     forwarder rejects the dangling argument the callee never sees. -/
 theorem dangling_rejected :
-    ¬ (isZeroContract.withArgs danglingArgs).Holds Extracted.program isZeroIgnoring :=
-  fun holds => by
-    obtain ⟨_, _, invoked, -⟩ := holds 0 sample trivial
-    obtain ⟨_, _, _, _, -, checked, -, -⟩ := invoke_success_setup invoked
-    obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ checked
-    subst same
-    have dangling := valid (.reference (.address ⟨1, 0⟩))
-      (by simp [MethodContract.withArgs, danglingArgs])
-    have missing : form sample ⟨1, 0⟩ = .error .missingAllocation := rfl
-    exact absurd (missing.symm.trans dangling) nofun
+    (isZeroContract.withArgs danglingArgs).Refuted Extracted.program isZeroIgnoring :=
+  .of_fault (input := 0) (initial := sample) trivial (by decide)
+    (rfl : invoke Extracted.program 64 isZeroIgnoring
+      ((isZeroContract.withArgs danglingArgs).args 0) sample = .error _)
 
 #print axioms first_not_forwarded
 #print axioms first_selection_rejected

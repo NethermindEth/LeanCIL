@@ -65,7 +65,8 @@ partial class Program
 
     /// <summary>
     /// How a variant's verified statement relates to production's `T`, both as the theorem audits print them:
-    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at `Not T`; `different` when
+    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at the counterexample predicate
+    /// of the contract whose `Holds` `T` states, with `T`'s arguments; `different` when
     /// it does not; `unavailable` when there was nothing to compare; `independent` when the manifest says so.
     /// </summary>
     sealed record GateStatement(string status, string? production, string? variant);
@@ -150,8 +151,9 @@ partial class Program
     /// <summary>
     /// Builds, extracts and verifies an explicit catalog of gates and their variants, plans the selected rows
     /// into balanced jobs, runs one job of a plan, or checks that the results of every job passed. A `rejected`
-    /// variant passes only when its refutation verifies at the negation of production's statement and its proof
-    /// fails at proof checking; a certifying variant's theorem must verify at production's statement.
+    /// variant passes only when production's statement is a contract's `Holds`, its refutation verifies at that
+    /// contract's counterexample predicate with the same arguments, and its proof fails at proof checking; a
+    /// certifying variant's theorem must verify at production's statement.
     /// </summary>
     internal static int RunGates(string[] args)
     {
@@ -577,8 +579,9 @@ partial class Program
             var origin = requestIndex.TryGetValue(production[(row.Gate, row.Profile)], out var at)
                 ? first.Verified[at.Proof]?.statementIdentity?.term : null;
             var index = requestIndex[row];
-            // Without production's statement the variant still verifies, and its statement is unavailable.
-            if (origin is { } term)
+            // Without production's statement the variant still verifies, and its statement is unavailable; a raw
+            // statement has no counterexample predicate, so a refutation of it is never compared.
+            if (origin is { } term && (row.Expect != "rejected" || StatesContract(term)))
                 statements[row.Expect == "rejected" ? index.Refutation!.Value : index.Proof] =
                     new(false, term.GetRawText(), row.Expect == "rejected");
         }
@@ -1099,8 +1102,10 @@ partial class Program
     }
 
     /// <summary>
-    /// How the statement `row` verified relates to production's statement `T`: the kernel must accept a `rejected`
-    /// variant's refutation at `¬ T` and any other variant's theorem at `T`, in the variant's own environment. No
+    /// How the statement `row` verified relates to production's statement `T`: `T` must state a contract's `Holds`
+    /// for a `rejected` variant, whose refutation the kernel must accept at that contract's counterexample predicate
+    /// with `T`'s arguments, and the kernel must accept any other variant's theorem at `T`, in the variant's own
+    /// environment. No
     /// statement is compared when the variant's own leg did not verify; that leg reports why.
     /// </summary>
     static (GateStatement?, string?) CompareGateStatement(GateRow row, GateRow production, string productionStage,
@@ -1116,15 +1121,45 @@ partial class Program
                 $"{row.Name} has nothing to match."
             : expected?.term is null
             ? $"Production {production.Name} has no statement to compare: {expected?.termError ?? "none reported"}"
+            : refutes && !StatesContract(expected.term.Value)
+            ? $"Production {production.Name} does not state a contract's Holds, so {row.Name} has no refutation to " +
+                "state: a rejected variant needs production's theorem to state MethodContract.Holds, " +
+                "OutcomeContract.Holds or OutcomeContract.HoldsCLR"
             : identity?.matches is null ? $"{variantReport.theorem} was not compared with production's statement."
             : identity.matches == true ? null
-            : (refutes ? $"Refutation {variantReport.theorem} does not state the negation of production's statement"
+            : (refutes ? $"Refutation {variantReport.theorem} does not state the counterexample predicate of " +
+                "production's contract"
                 : $"{variantReport.theorem} does not state production's statement") + ": " + identity.mismatch;
         var productionText = productionReport is null ? null : StatementOf(productionReport);
         var status = reason is null ? "same" : identity?.matches == false ? "different" : "unavailable";
         return (new(status, productionText, shown), reason is null ? null : reason + "\n  Production: " +
             (productionText ?? "unavailable") + "\n  " + (refutes ? "Refutation: " : "Variant: ") + shown);
     }
+
+    /// <summary>
+    /// The library contract predicates, by declaring module and name, that a `rejected` variant refutes.
+    /// </summary>
+    static readonly (string Module, string Name)[] ContractPredicates =
+    [
+        ("CIL.Safety.MethodContract", "CIL.Safety.MethodContract.Holds"),
+        ("CIL.Safety.OutcomeContract", "CIL.Safety.OutcomeContract.Holds"),
+        ("CIL.Safety.RuntimeExceptions", "CIL.Safety.OutcomeContract.HoldsCLR")
+    ];
+
+    /// <summary>
+    /// Whether `term`, a statement as the theorem audit encodes it, is a library contract predicate applied to its
+    /// arguments; the walk visits each application of the spine once.
+    /// </summary>
+    static bool StatesContract(JsonElement term)
+    {
+        var nodes = term.GetProperty("nodes");
+        var node = nodes[term.GetProperty("root").GetInt32()];
+        while (node[0].GetString() == "app") node = nodes[node[1].GetInt32()];
+        return node[0].GetString() == "const" && ContractPredicates.Contains((Dotted(node[1]), Dotted(node[2])));
+    }
+
+    /// <summary>A name the audit encodes as its components, written with dots.</summary>
+    static string Dotted(JsonElement name) => string.Join('.', name.EnumerateArray().Select(part => part.ToString()));
 
     static bool SafeGateName(string? name) => name is not (null or "" or "." or "..") &&
         Regex.IsMatch(name, @"\A[A-Za-z0-9_.-]+\z");

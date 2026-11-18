@@ -239,15 +239,18 @@ def echoOff : MethodContract CIL.W64 CIL.W64 :=
   { echoContract with post := fun v _ _ out => out = v + 1 }
 
 /-- Only the returned values of a computed run are compared; memories never are. -/
-theorem echo_off_rejected : ¬ echoOff.Holds program echoMethod := fun holds => by
-  obtain ⟨_, ⟨_, values⟩, invoked, -, out, encoded, wrong⟩ :=
-    holds sample empty ⟨empty_formed, empty_world⟩
-  have observed := invoke_ok_observation_unique Prod.snd
-    (rfl : (invoke program echoFuel echoMethod (echoOff.args sample) empty).map Prod.snd =
-      .ok sampleArgs)
-    invoked
-  dsimp only [echoOff, echoContract] at observed encoded wrong
-  subst observed wrong
+theorem echo_off_rejected : echoOff.Refuted program echoMethod := by
+  have mapped : (invoke program echoFuel echoMethod (echoOff.args sample) empty).map Prod.snd =
+      .ok sampleArgs := rfl
+  obtain ⟨⟨final, values⟩, invoked, rfl⟩ : ∃ result,
+      invoke program echoFuel echoMethod (echoOff.args sample) empty = .ok result ∧
+        result.2 = sampleArgs := by
+    revert mapped
+    cases invoke program echoFuel echoMethod (echoOff.args sample) empty <;> simp [Except.map]
+  refine .of_return (input := sample) (initial := empty) ⟨empty_formed, empty_world⟩ invoked ?_
+  rintro ⟨-, out, encoded, wrong⟩
+  dsimp only [echoOff, echoContract] at encoded wrong
+  subst wrong
   simp at encoded
 
 #print axioms echo_off_rejected

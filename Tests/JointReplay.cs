@@ -231,8 +231,9 @@ Compile("JointClash2", "theorem JointClash.same : 1 = 1 := rfl\n");
 Compile("JointClean", "theorem JointDuplicate.same : True := True.intro\n");
 Compile("JointUnapproved", "axiom JointUnapproved.oracle : True\n" +
     "theorem JointDuplicate.same : True := JointUnapproved.oracle\n");
-Compile("JointRefutation", "def CIL.Safety.MethodContract.Holds : Prop := False\n" +
-    "theorem JointRefutation.test : ¬ CIL.Safety.MethodContract.Holds := fun h => h\n");
+// A same-named predicate of another module is no contract, so stating it is no refutation.
+Compile("JointOwnRefuted", "def CIL.Safety.MethodContract.Refuted : Prop := True\n" +
+    "theorem JointOwnRefuted.test : CIL.Safety.MethodContract.Refuted := trivial\n");
 Compile("JointVisible", "theorem JointVisible.correctness : True := True.intro\n");
 Compile("JointHidden", """
     import Lean
@@ -293,10 +294,28 @@ void CheckFusedReplay()
     var shadow = Path.Combine(root, "Shadow");
     Directory.CreateDirectory(shadow);
     File.WriteAllText(Path.Combine(shadow, "Init.olean"), "Not an olean");
-    var leanPath = shadow + Path.PathSeparator + root;
+    if (verification.library is null) verification.Library(Inputs(At("CIL.lean")));
+    var library = Path.Combine(verification.library!, ".lake/build/lib/lean");
+    var leanPath = shadow + Path.PathSeparator + root + Path.PathSeparator + library;
+    // A refutation of the library's contract predicate needs the library on the search path.
+    var refutationSource = Path.Combine(root, "JointRefutation.lean");
+    File.WriteAllText(refutationSource, """
+        import CIL.Safety.MethodContract
+        open CIL.Safety
+        def JointRefutation.returns : MethodContract Unit where
+          args _ := []
+          pre _ _ := True
+          footprint _ := []
+          post _ _ _ _ := True
+        theorem JointRefutation.test : JointRefutation.returns.Refuted [] 0 :=
+          .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
+            (fault := ⟨0, 0, .invalidState⟩) trivial (by decide) rfl
+        """);
+    Run([verification.LeanExecutable, "--root=" + root, "-o", Path.Combine(root, "JointRefutation.olean"),
+        refutationSource], root, root + Path.PathSeparator + library, environment: environment);
 
     System.Text.Json.JsonElement Audit(string[] targets, string module, string theorem, bool fused,
-        bool rejected = false, bool metadata = false)
+        bool rejected = false, bool metadata = false, string[]? axioms = null)
     {
         var request = Path.Combine(root, "fused-request.json");
         var result = Path.Combine(root, "fused-result.json");
@@ -305,7 +324,7 @@ void CheckFusedReplay()
             ["modules"] = new[] { module }, ["replayTargets"] = targets,
             ["theorems"] = new[]
             {
-                new { name = theorem, axioms = Array.Empty<string>(), statement = true, refutation = true }
+                new { name = theorem, axioms = axioms ?? [], statement = true, refutation = true }
             }
         };
         if (metadata)
@@ -332,10 +351,16 @@ void CheckFusedReplay()
     Audit(["JointUnapproved", "JointClean"], "JointUnapproved", "JointDuplicate.same",
         fused: false, rejected: true);
     Console.WriteLine("PASS duplicate theorem bodies retain their own rejected axiom closure in both orders");
-    var refutation = Audit(["JointRefutation"], "JointRefutation", "JointRefutation.test", fused: false);
-    if (refutation.GetProperty("theorems")[0].GetProperty("refutes").GetProperty("line").GetInt32() != 2)
+    // The library's refutation lemmas use the two standard axioms.
+    var refutation = Audit(["JointRefutation"], "JointRefutation", "JointRefutation.test", fused: false,
+        axioms: ["propext", "Quot.sound"]);
+    if (refutation.GetProperty("theorems")[0].GetProperty("refutes").GetProperty("line").GetInt32() != 8)
         throw new InvalidOperationException("Fused fallback lost the refutation's source location");
-    Console.WriteLine("PASS refutation audit retains original source locations");
+    var own = Audit(["JointOwnRefuted"], "JointOwnRefuted", "JointOwnRefuted.test", fused: false);
+    if (own.GetProperty("theorems")[0].TryGetProperty("refutes", out var ownRefutes) &&
+        ownRefutes.ValueKind != JsonValueKind.Null)
+        throw new InvalidOperationException("A same-named predicate of another module counted as a refutation");
+    Console.WriteLine("PASS refutation audit retains original source locations and refuses same-named predicates");
 
     var forgedRequest = Path.Combine(root, "forged-fused.json");
     File.WriteAllText(forgedRequest, """

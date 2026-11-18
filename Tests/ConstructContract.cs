@@ -177,11 +177,10 @@ theorem storage_formed : storage.WellFormed where
     exact ⟨_, rfl, by decide⟩
 
 /-- This build stores `high + 1`, so `Pair(0, 0)` reads back as `Pair(0, 1)`. -/
-theorem correctness : ¬ pairContract.Holds Extracted.program pair := by
-  intro holds
-  obtain ⟨_, ⟨final, values⟩, ran, -, _, -, wrong⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ storage ⟨storage_formed, rfl⟩
-  obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 pair
-    (pairContract.args ⟨⟨0, 0⟩, 0, 0⟩) storage = .ok _))
+theorem correctness : pairContract.Refuted Extracted.program pair :=
+  .of_return (input := ⟨⟨0, 0⟩, 0, 0⟩) (initial := storage) ⟨storage_formed, rfl⟩
+    (rfl : invoke Extracted.program 16 pair (pairContract.args ⟨⟨0, 0⟩, 0, 0⟩) storage = .ok _) <| by
+  rintro ⟨-, _, -, wrong⟩
   have observed : (Except.ok (pairBytes ⟨⟨0, 0⟩, 0, 0⟩) : Checked (List (BitVec 8))) =
       .ok (numberBytes 0 8 ++ numberBytes 1 8) := wrong.symm.trans rfl
   exact absurd (Except.ok.inj observed) (by decide)

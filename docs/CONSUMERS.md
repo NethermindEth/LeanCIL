@@ -167,23 +167,33 @@ proof.
 import Extracted
 import CIL.Safety.MethodContract
 open CIL.Safety
-theorem Witness.refuted : ¬ ∀ (left right : CIL.W64) (memory : Memory),
-    ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-      memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
-  intro holds
-  obtain ⟨fuel, ran⟩ := holds @LEFT@ @RIGHT@ Memory.empty
-  have returned := congrArg Prod.snd (invoke_ok_unique ran (rfl : invoke Extracted.program 16 0
-    [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _))
-  revert returned
-  decide
+/-- Production's contract: the wrapping sum, with caller memory unchanged. -/
+def Witness.contract : MethodContract (CIL.W64 × CIL.W64) where
+  args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  pre _ _ := True
+  footprint _ := []
+  post input initial final values :=
+    final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
+/-- The witness inputs make the extracted method return other than their wrapping sum. -/
+theorem Witness.refuted : Witness.contract.Refuted Extracted.program 0 :=
+  .of_return (input := (@LEFT@, @RIGHT@)) (initial := Memory.empty) trivial
+    (rfl : invoke Extracted.program 16 0 [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _)
+    (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
 ```
+
+Production's theorem states `MethodContract.Holds`, `OutcomeContract.Holds` or
+`OutcomeContract.HoldsCLR` of a contract, and a refutation states the matching `Refuted` with
+the same arguments: a definite counterexample, as in
+[Refute a contract](PROOFS-CONTRACTS.md#refute-a-contract). A gate whose production theorem states
+anything else has no refutation to compare, so each of its `rejected` variants fails at stage
+`statement identity`.
 
 A variant passes as follows:
 
 | `expect` | Passes when |
 | --- | --- |
 | `certifies` | Its proof verifies against its extraction, as for production, at production's statement unless `statement` is `independent`. |
-| `rejected` | Its refutation verifies against its extraction, with the same kernel replay and axiom audit as any theorem, at the negation of production's statement, and its proof fails at proof checking. |
+| `rejected` | Its refutation verifies against its extraction, with the same kernel replay and axiom audit as any theorem, at the `Refuted` form of production's contract statement, and its proof fails at proof checking. |
 | `unchanged` | Its program comparison holds. No proof is requested. |
 
 A build, extraction, program comparison or template failure, a missing proof, and a proof whose
@@ -198,7 +208,8 @@ Production's theorem audit reports its statement `T` as a term in which each con
 the module that declares it, and a definition or theorem of production's own proof file is
 replaced by its value. Production verifies first; the variants compared with it verify in a
 second batch, where the theorem audit decodes `T` in the variant's replayed environment and the
-kernel checks the variant's theorem, or its refutation, at `T` or `¬ T`. The check is
+kernel checks the variant's theorem at `T`, or its refutation at `T` with the contract's `Holds`
+replaced by its `Refuted`. The check is
 structural first and then definitional, so a variant may state `T` through definitions, such as
 `Extracted.entryIndex` for `0`, that unfold to the same term. A constant of `T` that the variant's
 environment lacks, or declares in another module, fails the check, and so does a check that

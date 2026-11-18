@@ -65,24 +65,20 @@ def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, 
 """;
 const string RefuteThreshold = Empty + """
 /-- This build throws for `100`; the contract requires it to return. -/
-theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
-  intro holds
-  obtain ⟨_, _, _, ran, -⟩ := holds.returning (input := 100) (initial := empty) trivial (by decide)
-  have thrown : invoke Extracted.program 16 percent (percentContract.args 100) empty =
-      .error ⟨percent, 6, .thrown .argumentOutOfRange⟩ := rfl
-  cases invoke_unique (by trivial) (by simp [Settled]) ran thrown
+theorem correctness : percentContract.Refuted Extracted.program percent :=
+  .of_fault (input := 100) (initial := empty) trivial (by decide)
+    (rfl : invoke Extracted.program 16 percent (percentContract.args 100) empty =
+      .error ⟨percent, 6, .thrown .argumentOutOfRange⟩)
+    (by simp [OutcomeContract.Violates, MethodContract.Violates, percentContract])
 
 """;
 const string RefuteException = Empty + """
 /-- This build throws `ArgumentException` for `101`; the contract names `ArgumentOutOfRangeException`. -/
-theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
-  intro holds
-  obtain ⟨_, fault, ran, named⟩ := holds.raising (input := 101) (initial := empty)
-    (exception := .argumentOutOfRange) trivial (by decide)
-  have thrown : invoke Extracted.program 16 percent (percentContract.args 101) empty =
-      .error ⟨percent, 6, .thrown .argument⟩ := rfl
-  cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
-  simp at named
+theorem correctness : percentContract.Refuted Extracted.program percent :=
+  .of_fault (input := 101) (initial := empty) trivial (by decide)
+    (rfl : invoke Extracted.program 16 percent (percentContract.args 101) empty =
+      .error ⟨percent, 6, .thrown .argument⟩)
+    (by simp [OutcomeContract.Violates, percentContract])
 
 """;
 foreach (var (name, assembly, refutation) in new[] { ("Threshold", threshold, RefuteThreshold), ("Exception", exception, RefuteException) })

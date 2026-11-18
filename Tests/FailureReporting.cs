@@ -10,7 +10,8 @@
 using System.Text.Json;
 
 // failed.json classifies each failure, points at the obligation in the user's file and never
-// reports an unproved goal as a disproved contract; only a verified `Not (contract.Holds ...)` is.
+// reports an unproved goal as a disproved contract; only a verified counterexample (`contract.Refuted ...`)
+// is, and a theorem stating `Not (contract.Holds ...)` from a run the model does not cover is refused.
 var cli = new[] { "dotnet", ExtractorPath };
 var root = Path.GetFullPath(At("artifacts/FailureReporting"));
 var package = Path.Combine(root, "Package");
@@ -115,14 +116,10 @@ const string Refutation = """
 def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩, views := [], nextIdentity := 0 }
 
 /-- This build returns `Mix(0, 0) = 1`; the contract requires `0 * 3 + 0`. -/
-theorem correctness : ¬ mixContract.Holds Extracted.program mix := by
-  intro holds
-  obtain ⟨_, ⟨final, values⟩, ran, -, out, encoded, wrong⟩ := holds (0, 0) empty trivial
-  obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 mix
-    (mixContract.args (0, 0)) empty = .ok _))
-  simp only [mixContract] at encoded wrong
-  subst wrong
-  simp at encoded
+theorem correctness : mixContract.Refuted Extracted.program mix :=
+  .of_return (input := (0, 0)) (initial := empty) trivial
+    (rfl : invoke Extracted.program 16 mix (mixContract.args (0, 0)) empty = .ok _)
+    (by rintro ⟨-, out, encoded, wrong⟩; simp only [mixContract] at encoded wrong; subst wrong; simp at encoded)
 """;
 File.WriteAllText(Path.Combine(package, "Client", "Contracts.lean"), Contracts);
 string Proof(string name, string body)
@@ -310,3 +307,61 @@ if (Text(stale, "kind") != "stale-input" || Text(stale, "stage") != "extraction 
     !stale.GetProperty("message").GetString()!.Contains("assembly has changed since extraction", StringComparison.Ordinal))
     throw new InvalidOperationException("Unexpected stale assembly report:\n" + stale);
 Console.WriteLine("PASS a replaced assembly is a stale input naming the extracted method and its recorded assembly");
+
+// SameText returns true on the CLR from every memory; with no object bound to its literal the model stops as
+// unsupported, which proves the negation of the contract but is no counterexample, so the audit refuses it.
+const string Forged = """
+    import Extracted
+    import CIL.Safety.SymbolicExecution
+    import CIL.Safety.MethodContract
+
+    /-! A forged refutation. `Examples.Strings.SameText()` returns true on the CLR from every
+    memory, but with no object bound to "x" the model stops as unsupported at the first load. -/
+
+    open CIL CIL.Safety
+    namespace Forge
+
+    /-- `SameText` returns true from any memory; true on the CLR. -/
+    def sameTextContract : MethodContract Unit where
+      args _ := []
+      pre _ _ := True
+      footprint _ := []
+      post _ _ _ values := values = [.scalar (.i32 1)]
+
+    /-- Refutes the contract from an unsupported fault alone, without any refutation lemma. -/
+    theorem refuted : ¬ sameTextContract.Holds Extracted.program 0 := by
+      intro holds
+      obtain ⟨fuel, result, ran, -⟩ := holds () Memory.empty trivial
+      have unbound : Memory.empty.literals.lookup "x" = none := rfl
+      have missing : literalObject Memory.empty "x" =
+          .error (.unsupported "String literal is not bound by the caller") := by
+        simp only [literalObject, unbound]
+      have stuck : ∃ observed, invoke Extracted.program observed 0 [] Memory.empty =
+          .error ⟨0, 0, .unsupported "String literal is not bound by the caller"⟩ := by
+        cil_checked_steps [missing]
+      obtain ⟨observed, stuck⟩ := stuck
+      have up := invoke_mono Extracted.program observed fuel 0 [] Memory.empty _
+        (by simp [Stable]) stuck
+      have down := invoke_mono Extracted.program fuel observed 0 [] Memory.empty (.ok result)
+        trivial ran
+      rw [Nat.add_comm, up] at down
+      cases down
+
+    #print axioms refuted
+    end Forge
+    """;
+var sameText = Path.Combine(root, "Out", "SameText");
+Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"), "Strings::SameText()", sameText, "scalar",
+    "--assembly", "Examples"]);
+var forgedProof = Path.Combine(root, "Forged.lean");
+File.WriteAllText(forgedProof, Forged);
+var forgedRun = Execute([.. cli, "verify", sameText, "--proof", forgedProof, "--theorem", "Forge.refuted"]);
+var forgedReport = Failure(sameText);
+if (forgedRun.Code != 1 || File.Exists(Path.Combine(sameText, "verified.json")) ||
+    Text(forgedReport, "kind") != "replay-or-audit-rejected" ||
+    Text(forgedReport, "message")?.Contains("which a run the model does not cover can prove",
+        StringComparison.Ordinal) != true)
+    throw new InvalidOperationException("A negated contract from an unsupported fault was not refused:\n" +
+        forgedRun.Output);
+Console.WriteLine("PASS a negated contract proved from a run the model does not cover is refused as no " +
+    "counterexample");

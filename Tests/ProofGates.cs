@@ -77,13 +77,23 @@ const string PastEnd = """
 string Correctness(string name, string support, string operation, string prefix = "", string tactic = "") => $$"""
     import Extracted
     import CIL.Safety.SymbolicExecution
+    import CIL.Safety.MethodContract
     import {{support}}Support
     open CIL.Safety
     {{prefix}}
-    /-- The extracted method computes wrapping arithmetic in arbitrary caller memory. -/
-    theorem {{name}}.correctness (left right : CIL.W64) (memory : Memory) :
-        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left {{operation}} right))]) := by
+    /-- The extracted method returns wrapping arithmetic of its arguments and keeps caller memory. -/
+    def {{name}}.contract : MethodContract (CIL.W64 × CIL.W64) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values :=
+        final = initial ∧ values = [.scalar (.i64 (input.1 {{operation}} input.2))]
+    /-- The extracted method meets its contract in arbitrary caller memory. -/
+    theorem {{name}}.correctness : {{name}}.contract.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      refine MethodContract.Holds.intro (c := {{name}}.contract) (input := (left, right)) memory
+        [.scalar (.i64 (left {{operation}} right))] ?_ (Confined.refl _ memory) ⟨rfl, rfl⟩
+      dsimp only [{{name}}.contract]
       {{tactic}}cil_checked_steps []
       all_goals simp only [BitVec.add_comm]
     #print axioms {{name}}.correctness
@@ -111,29 +121,47 @@ File.WriteAllText(Path.Combine(package, "Trivial.lean"), """
     #print axioms Trivial.holds
 
     """);
-// Weaker.lean adds a premise to production's statement, so the kernel must not accept it as production's.
+// Weaker.lean strengthens production's precondition, so the kernel must not accept it as production's.
 File.WriteAllText(Path.Combine(package, "Weaker.lean"), Correctness("Weaker", "First", "+")
-    .Replace("(memory : Memory) :", "(memory : Memory) (_small : left = 0) :"));
+    .Replace("pre _ _ := True", "pre input _ := input.1 = 0"));
+// Raw.lean states the run itself, which names no contract, so no variant of its gate can be rejected.
+File.WriteAllText(Path.Combine(package, "Raw.lean"), """
+    import Extracted
+    import CIL.Safety.SymbolicExecution
+    open CIL.Safety
+    /-- The extracted method computes the wrapping sum in arbitrary caller memory. -/
+    theorem Raw.correctness (left right : CIL.W64) (memory : Memory) :
+        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
+          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
+      cil_checked_steps []
+    #print axioms Raw.correctness
+
+    """);
 // Definitional.lean names production's `0` through a definition, which the kernel unfolds.
 File.WriteAllText(Path.Combine(package, "Definitional.lean"), """
     import Extracted
     import CIL.Safety.SymbolicExecution
+    import CIL.Safety.MethodContract
     import FirstSupport
     open CIL.Safety
     /-- The entry method's index. -/
     def Definitional.entry : Nat := 0
-    /-- Production's statement, proved directly. -/
-    theorem Definitional.original (left right : CIL.W64) (memory : Memory) :
-        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
+    /-- Production's contract, declared again. -/
+    def Definitional.contract : MethodContract (CIL.W64 × CIL.W64) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values :=
+        final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
+    /-- Production's statement with the entry index named by `Definitional.entry`. -/
+    theorem Definitional.correctness :
+        Definitional.contract.Holds Extracted.program Definitional.entry := by
+      rintro ⟨left, right⟩ memory -
+      refine MethodContract.Holds.intro (c := Definitional.contract) (input := (left, right)) memory
+        [.scalar (.i64 (left + right))] ?_ (Confined.refl _ memory) ⟨rfl, rfl⟩
+      dsimp only [Definitional.contract, Definitional.entry]
       cil_checked_steps []
       all_goals simp only [BitVec.add_comm]
-    /-- Production's statement with the entry index named by `Definitional.entry`. -/
-    theorem Definitional.correctness (left right : CIL.W64) (memory : Memory) :
-        ∃ fuel, invoke Extracted.program fuel Definitional.entry
-          [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left + right))]) :=
-      Definitional.original left right memory
     #print axioms Definitional.correctness
 
     """);
@@ -149,23 +177,29 @@ File.WriteAllText(Path.Combine(directory, "plain.json"), """
     """);
 // A recorded witness gives inputs whose wrong result differs from the wrapping sum.
 var template = Path.Combine(package, "Refutation.lean.in");
-File.WriteAllText(template, """
+string Witness(string name, string statement, string proof) => $$"""
     import Extracted
     import CIL.Safety.MethodContract
     open CIL.Safety
+    /-- Production's contract, declared again. -/
+    def {{name}}.contract : MethodContract (CIL.W64 × CIL.W64) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values :=
+        final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
     /-- The witness inputs make the extracted method return other than their wrapping sum. -/
-    theorem FixtureWitness.refuted : ¬ ∀ (left right : CIL.W64) (memory : Memory),
-        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
-      intro holds
-      obtain ⟨fuel, ran⟩ := holds @LEFT@ @RIGHT@ Memory.empty
-      have returned := congrArg Prod.snd (invoke_ok_unique ran (rfl : invoke Extracted.program 16 0
-        [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _))
-      revert returned
-      decide
-    #print axioms FixtureWitness.refuted
+    theorem {{name}}.refuted : {{statement}} :=
+      {{proof}}.of_return (input := (@LEFT@, @RIGHT@)) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 16 0 [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _)
+        (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
+    #print axioms {{name}}.refuted
 
-    """);
+    """;
+File.WriteAllText(template, Witness("FixtureWitness", "FixtureWitness.contract.Refuted Extracted.program 0", ""));
+// Negated.lean.in states the negation of production's contract, which a run the model does not cover can prove.
+File.WriteAllText(Path.Combine(package, "Negated.lean.in"), Witness("Negated",
+    "¬ Negated.contract.Holds Extracted.program 0", "MethodContract.Refuted.not_holds <| MethodContract.Refuted"));
 var witnesses = new Dictionary<string, (ulong Left, ulong Right)>
 {
     ["WrongXor"] = (1, 1), ["WrongSub"] = (0, 1), ["Agreeing"] = (0, 0)
@@ -240,7 +274,10 @@ void Manifest(bool controls, params object[] extra)
             new { name = "extraction-fails", build = Build("Absent"), profiles = scalar, expect = "rejected",
                 refutation = Refute("WrongXor") },
             new { name = "internal-error", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
-                proof = "Panicking.lean", theorem = "Panicking.correctness", refutation = Refute("WrongXor") }
+                proof = "Panicking.lean", theorem = "Panicking.correctness", refutation = Refute("WrongXor") },
+            new { name = "negated-refutation", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
+                refutation = new { template = "Negated.lean.in", theorem = "Negated.refuted",
+                    values = new Dictionary<string, string> { ["LEFT"] = "1", ["RIGHT"] = "1" } } }
         ]);
     File.WriteAllText(manifest, JsonSerializer.Serialize(new
     {
@@ -268,7 +305,16 @@ void Manifest(bool controls, params object[] extra)
             new { name = "second", assembly = "Second/output/Second.dll", method = "Methods::Second(ulong,ulong)",
                 profiles = new[] { "scalar", "x64-v3", "plain" }, proof = "Second.lean",
                 theorem = "Second.correctness" }
-        }
+        }.Concat(controls ? new object[]
+        {
+            new { name = "raw-first", build = new { project = "fixture" }, method = "Methods::First(ulong,ulong)",
+                profiles = scalar, proof = "Raw.lean", theorem = "Raw.correctness",
+                variants = new object[]
+                {
+                    new { name = "raw-rejected", build = Build("WrongXor"), expect = "rejected",
+                        program = "different", refutation = Refute("WrongXor") }
+                } }
+        } : []).ToArray()
     }));
 }
 JsonElement[] Gates(int expectedCode, params string[] options)
@@ -347,7 +393,7 @@ foreach (var (variant, profile, witness) in
 {
     var generated = File.ReadAllText(Path.Combine(package, "Generated", "first", profile, variant, "Refutation.lean"));
     Expect(!generated.Contains('@') && !generated.Contains('\r') &&
-        generated.Contains($"holds {witnesses[witness].Left} {witnesses[witness].Right} Memory.empty"),
+        generated.Contains($"(input := ({witnesses[witness].Left}, {witnesses[witness].Right}))"),
         "A template was not instantiated with its witness: " + variant);
 }
 
@@ -426,7 +472,7 @@ Failed("production-verifies", "A proof that verifies counted as a rejection", ro
 // The refutation and the rejection both hold, so only the statement comparison fails these rows.
 Failed("unrelated-refutation", "A refutation of an unrelated statement counted as a rejection", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
-    Text(row, "error")!.Contains("does not state the negation", StringComparison.Ordinal) &&
+    Text(row, "error")!.Contains("does not state the counterexample predicate", StringComparison.Ordinal) &&
     row.GetProperty("statement").GetProperty("variant").GetString()!.StartsWith("Trivial.holds : True"));
 Failed("weaker-statement", "A weaker own statement certified the variant", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
@@ -449,6 +495,17 @@ Failed("extraction-fails", "A failed extraction counted as a rejection", row =>
     Text(row, "stage") == "extraction" && Text(row, "build") == "built" && Text(row, "extraction") == "failed");
 Failed("internal-error", "A proof that panics counted as a rejection", row =>
     Text(row, "error")!.Contains("Lean reported an internal error", StringComparison.Ordinal));
+// A negated contract follows from a run the model does not cover, so the audit refuses it as a refutation.
+Failed("negated-refutation", "A negated contract counted as a refutation", row =>
+    row.GetProperty("refutation").GetProperty("status").GetString() == "failed" &&
+    row.GetProperty("refutation").GetProperty("error").GetString()!.Contains(
+        "which a run the model does not cover can prove", StringComparison.Ordinal));
+// A statement of the run itself names no contract, so it has no counterexample predicate to refute.
+var raw = Row(controls, "raw-rejected", gate: "raw-first");
+Expect(Text(Row(controls, "production", gate: "raw-first"), "status") == "verified" &&
+    Text(raw, "status") == "failed" && Text(raw, "stage") == "statement identity" &&
+    Text(raw, "error")!.Contains("does not state a contract's Holds", StringComparison.Ordinal),
+    "A rejected variant of a gate that states no contract passed or was misreported", raw);
 NoRejectedCertificates(controls);
 
 // A profile the gate does not list is a manifest error, before anything is built.

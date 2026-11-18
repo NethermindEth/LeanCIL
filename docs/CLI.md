@@ -1192,7 +1192,7 @@ output (for the last request of an output, as with `verified.json`) and as the
 | `unsolved-goal` | A Lean `unsolved goals` error, or a `verify --goals` run that stopped at the goals it found open |
 | `resource-limit` | Heartbeats (`(deterministic) timeout`, `(kernel) deterministic timeout`) or recursion depth; `resource` names which |
 | `replay-or-audit-rejected` | Kernel replay or the theorem and axiom audit rejected the proof |
-| `refutation` | The theorem verified and states `Not (contract.Holds ...)` for a `MethodContract` or `OutcomeContract` |
+| `refutation` | The theorem verified and states a contract's counterexample, `MethodContract.Refuted`, `OutcomeContract.Refuted` or `OutcomeContract.RefutedCLR` |
 | `invalid-request` | The proof or theorem selection is invalid |
 | `unclassified` | Anything else, such as a missing tool; read `message` |
 
@@ -1202,8 +1202,11 @@ message block, so an internal error gives the request its kind. Lines are 1-base
 columns 0-based, as Lean prints them. Locations in the session's copies cite their originals, as
 in the text report. `message` is the original output, unmodified; `rerun` reruns just that
 request. Classification uses only the stage, LeanCIL's own messages and Lean's error prefixes
-above. Only a verified theorem whose elaborated statement is `Not` applied to a contract's `Holds`
-is a refutation, as reported by the theorem audit; an unsolved goal is never a refutation. A
+above. Only a verified theorem whose elaborated statement is a contract's `Refuted` is a
+refutation, as reported by the theorem audit; an unsolved goal is never a refutation. The audit
+rejects a requested theorem that states `Not` applied to a contract's `Holds`, as kind
+`replay-or-audit-rejected`: a run the model does not cover, such as an `unsupported` fault, proves
+such a negation without any fault of the method. A lemma the requested theorem uses may state it. A
 verified refutation keeps its `verified.json`, the certificate of the refutation, and also
 writes `failed.json` with kind `refutation`, located at the theorem's name.
 

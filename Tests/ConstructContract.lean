@@ -312,15 +312,10 @@ def unguardedContract : MethodContract PairInput Unit :=
   { pairContract with pre := fun input m => m.WellFormed ∧ read m input.this 16 1 = .ok (List.replicate 16 0) }
 
 /-- Readable, zeroed storage is not enough: the constructor's first store faults without write authority. -/
-theorem missing_authority_rejected : ¬ unguardedContract.Holds Extracted.program pair := by
-  intro holds
-  obtain ⟨fuel, ⟨final, values⟩, ran, -⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ readOnly ⟨readOnly_formed, rfl⟩
-  have faulted : invoke Extracted.program 8 pair (unguardedContract.args ⟨⟨0, 0⟩, 0, 0⟩) readOnly =
-      .error ⟨2, 2, .memory .unwritable (.address ⟨0, 0⟩) 8⟩ := rfl
-  have up := invoke_mono _ _ 8 _ _ _ (.ok (final, values)) trivial ran
-  have down := invoke_mono _ _ fuel _ _ _ _ (by simp [Stable]) faulted
-  rw [Nat.add_comm] at down
-  cases up.symm.trans down
+theorem missing_authority_rejected : unguardedContract.Refuted Extracted.program pair :=
+  .of_fault (input := ⟨⟨0, 0⟩, 0, 0⟩) (initial := readOnly) ⟨readOnly_formed, rfl⟩ (by decide)
+    (rfl : invoke Extracted.program 8 pair (unguardedContract.args ⟨⟨0, 0⟩, 0, 0⟩) readOnly =
+      .error ⟨2, 2, .memory .unwritable (.address ⟨0, 0⟩) 8⟩)
 
 /-- `Logged(ref ulong log, ulong value) { log = 1; Value = value; }` -/
 @[cil_code] def logged : CIL.Method := { returnsValue := false, locals := [], code :=
@@ -352,12 +347,10 @@ theorem shared_formed : shared.WellFormed where
     exact ⟨_, rfl, by decide⟩
 
 /-- The write through `log` lands outside the footprint, so the contract is refuted by a concrete run. -/
-theorem stray_write_rejected : ¬ loggedContract.Holds loggedProgram 0 := by
-  intro holds
-  obtain ⟨_, ⟨final, values⟩, ran, framed, -⟩ :=
-    holds ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩ shared ⟨shared_formed, rfl, rfl⟩
-  obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke loggedProgram 8 0
-    (loggedContract.args ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩) shared = .ok _))
+theorem stray_write_rejected : loggedContract.Refuted loggedProgram 0 :=
+  .of_return (input := ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩) (initial := shared) ⟨shared_formed, rfl, rfl⟩
+    (rfl : invoke loggedProgram 8 0 (loggedContract.args ⟨⟨0, 0⟩, ⟨0, 8⟩, 0⟩) shared = .ok _) <| by
+  rintro ⟨framed, -⟩
   have kept := framed.cells 0 (by decide) 8 (by simp [Outside, loggedContract])
   exact absurd kept (by decide)
 

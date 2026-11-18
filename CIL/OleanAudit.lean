@@ -24,7 +24,7 @@ REQUEST (JSON):
   { "modules":   ["Proof", ...],
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
                     "statement": bool?, "refutation": bool?, "term": bool?,
-                    "expected": { "term": T, "negated": bool? }?, "allowedModules": [M, ...]? }],
+                    "expected": { "term": T, "refuted": bool? }?, "allowedModules": [M, ...]? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
     "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
@@ -51,8 +51,11 @@ Levels L: n (the n-th successor of zero), {"param": u}, {"succ": L}, {"max": [L,
 {"imax": [L, L]}.
 Comparison is structural after removing metadata: no unfolding, instances or elaboration.
 `term` reports the theorem's type as a `statementTerm` T, for another audit's `expected`: there the
-theorem `matches` when the kernel accepts it at type T (or `¬ T` when `negated`), structurally or by
-definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why.
+theorem `matches` when the kernel accepts it at type T, or, when `refuted`, at the counterexample
+predicate of the contract whose `Holds` heads T applied to T's arguments, structurally or by
+definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why. `refutation`
+reports a theorem stating a library contract's counterexample predicate as `refutes`, and fails
+one stating `Not` of a library contract's `Holds`.
 
 RESULT (JSON):
   { "modules": { N: olean path },
@@ -196,10 +199,35 @@ partial def stripMData (e : Expr) : Expr := e.replace fun
   | .mdata _ b => some (stripMData b)
   | _ => none
 
-/-- The contract predicates whose negation a refutation theorem may state. -/
-def contracts : List Name :=
-  [`CIL.Safety.MethodContract.Holds, `CIL.Safety.OutcomeContract.Holds,
-    `CIL.Safety.OutcomeContract.HoldsCLR]
+/-- A contract predicate, the counterexample predicate that refutes it with the same arguments,
+    and the module that declares both. -/
+structure Contract where
+  holds : Name
+  refuted : Name
+  module : Name
+
+/-- The contracts a refutation theorem may refute, matched by name and declaring module. -/
+def contracts : List Contract :=
+  [⟨`CIL.Safety.MethodContract.Holds, `CIL.Safety.MethodContract.Refuted,
+      `CIL.Safety.MethodContract⟩,
+    ⟨`CIL.Safety.OutcomeContract.Holds, `CIL.Safety.OutcomeContract.Refuted,
+      `CIL.Safety.OutcomeContract⟩,
+    ⟨`CIL.Safety.OutcomeContract.HoldsCLR, `CIL.Safety.OutcomeContract.RefutedCLR,
+      `CIL.Safety.RuntimeExceptions⟩]
+
+/-- Whether `type` names a contract predicate by name alone: a `Refuted` application, or `Not`
+    applied to a `Holds` one. -/
+def namesContract (type : Expr) : Bool :=
+  match type with
+  | .app (.const `Not _) claim => contracts.any (claim.getAppFn.constName? == some ·.holds)
+  | _ => contracts.any (type.getAppFn.constName? == some ·.refuted)
+
+/-- The library contract whose predicate `select` picks as the head of `claim`, checked against
+    the module `ownerOf` gives. -/
+def contractAt (ownerOf : Name → Option Name) (select : Contract → Name) (claim : Expr) :
+    Option Contract :=
+  claim.getAppFn.constName?.bind fun head =>
+    contracts.find? fun contract => select contract == head && ownerOf head == some contract.module
 
 /-- The context for pretty-printing and source ranges; no elaboration runs in it.
 With no open namespaces or aliases only full names resolve, so `pp.fullNames` prints the same text
@@ -225,17 +253,31 @@ def statement (env : Environment) (thm : Name) (type : Expr) : IO String :=
       catch _ => pure (toString type)
     return s!"{thm} : {text}"
 
-/-- When `type` negates a contract predicate applied to arguments, that contract and the
-    source position of `thm`; otherwise `none`. -/
-def refutation (env : Environment) (thm : Name) (type : Expr) : IO (Option Json) := do
-  let .app (.const `Not _) claim := type | return none
-  let .const contract _ := claim.getAppFn | return none
-  unless contracts.contains contract do return none
+/-- When `type` is a library contract's counterexample predicate applied to arguments, the
+    contract it refutes and the source position of `thm`; otherwise `none`. A statement `Not`
+    applied to a library contract's `Holds` is an error: a run the model does not cover proves it,
+    so it is no evidence of a counterexample. -/
+def refutation (env : Environment) (ownerOf : Name → Option Name) (thm : Name) (type : Expr) :
+    IO (Except String (Option Json)) := do
+  if let .app (.const `Not _) claim := type then
+    if let some contract := contractAt ownerOf (·.holds) claim then
+      return .error s!"{thm} states Not ({contract.holds} ...), which a run the model does not \
+        cover can prove, so it is no counterexample; state {contract.refuted} instead"
+  let some contract := contractAt ownerOf (·.refuted) type | return .ok none
   let some ranges ← run env (findDeclarationRanges? thm)
     | throw (IO.userError s!"Missing refutation location for {thm}")
-  return some <| Json.mkObj [("contract", toJson contract.toString),
+  return .ok <| some <| Json.mkObj [("contract", toJson contract.holds.toString),
     ("line", toJson ranges.selectionRange.pos.line),
     ("column", toJson ranges.selectionRange.pos.column)]
+
+/-- `holds`, a library contract's `Holds` applied to arguments, as that contract's counterexample
+    predicate applied to the same arguments. -/
+def refutedAt (ownerOf : Name → Option Name) (holds : Expr) : Except String Expr :=
+  match contractAt ownerOf (·.holds) holds, holds.getAppFn with
+  | some contract, .const _ levels =>
+    pure (mkAppN (.const contract.refuted levels) holds.getAppArgs)
+  | _, _ => throw "Production's statement is not a contract's Holds, so no refutation of it \
+      can be compared"
 
 /-- `n` as JSON: its components from the root, strings as strings and numbers as numbers. -/
 def nameJson (n : Name) : Json :=
@@ -426,7 +468,10 @@ def theorem? (env : Environment) (req : Json)
   if req.getObjValAs? Bool "statement" matches .ok true then
     fields := fields ++ [("statement", toJson (← statement env thm info.type))]
   if req.getObjValAs? Bool "refutation" matches .ok true then
-    if let some r ← refutation env thm type then fields := fields ++ [("refutes", r)]
+    match ← refutation env ownerOf thm type with
+    | .ok (some refutes) => fields := fields ++ [("refutes", refutes)]
+    | .ok none => pure ()
+    | .error error => return result (fields ++ [("error", toJson error)])
   if req.getObjValAs? Bool "term" matches .ok true then
     let term := (ownerOf thm).map (statementTerm kernel ownerOf · info.levelParams type)
     fields := fields ++ match term with
@@ -434,10 +479,10 @@ def theorem? (env : Environment) (req : Json)
       | some (.error error) => [("termError", toJson error)]
       | none => [("termError", toJson s!"Theorem has no declaring module: {thm}")]
   if let .ok expected := req.getObjVal? "expected" then
-    let negated := (expected.getObjValAs? Bool "negated").toOption.getD false
+    let refuted := (expected.getObjValAs? Bool "refuted").toOption.getD false
     let target := (expected.getObjVal? "term").bind
       (decodeStatement kernel ownerOf info.levelParams)
-    fields := fields ++ match target.map (if negated then mkApp (.const ``Not []) else id) with
+    fields := fields ++ match target.bind (if refuted then refutedAt ownerOf else pure) with
       | .ok target => match acceptsAt kernel thm info.levelParams type target with
         | none => [("matches", toJson true)]
         | some error => [("matches", toJson false), ("mismatch", toJson error)]
@@ -587,9 +632,7 @@ def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run
     if entry.getObjValAs? Bool "refutation" matches .ok true then
       let some thm := (entry.getObjValAs? String "name").toOption | return true
       if let some (.thmInfo info) := env.find? (name thm) then
-        if let .app (.const `Not _) claim := stripMData info.type then
-          if let .const contract _ := claim.getAppFn then
-            if contracts.contains contract then return true
+        if namesContract (stripMData info.type) then return true
   return false
 
 /-- Audits a supplied immutable environment and records the exact resolved module paths. -/

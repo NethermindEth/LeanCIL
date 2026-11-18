@@ -85,9 +85,9 @@ leancil gates gates.json
 
 An unknown manifest key is an error. A `certifies` variant passes when its proof verifies and the
 kernel accepts its theorem at production's statement `T`, unless its `statement` is
-`independent`. A `rejected` variant passes only when its refutation verifies against the
-variant's extraction, the kernel accepts the refutation at `¬ T`, and its proof fails at proof
-checking; use one to show that a proof detects a wrong implementation. An `unchanged` variant
+`independent`. A `rejected` variant passes only when `T` states a contract's `Holds`, its
+refutation verifies against the variant's extraction, the kernel accepts the refutation at `T`
+with `Holds` replaced by `Refuted`, and its proof fails at proof checking; use one to show that a proof detects a wrong implementation. An `unchanged` variant
 requests no proof and passes when its program comparison holds. A build, extraction, program
 comparison, template or statement identity failure, a missing proof or an internal error fails
 the variant and never counts as a rejection. The variant's output keeps no `verified.json`.

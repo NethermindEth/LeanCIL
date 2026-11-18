@@ -369,12 +369,12 @@ Rejected(Audit("Retargets", [Equation("Retargets.claim", 0, 1)]).theorems[0], "T
 AuditedAxioms(Audit("Canonical", [Equation("Canonical.claim", 1, 1)]).theorems[0]);
 Console.WriteLine("PASS retargeted numeral instance fails the structural statement check");
 
-var refutationLine = 4;
+// A same-named predicate of another module is no contract, so stating it is no refutation.
 Compile("Shapes", """
     def Shapes.value : Nat := 3
     theorem Shapes.wild : (3 : Nat) = 3 := rfl
-    namespace CIL.Safety.MethodContract def Holds (n : Nat) : Prop := n = 0 end CIL.Safety.MethodContract
-    theorem Shapes.refuted : ¬ CIL.Safety.MethodContract.Holds 1 := Nat.succ_ne_zero 0
+    namespace CIL.Safety.MethodContract def Refuted (n : Nat) : Prop := n = 1 end CIL.Safety.MethodContract
+    theorem Shapes.refuted : CIL.Safety.MethodContract.Refuted 1 := rfl
     """);
 var shapes = Audit("Shapes", [ProofTheorem("Shapes.value"), ProofTheorem("Shapes.missing"),
     new("Shapes.wild", App(Const("Eq", 1), "_", "_", "_"), ApprovedAxioms),
@@ -385,12 +385,46 @@ Rejected(shapes.theorems[0], "Expected a theorem");
 Rejected(shapes.theorems[1], "Expected a theorem");
 AuditedAxioms(shapes.theorems[2]);
 Rejected(shapes.theorems[3], "Theorem statement mismatch");
-if (shapes.theorems[4].refutes is not { contract: "CIL.Safety.MethodContract.Holds", column: 8 } refutes || refutes.line != refutationLine ||
-    shapes.theorems[5].refutes is not null || !AuditText(shapes.theorems[4]).Contains($"LeanCIL refutes: CIL.Safety.MethodContract.Holds at {refutationLine}:8\n"))
-    throw new InvalidOperationException("Refutation not located: " + JsonSerializer.Serialize(shapes.theorems[4]));
+if (shapes.theorems[4].refutes is not null || shapes.theorems[5].refutes is not null)
+    throw new InvalidOperationException("A same-named predicate counted as a refutation: " +
+        JsonSerializer.Serialize(shapes.theorems[4]));
 if (shapes.constants[0].error is not null || shapes.constants[1].error is null || shapes.constants[2].error is null)
     throw new InvalidOperationException("Constant value checks: " + JsonSerializer.Serialize(shapes.constants));
-Console.WriteLine("PASS theorem kind, structural wildcards, constant values and refutation locations");
+Console.WriteLine("PASS theorem kind, structural wildcards, constant values and same-named predicates");
+
+// Only the library's counterexample predicate is a refutation. A requested theorem stating the
+// negation of a contract is refused, since a run the model does not cover proves it; a lemma
+// stating it that is not requested is checked like any other.
+const string RefutationSource = """
+    import CIL.Safety.MethodContract
+    open CIL.Safety
+    /-- Promises a return from any memory. -/
+    def Refutations.returns : MethodContract Unit :=
+      { args := fun _ => [], pre := fun _ _ => True, footprint := fun _ => [], post := fun _ _ _ _ => True }
+    theorem Refutations.refuted : Refutations.returns.Refuted [] 0 :=
+      .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
+        (fault := ⟨0, 0, .invalidState⟩) trivial (by decide) rfl
+    theorem Refutations.negated : ¬ Refutations.returns.Holds [] 0 := Refutations.refuted.not_holds
+    theorem Refutations.uses : True := (fun _ : ¬ Refutations.returns.Holds [] 0 => trivial) Refutations.negated
+    """;
+Compile("Refutations", RefutationSource);
+var refutedLine = Array.FindIndex(RefutationSource.Split('\n'), line => line.StartsWith("theorem Refutations.refuted",
+    StringComparison.Ordinal)) + 1;
+var refutations = verification.AuditOleans(fixtureSearch, ["Refutations"], [ProofTheorem("Refutations.refuted"),
+    ProofTheorem("Refutations.negated"), ProofTheorem("Refutations.uses")]);
+AuditedAxioms(refutations.theorems[0]);
+if (refutations.theorems[0].refutes is not { contract: "CIL.Safety.MethodContract.Holds", column: 8 } refutes ||
+    refutes.line != refutedLine ||
+    !AuditText(refutations.theorems[0]).Contains(
+        $"LeanCIL refutes: CIL.Safety.MethodContract.Holds at {refutedLine}:8\n"))
+    throw new InvalidOperationException("Refutation not located: " +
+        JsonSerializer.Serialize(refutations.theorems[0]));
+Rejected(refutations.theorems[1], "which a run the model does not cover can prove");
+AuditedAxioms(refutations.theorems[2]);
+if (refutations.theorems[2].refutes is not null)
+    throw new InvalidOperationException("A theorem using a negated contract counted as a refutation");
+Console.WriteLine("PASS counterexample refutations are located, negated contracts refused, lemmas stating them " +
+    "unchanged");
 
 // Builtin notation such as `-1`, `/` and `bif` has formatters only in unloaded imports; printing
 // it must fall back to the raw expression instead of failing the audit or evaluating imports.
@@ -563,14 +597,14 @@ var production = Audit("StatementProduction", [.. new[]
     .Select(name => new StatementRequest(true).Apply(ProofTheorem(name)))]).theorems;
 if (production.Any(theorem => theorem.term is null || theorem.termError is not null))
     throw new InvalidOperationException("Statement terms: " + JsonSerializer.Serialize(production));
-AuditedTheorem Compared(string module, string theorem, AuditedTheorem expected, bool negated = false) =>
-    Audit(module, [new StatementRequest(false, expected.term!.Value.GetRawText(), negated)
+AuditedTheorem Compared(string module, string theorem, AuditedTheorem expected, bool refuted = false) =>
+    Audit(module, [new StatementRequest(false, expected.term!.Value.GetRawText(), refuted)
         .Apply(ProofTheorem(theorem))])
         .theorems[0];
 var unfolded = Compared("StatementVariant", "Variant.claim", production[0]);
 var weaker = Compared("StatementVariant", "Variant.weaker", production[0]);
 var inlined = Compared("StatementVariant", "Variant.one", production[2]);
-var forged = Compared("StatementForged", "Forged.refuted", production[1], negated: true);
+var forged = Compared("StatementForged", "Forged.refuted", production[1], refuted: true);
 // A numeral above 2^64 crosses Lean and C# JSON exactly, so only the equal literal matches.
 var big = Compared("StatementVariant", "Variant.big", production[3]);
 var near = Compared("StatementVariant", "Variant.near", production[3]);

@@ -230,7 +230,7 @@ string[] expectedRerun = ["leancil", "verify", output, "--proof", proof, "--theo
 Require(unrooted is { kind: FailureReports.UnsolvedGoal, module: "Proof", line: 4, column: 2 } &&
     unrooted.file == proof && unrooted.rerun.SequenceEqual(expectedRerun),
     "unrooted proof copy and rerun");
-const string Audit = "ExampleProof.correctness : ¬mixContract.Holds Extracted.program mix\n" +
+const string Audit = "ExampleProof.correctness : mixContract.Refuted Extracted.program mix\n" +
     "'ExampleProof.correctness' depends on axioms: [propext]\n";
 var refuted = FailureReports.Refuted(Audit + "LeanCIL refutes: CIL.Safety.MethodContract.Holds at 21:0\n",
     "ExampleProof.correctness", proof, output, package);
@@ -239,7 +239,8 @@ Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage
     "verified refutation");
 // The marker comes from the Lean audit only; statement text never makes a refutation.
 Require(FailureReports.Refuted(Audit, "ExampleProof.correctness", proof, output, package) is null &&
-    unsolved.kind != FailureReports.Refutation, "an unsolved goal or a negated statement alone is never a refutation");
+    unsolved.kind != FailureReports.Refutation,
+    "an unsolved goal or a refuting statement alone is never a refutation");
 
 // A build that Lake reports as successful while a tactic of the proof module read past the end of an array.
 const string built = "\u2139";

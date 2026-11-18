@@ -124,14 +124,10 @@ foreach (var (name, assembly, body) in new[] { ("Original", original, helpers), 
 // Each bug fails the original helper proofs, and a concrete run refutes the contract itself.
 const string RefuteArithmetic = """
 /-- This build returns `Mix(0, 0) = 1`; the contract requires `0 * 3 + 0`. -/
-theorem correctness : ¬ mixContract.Holds Extracted.program mix := by
-  intro holds
-  obtain ⟨_, ⟨final, values⟩, ran, -, out, encoded, wrong⟩ := holds (0, 0) Memory.empty Memory.empty_wellFormed
-  obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 mix
-    (mixContract.args (0, 0)) Memory.empty = .ok _))
-  simp only [mixContract] at encoded wrong
-  subst wrong
-  simp at encoded
+theorem correctness : mixContract.Refuted Extracted.program mix :=
+  .of_return (input := (0, 0)) (initial := Memory.empty) Memory.empty_wellFormed
+    (rfl : invoke Extracted.program 16 mix (mixContract.args (0, 0)) Memory.empty = .ok _)
+    (by rintro ⟨-, out, encoded, wrong⟩; simp only [mixContract] at encoded wrong; subst wrong; simp at encoded)
 
 """;
 const string RefuteAliasing = """
@@ -143,12 +139,10 @@ def aliased : Memory := {
   nextIdentity := 1 }
 
 /-- The contract permits `res` to alias `b`; this build then writes `2`, not `1 + 2`. -/
-theorem correctness : ¬ addContract.Holds Extracted.program addTo := by
-  intro holds
-  obtain ⟨_, ⟨final, values⟩, ran, -, _, -, -, wrong⟩ :=
-    holds ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩ aliased ⟨rfl, rfl, rfl⟩
-  obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 addTo
-    (addContract.args ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩) aliased = .ok _))
+theorem correctness : addContract.Refuted Extracted.program addTo :=
+  .of_return (input := ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩) (initial := aliased) ⟨rfl, rfl, rfl⟩
+    (rfl : invoke Extracted.program 16 addTo (addContract.args ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 8⟩, 1, 2⟩) aliased = .ok _) <| by
+  rintro ⟨-, _, -, -, wrong⟩
   have observed : (Except.ok (numberBytes (1 + 2 : CIL.W64).toNat 8) : Checked (List (BitVec 8))) =
       .ok (numberBytes 2 8) := wrong.symm.trans rfl
   exact absurd (Except.ok.inj observed) (by decide)
