@@ -303,6 +303,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 case Form.Type: decoder.DecodeType(ref blob); break;
                 default: decoder.DecodeMethodSpecificationSignature(ref blob); break;
             }
+            if (blob.RemainingBytes != 0)
+                throw new InvalidDataException($"Unsupported metadata signature: {form} has trailing bytes.");
             foreach (var token in collector.Tokens)
             {
                 Token(token, collector.OnlyModifier(token));

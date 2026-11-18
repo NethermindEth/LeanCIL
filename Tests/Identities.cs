@@ -264,7 +264,7 @@ static void CheckExceptionTypes()
 }
 
 // The fixture contains metadata and an abstract method with no body.
-static byte[] PairSignatureImage(bool secondValueType = true, bool namedArgument = false)
+static byte[] PairSignatureImage(bool secondValueType = true, bool namedArgument = false, bool trailing = false)
 {
     var rows = new MetadataBuilder();
     var fixture = rows.GetOrAddString("PairSignatures");
@@ -289,6 +289,8 @@ static byte[] PairSignatureImage(bool secondValueType = true, bool namedArgument
     rows.AddFieldDefinition(0, rows.GetOrAddString("Second"), Blob([6, 0x15, kind, pairIndex, 2, .. argument, 8]));
     rows.AddMethodDefinition(System.Reflection.MethodAttributes.Abstract | System.Reflection.MethodAttributes.Virtual,
         0, rows.GetOrAddString("Anchor"), Blob(0x20, 0, 1), -1, MetadataTokens.ParameterHandle(1));
+    rows.AddTypeSpecification(trailing ? Blob(8, 0) : Blob(8));
+    rows.AddMemberReference(pair, rows.GetOrAddString("Item1"), trailing ? Blob(6, 8, 0) : Blob(6, 8));
     var output = new Srm.BlobBuilder();
     var image = new ManagedPEBuilder(new PEHeaderBuilder(), new MetadataRootBuilder(rows), new Srm.BlobBuilder());
     image.Serialize(output);
@@ -319,6 +321,12 @@ static void CheckPairSignatures()
         context.AggregateLayout(fields[0].FieldType);
         return context.AggregateLayout(fields[1].FieldType).Size;
     }
+    static void Slice(byte[] image, uint token)
+    {
+        using var pins = new PinnedAssemblies(image, Convert.ToHexStringLower(SHA256.HashData(image)), []);
+        var method = pins.Original(pins.Selected).Types[1].Methods.Single();
+        new MetadataSlices(pins).Method(method, [token], false);
+    }
     var control = PairSignatureImage();
     if (Layout(control) != 8) throw new InvalidOperationException("Unexpected primitive pair size");
     Refuses("CLASS after VALUETYPE", "value-type signature",
@@ -326,6 +334,12 @@ static void CheckPairSignatures()
     var named = PairSignatureImage(namedArgument: true);
     Refuses("named Int32 argument", "Unsupported field type", () => Layout(named));
     Refuses("named Int32 after cached primitive layout", "Unsupported field type", () => Layout(named, cached: true));
+    var suffix = PairSignatureImage(trailing: true);
+    foreach (var (form, token) in new[] { ("TypeSpec", 0x1b000001u), ("field MemberRef", 0x0a000001u) })
+    {
+        Slice(control, token);
+        Refuses($"{form} trailing byte", "trailing", () => Slice(suffix, token));
+    }
     if (failures.Count != 0) throw new InvalidOperationException(string.Join(", ", failures));
 }
 

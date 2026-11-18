@@ -163,7 +163,7 @@ its `NestedClass` row or its first `GenericParam` row. Lean reads the rows by th
 fixes, decodes strings, blobs and user strings, and decodes the signature blobs
 ([Signatures](../CIL/Extraction/Signatures.lean)). `MetadataResolution` and `MetadataBinding` then
 check what the extractor states. A coded index must have a valid table tag and a row number
-that fits in 24 bits.
+that fits in 24 bits. Both readers require each signature to consume its entire blob.
 
 Building the lookup trees of a slice costs its size, and the kernel keeps no cache between declarations. The
 extractor therefore writes them out as the literal `method{n}Tables` (balanced search trees of the rows, heap
