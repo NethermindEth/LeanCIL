@@ -25,6 +25,50 @@ partial class Program
     [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
     private static partial Regex ResolutionFactsCommand();
 
+    [GeneratedRegex(@"\Adef method(\d+) : Method := .* code := \[\r?\z")]
+    private static partial Regex LiteralMethodHeader();
+
+    [GeneratedRegex(@"(?m)^(?:def method(?<number>\d+) : Method|" +
+        @"cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?) :=")]
+    private static partial Regex DefinedMethod();
+
+    // A theorem and its indented continuation lines; a Lean name may end in ?, ! or '.
+    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n")]
+    private static partial Regex GeneratedTheorem();
+
+    [GeneratedRegex(@"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z")]
+    private static partial Regex IdentityWitnessName();
+
+    [GeneratedRegex(@"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_spelled)\z")]
+    private static partial Regex RetainedObligationName();
+
+    [GeneratedRegex(@"(?m)^#print axioms [^\r\n]*\r?\n")]
+    private static partial Regex AxiomsCommand();
+
+    [GeneratedRegex(@"""(?:\\.|[^""\\])*""")]
+    private static partial Regex StringLiteral();
+
+    [GeneratedRegex(@"(?m)^(?:namespace|end) Extracted\r?$")]
+    private static partial Regex ExtractedNamespaceLine();
+
+    [GeneratedRegex(@"\bExtracted\b")]
+    private static partial Regex ExtractedWord();
+
+    [GeneratedRegex(@"(?m)^namespace Extracted\r?$")]
+    private static partial Regex NamespaceExtracted();
+
+    [GeneratedRegex(@"(?m)^end Extracted\r?$")]
+    private static partial Regex EndExtracted();
+
+    [GeneratedRegex(@"(?m)^import [^\r\n]+\r?\n")]
+    private static partial Regex ImportCommand();
+
+    [GeneratedRegex(@"(?m)^(?:namespace|end) Extracted\r?\n")]
+    private static partial Regex ExtractedNamespaceCommand();
+
+    [GeneratedRegex(@"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", RegexOptions.Multiline)]
+    private static partial Regex ImportedModule();
+
     /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
     sealed record ExtractedInstruction(int Method, int Pc, string Op);
 
@@ -35,7 +79,7 @@ partial class Program
         var lines = source.Split('\n');
         for (var line = 0; line < lines.Length; line++)
         {
-            var header = Regex.Match(lines[line], @"\Adef method(\d+) : Method := .* code := \[\r?\z");
+            var header = LiteralMethodHeader().Match(lines[line]);
             if (!header.Success) continue;
             var method = int.Parse(header.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
             // The line that closes the code list ends the definition, whatever follows it.
@@ -59,9 +103,7 @@ partial class Program
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
 
     /// <summary>The numbers of the methods an extraction defines, by a literal or by its decoder.</summary>
-    static int[] DefinedMethods(string source) => [.. Regex.Matches(source,
-            @"(?m)^(?:def method(?<number>\d+) : Method|" +
-            @"cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?) :=")
+    static int[] DefinedMethods(string source) => [.. DefinedMethod().Matches(source)
         .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
 
     /// <summary>
@@ -156,17 +198,15 @@ partial class Program
     static string NarrowEvidence(string source, string theorem)
     {
         var found = 0;
-        var result = Regex.Replace(source,
-            @"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", match =>
+        var result = GeneratedTheorem().Replace(source, match =>
             {
                 // Byte-backed identity definitions carry these checked UTF-8 witnesses.
-                if (Regex.IsMatch(match.Groups[1].Value, @"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z"))
+                if (IdentityWitnessName().IsMatch(match.Groups[1].Value))
                     return match.Value;
                 // A body obligation reads its module's lookup tables through their equality with the metadata, the
                 // identity of each assembly it reaches through the assembly's own proof, and the pins through theirs.
                 if (match.Groups[1].Value != theorem &&
-                    Regex.IsMatch(match.Groups[1].Value,
-                        @"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_spelled)\z") &&
+                    RetainedObligationName().IsMatch(match.Groups[1].Value) &&
                     !theorem.EndsWith("_tables_valid", StringComparison.Ordinal))
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
@@ -175,7 +215,7 @@ partial class Program
             });
         if (found != 1) throw new InvalidOperationException("Missing unique evidence obligation: " + theorem);
         result = ResolutionFactsCommand().Replace(result, "");
-        return Regex.Replace(result, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+        return AxiomsCommand().Replace(result, "");
     }
 
     // Keep narrowed declarations and exact obligation types checked, but reuse the original
@@ -183,12 +223,11 @@ partial class Program
     static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)
     {
         // Explicit references could bypass the projected declarations and reach the original.
-        var code = Regex.Replace(narrowed, @"""(?:\\.|[^""\\])*""", "\"\"");
-        code = Regex.Replace(code, @"(?m)^(?:namespace|end) Extracted\r?$", "");
-        if (Regex.IsMatch(code, @"\bExtracted\b"))
+        var code = StringLiteral().Replace(narrowed, "\"\"");
+        code = ExtractedNamespaceLine().Replace(code, "");
+        if (ExtractedWord().IsMatch(code))
             throw new InvalidOperationException("Evidence controls require namespace-relative references.");
-        if (Regex.Matches(narrowed, @"(?m)^namespace Extracted\r?$").Count != 1 ||
-            Regex.Matches(narrowed, @"(?m)^end Extracted\r?$").Count != 1)
+        if (NamespaceExtracted().Count(narrowed) != 1 || EndExtracted().Count(narrowed) != 1)
             throw new InvalidOperationException("Missing unique evidence control namespace.");
         var witnesses = new StringBuilder();
         var audits = new StringBuilder();
@@ -210,9 +249,9 @@ partial class Program
                 narrowed[(obligation.Index + obligation.Length)..];
             audits.AppendLine($"#print axioms EvidenceControl{index}.{theorem}");
         }
-        narrowed = Regex.Replace(narrowed, @"(?m)^import [^\r\n]+\r?\n", "");
+        narrowed = ImportCommand().Replace(narrowed, "");
         // A nested Extracted namespace can resolve missing names in the original Extracted.
-        narrowed = Regex.Replace(narrowed, @"(?m)^(?:namespace|end) Extracted\r?\n", "");
+        narrowed = ExtractedNamespaceCommand().Replace(narrowed, "");
         return witnesses + $"\nnamespace EvidenceControl{index}\nset_option autoImplicit false\n" + narrowed +
             $"\nend EvidenceControl{index}\n" + audits;
     }
@@ -236,11 +275,11 @@ partial class Program
                 if (!source.Contains("namespace Extracted\n", StringComparison.Ordinal) ||
                     !source.Contains("theorem " + cases[index].Theorem + " :", StringComparison.Ordinal))
                     throw new InvalidOperationException("Expected generated extraction evidence: " + cases[index].Path);
-                var body = Regex.Replace(source, @"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", match =>
+                var body = ImportedModule().Replace(source, match =>
                 {
                     imports.Add(match.Groups[1].Value);
                     return "";
-                }, RegexOptions.Multiline);
+                });
                 bodies.AppendLine($"namespace EvidenceCase{index}");
                 bodies.AppendLine(body);
                 bodies.AppendLine("#print axioms Extracted." + cases[index].Theorem);

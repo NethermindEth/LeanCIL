@@ -1844,10 +1844,10 @@ string WithEvidenceCosts(string extracted)
     const string Header =
         "@[cil_code] def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := ";
     var definition = Regex.Match(templates, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
-    var depth = Regex.Match(extracted, @"(?m)^set_option maxRecDepth [0-9]+");
+    var depth = LookupPatterns.RecursionDepth().Match(extracted);
     if (!definition.Success || !depth.Success ||
         !IsDecodedMethod(extracted, 0) ||
-        !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$") ||
+        !LookupPatterns.FirstEquations().IsMatch(extracted) ||
         !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
         throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
     var instructions = definition.Groups[1].Captures.Count;
@@ -3010,4 +3010,10 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\bmark index ([0-9]+) (start|end) ([0-9]+)")]
     internal static partial Regex HeartbeatMark();
+
+    [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+")]
+    internal static partial Regex RecursionDepth();
+
+    [GeneratedRegex(@"(?m)^cil_instruction_equations method0\r?$")]
+    internal static partial Regex FirstEquations();
 }

@@ -36,8 +36,8 @@ partial class Program
             {
                 if (!item.Source.Contains("namespace Extracted\n", StringComparison.Ordinal))
                     throw new InvalidOperationException("Expected generated evidence: " + item.Path);
-                bodies.Add(Regex.Replace(item.Source, @"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$",
-                    match => { imports.Add(match.Groups[1].Value); return ""; }, RegexOptions.Multiline));
+                bodies.Add(RejectedImport().Replace(item.Source,
+                    match => { imports.Add(match.Groups[1].Value); return ""; }));
             }
             const string isolation = """
                 set_option maxErrors 0
@@ -129,19 +129,18 @@ partial class Program
             for (var index = 0; index < cases.Count; index++)
             {
                 var output = errors[index].ToString();
-                var theorems = Regex.Matches(cases[index].Source,
-                        @"(?m)^(?:@\[[^\r\n]*\] )?theorem (\w+) : [^\r\n]*? := [^\r\n]*\r?$")
+                var theorems = SingleLineTheorem().Matches(cases[index].Source)
                     .Select(match => match.Groups[1].Value)
-                    .Where(name => !Regex.IsMatch(name, @"\AexternalIdentity|_tables_valid\z")).ToArray();
+                    .Where(name => !CarriedWitnessName().IsMatch(name)).ToArray();
                 if (!output.Contains("proved that the proposition", StringComparison.Ordinal) ||
                     !output.Contains("is false", StringComparison.Ordinal) || theorems.Length != 1)
                 {
                     unrefuted.Add(Path.GetFileName(cases[index].Path));
                     continue;
                 }
-                var body = Regex.Replace(KernelRefutation(cases[index].Source, theorems[0], "kernelRefutation"),
-                    @"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$",
-                    match => { imports.Add(match.Groups[1].Value); return ""; }, RegexOptions.Multiline);
+                var body = RejectedImport().Replace(
+                    KernelRefutation(cases[index].Source, theorems[0], "kernelRefutation"),
+                    match => { imports.Add(match.Groups[1].Value); return ""; });
                 refutations.Add($"namespace KernelRefuted{refutations.Count}\n{body}\n" +
                     $"end KernelRefuted{refutations.Count}\n");
             }
@@ -160,4 +159,14 @@ partial class Program
                     string.Join(", ", unrefuted)));
         }
     }
+
+    [GeneratedRegex(@"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", RegexOptions.Multiline)]
+    private static partial Regex RejectedImport();
+
+    // A theorem stated and proved on one line; a Lean name may end in ?, ! or '.
+    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) : [^\r\n]*? := [^\r\n]*\r?$")]
+    private static partial Regex SingleLineTheorem();
+
+    [GeneratedRegex(@"\AexternalIdentity|_tables_valid\z")]
+    private static partial Regex CarriedWitnessName();
 }

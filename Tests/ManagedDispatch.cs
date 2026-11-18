@@ -152,7 +152,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         var path = Path.Combine(root, "Rejected-" + mutation + ".lean");
         var mutated = narrowed.Replace(before, after, StringComparison.Ordinal);
         if (mutation == "target")
-            mutated = Linked(mutated, link => Regex.Replace(link, @"method := \d+", "method := 999999"));
+            mutated = Linked(mutated, link => ManagedPatterns.LinkTarget().Replace(link, "method := 999999"));
         if (mutation == "identity")
             mutated = Linked(mutated, link => link.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch",
                 StringComparison.Ordinal));
@@ -278,4 +278,8 @@ static partial class ManagedPatterns
     /// <summary>A link definition of method 0, whose text repeats the catalog of its call site.</summary>
     [GeneratedRegex(@"(?m)^@\[cil_code\] def method0Link\d+ : Link := .*$")]
     internal static partial Regex LinkDefinition();
+
+    /// <summary>The method a link names.</summary>
+    [GeneratedRegex(@"method := \d+")]
+    internal static partial Regex LinkTarget();
 }

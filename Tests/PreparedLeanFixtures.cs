@@ -29,7 +29,7 @@ partial class Program
         {
             if (dependencies.ContainsKey(module)) continue;
             var text = File.ReadAllText(At(module.Replace('.', '/') + ".lean"));
-            dependencies[module] = [.. Regex.Matches(text, @"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")
+            dependencies[module] = [.. TestImport().Matches(text)
                 .Select(match => match.Groups[1].Value)];
             foreach (var dependency in dependencies[module]) unread.Push(dependency);
         }
@@ -107,4 +107,7 @@ partial class Program
         if (!PreparedLeanFixturesMatch([module]))
             Run(["lake", "env", "lean", At(module.Replace('.', '/') + ".lean")], FixturePackage());
     }
+
+    [GeneratedRegex(@"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")]
+    private static partial Regex TestImport();
 }

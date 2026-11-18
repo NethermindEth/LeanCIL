@@ -628,7 +628,7 @@ Test("each way to reach another repository is found in a scratch copy of a workf
         File.WriteAllText(copy, original);
         Require(ExternalSources.Scan(scratch, [copy]).Count == 0, "An unchanged copy must pass");
         // Strings are split so that this file does not match its own rules.
-        string checkoutStep = Regex.Match(original, @"(?m)^( *)- uses: actions/checkout@.*$").Value;
+        string checkoutStep = ExternalSources.CheckoutStep().Match(original).Value;
         Require(checkoutStep.Length > 0, "The workflow has no checkout step to mutate");
         string indent = checkoutStep[..checkoutStep.IndexOf('-')];
         int stepStart = original.IndexOf(checkoutStep, StringComparison.Ordinal);
@@ -699,6 +699,9 @@ static partial class ExternalSources
 
     [GeneratedRegex(@"\bgit\s+(clone|submodule|remote\s+add)\b|\bgh\s+repo\s+clone\b|""(clone|submodule)""")]
     private static partial Regex FetchRepository();
+
+    [GeneratedRegex(@"(?m)^( *)- uses: actions/checkout@.*$")]
+    internal static partial Regex CheckoutStep();
 
     [GeneratedRegex(@"--sourc[e]\b|\bnuget\s+add\s+sourc[e]\b|<add\s+key=", RegexOptions.IgnoreCase)]
     private static partial Regex PackageSource();

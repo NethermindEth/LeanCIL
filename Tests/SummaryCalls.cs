@@ -200,7 +200,7 @@ void RejectedProof(string name, string text, ProofTarget target, string theorem,
     catch (InvalidOperationException error)
     {
         // The session checks a copy of the proof, with the same lines, as Proof.lean.
-        var located = Regex.Matches(error.Message, @"Proof\.lean:(\d+):\d+: error(?:\([^)\r\n]*\))?: ([^\r\n]*)")
+        var located = SummaryPatterns.ProofError().Matches(error.Message)
             .Select(match => (Line: int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
                 Message: match.Groups[2].Value)).ToArray();
         if (start == 0 || end == 0 || !located.Any(found => found.Line >= start && found.Line <= end &&
@@ -412,3 +412,10 @@ static string MutateProof(int calls) => $$"""
 
 // The assembly, library and entry a rejected proof is verified against.
 record ProofTarget(string Assembly, string Library, string Entry);
+
+/// <summary>The patterns that read Lean's report of a rejected proof.</summary>
+static partial class SummaryPatterns
+{
+    [GeneratedRegex(@"Proof\.lean:(\d+):\d+: error(?:\([^)\r\n]*\))?: ([^\r\n]*)")]
+    internal static partial Regex ProofError();
+}
