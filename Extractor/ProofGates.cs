@@ -1116,24 +1116,27 @@ partial class Program
         var shown = StatementOf(variantReport);
         var expected = productionReport?.statementIdentity;
         var identity = variantReport.statementIdentity;
+        const string requirement = "a rejected variant needs production's theorem to state";
+        const string predicates = "MethodContract.Holds, OutcomeContract.Holds or OutcomeContract.HoldsCLR";
+        const string counterexample = "the counterexample predicate of production's contract";
         var reason = productionReport is null
-            ? $"Production {production.Name} did not verify (stage: {productionStage}), so the statement of " +
-                $"{row.Name} has nothing to match."
+            ? $"""Production {production.Name} did not verify (stage: {productionStage}), so the statement of {
+                row.Name} has nothing to match."""
             : expected?.term is null
-            ? $"Production {production.Name} has no statement to compare: {expected?.termError ?? "none reported"}"
+            ? $"""Production {production.Name} has no statement to compare: {expected?.termError ?? "none reported"}"""
             : refutes && !StatesContract(expected.term.Value)
-            ? $"Production {production.Name} does not state a contract's Holds, so {row.Name} has no refutation to " +
-                "state: a rejected variant needs production's theorem to state MethodContract.Holds, " +
-                "OutcomeContract.Holds or OutcomeContract.HoldsCLR"
-            : identity?.matches is null ? $"{variantReport.theorem} was not compared with production's statement."
+            ? $"""Production {production.Name} does not state a contract's Holds, so {
+                row.Name} has no refutation to state: {requirement} {predicates}"""
+            : identity?.matches is null ? $"""{variantReport.theorem} was not compared with production's statement."""
             : identity.matches == true ? null
-            : (refutes ? $"Refutation {variantReport.theorem} does not state the counterexample predicate of " +
-                "production's contract"
-                : $"{variantReport.theorem} does not state production's statement") + ": " + identity.mismatch;
+            : refutes ? $"""Refutation {variantReport.theorem} does not state {counterexample}: {identity.mismatch}"""
+            : $"""{variantReport.theorem} does not state production's statement: {identity.mismatch}""";
         var productionText = productionReport is null ? null : StatementOf(productionReport);
         var status = reason is null ? "same" : identity?.matches == false ? "different" : "unavailable";
-        return (new(status, productionText, shown), reason is null ? null : reason + "\n  Production: " +
-            (productionText ?? "unavailable") + "\n  " + (refutes ? "Refutation: " : "Variant: ") + shown);
+        var label = refutes ? "Refutation" : "Variant";
+        var error = reason is null ? null
+            : $"""{reason}{'\n'}  Production: {productionText ?? "unavailable"}{'\n'}  {label}: {shown}""";
+        return (new(status, productionText, shown), error);
     }
 
     /// <summary>
@@ -1147,12 +1150,12 @@ partial class Program
     ];
 
     /// <summary>
-    /// Whether `term`, a statement as the theorem audit encodes it, is a library contract predicate applied to its
-    /// arguments; the walk visits each application of the spine once.
+    /// Whether the audited statement applies a library contract predicate. Indexing its nodes once gives
+    /// each application on the function spine a constant-time lookup.
     /// </summary>
-    static bool StatesContract(JsonElement term)
+    internal static bool StatesContract(JsonElement term)
     {
-        var nodes = term.GetProperty("nodes");
+        JsonElement[] nodes = [.. term.GetProperty("nodes").EnumerateArray()];
         var node = nodes[term.GetProperty("root").GetInt32()];
         while (node[0].GetString() == "app") node = nodes[node[1].GetInt32()];
         return node[0].GetString() == "const" && ContractPredicates.Contains((Dotted(node[1]), Dotted(node[2])));

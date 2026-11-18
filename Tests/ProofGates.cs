@@ -1,5 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AssemblyName=LeanCIL.IdentityTests
+#:project ../Extractor/Extractor.csproj
 #:include ../scripts/Verification.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -7,7 +9,13 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 
+extern alias IdentityExtractor;
+
+using System.Diagnostics;
 using System.Text.Json;
+
+CheckContractSpineScaling();
+if (args is ["--spine-only"]) return;
 
 // One fixture project builds every case of `First` from its FixtureCase property; `Second` is a prebuilt
 // assembly from another project, so selection by project directory has something to leave out.
@@ -532,3 +540,59 @@ Manifest(false);
 Edit("\"plain\":\"@plain.json\"", "\"scalar\":\"@plain.json\"");
 Invalid("A named profile shadowed a built-in profile", "Profile scalar has the name of a built-in profile.");
 Console.WriteLine("PASS build, extraction, program, template, proof and internal failures never count as rejections");
+
+static void CheckContractSpineScaling()
+{
+    const int shortSpine = 2_000;
+    const int longSpine = 32_000;
+    const double maximumGrowth = 2.0 * longSpine / shortSpine;
+    var shorter = Measure(Statement(shortSpine));
+    var longer = Measure(Statement(longSpine));
+    var growth = longer / shorter;
+    var timing = $"""{shortSpine}: {shorter:F3} ms, {longSpine}: {longer:F3} ms, growth {growth:F1}x""";
+    if (growth >= maximumGrowth)
+        throw new InvalidOperationException($"""Contract spine walk exceeded its {maximumGrowth}x limit: {timing}""");
+    Console.WriteLine($"""PASS contract spine walk: {timing}""");
+
+    static JsonElement Statement(int applications)
+    {
+        object[][] nodes = new object[applications + 2][];
+        string[] module = ["CIL", "Safety", "MethodContract"];
+        string[] name = [.. module, "Holds"];
+        nodes[0] = ["const", module, name, Array.Empty<string>()];
+        nodes[1] = ["nat", 0];
+        int root = 0;
+        for (int index = 2; index < nodes.Length; index++)
+        {
+            nodes[index] = ["app", root, 1];
+            root = index;
+        }
+        return JsonSerializer.SerializeToElement(new { levelParams = Array.Empty<string>(), nodes, root });
+    }
+
+    static double Measure(JsonElement term)
+    {
+        var warmup = Stopwatch.StartNew();
+        do
+        {
+            Walk();
+        } while (warmup.ElapsedMilliseconds < 250);
+
+        const int samples = 5;
+        var times = new double[samples];
+        for (int sample = 0; sample < samples; sample++)
+        {
+            long start = Stopwatch.GetTimestamp();
+            Walk();
+            times[sample] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        }
+        Array.Sort(times);
+        return times[samples / 2];
+
+        void Walk()
+        {
+            if (!IdentityExtractor::Program.StatesContract(term))
+                throw new InvalidOperationException("Contract spine did not resolve to MethodContract.Holds");
+        }
+    }
+}
