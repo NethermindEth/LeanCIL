@@ -413,10 +413,14 @@ theorem nested_of_snapshot :
       [.scalar (.snapshot (.aggregate 4) [(1, true), (2, true), (3, false), (4, true)])]
       Memory.empty).map Prod.snd = .error .invalidState := ⟨rfl, rfl, rfl⟩
 
--- A nested struct snapshot is stored only at the field's width.
+-- A nested struct snapshot is stored only at the field's width, and only when its bytes number
+-- that width: each condition alone refuses the store.
 theorem nested_snapshot_store_size :
-    (instruction (.setAggregateFieldAt 0 8) [.scalar (.snapshot (.aggregate 1) [(1, false)]),
-      Tests.reference] Tests.caller).map Prod.snd = .error .invalidState := rfl
+    (instruction (.setAggregateFieldAt 0 8) [.scalar (.snapshot (.aggregate 8) [(1, false)]),
+      Tests.reference] Tests.caller).map Prod.snd = .error .invalidState ∧
+    (instruction (.setAggregateFieldAt 0 8)
+      [.scalar (.snapshot (.aggregate 1) (List.replicate 8 (1, false))), Tests.reference]
+      Tests.caller).map Prod.snd = .error .invalidState := ⟨rfl, rfl⟩
 #print axioms nested_of_snapshot
 #print axioms nested_snapshot_store_size
 

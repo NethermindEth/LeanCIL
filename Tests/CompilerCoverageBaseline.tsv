@@ -631,6 +631,8 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.MarshaledMe
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.UnalignedMemory::Read128(System.Byte&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.UnalignedMemory::ReadAligned128(System.Byte*)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.ValueBitCasts::To128Byte(Examples.ValueBitCasts/Pair)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.Byte> Examples.VectorFields::ReadBytes128(Examples.VectorFields/Bytes128)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector128`1<System.Int32> Examples.VectorFields::ReadInts128(Examples.VectorFields/Ints128)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt32> Examples.ValueBitCasts::To128UInt32(Examples.ValueBitCasts/Pair)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateArrays::ReadVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64> Examples.AggregateSpans::ReadVector(System.ReadOnlySpan`1<System.Runtime.Intrinsics.Vector128`1<System.UInt64>>)	A	A	A	A	A	A	A	A
@@ -651,8 +653,10 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeRe
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::Shuffle256(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int32> Examples.ValueBitCasts::To256Int32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.ValueBitCasts::To256Int64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.VectorFields::ReadLongs256(Examples.VectorFields/Longs256)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.DivisionIntrinsics::CreateWords(System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.ValueBitCasts::To256UInt32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
+Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32> Examples.VectorFields::ReadUInts256(Examples.VectorFields/UInts256)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt32>& Examples.UnsafeReferences::Vector(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.DivisionIntrinsics::SignWindow(System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64,System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.UInt64> Examples.ValueBitCasts::CopyLocal(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A

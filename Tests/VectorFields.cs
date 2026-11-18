@@ -73,6 +73,9 @@ void Prove(string name, List<string> claims, string definitions = "")
 foreach ((string name, string holder, int width, bool write) in new[]
 {
     ("Read128", "Holder128", 16, false), ("Read256", "Holder256", 32, false),
+    // Each other admitted lane, so a swapped lane tag in the extractor fails against Lean.
+    ("ReadBytes128", "Bytes128", 16, false), ("ReadInts128", "Ints128", 16, false),
+    ("ReadUInts256", "UInts256", 32, false), ("ReadLongs256", "Longs256", 32, false),
     ("Write128", "Holder128", 16, true), ("Write256", "Holder256", 32, true),
     ("WritePacked", "Packed256", 32, true), ("Reinterpret", "Words256", 32, true)
 })
@@ -106,7 +109,9 @@ foreach ((string name, string holder, int width, bool write) in new[]
     Prove(name, claims, definitions);
 
     object instance = Activator.CreateInstance(type)!;
-    object vector = width == 16 ? (object)Vector128.Create(0x1122334455667788UL) : Vector256.Create(0x1122334455667788UL);
+    Type element = owner.GetMethod(name)!.ReturnType.GetGenericArguments()[0];
+    object vector = (width == 16 ? typeof(Vector128) : typeof(Vector256)).GetMethod("Create", [element])!
+        .Invoke(null, [Convert.ChangeType(0x5A, element)])!;
     if (write)
     {
         object[] arguments = [instance, vector];

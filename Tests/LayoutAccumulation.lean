@@ -45,7 +45,8 @@ theorem invalid : computeLayout noLayouts { mixed with packing := 3 } = none ∧
 
 /-- Architecture-dependent vector alignment and the scalar restriction are unchanged. -/
 theorem vectorProfiles :
-    computeLayout noLayouts { mixed with fields := [⟨.vector256 .unsigned64, none⟩] } .scalar = none ∧
+    computeLayout noLayouts { mixed with fields := [⟨.vector256 .unsigned64, none⟩] } .scalar =
+      none ∧
     computeLayout noLayouts { mixed with fields := [⟨.vector256 .unsigned64, none⟩] } .arm64 =
       some ⟨⟨32, [⟨0, 32, false⟩]⟩, 16⟩ := by decide +kernel
 #print axioms vectorProfiles

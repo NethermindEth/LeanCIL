@@ -346,19 +346,27 @@ theorem LayoutTable.indexed_eq (layouts : List RawLayout) :
 
 #print axioms LayoutTable.indexed_eq
 
+/-- `closeLayoutTypeWith` together with whether the type is a class head or a class
+    application, found in the same walk, so a class application is never looked up. -/
+private def closeLayoutTypeKind (table : LayoutTable) : TypeExpr → TypeExpr × Bool
+  | .byref type => (.byref (closeLayoutTypeKind table type).1, false)
+  | .pointer type => (.pointer (closeLayoutTypeKind table type).1, false)
+  | .array type => (.array (closeLayoutTypeKind table type).1, false)
+  | .objectConstructor scope name => (.objectConstructor scope name, true)
+  | .apply owner argument =>
+    let (closedOwner, classHead) := closeLayoutTypeKind table owner
+    let type := .apply closedOwner (closeLayoutTypeKind table argument).1
+    if classHead then (type, true) else
+    match table.owner type with
+    | some index =>
+      (.aggregate ((table.entry index).map RawLayout.identity |>.getD "") index, false)
+    | none => (type, false)
+  | type => (type, false)
+
 /-- Resolve specialized storage tokens after substituting owner or method parameters. A class
     application stays a class whatever layout the table lists for it. -/
-def closeLayoutTypeWith (table : LayoutTable) : TypeExpr → TypeExpr
-  | .byref type => .byref (closeLayoutTypeWith table type)
-  | .pointer type => .pointer (closeLayoutTypeWith table type)
-  | .array type => .array (closeLayoutTypeWith table type)
-  | .apply owner argument =>
-    let type := .apply (closeLayoutTypeWith table owner) (closeLayoutTypeWith table argument)
-    if (TypeExpr.apply owner argument).objectApplication then type else
-    match table.owner type with
-    | some index => .aggregate ((table.entry index).map RawLayout.identity |>.getD "") index
-    | none => type
-  | type => type
+def closeLayoutTypeWith (table : LayoutTable) (type : TypeExpr) : TypeExpr :=
+  (closeLayoutTypeKind table type).1
 
 /-- `closeLayoutTypeWith` reading a raw layout list. -/
 def closeLayoutType (layouts : List RawLayout) : TypeExpr → TypeExpr :=

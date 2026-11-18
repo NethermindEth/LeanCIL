@@ -200,16 +200,16 @@ What `MetadataResolution` and `MetadataBinding` check:
   allows. An instance field access needs its owner's definition in a carried slice, which gives the
   field's index; the one exception is a field of a platform ``ValueTuple`2``, which reads as the
   pair's first or second item only when the pair's own `TypeRef` is scoped by a core-library
-  assembly and the reference's signature declares `Item1` as `!0` or `Item2` as `!1`, and
-  otherwise fails with `operandMismatch`. Any other instance field of an owner outside the carried slices, and any other member
-  of the pair, fails with `unboundInstanceField`. A static field access by `ldsfld`, `ldsflda`,
-  `stsfld` or a field `ldtoken` likewise needs its owner's definition in a carried slice and
-  otherwise fails with `unboundStaticField`; the one exception is System.Runtime's
-  `BitConverter.IsLittleEndian`, admitted only as an `ldsfld`, which the feature check reads as
-  the profile's endianness constant. A static field named through a generic instantiation of its
-  owner fails with `instantiatedStaticField`, since each closed instantiation has its own storage.
-  The descriptor of the static site at an access must name the instruction's field operand as its
-  `field`.
+  assembly; such an `Item1` or `Item2` whose reference declares it as other than `!0` or `!1`
+  respectively fails with `operandMismatch`. Any other instance field of an owner outside the
+  carried slices, and any other member of the pair, fails with `unboundInstanceField`. A static
+  field access by `ldsfld`, `ldsflda`, `stsfld` or a field `ldtoken` likewise needs its owner's
+  definition in a carried slice and otherwise fails with `unboundStaticField`; the one exception is
+  System.Runtime's `BitConverter.IsLittleEndian`, admitted only as an `ldsfld`, which the feature
+  check reads as the profile's endianness constant. A static field named through a generic
+  instantiation of its owner fails with `instantiatedStaticField`, since each closed instantiation
+  has its own storage. The descriptor of the static site at an access must name the instruction's
+  field operand as its `field`.
 - The decoder records the instruction index and token of each static access whose field a carried
   row defines, and the body must list the same ones (`BodyEvidence.statics`). Over the whole
   program, `StaticIdentitiesValid` requires two static sites to share an identity exactly when

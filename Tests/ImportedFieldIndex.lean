@@ -264,9 +264,10 @@ theorem static_flagged_access_of_y_rejected :
 
 /-! ## The platform pair -/
 
-/-- `T` with `System.ValueTuple<int, int>` and its members `Item1 : !0`, `Item2 : !1` and
-    `Rest : !0`, the last a member the pair does not declare. -/
-private def pairWorld : Step (Nat × Nat × Nat) := do
+/-- `T` with `System.ValueTuple` over the argument type bytes `arguments` and its members
+    `Item1 : !0`, `Item2` with the signature type bytes `second` and `Rest : !0`, the last a
+    member the pair does not declare. -/
+private def pairWorldWith (arguments second : List Nat) : Step (Nat × Nat × Nat) := do
   let runtimeName ← string "System.Runtime"
   let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
   let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
@@ -274,11 +275,11 @@ private def pairWorld : Step (Nat × Nat × Nat) := do
   let tupleName ← string "ValueTuple`2"
   let systemName ← string "System"
   let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
-  let tupleBlob ← blob [0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2, 0x08, 0x08]
+  let tupleBlob ← blob ([0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2] ++ arguments)
   let tupleSpec ← row Table.typeSpec [tupleBlob]
   let parent := (tupleSpec - 0x1B000000) * 8 + 4
   let firstSignature ← blob [0x06, 0x13, 0x00]
-  let secondSignature ← blob [0x06, 0x13, 0x01]
+  let secondSignature ← blob (0x06 :: second)
   let firstName ← string "Item1"
   let secondName ← string "Item2"
   let restName ← string "Rest"
@@ -286,6 +287,9 @@ private def pairWorld : Step (Nat × Nat × Nat) := do
   let secondRef ← row Table.memberRef [parent, secondName, secondSignature]
   let restRef ← row Table.memberRef [parent, restName, firstSignature]
   pure (firstRef, secondRef, restRef)
+
+/-- `ValueTuple<int, int>` with `Item2 : !1`. -/
+private def pairWorld : Step (Nat × Nat × Nat) := pairWorldWith [0x08, 0x08] [0x13, 0x01]
 
 private def pairSlice : MetadataSlice × Nat × Nat × Nat :=
   build pairWorld (bytesOf "T") pin.identity
@@ -309,5 +313,31 @@ theorem pair_items_bound_and_other_members_refused :
     checkPair pairSlice.2.2.2 (.field pair 0 int32 name!"Rest" true) =
       some (.instantiatedStaticField pairSlice.2.2.2) := by decide +kernel
 #print axioms pair_items_bound_and_other_members_refused
+
+/-- The error checking `operand` against the `Item2` reference of `pairWorldWith arguments
+    second` gives, if any. -/
+private def checkSecond (arguments second : List Nat) (operand : RawOperand) :
+    Option MetadataError :=
+  let (slice, _, token, _) := build (pairWorldWith arguments second) (bytesOf "T") pin.identity
+  match (do checkEntry (MetadataEnv.ofSlices [← slice.index]) 0 token operand) with
+  | .ok _ => none
+  | .error found => some found
+
+/-- `ValueTuple<int, uint>` as the extractor names it. -/
+private def mixedPair : TypeExpr :=
+  .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.UInt32>") 0
+
+/-- `Item2` declared `!0` is refused even where both arguments are `int`, and on
+    `ValueTuple<int, uint>` a valid `Item2 : !1` holds the second argument, `uint`, not the
+    first. -/
+theorem pair_second_item_reads_its_own_declaration :
+    checkSecond [0x08, 0x08] [0x13, 0x00] (.field pair 1 int32 name!"Item2" false) =
+      some (.operandMismatch (build (pairWorldWith [0x08, 0x08] [0x13, 0x00]) (bytesOf "T")
+        pin.identity).2.2.1) ∧
+    checkSecond [0x08, 0x09] [0x13, 0x01]
+      (.field mixedPair 1 (.atom runtimeScope "System.UInt32") name!"Item2" false) = none ∧
+    (checkSecond [0x08, 0x09] [0x13, 0x01] (.field mixedPair 1 int32 name!"Item2" false)).isSome =
+      true := by decide +kernel
+#print axioms pair_second_item_reads_its_own_declaration
 
 end Tests.ImportedFieldIndex

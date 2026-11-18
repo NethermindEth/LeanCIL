@@ -9,9 +9,10 @@ Pins `CIL.LayoutEnvironment.fieldShape`, `valueShape` and the facts `cil_field_s
 `cil_value_shape` declare, over a hand-written environment of five structs. A struct field
 resolves to the offset and width of its checked layout entry, sign-extended only when it is
 declared as a narrow signed integer; a field whose index or held type does not match the
-declaration, a vector's element lane included, is unsupported; a class field resolves to the model slot of its index, a struct array
-element taking its size from the layout; and a method, defined or known by a hypothesis on its
-environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
+declaration, a vector's element lane included, is unsupported; a class field resolves to the model
+slot of its index, a struct array element taking its size from the layout; and a method, defined
+or known by a hypothesis on its environment, reads the shared facts through the `cil_code`
+simprocs. Stepping `ldflda` of a class
 field faults; a struct field steps on each receiver kind as the lowered access of its shape, and
 a field operand without a fact steps to the same literal shape a fact states. A nested struct
 copied out of memory keeps its uninitialized padding, through a load and a store, as a snapshot.
@@ -367,6 +368,7 @@ theorem value_address_faults (frame : Safety.Frame) (memory : Safety.Memory)
   rfl
 #print axioms value_address_faults
 
+/-- `T::Outer`, a `Pair` followed by an `int32`. -/
 private def outer : TypeExpr := .aggregate "T::Outer" 4
 
 /-- `Outer.pair`, the nested `Pair` at offset 0, whose bytes 2 and 3 are padding. -/
@@ -432,11 +434,13 @@ theorem padded_copy_keeps_padding :
       | _ => false) = true := by decide +kernel
 #print axioms padded_copy_keeps_padding
 
--- Bounds and lifetime are decided before initialization: a padded field past the allocation or
--- in an expired one still faults as before.
+-- Bounds and lifetime are decided before initialization: a padded field past the allocation, whose
+-- first byte is uninitialized, or in an expired allocation still faults on bounds or lifetime.
 theorem padded_load_faults_first :
     (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
-        [.reference (.address ⟨0, 24⟩)] paddedMemory).map (fun _ => ()) =
+        [.reference (.address ⟨0, 24⟩)] { paddedMemory with
+          cells := fun _ offset => ⟨(testByte [2, 3, 24] offset).1,
+            (testByte [2, 3, 24] offset).2⟩ }).map (fun _ => ()) =
       .error (.memory .outsideAllocation (.address ⟨0, 24⟩) 12) ∧
     (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
         [.reference (.address ⟨0, 0⟩)] { paddedMemory with
