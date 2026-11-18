@@ -185,7 +185,7 @@ File.WriteAllText(Path.Combine(directory, "plain.json"), """
     """);
 // A recorded witness gives inputs whose wrong result differs from the wrapping sum.
 var template = Path.Combine(package, "Refutation.lean.in");
-string Witness(string name, string statement, string proof) => $$"""
+string Witness(string name, string statement, string proof, string operation = "+") => $$"""
     import Extracted
     import CIL.Safety.MethodContract
     open CIL.Safety
@@ -195,8 +195,8 @@ string Witness(string name, string statement, string proof) => $$"""
       pre _ _ := True
       footprint _ := []
       post input initial final values :=
-        final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
-    /-- The witness inputs make the extracted method return other than their wrapping sum. -/
+        final = initial ∧ values = [.scalar (.i64 (input.1 {{operation}} input.2))]
+    /-- The witness inputs make the extracted method return other than the contract's result. -/
     theorem {{name}}.refuted : {{statement}} :=
       {{proof}}.of_return (input := (@LEFT@, @RIGHT@)) (initial := Memory.empty) trivial
         (rfl : invoke Extracted.program 16 0 [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _)
@@ -205,6 +205,9 @@ string Witness(string name, string statement, string proof) => $$"""
 
     """;
 File.WriteAllText(template, Witness("FixtureWitness", "FixtureWitness.contract.Refuted Extracted.program 0", ""));
+// Unrelated.lean.in refutes a contract other than production's: the wrapping product, which XOR also misses.
+File.WriteAllText(Path.Combine(package, "Unrelated.lean.in"),
+    Witness("Unrelated", "Unrelated.contract.Refuted Extracted.program 0", "", "*"));
 // Negated.lean.in states the negation of production's contract, which a run the model does not cover can prove.
 File.WriteAllText(Path.Combine(package, "Negated.lean.in"), Witness("Negated",
     "¬ Negated.contract.Holds Extracted.program 0", "MethodContract.Refuted.not_holds <| MethodContract.Refuted"));
@@ -263,7 +266,8 @@ void Manifest(bool controls, params object[] extra)
             new { name = "production-verifies", build = Build("Reordered"), profiles = scalar, expect = "rejected",
                 refutation = Trivial },
             new { name = "unrelated-refutation", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
-                refutation = Trivial },
+                refutation = new { template = "Unrelated.lean.in", theorem = "Unrelated.refuted",
+                    values = new Dictionary<string, string> { ["LEFT"] = "1", ["RIGHT"] = "1" } } },
             new { name = "weaker-statement", build = Build("Baseline"), profiles = scalar, expect = "certifies",
                 proof = "Weaker.lean", theorem = "Weaker.correctness" },
             new { name = "program-differs", build = Build("WrongXor"), profiles = scalar, expect = "certifies",
@@ -478,10 +482,12 @@ Failed("production-verifies", "A proof that verifies counted as a rejection", ro
     row.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
     StatementStatus(row) == "different");
 // The refutation and the rejection both hold, so only the statement comparison fails these rows.
-Failed("unrelated-refutation", "A refutation of an unrelated statement counted as a rejection", row =>
+// A genuine counterexample to another contract verifies and still fails the gate at statement identity.
+Failed("unrelated-refutation", "A refutation of another contract counted as a rejection", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
+    row.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
     Text(row, "error")!.Contains("does not state the counterexample predicate", StringComparison.Ordinal) &&
-    row.GetProperty("statement").GetProperty("variant").GetString()!.StartsWith("Trivial.holds : True"));
+    row.GetProperty("statement").GetProperty("variant").GetString()!.StartsWith("Unrelated.refuted : "));
 Failed("weaker-statement", "A weaker own statement certified the variant", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
     !File.Exists(Path.Combine(Text(row, "output")!, "verified.json")));
