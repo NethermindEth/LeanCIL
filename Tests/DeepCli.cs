@@ -69,10 +69,16 @@ void RefusedAsUnknownCommand(string[] cli, string output, string digestFile)
 void RequireNoSeparateAudit(string[] cli)
 {
     var help = Execute([.. cli, "--help"]);
+    // A command's usage wraps onto indented lines that do not start with `leancil`; each belongs to the command above.
     var commands = help.Stdout.ReplaceLineEndings("\n").Split('\n')
-        .Select(line => line.Trim().StartsWith("Usage: ", StringComparison.Ordinal) ? line.Trim()["Usage: ".Length..]
-            : line.Trim())
-        .Where(line => line.StartsWith("leancil ", StringComparison.Ordinal)).ToArray();
+        .Aggregate(new List<string>(), (joined, raw) =>
+        {
+            var line = raw.Trim().StartsWith("Usage: ", StringComparison.Ordinal) ? raw.Trim()["Usage: ".Length..]
+                : raw.Trim();
+            if (line.StartsWith("leancil ", StringComparison.Ordinal)) joined.Add(line);
+            else if (line.Length > 0 && raw.StartsWith(' ') && joined.Count > 0) joined[^1] = $"{joined[^1]} {line}";
+            return joined;
+        }).ToArray();
     var names = commands.Select(line => line.Split(' ')[1])
         .Where(name => !name.StartsWith("--", StringComparison.Ordinal)).ToArray();
     var audits = names.Where(name => name.Contains("audit", StringComparison.OrdinalIgnoreCase)).ToArray();
