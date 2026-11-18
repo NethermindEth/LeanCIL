@@ -1150,8 +1150,8 @@ partial class Program
     ];
 
     /// <summary>
-    /// Whether the audited statement applies a library contract predicate. Indexing its nodes once gives
-    /// each application on the function spine a constant-time lookup.
+    /// Whether the audited statement applies a library contract predicate. The walk is linear in the
+    /// statement's node count.
     /// </summary>
     internal static bool StatesContract(JsonElement term)
     {

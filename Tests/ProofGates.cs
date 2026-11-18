@@ -546,8 +546,17 @@ static void CheckContractSpineScaling()
     const int shortSpine = 2_000;
     const int longSpine = 32_000;
     const double maximumGrowth = 2.0 * longSpine / shortSpine;
-    var shorter = Measure(Statement(shortSpine));
-    var longer = Measure(Statement(longSpine));
+    var shortTerm = Statement(shortSpine);
+    var longTerm = Statement(longSpine);
+    var warmup = Stopwatch.StartNew();
+    do
+    {
+        Walk(shortTerm);
+        Walk(longTerm);
+    } while (warmup.ElapsedMilliseconds < 250);
+
+    var shorter = Measure(shortTerm);
+    var longer = Measure(longTerm);
     var growth = longer / shorter;
     var timing = $"""{shortSpine}: {shorter:F3} ms, {longSpine}: {longer:F3} ms, growth {growth:F1}x""";
     if (growth >= maximumGrowth)
@@ -572,27 +581,29 @@ static void CheckContractSpineScaling()
 
     static double Measure(JsonElement term)
     {
-        var warmup = Stopwatch.StartNew();
-        do
-        {
-            Walk();
-        } while (warmup.ElapsedMilliseconds < 250);
-
         const int samples = 5;
+        var minimumSampleTime = TimeSpan.FromMilliseconds(20);
         var times = new double[samples];
         for (int sample = 0; sample < samples; sample++)
         {
             long start = Stopwatch.GetTimestamp();
-            Walk();
-            times[sample] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            int walks = 0;
+            TimeSpan elapsed;
+            do
+            {
+                Walk(term);
+                walks++;
+                elapsed = Stopwatch.GetElapsedTime(start);
+            } while (elapsed < minimumSampleTime);
+            times[sample] = elapsed.TotalMilliseconds / walks;
         }
         Array.Sort(times);
         return times[samples / 2];
+    }
 
-        void Walk()
-        {
-            if (!IdentityExtractor::Program.StatesContract(term))
-                throw new InvalidOperationException("Contract spine did not resolve to MethodContract.Holds");
-        }
+    static void Walk(JsonElement term)
+    {
+        if (!IdentityExtractor::Program.StatesContract(term))
+            throw new InvalidOperationException("Contract spine did not resolve to MethodContract.Holds");
     }
 }
