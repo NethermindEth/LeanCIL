@@ -406,12 +406,17 @@ const string RefutationSource = """
         (fault := ⟨0, 0, .invalidState⟩) trivial (by decide) rfl
     theorem Refutations.negated : ¬ Refutations.returns.Holds [] 0 := Refutations.refuted.not_holds
     theorem Refutations.uses : True := (fun _ : ¬ Refutations.returns.Holds [] 0 => trivial) Refutations.negated
+    def Refutations.negatedAlias : Prop := Not (Refutations.returns.Holds [] 0)
+    theorem Refutations.aliasNegated : Refutations.negatedAlias := Refutations.negated
+    abbrev Refutations.refutedAlias : Prop := Refutations.returns.Refuted [] 0
+    theorem Refutations.aliasRefuted : Refutations.refutedAlias := Refutations.refuted
     """;
 Compile("Refutations", RefutationSource);
 var refutedLine = Array.FindIndex(RefutationSource.Split('\n'), line => line.StartsWith("theorem Refutations.refuted",
     StringComparison.Ordinal)) + 1;
 var refutations = verification.AuditOleans(fixtureSearch, ["Refutations"], [ProofTheorem("Refutations.refuted"),
-    ProofTheorem("Refutations.negated"), ProofTheorem("Refutations.uses")]);
+    ProofTheorem("Refutations.negated"), ProofTheorem("Refutations.uses"), ProofTheorem("Refutations.aliasNegated"),
+    ProofTheorem("Refutations.aliasRefuted")]);
 AuditedAxioms(refutations.theorems[0]);
 // The audit reports the program only as a constant, so the empty list names none, and the method as its numeral.
 if (refutations.theorems[0].refutes is not
@@ -423,6 +428,13 @@ Rejected(refutations.theorems[1], "which a run the model does not cover can prov
 AuditedAxioms(refutations.theorems[2]);
 if (refutations.theorems[2].refutes is not null)
     throw new InvalidOperationException("A theorem using a negated contract counted as a refutation");
+// Classification unfolds definitions as the kernel comparison does: an alias of a negated contract is refused,
+// and an alias of a counterexample predicate is the refutation it unfolds to.
+Rejected(refutations.theorems[3], "which a run the model does not cover can prove");
+AuditedAxioms(refutations.theorems[4]);
+if (refutations.theorems[4].refutes is not { contract: "CIL.Safety.MethodContract.Holds", program: null, method: 0 })
+    throw new InvalidOperationException($"An alias of a refutation was not classified as one: {
+        JsonSerializer.Serialize(refutations.theorems[4])}");
 Console.WriteLine("PASS counterexample refutations are located, negated contracts refused, lemmas stating them " +
     "unchanged");
 

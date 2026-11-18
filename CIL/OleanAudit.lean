@@ -58,7 +58,8 @@ theorem `matches` when the kernel accepts it at type T, or, when `refuted`, at t
 predicate of the contract whose `Holds` heads T applied to T's arguments, structurally or by
 definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why. `refutation`
 reports a theorem stating a library contract's counterexample predicate as `refutes`, and fails
-one stating `Not` of a library contract's `Holds`.
+one stating `Not` of a library contract's `Holds`, each read through the definitions at the
+statement's head as the kernel comparison unfolds them.
 
 RESULT (JSON):
   { "modules": { N: olean path },
@@ -253,12 +254,38 @@ def contracts : List Contract :=
     ⟨`CIL.Safety.OutcomeContract.HoldsCLR, `CIL.Safety.OutcomeContract.RefutedCLR,
       `CIL.Safety.RuntimeExceptions⟩]
 
-/-- Whether `type` names a contract predicate by name alone: a `Refuted` application, or `Not`
-    applied to a `Holds` one. -/
-def namesContract (type : Expr) : Bool :=
-  match type with
+/-- How many definitions `unfoldAliases` unfolds at the head of a statement. -/
+def aliasDepth : Nat := 16
+
+/-- `type` with the definition at its head unfolded, at most `depth` times, until the head is
+    `Not`, a contract predicate's name or no definition. Classification reads statements through
+    it, as the kernel comparison of statements unfolds any definition, so an alias of a contract
+    claim is classified as the claim it stands for. -/
+def unfoldAliases (find : Name → Option ConstantInfo) : Nat → Expr → Expr
+  | 0, type => type
+  | depth + 1, type =>
+    match type.getAppFn with
+    | .const name levels =>
+      if name == `Not || contracts.any (fun c => c.holds == name || c.refuted == name) then type
+      else match find name with
+        | some (.defnInfo info) => unfoldAliases find depth <| stripMData <|
+            (info.value.instantiateLevelParams info.levelParams levels).beta type.getAppArgs
+        | _ => type
+    | _ => type
+
+/-- `type` and, under a `Not`, its claim, read through `unfoldAliases`. -/
+def contractClaim (find : Name → Option ConstantInfo) (type : Expr) : Expr :=
+  match unfoldAliases find aliasDepth type with
+  | .app (.const `Not levels) claim =>
+    .app (.const `Not levels) (unfoldAliases find aliasDepth claim)
+  | unfolded => unfolded
+
+/-- Whether `type`, read through `contractClaim`, names a contract predicate by name alone: a
+    `Refuted` application, or `Not` applied to a `Holds` one. -/
+def namesContract (find : Name → Option ConstantInfo) (type : Expr) : Bool :=
+  match contractClaim find type with
   | .app (.const `Not _) claim => contracts.any (claim.getAppFn.constName? == some ·.holds)
-  | _ => contracts.any (type.getAppFn.constName? == some ·.refuted)
+  | claim => contracts.any (claim.getAppFn.constName? == some ·.refuted)
 
 /-- The library contract whose predicate `select` picks as the head of `claim`, checked against
     the module `ownerOf` gives. -/
@@ -310,10 +337,11 @@ def methodIndex? (env : Environment) : Nat → Expr → Option Nat
     contract it refutes, the program and method it names, and the source position of `thm`;
     otherwise `none`. The program is reported only as a constant and the method only as the
     number `methodIndex?` reads, so a caller can bind the refutation to an extraction. A
-    statement `Not` applied to a library contract's `Holds` is an error: a run the model does not cover proves it,
-    so it is no evidence of a counterexample. -/
+    statement `Not` applied to a library contract's `Holds` is an error: a run the model does not
+    cover proves it, so it is no evidence of a counterexample. -/
 def refutation (env : Environment) (ownerOf : Name → Option Name) (thm : Name) (type : Expr) :
     IO (Except String (Option Json)) := do
+  let type := contractClaim env.find? type
   if let .app (.const `Not _) claim := type then
     if let some contract := contractAt ownerOf (·.holds) claim then
       return .error s!"{thm} states Not ({contract.holds} ...), which a run the model does not \
@@ -699,7 +727,7 @@ def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run
     if entry.getObjValAs? Bool "refutation" matches .ok true then
       let some thm := (entry.getObjValAs? String "name").toOption | return true
       if let some (.thmInfo info) := env.find? (name thm) then
-        if namesContract (stripMData info.type) then return true
+        if namesContract env.find? (stripMData info.type) then return true
   return false
 
 /-- Audits a supplied immutable environment and records the exact resolved module paths. -/
