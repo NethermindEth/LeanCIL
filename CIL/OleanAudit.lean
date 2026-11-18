@@ -77,9 +77,20 @@ Per-item failures are reported in `error`; a missing module or malformed request
 namespace LeanCILAudit
 open Lean
 
+/-- A decoded object key and its hash. Equal hashes still require equal text. -/
+private structure RequestKey where
+  hashCode : UInt64
+  text : String
+  deriving BEq
+
+/-- Resizing the set of request keys reads the stored hash in constant time. -/
+private instance : Hashable RequestKey where
+  hash key := key.hashCode
+
 open Std.Internal.Parsec Std.Internal.Parsec.String in
 /-- Checks decoded keys in each open object before JSON parsing can overwrite a duplicate. -/
-private partial def checkUniqueKeys (objects : List (Std.HashSet String)) : Parser Unit := do
+private partial def checkUniqueKeys [Hashable String] (objects : List (Std.HashSet RequestKey)) :
+    Parser Unit := do
   if <- isEof then return
   match <- any with
   | '{' => checkUniqueKeys ({} :: objects)
@@ -90,11 +101,15 @@ private partial def checkUniqueKeys (objects : List (Std.HashSet String)) : Pars
     -- Only object keys are followed by a colon outside a string.
     if (<- peek?) == some ':' then
       if let keys :: parents := objects then
-        let (duplicate, keys) := keys.containsThenInsert key
+        let (duplicate, keys) := keys.containsThenInsert { hashCode := hash key, text := key }
         if duplicate then fail s!"Duplicate JSON key: {key}"
         return <- checkUniqueKeys (keys :: parents)
     checkUniqueKeys objects
   | _ => checkUniqueKeys objects
+
+/-- Refuses a repeated decoded key within any object of the request text. -/
+def checkRequestKeys [Hashable String] (source : String) : Except String Unit :=
+  (checkUniqueKeys []).run source
 
 /-- The declaration name written as `s`. -/
 def name (s : String) : Name := s.toName
@@ -714,7 +729,7 @@ unsafe def main (args : List String) : IO UInt32 := do
   | _ => pure ()
   let [request, output] := args | throw (IO.userError "Usage: leancil-audit REQUEST RESULT")
   let source <- IO.FS.readFile request
-  IO.ofExcept ((checkUniqueKeys []).run source)
+  IO.ofExcept (checkRequestKeys source)
   let req <- IO.ofExcept (Json.parse source)
   let sysroot ← findSysroot
   -- Toolchain modules first: LEAN_PATH may add modules but never replace core ones.

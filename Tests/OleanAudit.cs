@@ -621,6 +621,8 @@ foreach (object expected in new object[]
     })
     Rejected(Audit("StatementVariant", [ProofTheorem("Variant.claim") with { expected = expected }]).theorems[0],
         "expected.refuted");
+Rejected(Audit("StatementVariant", [ProofTheorem("Variant.claim") with { expected = new { refuted = false } }])
+    .theorems[0], "expected.term");
 var extraField = new { term = production[0].term!.Value, refuted = false, negated = true };
 Rejected(Audit("StatementVariant", [ProofTheorem("Variant.claim") with { expected = extraField }]).theorems[0],
     "negated");
@@ -642,6 +644,8 @@ RejectDuplicate("refuted", $$"""
     }] }
     """);
 RejectDuplicate("modules", """{ "modules": ["StatementVariant"], "modul\u0065s": ["StatementVariant"] }""");
+Console.WriteLine(Run([verification.LeanExecutable, At("Tests/AuditKeyScaling.lean")],
+    fixtures, fixtureSearch, environment: environment));
 Console.WriteLine("PASS the kernel compares statements by unfolding, refuses weaker ones and forged constants");
 
 // A user module cannot replace a toolchain module on the audit's search path.
