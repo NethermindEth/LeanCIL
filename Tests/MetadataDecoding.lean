@@ -361,6 +361,17 @@ theorem coded_indices_decode :
   decide +kernel
 #print axioms coded_indices_decode
 
+/-- Both parent and scope indices admit the last representable row and reject the next. -/
+theorem coded_rows_fit_token :
+    [(resolutionScopeTags, 2, 1), (memberRefParentTags, 3, 2)].all (fun (tags, bits, tag) =>
+      let limit := 2 ^ 24
+      let field := 2 ^ bits
+      let oversized := limit * field + tag
+      gives (decodeCoded tags bits ((limit - 1) * field + tag)) (tokenOf 0x1A (limit - 1)) &&
+      failsWith (decodeCoded tags bits oversized) (.badCodedIndex oversized)) := by
+  decide +kernel
+#print axioms coded_rows_fit_token
+
 /-! ## Slices that must be refused -/
 
 /-- A tag past the table list of a coded index. -/

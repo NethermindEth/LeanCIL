@@ -333,9 +333,11 @@ def rowSize (widths : ColumnWidths) (table : Nat) : Option Nat :=
   (columnWidths widths table).map List.sum
 
 /-- A coded index as a token: the tag picks the table, the rest is the row. -/
-def decodeCoded (tags : List Nat) (bits value : Nat) : Except MetadataError Nat :=
+def decodeCoded (tags : List Nat) (bits value : Nat) : Except MetadataError Nat := do
+  let row := value / 2 ^ bits
+  if row ≥ 0x1000000 then throw (.badCodedIndex value)
   match tags[value % 2 ^ bits]? with
-  | some table => .ok (tokenOf table (value / 2 ^ bits))
+  | some table => .ok (tokenOf table row)
   | none => .error (.badCodedIndex value)
 
 /-- The tables a `TypeDefOrRef` coded index names, by tag. -/

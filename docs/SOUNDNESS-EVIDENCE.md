@@ -162,7 +162,8 @@ outside the Lean evidence, for the strict audit. A slice also holds links, each 
 its `NestedClass` row or its first `GenericParam` row. Lean reads the rows by the widths the header
 fixes, decodes strings, blobs and user strings, and decodes the signature blobs
 ([Signatures](../CIL/Extraction/Signatures.lean)). `MetadataResolution` and `MetadataBinding` then
-check what the extractor states.
+check what the extractor states. A coded index must have a valid table tag and a row number
+that fits in 24 bits.
 
 Building the lookup trees of a slice costs its size, and the kernel keeps no cache between declarations. The
 extractor therefore writes them out as the literal `method{n}Tables` (balanced search trees of the rows, heap
