@@ -218,7 +218,7 @@ resolution_fixture invalidEnumeration : (.enum "Truth" (.atom runtimeScope "Syst
   returns true narrows none
 resolution_fixture nestedEnumeration :
   (.enum "Outer" (.enum "Inner" (.atom runtimeScope "System.Byte")))
-  returns true narrows (some .unsigned8)
+  returns true narrows none
 resolution_fixture noValue : (.atom runtimeScope "System.Byte") returns false narrows none
 resolution_fixture aggregate : (.aggregate "Examples.Point" 0) returns true narrows none
 resolution_fixture foreign : (.atom "Other" "System.Byte") returns true narrows none

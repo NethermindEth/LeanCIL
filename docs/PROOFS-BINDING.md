@@ -712,10 +712,13 @@ operand without a fact resolve by compiled evaluation to the literal shape a fac
 which the kernel checks again; `set_option cil.requireFieldShapeFacts true` makes that case an
 error instead, so a proof can require that every field step reads a fact.
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
-checked layout entry when the operand holds the field's declared tag (`Extraction.fieldKind?`:
-the primitive or enum kind, the struct, or the vector's width and element lane), and a class instance
-field to the model slot of its index; `valueShape` gives a vector, including a floating-point
-one, its width.
+checked layout entry when the operand holds the field's declared tag. For an enum,
+`Extraction.fieldKind?` requires an immediate runtime integer atom from the eight supported types
+`System.SByte`, `System.Byte`, `System.Int16`, `System.UInt16`, `System.Int32`, `System.UInt32`,
+`System.Int64` or `System.UInt64`. The enum has that integer's field kind. Other struct fields
+must match their primitive kind, struct index, or vector width and element lane. A class instance
+field resolves to the model slot of its index. `valueShape` gives each vector its width, including
+floating-point vectors.
 
 The first fact of an environment names suffixes of its layout lists,
 `Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`

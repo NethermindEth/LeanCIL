@@ -55,6 +55,13 @@ def computedLayouts : Array ComputedLayout := #[
 theorem layouts_valid : LayoutsValid rawLayouts computedLayouts .x64 := by decide +kernel
 #print axioms layouts_valid
 
+/-- An enum over another enum has neither metadata storage nor a declared field kind. -/
+theorem nestedEnumHasNoFieldKind :
+    let nested := TypeExpr.enum "E" (.enum "Inner" (.atom runtimeScope "System.Int32"))
+    And (typeStorage rawLayouts nested = none) (fieldKind? rawLayouts nested = none) := by
+  decide +kernel
+#print axioms nestedEnumHasNoFieldKind
+
 /-- The environment every method of the test shares. -/
 @[cil_code] def environment : LayoutEnvironment :=
   { rawLayouts := rawLayouts, layouts := computedLayouts }
@@ -434,19 +441,24 @@ theorem padded_copy_keeps_padding :
       | _ => false) = true := by decide +kernel
 #print axioms padded_copy_keeps_padding
 
--- Bounds and lifetime are decided before initialization: a padded field past the allocation, whose
--- first byte is uninitialized, or in an expired allocation still faults on bounds or lifetime.
+/-- A padded field load checks lifetime and bounds. Its byte read faults on bounds even when
+    the first byte is uninitialized. -/
 theorem padded_load_faults_first :
-    (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
-        [.reference (.address ⟨0, 24⟩)] { paddedMemory with
-          cells := fun _ offset => ⟨(testByte [2, 3, 24] offset).1,
-            (testByte [2, 3, 24] offset).2⟩ }).map (fun _ => ()) =
-      .error (.memory .outsideAllocation (.address ⟨0, 24⟩) 12) ∧
-    (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
-        [.reference (.address ⟨0, 0⟩)] { paddedMemory with
-          allocations := fun _ => some ⟨.callerStack, ⟨32, 1, []⟩, false, []⟩ }).map
-        (fun _ => ()) =
-      .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := ⟨rfl, rfl⟩
+    let memory := { paddedMemory with
+      cells := fun _ offset =>
+        let (bits, initialized) := testByte [2, 3, 24] offset
+        Safety.Cell.mk bits initialized }
+    let start := Safety.Reference.mk 0 24
+    let bytes := Safety.read memory start 12 Safety.ordinaryAccessAlignment
+    let load (address : Safety.Reference) (source : Safety.Memory) :=
+      (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
+        [.reference (.address address)] source).map (fun _ => ())
+    let expired := { paddedMemory with
+      allocations := fun _ => some (.mk .callerStack (.mk 32 1 []) false []) }
+    And (bytes = .error .outsideAllocation)
+      (And (load start memory = .error (.memory .outsideAllocation (.address start) 12))
+        (load (.mk 0 0) expired = .error (.memory .expiredLifetime (.address (.mk 0 0)) 0))) :=
+  And.intro rfl (.intro rfl rfl)
 #print axioms padded_load_faults_first
 
 /-- `Node.lanes` written inline under another name, which no shape fact states. -/

@@ -4,8 +4,7 @@ import CIL.Extraction.TypeStorage
 /-! Field accumulation preserves declaration order and all metadata rejection boundaries. Named
 tables with a wrong offset, size, length, child position or generic owner are rejected by both
 `layoutsValidIndexed` and `LayoutsValid`, a class owner included, the owner index finds the first
-matching owner, a class application never closes to a layout entry, and an enum argument over
-a vector is refused. -/
+matching owner, class applications stay classes, and enum arguments require integer atoms. -/
 namespace Tests.LayoutAccumulation
 open CIL CIL.Extraction
 
@@ -249,6 +248,17 @@ theorem classApplicationStaysClass :
       .aggregate "S::Wrap1`1<Leaf>" 1 := by decide +kernel
 #print axioms classApplicationStaysClass
 
+/-- A class keeps its second argument even when a layout claims that exact closed owner. -/
+theorem twoArgumentClassStaysClass :
+    let owner := TypeExpr.objectConstructor "S" "C`2"
+    let first := TypeExpr.atom runtimeScope "System.Byte"
+    let second := TypeExpr.atom runtimeScope "System.Int32"
+    let applied := TypeExpr.apply (.apply owner first) second
+    let entry := { classWrap with generic := some {
+      owner, arity := 2, arguments := [first, second], fields := [], constraints := [] } }
+    closeLayoutType [entry] applied = applied := by decide +kernel
+#print axioms twoArgumentClassStaysClass
+
 /-- `System.Runtime.Intrinsics.Vector128<ulong>`. -/
 def vectorOfWords : TypeExpr :=
   .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
@@ -262,12 +272,21 @@ def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
     fields := [.parameter 0], constraints := [(0, [])] },
   fields := [⟨kind, none⟩] }
 
-/-- An enum argument is stored as its underlying integer, and an enum claimed over a vector is
-    refused: no enum has a vector as its underlying type. -/
+/-- An enum argument requires an immediate integer atom. The indexed and propositional checks
+    reject the same four-byte claim for a nested enum. -/
 theorem enumArgumentNeedsIntegerUnderlying :
-    genericLayoutValid (.ofList []) (enumWrap (.atom runtimeScope "System.Int32") .signed32) =
-      true ∧
-    genericLayoutValid (.ofList []) (enumWrap vectorOfWords (.vector128 .unsigned64)) = false := by
-  decide +kernel
+    let int32 := TypeExpr.atom runtimeScope "System.Int32"
+    let integer := enumWrap int32 .signed32
+    let nested := enumWrap (.enum "Inner" int32) .signed32
+    let aggregate := enumWrap (.aggregate leaf.identity 0) (.aggregate 0)
+    let computed : Array ComputedLayout := #[.mk (.mk 4 [.mk 0 4 false]) 4]
+    [genericLayoutValid (.ofList [integer]) integer,
+      genericLayoutValid (.ofList [nested]) nested,
+      genericLayoutValid (.ofList [leaf, aggregate]) aggregate,
+      genericLayoutValid (.ofList []) (enumWrap vectorOfWords (.vector128 .unsigned64)),
+      layoutsValidIndexed [integer] computed .scalar,
+      layoutsValidIndexed [nested] computed .scalar,
+      decide (LayoutsValid [nested] computed .scalar)] =
+      [true, false, false, false, true, false, false] := by decide +kernel
 #print axioms enumArgumentNeedsIntegerUnderlying
 end Tests.LayoutAccumulation

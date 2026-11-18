@@ -41,10 +41,13 @@ inductive ScalarKind where
 /-- The claimed stack kinds (top first) at each raw pc; `none` where the pc is unreachable. -/
 abbrev ScalarCertificate := List (Option (List ScalarKind))
 
-/-- The stack kind of a metadata type: small integers widen to `word32`, enums use their
-    underlying type. -/
+/-- Small integers widen to `word32`. Enums take the stack kind of their immediate integer
+    atom, and a malformed enum has kind `other`. -/
 def scalarType : TypeExpr → ScalarKind
-  | .enum _ underlying => scalarType underlying
+  | .enum _ underlying => match enumUnderlyingField underlying with
+    | some .signed64 | some .unsigned64 => .word64
+    | some _ => .word32
+    | none => .other
   | .pointer .void => .other
   | .byref element => match scalarType element with
       | .enumSpan identity writable _ => .enumSpan identity writable true

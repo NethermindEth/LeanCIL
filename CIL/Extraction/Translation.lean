@@ -86,21 +86,6 @@ private def initialLocal : LocalKind → Value
 def _root_.CIL.LocalKind.initialValue (initLocals : Bool) (kind : LocalKind) : Value :=
   if initLocals then initialLocal kind else .unmodeled
 
-/-- Integer static-field storage and its narrow-load signedness. -/
-private def staticScalarType : TypeExpr → Option (Nat × Bool)
-  | .enum _ underlying => staticScalarType underlying
-  | .atom scope name =>
-    if scope != runtimeScope then none else
-    match name with
-    | "System.SByte" => some (1, true)
-    | "System.Byte" | "System.Boolean" => some (1, false)
-    | "System.Int16" => some (2, true)
-    | "System.UInt16" | "System.Char" => some (2, false)
-    | "System.Int32" | "System.UInt32" => some (4, false)
-    | "System.Int64" | "System.UInt64" | "System.IntPtr" | "System.UIntPtr" => some (8, false)
-    | _ => none
-  | _ => none
-
 /-- A readonly scalar load has exactly the width and extension of its raw field type. -/
 private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstruction)
     (descriptor : Option StaticDescriptor) : Bool :=
@@ -109,9 +94,9 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
     if instruction.opcode != opcode then false else
     match instruction.operand with
     | .field _ _ type _ _ =>
-      match staticScalarType type with
+      match objectFieldShape type with
       | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
-      | none => descriptor.scalar.isNone
+      | none => !(type matches .enum ..) && descriptor.scalar.isNone
     | _ => false
   | _, _ => false
 

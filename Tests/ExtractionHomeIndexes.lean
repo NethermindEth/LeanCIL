@@ -82,6 +82,21 @@ theorem first_static_wins :
   decide +kernel
 #print axioms first_static_wins
 
+/-- A scalar static load with matching enum identities and a descriptor of the given width. -/
+private def enumLoad (name : String) (width : Nat) (scalar : Option Bool := some false) : Bool :=
+  let field := { loaded with type := .enum "E" (.atom runtimeScope name) }
+  let operand := RawOperand.field field.owner field.index field.type field.name true
+  let site := { descriptor with field, bytes := List.replicate width 0, scalar }
+  methodShapeInstructions { raw with code := [{ load with operand }] }
+    { body [(0, site)] with code := [.ldsfld field] }
+
+/-- The load admits an Int32 enum and rejects Boolean, Char and native integer bases. -/
+theorem staticEnumNeedsInteger :
+    [enumLoad "System.Boolean" 1, enumLoad "System.Char" 2, enumLoad "System.IntPtr" 8,
+      enumLoad "System.Boolean" 1 none, enumLoad "System.Int32" 4] =
+      [false, false, false, false, true] := by decide +kernel
+#print axioms staticEnumNeedsInteger
+
 /-- Missing raw instructions, absent descriptors and wrong raw opcodes cannot pass. -/
 theorem missing_static_rejects :
     methodShapeInstructions raw (body [(0, descriptor)]) = false ∧

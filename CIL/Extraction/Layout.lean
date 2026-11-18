@@ -3,6 +3,7 @@ import CIL.Features
 import CIL.TypeExpr
 import CIL.Extraction.FlowIndex
 import Std.Data.TreeSet.Lemmas
+import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
 # Aggregate layouts from raw metadata
@@ -31,12 +32,85 @@ inductive FieldType where
   | aggregate (index : Nat)
   deriving DecidableEq, Repr
 
-/-- Whether an enum may have field kind `kind` as its underlying type: only the eight integer
-    kinds. -/
-def FieldType.enumUnderlying : FieldType → Bool
-  | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
-  | .signed64 | .unsigned64 => true
-  | _ => false
+/-- The exact primitive runtime names and their field storage. -/
+private def primitiveFields : List (Prod String FieldType) :=
+  [("System.SByte", .signed8), ("System.Byte", .unsigned8), ("System.Boolean", .boolean),
+    ("System.Int16", .signed16), ("System.UInt16", .unsigned16), ("System.Char", .character),
+    ("System.Int32", .signed32), ("System.UInt32", .unsigned32), ("System.Int64", .signed64),
+    ("System.UInt64", .unsigned64), ("System.IntPtr", .nativeInt), ("System.UIntPtr", .nativeUInt)]
+
+/-- Reversed UTF-8 bytes preserve every character and expose primitive-name suffixes first. -/
+private def storageNameBytes (name : String) : List UInt8 := name.toByteArray.data.toList.reverse
+
+/-- Byte-name equality uses structural decisions without order-package proof dependencies. -/
+private def storageBytesEqual (left right : List UInt8) : Bool :=
+  @decide (left = right) (@List.hasDecEq UInt8 UInt8.decEq left right)
+
+/-- Primitive name bytes are materialized so a lookup never encodes the fixed names. -/
+private def primitiveNameBytes : List (List UInt8) := by
+  run_tac do
+    let expression <- Lean.Elab.Term.elabTerm
+      (<- `(primitiveFields.map fun entry => storageNameBytes entry.1)) none
+    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expression <- Lean.instantiateMVars expression
+    let values <- unsafe Lean.Meta.evalExpr (List (List UInt8))
+      (<- Lean.Meta.inferType expression) expression
+    Lean.Elab.Tactic.closeMainGoal `primitiveNameBytes (Lean.toExpr values)
+
+/-- The materialized bytes spell exactly the primitive field names. -/
+private theorem primitiveNameBytes_eq :
+    primitiveNameBytes = primitiveFields.map (fun entry => storageNameBytes entry.1) := by
+  decide +kernel
+#print axioms primitiveNameBytes_eq
+
+/-- Byte equality agrees with string equality for all metadata names. -/
+private theorem storageNameBytes_beq (left right : String) :
+    storageBytesEqual (storageNameBytes left) (storageNameBytes right) = (left == right) := by
+  apply Bool.eq_iff_iff.mpr
+  simp only [storageBytesEqual, storageNameBytes, decide_eq_true_eq, beq_iff_eq,
+    List.reverse_inj, Array.toList_inj]
+  constructor
+  . intro equal
+    exact String.toByteArray_inj.mp (ByteArray.ext equal)
+  . intro equal
+    cases equal
+    rfl
+#print axioms storageNameBytes_beq
+
+/-- The field type of a primitive runtime type, by its exact UTF-8 name. -/
+def primitiveField (name : String) : Option FieldType :=
+  ((primitiveNameBytes.zip (primitiveFields.map Prod.snd)).find?
+    fun entry => storageBytesEqual (storageNameBytes name) entry.1).map Prod.snd
+
+/-- info: 'CIL.Extraction.primitiveField' does not depend on any axioms -/
+#guard_msgs in
+#print axioms primitiveField
+
+/-- Primitive byte lookup gives exactly the field selected by the runtime name. -/
+private theorem primitiveField_eq (name : String) : primitiveField name = (match name with
+    | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
+    | "System.Boolean" => some .boolean | "System.Int16" => some .signed16
+    | "System.UInt16" => some .unsigned16 | "System.Char" => some .character
+    | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
+    | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
+    | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
+    | _ => none) := by
+  simp only [primitiveField, primitiveNameBytes_eq, primitiveFields, List.map_cons,
+    List.map_nil, List.zip_cons_cons, List.zip_nil_left, List.find?_cons, List.find?_nil,
+    storageNameBytes_beq]
+  repeat' (split <;> simp_all)
+#print axioms primitiveField_eq
+
+/-- The field kind of an enum whose immediate underlying type is a runtime integer atom. -/
+def enumUnderlyingField : TypeExpr -> Option FieldType
+  | .atom scope name =>
+    -- UInt64 has one of the longest admitted names. Bound the byte lookup for other names.
+    if scope != runtimeScope || name.utf8ByteSize > "System.UInt64".utf8ByteSize then none else
+      (primitiveField name).filter fun kind => match kind with
+        | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
+        | .signed64 | .unsigned64 => true
+        | _ => false
+  | _ => none
 
 /-- The lane of a vector whose elements have field kind `kind`; `none` for a kind no vector
     field holds. -/
@@ -380,22 +454,12 @@ def closeLayoutType (layouts : List RawLayout) : TypeExpr → TypeExpr :=
   closeLayoutTypeWith (.ofList layouts)
 
 /-- Field storage is derived from substituted metadata, including exact aggregate identities. -/
-private def genericFieldType (table : LayoutTable) : TypeExpr → Option FieldType
-  | .enum _ underlying => do
-    let kind ← genericFieldType table underlying
-    if kind.enumUnderlying then some kind else none
-  | type =>
+private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option FieldType :=
   match closeLayoutTypeWith table type with
+  | .enum _ underlying => enumUnderlyingField underlying
   | .aggregate identity index =>
     if (table.entry index).any (·.identity == identity) then some (.aggregate index) else none
-  | .atom scope name => if scope != runtimeScope then none else match name with
-    | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
-    | "System.Boolean" => some .boolean | "System.Char" => some .character
-    | "System.Int16" => some .signed16 | "System.UInt16" => some .unsigned16
-    | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-    | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-    | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
-    | _ => none
+  | .atom scope name => if scope == runtimeScope then primitiveField name else none
   | .apply (.constructor scope name) (.atom elementScope element) => do
     if scope != "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
         "PublicKeyToken=cc7b13ffcd2ddd51" || elementScope != runtimeScope then none

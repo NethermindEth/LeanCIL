@@ -1,5 +1,4 @@
 import CIL.Extraction.Parameters
-import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
 # Storage from metadata types
@@ -24,78 +23,6 @@ def integerVectorWidth : TypeExpr → Option Nat
     else if name == "System.Runtime.Intrinsics.Vector512`1" then some 64
     else none
   | _ => none
-
-/-- The exact primitive runtime names and their field storage. -/
-private def primitiveFields : List (Prod String FieldType) :=
-  [("System.SByte", .signed8), ("System.Byte", .unsigned8), ("System.Boolean", .boolean),
-    ("System.Int16", .signed16), ("System.UInt16", .unsigned16), ("System.Char", .character),
-    ("System.Int32", .signed32), ("System.UInt32", .unsigned32), ("System.Int64", .signed64),
-    ("System.UInt64", .unsigned64), ("System.IntPtr", .nativeInt), ("System.UIntPtr", .nativeUInt)]
-
-/-- Reversed UTF-8 bytes preserve every character and expose primitive-name suffixes first. -/
-private def storageNameBytes (name : String) : List UInt8 := name.toByteArray.data.toList.reverse
-
-/-- Byte-name equality uses structural decisions without order-package proof dependencies. -/
-private def storageBytesEqual (left right : List UInt8) : Bool :=
-  @decide (left = right) (@List.hasDecEq UInt8 UInt8.decEq left right)
-
-/-- Primitive name bytes are materialized so a lookup never encodes the fixed names. -/
-private def primitiveNameBytes : List (List UInt8) := by
-  run_tac do
-    let expression <- Lean.Elab.Term.elabTerm
-      (<- `(primitiveFields.map fun entry => storageNameBytes entry.1)) none
-    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
-    let expression <- Lean.instantiateMVars expression
-    let values <- unsafe Lean.Meta.evalExpr (List (List UInt8))
-      (<- Lean.Meta.inferType expression) expression
-    Lean.Elab.Tactic.closeMainGoal `primitiveNameBytes (Lean.toExpr values)
-
-/-- The materialized bytes spell exactly the primitive field names. -/
-private theorem primitiveNameBytes_eq :
-    primitiveNameBytes = primitiveFields.map (fun entry => storageNameBytes entry.1) := by
-  decide +kernel
-#print axioms primitiveNameBytes_eq
-
-/-- Byte equality agrees with string equality for all metadata names. -/
-private theorem storageNameBytes_beq (left right : String) :
-    storageBytesEqual (storageNameBytes left) (storageNameBytes right) = (left == right) := by
-  apply Bool.eq_iff_iff.mpr
-  simp only [storageBytesEqual, storageNameBytes, decide_eq_true_eq, beq_iff_eq,
-    List.reverse_inj, Array.toList_inj]
-  constructor
-  . intro equal
-    exact String.toByteArray_inj.mp (ByteArray.ext equal)
-  . intro equal
-    cases equal
-    rfl
-#print axioms storageNameBytes_beq
-
-/-- The field type of a primitive runtime type, by its exact UTF-8 name. -/
-private def primitiveField (name : String) : Option FieldType :=
-  ((primitiveNameBytes.zip (primitiveFields.map Prod.snd)).find?
-    fun entry => storageBytesEqual (storageNameBytes name) entry.1).map Prod.snd
-
-/--
-info: '_private.CIL.Extraction.TypeStorage.0.CIL.Extraction.primitiveField'
-does not depend on any axioms
--/
-#guard_msgs in
-#print axioms primitiveField
-
-/-- Primitive byte lookup gives exactly the field selected by the runtime name. -/
-private theorem primitiveField_eq (name : String) : primitiveField name = (match name with
-    | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
-    | "System.Boolean" => some .boolean | "System.Int16" => some .signed16
-    | "System.UInt16" => some .unsigned16 | "System.Char" => some .character
-    | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-    | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-    | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
-    | _ => none) := by
-  simp only [primitiveField, primitiveNameBytes_eq, primitiveFields, List.map_cons,
-    List.map_nil, List.zip_cons_cons, List.zip_nil_left, List.find?_cons, List.find?_nil,
-    storageNameBytes_beq]
-  repeat' (split <;> simp_all)
-#print axioms primitiveField_eq
 
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
 def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
@@ -156,8 +83,7 @@ def callableType : TypeExpr → TypeExpr
 /-- Function pointers admit checked aggregates, integer vectors and integer/reference types. -/
 def managedParameter : TypeExpr → Bool
   | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
-  | .enum _ (.atom scope name) => scope == runtimeScope &&
-      ((primitiveField name).map FieldType.enumUnderlying).getD false
+  | .enum _ underlying => (enumUnderlyingField underlying).isSome
   | .byref element => match element with
       | .atom .. | .enum .. | .aggregate .. | .apply .. => managedParameter element
       | _ => false
@@ -196,9 +122,7 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .aggregate identity index => do
     let metadata ← layouts[index]?
     if metadata.identity = identity then return .field (.aggregate index) else none
-  | .enum _ underlying => do
-    let .field kind ← typeStorage layouts underlying | none
-    if kind.enumUnderlying then return .field kind else none
+  | .enum _ underlying => StorageType.field <$> enumUnderlyingField underlying
   | .byref _ => some .reference
   -- An array of class references is itself an object on the heap.
   | .array (.object _ _) => some .object
@@ -216,9 +140,8 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
         "System.UInt16", "System.Char", "System.Int32", "System.UInt32", "System.Int64",
         "System.UInt64", "System.IntPtr", "System.UIntPtr"] then some .reference else none
-  | .pointer (.enum identity underlying) => do
-    let .field _ ← typeStorage layouts (.enum identity underlying) | none
-    return .reference
+  | .pointer (.enum _ underlying) =>
+    if (enumUnderlyingField underlying).isSome then some .reference else none
   | .pointer (.aggregate identity index) => do
     let metadata ← layouts[index]?
     if metadata.identity == identity then some .reference else none

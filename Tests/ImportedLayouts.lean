@@ -1,6 +1,7 @@
 import CIL.Extraction.Translation
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.LayoutProjection
+import Tests.LayoutAccumulation
 
 /-! Certificate regression fixtures, evaluated against the checked CIL extraction model. -/
 
@@ -47,6 +48,14 @@ theorem rejection_3 : ¬ LayoutProjectionValid artifactRaw artifactComputed
 theorem rejection_4 : ¬ LayoutProjectionValid artifactRaw artifactComputed publicRaw
     #[leafLayout, { pairLayout with alignment := 4 }] [1, 2] .scalar := by decide +kernel
 #print axioms rejection_4
+
+/-- Matching published and actual rows cannot certify four bytes for an enum over an enum. -/
+theorem nestedEnumCatalogRejected :
+    let underlying := TypeExpr.enum "Inner" (.atom runtimeScope "System.Int32")
+    let rows := [Tests.LayoutAccumulation.enumWrap underlying .signed32]
+    let imported := ImportLayoutCatalog.mk rows rows #[privateLayout]
+    Not (imported.Valid .scalar) := by decide +kernel
+#print axioms nestedEnumCatalogRejected
 
 def catalog : ImportLayoutCatalog := ⟨publicRaw, publicRaw, publicComputed⟩
 def copySignature : ImportSignature := ⟨owner, "Copy", [], .void, [.byref pair, .byref pair]⟩

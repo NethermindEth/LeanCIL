@@ -250,18 +250,17 @@ void ReturnResolutionCosts(bool stepOnly = false)
                 """);
             var type = ".atom runtimeScope \"System.Byte\"";
             var expected = "some .unsigned8";
-            if (dimension == "depth")
-                type = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", size)) + type + new string(')', size);
             if (dimension == "layouts")
             {
                 type = ".aggregate \"Point\" 0";
                 expected = "none";
             }
-            if (dimension is "enum-depth" or "enum-layouts")
+            if (dimension is "depth" or "enum-depth" or "enum-layouts")
             {
-                var depth = dimension == "enum-depth" ? size : 1;
-                type = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", depth)) +
-                    ".array (.aggregate \"Point\" 0)" + new string(')', depth);
+                var depth = dimension == "enum-layouts" ? 1 : size;
+                var underlying = dimension == "depth" ? type : ".array (.aggregate \"Point\" 0)";
+                var heads = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", depth));
+                type = $"""{heads}{underlying}{new string(')', depth)}""";
                 expected = "none";
             }
             var instructions = dimension is "body" or "step-body"

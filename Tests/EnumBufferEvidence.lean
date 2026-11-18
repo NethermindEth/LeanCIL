@@ -31,6 +31,13 @@ theorem enum_storage_checked :
           some (.enumeration "Fixture::Choice" storage)) = true := by decide +kernel
 #print axioms enum_storage_checked
 
+/-- An Int32 enum widens to a word, while an enum over an Int32 byref has no scalar kind. -/
+theorem enumScalarNeedsInteger :
+    let int32 := TypeExpr.atom runtimeScope "System.Int32"
+    (scalarType (.enum "E" (.byref int32)), scalarType (.enum "E" int32)) =
+      (.other, .word32) := by decide +kernel
+#print axioms enumScalarNeedsInteger
+
 /-- Exact enum identity survives local stores and returns instead of becoming only a width. -/
 theorem span_identity_checked :
     scalarTransfer method ⟨0, 10, .none⟩ [scalarType (span "First")] = some [] ∧

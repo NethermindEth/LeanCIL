@@ -134,9 +134,6 @@ theorem typeStorage_narrow_of_not_candidate (layouts : List RawLayout) (type : T
   | pointer element =>
     cases element <;> simp only [typeStorage] at stored <;> revert stored <;> (repeat' split) <;>
       simp_all [Option.bind_eq_bind, Option.bind_eq_some_iff]
-    -- A pointer to an enum: the storage of the pointer itself is a reference.
-    intro storage _ _ _ result
-    cases storage <;> simp at result
   | apply constructor argument =>
     cases constructor <;> simp only [typeStorage] at stored <;> revert stored <;>
       (repeat' split) <;> simp_all [Option.bind_eq_bind, Option.bind_eq_some_iff]
@@ -179,15 +176,19 @@ theorem declaredNarrow_of_not_candidate (layouts : List RawLayout) (type : TypeE
 theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : String)
     (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
     declaredNarrow layouts (.enum identity type) = none := by
-  rw [declaredNarrow_eq_storage] at narrow ⊢
-  simp only [typeStorage]
-  cases stored : typeStorage layouts type with
-  | none => simp
-  | some storage =>
-    rw [stored] at narrow
-    cases storage <;> try simp
-    case field kind =>
-      cases kind <;> simp_all [StorageType.narrow]
+  cases type <;> try rfl
+  case atom scope name =>
+    by_cases runtime : scope = runtimeScope
+    . subst scope
+      by_cases longName : name.utf8ByteSize > "System.UInt64".utf8ByteSize
+      . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, enumUnderlyingField, longName]
+      . cases stored : primitiveField name with
+        | none => simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, enumUnderlyingField,
+            longName, stored]
+        | some kind =>
+          cases kind <;> simp_all [declaredNarrow, TypeExpr.narrowCandidate, typeStorage,
+            enumUnderlyingField, StorageType.narrow]
+    . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, enumUnderlyingField, runtime]
 
 #print axioms declaredNarrow_enum_of_none
 
