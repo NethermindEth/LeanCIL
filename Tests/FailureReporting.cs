@@ -386,7 +386,7 @@ const string Elsewhere = """
     /-- The empty program has no method zero, so a call to it faults. -/
     theorem refuted : returns.Refuted [] 0 :=
       .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
-        (fault := ⟨0, 0, .invalidState⟩) trivial (by decide) rfl
+        (fault := { method := 0, instruction := 0, fault := .invalidState }) trivial (by decide) rfl
 
     #print axioms refuted
     end Elsewhere
@@ -397,7 +397,8 @@ var elsewhereRun = Execute([.. cli, "verify", sameText, "--proof", elsewhereProo
 var elsewhereReport = Failure(sameText);
 if (elsewhereRun.Code != 1 || File.Exists(Path.Combine(sameText, "verified.json")) ||
     Text(elsewhereReport, "kind") != "replay-or-audit-rejected" ||
-    Text(elsewhereReport, "message")?.Contains("a refutation states Extracted.program", StringComparison.Ordinal) != true)
+    Text(elsewhereReport, "message")?.Contains("a refutation states Extracted.program",
+        StringComparison.Ordinal) != true)
     throw new InvalidOperationException(
         $"A refutation of another program was reported against this one:\n{elsewhereRun.Output}");
 Console.WriteLine("PASS a counterexample about another program is refused, not reported against the extraction");
