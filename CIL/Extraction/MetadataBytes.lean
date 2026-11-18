@@ -1,5 +1,6 @@
 import CIL.Extraction.KernelEquation
 import CIL.Extraction.ByteLiterals
+import CIL.Extraction.MetadataToken
 
 /-!
 # Metadata tables and heaps
@@ -31,6 +32,7 @@ inductive MetadataError where
   | unsupportedTable (token : Nat)
   | rowLength (token expected actual : Nat)
   | badCodedIndex (value : Nat)
+  | rowOverflow (table row : Nat)
   | missingHeap (heap offset : Nat)
   | malformedHeap (heap offset : Nat)
   | malformedUserString (offset : Nat)
@@ -75,15 +77,6 @@ def blobHeap : Nat := 1
 
 /-- The heap number `MetadataError.missingHeap` reports for `#US`. -/
 def userStringHeap : Nat := 2
-
-/-- The table number of a token: its top byte. -/
-def metadataTableOf (token : Nat) : Nat := token / 0x1000000
-
-/-- The row number of a token: its low three bytes. -/
-def tokenRow (token : Nat) : Nat := token % 0x1000000
-
-/-- The token of a row of a table. -/
-def tokenOf (table row : Nat) : Nat := table * 0x1000000 + row
 
 /-! The metadata table numbers of II.22 that the checker reads; a user string is table `0x70`
     and a standalone signature is table `0x11`. -/
@@ -333,11 +326,9 @@ def rowSize (widths : ColumnWidths) (table : Nat) : Option Nat :=
   (columnWidths widths table).map List.sum
 
 /-- A coded index as a token: the tag picks the table, the rest is the row. -/
-def decodeCoded (tags : List Nat) (bits value : Nat) : Except MetadataError Nat := do
-  let row := value / 2 ^ bits
-  if row ≥ 0x1000000 then throw (.badCodedIndex value)
+def decodeCoded (tags : List Nat) (bits value : Nat) : Except MetadataError Nat :=
   match tags[value % 2 ^ bits]? with
-  | some table => .ok (tokenOf table row)
+  | some table => checkedTokenOf table (value / 2 ^ bits) fun _ _ => .badCodedIndex value
   | none => .error (.badCodedIndex value)
 
 /-- The tables a `TypeDefOrRef` coded index names, by tag. -/
@@ -774,7 +765,8 @@ def MetadataIndex.nestedClass (index : MetadataIndex) (token : Nat) :
     Except MetadataError NestedClassRow := do
   match ← index.columnsOf Table.nestedClass token with
   | [nested, enclosing] =>
-    .ok { nested := tokenOf Table.typeDef nested, enclosing := tokenOf Table.typeDef enclosing }
+    .ok { nested := ← checkedTokenOf Table.typeDef nested .rowOverflow,
+          enclosing := ← checkedTokenOf Table.typeDef enclosing .rowOverflow }
   | _ => .error (.unsupportedTable token)
 
 /-- The `GenericParam` row of a token. -/
@@ -925,48 +917,40 @@ abbrev AssemblyIdentified (assembly : AssemblyMetadata) (identity : List Nat) : 
     `row`, as far as the rows are carried, with the total and whether every row was carried. A
     field is static when bit 4 of the first flag byte is set. -/
 private def fieldCounts (index : MetadataIndex) :
-    Nat → Nat → Nat → List (Nat × Nat) → List (Nat × Nat) × Nat × Bool
-  | 0, _, instances, found => (found, instances, true)
-  | count + 1, row, instances, found =>
-    match index.rows.find? (tokenOf Table.field row) with
-    | none => (found, instances, false)
+    Nat → Nat → Nat → List (Nat × Nat) → Except MetadataError (List (Nat × Nat) × Nat × Bool)
+  | 0, _, instances, found => .ok (found, instances, true)
+  | count + 1, row, instances, found => do
+    let token ← checkedTokenOf Table.field row .rowOverflow
+    match index.rows.find? token with
+    | none => .ok (found, instances, false)
     | some bytes =>
       let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
       fieldCounts index count (row + 1) (if isStatic then instances else instances + 1)
-        ((tokenOf Table.field row, instances) :: found)
+        ((token, instances) :: found)
 
-/-- The instance field counts of one carried type whose next type's row is carried: each count
-    before a field, latest first, over the carried rows from the type's first field, which may be a
-    prefix of its fields; and the total, only when every field is carried. -/
+/-- The carried prefix of a type's field counts, with a total when all its rows are carried. -/
 private def typeCounts (index : MetadataIndex) (token : Nat) :
-    Option (List (Nat × Nat) × Option Nat) :=
-  match index.typeDef token with
-  | .error _ => none
-  | .ok row =>
-    let stop :=
-      if tokenRow token == index.header.rows Table.typeDef then
-        some (index.header.rows Table.field + 1)
-      else (match index.typeDef (token + 1) with
-        | .ok next => some next.fieldList
-        | .error _ => none)
-    match stop with
-    | none => none
-    | some stop =>
-      let (found, instances, complete) :=
-        fieldCounts index (stop - row.fieldList) row.fieldList 0 []
-      some (found, if complete then some instances else none)
+    Except MetadataError (Option (List (Nat × Nat) × Option Nat)) := do
+  let .ok row := index.typeDef token | return none
+  let stop ← if tokenRow token == index.header.rows Table.typeDef then
+    pure (some (index.header.rows Table.field + 1))
+  else do
+    let next ← checkedTokenOf Table.typeDef (tokenRow token + 1) .rowOverflow
+    pure ((index.typeDef next).toOption.map (·.fieldList))
+  let some stop := stop | return none
+  let (found, instances, complete) ← fieldCounts index (stop - row.fieldList) row.fieldList 0 []
+  return some (found, if complete then some instances else none)
 
 /-- The instance field counts of every carried type, as entries in ascending key order. -/
 private def fieldCountEntries (index : MetadataIndex) :
-    Except MetadataError (SearchTree Nat × SearchTree Nat) :=
-  let (before, total) := index.rows.toList.foldl (fun (before, total) (token, _) =>
-    if metadataTableOf token == Table.typeDef then
-      match typeCounts index token with
-      | some (found, some count) => (found ++ before, (token, count) :: total)
-      | some (found, none) => (found ++ before, total)
-      | none => (before, total)
-    else (before, total)) ([], [])
-  do .ok (← SearchTree.ofEntries before.reverse, ← SearchTree.ofEntries total.reverse)
+    Except MetadataError (SearchTree Nat × SearchTree Nat) := do
+  let (before, total) ← index.rows.toList.foldlM (fun (before, total) (token, _) => do
+    if metadataTableOf token != Table.typeDef then return (before, total)
+    match ← typeCounts index token with
+    | some (found, some count) => return (found ++ before, (token, count) :: total)
+    | some (found, none) => return (found ++ before, total)
+    | none => return (before, total)) ([], [])
+  return (← SearchTree.ofEntries before.reverse, ← SearchTree.ofEntries total.reverse)
 
 /-- Insert links into a list of entries keyed by kind and source, refusing a second link for one
     key. -/

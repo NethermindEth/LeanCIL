@@ -370,9 +370,34 @@ theorem coded_rows_fit_token :
       let field := 2 ^ bits
       let oversized := limit * field + tag
       gives (decodeCoded tags bits ((limit - 1) * field + tag)) (tokenOf 0x1A (limit - 1)) &&
-      failsWith (decodeCoded tags bits oversized) (.badCodedIndex oversized)) := by
+      [oversized, oversized + field].all (fun value =>
+        failsWith (decodeCoded tags bits value) (.badCodedIndex value))) := by
   decide +kernel
 #print axioms coded_rows_fit_token
+
+/-- A four-byte compressed TypeRef index cannot carry into the TypeDef table. -/
+theorem signature_rows_fit_token :
+    failsWith (decodeTypeSpec [0x11, 0xC4, 0, 0, 5]) (.badCodedIndex 0x04000005) := by
+  decide +kernel
+#print axioms signature_rows_fit_token
+
+/-- The nested and enclosing tokens from a NestedClass row with four-byte TypeDef indices. -/
+private def wideNestedClass (nested enclosing : List Nat) : Except MetadataError (Nat × Nat) := do
+  let index ← examplesSlice.index
+  let rows ← indexEntries [(0x29000001, nested ++ enclosing)]
+  let index := { index with rows, header.widths.typeDef := 4 }
+  let entry ← index.nestedClass 0x29000001
+  return (entry.nested, entry.enclosing)
+
+/-- Both simple indices retain rows zero and 0xffffff and reject a carry into another table. -/
+theorem nested_class_rows_fit_token :
+    let oversized := [1, 0, 0, 1]
+    let zero := [0, 0, 0, 0]
+    gives (wideNestedClass zero [255, 255, 255, 0]) (0x02000000, 0x02ffffff) ∧
+      failsWith (wideNestedClass oversized zero) (.rowOverflow Table.typeDef 0x1000001) ∧
+      failsWith (wideNestedClass zero oversized) (.rowOverflow Table.typeDef 0x1000001) := by
+  decide +kernel
+#print axioms nested_class_rows_fit_token
 
 /-! ## Slices that must be refused -/
 

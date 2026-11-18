@@ -168,4 +168,10 @@ theorem rejects_a_row_past_the_table :
   decide +kernel
 #print axioms rejects_a_row_past_the_table
 
+/-- An oversized claimed row fails before the auditor reads the TypeDef flags. -/
+theorem rejects_a_row_above_24_bits :
+    failsWith (check { shape with row := 0x1000001 }) (.rowOverflow 0x02 0x1000001) := by
+  decide +kernel
+#print axioms rejects_a_row_above_24_bits
+
 end Tests.StrictBinding.TypeDefs

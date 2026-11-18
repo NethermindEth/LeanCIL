@@ -150,6 +150,8 @@ bytes of a string literal, so the two kinds of comparison in the checker mean th
 and blobs stay kernel decisions. The equations cover the owner and base class names of a method
 (`MethodNames.Spell`), the method's own assembly against its pin, and each assembly's identity; the method's
 signature string is equated the same way.
+The checker and the raw-image audit both require a row to fit in 24 bits before forming its
+token. This also applies to simple index columns and to rows computed while walking a table.
 A method's evidence is a function of the method and its assemblies and of nothing else in the extraction,
 so a verified method's component is reused by every extraction that holds the method. The `RVA` column of every carried `MethodDef` row is zero: where a
 body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend

@@ -48,7 +48,7 @@ def streamFacts (name : String) (stream : Stream) : List Fact :=
     address. -/
 def methodFacts (view : ImageView) (layout : MetadataLayout) : Except AuditError (List Fact) :=
   (List.range (layout.rowCount 0x06)).filterMapM fun index => do
-    let rva ← layout.cell view (tokenOf 0x06 (index + 1)) 0
+    let rva ← layout.cellOfRow view 0x06 (index + 1) 0
     if rva == 0 then pure none
     else pure (some (.method (index + 1) rva (← mapRva layout.pe.sections rva 1)))
 

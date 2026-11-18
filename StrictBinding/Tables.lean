@@ -1,4 +1,5 @@
 import StrictBinding.Pe
+import CIL.Extraction.MetadataToken
 
 /-!
 # Metadata tables
@@ -235,7 +236,7 @@ def MetadataLayout.rows? (layout : MetadataLayout) (table : Nat) : Option TableR
 def MetadataLayout.rowCount (layout : MetadataLayout) (table : Nat) : Nat :=
   ((layout.rows? table).map (·.count)).getD 0
 
-/-- The metadata token of row `row` of `table`: the table number above the 1-based row number. -/
+/-- The metadata token of a table and a row already known to fit below its table byte. -/
 def tokenOf (table row : Nat) : Nat := table * 2 ^ 24 + row
 
 /-- The file offset of the row a token names, and its size; row zero and rows past the count are
@@ -325,5 +326,11 @@ def MetadataLayout.cell (layout : MetadataLayout) (view : ImageView) (token colu
     Except AuditError Nat := do
   let (offset, width) ← layout.cellAt token column
   view.u offset width
+
+/-- Read a column at a table and row after checking that the row fits in a token. -/
+def MetadataLayout.cellOfRow (layout : MetadataLayout) (view : ImageView)
+    (table row column : Nat) : Except AuditError Nat := do
+  let token ← CIL.Extraction.checkedTokenOf table row .rowOverflow
+  layout.cell view token column
 
 end StrictBinding

@@ -71,14 +71,9 @@ structure TypeDefClaim where
 /-- The table a token names a row of: its top byte. -/
 def tableOf (token : Nat) : Nat := token / 2 ^ 24
 
-/-- The token of TypeDef row `row`. -/
-def typeDefToken (row : Nat) : Nat := tokenOf CIL.Extraction.Table.typeDef row
-
-/-- The token of NestedClass row `row`. -/
-def nestedClassToken (row : Nat) : Nat := tokenOf CIL.Extraction.Table.nestedClass row
-
-/-- The token of the claimed TypeDef row. -/
-def TypeDefClaim.token (claim : TypeDefClaim) : Nat := typeDefToken claim.row
+/-- The token of the claimed TypeDef row, when its row number fits in 24 bits. -/
+def TypeDefClaim.token (claim : TypeDefClaim) : Except AuditError Nat :=
+  CIL.Extraction.checkedTokenOf CIL.Extraction.Table.typeDef claim.row .rowOverflow
 
 /-! ## Columns and flags -/
 
@@ -152,11 +147,11 @@ def nestedCount (image : PreparedImage) : Nat :=
 
 /-- The TypeDef row that NestedClass row `nestedRow` names as nested. -/
 def nestedTypeOf (image : PreparedImage) (nestedRow : Nat) : Except AuditError Nat :=
-  image.layout.cell image.view (nestedClassToken nestedRow) nestedTypeColumn
+  image.layout.cellOfRow image.view CIL.Extraction.Table.nestedClass nestedRow nestedTypeColumn
 
 /-- The TypeDef row that NestedClass row `nestedRow` names as enclosing. -/
 def enclosingOf (image : PreparedImage) (nestedRow : Nat) : Except AuditError Nat :=
-  image.layout.cell image.view (nestedClassToken nestedRow) enclosingTypeColumn
+  image.layout.cellOfRow image.view CIL.Extraction.Table.nestedClass nestedRow enclosingTypeColumn
 
 /-- NestedClass row `nestedRow` names a TypeDef row below `row`, or is row zero, before the
     table. -/
@@ -175,7 +170,7 @@ def NameAt (image : PreparedImage) (token column : Nat) (bytes : List Nat) : Pro
     the Field table for the last row (II.22.37). -/
 def fieldsEnd (image : PreparedImage) (row : Nat) : Except AuditError Nat :=
   if row < image.layout.rowCount CIL.Extraction.Table.typeDef then
-    image.layout.cell image.view (typeDefToken (row + 1)) typeDefFieldListColumn
+    image.layout.cellOfRow image.view CIL.Extraction.Table.typeDef (row + 1) typeDefFieldListColumn
   else pure (image.layout.rowCount CIL.Extraction.Table.field + 1)
 
 /-- A row at the top level has a top-level visibility and the stated NestedClass rows bracket it;
@@ -207,14 +202,14 @@ def BaseAt (image : PreparedImage) (baseValue : Nat) : BaseType → Prop
     rows and base type are the row's, and its kind is the one the row's flags and base type
     give. -/
 def TypeDefAt (image : PreparedImage) (claim : TypeDefClaim) : Prop :=
-  ∃ flags baseValue,
-    image.layout.cell image.view claim.token typeDefFlagsColumn = .ok flags ∧
-    NameAt image claim.token typeNameColumn claim.typeName ∧
-    NameAt image claim.token typeNamespaceColumn claim.typeNamespace ∧
+  ∃ token flags baseValue, claim.token = .ok token ∧
+    image.layout.cell image.view token typeDefFlagsColumn = .ok flags ∧
+    NameAt image token typeNameColumn claim.typeName ∧
+    NameAt image token typeNamespaceColumn claim.typeNamespace ∧
     NestingAt image claim.row flags claim.nesting ∧
-    image.layout.cell image.view claim.token typeDefFieldListColumn = .ok claim.fields.1 ∧
+    image.layout.cell image.view token typeDefFieldListColumn = .ok claim.fields.1 ∧
     fieldsEnd image claim.row = .ok (claim.fields.1 + claim.fields.2) ∧
-    image.layout.cell image.view claim.token typeDefExtendsColumn = .ok baseValue ∧
+    image.layout.cell image.view token typeDefExtendsColumn = .ok baseValue ∧
     BaseAt image baseValue claim.base ∧
     claim.kind = kindOf flags claim.typeNamespace claim.typeName claim.base
 
@@ -277,15 +272,16 @@ def baseBound (image : PreparedImage) (row baseValue : Nat) :
     one NestedClass row, the next TypeDef row's field list, the base row's two names and the
     four entries the names select, so its cost does not grow with the tables. -/
 def typeDefBound (image : PreparedImage) (claim : TypeDefClaim) : Except AuditError Unit := do
-  let flags ← image.layout.cell image.view claim.token typeDefFlagsColumn
-  nameBound image claim.token typeNameColumn claim.typeName claim.row .typeName
-  nameBound image claim.token typeNamespaceColumn claim.typeNamespace claim.row .typeNamespace
+  let token ← claim.token
+  let flags ← image.layout.cell image.view token typeDefFlagsColumn
+  nameBound image token typeNameColumn claim.typeName claim.row .typeName
+  nameBound image token typeNamespaceColumn claim.typeNamespace claim.row .typeNamespace
   nestingBound image claim.row flags claim.nesting
-  let first ← image.layout.cell image.view claim.token typeDefFieldListColumn
+  let first ← image.layout.cell image.view token typeDefFieldListColumn
   let next ← fieldsEnd image claim.row
   requirePart claim.row .fields
     (first == claim.fields.1 && next == claim.fields.1 + claim.fields.2)
-  let baseValue ← image.layout.cell image.view claim.token typeDefExtendsColumn
+  let baseValue ← image.layout.cell image.view token typeDefExtendsColumn
   baseBound image claim.row baseValue claim.base
   requirePart claim.row .kind
     (kindOf flags claim.typeNamespace claim.typeName claim.base == claim.kind)
@@ -488,6 +484,7 @@ theorem typeDefAt_of_typeDefBound {image : PreparedImage} (bounded : image.view.
     {claim : TypeDefClaim} (checked : typeDefBound image claim = .ok ()) :
     TypeDefAt image claim := by
   unfold typeDefBound at checked
+  obtain ⟨token, readToken, checked⟩ := except_bind_ok checked
   obtain ⟨flags, readFlags, checked⟩ := except_bind_ok checked
   obtain ⟨named, nameOk, checked⟩ := except_bind_ok checked
   cases named
@@ -506,7 +503,7 @@ theorem typeDefAt_of_typeDefBound {image : PreparedImage} (bounded : image.view.
   simp only [Bool.and_eq_true, beq_iff_eq] at fields
   have kind := requirePart_ok kindOk
   simp only [beq_iff_eq] at kind
-  exact ⟨flags, baseValue, readFlags, nameAt_of_nameBound bounded nameOk,
+  exact ⟨token, flags, baseValue, readToken, readFlags, nameAt_of_nameBound bounded nameOk,
     nameAt_of_nameBound bounded namespaceOk, nestingAt_of_nestingBound nestingOk,
     fields.1 ▸ readFirst, fields.2 ▸ readNext, readBase, baseAt_of_baseBound bounded baseOk,
     kind.symm⟩

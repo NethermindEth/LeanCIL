@@ -20,7 +20,7 @@ open CIL.Safety (except_bind_ok)
 /-- The key of row `row` of `table`: the values of the key columns, in order. -/
 def keyAt (image : PreparedImage) (table row : Nat) (key : List Nat) :
     Except AuditError (List Nat) :=
-  key.mapM fun column => image.layout.cell image.view (tokenOf table row) column
+  key.mapM fun column => image.layout.cellOfRow image.view table row column
 
 /-- Whether key `lower` is at most key `upper` in lexicographic order. -/
 def keyLe : List Nat → List Nat → Bool
@@ -134,10 +134,10 @@ theorem keysSorted_of_tablesSorted {images : List PinnedImage} {claims : List So
 /-- A one-column key is the column's value. -/
 theorem keyAt_single {image : PreparedImage} {table row column : Nat} {key : List Nat}
     (read : keyAt image table row [column] = .ok key) :
-    ∃ value, image.layout.cell image.view (tokenOf table row) column = .ok value ∧
+    ∃ value, image.layout.cellOfRow image.view table row column = .ok value ∧
       key = [value] := by
   unfold keyAt at read
-  cases cell : image.layout.cell image.view (tokenOf table row) column with
+  cases cell : image.layout.cellOfRow image.view table row column with
   | error error => simp [cell, List.mapM_cons, bind, Except.bind] at read
   | ok value =>
     simp only [cell, List.mapM_cons, List.mapM_nil, bind, Except.bind, pure, Except.pure,
@@ -160,8 +160,8 @@ theorem value_le_of_keysSorted {image : PreparedImage} {table column : Nat}
     (sorted : KeysSorted image table [column]) :
     ∀ {lower upper first last : Nat}, 1 ≤ lower → lower ≤ upper →
       upper ≤ image.layout.rowCount table →
-      image.layout.cell image.view (tokenOf table lower) column = .ok first →
-      image.layout.cell image.view (tokenOf table upper) column = .ok last → first ≤ last
+      image.layout.cellOfRow image.view table lower column = .ok first →
+      image.layout.cellOfRow image.view table upper column = .ok last → first ≤ last
   | lower, 0, _, _, low, ordered, _, _, _ => by omega
   | lower, upper + 1, first, last, low, ordered, inside, readFirst, readLast => by
     by_cases same : lower = upper + 1

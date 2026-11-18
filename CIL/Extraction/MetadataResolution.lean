@@ -207,7 +207,7 @@ def MetadataIndex.corlibIdentity (index : MetadataIndex) :
     Except MetadataError (Option (List Nat)) :=
   if index.corlib == 0 then .ok none
   else do
-    let token := tokenOf Table.assemblyRef index.corlib
+    let token ← checkedTokenOf Table.assemblyRef index.corlib .rowOverflow
     let row ← index.assemblyRef token
     if !corlibNames.contains (← index.string row.name) then throw (.unsupportedAssemblyRef token)
     .ok (some (← index.assemblyRefIdentity token))
@@ -236,7 +236,7 @@ def typeRefQualified (env : MetadataEnv) (position : Nat) :
 def firstInstanceField (index : MetadataIndex) : Nat → Nat → Except MetadataError (Option Nat)
   | 0, _ => .ok none
   | count + 1, row => do
-    let token := tokenOf Table.field row
+    let token ← checkedTokenOf Table.field row .rowOverflow
     let field ← index.field token
     if field.flags / 0x10 % 2 == 1 then firstInstanceField index count (row + 1)
     else .ok (some token)
@@ -246,7 +246,7 @@ def MetadataIndex.fieldEnd (index : MetadataIndex) (token : Nat) (row : TypeDefR
   if tokenRow token == index.header.rows Table.typeDef then
     .ok (index.header.rows Table.field + 1)
   else do
-    let next ← index.typeDef (token + 1)
+    let next ← index.typeDef (← checkedTokenOf Table.typeDef (tokenRow token + 1) .rowOverflow)
     if next.fieldList < row.fieldList then throw (.unresolvedType token)
     .ok next.fieldList
 
@@ -297,7 +297,7 @@ private def genericRun (index : MetadataIndex) (owner : Nat) :
   | fuel + 1, row =>
     if index.header.rows Table.genericParam < row then .ok []
     else do
-      let entry ← index.genericParam (tokenOf Table.genericParam row)
+      let entry ← index.genericParam (← checkedTokenOf Table.genericParam row .rowOverflow)
       if entry.owner != owner then .ok []
       else do .ok (entry :: (← genericRun index owner fuel (row + 1)))
 
@@ -308,7 +308,8 @@ def MetadataIndex.noGenericParameters (index : MetadataIndex) (owner : Nat) :
     Except MetadataError Unit := do
   let code := genericOwnerCode owner
   let codeAt (row : Nat) : Except MetadataError Nat := do
-    .ok (genericOwnerCode (← index.genericParam (tokenOf Table.genericParam row)).owner)
+    let token ← checkedTokenOf Table.genericParam row .rowOverflow
+    .ok (genericOwnerCode (← index.genericParam token).owner)
   let last := index.header.rows Table.genericParam
   let bracketed : Bool ← match index.genericOwners.above? code with
     | some (_, (first, _)) => do
@@ -334,10 +335,11 @@ def MetadataIndex.genericParameters (index : MetadataIndex) (position owner : Na
   | some (first, count) => do
     if (index.link linkGenericParams owner).any (· != (position, first)) then
       throw (.unresolvedMember owner)
-    if first != tokenOf Table.genericParam (tokenRow first) || tokenRow first == 0 then
+    if metadataTableOf first != Table.genericParam || tokenRow first == 0 then
       throw (.tokenOutOfScope first)
     if 1 < tokenRow first then
-      if (← index.genericParam (first - 1)).owner == owner then throw (.unresolvedMember owner)
+      let previous ← checkedTokenOf Table.genericParam (tokenRow first - 1) .rowOverflow
+      if (← index.genericParam previous).owner == owner then throw (.unresolvedMember owner)
     let run ← genericRun index owner (index.header.rows Table.genericParam) (tokenRow first)
     if run.length == count &&
         (run.zipIdx.all fun (entry, number) => entry.number == number) then .ok run

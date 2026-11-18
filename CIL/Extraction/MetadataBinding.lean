@@ -67,7 +67,9 @@ def MetadataEnv.declaringType (env : MetadataEnv) (position token : Nat) :
       let end_ ←
         if tokenRow owner == index.header.rows Table.typeDef then
           pure (index.header.rows Table.methodDef + 1)
-        else do .ok (← index.typeDef (owner + 1)).methodList
+        else do
+          let next ← checkedTokenOf Table.typeDef (tokenRow owner + 1) .rowOverflow
+          .ok (← index.typeDef next).methodList
       .ok (row.methodList, end_)
   if tokenRow token < start || stop ≤ tokenRow token then throw (.unresolvedMember token)
   .ok owner

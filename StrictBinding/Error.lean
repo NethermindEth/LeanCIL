@@ -76,6 +76,8 @@ inductive AuditError where
   | tables (error : TableError)
   /-- The token names a row the tables do not have. -/
   | tokenOutOfScope (token : Nat)
+  /-- The row number exceeds the three bytes available below the table byte. -/
+  | rowOverflow (table row : Nat)
   /-- A body is bound to a token that is not a MethodDef token. -/
   | notMethodDef (token : Nat)
   /-- The MethodDef row of the token has no IL body. -/
