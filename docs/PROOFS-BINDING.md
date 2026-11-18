@@ -705,11 +705,12 @@ the operand for every method whose environment is `Extracted.environment`. Each 
 kernel check, however many sites and methods use the operand, and the `cil_code` simprocs
 `reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it. The
 `cil_step` simprocs `reduceFieldLoad`, `reduceFieldStore` and `reduceFieldAddress` step a class
-field access by the equation for its slot, with the owner shown as the operand writes it; a
-closed method and operand without a fact resolve by compiled evaluation to the literal shape a
-fact would state, which the kernel checks again; `set_option cil.requireFieldShapeFacts true`
-makes that case an error instead, so a proof can require that every class field step reads a
-fact.
+field access by the equation for its slot, with the owner shown as the operand writes it, and a
+struct field access as the `fieldAt`, `setFieldAt`, `aggregateFieldAt`, `setAggregateFieldAt` or
+`fieldAddress` step of its shape (`step_ldfld_value_eq` and its siblings); a closed method and
+operand without a fact resolve by compiled evaluation to the literal shape a fact would state,
+which the kernel checks again; `set_option cil.requireFieldShapeFacts true` makes that case an
+error instead, so a proof can require that every field step reads a fact.
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared type, and a class instance
 field to the model slot of its index; `valueShape` gives a vector, including a floating-point

@@ -710,7 +710,7 @@ def FieldShape.ofLayout (layout : FieldLayout) (signed : Bool) : FieldShape :=
     whose address is never formed, and for an unsupported field. -/
 def FieldShape.structOffset? : FieldShape → Option Nat
   | .value offset .. | .aggregate offset _ => some offset
-  | .classSlot .. | .unsupported _ => none
+  | _ => none
 
 /-- The slot of a class instance field typed `type`, apart from the size of a struct array
     element, which only the environment's layouts know. -/

@@ -262,6 +262,20 @@ theorem inner_store_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step]
 #print axioms inner_store_is_lowered
 
+theorem inner_load_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+    (stack : List Safety.Value) :
+    Safety.step body (.ldfld innerField) 0 [] frame stack memory =
+      Safety.step body (.aggregateFieldAt 8 4) 0 [] frame stack memory := by
+  simp only [cil_step]
+#print axioms inner_load_is_lowered
+
+theorem inner_address_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+    (stack : List Safety.Value) :
+    Safety.step body (.ldflda innerField) 0 [] frame stack memory =
+      Safety.step body (.fieldAddress 8) 0 [] frame stack memory := by
+  simp only [cil_step]
+#print axioms inner_address_is_lowered
+
 theorem high_address_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :
     Safety.step body (.ldflda highField) 0 [] frame stack memory =
