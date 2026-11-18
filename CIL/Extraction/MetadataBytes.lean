@@ -871,15 +871,17 @@ def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
   return assemblySpelling parts.name version.major version.minor version.build version.revision
     parts.culture spelled
 
-/-- The assembly identity with the original name, culture, version and big-endian token. -/
-def MetadataIndex.assemblyRefName (index : MetadataIndex) (token : Nat) :
-    Except MetadataError AssemblyName := do
-  let parts <- index.assemblyRefParts token
+/-- The assembly identity when its name and culture fit the expected identity's byte lengths. -/
+def MetadataIndex.assemblyRefName (index : MetadataIndex) (token : Nat) (expected : AssemblyName) :
+    Except MetadataError (Option AssemblyName) := do
+  let parts ← index.assemblyRefParts token
+  if parts.name.length != expected.name.code.log2 / 8 ||
+      parts.culture.length != expected.culture.code.log2 / 8 then return none
   let some name := MetadataName.ofBytes? parts.name | throw (.unsupportedAssemblyRef token)
   let some culture := MetadataName.ofBytes? parts.culture | throw (.unsupportedAssemblyRef token)
   let some key := radixCode? 256 parts.publicKeyToken 0 | throw (.unsupportedAssemblyRef token)
-  return { name, version := parts.version, culture,
-           publicKeyToken := if parts.publicKeyToken.isEmpty then none else some key }
+  let publicKeyToken := if parts.publicKeyToken.isEmpty then none else some key
+  return some { name, version := parts.version, culture, publicKeyToken }
 
 /-- The identity an `Assembly` row spells, with the key token the assembly states. A key token is
     the SHA-1 of the public key, which the kernel does not compute: it is the stated token when

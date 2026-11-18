@@ -264,7 +264,7 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
           let index <- env.slice 0 token
           let scope := (<- index.typeRef reference).scope
           if metadataTableOf scope == Table.assemblyRef then
-            pure ((<- index.assemblyRefName scope) == runtimeAssembly)
+            pure ((← index.assemblyRefName scope runtimeAssembly) == some runtimeAssembly)
           else pure false
       | _, _ => pure false
     -- With no carried row, the reference's own signature is the item's only declaration.

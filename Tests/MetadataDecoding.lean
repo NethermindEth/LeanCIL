@@ -1,4 +1,6 @@
 import CIL.Extraction.Signatures
+import CIL.TypeExpr
+import Lean
 
 /-!
 # Metadata table and heap decoding tests
@@ -498,6 +500,40 @@ theorem rejects_an_assembly_reference_with_a_full_key :
       (·.assemblyRefIdentity 0x23000001))
       (.unsupportedAssemblyRef 0x23000001) = true := by decide +kernel
 #print axioms rejects_an_assembly_reference_with_a_full_key
+
+/-- A rejected reference name of any tested length needs no constructed assembly identity. -/
+private def skipsLongName (length : Nat) : Bool := Id.run do
+  let long := List.replicate length 65 ++ [0]
+  let row := (examplesRows.lookup 0x23000001).getD []
+  let rejected := fun name culture =>
+    let strings := [(7, culture), (6105, name)]
+    let rows := [(0x23000001, row.set 16 7)]
+    gives (({ examplesSlice with strings, rows }.index.bind fun index =>
+      index.assemblyRefName 0x23000001 runtimeAssembly)) none
+  return rejected long [0] && rejected (runtimeAssembly.name.bytes?.getD [] ++ [0]) long
+
+open Lean Meta Elab Command in
+run_cmd do
+  let perByteBudget := 1850
+  let mut previousSize := 0
+  let mut previousCost := 0
+  let mut exceeded := false
+  for length in [64, 256, 1024] do
+    let (statement, proof) ← liftTermElabM do
+      let exercise := mkApp (mkConst ``skipsLongName) (mkNatLit length)
+      let statement ← mkEq exercise (mkConst ``Bool.true)
+      pure (statement, ← mkEqRefl (mkConst ``Bool.true))
+    let start ← IO.getNumHeartbeats
+    match Kernel.check (← getEnv) {} (.letE `checked statement proof (.bvar 0) false) with
+    | .error error => throwKernelException error
+    | .ok _ => pure ()
+    let cost := (← IO.getNumHeartbeats) - start
+    logInfo m!"assembly name and culture: {length} bytes, {cost} kernel heartbeats"
+    if previousSize != 0 then
+      exceeded := exceeded || cost - previousCost > perByteBudget * (length - previousSize)
+    previousSize := length
+    previousCost := cost
+  if exceeded then throwError "assembly name and culture exceeded the per-byte heartbeat budget"
 
 /-! ## Signatures -/
 
