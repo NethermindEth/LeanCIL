@@ -213,6 +213,14 @@ def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classO
     .ok (inherited + before)
   else .ok before
 
+/-- Storage width of a primitive field signature on the supported 64-bit profiles. -/
+private def primitiveWidth : Nat -> Option Nat
+  | 0x02 | 0x04 | 0x05 => some 1
+  | 0x03 | 0x06 | 0x07 => some 2
+  | 0x08 | 0x09 => some 4
+  | 0x0A | 0x0B | 0x18 | 0x19 => some 8
+  | _ => none
+
 /-- The index a field operand must carry, and the type it must hold. A field signature's `!n`
     names the declaring type's parameter, so the held type reads it as the declaring instance's
     argument, which may itself be a parameter of the reading method or its owner. No carried
@@ -238,8 +246,9 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
   | none =>
     -- The pair is known by its own reference, never by the slice's `corlib` number.
     let pair := match site.owner with
-      | .genericInst head arguments =>
-        arguments.toList.length == 2 && isCorlibScope head.scope &&
+      | .genericInst head (.cons (.primitive first) (.cons (.primitive second) .nil)) =>
+        (primitiveWidth first).any (fun width => primitiveWidth second == some width) &&
+          isCorlibScope head.scope &&
           head.parts == [systemNamespace, valueTuplePairName]
       | _ => false
     -- With no carried row, the reference's own signature is the item's only declaration.

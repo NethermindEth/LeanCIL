@@ -1035,17 +1035,16 @@ theorem refuses_a_method_parameter_past_the_arity :
 
 /-! ## Facts read from a type's own reference -/
 
-/-- `T` with `System.ValueTuple<Lib.Pair, Lib.Pair>` and references to its fields `Item1` and
+/-- `T` with `System.ValueTuple<int, int>` and references to its fields `Item1` and
     `Item2` whose field signatures end with the type bytes `first` and `second`. -/
 private def tupleWorldWith (first second : List Nat) : Step (Nat × Nat) := do
-  let tokens ← ownWorld
+  let _ <- ownWorld
   let tupleName ← string "ValueTuple`2"
   let systemName ← string "System"
   let firstName ← string "Item1"
   let secondName ← string "Item2"
   let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
-  let pair := (tokens.pairRef - 0x01000000) * 4 + 1
-  let tupleBlob ← blob [0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2, 0x11, pair, 0x11, pair]
+  let tupleBlob <- blob [0x15, 0x11, typeRefCoded tupleRef, 2, 0x08, 0x08]
   let tupleSpec ← row Table.typeSpec [tupleBlob]
   let firstSignature ← blob (0x06 :: first)
   let secondSignature ← blob (0x06 :: second)
@@ -1054,8 +1053,7 @@ private def tupleWorldWith (first second : List Nat) : Step (Nat × Nat) := do
   let secondRef ← row Table.memberRef [parent, secondName, secondSignature]
   pure (firstRef, secondRef)
 
-/-- The tuple world with `Item1 : !0` and `Item2 : !1`, as a method that names no primitive
-    type reads them. -/
+/-- The tuple world with `Item1 : !0` and `Item2 : !1`. -/
 private def tupleWorld : Step (Nat × Nat) := tupleWorldWith [0x13, 0x00] [0x13, 0x01]
 
 /-- The tuple world's slice with the given core-library number, and its field tokens. -/
@@ -1063,22 +1061,22 @@ private def tupleSlice (corlib : Nat) : MetadataSlice × Nat × Nat :=
   let (slice, fields) := build tupleWorld (bytesOf "T") ownIdentity
   ({ slice with corlib := corlib }, fields)
 
-/-- The pair as the extractor names it, and its element. -/
+/-- The pair as the extractor names it. -/
 private def pairTuple : TypeExpr :=
-  .aggregate (runtimeScope ++ "::System.ValueTuple`2<Lib.Pair,Lib.Pair>") 0
-private def pairAtom : TypeExpr := .atom libScope "Lib.Pair"
+  .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32>") 0
 
 /-- The pair's instance field at `index` with `name`. -/
 private def pairField (index : Nat) (name : MetadataName) : RawOperand :=
-  .field pairTuple index pairAtom name false
+  .field pairTuple index int32 name false
 
-/-- `Item2` of the pair is its second field whatever the slice's core-library number says: the
-    pair is known from its own reference to `System.Runtime`, so `Item2` claimed at index 0 is
-    refused with the number right, missing or naming no reference. -/
+/-- The pair's reference determines its field indices even without a core-library number.
+    Checking the held primitive at the correct index also requires its scope. -/
 theorem reads_the_pair_from_its_own_reference :
     passes (tupleSlice 1).1 lib (tupleSlice 1).2.2 (pairField 1 name!"Item2") = true ∧
-    passes (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 1 name!"Item2") = true ∧
-    passes (tupleSlice 0).1 lib (tupleSlice 0).2.1 (pairField 0 name!"Item1") = true ∧
+    rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 1 name!"Item2")
+      (.operandMismatch (tupleSlice 0).2.2) = true /\
+    rejects (tupleSlice 0).1 lib (tupleSlice 0).2.1 (pairField 0 name!"Item1")
+      (.operandMismatch (tupleSlice 0).2.1) = true /\
     rejects (tupleSlice 1).1 lib (tupleSlice 1).2.2 (pairField 0 name!"Item2")
       (.fieldIndexMismatch (tupleSlice 1).2.2 0 1) = true ∧
     rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 0 name!"Item2")

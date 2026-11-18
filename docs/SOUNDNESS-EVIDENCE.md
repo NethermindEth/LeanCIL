@@ -198,10 +198,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
   allows. An instance field access needs its owner's definition in a carried slice, which gives the
-  field's index; the one exception is a field of a platform ``ValueTuple`2``, which reads as the
-  pair's first or second item only when the pair's own `TypeRef` is scoped by a core-library
-  assembly; such an `Item1` or `Item2` whose reference declares it as other than `!0` or `!1`
-  respectively fails with `operandMismatch`. Any other instance field of an owner outside the
+  field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its own
+  `TypeRef` names a core-library assembly and both arguments are primitive integers, booleans
+  or chars of the same storage width (1, 2, 4 or 8 bytes, including 8 for native integers).
+  The field references must declare `Item1` as `!0` and `Item2` as `!1`, or the check fails
+  with `operandMismatch`. Any other instance field of an owner outside the
   carried slices, and any other member of the pair, fails with `unboundInstanceField`. A static
   field access by `ldsfld`, `ldsflda`, `stsfld` or a field `ldtoken` likewise needs its owner's
   definition in a carried slice and otherwise fails with `unboundStaticField`; the one exception is

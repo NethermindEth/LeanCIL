@@ -14,8 +14,8 @@ its parameter names, and is no valid translation with the access at the slot of 
 parameterless `M()` that reaches `Y` of the class through `ldnull` names `Ext.Point` only in
 the operand and fails on the `Y` token. An operand that flags `Y` static fails on its token for
 the struct and for the parameterless class method, since no carried row gives a static of
-`Ext.Point` either, and on the signature for `M(Ext.Point)`. Of the platform pair
-`ValueTuple<int, int>`, `Item1` and `Item2` keep indices 0 and 1 and any other member is refused.
+`Ext.Point` either, and on the signature for `M(Ext.Point)`. The platform pair binds `Item1`
+and `Item2` at indices 0 and 1 for primitive arguments of equal storage width.
 -/
 
 namespace Tests.ImportedFieldIndex
@@ -264,10 +264,13 @@ theorem static_flagged_access_of_y_rejected :
 
 /-! ## The platform pair -/
 
+/-- A fixture that returns the member tokens for Item1, Item2 and Rest in that order. -/
+private abbrev PairWorld := Step (Prod Nat (Prod Nat Nat))
+
 /-- `T` with `System.ValueTuple` over the argument type bytes `arguments` and its members
     `Item1 : !0`, `Item2` with the signature type bytes `second` and `Rest : !0`, the last a
     member the pair does not declare. -/
-private def pairWorldWith (arguments second : List Nat) : Step (Nat × Nat × Nat) := do
+private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01]) : PairWorld := do
   let runtimeName ← string "System.Runtime"
   let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
   let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
@@ -289,7 +292,7 @@ private def pairWorldWith (arguments second : List Nat) : Step (Nat × Nat × Na
   pure (firstRef, secondRef, restRef)
 
 /-- `ValueTuple<int, int>` with `Item2 : !1`. -/
-private def pairWorld : Step (Nat × Nat × Nat) := pairWorldWith [0x08, 0x08] [0x13, 0x01]
+private def pairWorld : PairWorld := pairWorldWith [0x08, 0x08]
 
 private def pairSlice : MetadataSlice × Nat × Nat × Nat :=
   build pairWorld (bytesOf "T") pin.identity
@@ -298,8 +301,9 @@ private def pair : TypeExpr :=
   .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32>") 0
 
 /-- The error checking `operand` against `token` of the pair world gives, if any. -/
-private def checkPair (token : Nat) (operand : RawOperand) : Option MetadataError :=
-  match (do checkEntry (MetadataEnv.ofSlices [← pairSlice.1.index]) 0 token operand) with
+private def checkPair (token : Nat) (operand : RawOperand) (slice := pairSlice.1) :
+    Option MetadataError :=
+  match (do checkEntry (MetadataEnv.ofSlices [<- slice.index]) 0 token operand) with
   | .ok _ => none
   | .error found => some found
 
@@ -319,9 +323,7 @@ theorem pair_items_bound_and_other_members_refused :
 private def checkSecond (arguments second : List Nat) (operand : RawOperand) :
     Option MetadataError :=
   let (slice, _, token, _) := build (pairWorldWith arguments second) (bytesOf "T") pin.identity
-  match (do checkEntry (MetadataEnv.ofSlices [← slice.index]) 0 token operand) with
-  | .ok _ => none
-  | .error found => some found
+  checkPair token operand slice
 
 /-- `ValueTuple<int, uint>` as the extractor names it. -/
 private def mixedPair : TypeExpr :=
@@ -339,5 +341,58 @@ theorem pair_second_item_reads_its_own_declaration :
     (checkSecond [0x08, 0x09] [0x13, 0x01] (.field mixedPair 1 int32 name!"Item2" false)).isSome =
       true := by decide +kernel
 #print axioms pair_second_item_reads_its_own_declaration
+
+/-- The field reference at the requested item position, checked against its claimed type. -/
+private def itemError (world : PairWorld) (index : Nat) (owner held : TypeExpr) :
+    Option MetadataError :=
+  let (slice, first, second, _) := build world (bytesOf "T") pin.identity
+  if index == 0 then checkPair first (.field owner index held name!"Item1" false) slice
+  else checkPair second (.field owner index held name!"Item2" false) slice
+
+/-- The extractor's aggregate operand for two tuple arguments in the given assembly. -/
+private def tupleOwner (first second : String) (scope := runtimeScope) (layout := 0) : TypeExpr :=
+  .aggregate (scope ++ "::System.ValueTuple`2<" ++ first ++ "," ++ second ++ ">") layout
+
+/-- The outer tuple holds the inner pair in its first field. -/
+private def nestedWorld := pairWorldWith [0x15, 0x11, 5, 2, 0x08, 0x08, 0x08]
+
+/-- The nested tuple has its own layout after the inner pair. -/
+private def nestedOwner := tupleOwner "System.ValueTuple`2<System.Int32,System.Int32>"
+  "System.Int32" (layout := 1)
+
+/-- An aggregate argument prevents binding the outer pair's first item. -/
+theorem refuses_nested_first_item :
+    itemError nestedWorld 0 nestedOwner pair = some (.unboundInstanceField 0x0A000001) := by
+  decide +kernel
+#print axioms refuses_nested_first_item
+
+/-- The scalar second item of the same outer pair has no certified index either. -/
+theorem refuses_nested_second_item :
+    itemError nestedWorld 1 nestedOwner int32 = some (.unboundInstanceField 0x0A000002) := by
+  decide +kernel
+#print axioms refuses_nested_second_item
+
+/-- A pair with unequal primitive widths has no certified field order. -/
+theorem refuses_unequal_width_pair :
+    itemError (pairWorldWith [0x08, 0x0A]) 0 (tupleOwner "System.Int32" "System.Int64") int32 =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_unequal_width_pair
+
+/-- CoreCLR places the four-byte Item2 of (byte, uint) at offset 0. Its index cannot certify
+    the sequential offset 4, even when the MemberRef correctly declares Item2 as !1. -/
+theorem refuses_byte_uint_second_item :
+    checkSecond [0x05, 0x09] [0x13, 0x01]
+      (.field (tupleOwner "System.Byte" "System.UInt32") 1 (.atom runtimeScope "System.UInt32")
+        name!"Item2" false) = some (.unboundInstanceField 0x0A000002) := by decide +kernel
+#print axioms refuses_byte_uint_second_item
+
+/-- Equal widths preserve both field positions across distinct primitive types. -/
+theorem binds_equal_width_items :
+    let bytes := pairWorldWith [0x05, 0x02]
+    let owner := tupleOwner "System.Byte" "System.Boolean"
+    itemError (pairWorldWith [0x08, 0x09]) 0 mixedPair int32 = none /\
+    itemError bytes 0 owner (.atom runtimeScope "System.Byte") = none /\
+    itemError bytes 1 owner (.atom runtimeScope "System.Boolean") = none := by decide +kernel
+#print axioms binds_equal_width_items
 
 end Tests.ImportedFieldIndex
