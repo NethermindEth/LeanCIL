@@ -217,8 +217,9 @@ def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classO
     names the declaring type's parameter, so the held type reads it as the declaring instance's
     argument, which may itself be a parameter of the reading method or its owner. No carried
     row gives a field of an owner no carried slice defines, so such a field is refused except
-    as an item of the platform pair, read as an instance field, and as the `platform` constant
-    field; any other member of the pair is refused too. -/
+    as an item of the platform pair, read as an instance field whose reference declares it as
+    the pair's own parameter (`!0` for `Item1`, `!1` for `Item2`), and as the `platform`
+    constant field; any other member of the pair is refused too. -/
 def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSite)
     (classOwner isStatic platform : Bool) :
     Except MetadataError (Nat × ResolvedType × Option Bool) := do
@@ -238,19 +239,19 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
     -- The pair is known by its own reference, never by the slice's `corlib` number.
     let pair := match site.owner with
       | .genericInst head arguments =>
-        match arguments.toList with
-        | [first, second] =>
-          if isCorlibScope head.scope && head.parts == [systemNamespace, valueTuplePairName] then
-            some (first, second)
-          else none
-        | _ => none
-      | _ => none
-    match pair with
-    | some (first, second) =>
-      if site.name == firstItemName then .ok (0, first, some false)
-      else if site.name == secondItemName then .ok (1, second, some false)
+        arguments.toList.length == 2 && isCorlibScope head.scope &&
+          head.parts == [systemNamespace, valueTuplePairName]
+      | _ => false
+    -- With no carried row, the reference's own signature is the item's only declaration.
+    if pair then
+      if site.name == firstItemName then
+        if site.declared != .var 0 then throw (.operandMismatch token)
+        else .ok (0, held, some false)
+      else if site.name == secondItemName then
+        if site.declared != .var 1 then throw (.operandMismatch token)
+        else .ok (1, held, some false)
       else throw (.unboundInstanceField token)
-    | none =>
+    else
       if !isStatic then throw (.unboundInstanceField token)
       else if platform then .ok (0, held, none)
       else throw (.unboundStaticField token)

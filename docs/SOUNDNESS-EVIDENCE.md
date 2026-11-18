@@ -195,7 +195,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   allows. An instance field access needs its owner's definition in a carried slice, which gives the
   field's index; the one exception is a field of a platform ``ValueTuple`2``, which reads as the
   pair's first or second item only when the pair's own `TypeRef` is scoped by a core-library
-  assembly. Any other instance field of an owner outside the carried slices, and any other member
+  assembly and the reference's signature declares `Item1` as `!0` or `Item2` as `!1`, and
+  otherwise fails with `operandMismatch`. Any other instance field of an owner outside the carried slices, and any other member
   of the pair, fails with `unboundInstanceField`. A static field access by `ldsfld`, `ldsflda`,
   `stsfld` or a field `ldtoken` likewise needs its owner's definition in a carried slice and
   otherwise fails with `unboundStaticField`; the one exception is System.Runtime's

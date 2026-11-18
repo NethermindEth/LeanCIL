@@ -1014,9 +1014,9 @@ theorem refuses_a_method_parameter_past_the_arity :
 
 /-! ## Facts read from a type's own reference -/
 
-/-- `T` with `System.ValueTuple<Lib.Pair, Lib.Pair>` and its fields `Item1 : !0` and
-    `Item2 : !1`, as a method that names no primitive type reads them. -/
-private def tupleWorld : Step (Nat × Nat) := do
+/-- `T` with `System.ValueTuple<Lib.Pair, Lib.Pair>` and references to its fields `Item1` and
+    `Item2` whose field signatures end with the type bytes `first` and `second`. -/
+private def tupleWorldWith (first second : List Nat) : Step (Nat × Nat) := do
   let tokens ← ownWorld
   let tupleName ← string "ValueTuple`2"
   let systemName ← string "System"
@@ -1026,12 +1026,16 @@ private def tupleWorld : Step (Nat × Nat) := do
   let pair := (tokens.pairRef - 0x01000000) * 4 + 1
   let tupleBlob ← blob [0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2, 0x11, pair, 0x11, pair]
   let tupleSpec ← row Table.typeSpec [tupleBlob]
-  let firstSignature ← blob [0x06, 0x13, 0x00]
-  let secondSignature ← blob [0x06, 0x13, 0x01]
+  let firstSignature ← blob (0x06 :: first)
+  let secondSignature ← blob (0x06 :: second)
   let parent := (tupleSpec - 0x1B000000) * 8 + 4
   let firstRef ← row Table.memberRef [parent, firstName, firstSignature]
   let secondRef ← row Table.memberRef [parent, secondName, secondSignature]
   pure (firstRef, secondRef)
+
+/-- The tuple world with `Item1 : !0` and `Item2 : !1`, as a method that names no primitive
+    type reads them. -/
+private def tupleWorld : Step (Nat × Nat) := tupleWorldWith [0x13, 0x00] [0x13, 0x01]
 
 /-- The tuple world's slice with the given core-library number, and its field tokens. -/
 private def tupleSlice (corlib : Nat) : MetadataSlice × Nat × Nat :=
@@ -1059,6 +1063,23 @@ theorem reads_the_pair_from_its_own_reference :
     rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 0 name!"Item2")
       (.fieldIndexMismatch (tupleSlice 0).2.2 0 1) = true := by decide +kernel
 #print axioms reads_the_pair_from_its_own_reference
+
+/-- The tuple world with `Item1` declared `int64`, and its field tokens. -/
+private def wideTuple : MetadataSlice × Nat × Nat :=
+  build (tupleWorldWith [0x0A] [0x13, 0x01]) (bytesOf "T") ownIdentity
+
+/-- The tuple world with `Item1` declared `!1`, and its field tokens. -/
+private def swappedTuple : MetadataSlice × Nat × Nat :=
+  build (tupleWorldWith [0x13, 0x01] [0x13, 0x01]) (bytesOf "T") ownIdentity
+
+/-- With no carried row a reference's signature is the item's only declaration, so `Item1`
+    declared `int64` or `!1` is refused although the operand holds the pair's first argument. -/
+theorem refuses_a_pair_item_declared_otherwise :
+    rejects wideTuple.1 lib wideTuple.2.1 (pairField 0 name!"Item1")
+      (.operandMismatch wideTuple.2.1) = true ∧
+    rejects swappedTuple.1 lib swappedTuple.2.1 (pairField 0 name!"Item1")
+      (.operandMismatch swappedTuple.2.1) = true := by decide +kernel
+#print axioms refuses_a_pair_item_declared_otherwise
 
 /-- A `Lib` whose class `Lib.Outer` encloses `Leaf` twice, with namespace columns `A` and `B`,
     and `Mid` twice, with columns `A` and `B`, each enclosing an `Inner` of its own. -/
