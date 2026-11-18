@@ -739,8 +739,9 @@ raw site. Compiled code evaluates the decoder, and the command writes the result
 over numerals, except that a field whose type is that of a constant passed to the decoder, such as
 the profile, the environment and the link table, is written as that constant, and a
 zero-initialized struct local is written as `.aggregate (List.replicate size 0)`, the term an
-extraction's literal and `make_fitting_local` hypotheses name. The kernel
-then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
+extraction's literal and `make_fitting_local` hypotheses name. In a method with a constrained call,
+the command writes aggregate identities with the expressions from the environment's raw layouts.
+The kernel then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
 `_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are

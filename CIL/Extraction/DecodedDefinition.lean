@@ -15,8 +15,8 @@ extractor writes supplies any part of the method. A field whose type is that of 
 passed to the decoder, such as an extraction's `profile`, `environment` and link table, is written
 as that constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand
 equal to a listed `FieldRef` constant as that constant, as an extraction's literal names it, so
-the facts `cil_field_shape` states about the constant apply. Neither the compiled evaluation nor
-that choice is trusted: the kernel checks `name_decoder_eq` and every fact.
+the facts `cil_field_shape` states about the constant apply. A decoded constrained call keeps
+the identity expressions from its raw layouts. The kernel checks `name_decoder_eq` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -165,6 +165,34 @@ unsafe def evaluateFieldUnsafe (field : Expr) : MetaM Extraction.FieldRef :=
 @[implemented_by evaluateFieldUnsafe]
 opaque evaluateField (field : Expr) : MetaM Extraction.FieldRef
 
+/-- Each named environment shares its raw aggregate identity expressions across decoded methods. -/
+private initialize layoutIdentityCache : EnvExtension (NameMap (Std.HashMap Expr Expr)) ←
+  registerEnvExtension (pure {}) (asyncMode := .local)
+
+/-- The raw layout expressions for identity strings used by a decoded constrained call.
+    Reusing the expressions lets the kernel compare aggregate receivers by their source terms. -/
+private def constrainedLayoutIdentities (decoder : Expr) (method : Method) :
+    MetaM (Std.HashMap Expr Expr) := do
+  let_expr CIL.Method.ofClosed? _ environment _ _ _ := decoder | return {}
+  let .const name _ := environment | return {}
+  unless method.code.any (fun
+      | .call _ prefixes => prefixes.constrained.isSome
+      | _ => false) do return {}
+  if let some identities := (layoutIdentityCache.getState (← getEnv)).find? name then
+    return identities
+  let mut entries := mkApp (mkConst ``LayoutEnvironment.rawLayouts) environment
+  let mut identities := {}
+  for layout in method.environment.rawLayouts do
+    let (``List.cons, #[_, entry, tail]) := (← kernelWhnf entries).getAppFnArgs | break
+    let raw ← kernelWhnf entry
+    unless raw.isAppOf ``RawLayout.mk do break
+    let identity := raw.getArg! 0
+    unless identity.isStringLit do
+      identities := identities.insert (mkStrLit layout.identity) identity
+    entries := tail
+  modifyEnv (layoutIdentityCache.modifyState · (·.insert name identities))
+  return identities
+
 /-- The term `method` denotes, with each field whose type is that of a constant in `passed`
     written as that constant and every other field as its constructors. -/
 def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
@@ -271,8 +299,9 @@ elab_rules : command
       fieldNames := fieldNames.push fieldName
     let some method ← evaluate decoder
       | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
+    let identities ← constrainedLayoutIdentities decoder method
     let named (term : Expr) : Option Expr :=
-      if passed.contains term then some term else fieldConstants.get? term
+      if passed.contains term then some term else fieldConstants.get? term <|> identities.get? term
     let written ← literal named methodType (← methodTerm passed method)
     let fields := getStructureFields (← getEnv) ``CIL.Method
     let some localsPosition := fields.idxOf? `locals
