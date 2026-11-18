@@ -279,10 +279,10 @@ internal static partial class Program
             var assemblySnapshot = batch?.ReadAssembly(assemblyPath);
             byte[] assembly = assemblySnapshot?.Bytes ?? File.ReadAllBytes(assemblyPath);
             stage = "metadata and CIL validation";
-            if (assemblySnapshot is null) VectorSignatures.Validate(assembly);
-            else assemblySnapshot.ValidateSignatures();
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             var assemblyHash = assemblySnapshot?.Hash ?? Hash(assembly);
+            assemblySnapshot ??= new(assembly, assemblyHash);
+            assemblySnapshot.ValidateSignatures();
             List<PinnedAssemblies.Source> referenceSources = [];
             JsonElement[] recordedReferences = recorded is { } pinnedGraph &&
                 pinnedGraph.TryGetProperty("references", out JsonElement pinnedRecords)
@@ -295,7 +295,7 @@ internal static partial class Program
                     global::Program.ExtractionIdentity.Resolve(output, pin.GetProperty("path").GetString()!),
                     pin.GetProperty("sha256").GetString()!));
             referenceSources.AddRange(referencePaths.Select(path => new PinnedAssemblies.Source(path)));
-            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources,
+            using PinnedAssemblies pinned = new(assemblySnapshot, referenceSources,
                 batch is null ? null : batch.ReadAssembly);
             ModuleDefinition module = pinned.Selected;
             foreach ((JsonElement record, var reference) in recordedReferences.Zip(pinned.References))

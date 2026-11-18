@@ -83,27 +83,35 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// referenced assembly's bytes and hash, so a batch of extractions reads each reference once.</summary>
     internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources,
         Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference = null)
+        : this(new Program.ExtractionBatch.AssemblySnapshot(selected, selectedHash), sources, readReference) { }
+
+    /// <summary>A batch shares each immutable image's signature check across extraction requests.</summary>
+    internal PinnedAssemblies(Program.ExtractionBatch.AssemblySnapshot snapshot, IEnumerable<Source> sources,
+        Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference)
     {
         Signatures = new(this);
         previous = active;
         try
         {
+            snapshot.ValidateSignatures();
+            byte[] selected = snapshot.Bytes;
             Selected = ReadPin(selected);
-            SelectedPin = new(Selected.Assembly.Name.FullName, Selected.Mvid, selectedHash);
+            SelectedPin = new(Selected.Assembly.Name.FullName, Selected.Mvid, snapshot.Hash);
             AssemblyName selectedIdentity = IdentityOf(Selected.Assembly.Name);
             modules.Add(selectedIdentity, Selected);
             byName.TryAdd(selectedIdentity.Name, Selected);
             AddOriginal(Selected, selected);
             foreach (Source source in sources)
             {
-                byte[] bytes;
-                string hash;
-                if (readReference?.Invoke(source.Path) is { } image) (bytes, hash) = (image.Bytes, image.Hash);
-                else hash = Convert.ToHexStringLower(SHA256.HashData(bytes = File.ReadAllBytes(source.Path)));
+                var image = readReference?.Invoke(source.Path);
+                byte[] bytes = image?.Bytes ?? File.ReadAllBytes(source.Path);
+                string hash = image?.Hash ?? Convert.ToHexStringLower(SHA256.HashData(bytes));
                 if (source.ExpectedSha256 is { } expected && !string.Equals(expected, hash, StringComparison.Ordinal))
                     throw new InvalidDataException(
                         $"Referenced assembly hash mismatch: {CliPaths.Display(source.Path)}\n" +
                         $"  Expected SHA-256: {expected}\n  Actual SHA-256: {hash}");
+                if (image is null) PlatformSignatures.Validate(bytes);
+                else image.ValidateSignatures();
                 ModuleDefinition module = ReadPin(bytes);
                 string identity = module.Assembly.Name.FullName;
                 AssemblyName key = IdentityOf(module.Assembly.Name);

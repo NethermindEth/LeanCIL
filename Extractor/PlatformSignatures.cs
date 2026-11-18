@@ -5,8 +5,10 @@ using System.Reflection.PortableExecutable;
 
 namespace Nethermind.LeanCIL;
 
-internal sealed class VectorSignatures : ISignatureTypeProvider<bool, object?>
+/// <summary>Checks each platform type's class or value-type marker before Cecil caches its head.</summary>
+internal sealed class PlatformSignatures(PEReader source) : ISignatureTypeProvider<bool, object?>
 {
+    MetadataImage? image;
     readonly HashSet<TypeSpecificationHandle> active = [];
     readonly HashSet<TypeSpecificationHandle> checkedTypes = [];
 
@@ -14,7 +16,7 @@ internal sealed class VectorSignatures : ISignatureTypeProvider<bool, object?>
     {
         using PEReader image = new(new MemoryStream(assembly));
         MetadataReader reader = image.GetMetadataReader();
-        VectorSignatures provider = new();
+        PlatformSignatures provider = new(image);
         foreach (FieldDefinitionHandle handle in reader.FieldDefinitions)
             reader.GetFieldDefinition(handle).DecodeSignature(provider, null);
         foreach (MethodDefinitionHandle handle in reader.MethodDefinitions)
@@ -36,7 +38,8 @@ internal sealed class VectorSignatures : ISignatureTypeProvider<bool, object?>
         for (int row = 1; row <= reader.GetTableRowCount(TableIndex.TypeSpec); row++)
             provider.GetTypeFromSpecification(reader, null, MetadataTokens.TypeSpecificationHandle(row), 0);
         for (int row = 1; row <= reader.GetTableRowCount(TableIndex.MethodSpec); row++)
-            reader.GetMethodSpecification(MetadataTokens.MethodSpecificationHandle(row)).DecodeSignature(provider, null);
+            reader.GetMethodSpecification(MetadataTokens.MethodSpecificationHandle(row))
+                .DecodeSignature(provider, null);
     }
 
     static bool Check(MetadataReader reader, StringHandle scope, StringHandle name, byte kind)
@@ -45,7 +48,8 @@ internal sealed class VectorSignatures : ISignatureTypeProvider<bool, object?>
             (reader.StringComparer.Equals(name, "Vector128`1") || reader.StringComparer.Equals(name, "Vector256`1") ||
                 reader.StringComparer.Equals(name, "Vector512`1")) &&
             kind != (byte)SignatureTypeKind.ValueType)
-            throw new InvalidDataException("Unsupported vector type encoding: " + reader.GetString(name) + " must use a value-type signature.");
+            throw new InvalidDataException(
+                $"Unsupported vector type encoding: {reader.GetString(name)} must use a value-type signature.");
         return false;
     }
 
@@ -58,13 +62,25 @@ internal sealed class VectorSignatures : ISignatureTypeProvider<bool, object?>
     public bool GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
     {
         TypeReference type = reader.GetTypeReference(handle);
+        if (rawTypeKind != (byte)SignatureTypeKind.ValueType &&
+            type.ResolutionScope.Kind == HandleKind.AssemblyReference &&
+            reader.StringComparer.Equals(type.Name, "ValueTuple`2") &&
+            reader.StringComparer.Equals(type.Namespace, "System"))
+        {
+            var metadata = image ??= new MetadataImage(source);
+            if (metadata.AssemblyIdentity((uint)MetadataTokens.GetToken(type.ResolutionScope)) ==
+                PlatformAssemblies.SystemRuntime)
+                throw new InvalidDataException("The platform pair must use a value-type signature.");
+        }
         return Check(reader, type.Namespace, type.Name, rawTypeKind);
     }
 
-    public bool GetTypeFromSpecification(MetadataReader reader, object? genericContext, TypeSpecificationHandle handle, byte rawTypeKind)
+    public bool GetTypeFromSpecification(MetadataReader reader, object? genericContext,
+        TypeSpecificationHandle handle, byte rawTypeKind)
     {
         if (checkedTypes.Contains(handle)) return false;
-        if (active.Count >= 128 || !active.Add(handle)) throw new InvalidDataException("Cyclic or excessively nested vector type signature.");
+        if (active.Count >= 128 || !active.Add(handle))
+            throw new InvalidDataException("Cyclic or excessively nested type signature.");
         reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);
         active.Remove(handle);
         checkedTypes.Add(handle);

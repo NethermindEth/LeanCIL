@@ -112,6 +112,7 @@ internal sealed class ImportResolution : IDisposable
                     var library = new Library(source, contract, ContractInterface.Hash(sidecar), module);
                     var pinned = identityOwner ?? throw new InvalidDataException(
                         "Import identity without a pinned module context");
+                    PlatformSignatures.Validate(implementation);
                     pinned.RegisterIdentityImage(module, implementation);
                     libraries.Add(library);
                     librariesByIdentity.Add(contract.AssemblyIdentity, library);

@@ -32,6 +32,11 @@ if (args.Length == 0 || args.Contains("--emissions-only", StringComparer.Ordinal
     CheckLeanStringEmissions();
     if (args.Length != 0) return;
 }
+if (args.Contains("--pair-signatures-only", StringComparer.Ordinal))
+{
+    CheckPairSignatures();
+    return;
+}
 if (args.Contains("--exception-types-only", StringComparer.Ordinal))
 {
     CheckExceptionTypes();
@@ -69,6 +74,7 @@ if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
 CheckHeapBounds();
 CheckAssemblyCache();
 CheckFieldReferences();
+CheckPairSignatures();
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -255,6 +261,63 @@ static void CheckExceptionTypes()
         if (actual != raised) throw new InvalidOperationException("Unexpected exception admission: " + name);
     }
     Console.WriteLine("PASS exception members, display names and constructor admission");
+}
+
+// The fixture contains metadata and an abstract method with no body.
+static byte[] PairSignatureImage(bool secondValueType = true)
+{
+    var rows = new MetadataBuilder();
+    var fixture = rows.GetOrAddString("PairSignatures");
+    rows.AddModule(0, fixture, rows.GetOrAddGuid(Guid.Empty), default, default);
+    rows.AddAssembly(fixture, new Version(1, 0, 0, 0), default, default, 0, 0);
+    var runtime = AssemblyNameReference.Parse(PlatformAssemblies.SystemRuntime.ToDisplay());
+    var scope = rows.AddAssemblyReference(rows.GetOrAddString(runtime.Name), runtime.Version, default,
+        rows.GetOrAddBlob(runtime.PublicKeyToken), 0, default);
+    var system = rows.GetOrAddString("System");
+    var pair = rows.AddTypeReference(scope, system, rows.GetOrAddString("ValueTuple`2"));
+    byte pairIndex = checked((byte)CodedIndex.TypeDefOrRef(pair));
+    var firstField = MetadataTokens.FieldDefinitionHandle(1);
+    var method = MetadataTokens.MethodDefinitionHandle(1);
+    rows.AddTypeDefinition(0, default, rows.GetOrAddString("<Module>"), default, firstField, method);
+    rows.AddTypeDefinition(System.Reflection.TypeAttributes.Abstract, default, fixture, default, firstField, method);
+    Srm.BlobHandle Blob(params byte[] bytes) => rows.GetOrAddBlob(bytes);
+    rows.AddFieldDefinition(0, rows.GetOrAddString("First"), Blob(6, 0x15, 0x11, pairIndex, 2, 8, 8));
+    byte kind = secondValueType ? (byte)0x11 : (byte)0x12;
+    rows.AddFieldDefinition(0, rows.GetOrAddString("Second"), Blob(6, 0x15, kind, pairIndex, 2, 8, 8));
+    rows.AddMethodDefinition(System.Reflection.MethodAttributes.Abstract | System.Reflection.MethodAttributes.Virtual,
+        0, rows.GetOrAddString("Anchor"), Blob(0x20, 0, 1), -1, MetadataTokens.ParameterHandle(1));
+    var output = new Srm.BlobBuilder();
+    var image = new ManagedPEBuilder(new PEHeaderBuilder(), new MetadataRootBuilder(rows), new Srm.BlobBuilder());
+    image.Serialize(output);
+    return output.ToArray();
+}
+
+static void CheckPairSignatures()
+{
+    var failures = new List<string>();
+    void Refuses(string test, string reason, Action check)
+    {
+        try { check(); }
+        catch (InvalidDataException error) when (error.Message.Contains(reason, StringComparison.Ordinal))
+        {
+            Console.WriteLine($"PASS {test}: {error.Message}");
+            return;
+        }
+        failures.Add(test);
+        Console.WriteLine($"FAIL {test}: accepted");
+    }
+    static int Layout(byte[] image)
+    {
+        using var pins = new PinnedAssemblies(image, Convert.ToHexStringLower(SHA256.HashData(image)), []);
+        var module = pins.Selected;
+        var fields = module.Types[1].Fields;
+        return MetadataValidation.AggregateLayout(fields[1].FieldType, module).Size;
+    }
+    var control = PairSignatureImage();
+    if (Layout(control) != 8) throw new InvalidOperationException("Unexpected primitive pair size");
+    Refuses("CLASS after VALUETYPE", "value-type signature",
+        () => Layout(PairSignatureImage(secondValueType: false)));
+    if (failures.Count != 0) throw new InvalidOperationException(string.Join(", ", failures));
 }
 
 static void CheckFieldReferences()

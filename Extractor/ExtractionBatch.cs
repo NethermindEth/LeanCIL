@@ -19,7 +19,7 @@ internal static partial class Program
             internal void ValidateSignatures()
             {
                 if (signaturesValidated) return;
-                VectorSignatures.Validate(Bytes);
+                PlatformSignatures.Validate(Bytes);
                 signaturesValidated = true;
             }
         }
