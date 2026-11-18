@@ -733,14 +733,14 @@ def LayoutEnvironment.classSlot (environment : LayoutEnvironment) (type : Extrac
   | _ => classSlotOf type
 
 /-- The checked layout entry of field `index` of the struct at layout `parent`, with whether a
-    load sign-extends it; `none` unless the field is declared with the storage `held` decodes to.
--/
+    load sign-extends it; `none` unless the field is declared with the tag `held` has, a
+    vector's element lane included. -/
 def LayoutEnvironment.structField? (environment : LayoutEnvironment) (parent index : Nat)
     (held : Extraction.TypeExpr) : Option (FieldLayout × Bool) := do
   let metadata ← environment.rawLayouts[parent]?
   let declared ← metadata.fields[index]?
-  if Extraction.typeStorage environment.rawLayouts held !=
-      some (Extraction.declaredFieldStorage declared.type) then none else pure ()
+  if Extraction.fieldKind? environment.rawLayouts held != some declared.type then none
+  else pure ()
   let layout ← environment.layouts[parent]?
   let computed ← layout.layout.fields[index]?
   return (computed, Extraction.signedField declared.type)
@@ -891,6 +891,17 @@ theorem Extraction.typeStorage_aggregate {layouts : List Extraction.RawLayout}
 
 #print axioms Extraction.typeStorage_aggregate
 
+/-- A struct type is held by a field declared with its index when the layout there carries its
+    identity. -/
+theorem Extraction.fieldKind?_aggregate {layouts : List Extraction.RawLayout}
+    {metadata : Extraction.RawLayout} {identity : String} {index : Nat}
+    (found : layouts[index]? = some metadata) (named : metadata.identity = identity) :
+    Extraction.fieldKind? layouts (.aggregate identity index) = some (.aggregate index) := by
+  unfold Extraction.fieldKind?
+  rw [Extraction.typeStorage_aggregate found named]
+
+#print axioms Extraction.fieldKind?_aggregate
+
 /-- An array of a struct decodes to an array of that struct's layout when the layout at its
     index carries its identity and is not byref-like. -/
 theorem Extraction.typeStorage_aggregateArray {layouts : List Extraction.RawLayout}
@@ -906,15 +917,14 @@ theorem Extraction.typeStorage_aggregateArray {layouts : List Extraction.RawLayo
 
 #print axioms Extraction.typeStorage_aggregateArray
 
-/-- Field `index` of the struct at `parent` is its checked entry when its declared storage is
-    the storage of `held`. -/
+/-- Field `index` of the struct at `parent` is its checked entry when it is declared with the
+    tag `held` has. -/
 theorem LayoutEnvironment.structField?_eq {environment : LayoutEnvironment}
     {parent index : Nat} {held : Extraction.TypeExpr} {metadata : Extraction.RawLayout}
     {declared : Extraction.RawField} {layout : Extraction.ComputedLayout} {computed : FieldLayout}
     (raw : environment.rawLayouts[parent]? = some metadata)
     (field : metadata.fields[index]? = some declared)
-    (storage : Extraction.typeStorage environment.rawLayouts held =
-      some (Extraction.declaredFieldStorage declared.type))
+    (kind : Extraction.fieldKind? environment.rawLayouts held = some declared.type)
     (checked : environment.layouts.toList[parent]? = some layout)
     (entry : layout.layout.fields[index]? = some computed) :
     environment.structField? parent index held =
@@ -925,7 +935,7 @@ theorem LayoutEnvironment.structField?_eq {environment : LayoutEnvironment}
   dsimp only [bind, Option.bind]
   rw [field]
   dsimp only [bind, Option.bind]
-  rw [storage, bne_self_eq_false]
+  rw [kind, bne_self_eq_false]
   dsimp only [bind, Option.bind, Bool.false_eq_true, ↓reduceIte, pure]
   rw [checked]
   dsimp only [bind, Option.bind]

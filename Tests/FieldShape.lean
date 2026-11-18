@@ -9,7 +9,7 @@ Pins `CIL.LayoutEnvironment.fieldShape`, `valueShape` and the facts `cil_field_s
 `cil_value_shape` declare, over a hand-written environment of five structs. A struct field
 resolves to the offset and width of its checked layout entry, sign-extended only when it is
 declared as a narrow signed integer; a field whose index or held type does not match the
-declaration is unsupported; a class field resolves to the model slot of its index, a struct array
+declaration, a vector's element lane included, is unsupported; a class field resolves to the model slot of its index, a struct array
 element taking its size from the layout; and a method, defined or known by a hypothesis on its
 environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
 field faults; a struct field steps on each receiver kind as the lowered access of its shape, and
@@ -35,7 +35,8 @@ def rawLayouts : List RawLayout := [
   { identity := "T::Ref", explicit := false, packing := 0, declaredSize := 0, byRefLike := true,
     fields := [{ type := .signed32 }] },
   { identity := "T::Lanes", explicit := false, packing := 0, declaredSize := 0,
-    fields := [{ type := .vector256 }, { type := .vector128 }, { type := .signed32 }] },
+    fields := [{ type := .vector256 .unsigned64 }, { type := .vector128 .unsigned64 },
+      { type := .signed32 }] },
   { identity := "T::Outer", explicit := false, packing := 0, declaredSize := 0,
     fields := [{ type := .aggregate 1 }, { type := .signed32 }] }]
 
@@ -484,5 +485,28 @@ theorem fact_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step]
   exact ⟨_, rfl⟩
 #print axioms fact_lanes_load
+
+/-- `Lanes.narrow` read as a `Vector128<double>`, whose element no vector field declares. -/
+def doubleNarrow : FieldRef :=
+  { narrowField with type := .apply (.constructor intrinsicsScope
+      "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double") }
+/-- `Lanes.narrow` read as a `Vector128<long>`, the width it declares with another lane. -/
+def longNarrow : FieldRef :=
+  { narrowField with type := .apply (.constructor intrinsicsScope
+      "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int64") }
+
+-- A vector field is held only at its declared lane, so another element type is refused.
+theorem refuses_another_lane :
+    environment.fieldShape doubleNarrow = .unsupported "Field outside the checked layouts" ∧
+    environment.fieldShape longNarrow = .unsupported "Field outside the checked layouts" := by
+  decide +kernel
+#print axioms refuses_another_lane
+
+theorem another_lane_load_unsupported (frame : Safety.Frame) (memory : Safety.Memory) :
+    Safety.step body (.ldfld doubleNarrow) 0 [] frame [lanesSnapshot] memory =
+      .error (.unsupported "Field outside the checked layouts") := by
+  simp only [cil_step]
+  rfl
+#print axioms another_lane_load_unsupported
 
 end Tests.FieldShape

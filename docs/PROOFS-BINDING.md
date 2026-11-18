@@ -712,7 +712,8 @@ operand without a fact resolve by compiled evaluation to the literal shape a fac
 which the kernel checks again; `set_option cil.requireFieldShapeFacts true` makes that case an
 error instead, so a proof can require that every field step reads a fact.
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
-checked layout entry when the operand holds the field's declared type, and a class instance
+checked layout entry when the operand holds the field's declared tag (`Extraction.fieldKind?`:
+the primitive or enum kind, the struct, or the vector's width and element lane), and a class instance
 field to the model slot of its index; `valueShape` gives a vector, including a floating-point
 one, its width.
 

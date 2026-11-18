@@ -751,25 +751,24 @@ def structFieldProof? (owner : Body) (field : Expr) : MetaM (Option Expr) := do
   let some computed ← listEntry? (mkApp (mkConst ``CIL.AggregateLayout.fields)
       (mkApp (mkConst ``CIL.Extraction.ComputedLayout.layout) layout)) index | return none
   let declaredType := mkApp (mkConst ``CIL.Extraction.RawField.type) declared
-  let storageType := mkConst ``CIL.Extraction.StorageType
-  let declaredStorage := mkApp2 (mkConst ``Option.some [.zero]) storageType
-    (mkApp (mkConst ``CIL.Extraction.declaredFieldStorage) declaredType)
+  let declaredKind := mkApp2 (mkConst ``Option.some [.zero])
+    (mkConst ``CIL.Extraction.FieldType) declaredType
   -- A held struct is decoded through its own entry; other held types do not read the layouts.
-  let heldStorage ← match (← whnf held).getAppFnArgs with
+  let heldKind ← match (← whnf held).getAppFnArgs with
     | (``CIL.Extraction.TypeExpr.aggregate, #[heldIdentity, heldIndexExpr]) => do
       let some heldIndex ← (Meta.evalNat heldIndexExpr).run | return none
       let some (heldMetadata, heldFound) ← layoutEntry? owner rawLayoutStem heldIndex
         | return none
-      pure (mkAppN (mkConst ``CIL.Extraction.typeStorage_aggregate)
+      pure (mkAppN (mkConst ``CIL.Extraction.fieldKind?_aggregate)
         #[raw, heldMetadata, heldIdentity, heldIndexExpr, heldFound, ← mkEqRefl heldIdentity])
-    | _ => mkEqRefl declaredStorage
+    | _ => mkEqRefl declaredKind
   let fieldFound ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero])
     (mkConst ``CIL.Extraction.RawField) declared)
   let entryFound ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero])
     (mkConst ``CIL.FieldLayout) computed)
   let structFound := mkAppN (mkConst ``CIL.LayoutEnvironment.structField?_eq)
     #[environment, parentExpr, indexExpr, held, metadata, declared, layout, computed, rawFound,
-      fieldFound, heldStorage, checked, entryFound]
+      fieldFound, heldKind, checked, entryFound]
   let signed := mkApp (mkConst ``CIL.Extraction.signedField) declaredType
   return mkAppN (mkConst ``CIL.LayoutEnvironment.fieldShape_struct)
     #[environment, field, parentExpr, computed, signed, ownerStorage, structFound]

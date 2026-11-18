@@ -183,7 +183,9 @@ string baseline = File.ReadAllText(Path.Combine(root, "WritePacked", "Extracted.
 foreach ((string name, string changed) in new[]
 {
     ("field-offset", baseline.Replace(".fieldAt 3 32", ".fieldAt 2 32")),
-    ("vector-storage", baseline.Replace("type := .vector256", "type := .unsigned64")),
+    ("vector-storage", baseline.Replace("type := (.vector256 .unsigned64)", "type := .unsigned64")),
+    // Same width, another lane: the layouts still check, so the field site must refuse it.
+    ("vector-lane", baseline.Replace("type := (.vector256 .unsigned64)", "type := (.vector256 .signed64)")),
     ("computed-width", baseline.Replace("⟨3, 32, false⟩", "⟨3, 16, false⟩")),
     ("omitted-uses", Regex.Replace(baseline,
         @"def method0LayoutUses : List Extraction.LayoutUse := [^\r\n]*",

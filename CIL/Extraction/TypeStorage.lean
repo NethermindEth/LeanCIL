@@ -195,13 +195,6 @@ def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
     callableLayoutsValid layouts head && callableLayoutsValid layouts tail
   | _ => true
 
-/-- The storage a struct field's declared type must decode to: vector fields to vector storage,
-    every other field kind to a field of that kind. -/
-def declaredFieldStorage : FieldType → StorageType
-  | .vector128 => .vector128
-  | .vector256 => .vector256
-  | kind => .field kind
-
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
@@ -251,5 +244,17 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
+
+/-- The struct field tag a field holding `type` is declared with: a primitive's kind, an enum's
+    underlying kind, a checked struct's index, or an integer vector's width and element lane. -/
+def fieldKind? (layouts : List RawLayout) (type : TypeExpr) : Option FieldType :=
+  match typeStorage layouts type, type with
+  | some (.field kind), _ => some kind
+  -- `typeStorage` has decided both scopes; the element's name decides the lane.
+  | some .vector128, .apply _ (.atom _ element) =>
+    FieldType.vector128 <$> (primitiveField element).bind VectorLane.ofField?
+  | some .vector256, .apply _ (.atom _ element) =>
+    FieldType.vector256 <$> (primitiveField element).bind VectorLane.ofField?
+  | _, _ => none
 
 end CIL.Extraction

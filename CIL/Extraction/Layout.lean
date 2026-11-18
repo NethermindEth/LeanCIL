@@ -16,13 +16,29 @@ indexes built once, and the `Decidable` instance of `LayoutsValid` runs it.
 
 namespace CIL.Extraction
 
-/-- Storage tags retain metadata distinctions before layout computation. -/
+/-- The integer element types a struct's vector field may declare, named by their field kind. -/
+inductive VectorLane where
+  | unsigned8 | signed32 | unsigned32 | signed64 | unsigned64
+  deriving DecidableEq, Repr
+
+/-- Storage tags retain metadata distinctions before layout computation: a vector field's element
+    type as its lane, a nested struct as its layout index. -/
 inductive FieldType where
   | signed8 | unsigned8 | boolean | signed16 | unsigned16 | character
   | signed32 | unsigned32 | signed64 | unsigned64 | nativeInt | nativeUInt
-  | vector128 | vector256
+  | vector128 (lane : VectorLane) | vector256 (lane : VectorLane)
   | aggregate (index : Nat)
   deriving DecidableEq, Repr
+
+/-- The lane of a vector whose elements have field kind `kind`; `none` for a kind no vector
+    field holds. -/
+def VectorLane.ofField? : FieldType → Option VectorLane
+  | .unsigned8 => some .unsigned8
+  | .signed32 => some .signed32
+  | .unsigned32 => some .unsigned32
+  | .signed64 => some .signed64
+  | .unsigned64 => some .unsigned64
+  | _ => none
 
 /-- One struct field as declared: its type and, for explicit layout, its byte offset. -/
 structure RawField where
@@ -74,8 +90,8 @@ private def fieldStorage (previous : Nat → Option ComputedLayout) (architectur
   | .signed16 | .unsigned16 | .character => some (2, 2, false)
   | .signed32 | .unsigned32 => some (4, 4, false)
   | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some (8, 8, false)
-  | .vector128 => some (16, 16, false)
-  | .vector256 => some (32, if architecture == .arm64 then 16 else 32, false)
+  | .vector128 _ => some (16, 16, false)
+  | .vector256 _ => some (32, if architecture == .arm64 then 16 else 32, false)
   | .aggregate index => do
     let child ← previous index
     return (child.layout.size, child.alignment, true)
@@ -106,8 +122,7 @@ private def alignUp (size alignment : Nat) : Nat :=
 private def autoSequential (previous : Nat → Option ComputedLayout) (raw : RawLayout) : Bool :=
   !raw.explicit && raw.packing ≤ 0 && raw.declaredSize ≤ 0 &&
   match raw.fields.mapM (fun field => do
-      if field.offset.isSome || field.type == FieldType.vector128 ||
-          field.type == FieldType.vector256 then none else
+      if field.offset.isSome || (field.type matches .vector128 _ | .vector256 _) then none else
         let (width, _, aggregate) ← fieldStorage previous .scalar field.type
         if aggregate then none else some width) with
   | some (width :: widths) => widths.all (· == width)
@@ -117,7 +132,7 @@ private def autoSequential (previous : Nat → Option ComputedLayout) (raw : Raw
 private def placeField (previous : Nat → Option ComputedLayout) (raw : RawLayout)
     (architecture : Architecture) (pack size alignment : Nat) (field : RawField) :
     Option (Nat × Nat × FieldLayout) := do
-  if field.type == .vector256 && pack > 16 && architecture == .scalar then none else do
+  if (field.type matches .vector256 _) && pack > 16 && architecture == .scalar then none else do
     let (width, natural, aggregate) ← fieldStorage previous architecture field.type
     let aligned := min pack natural
     if aligned = 0 then none else do
@@ -189,7 +204,7 @@ private theorem placeField_append (previous : Nat → Option ComputedLayout) (ra
     (do
       let (size, alignment, placed) ← placeField previous raw architecture pack size alignment field
       return (size, alignment, fields ++ [placed])) = (do
-      if field.type == .vector256 && pack > 16 && architecture == .scalar then none else do
+      if (field.type matches .vector256 _) && pack > 16 && architecture == .scalar then none else do
         let (width, natural, aggregate) ← fieldStorage previous architecture field.type
         let aligned := min pack natural
         if aligned = 0 then none else do
@@ -216,7 +231,7 @@ theorem computeLayout_eq_append (previous : Nat → Option ComputedLayout) (raw 
     let pack := if raw.packing ≤ 0 then 64 else raw.packing.toNat
     let (size, alignment, fields) ← raw.fields.foldlM (init := (0, 1, ([] : List FieldLayout)))
         fun (size, alignment, fields) field => do
-      if field.type == .vector256 && pack > 16 && architecture == .scalar then none else do
+      if (field.type matches .vector256 _) && pack > 16 && architecture == .scalar then none else do
         let (width, natural, aggregate) ← fieldStorage previous architecture field.type
         let aligned := min pack natural
         if aligned = 0 then none else do
@@ -361,13 +376,15 @@ private def genericFieldType (table : LayoutTable) : TypeExpr → Option FieldTy
     | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
     | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
     | _ => none
-  | .apply (.constructor scope name) (.atom elementScope element) =>
+  | .apply (.constructor scope name) (.atom elementScope element) => do
     if scope != "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
-        "PublicKeyToken=cc7b13ffcd2ddd51" || elementScope != runtimeScope ||
-        element ∉ ["System.Byte", "System.Int32", "System.UInt32",
-          "System.Int64", "System.UInt64"] then none else
-    if name == "System.Runtime.Intrinsics.Vector128`1" then some .vector128
-    else if name == "System.Runtime.Intrinsics.Vector256`1" then some .vector256 else none
+        "PublicKeyToken=cc7b13ffcd2ddd51" || elementScope != runtimeScope then none
+    let lane ← match element with
+      | "System.Byte" => some VectorLane.unsigned8 | "System.Int32" => some .signed32
+      | "System.UInt32" => some .unsigned32 | "System.Int64" => some .signed64
+      | "System.UInt64" => some .unsigned64 | _ => none
+    if name == "System.Runtime.Intrinsics.Vector128`1" then some (.vector128 lane)
+    else if name == "System.Runtime.Intrinsics.Vector256`1" then some (.vector256 lane) else none
   | _ => none
 
 /-- Closed generic identities retain the scope and ordering of every supported argument. -/

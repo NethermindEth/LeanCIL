@@ -67,8 +67,8 @@ def storageKind (layouts : Array ComputedLayout) : StorageType → Option LocalK
   | .vector128 => some .vector128
   | .vector256 => some .vector256
   | .vector512 => some .vector512
-  | .field .vector128 => some .vector128
-  | .field .vector256 => some .vector256
+  | .field (.vector128 _) => some .vector128
+  | .field (.vector256 _) => some .vector256
   | .field .signed8 => some (.narrow .signed8)
   | .field .unsigned8 | .field .boolean => some (.narrow .unsigned8)
   | .field .signed16 => some (.narrow .signed16)

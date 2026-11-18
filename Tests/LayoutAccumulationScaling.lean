@@ -11,8 +11,8 @@ private def fieldStorage (previous : Array ComputedLayout) (architecture : Archi
   | .signed16 | .unsigned16 | .character => some (2, 2, false)
   | .signed32 | .unsigned32 => some (4, 4, false)
   | .signed64 | .unsigned64 | .nativeInt | .nativeUInt => some (8, 8, false)
-  | .vector128 => some (16, 16, false)
-  | .vector256 => some (32, if architecture == .arm64 then 16 else 32, false)
+  | .vector128 _ => some (16, 16, false)
+  | .vector256 _ => some (32, if architecture == .arm64 then 16 else 32, false)
   | .aggregate index => do
     let child ← previous[index]?
     return (child.layout.size, child.alignment, true)
@@ -25,8 +25,7 @@ private def alignUp (size alignment : Nat) : Nat :=
 private def autoSequential (previous : Array ComputedLayout) (raw : RawLayout) : Bool :=
   !raw.explicit && raw.packing ≤ 0 && raw.declaredSize ≤ 0 &&
   match raw.fields.mapM (fun field => do
-      if field.offset.isSome || field.type == FieldType.vector128 ||
-          field.type == FieldType.vector256 then none else
+      if field.offset.isSome || (field.type matches .vector128 _ | .vector256 _) then none else
         let (width, _, aggregate) ← fieldStorage previous .scalar field.type
         if aggregate then none else some width) with
   | some (width :: widths) => widths.all (· == width)
@@ -43,7 +42,7 @@ def baselineLayout (previous : Array ComputedLayout) (raw : RawLayout)
     let pack := if raw.packing ≤ 0 then 64 else raw.packing.toNat
     let (size, alignment, fields) ← raw.fields.foldlM (init := (0, 1, ([] : List FieldLayout)))
         fun (size, alignment, fields) field => do
-      if field.type == .vector256 && pack > 16 && architecture == .scalar then none else do
+      if (field.type matches .vector256 _) && pack > 16 && architecture == .scalar then none else do
         let (width, natural, aggregate) ← fieldStorage previous architecture field.type
         let aligned := min pack natural
         if aligned = 0 then none else do

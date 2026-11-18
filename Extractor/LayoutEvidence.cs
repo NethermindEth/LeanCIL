@@ -90,7 +90,7 @@ internal sealed class LayoutEvidence
             if (index < 0) throw new InvalidDataException("Missing raw aggregate metadata: " + type.FullName);
             return $".aggregate {index}";
         }
-        if (MetadataValidation.VectorFieldWidth(type) is int width) return width == 16 ? ".vector128" : ".vector256";
+        if (MetadataValidation.VectorFieldWidth(type) is int width) return $"(.vector{width * 8} {VectorLane(type)})";
         return EnumTypes.Storage(type).FullName switch
         {
             "System.SByte" => ".signed8", "System.Byte" => ".unsigned8", "System.Boolean" => ".boolean",
@@ -101,6 +101,14 @@ internal sealed class LayoutEvidence
             _ => throw new InvalidDataException("Unsupported raw layout field: " + type.FullName)
         };
     }
+
+    // A vector field's lane is its element's field kind; VectorFieldWidth admits only these elements.
+    static string VectorLane(TypeReference vector) => ((GenericInstanceType)vector).GenericArguments[0].FullName switch
+    {
+        "System.Byte" => ".unsigned8", "System.Int32" => ".signed32", "System.UInt32" => ".unsigned32",
+        "System.Int64" => ".signed64", "System.UInt64" => ".unsigned64",
+        _ => throw new InvalidDataException($"Unsupported vector field lane: {vector.FullName}")
+    };
 
     internal void EmitLayouts(StringBuilder lean)
     {
