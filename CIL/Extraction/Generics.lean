@@ -268,6 +268,21 @@ theorem instantiateMethod_token {layouts : List RawLayout} {original closed : Ra
 
 #print axioms instantiateMethod_token
 
+/-- A closed method retains its definition's local initialization flag. -/
+theorem instantiateMethod_initLocals {layouts : List RawLayout} {original closed : RawMethod}
+    {arguments : List TypeExpr}
+    (instantiated : instantiateMethod layouts original arguments = some closed) :
+    closed.initLocals = original.initLocals := by
+  unfold instantiateMethod at instantiated
+  split at instantiated
+  · cases instantiated
+  · simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at instantiated
+    obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := instantiated
+    rfl
+
+#print axioms instantiateMethod_initLocals
+
 /-- Closed argument metadata is derived from this checked body, including short opcodes. -/
 def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   match instruction.opcode, instruction.operand with

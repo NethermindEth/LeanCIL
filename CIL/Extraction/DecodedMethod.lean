@@ -21,19 +21,12 @@ translator output.
 
 namespace CIL.Extraction
 
-/-- The method a raw definition denotes at `arguments`: each instruction of its instantiated
-    code as `Instruction.ofRaw` decodes it after the instruction before it, frame and signature
-    from the same definition, homes over every pc, the link table `links`, and no static sites
-    or opaque vector locals. The table is not read here; `ManagedCallsValid` ties each entry to
-    its raw site. Every instruction decodes, so `none` means the instantiation failed (an
-    explicit receiver signature has none), a parameter, local or homed argument type has no
-    storage or slot kind, a prefix sequence is invalid, or the code fails the argument rule,
-    `validateArgumentOpAt`, at some pc. -/
-def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (links : List (Nat × Link)) (source : RawMethod) (arguments : List TypeExpr) :
+/-- The method denoted by a closed definition and its argument storage. Its code contains
+    one decoded instruction per raw site. The frame requires supported local kinds, valid
+    parameter homes and argument accesses, and valid prefix sequences. -/
+def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (links : List (Nat × Link)) (closed : RawMethod) (storage : RawArguments) :
     Option Method := do
-  let closed ← instantiateMethod environment.rawLayouts source arguments
-  let storage ← closedArguments environment.rawLayouts closed
   let code := Instruction.ofRawCode none closed.code
   let localKinds ← storage.locals.mapM (storageKind environment.layouts)
   let reachable := storage.code.map fun _ => true
@@ -44,9 +37,28 @@ def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnv
       argumentInstructionsValid storage homes reachable code do none
   return {
     profile := profile, code := code, localKinds := localKinds,
-    locals := localKinds.map (LocalKind.initialValue source.initLocals),
+    locals := localKinds.map (LocalKind.initialValue closed.initLocals),
     parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
     environment := environment, links := links, returnsValue := closed.returnType != .void }
+
+/-- The method a raw definition denotes at its type arguments, with the supplied link table. -/
+def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (links : List (Nat × Link)) (source : RawMethod) (arguments : List TypeExpr) :
+    Option Method := do
+  let closed ← instantiateMethod environment.rawLayouts source arguments
+  let storage ← closedArguments environment.rawLayouts closed
+  Method.ofClosed? profile environment links closed storage
+
+/-- A validated specialization gives the closed definition and storage for raw decoding. -/
+theorem SpecializationValid.ofRaw?_eq_ofClosed? {environment : LayoutEnvironment}
+    {source closed : RawMethod} {arguments : List TypeExpr} {storage : RawArguments}
+    (valid : SpecializationValid environment.rawLayouts source arguments closed storage)
+    (profile : FeatureProfile) (links : List (Nat × Link)) :
+    Method.ofRaw? profile environment links source arguments =
+      Method.ofClosed? profile environment links closed storage := by
+  simp only [Method.ofRaw?, valid.1, valid.2, bind, Option.bind]
+
+#print axioms SpecializationValid.ofRaw?_eq_ofClosed?
 
 /-- The method pinned body bytes denote with link table `links`: `checkBody` checks the
     definition's metadata, and the code and init flag are the ones decoded from the bytes. -/
@@ -142,7 +154,7 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     (decoded : Method.ofRaw? profile environment links source arguments = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
-  unfold Method.ofRaw? at decoded
+  unfold Method.ofRaw? Method.ofClosed? at decoded
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
   obtain ⟨closed, instantiated, _, _, _, _, _, _, built⟩ := decoded
   refine ⟨closed, instantiated, fun pc => ?_⟩

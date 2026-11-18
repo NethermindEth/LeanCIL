@@ -338,14 +338,14 @@ example : sumMethod =
       declared := { parameters := [uint32, uint32], returnType := uint32, initLocals := false },
       returnsValue := true } := rfl
 
-/-- info: Tests.DecodedMethod.sumMethod_decoded :
+/-- info: Tests.DecodedMethod.sumMethod_decoder_eq :
   Method.ofRaw? testProfile testEnvironment [] sumRaw [] = some sumMethod -/
-#guard_msgs (whitespace := lax) in #check sumMethod_decoded
+#guard_msgs (whitespace := lax) in #check sumMethod_decoder_eq
 
 -- The kernel proves the decoded fact and the field facts by reduction, with no other axiom.
-/-- info: 'Tests.DecodedMethod.sumMethod_decoded' depends on axioms:
+/-- info: 'Tests.DecodedMethod.sumMethod_decoder_eq' depends on axioms:
   [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms sumMethod_decoded
+#guard_msgs (whitespace := lax) in #print axioms sumMethod_decoder_eq
 /-- info: 'Tests.DecodedMethod.sumMethod_profile' does not depend on any axioms -/
 #guard_msgs in #print axioms sumMethod_profile
 
@@ -420,13 +420,13 @@ private def emptyMethod (profile : FeatureProfile) (environment : LayoutEnvironm
 
 -- A value the kernel does not reduce to the evaluated literal is refused, never kept unreduced.
 /-- error: cil_decoded_method: the kernel does not reduce both sides of
-  Tests.DecodedMethod.stuckIndexMethod_decoded to one term -/
+  Tests.DecodedMethod.stuckIndexMethod_decoder_eq to one term -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method stuckIndexMethod := emptyMethod testProfile testEnvironment [] [stuckIndex]
 
 -- A constant passed to the decoder is written by name, so the opaque list is passed inside a term.
 /-- error: cil_decoded_method: the kernel does not reduce both sides of
-  Tests.DecodedMethod.stuckLocalsMethod_decoded to one term -/
+  Tests.DecodedMethod.stuckLocalsMethod_decoder_eq to one term -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method stuckLocalsMethod :=
   emptyMethod testProfile testEnvironment (stuckLocals ++ []) []

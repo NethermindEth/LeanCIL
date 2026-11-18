@@ -306,9 +306,19 @@ internal static class LeanEmitter
                 var naming = string.Join(", ", ops.OfType<ClassField>().Select(access =>
                     operandShapes.FieldName(access.Reference ?? throw new InvalidOperationException(
                         "A class field access has no field operand."))).Distinct());
-                lean.AppendLine($"cil_decoded_method method{n} {(naming.Length == 0 ? "" : $"[{naming}] ")}:= " +
-                    $"Method.ofRaw? profile {FrameMetadata.EnvironmentLean} {linkTable} method{n}Original " +
-                    $"method{n}TypeArgumentsRaw");
+                var fields = naming.Length == 0 ? "" : $"[{naming}] ";
+                var method = $"method{n}";
+                var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable}";
+                var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
+                var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
+                const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
+                var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
+                var evidence = $"{method}_specialization_validated profile {linkTable}";
+                var proof = $"Eq.trans ({equality} {environment} {evidence}) {method}_decoder_eq";
+                lean.AppendLine($"""
+                    cil_decoded_method {method} {fields}:= {closedDecoder}
+                    theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
+                    """);
             }
             else
             {

@@ -6,8 +6,8 @@ import CIL.SymbolicExecution
 # Methods defined by evaluating the decoder
 
 `cil_decoded_method name := decoder` evaluates a closed `Option CIL.Method`, such as
-`Method.ofRaw? profile environment links original arguments`, defines `name` as the method it gives
-and adds `name_decoded : decoder = some name`, which the kernel checks by evaluating the
+`Method.ofClosed? profile environment links closed storage`, defines `name` as the method it gives
+and adds `name_decoder_eq : decoder = some name`, which the kernel checks by evaluating the
 decoder. Compiled code computes the value, which is written as constructors over numerals, so
 the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`, ... read as
 literals to `cil_instruction_equations`, `cil_resolution_facts` and stepping, and no text an
@@ -16,7 +16,7 @@ passed to the decoder, such as an extraction's `profile`, `environment` and link
 as that constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand
 equal to a listed `FieldRef` constant as that constant, as an extraction's literal names it, so
 the facts `cil_field_shape` states about the constant apply. Neither the compiled evaluation nor
-that choice is trusted: the kernel checks `name_decoded` and every fact.
+that choice is trusted: the kernel checks `name_decoder_eq` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -234,7 +234,7 @@ syntax decodedFields := "[" ident,* "]"
 /-- `cil_decoded_method name [field, ...] := decoder` defines `name` as the method the closed
     `Option CIL.Method` `decoder` evaluates to, with each field operand equal to a listed
     `FieldRef` constant written as that constant and each zero-initialized struct local as
-    `List.replicate size 0`, proves `name_decoded : decoder = some name` and the `@[cil_code]`
+    `List.replicate size 0`, proves `name_decoder_eq : decoder = some name` and the `@[cil_code]`
     facts `name_{field}` for each of `factFields`. Fails when the decoder gives `none` or does
     not reduce, or when a listed constant names no field operand. -/
 syntax (name := decodedMethod)
@@ -280,7 +280,7 @@ elab_rules : command
     let arguments := written.getAppArgs
     let value := mkAppN written.getAppFn <| arguments.set! localsPosition
       (← initialLocals method.locals arguments[localsPosition]!)
-    let used := value.getUsedConstants
+    let used := value.getUsedConstantsAsSet
     for fieldName in fieldNames do
       unless used.contains fieldName do
         throwError "cil_decoded_method: the decoded method has no field operand {fieldName}"
@@ -292,7 +292,7 @@ elab_rules : command
     addDeclarationRangesFromSyntax name (← getRef) nameSyntax
     addDocStringCore name s!"The method `{decoderSyntax}` decodes to."
     let method := mkConst name
-    proveByReduction (name.appendAfter "_decoded") s!"`{name}` is the decoded method."
+    proveByReduction (name.appendAfter "_decoder_eq") s!"`{name}` is the decoded method."
       (← mkEq decoder (mkApp2 (mkConst ``Option.some [.zero]) methodType method))
     for field in factFields do
       let some position := fields.idxOf? field

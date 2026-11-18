@@ -36,11 +36,11 @@ partial class Program
 
     // A decoded method's definition line: its options, then its decoder over the method's own definitions.
     const string DecodedMethodHead = """(?m)^cil_decoded_method method(?<number>\d+)( \[[^\]\r\n]*\])? := """;
-    const string DecoderCall = """Method\.ofRaw\? profile environment method\k<number>Links """;
-    const string DecoderInput = """method\k<number>Original method\k<number>TypeArgumentsRaw""";
+    const string DecoderCall = """Method\.ofClosed\? profile environment method\k<number>Links """;
+    const string DecoderInput = """method\k<number>Closed method\k<number>RawArguments""";
 
     [GeneratedRegex($"""{DecodedMethodHead}{DecoderCall}{DecoderInput}(?=\r?$)""")]
-    private static partial Regex DecodedMethod { get; }
+    internal static partial Regex DecodedMethod { get; }
 
     [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := [^\r\n]*")]
     private static partial Regex RawDefinition { get; }
@@ -144,15 +144,19 @@ partial class Program
     }
 
     /// <summary>
-    /// `source` with `before` changed to `after` in the raw definition decoded method `method` is decoded from:
-    /// the method the kernel recomputes changes, while its closed definition and certificates keep their values.
+    /// Decodes the forged original so the emitted code differs from the closed evidence used by the checks.
     /// </summary>
     static string ForgeDecodedOriginal(string source, int method, string before, string after)
     {
         var original = DecodedOriginal(source, method);
         if (!original.Contains(before, StringComparison.Ordinal))
             throw new InvalidOperationException($"method{method}Original has no {before}");
-        return source.Replace(original, original.Replace(before, after, StringComparison.Ordinal),
+        var definition = DecodedDefinition(source, method);
+        var name = $"method{method}";
+        var decoder = $"Method.ofRaw? profile environment {name}Links {name}Original {name}TypeArgumentsRaw";
+        var command = definition.Value[..definition.Value.IndexOf("Method.ofClosed?", StringComparison.Ordinal)];
+        var changed = source.Replace(definition.Value, $"""{command}{decoder}""", StringComparison.Ordinal);
+        return changed.Replace(original, original.Replace(before, after, StringComparison.Ordinal),
             StringComparison.Ordinal);
     }
 
@@ -169,14 +173,15 @@ partial class Program
         var call = DecodedDefinition(source, method);
         if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
         var forged = $"method{method}Forged";
-        return source[..call.Index] +
-            $"def {forged} (profile : FeatureProfile) (environment : LayoutEnvironment) " +
-            "(links : List (Nat × Link)) (original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) : " +
-            "Option Method := (Method.ofRaw? profile environment links original arguments).map fun method => " +
-            $"{{ method with {update} }}\n" +
-            $"cil_decoded_method method{method}{call.Groups[1].Value} := {forged} profile environment " +
-            $"method{method}Links method{method}Original method{method}TypeArgumentsRaw" +
-            source[(call.Index + call.Length)..];
+        var name = $"method{method}";
+        var decoder = $"{forged} profile environment {name}Links {name}Closed {name}RawArguments";
+        return $$"""
+            {{source[..call.Index]}}def {{forged}} (profile : FeatureProfile) (environment : LayoutEnvironment)
+                (links : List (Prod Nat Link)) (closed : Extraction.RawMethod) (storage : Extraction.RawArguments) :
+                Option Method := (Method.ofClosed? profile environment links closed storage).map fun method =>
+                  { method with {{update}} }
+            cil_decoded_method {{name}}{{call.Groups[1].Value}} := {{decoder}}{{source[(call.Index + call.Length)..]}}
+            """;
     }
 
     /// <summary>

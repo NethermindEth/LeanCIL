@@ -731,8 +731,8 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 ### Methods defined from their decoder
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
-method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? profile environment
-links original typeArguments`, gives. The decoder takes the link table as given: a `call` and a
+method that `decoder`, a closed `Option Method` term such as `Method.ofClosed? profile environment
+links closed storage`, gives. The decoder takes the link table as given: a `call` and a
 `newobj` name their method's metadata, and the table states the method index, and for a
 construction the allocation, each enters, which `Extraction.ManagedCallsValid` checks against the
 raw site. Compiled code evaluates the decoder, and the command writes the result as constructors
@@ -740,11 +740,14 @@ over numerals, except that a field whose type is that of a constant passed to th
 the profile, the environment and the link table, is written as that constant, and a
 zero-initialized struct local is written as `.aggregate (List.replicate size 0)`, the term an
 extraction's literal and `make_fitting_local` hypotheses name. The kernel
-then checks by reduction the theorem, named with the suffix `_decoded`, that
+then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
 `_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
-`Extracted.method0_decoded`, `Extracted.method0_profile` and so on. A decoder with a hole, a
+`Extracted.method0_decoder_eq`, `Extracted.method0_profile` and so on. The extraction derives
+`Extracted.method0_decoded` from the closed equation and the validated specialization.
+It states that decoding the original method at its type arguments gives the same method.
+A decoder with a hole, a
 decoder that gives `none`, and a value the kernel does not reduce to the evaluated method are
 errors, so a file builds only when the kernel confirms what compiled code computed. The form
 `cil_decoded_method name [field, ...] := decoder` also writes each field operand equal to a listed
@@ -759,8 +762,8 @@ out keeps its literal, whose `.unadmitted` hole at that pc the feature check req
 `Extracted.lean` then states the method as
 
 ```text
-cil_decoded_method method0 := Method.ofRaw? profile environment method0Links method0Original
-  method0TypeArgumentsRaw
+cil_decoded_method method0 := Method.ofClosed? profile environment method0Links method0Closed
+  method0RawArguments
 ```
 
 in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when

@@ -87,7 +87,7 @@ theorem Method.ofRaw?_links (profile : FeatureProfile) (environment : LayoutEnvi
     Method.ofRaw? profile environment links source arguments =
       (Method.ofRaw? profile environment [] source arguments).map
         fun method => { method with links := links } := by
-  simp only [Method.ofRaw?, bind, pure, Option.map_bind]
+  simp only [Method.ofRaw?, Method.ofClosed?, bind, pure, Option.map_bind]
   refine congrArg _ (funext fun closed => ?_)
   simp only [Function.comp_apply, Option.map_bind]
   refine congrArg _ (funext fun storage => ?_)
