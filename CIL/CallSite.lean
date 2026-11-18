@@ -47,7 +47,8 @@ def MethodRef.arity (count : Nat) : MethodRef :=
 
 #print axioms MethodRef.arity_parameters_length
 
-/-- The member's signature before substitution. Each type variable keeps its blob index. -/
+/-- The member's signature before substitution. Owner and method variables keep their binder
+    and their index within it. -/
 structure OpenSignature where
   convention : Nat
   returnType : TypeExpr := .void

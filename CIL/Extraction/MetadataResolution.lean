@@ -936,8 +936,10 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         | .enumType code => typeAdmits frame fuel (.primitive code) underlying
         | .external (some true) | .external none => integerAtom frame underlying
         | _ => false
-    | .var index, .parameter number => index < frame.ownerArity &&
-        number == (if frame.rawIndices then index else frame.arity + index)
+    | .var index, .ownerParameter number =>
+      frame.rawIndices && index < frame.ownerArity && number == index
+    | .var index, .parameter number =>
+      !frame.rawIndices && index < frame.ownerArity && number == frame.arity + index
     -- Past the arity, a method parameter's index would be an owner parameter's.
     | .mvar index, .parameter number => index < frame.arity && number == index
     | .byref element, .byref inner => typeAdmits frame fuel element inner

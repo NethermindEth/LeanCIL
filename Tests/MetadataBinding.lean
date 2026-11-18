@@ -34,11 +34,16 @@ private def rejects (ownSlice libSlice : MetadataSlice) (token : Nat) (operand :
 
 /-- A runtime MemberRef, optionally instantiated by a MethodSpec, in the calling assembly. -/
 private def memberFixture (namespace_ owner name : String) (signature : List Nat)
-    (instantiation : Option (List Nat)) :
+    (instantiation : Option (List Nat)) (ownerArgument : Option Nat := none) :
     MetadataSlice × Nat := build (do
   let _ ← ownWorld
   let reference ← row Table.typeRef [6, ← string owner, ← string namespace_]
-  let member ← row Table.memberRef [tokenRow reference * 8 + 1, ← string name, ← blob signature]
+  let parent ← match ownerArgument with
+    | none => pure (tokenRow reference * 8 + 1)
+    | some code => do
+      let spec ← row Table.typeSpec [← blob [0x15, 0x12, tokenRow reference * 4 + 1, 1, code]]
+      pure (tokenRow spec * 8 + 4)
+  let member ← row Table.memberRef [parent, ← string name, ← blob signature]
   match instantiation with
   | none => pure member
   | some arguments => row Table.methodSpec [tokenRow member * 2 + 1, ← blob arguments]
@@ -87,6 +92,34 @@ example :
     let member := memberFixture "System" "Math" "Min" [0, 2, 8, 8, 8] none
     passes spec.1 lib spec.2 (.call (sizeCall 1 [int32])) &&
       passes member.1 lib member.2 (.call minCall) := by decide +kernel
+
+/-- G<UInt64>.M<UInt64>() declares an owner or method variable as its return type. -/
+private def genericOwnerCall (returned : TypeExpr) (spelling : String) : CallSite :=
+  memberCall (.apply (.objectConstructor runtimeScope "System.G`1") uint64) name!"M" "M"
+    (spelling ++ " System.G`1<System.UInt64>::M()") 1 [uint64]
+    { convention := 0x10, returnType := returned } uint64 []
+
+/-- Both instances return UInt64, so only the open declaration distinguishes !0 and !!0. -/
+example :
+    let owner := memberFixture "System" "G`1" "M" [0x10, 1, 0, 0x13, 0]
+      (some [0x0A, 1, 0x0B]) (some 0x0B)
+    rejects owner.1 lib owner.2 (.call (genericOwnerCall (.parameter 0) "!0"))
+      (.operandMismatch owner.2) := by decide +kernel
+
+example :
+    let member := memberFixture "System" "G`1" "M" [0x10, 1, 0, 0x1E, 0]
+      (some [0x0A, 1, 0x0B]) (some 0x0B)
+    rejects member.1 lib member.2 (.call (genericOwnerCall (.ownerParameter 0) "!!0"))
+      (.operandMismatch member.2) := by decide +kernel
+
+example :
+    let owner := memberFixture "System" "G`1" "M" [0x10, 1, 0, 0x13, 0]
+      (some [0x0A, 1, 0x0B]) (some 0x0B)
+    let member := memberFixture "System" "G`1" "M" [0x10, 1, 0, 0x1E, 0]
+      (some [0x0A, 1, 0x0B]) (some 0x0B)
+    passes owner.1 lib owner.2 (.call (genericOwnerCall (.ownerParameter 0) "!0")) &&
+      passes member.1 lib member.2 (.call (genericOwnerCall (.parameter 0) "!!0")) := by
+  decide +kernel
 
 /-- Replace the bytes of a row of a slice. -/
 private def mutateRow (slice : MetadataSlice) (token : Nat) (change : List Nat → List Nat) :
@@ -966,10 +999,10 @@ example :
     let frame := { pairFrame with rawIndices := true }
     let modifier := namedIn "Library" "Modifier" (.external none)
     let type := ResolvedType.modified true modifier (.byref (.var 0))
-    frame.admits type (.modified true "Library" "Modifier" (.byref (.parameter 0))) &&
-      !frame.admits type (.modified true "Other" "Modifier" (.byref (.parameter 0))) &&
-      !frame.admits type (.modified true "Library" "Modifier" (.byref (.parameter 1))) &&
-      !frame.admits type (.modified false "Library" "Modifier" (.byref (.parameter 0))) := by
+    frame.admits type (.modified true "Library" "Modifier" (.byref (.ownerParameter 0))) &&
+      !frame.admits type (.modified true "Other" "Modifier" (.byref (.ownerParameter 0))) &&
+      !frame.admits type (.modified true "Library" "Modifier" (.byref (.ownerParameter 1))) &&
+      !frame.admits type (.modified false "Library" "Modifier" (.byref (.ownerParameter 0))) := by
   decide +kernel
 
 /-- `System.Int32` of the primitive assembly. -/

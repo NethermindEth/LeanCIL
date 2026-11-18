@@ -74,8 +74,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         }
         if (type is GenericParameter parameter)
         {
-            var offset = !declared && parameter.Type == GenericParameterType.Type
-                ? methodParameterCount : 0;
+            var ownerParameter = parameter.Type == GenericParameterType.Type;
+            if (declared && ownerParameter) return $".ownerParameter {parameter.Position}";
+            var offset = ownerParameter ? methodParameterCount : 0;
             return $".parameter {parameter.Position + offset}";
         }
         if (type is ByReferenceType byRef) return $".byref ({Nested(byRef.ElementType)})";

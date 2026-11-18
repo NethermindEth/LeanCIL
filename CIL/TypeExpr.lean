@@ -67,11 +67,14 @@ inductive TypeExpr where
   | object (scope name : String)
   /-- A custom modifier of an open member type, with the modifier's assembly and full name. -/
   | modified (required : Bool) (scope name : String) (element : TypeExpr)
+  /-- An owner variable (!n) in an open declaration. A method variable (!!n) uses `parameter`. -/
+  | ownerParameter (index : Nat)
   deriving DecidableEq, Repr
 
 /-- Structural substitution includes nested type constructors, not just signature strings. -/
 def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .parameter index => arguments[index]?
+  | .ownerParameter _ => none
   | .byref element => TypeExpr.byref <$> substituteType arguments element
   | .pointer element => TypeExpr.pointer <$> substituteType arguments element
   | .array element => TypeExpr.array <$> substituteType arguments element
@@ -145,6 +148,7 @@ def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
   | .enum identity underlying, rest =>
     keyBytes "enum" :: keyBytes identity :: typeKeyInto underlying rest
   | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
+  | .ownerParameter index, rest => keyBytes "ownerParameter" :: keyBytes (toString index) :: rest
   | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest
   | .pointer element, rest => keyBytes "pointer" :: typeKeyInto element rest
   | .array element, rest => keyBytes "array" :: typeKeyInto element rest

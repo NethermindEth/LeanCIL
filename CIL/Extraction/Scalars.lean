@@ -533,7 +533,7 @@ private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   -- Enum names cannot contain generic owner arguments.
   | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
   | .parameter index => some (signatureBytes ("!!" ++ toString index))
-  | .functionPointer .. | .signatureParameter .. | .modified .. => none
+  | .functionPointer .. | .signatureParameter .. | .modified .. | .ownerParameter _ => none
   -- `&` and `*`.
   | .byref element => (· ++ [38]) <$> scalarTypeBytes element
   | .pointer element => (· ++ [42]) <$> scalarTypeBytes element
