@@ -644,6 +644,44 @@ theorem class_declaring_owner_rejected :
         typeArguments := [integer], ownerArgumentCount := 1 } = none := by decide +kernel
 #print axioms class_declaring_owner_rejected
 
+/-- The struct lists the closed interface on which slot 5 is declared. -/
+private def genericSlotTypes (owner : TypeExpr) : List DispatchType :=
+  [{ concrete with
+      identity := genericReceiver, interfaces := [.apply owner integer],
+      methods := [genericImplementation] },
+    { declared with identity := .apply owner integer }]
+
+/-- An instance call of slot 5 on the supplied generic interface at Int32. -/
+private def genericSlotSite (owner : TypeExpr) : CallSite :=
+  { site with
+    method.owner := .apply owner integer, typeArguments := [integer], ownerArgumentCount := 1 }
+
+/-- The caller and its direct link to token 21 must agree with resolution of slot 5. -/
+private def genericSlotCallValid (owner : TypeExpr) : Prop :=
+  let callSite := genericSlotSite owner
+  let caller := { genericRaw with code := genericRaw.code.set 2 (.mk 7 111 (.call callSite)) }
+  ConstrainedCallsValid (genericSlotTypes owner) [.mk [] caller, genericTarget] caller
+    [true, true, true, true] (constrainedEmitted genericReceiver callSite)
+
+/-- The receiver's own scoped type cannot also declare interface slot 5. -/
+theorem conflicting_interface_slot_rejected :
+    resolveConstrained (genericSlotTypes classOwner) genericReceiver
+      (genericSlotSite classOwner) = none := by decide +kernel
+#print axioms conflicting_interface_slot_rejected
+
+/-- A link to token 21 cannot certify slot 5 on the conflicting interface. -/
+theorem conflicting_interface_call_rejected : Not (genericSlotCallValid classOwner) := by
+  unfold genericSlotCallValid
+  decide +kernel
+#print axioms conflicting_interface_call_rejected
+
+/-- The same receiver implements slot 5 of a distinct closed generic interface with token 21. -/
+theorem distinct_generic_interface_call_valid :
+    genericSlotCallValid (.objectConstructor "Fixture" "IValue`1") := by
+  unfold genericSlotCallValid
+  decide +kernel
+#print axioms distinct_generic_interface_call_valid
+
 /-- A class of the fixture assembly that type tests name. -/
 private def dogClass : TypeExpr := .object "Fixture" "Fixture.Dog"
 private def dogEntry : DispatchType := {

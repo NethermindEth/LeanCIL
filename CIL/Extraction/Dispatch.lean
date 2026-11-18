@@ -88,14 +88,20 @@ def dispatchOwnerMatches (receiver : TypeExpr) (target : DispatchMethod) : Bool 
     genericOwnerIdentity owner target.ownerArguments == some identity
   | _, _ => false
 
-/-- A closed value-type slot uses its receiver's layout identity. Interfaces keep their type. -/
-private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : TypeExpr :=
-  if site.typeArguments.isEmpty then site.declaringType else
-  match receiver, ownerBase site.declaringType with
-  | .aggregate identity _, owner@(.constructor ..) =>
-    if genericOwnerIdentity owner site.typeArguments == some identity
-      then receiver else site.declaringType
-  | _, _ => site.declaringType
+/-- A matching struct owner denotes the receiver. A reference-type head at that identity
+    conflicts with the receiver's kind. Other slots retain their declared type. -/
+private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : Option TypeExpr :=
+  match receiver with
+  | .aggregate identity _ =>
+    -- A generic owner containing the receiver as an argument has a strictly longer identity.
+    if site.typeArguments.contains receiver then some site.declaringType else
+    let owner := ownerBase site.declaringType
+    if genericOwnerIdentity owner site.typeArguments == some identity then
+      match owner with
+      | .constructor .. => some receiver
+      | _ => none
+    else some site.declaringType
+  | _ => some site.declaringType
 
 /-- Owner arguments are the site's closed owner arguments; method arguments precede them, must
     be closed, and are admitted only for static slots. -/
@@ -232,14 +238,15 @@ def resolveConstrained (types : List DispatchType) (receiver : TypeExpr) (site :
   let .managed token := site.target | none
   let concrete ← unique (types.filter fun type => type.identity == receiver)
   if !concrete.valueType || concrete.interfaceType || !concrete.pinned then none else pure ()
-  let declaring ← unique (types.filter fun type => type.identity == declaringIdentity receiver site)
+  let identity <- declaringIdentity receiver site
+  let declaring <- unique (types.filter fun type => type.identity == identity)
   if !declaring.pinned then none else pure ()
   let slot ← unique (declaring.methods.filter fun method => method.token == token)
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
-  let target ← if receiver == declaring.identity then
+  let target <- if receiver == identity then
       (if site.hasThis then some (.implementation slot) else none) else do
     if !declaring.interfaceType || !slot.isVirtual ||
-        !concrete.interfaces.contains declaring.identity then none else pure ()
+        !concrete.interfaces.contains identity then none else pure ()
     selectTarget site slot
       (concrete.methods.filter fun method => method.overrides.contains (token, site.declaringType))
       (concrete.methods.filter fun method =>
@@ -444,14 +451,15 @@ def DispatchIndex.resolve (index : DispatchIndex) (receiver : TypeExpr) (site : 
   let concrete ← index.findType receiver
   if !concrete.raw.valueType || concrete.raw.interfaceType || !concrete.raw.pinned then none
     else pure ()
-  let declaring ← index.findType (declaringIdentity receiver site)
+  let identity <- declaringIdentity receiver site
+  let declaring <- index.findType identity
   if !declaring.raw.pinned then none else pure ()
   let slot ← unique (declaring.tokens.getD token [])
   if slot.name != site.name || !signatureMatches slot site then none else pure ()
-  let target ← if receiver == declaring.raw.identity then
+  let target <- if receiver == identity then
       (if site.hasThis then some (.implementation slot) else none) else do
     if !declaring.raw.interfaceType || !slot.isVirtual ||
-        !concrete.raw.interfaces.contains declaring.raw.identity then none else pure ()
+        !concrete.raw.interfaces.contains identity then none else pure ()
     selectTarget site slot
       ((concrete.overrides.getD token []).filter fun method =>
         method.overrides.contains (token, site.declaringType))

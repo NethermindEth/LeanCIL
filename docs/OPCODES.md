@@ -311,7 +311,8 @@ read for dispatch, so a body that needs it is rejected.
 Closed sequential generic structs admit direct slots and directly implemented interface slots,
 including closed generic interfaces. For a direct slot or an implementation on the struct, the
 generic owner must have a value-type head and match the receiver's closed layout identity.
-An interface slot uses its full declaring type, including its generic arguments.
+An interface slot uses its full declaring type, including its generic arguments. Dispatch rejects
+a slot whose class or interface head gives the same closed identity as the struct receiver.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
 overrides take precedence and retain the closed interface owner as well as the method token.
 Slots with [`in` parameters](#in-parameters-of-virtual-members) match only implementations
