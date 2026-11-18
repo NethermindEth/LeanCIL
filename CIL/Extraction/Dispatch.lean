@@ -80,21 +80,22 @@ def ownerBase : TypeExpr → TypeExpr
   | .apply owner _ => ownerBase owner
   | type => type
 
-/-- Generic dispatch metadata must name precisely the closed receiver specialization. -/
+/-- A generic implementation must name the value type and arguments of its struct receiver. -/
 def dispatchOwnerMatches (receiver : TypeExpr) (target : DispatchMethod) : Bool :=
   if target.ownerArguments.isEmpty then target.owner == .void else
-  match receiver with
-  | .aggregate identity _ => genericOwnerIdentity target.owner target.ownerArguments == some identity
-  | _ => false
+  match receiver, target.owner with
+  | .aggregate identity _, owner@(.constructor ..) =>
+    genericOwnerIdentity owner target.ownerArguments == some identity
+  | _, _ => false
 
-/-- A closed struct slot uses its receiver's layout identity; interface identities stay structural. -/
+/-- A closed value-type slot uses its receiver's layout identity. Interfaces keep their type. -/
 private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : TypeExpr :=
-  match receiver with
-  | .aggregate identity _ =>
-    if !site.typeArguments.isEmpty &&
-        genericOwnerIdentity (ownerBase site.declaringType) site.typeArguments == some identity
+  if site.typeArguments.isEmpty then site.declaringType else
+  match receiver, ownerBase site.declaringType with
+  | .aggregate identity _, owner@(.constructor ..) =>
+    if genericOwnerIdentity owner site.typeArguments == some identity
       then receiver else site.declaringType
-  | _ => site.declaringType
+  | _, _ => site.declaringType
 
 /-- Owner arguments are the site's closed owner arguments; method arguments precede them, must
     be closed, and are admitted only for static slots. -/

@@ -1,7 +1,11 @@
 import CIL.Extraction.Constrained
 import Tests.Support
 
-/-! # Independently tampered constrained-call metadata and translations -/
+/-! # Constrained-call evidence
+
+These fixtures check receiver and interface dispatch, including the owner kind of a closed
+generic struct, and the emitted calls and type tests against their metadata.
+-/
 namespace Tests.ConstrainedEvidence
 open CIL CIL.Extraction
 
@@ -619,6 +623,26 @@ theorem changed_owner_scope_rejected :
         { genericImplementation with owner := .constructor "Other" "Counter`1" }] }, declared]
       genericReceiver site = none := by decide +kernel
 #print axioms changed_owner_scope_rejected
+
+/-- The class head with the same scope and name as the generic struct. -/
+private def classOwner : TypeExpr := .objectConstructor "Fixture" "Counter`1"
+
+/-- A method with a class owner cannot implement an interface slot on the struct. -/
+theorem class_implementation_owner_rejected :
+    Not (ConstrainedCallsValid
+      [{ concrete with identity := genericReceiver, methods := [
+        { genericImplementation with owner := classOwner }] }, declared]
+      [SpecializedMethod.mk [] genericRaw, genericTarget] genericRaw
+      [true, true, true, true] genericEmitted) := by decide +kernel
+#print axioms class_implementation_owner_rejected
+
+/-- A slot declared on the same-named class has no target on the struct receiver. -/
+theorem class_declaring_owner_rejected :
+    resolveConstrained genericTypes genericReceiver
+      { site with
+        method.owner := .apply classOwner integer, target := .managed 21,
+        typeArguments := [integer], ownerArgumentCount := 1 } = none := by decide +kernel
+#print axioms class_declaring_owner_rejected
 
 /-- A class of the fixture assembly that type tests name. -/
 private def dogClass : TypeExpr := .object "Fixture" "Fixture.Dog"

@@ -309,7 +309,9 @@ for an interface-level body, every interface of `T` must be declared in the extr
 struct may implement a slot of a referenced interface. An interface of any other assembly is never
 read for dispatch, so a body that needs it is rejected.
 Closed sequential generic structs admit direct slots and directly implemented interface slots,
-including closed generic interfaces. The slot's closed declaring owner must match exactly.
+including closed generic interfaces. For a direct slot or an implementation on the struct, the
+generic owner must have a value-type head and match the receiver's closed layout identity.
+An interface slot uses its full declaring type, including its generic arguments.
 Implicit implementations must uniquely match the public name and signature; explicit `MethodImpl`
 overrides take precedence and retain the closed interface owner as well as the method token.
 Slots with [`in` parameters](#in-parameters-of-virtual-members) match only implementations
