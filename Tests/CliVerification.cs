@@ -289,10 +289,10 @@ var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "
 var tracedText = traced.Stdout.ReplaceLineEndings("\n");
 var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
 if (traced.Code != 0 || !tracedText.Contains("  Trace (") || tracedText.Contains("Untraced") ||
-    !tracedText.Contains("Countdown.lean:30:4: [CIL.step] pc 0: CIL.Instruction.ldarg 0\n") ||
+    !tracedText.Contains("Countdown.lean:31:4: [CIL.step] pc 0: CIL.Instruction.ldarg 0\n") ||
     !tracedText.Contains("[CIL.step] cil_loop_finish took ") || tracedMessages.Contains("[CIL.step]") ||
     // Each tactic reports its step count once, at its own position.
-    tracedText.Split("Countdown.lean:30:4: [CIL.step] cil_loop_recurse took ").Length != 2)
+    tracedText.Split("Countdown.lean:31:4: [CIL.step] cil_loop_recurse took ").Length != 2)
     throw new InvalidOperationException("verify --trace did not report the steps apart: " + traced.Output);
 var tracedReport = JsonNode.Parse(Exited(Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "--trace",
     "--format", "json"]), 0).Stdout) as JsonObject;
