@@ -36,6 +36,17 @@ theorem numericValue_snapshotValue (shape : CIL.SnapshotShape) (bytes : List (Bi
   · cases shape <;> rfl
   · simp [numericValue, length]
 
+/-- A slice of a snapshot's bytes that lies within them is a well-formed value of its width. -/
+theorem numericValue_snapshotSlice {bytes : List (BitVec 8 × Bool)} {offset size total : Nat}
+    (within : ¬(bytes.length != total || decide (offset + size > total)) = true) :
+    numericValue (snapshotValue (.aggregate size) ((bytes.drop offset).take size)) = true := by
+  apply numericValue_snapshotValue
+  simp only [Bool.or_eq_true, bne_iff_ne, ne_eq, decide_eq_true_eq, not_or, Decidable.not_not]
+    at within
+  simp only [List.length_take, List.length_drop, CIL.SnapshotShape.width]
+  omega
+#print axioms numericValue_snapshotSlice
+
 theorem loadSnapshot_numeric {m : Memory} {r : ManagedReference} {shape : CIL.SnapshotShape}
     {value : CIL.Value} (h : loadSnapshot m r shape = .ok value) : numericValue value = true := by
   unfold loadSnapshot at h

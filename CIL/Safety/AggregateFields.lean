@@ -321,7 +321,24 @@ theorem step_setAggregateFieldAt_reference_eq (body : CIL.Method) (pc : Nat)
         return .next (pc + 1) rest frame stored := by
   field_step_proof step_setAggregateFieldAt_eq
 
-/-- A nested struct field load reads the field's bytes at the field address. -/
+/-- A nested struct field store of a snapshot writes its bytes and initialization flags at the
+    field address once its width and byte count match the field's. -/
+theorem step_setAggregateFieldAt_snapshot_eq (body : CIL.Method) (pc : Nat)
+    (args : List Value) (frame : Frame) (memory : Memory) (offset size width : Nat)
+    (bytes : List (BitVec 8 × Bool)) (reference : Reference) (rest : List Value) :
+    step body (.setAggregateFieldAt offset size) pc args frame
+      (.scalar (.snapshot (.aggregate width) bytes) :: .reference (.address reference) :: rest)
+        memory =
+      if bytes.length != size || width != size then .error .invalidState else do
+        let address ← checkedAt (.address reference) 0
+          (add memory reference 1 (BitVec.ofNat 64 offset))
+        let stored ← checkedAt (.address address) size
+          (writeSnapshot memory address bytes ordinaryAccessAlignment)
+        return .next (pc + 1) rest frame stored := by
+  field_step_proof step_setAggregateFieldAt_eq
+
+/-- A nested struct field load copies the field's bytes at the field address, as a snapshot
+    keeping their initialization flags when some of them are uninitialized. -/
 theorem step_aggregateFieldAt_reference_eq (body : CIL.Method) (pc : Nat) (args : List Value)
     (frame : Frame) (memory : Memory) (offset size : Nat) (reference : Reference)
     (rest : List Value) :
@@ -329,10 +346,25 @@ theorem step_aggregateFieldAt_reference_eq (body : CIL.Method) (pc : Nat) (args 
       (.reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
+      if let .error .uninitialized := read memory address size ordinaryAccessAlignment then
+        let copied ← loadSnapshot memory (.address address) (.aggregate size)
+        return .next (pc + 1) (.scalar copied :: rest) frame memory
       let bytes ← checkedAt (.address address) size
         (read memory address size ordinaryAccessAlignment)
       return .next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory := by
-  field_step_proof step_aggregateFieldAt_eq
+  rw [step_aggregateFieldAt_eq]
+  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, referenceAt, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
+  cases checkedAt (.address reference) 0 (add memory reference 1 (BitVec.ofNat 64 offset)) with
+  | error => rfl
+  | ok address =>
+    dsimp only
+    cases read memory address size ordinaryAccessAlignment with
+    | ok => rfl
+    | error fault =>
+      cases fault <;> try rfl
+      cases loadSnapshot memory (.address address) (.aggregate size) <;> rfl
 
 /-- A field store into readable struct bytes leaves them reading as the stored field bytes. -/
 theorem read_after_field_write {memory after : Memory} {home : Reference}
@@ -453,6 +485,7 @@ theorem step_setAggregateFieldAt_home {memory : Memory} {home : Reference}
 #print axioms step_setFieldAt_v256_eq
 #print axioms step_setAggregateFieldAt_reference_eq
 #print axioms step_aggregateFieldAt_reference_eq
+#print axioms step_setAggregateFieldAt_snapshot_eq
 #print axioms field_address
 #print axioms step_setFieldAt_home
 #print axioms step_setAggregateFieldAt_home

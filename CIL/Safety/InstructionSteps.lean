@@ -311,6 +311,19 @@ theorem step_aggregateFieldAt_aggregate_eq (offset size : Nat)
         (.scalar (.aggregate ((bytes.drop offset).take size)) :: rest) frame memory) := by
   instruction_step_proof step_aggregateFieldAt_eq
 
+/-- A nested struct field of a struct snapshot is the slice of its bytes and flags, a plain struct
+    value when all of them are initialized, after a bounds check. -/
+@[cil_instruction_step high]
+theorem step_aggregateFieldAt_snapshot_eq (offset size total : Nat)
+    (bytes : List (BitVec 8 × Bool)) (rest : List Value) :
+    step body (.aggregateFieldAt offset size) pc args frame
+      (.scalar (.snapshot (.aggregate total) bytes) :: rest) memory =
+      if bytes.length != total || offset + size > total then .error .invalidState
+      else .ok (.next (pc + 1)
+        (.scalar (snapshotValue (.aggregate size) ((bytes.drop offset).take size)) :: rest)
+        frame memory) := by
+  instruction_step_proof step_aggregateFieldAt_eq
+
 -- Reference checks and struct initialization.
 /-- `skipInit` checks that the reference forms and pops it. -/
 @[cil_instruction_step high]
@@ -359,6 +372,7 @@ end InstructionEquations
 #print axioms step_fieldAt_aggregate_4_eq
 #print axioms step_fieldAt_aggregate_8_eq
 #print axioms step_aggregateFieldAt_aggregate_eq
+#print axioms step_aggregateFieldAt_snapshot_eq
 #print axioms step_skipInit_reference_eq
 #print axioms step_initAggregate_reference_eq
 

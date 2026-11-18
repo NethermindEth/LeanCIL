@@ -1328,20 +1328,38 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
         | 32 => .ok (.v256 (BitVec.ofNat 256 number))
         | _ => .error (.unsupported "Aggregate field width")
       return (m, .scalar value :: rest)
-  | .fieldAt offset width _, .scalar (.snapshot (.aggregate size) bytes) :: rest =>
+  | .fieldAt offset width signed, .scalar (.snapshot (.aggregate size) bytes) :: rest =>
     if bytes.length != size || offset + width > size then .error .invalidState else
       if width = 16 || width = 32 then
         let value ← bitcastValue (.aggregate width) (if width = 16 then .vector128 else .vector256)
           (.snapshot (.aggregate width) ((bytes.drop offset).take width))
         return (m, .scalar value :: rest)
-      else .error (.unsupported "Snapshot field width")
+      -- A scalar field is read only when its own bytes are initialized; padding need not be.
+      else if ((bytes.drop offset).take width).all Prod.snd then
+        let number := byteNumber (((bytes.drop offset).take width).map Prod.fst)
+        let value ← match width with
+          | 1 => .ok (.i32 (if signed then (BitVec.ofNat 8 number).signExtend 32
+              else BitVec.ofNat 32 number))
+          | 2 => .ok (.i32 (if signed then (BitVec.ofNat 16 number).signExtend 32
+              else BitVec.ofNat 32 number))
+          | 4 => .ok (.i32 (BitVec.ofNat 32 number))
+          | 8 => .ok (.i64 (BitVec.ofNat 64 number))
+          | _ => .error (.unsupported "Snapshot field width")
+        return (m, .scalar value :: rest)
+      else .error (.unsupported "Uninitialized snapshot field")
   | .aggregateFieldAt offset size, .scalar (.aggregate bytes) :: rest =>
     if offset + size > bytes.length then .error .invalidState else
       return (m, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
+  | .aggregateFieldAt offset size, .scalar (.snapshot (.aggregate total) bytes) :: rest =>
+    if bytes.length != total || offset + size > total then .error .invalidState else
+      return (m, .scalar (snapshotValue (.aggregate size) ((bytes.drop offset).take size)) :: rest)
   | .aggregateFieldAt offset size, .reference reference :: rest
   | .aggregateFieldAt offset size, .readOnlyReference reference :: rest =>
     let r ← referenceAt reference
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+    -- Padding stays uninitialized in the copy, as `loadAggregate` keeps it.
+    if let .error .uninitialized := read m address size ordinaryAccessAlignment then
+      return (m, .scalar (← loadSnapshot m (.address address) (.aggregate size)) :: rest)
     let bytes ← checkedAt (.address address) size (read m address size ordinaryAccessAlignment)
     return (m, .scalar (.aggregate bytes) :: rest)
   | .setAggregateFieldAt offset size, .scalar (.aggregate bytes) :: .reference reference :: rest =>
@@ -1350,6 +1368,13 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
       let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
       return (← checkedAt (.address address) size
         (write m address bytes ordinaryAccessAlignment), rest)
+  | .setAggregateFieldAt offset size,
+      .scalar (.snapshot (.aggregate width) bytes) :: .reference reference :: rest =>
+    if bytes.length != size || width != size then .error .invalidState else
+      let r ← referenceAt reference
+      let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+      return (← checkedAt (.address address) size
+        (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
   | .fieldAt offset width signed, .reference (.address r) :: rest
   | .fieldAt offset width signed, .readOnlyReference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))

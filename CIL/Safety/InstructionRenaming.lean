@@ -323,6 +323,7 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
          intro first second sourceStep same
          subst second
          exact .ok ⟨related, rfl⟩)
+      | simp only [related.read _ (by assumption)]
       | dsimp +instances only [AllocationRenaming.reference]
       | simp only [mapping.isNull, imageEquality]
       | (split <;> try simp only [*, AllocationRenaming.managedReference,

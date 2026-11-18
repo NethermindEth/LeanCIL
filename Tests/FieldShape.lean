@@ -6,14 +6,15 @@ import CIL.Safety.FuelLemmas
 # Field and value shapes
 
 Pins `CIL.LayoutEnvironment.fieldShape`, `valueShape` and the facts `cil_field_shape` and
-`cil_value_shape` declare, over a hand-written environment of three structs. A struct field
+`cil_value_shape` declare, over a hand-written environment of five structs. A struct field
 resolves to the offset and width of its checked layout entry, sign-extended only when it is
 declared as a narrow signed integer; a field whose index or held type does not match the
 declaration is unsupported; a class field resolves to the model slot of its index, a struct array
 element taking its size from the layout; and a method, defined or known by a hypothesis on its
 environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
 field faults; a struct field steps on each receiver kind as the lowered access of its shape, and
-a field operand without a fact steps to the same literal shape a fact states.
+a field operand without a fact steps to the same literal shape a fact states. A nested struct
+copied out of memory keeps its uninitialized padding, through a load and a store, as a snapshot.
 -/
 
 namespace Tests.FieldShape
@@ -24,7 +25,8 @@ open CIL CIL.Extraction
 private def scope : String := "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 
 /-- `T::Inner`, one `int32`; `T::Pair`, an `int16`, a `uint32` and an `Inner`; `T::Ref`, a
-    byref-like struct; `T::Lanes`, a 32-byte and a 16-byte vector and an `int32`. -/
+    byref-like struct; `T::Lanes`, a 32-byte and a 16-byte vector and an `int32`; `T::Outer`, a
+    `Pair` and an `int32`. -/
 def rawLayouts : List RawLayout := [
   { identity := "T::Inner", explicit := false, packing := 0, declaredSize := 0,
     fields := [{ type := .signed32 }] },
@@ -33,7 +35,9 @@ def rawLayouts : List RawLayout := [
   { identity := "T::Ref", explicit := false, packing := 0, declaredSize := 0, byRefLike := true,
     fields := [{ type := .signed32 }] },
   { identity := "T::Lanes", explicit := false, packing := 0, declaredSize := 0,
-    fields := [{ type := .vector256 }, { type := .vector128 }, { type := .signed32 }] }]
+    fields := [{ type := .vector256 }, { type := .vector128 }, { type := .signed32 }] },
+  { identity := "T::Outer", explicit := false, packing := 0, declaredSize := 0,
+    fields := [{ type := .aggregate 1 }, { type := .signed32 }] }]
 
 /-- The layouts CoreCLR computes for `rawLayouts`. -/
 def computedLayouts : Array ComputedLayout := #[
@@ -42,7 +46,9 @@ def computedLayouts : Array ComputedLayout := #[
     { offset := 8, width := 4, aggregate := true }] }, 4⟩,
   ⟨{ size := 4, fields := [{ offset := 0, width := 4 }] }, 4⟩,
   ⟨{ size := 64, fields := [{ offset := 0, width := 32 }, { offset := 32, width := 16 },
-    { offset := 48, width := 4 }] }, 32⟩]
+    { offset := 48, width := 4 }] }, 32⟩,
+  ⟨{ size := 16, fields := [{ offset := 0, width := 12, aggregate := true },
+    { offset := 12, width := 4 }] }, 4⟩]
 
 theorem layouts_valid : LayoutsValid rawLayouts computedLayouts .x64 := by decide +kernel
 #print axioms layouts_valid
@@ -304,26 +310,42 @@ cil_field_shape environment wideField
 cil_field_shape environment narrowField
 cil_field_shape environment tagField
 
-/-- A `T::Lanes` value held as a byte snapshot, as a vector bitcast leaves it. -/
+/-- The byte at `offset` of a test value: its offset, initialized unless it is in `unset`. -/
+def testByte (unset : List Nat) (offset : Nat) : BitVec 8 × Bool :=
+  (BitVec.ofNat 8 offset, !unset.contains offset)
+
+/-- A `T::Lanes` value held as a byte snapshot, as a vector bitcast leaves it: each byte holds
+    its offset, and byte 33 of `narrow` is uninitialized. -/
 def lanesSnapshot : Safety.Value :=
-  .scalar (.snapshot (.aggregate 64) (List.replicate 64 (0, true)))
+  .scalar (.snapshot (.aggregate 64) ((List.range 64).map (testByte [33])))
 
--- A snapshot receiver yields its 32- and 16-byte vector fields, and faults on any other width.
-theorem snapshot_vector_fields_load (frame : Safety.Frame) (memory : Safety.Memory) :
-    (∃ value, Safety.step body (.ldfld wideField) 0 [] frame [lanesSnapshot] memory =
-      .ok (.next (0 + 1) [.scalar value] frame memory)) ∧
-    (∃ value, Safety.step body (.ldfld narrowField) 0 [] frame [lanesSnapshot] memory =
-      .ok (.next (0 + 1) [.scalar value] frame memory)) := by
-  simp only [cil_step]
-  exact ⟨⟨_, rfl⟩, ⟨_, rfl⟩⟩
-#print axioms snapshot_vector_fields_load
-
-theorem snapshot_word_field_faults (frame : Safety.Frame) (memory : Safety.Memory) :
+-- A snapshot receiver yields each field from its own bytes: an initialized vector or word as its
+-- number, a vector with an uninitialized byte as a snapshot of the field's bytes and flags.
+theorem snapshot_fields_load (frame : Safety.Frame) (memory : Safety.Memory) :
+    Safety.step body (.ldfld wideField) 0 [] frame [lanesSnapshot] memory =
+      .ok (.next (0 + 1)
+        [.scalar (.v256 (BitVec.ofNat 256
+          (Safety.byteNumber ((List.range 32).map (BitVec.ofNat 8)))))] frame memory) ∧
+    Safety.step body (.ldfld narrowField) 0 [] frame [lanesSnapshot] memory =
+      .ok (.next (0 + 1)
+        [.scalar (.snapshot .vector128 ((List.range' 32 16).map (testByte [33])))] frame memory) ∧
     Safety.step body (.ldfld tagField) 0 [] frame [lanesSnapshot] memory =
-      .error (.unsupported "Snapshot field width") := by
+      .ok (.next (0 + 1) [.scalar (.i32 (BitVec.ofNat 32 (Safety.byteNumber
+        ((List.range' 48 4).map (BitVec.ofNat 8)))))] frame memory) := by
+  simp only [cil_step]
+  exact ⟨rfl, rfl, rfl⟩
+#print axioms snapshot_fields_load
+
+-- A word field with an uninitialized byte is not read, and the fault is not definite.
+theorem snapshot_uninitialized_word_unsupported (frame : Safety.Frame) (memory : Safety.Memory) :
+    Safety.step body (.ldfld tagField) 0 [] frame
+        [.scalar (.snapshot (.aggregate 64) ((List.range 64).map (testByte [50])))] memory =
+      .error (.unsupported "Uninitialized snapshot field") ∧
+    (Safety.ExecutionFault.unsupported "Uninitialized snapshot field").definite = false := by
+  refine ⟨?_, rfl⟩
   simp only [cil_step]
   rfl
-#print axioms snapshot_word_field_faults
+#print axioms snapshot_uninitialized_word_unsupported
 
 -- A store through a readonly reference faults before any address is formed.
 theorem readonly_store_unwritable (frame : Safety.Frame) (memory : Safety.Memory)
@@ -343,6 +365,84 @@ theorem value_address_faults (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step]
   rfl
 #print axioms value_address_faults
+
+private def outer : TypeExpr := .aggregate "T::Outer" 4
+
+/-- `Outer.pair`, the nested `Pair` at offset 0, whose bytes 2 and 3 are padding. -/
+def outerPairField : FieldRef :=
+  { owner := outer, index := 0, type := pair, name := name!"pair" }
+
+cil_field_shape environment outerPairField
+
+/-- Two `T::Outer` values in one caller allocation, a source at offset 0 and a destination at
+    16; every byte holds its offset, and the padding of the source's `Pair` is uninitialized. -/
+def paddedMemory : Safety.Memory := {
+  allocations := fun identity => if identity == 0 then
+    some ⟨.callerStack, ⟨32, 1, []⟩, true, []⟩ else none
+  cells := fun _ offset => ⟨(testByte [2, 3] offset).1, (testByte [2, 3] offset).2⟩
+  views := [⟨0, 0, 32, true, true⟩]
+  nextIdentity := 1 }
+
+/-- The source's `Pair` as a copy holds it: its twelve bytes with their flags. -/
+def paddedPair : List (BitVec 8 × Bool) := (List.range 12).map (testByte [2, 3])
+
+/-- Whether the destination's `Pair` reads back as the source's bytes and flags. -/
+def copiedPair (memory : Safety.Memory) : Bool :=
+  match Safety.readSnapshot memory ⟨0, 16⟩ 12 1 with
+  | .ok bytes => bytes == paddedPair
+  | .error _ => false
+
+/-- A frame with no locals, for running steps on concrete memory. -/
+def emptyFrame : Safety.Frame := ⟨0, [], [], 0⟩
+
+-- Loading the padded `Pair` through a reference pushes it as a snapshot with its flags, so
+-- `ldfld` followed by `pop` succeeds instead of faulting on the padding.
+theorem padded_load_keeps_padding :
+    (match Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
+        [.reference (.address ⟨0, 0⟩)] paddedMemory with
+      | .ok (.next 1 [.scalar (.snapshot (.aggregate 12) copied)] _ loaded) =>
+        copied == paddedPair && match Safety.step body .pop 1 [] emptyFrame
+            [.scalar (.snapshot (.aggregate 12) copied)] loaded with
+          | .ok (.next 2 [] _ _) => true
+          | _ => false
+      | _ => false) = true := by decide +kernel
+#print axioms padded_load_keeps_padding
+
+-- A struct copy `destination.pair = source.pair` compiles to `ldfld` then `stfld`, or to
+-- `ldflda`, `ldfld` and `stobj`; either way the destination gets the source's flags.
+theorem padded_copy_keeps_padding :
+    (match Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
+        [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 16⟩)] paddedMemory with
+      | .ok (.next _ stack _ loaded) =>
+        match Safety.step body (.stfld outerPairField) 1 [] emptyFrame stack loaded with
+        | .ok (.next _ [] _ stored) => copiedPair stored
+        | _ => false
+      | _ => false) = true ∧
+    (match Safety.step body (.ldflda outerPairField) 0 [] emptyFrame
+        [.reference (.address ⟨0, 16⟩)] paddedMemory with
+      | .ok (.next _ [field] _ _) =>
+        match Safety.step body (.ldfld outerPairField) 1 [] emptyFrame
+            [.reference (.address ⟨0, 0⟩), field] paddedMemory with
+        | .ok (.next _ stack _ loaded) =>
+          match Safety.step body (.storeAggregate 12) 2 [] emptyFrame stack loaded with
+          | .ok (.next _ [] _ stored) => copiedPair stored
+          | _ => false
+        | _ => false
+      | _ => false) = true := by decide +kernel
+#print axioms padded_copy_keeps_padding
+
+-- Bounds and lifetime are decided before initialization: a padded field past the allocation or
+-- in an expired one still faults as before.
+theorem padded_load_faults_first :
+    (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
+        [.reference (.address ⟨0, 24⟩)] paddedMemory).map (fun _ => ()) =
+      .error (.memory .outsideAllocation (.address ⟨0, 24⟩) 12) ∧
+    (Safety.step body (.ldfld outerPairField) 0 [] emptyFrame
+        [.reference (.address ⟨0, 0⟩)] { paddedMemory with
+          allocations := fun _ => some ⟨.callerStack, ⟨32, 1, []⟩, false, []⟩ }).map
+        (fun _ => ()) =
+      .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := ⟨rfl, rfl⟩
+#print axioms padded_load_faults_first
 
 /-- `Node.lanes` written inline under another name, which no shape fact states. -/
 def inlineLanes : FieldRef :=

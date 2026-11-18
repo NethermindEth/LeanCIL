@@ -721,6 +721,7 @@ macro "instruction_contract_close" : tactic => `(tactic| (
             | exact True.intro
             | exact bitcastValue_numeric (by assumption)
             | exact loadSnapshot_numeric (by assumption)
+            | exact numericValue_snapshotSlice (by assumption)
             | exact loadTransfer_numeric _ _ _ _ (by assumption)
             | exact endianValue_numeric _ _ _ _ _ (by assumption)
             | exact retained.head
