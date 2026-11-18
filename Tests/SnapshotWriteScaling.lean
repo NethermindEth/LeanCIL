@@ -16,9 +16,10 @@ private def memory (width : Nat) : Memory := { Memory.empty with
 /-- The copy starts one byte into allocation zero. -/
 private def target : Reference := { allocation := 0, offset := 1 }
 
-/-- Consecutive byte values with alternating initialization flags expose reordered cells. -/
+/-- Each 256-byte block starts one value later. Initialization flags alternate. -/
 private def payload (width : Nat) (seed : Nat := 0) : List (Prod (BitVec 8) Bool) :=
-  (List.range width).map fun index => (BitVec.ofNat 8 (index + seed), index % 2 == 0)
+  (List.range width).map fun index =>
+    (BitVec.ofNat 8 (index + index / 256 + seed), index % 2 == 0)
 
 /-- Read back every byte and flag after the checked write. -/
 private def roundTrip (width : Nat) (seed : Nat := 0) : Bool :=
@@ -38,6 +39,45 @@ private def timeCopies (width : Nat) : IO Unit := do
       throw (IO.userError s!"readback failed at width {width}, seed {seed}")
   let elapsed := (<- IO.monoNanosNow) - start
   IO.println s!"{width} bytes, 256 copies, {elapsed} ns"
+
+/-- Add one full sweep of the stored cell function to the running byte sum. -/
+@[noinline] private def sumCells (stored : Memory) (width total : Nat) : Nat := Id.run do
+  let mut sum := total
+  for index in [:width] do
+    sum := sum + (stored.cells target.allocation (target.offset + index)).bits.toNat
+  return sum
+
+/-- Measure complete sweeps of a successful store for at least 20 ms, in nanoseconds per byte. -/
+private def nanosPerByte (width : Nat) : IO Nat := do
+  let bytes := payload width
+  let .ok stored := writeSnapshot (memory width) target bytes 1
+    | throw (IO.userError s!"snapshot write failed at width {width}")
+  let expected := bytes.foldl (fun sum cell => sum + cell.1.toNat) 0
+  let mut sum := 0
+  let mut sweeps := 0
+  let start <- IO.monoNanosNow
+  repeat
+    for _ in [:1024 / width] do
+      sum := sumCells stored width sum
+      sweeps := sweeps + 1
+    let elapsed := (<- IO.monoNanosNow) - start
+    if elapsed >= 20_000_000 then
+      unless sum == sweeps * expected do
+        throw (IO.userError s!"cell sum failed at width {width}")
+      let count := sweeps * width
+      let cost := elapsed / count
+      IO.println s!"{width}-byte store: {elapsed} ns / {count} cell reads = {cost} ns/byte"
+      return cost
+
+/-- At least two of three paired samples must stay within twice the small store's cost per byte. -/
+private def checkCompiledCost : IO Unit := do
+  let mut slow := 0
+  for _ in [:3] do
+    let small <- nanosPerByte 16
+    let large <- nanosPerByte 1024
+    if large > 2 * small then slow := slow + 1
+  if slow >= 2 then
+    throw (IO.userError s!"compiled cell reads exceeded 2x the 16-byte cost in {slow}/3 samples")
 
 /-- Both instructions operate on the same stack address and execution frame. -/
 private def Stepped (width : Nat) : Prop :=
@@ -98,5 +138,7 @@ theorem stepped256 : Stepped 256 := by check_copy
 #eval timeCopies 256
 
 #eval timeCopies 1024
+
+#eval checkCompiledCost
 
 end Tests.SnapshotWriteScaling
