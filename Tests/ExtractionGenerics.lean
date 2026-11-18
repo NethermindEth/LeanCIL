@@ -51,6 +51,7 @@ example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.paramet
 
 /-- A call site whose scoped signature and generic arguments match the selected closed method. -/
 def callSite (parameter : TypeExpr) : CallSite := {
+  declared := { convention := 0x10, returnType := word, parameters := [.byref (.parameter 0)] },
   method := {
     owner := .atom "Test" "Owner", name := name!"Call", hasThis := false, genericArity := 1,
     returnType := word, parameters := [.byref parameter], methodArguments := [word] },
@@ -122,6 +123,7 @@ def constructors (index : Nat) : Option SpecializedMethod :=
   [(⟨[], tallyConstructor⟩ : SpecializedMethod), ⟨[], pairConstructor⟩][index]?
 /-- The managed site of each constructor. -/
 def construction : CallSite := {
+  declared := { convention := 0x20, parameters := [word] },
   method := {
     owner := tally, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
     parameters := [word] },
@@ -173,6 +175,7 @@ theorem forged_constructions_rejected :
 def deposit : RawMethod := { closed with
   owner := "Test::Tally", hasThis := true, objectReceiver := true, parameters := [word] }
 def depositSite : CallSite := {
+  declared := { convention := 0x20, returnType := word, parameters := [word] },
   method := {
     owner := tally, name := name!"Deposit", hasThis := true, genericArity := 0, returnType := word,
     parameters := [word] },

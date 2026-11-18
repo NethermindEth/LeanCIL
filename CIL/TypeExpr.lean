@@ -5,8 +5,8 @@ import CIL.Identity
 # Metadata type expressions
 
 A scope-qualified form of ECMA-335 signature types, used by extraction and by typed import
-slots to compare signatures as values. Custom modifiers, whose placement the ECMA-335 augments
-widen, are not represented; see `docs/SOUNDNESS-SPEC.md` for the admitted placements.
+slots to compare signatures as values. Open member declarations preserve custom modifiers.
+See `docs/SOUNDNESS-SPEC.md` for the admitted placements.
 Ordered type keys and candidate buckets let dispatch and layout tables find entries by type.
 -/
 
@@ -65,6 +65,8 @@ inductive TypeExpr where
       `System.String`, or, as the type a class instance field holds, any class or interface,
       whose references the field never reads through. -/
   | object (scope name : String)
+  /-- A custom modifier of an open member type, with the modifier's assembly and full name. -/
+  | modified (required : Bool) (scope name : String) (element : TypeExpr)
   deriving DecidableEq, Repr
 
 /-- Structural substitution includes nested type constructors, not just signature strings. -/
@@ -79,6 +81,8 @@ def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .signatureParameter head tail => do
     return .signatureParameter (← substituteType arguments head) (← substituteType arguments tail)
   | .enum identity underlying => TypeExpr.enum identity <$> substituteType arguments underlying
+  | .modified required scope name element =>
+    .modified required scope name <$> substituteType arguments element
   | .apply constructor argument => do
     return .apply (← substituteType arguments constructor) (← substituteType arguments argument)
   | type => some type
@@ -131,6 +135,9 @@ theorem runtimeScope_spells_runtimeAssembly :
 /-- Constructor-delimited type buckets retain scopes and aggregate positions. Lookups through
     these keys still compare full identities, in case two encodings were to share a bucket. -/
 def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
+  | .modified required scope name element, rest =>
+    keyBytes (if required then "modreq" else "modopt") :: keyBytes scope :: keyBytes name ::
+      typeKeyInto element rest
   | .void, rest => keyBytes "void" :: rest
   | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
   | .aggregate identity index, rest =>

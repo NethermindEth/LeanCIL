@@ -9,6 +9,7 @@ private def scope :=
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
 private def word : TypeExpr := .atom scope "System.UInt64"
 private def call : CallSite := {
+  declared := { convention := 0x10, parameters := [.byref (.parameter 0)] },
   method := {
     owner := unsafeType, name := name!"SkipInit", hasThis := false, genericArity := 1,
     returnType := .void, parameters := [], methodArguments := [word] },
@@ -17,6 +18,7 @@ private def call : CallSite := {
     !!0&)"),
   typeArguments := [word], parameterCount := 1, returnsValue := false }
 private def nullCall : CallSite := {
+  declared := { convention := 0x10, returnType := .byref (.parameter 0) },
   method := {
     owner := unsafeType, name := name!"NullRef", hasThis := false, genericArity := 1,
     returnType := .void, parameters := [], methodArguments := [word] },
@@ -24,6 +26,9 @@ private def nullCall : CallSite := {
   target := .external (scope ++ "::!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"),
   typeArguments := [word], parameterCount := 0, returnsValue := true }
 private def testCall : CallSite := {
+  declared := {
+    convention := 0x10, returnType := .atom runtimeScope "System.Boolean",
+    parameters := [.byref (.parameter 0)] },
   method := {
     owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
     returnType := .void, parameters := [], methodArguments := [word] },

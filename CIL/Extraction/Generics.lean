@@ -116,7 +116,8 @@ def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)
 /-- Whether a type mentions a generic parameter of the method being instantiated. -/
 private def mentionsParameter : TypeExpr → Bool
   | .parameter _ => true
-  | .byref element | .pointer element | .array element | .enum _ element =>
+  | .byref element | .pointer element | .array element | .enum _ element
+  | .modified _ _ _ element =>
     mentionsParameter element
   | .functionPointer result parameters .. | .signatureParameter result parameters =>
     mentionsParameter result || mentionsParameter parameters
@@ -893,7 +894,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   obtain ⟨offset, opcode, operand⟩ := raw
   cases operand with
   | call site =>
-    obtain ⟨methodRef, name, called, typeArguments, parameterCount, returnsValue,
+    obtain ⟨methodRef, declared, name, called, typeArguments, parameterCount, returnsValue,
       ownerArgumentCount⟩ := site
     cases called with
     | managed token =>

@@ -16,6 +16,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
     readonly ExternalIdentityEvidence externalIdentities = new();
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
+    readonly Dictionary<MethodReference, string> declaredSignatures = new();
     int methodParameterCount;
     // Operand terms of the closed code, by instruction, kept while its definition is written.
     Dictionary<Instruction, string>? closedOperands;
@@ -52,25 +53,39 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     static TypeReference Returned(MethodReference reference) =>
         InitAccessors.Return(CallReturnType.Resolve(reference));
 
-    string Type(TypeReference type, bool preserveGeneric)
+    string Type(TypeReference type, bool preserveGeneric, bool declared = false)
     {
+        string Nested(TypeReference element) => Type(element, false, declared);
+        if (declared && type is IModifierType modifier)
+        {
+            var required = Bool(type is RequiredModifierType);
+            var name = Quote(modifier.ModifierType.FullName);
+            return $".modified {required} {Scope(modifier.ModifierType)} {name} ({Nested(modifier.ElementType)})";
+        }
         if (type is FunctionPointerType callable)
         {
             var parameters = ".void";
             foreach (var argument in callable.Parameters.Reverse())
-                parameters = $".signatureParameter ({Type(argument.ParameterType)}) ({parameters})";
-            return $".functionPointer ({Type(callable.ReturnType)}) ({parameters}) " +
-                $"{(int)callable.CallingConvention} {callable.HasThis.ToString().ToLowerInvariant()} " +
-                callable.ExplicitThis.ToString().ToLowerInvariant();
+                parameters = $".signatureParameter ({Nested(argument.ParameterType)}) ({parameters})";
+            return $"""
+                .functionPointer ({Nested(callable.ReturnType)}) ({parameters})
+                {(int)callable.CallingConvention} {Bool(callable.HasThis)} {Bool(callable.ExplicitThis)}
+                """.ReplaceLineEndings(" ");
         }
         if (type is GenericParameter parameter)
-            return $".parameter {parameter.Position +
-                (parameter.Type == GenericParameterType.Method ? 0 : methodParameterCount)}";
-        if (type is ByReferenceType byRef) return $".byref ({Type(byRef.ElementType)})";
+        {
+            var offset = !declared && parameter.Type == GenericParameterType.Type
+                ? methodParameterCount : 0;
+            return $".parameter {parameter.Position + offset}";
+        }
+        if (type is ByReferenceType byRef) return $".byref ({Nested(byRef.ElementType)})";
         // An element class outside the model is named as an object, as the array's reference slots hold it.
         if (type is ArrayType { IsVector: true } array)
-            return $".array ({(ReferenceArrays.Is(array) ? ObjectType(array.ElementType) : Type(array.ElementType))})";
-        if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
+        {
+            var element = ReferenceArrays.Is(array) ? ObjectType(array.ElementType) : Nested(array.ElementType);
+            return $".array ({element})";
+        }
+        if (type is PointerType pointer) return $".pointer ({Nested(pointer.ElementType)})";
         if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
             return $".aggregate {layouts.IdentityTerm(tuple)} {tuple}";
         if (type is GenericInstanceType generic)
@@ -78,7 +93,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (!preserveGeneric && GenericStructs.Is(type) && layouts.Index(type) is >= 0 and var aggregate)
                 return $".aggregate {layouts.IdentityTerm(aggregate)} {aggregate}";
             var result = $"{Head(generic)} {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
-            foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Type(argument)})";
+            foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Nested(argument)})";
             return result;
         }
         if (type.FullName == "System.Void") return ".void";
@@ -108,7 +123,24 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return $".aggregate {layouts.IdentityTerm(index)} {index}";
     }
 
-    string Call(MethodReference reference, Instruction instruction, IReadOnlySet<Instruction> reachable)
+    // The member in the untouched body retains its blob even when the call graph specializes its operand.
+    string DeclaredSignature(MethodReference original)
+    {
+        var member = original.GetElementMethod();
+        if (declaredSignatures.TryGetValue(member, out var signature)) return signature;
+        var convention = (byte)member.CallingConvention |
+            (member.HasThis ? 0x20 : 0) | (member.ExplicitThis ? 0x40 : 0);
+        string DeclaredType(TypeReference type) => Type(type, true, true);
+        signature = $$"""
+            { convention := {{convention}}, returnType := {{DeclaredType(member.ReturnType)}},
+            parameters := {{List(member.Parameters.Select(parameter => DeclaredType(parameter.ParameterType)))}} }
+            """.ReplaceLineEndings(" ");
+        declaredSignatures.Add(member, signature);
+        return signature;
+    }
+
+    string Call(MethodReference reference, MethodReference original, Instruction instruction,
+        IReadOnlySet<Instruction> reachable)
     {
         var (method, name, owners, extracted, typeArguments) = MethodOperand(reference);
         var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
@@ -123,7 +155,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             { method := {{method.ToLean()}}, name := {{Quote(name)}}, target := {{target}},
             typeArguments := {{typeArguments}}, ownerArgumentCount := {{owners}},
             {{slot}}parameterCount := {{reference.Parameters.Count}},
-            returnsValue := {{Bool(Returned(reference).FullName != "System.Void")}} }
+            returnsValue := {{Bool(Returned(reference).FullName != "System.Void")}},
+            declared := {{DeclaredSignature(original)}} }
             """.ReplaceLineEndings(" ");
     }
 
@@ -305,7 +338,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     string ArrayElement(TypeReference type) => ReferenceArrays.Element(type) ? ObjectType(type) : Type(type);
 
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
-        Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
+        Instruction original, Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
     {
         switch (instruction.Operand)
         {
@@ -325,7 +358,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 var term = Type(type);
                 closedOperands?.TryAdd(admittedInstruction, term);
                 return $".type ({term})";
-            case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
+            case MethodReference callee:
+                return $".call {Call(callee, (MethodReference)original.Operand, admittedInstruction, reachable)}";
             case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:
                 return $".indirectCall ({Type(site.ReturnType)}) "+
                     $"{List(site.Parameters.Select(parameter => Type(parameter.ParameterType)))} "+
@@ -381,7 +415,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     string Locals(MethodDefinition method) =>
         List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
 
-    string Method(MethodDefinition method, MethodDefinition admitted, IReadOnlySet<Instruction> reachable)
+    string Method(MethodDefinition method, MethodDefinition original, MethodDefinition admitted,
+        IReadOnlySet<Instruction> reachable)
     {
         methodParameterCount = method.GenericParameters.Count;
         var instructions = new InstructionIndex(method);
@@ -396,7 +431,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var selected = admitted.Body.Instructions[index];
             if (instruction.Offset != selected.Offset || instruction.OpCode.Value != selected.OpCode.Value)
                 throw new InvalidDataException("Specialization instruction mapping changed an offset or opcode.");
-            var operand = Operand(method, instructions, instruction, selected, reachable);
+            var operand = Operand(method, instructions, instruction, original.Body.Instructions[index],
+                selected, reachable);
             return $"{{ offset := {instruction.Offset}, opcode := {Unadmitted.RawOpcode(instruction)}, " +
                 $"operand := {operand} }}";
         });
@@ -452,11 +488,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         IReadOnlySet<Instruction> reachable)
     {
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
-        var originalEvidence = Method(original, method, reachable);
+        var originalEvidence = Method(original, original, method, reachable);
         // Token operands are spelled in the original's generic context, as its code is.
         var body = Body(original, method, reachable, number);
         closedOperands = [];
-        var closedEvidence = Method(method, method, reachable);
+        var closedEvidence = Method(method, original, method, reachable);
         closedCalls = closedOperands;
         closedOperands = null;
         externalIdentities.Emit(lean);
@@ -631,8 +667,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var site = admitted.Body.Instructions[index];
             // An external identity is a materialized name at a reachable site and a literal at an unreachable
             // one. The literal spelling names the operand, so two sites share a token only if it agrees.
-            var key = Operand(original, instructions, instruction, site, EmptySet);
-            var operand = Operand(original, instructions, instruction, site, reachable);
+            var key = Operand(original, instructions, instruction, instruction, site, EmptySet);
+            var operand = Operand(original, instructions, instruction, instruction, site, reachable);
             var known = positions.GetValueOrDefault(token, -1);
             if (known < 0)
             {

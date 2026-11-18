@@ -50,6 +50,7 @@ theorem span_identity_checked :
 /-- A method call cannot silently reinterpret one enum span as another. -/
 theorem span_call_identity_checked :
     let call : RawInstruction := ⟨0, 40, .call {
+      declared := { convention := 0, parameters := [span "First"] },
       method := {
         owner := .atom "Fixture" "Helpers", name := name!"Use", hasThis := false,
         genericArity := 0, returnType := .void, parameters := [span "First"] },
@@ -70,6 +71,8 @@ theorem array_identity_checked :
 /-- Pointer-based in-place construction keeps the enum receiver's exact metadata identity. -/
 theorem enum_local_constructor :
     let constructor : CallSite := {
+      declared := {
+        convention := 0x20, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },
       method := {
         owner := span "First", name := name!".ctor", hasThis := true, genericArity := 0,
         returnType := .void, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },

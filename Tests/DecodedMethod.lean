@@ -465,6 +465,7 @@ private def summingRaw : RawMethod := { sumRaw with token := tokens.main + 1 }
 
 /-- The call site of `summingRaw`, a static method of the world's `Program` class. -/
 private def sumSite : CallSite := {
+  declared := { convention := 0, returnType := uint32, parameters := [uint32, uint32] },
   method := {
     owner := .object ownIdentity "Program", name := name!"Sum", hasThis := false,
     genericArity := 0, returnType := uint32, parameters := [uint32, uint32] },

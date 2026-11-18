@@ -25,18 +25,20 @@ def TypeExpr.genericHead : TypeExpr → TypeExpr
   | .apply head _ => head.genericHead
   | type => type
 
-/-- The runtime methods of one opcode, owner head and name: `resolve` gives the model of a call to
-    a method reference of that owner instance and signature, or `none` when none is modelled. -/
+/-- The methods of one opcode, owner head and name. A modelled call must resolve its closed
+    reference and have a declaration the entry accepts. -/
 structure ModelEntry where
   opcode : CallOpcode
   owner : TypeExpr
   name : MetadataName
+  declares : OpenSignature → Bool
   resolve : LayoutEnvironment → MethodRef → Option RuntimeModel
 
-/-- The entry whose model `model` stands for exactly the reference `method` under `opcode`. -/
-def ModelEntry.exact (opcode : CallOpcode) (method : MethodRef) (model : RuntimeModel) :
-    ModelEntry :=
+/-- An entry for one declaration and closed method reference under `opcode`. -/
+def ModelEntry.exact (opcode : CallOpcode) (method : MethodRef) (declared : OpenSignature)
+    (model : RuntimeModel) : ModelEntry :=
   { opcode, owner := method.owner.genericHead, name := method.name,
+    declares := (· == declared),
     resolve := fun _ reference => if reference = method then some model else none }
 
 /-- The search key of an entry: the code of its method name. -/
@@ -49,14 +51,17 @@ def ModelEntry.sameSlot (left right : ModelEntry) : Bool :=
 /-- Model entries by name code; the entries under one code are tried in order. -/
 abbrev ModelTable := SearchTree (List ModelEntry)
 
-/-- The model of a call under `opcode` to `method`: the entry of its name, opcode and owner
-    head resolves the whole reference. The name is compared as well as the key, so an entry
-    filed under another name's key is never selected. -/
+/-- The entry for the method's name, opcode and owner head. -/
+def ModelTable.entry? (table : ModelTable) (opcode : CallOpcode) (method : MethodRef) :
+    Option ModelEntry := do
+  let entries ← table.find? method.name.code
+  entries.find? fun entry =>
+    entry.name == method.name && entry.opcode == opcode && entry.owner == method.owner.genericHead
+
+/-- The model of a call under `opcode` to the closed reference `method`. -/
 def ModelTable.find (table : ModelTable) (environment : LayoutEnvironment)
     (opcode : CallOpcode) (method : MethodRef) : Option RuntimeModel := do
-  let entries ← table.find? method.name.code
-  let entry ← entries.find? fun entry =>
-    entry.name == method.name && entry.opcode == opcode && entry.owner == method.owner.genericHead
+  let entry ← table.entry? opcode method
   entry.resolve environment method
 
 /-- `groups` with `entry` added at the end of the group of its key. -/
@@ -145,8 +150,8 @@ def ModelEntry.Yields (entry : ModelEntry) (property : RuntimeModel → Prop) : 
 
 /-- An exact entry resolves only its own model. -/
 @[simp] theorem ModelEntry.exact_yields {opcode : CallOpcode} {method : MethodRef}
-    {model : RuntimeModel} {property : RuntimeModel → Prop} :
-    (ModelEntry.exact opcode method model).Yields property ↔ property model := by
+    {declared : OpenSignature} {model : RuntimeModel} {property : RuntimeModel → Prop} :
+    (ModelEntry.exact opcode method declared model).Yields property ↔ property model := by
   constructor
   · intro yields
     exact yields {} method model (by simp [ModelEntry.exact])
@@ -166,17 +171,10 @@ theorem ModelTable.find_yields {table : ModelTable} {property : RuntimeModel →
     {environment : LayoutEnvironment} {opcode : CallOpcode} {method : MethodRef}
     {model : RuntimeModel} (found : table.find environment opcode method = some model) :
     property model := by
-  simp only [ModelTable.find, bind, Option.bind] at found
-  split at found
-  · cases found
-  · rename_i entries filed
-    dsimp only at found
-    split at found
-    · cases found
-    · rename_i entry selected
-      dsimp only at found
-      exact every _ (SearchTree.find?_mem_toList _ _ _ filed) entry
-        (List.mem_of_find?_eq_some selected) environment method model found
+  obtain ⟨entry, selected, resolved⟩ := Option.bind_eq_some_iff.mp found
+  obtain ⟨entries, filed, member⟩ := Option.bind_eq_some_iff.mp selected
+  exact every _ (SearchTree.find?_mem_toList _ _ _ filed) entry
+    (List.mem_of_find?_eq_some member) environment method model resolved
 
 #print axioms ModelTable.find_yields
 
@@ -195,15 +193,18 @@ def callOpcode? : Nat → Option CallOpcode
 /-- A raw instruction and its emission agree with `catalog`: at a `call` or `newobj` an
     emission other than a call stands for exactly the model the table gives the site's method. A
     call keeps its operand, and `ManagedCallsValid` decides whether a model or a link enters it;
-    a model the table gives its method must be available in `profile`. -/
+    the entry must accept its declaration and its model must be available in `profile`. -/
 def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (raw : RawInstruction) (emitted : Instruction) : Bool :=
-  match callOpcode? raw.opcode, raw.operand, emitted with
-  | some opcode, .call site, .call .. =>
-    (catalog.table.find environment opcode site.method).all (·.available profile)
-  | some opcode, .call site, _ =>
-    catalog.table.find environment opcode site.method == catalog.lowered emitted
-  | _, _, _ => true
+  match callOpcode? raw.opcode, raw.operand with
+  | some opcode, .call site =>
+    let entry := catalog.table.entry? opcode site.method
+    let model := entry.bind (fun candidate => candidate.resolve environment site.method)
+    (model.isNone || entry.any (fun candidate => candidate.declares site.declared)) &&
+      match emitted with
+      | .call .. => model.all (·.available profile)
+      | _ => model == catalog.lowered emitted
+  | _, _ => true
 
 /-- Every live call site of `closed` emits in `code` the model `catalog` gives it, so a model
     emission is tied to the method it stands for and not only to its stack effect, and a kept call
@@ -218,6 +219,13 @@ def ModelsAgree (catalog : ModelCatalog) (environment : LayoutEnvironment)
 instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (profile : FeatureProfile)
     (closed : RawMethod) (reachable : List Bool) (code : List Instruction) :
     Decidable (ModelsAgree catalog environment profile closed reachable code) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  decidable_of_iff (all3 (fun raw live emitted =>
+      !live || catalog.siteAgrees environment profile raw emitted)
+      closed.code reachable code = true) <| by
+    constructor
+    · intro checked
+      have lengths := all3_lengths checked
+      exact ⟨lengths.1, lengths.2, checked⟩
+    · exact fun agreed => agreed.2.2
 
 end CIL.Extraction

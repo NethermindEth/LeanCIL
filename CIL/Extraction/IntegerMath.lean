@@ -31,37 +31,38 @@ def _root_.CIL.IntegerMath.signedOnly : IntegerMath → Bool
   | .abs | .sign => true
   | .min | .max | .clamp => false
 
-/-- The width and signedness of the integer type `method` takes as the helper `operation` of
-    `arity` parameters: the static, non-generic reference must take `arity` values of one
-    modelled integer type, which is `fixed` when the owner is that type, and return it, or
-    `System.Int32` for `Sign`. -/
+/-- The width and signedness for a helper taking `arity` parameters of one integer type, fixed
+    for a primitive owner. The result is that type, or `System.Int32` for `Sign`. -/
 def integerMathOperand (operation : IntegerMath) (arity : Nat) (fixed : Option TypeExpr)
-    (method : MethodRef) : Option (Nat × Bool) := do
-  if method.hasThis || method.genericArity != 0 || !method.methodArguments.isEmpty then none
-  let parameter ← method.parameters.head?
-  if method.parameters != List.replicate arity parameter then none
+    (returned : TypeExpr) (parameters : List TypeExpr) : Option (Nat × Bool) := do
+  let parameter ← parameters.head?
+  if parameters != List.replicate arity parameter then none
   if fixed.any (· != parameter) then none
   let .atom scope name := parameter | none
   if scope != runtimeScope then none
   let (width, signed) ← mathIntegers.lookup name
   if operation.signedOnly && !signed then none
   let result := if operation == .sign then TypeExpr.atom runtimeScope "System.Int32" else parameter
-  if method.returnType != result then none
+  if returned != result then none
   some (width, signed)
 
 /-- The model of a call of `method` as the helper `operation` of `arity` parameters: the scalar
     intrinsic at the width and signedness of the integer type it takes. -/
 def integerMathModel (operation : IntegerMath) (arity : Nat) (fixed : Option TypeExpr)
-    (method : MethodRef) : Option RuntimeModel :=
-  (integerMathOperand operation arity fixed method).map fun (width, signed) =>
-    .intrinsic (.scalar (.math operation width signed)) arity
+    (method : MethodRef) : Option RuntimeModel := do
+  if method.hasThis || method.genericArity != 0 || !method.methodArguments.isEmpty then none
+  let (width, signed) ←
+    integerMathOperand operation arity fixed method.returnType method.parameters
+  some (.intrinsic (.scalar (.math operation width signed)) arity)
 
 /-- The `call` entry of the helper `name` declared by `owner`, whose parameters must be
     `fixed` when given. -/
 def integerMathEntry (owner : TypeExpr) (fixed : Option TypeExpr)
     (helper : MetadataName × IntegerMath × Nat) : ModelEntry :=
   let (name, operation, arity) := helper
-  { opcode := .call, owner, name, resolve := fun _ => integerMathModel operation arity fixed }
+  { opcode := .call, owner, name, resolve := fun _ => integerMathModel operation arity fixed,
+    declares := fun sig => sig.convention == 0 &&
+      (integerMathOperand operation arity fixed sig.returnType sig.parameters).isSome }
 
 /-- The helpers of `System.Math`, then those each integer type declares on itself; an unsigned
     type declares no `Abs` or `Sign`. -/
@@ -86,8 +87,11 @@ theorem integerMathEntries_yields {property : RuntimeModel → Prop}
     rcases member with ⟨helper, _, rfl⟩ | ⟨integer, _, helper, _, rfl⟩ <;>
       exact ⟨_, _, _, found⟩
   rcases resolved with ⟨operation, arity, fixed, resolved⟩
-  simp only [integerMathModel, Option.map_eq_some_iff] at resolved
-  rcases resolved with ⟨_, _, rfl⟩
+  unfold integerMathModel at resolved
+  split at resolved
+  · contradiction
+  obtain ⟨⟨width, signed⟩, _, same⟩ := Option.bind_eq_some_iff.mp resolved
+  cases same
   exact intrinsic _ _
 
 #print axioms integerMathEntries_yields

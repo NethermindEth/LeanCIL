@@ -238,6 +238,7 @@ theorem unaligned_address_refused :
 
 /-- A static call of `Fixture.Sink::Take(int32)`. -/
 private def takeSite : CallSite := {
+  declared := { convention := 0, parameters := [intType] },
   method := {
     owner := .object "Fixture" "Fixture.Sink", name := name!"Take",
     hasThis := false, genericArity := 0, returnType := .void, parameters := [intType] },

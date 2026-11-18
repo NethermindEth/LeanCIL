@@ -41,6 +41,7 @@ private def declared : DispatchType := {
   interfaces := [], methods := [slot], assembly := fixturePin }
 private def types := [concrete, declared]
 private def site : CallSite := {
+  declared := { convention := 0x20, returnType := integer },
   method := {
     owner := interface, name := name!"Read", hasThis := true, genericArity := 0,
     returnType := integer, parameters := [] },
@@ -213,6 +214,7 @@ private def overrideTypes :=
   [{ defaultConcrete with methods := [genericOverride] }, defaultDeclared]
 /-- `constrained. Allowance; call bool IAllowance<Allowance>::Spend<Price>(TSelf&)`. -/
 private def defaultSite : CallSite := {
+  declared := { convention := 0x10, returnType := boolean, parameters := [.byref (.parameter 0)] },
   method := {
     owner := allowanceInterface, name := name!"Spend", hasThis := false, genericArity := 1,
     returnType := boolean, parameters := [.byref allowance], methodArguments := [price] },

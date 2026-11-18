@@ -17,6 +17,10 @@ private def span (scope element : String) : TypeExpr :=
 private def words := span runtime "System.UInt32"
 
 private def getItem : RawOperand := .call {
+  declared := {
+    convention := 0x20, parameters := [intType],
+    returnType := .modified true runtime "System.Runtime.InteropServices.InAttribute"
+      (.byref (.parameter 0)) },
   method := {
     owner := words, name := name!"get_Item", hasThis := true, genericArity := 0,
     returnType := .void, parameters := [] },
@@ -48,6 +52,9 @@ theorem primitive_span_widths :
 
 /-- A closed int32 array extension call with its exact defining assembly. -/
 private def arraySpanCall : CallSite := {
+  declared := {
+    convention := 0x10, returnType := .apply (.constructor runtime "System.Span`1") (.parameter 0),
+    parameters := [.array (.parameter 0), intType] },
   method := {
     owner := .atom spanMemoryScope "System.MemoryExtensions", name := name!"AsSpan",
     hasThis := false, genericArity := 1,
@@ -89,6 +96,7 @@ private def itemOps : List Instruction :=
 /-- Storing and addressing a span receiver leaves every instruction outside a fold. -/
 theorem length_receiver_roles :
     foldRoles [words] [i 10, i 18 (.local 0), i 40 (.call {
+      declared := { convention := 0x20, returnType := intType },
       method := {
         owner := words, name := name!"get_Length", hasThis := true, genericArity := 0,
         returnType := intType, parameters := [] },
@@ -135,6 +143,7 @@ example : ¬ typeTestInstruction
 
 /-- The exact writable int32 span member used by whole-region initialization. -/
 private def fillCall : CallSite := {
+  declared := { convention := 0x20, parameters := [.parameter 0] },
   method := {
     owner := .apply (.constructor runtime "System.Span`1") intType, name := name!"Fill",
     hasThis := true, genericArity := 0, returnType := .void, parameters := [intType] },
@@ -163,6 +172,7 @@ theorem exact_span_fill_call :
 
 /-- Exact array constructor used by an in-place local initialization. -/
 private def localConstructor : CallSite := {
+  declared := { convention := 0x20, parameters := [.array (.parameter 0)] },
   method := {
     owner := words, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
     parameters := [.array (.atom runtime "System.UInt32")] },
@@ -208,6 +218,10 @@ theorem constructor_forgery_rejected :
 #print axioms constructor_forgery_rejected
 /-- A readonly cast binds both element types and the exact runtime overload. -/
 private def reinterpretCall : CallSite := {
+  declared := {
+    convention := 0x10,
+    returnType := .apply (.constructor runtime "System.ReadOnlySpan`1") (.parameter 1),
+    parameters := [.apply (.constructor runtime "System.ReadOnlySpan`1") (.parameter 0)] },
   method := {
     owner := .atom runtime "System.Runtime.InteropServices.MemoryMarshal", name := name!"Cast",
     hasThis := false, genericArity := 2, returnType := span runtime "System.Int32",

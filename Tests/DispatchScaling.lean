@@ -30,6 +30,7 @@ def types (count : Nat) : List DispatchType :=
     interfaces := [], methods := [slot], assembly := pin}]
 /-- Call site selecting the shared interface slot. -/
 def site : CallSite := {
+  declared := { convention := 0x20 },
   method := {
     owner := iface, name := name!"Read", hasThis := true, genericArity := 0, returnType := .void,
     parameters := [] },

@@ -40,11 +40,20 @@ def getElement128Method : MethodRef :=
 def getElement256Method : MethodRef :=
   getElementMethod "System.Runtime.Intrinsics.Vector256" "System.Runtime.Intrinsics.Vector256`1"
 
+/-- The declaration of a generic lane read from the named vector type. -/
+def getElementSignature (vector : String) : OpenSignature :=
+  { convention := 0x10, returnType := .parameter 0,
+    parameters := [.apply (.constructor intrinsicsScope vector) (.parameter 0),
+      .atom runtimeScope "System.Int32"] }
+
 /-- The vector helper entries: each stands for one exact reference and runs as its intrinsic. -/
 def vectorEntries : List ModelEntry :=
-  [.exact .call createScalarUnsafeMethod (.intrinsic (.vector .createScalarUnsafe64) 1),
-    .exact .call getElement128Method (.intrinsic (.vector (.extract64 128)) 2),
-    .exact .call getElement256Method (.intrinsic (.vector (.extract64 256)) 2)]
+  [.exact .call createScalarUnsafeMethod (createScalarUnsafeMethod.signature 0)
+      (.intrinsic (.vector .createScalarUnsafe64) 1),
+    .exact .call getElement128Method (getElementSignature "System.Runtime.Intrinsics.Vector128`1")
+      (.intrinsic (.vector (.extract64 128)) 2),
+    .exact .call getElement256Method (getElementSignature "System.Runtime.Intrinsics.Vector256`1")
+      (.intrinsic (.vector (.extract64 256)) 2)]
 
 /-- Every model a vector helper entry resolves is an intrinsic, so a property every intrinsic
     model has holds of them. -/

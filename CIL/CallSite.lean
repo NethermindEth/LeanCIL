@@ -47,9 +47,21 @@ def MethodRef.arity (count : Nat) : MethodRef :=
 
 #print axioms MethodRef.arity_parameters_length
 
+/-- The member's signature before substitution. Each type variable keeps its blob index. -/
+structure OpenSignature where
+  convention : Nat
+  returnType : TypeExpr := .void
+  parameters : List TypeExpr := []
+  deriving DecidableEq, Repr
+
+/-- A signature whose declared types are the types of the reference. -/
+def MethodRef.signature (method : MethodRef) (convention : Nat) : OpenSignature :=
+  { convention, returnType := method.returnType, parameters := method.parameters }
+
 /-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
 structure CallSite where
   method : MethodRef
+  declared : OpenSignature
   name : String := ""
   target : MethodId
   typeArguments : List TypeExpr

@@ -67,30 +67,28 @@ def bitHelperModel (owner : BitOwner) (helper : BitHelper) (type : TypeExpr) (wi
   | .binaryPrimitives, .reverseEndianness => some (type, .reverseEndianness width signed)
   | _, _ => none
 
-/-- The intrinsic a call of `method` as `helper` declared by `owner` runs as: the static,
-    non-generic reference must take one runtime integer type, which is `fixed` when the owner is
-    that type, followed by `System.Int32` for a rotation, and return the result the owner
-    declares. -/
+/-- The operation on the given parameter and result types. A rotation takes an additional
+    `System.Int32` count. A primitive owner fixes the operand type. -/
 def bitOperation (owner : BitOwner) (helper : BitHelper) (fixed : Option TypeExpr)
-    (method : MethodRef) : Option ScalarIntrinsic := do
-  if method.hasThis || method.genericArity != 0 || !method.methodArguments.isEmpty then none
-  let type ← method.parameters.head?
+    (returned : TypeExpr) (parameters : List TypeExpr) : Option ScalarIntrinsic := do
+  let type ← parameters.head?
   let rotation := match helper with | .rotateLeft | .rotateRight => true | _ => false
-  if method.parameters != (if rotation then [type, int32Type] else [type]) then none
+  if parameters != (if rotation then [type, int32Type] else [type]) then none
   if fixed.any (· != type) then none
   let .atom scope name := type | none
   if scope != runtimeScope then none
   let (width, signed) ← mathIntegers.lookup name
   let (result, operation) ← bitHelperModel owner helper type width signed
-  if method.returnType != result then none
+  if returned != result then none
   some operation
 
 /-- The model of a call of `method` as `helper` declared by `owner`: the scalar intrinsic
     `bitOperation` gives, on the call's arguments. -/
 def bitModel (owner : BitOwner) (helper : BitHelper) (fixed : Option TypeExpr)
-    (method : MethodRef) : Option RuntimeModel :=
-  (bitOperation owner helper fixed method).map fun operation =>
-    .intrinsic (.scalar operation) method.parameters.length
+    (method : MethodRef) : Option RuntimeModel := do
+  if method.hasThis || method.genericArity != 0 || !method.methodArguments.isEmpty then none
+  let operation ← bitOperation owner helper fixed method.returnType method.parameters
+  some (.intrinsic (.scalar operation) method.parameters.length)
 
 /-- The helpers `BitOperations` and the integer types declare, by metadata name. -/
 def bitHelpers : List (MetadataName × BitHelper) :=
@@ -104,6 +102,8 @@ def bitHelpers : List (MetadataName × BitHelper) :=
 def bitEntry (owner : BitOwner) (declaring : TypeExpr) (fixed : Option TypeExpr)
     (helper : MetadataName × BitHelper) : ModelEntry :=
   { opcode := .call, owner := declaring, name := helper.1,
+    declares := fun sig => sig.convention == 0 &&
+      (bitOperation owner helper.2 fixed sig.returnType sig.parameters).isSome,
     resolve := fun _ => bitModel owner helper.2 fixed }
 
 /-- The helpers of `BitOperations`, those each integer type declares on itself, and
@@ -135,8 +135,11 @@ theorem bitEntries_yields {property : RuntimeModel → Prop}
     · exact ⟨_, _, _, found⟩
     · exact ⟨.binaryPrimitives, .reverseEndianness, none, found⟩
   rcases resolved with ⟨owner, helper, fixed, resolved⟩
-  simp only [bitModel, Option.map_eq_some_iff] at resolved
-  rcases resolved with ⟨_, _, rfl⟩
+  unfold bitModel at resolved
+  split at resolved
+  · contradiction
+  obtain ⟨operation, _, same⟩ := Option.bind_eq_some_iff.mp resolved
+  cases same
   exact intrinsic _ _
 
 #print axioms bitEntries_yields

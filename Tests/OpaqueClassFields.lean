@@ -186,7 +186,8 @@ private def runMethod : MethodRef :=
 
 /-- The call of `runMethod`, linked to the second method of `T`. -/
 private def run : CallSite :=
-  { method := runMethod, target := .managed 0x06000002, typeArguments := [],
+  { method := runMethod, declared := { convention := 0x20 },
+    target := .managed 0x06000002, typeArguments := [],
     parameterCount := 0, returnsValue := false }
 
 /-- An opaque reference is no `Fixture` to store, call or read through, and no array to measure;

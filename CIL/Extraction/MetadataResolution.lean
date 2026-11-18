@@ -841,6 +841,8 @@ structure Frame where
   anchor : List Nat
   arity : Nat
   ownerArity : Nat
+  /-- A member declaration numbers each owner's variables from zero in its own signature. -/
+  rawIndices : Bool := false
 
 /-- A class, interface or external type that may be a class. -/
 def classLike : TypeKind → Bool
@@ -934,7 +936,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         | .enumType code => typeAdmits frame fuel (.primitive code) underlying
         | .external (some true) | .external none => integerAtom frame underlying
         | _ => false
-    | .var index, .parameter number => index < frame.ownerArity && number == frame.arity + index
+    | .var index, .parameter number => index < frame.ownerArity &&
+        number == (if frame.rawIndices then index else frame.arity + index)
     -- Past the arity, a method parameter's index would be an owner parameter's.
     | .mvar index, .parameter number => index < frame.arity && number == index
     | .byref element, .byref inner => typeAdmits frame fuel element inner
@@ -956,8 +959,11 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         explicitThis == (convention / explicitThisFlag % 2 == 1) &&
         typeAdmits frame fuel result expectedResult &&
         chainAdmits frame fuel parameters expectedParameters
+    | .modified required modifier element, .modified claimed scope name inner =>
+      frame.rawIndices && required == claimed && modifier.scope == bytesOf scope &&
+        modifier.name == bytesOf name && typeAdmits frame fuel element inner
     | .modified required modifier element, .atom scope name =>
-      bytesOf scope == frame.anchor &&
+      !frame.rawIndices && bytesOf scope == frame.anchor &&
         cecilName false fuel (.modified required modifier element) == some (bytesOf name)
     | _, _ => false
 

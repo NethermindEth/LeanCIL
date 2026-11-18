@@ -13,6 +13,7 @@ open CIL CIL.Extraction
 
 /-- A static feature getter with independently constructed raw metadata. -/
 def getter (owner member : String) : CallSite := {
+  declared := { convention := 0, returnType := .atom runtimeScope "System.Boolean" },
   method := {
     owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
     name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
@@ -108,6 +109,7 @@ theorem wrong_call_shape :
 
 /-- Raw process-width calls retain their exact owner, result and external identity. -/
 def platform (owner member result : String) : CallSite := {
+  declared := { convention := 0, returnType := .atom runtimeScope result },
   method := {
     owner := .atom runtimeScope owner,
     name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
@@ -178,6 +180,7 @@ theorem platform_field (raw : RawMethod) :
 
 /-- A reference-content query retains its independently serialized generic argument. -/
 def referenceQuery (type : TypeExpr) : CallSite := {
+  declared := { convention := 0x10, returnType := .atom runtimeScope "System.Boolean" },
   method := {
     owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers",
     name := name!"IsReferenceOrContainsReferences", hasThis := false, genericArity := 1,

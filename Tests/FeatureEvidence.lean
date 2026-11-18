@@ -9,6 +9,7 @@ private def intType : TypeExpr := .atom
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
   "System.Int32"
 private def getter : CallSite := {
+  declared := { convention := 0, returnType := .atom runtimeScope "System.Boolean" },
   method := {
     owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
     parameters := [] },

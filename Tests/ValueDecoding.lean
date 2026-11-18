@@ -30,6 +30,7 @@ private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
 
 /-- A static call site of `T.Account::Deposit(int32)`. -/
 private def callSite : CallSite := {
+  declared := { convention := 0, parameters := [.atom runtimeScope "System.Int32"] },
   method := {
     owner := .object "T" "T.Account", name := name!"Deposit", hasThis := false,
     genericArity := 0, returnType := .void, parameters := [.atom runtimeScope "System.Int32"] },
@@ -38,6 +39,7 @@ private def callSite : CallSite := {
 
 /-- A managed site of the `int32` constructor of `T.Account`. -/
 private def accountConstruction : CallSite := {
+  declared := { convention := 0x20, parameters := [.atom runtimeScope "System.Int32"] },
   method := {
     owner := .object "T" "T.Account", name := name!".ctor", hasThis := true, genericArity := 0,
     returnType := .void, parameters := [.atom runtimeScope "System.Int32"] },

@@ -49,17 +49,18 @@ private def typeHandle : RawInstruction → Option TypeExpr
 /-- The exact call site of a static `System.Type` method with `parameters` parameters;
     `methodName` is the metadata name spelling `name`. -/
 private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
-    (parameters : Nat) : CallSite := {
-  method := {
+    (parameters : Nat) : CallSite :=
+  let method : MethodRef := {
     owner := .atom runtimeScope "System.Type", name := methodName, hasThis := false,
     genericArity := 0,
     returnType := .atom runtimeScope
       (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
     parameters := if name == "GetTypeFromHandle" then
         [.atom runtimeScope "System.RuntimeTypeHandle"]
-      else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] },
-  name, target := .external (runtimeScope ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, returnsValue := true }
+      else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
+  { method, declared := method.signature 0, name,
+    target := .external (runtimeScope ++ "::" ++ signature), typeArguments := [],
+    parameterCount := parameters, returnsValue := true }
 
 private def getTypeFromHandle : CallSite :=
   typeMethod "GetTypeFromHandle" name!"GetTypeFromHandle"

@@ -206,7 +206,8 @@ def libScope : String := "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=
 
 /-- `System.Console.WriteLine(int)`: an external static call. -/
 def writeLineSite : CallSite :=
-  { method := {
+  { declared := { convention := 0, parameters := [int32] },
+    method := {
       owner := .atom runtimeScope "System.Console", name := name!"WriteLine", hasThis := false,
       genericArity := 0, returnType := .void, parameters := [int32] },
     name := "WriteLine",
@@ -215,7 +216,8 @@ def writeLineSite : CallSite :=
 
 /-- `Lib.Box.Get()`: a managed call into the other assembly. -/
 def getSite : CallSite :=
-  { method := {
+  { declared := { convention := 0, returnType := int32 },
+    method := {
       owner := .atom libScope "Lib.Box", name := name!"Get", hasThis := false, genericArity := 0,
       returnType := int32, parameters := [] },
     name := "Get", target := .managed 0x06000001, typeArguments := [], parameterCount := 0,
@@ -223,7 +225,8 @@ def getSite : CallSite :=
 
 /-- `Lib.Pair.Sum()`: a managed call to a static method of a struct in the other assembly. -/
 def sumSite : CallSite :=
-  { method := {
+  { declared := { convention := 0, returnType := int32 },
+    method := {
       owner := .atom libScope "Lib.Pair", name := name!"Sum", hasThis := false, genericArity := 0,
       returnType := int32, parameters := [] },
     name := "Sum", target := .managed 0x06000002, typeArguments := [], parameterCount := 0,
@@ -231,7 +234,8 @@ def sumSite : CallSite :=
 
 /-- `System.Console.Id<uint>(!!0)`: an external generic method. -/
 def idSite : CallSite :=
-  { method := {
+  { declared := { convention := 0x10, returnType := .parameter 0, parameters := [.parameter 0] },
+    method := {
       owner := .atom runtimeScope "System.Console", name := name!"Id", hasThis := false,
       genericArity := 1, returnType := uint32, parameters := [uint32],
       methodArguments := [uint32] },

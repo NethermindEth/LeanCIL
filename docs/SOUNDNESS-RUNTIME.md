@@ -81,7 +81,9 @@ model entries, searched by method name; at the leaf the entry's name, opcode and
 compared and the entry resolves the whole reference. A `call` the table models keeps its call
 and states no link, and the checked interpreter runs the model when the pc has no link;
 `ManagedCallsValid` requires every other `call` to state a `.direct` link and rejects an
-unlinked call the table does not model. `RuntimeModelsAgree` requires each live call site that
+unlinked call the table does not model. At each live modelled call, the entry must accept the
+member's calling-convention byte and its return and parameter types before generic substitution.
+`RuntimeModelsAgree` requires each live call site that
 emits a model in place of its call to emit exactly the model the table gives its reference, and a
 site the table does not model to emit none of the models the table accounts for. The table holds
 the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of

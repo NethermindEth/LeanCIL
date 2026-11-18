@@ -236,6 +236,17 @@ theorem holds_only_carried_classes_and_strings_in_object_arrays :
   decide +kernel
 #print axioms holds_only_carried_classes_and_strings_in_object_arrays
 
+/-- Metadata binding refuses claims that give the instantiated member types as its declaration. -/
+example : rejects own.1 lib tokens.idSpec
+    (.call { idSite with declared.returnType := uint32 }) (.operandMismatch tokens.idSpec) := by
+  decide +kernel
+example : rejects own.1 lib tokens.idSpec
+    (.call { idSite with declared.parameters := [uint32] }) (.operandMismatch tokens.idSpec) := by
+  decide +kernel
+example : rejects own.1 lib tokens.writeLine
+    (.call { writeLineSite with declared.convention := 0x40 }) (.operandMismatch tokens.writeLine)
+    := by decide +kernel
+
 /-- `System.Console.Id<T>` as a call site instantiated with `argument`. -/
 private def idWith (argument : TypeExpr) : CallSite :=
   let method := { idSite.method with
@@ -893,6 +904,17 @@ private def pairFrame : Frame :=
 private def namedIn (scope name : String) (kind : Extraction.TypeKind) (pinned := false) :
     NamedType :=
   { scope := bytesOf scope, name := bytesOf name, parts := [], kind := kind, pinned := pinned }
+
+/-- A modified open parameter binds the modifier and the variable inside the reference. -/
+example :
+    let frame := { pairFrame with rawIndices := true }
+    let modifier := namedIn "Library" "Modifier" (.external none)
+    let type := ResolvedType.modified true modifier (.byref (.var 0))
+    frame.admits type (.modified true "Library" "Modifier" (.byref (.parameter 0))) &&
+      !frame.admits type (.modified true "Other" "Modifier" (.byref (.parameter 0))) &&
+      !frame.admits type (.modified true "Library" "Modifier" (.byref (.parameter 1))) &&
+      !frame.admits type (.modified false "Library" "Modifier" (.byref (.parameter 0))) := by
+  decide +kernel
 
 /-- `System.Int32` of the primitive assembly. -/
 private def int32Atom : TypeExpr := .atom "C" "System.Int32"

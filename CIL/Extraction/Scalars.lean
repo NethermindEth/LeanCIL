@@ -361,6 +361,7 @@ private def primitiveSize (type : TypeExpr) : Option Nat :=
 /-- Exactly `call Unsafe.SizeOf<T>()`. -/
 private def unsafeSizeOf (site : CallSite) : Bool :=
   site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
+    site.declared == { convention := 0x10, returnType := .atom runtimeScope "System.Int32" } &&
     site.name == "SizeOf" && !site.hasThis && site.returnsValue && site.parameterCount == 0 &&
     site.parameterTypes.isEmpty && site.returnType == .atom runtimeScope "System.Int32" &&
     site.target == .external (runtimeScope ++
@@ -532,7 +533,7 @@ private def scalarTypeBytes : TypeExpr → Option (List UInt8)
   -- Enum names cannot contain generic owner arguments.
   | .enum identity _ => (splitBytes (signatureBytes identity) [58, 58])[1]?
   | .parameter index => some (signatureBytes ("!!" ++ toString index))
-  | .functionPointer .. | .signatureParameter .. => none
+  | .functionPointer .. | .signatureParameter .. | .modified .. => none
   -- `&` and `*`.
   | .byref element => (· ++ [38]) <$> scalarTypeBytes element
   | .pointer element => (· ++ [42]) <$> scalarTypeBytes element

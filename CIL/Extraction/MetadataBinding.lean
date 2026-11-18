@@ -445,6 +445,13 @@ theorem MethodSite.externalMatches_contract (site : MethodSite) (frame : Frame)
   simp [MethodSite.externalMatches, matched]
 #print axioms MethodSite.externalMatches_contract
 
+/-- The claimed parameter list names every parameter of the member, in order. -/
+private def parametersAdmitted (frame : Frame) : List ResolvedType → List TypeExpr → Bool
+  | [], [] => true
+  | type :: types, claim :: claims =>
+    frame.admits type claim && parametersAdmitted frame types claims
+  | _, _ => false
+
 /-- Check a `.call` operand against the member its token names. -/
 def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite) :
     Except MetadataError TokenFacts := do
@@ -477,8 +484,15 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }
   if !(located.admits site.owner call.declaringType) then throw (.operandMismatch token)
-  if call.hasThis != (site.convention / hasThisFlag % 2 == 1) ||
+  let declared := call.declared
+  if declared.convention != site.convention ||
+      call.hasThis != (declared.convention / hasThisFlag % 2 == 1) ||
       call.parameterCount != site.parameters.length then throw (.operandMismatch token)
+  let member := { located with
+    arity := site.genericArity, ownerArity := ownerList.length, rawIndices := true }
+  if !member.admits site.result declared.returnType ||
+      !parametersAdmitted member site.parameters declared.parameters then
+    throw (.operandMismatch token)
   let some returned := siteReturn site.methodArguments ownerArguments site.result
     | throw (.operandMismatch token)
   if call.returnsValue != (returned != .primitive 1) || !(located.admits returned call.returnType)

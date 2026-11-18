@@ -64,6 +64,7 @@ def copySlot : ImportSlot := {
   parameterCount := 2, hasThis := false, returnsValue := false,
   signature := some copySignature, layouts := catalog }
 def copySite : CallSite := {
+  declared := { convention := 0, parameters := [.byref pair, .byref pair] },
   method := {
     owner := owner, name := name!"Copy", hasThis := false, genericArity := 0, returnType := .void,
     parameters := [.byref pair, .byref pair] },
@@ -103,6 +104,7 @@ def identitySlot : ImportSlot := {
   identity := library ++ "::Identity<UInt64>", closureDigest := "digest",
   parameterCount := 1, hasThis := false, returnsValue := true, signature := some identitySignature }
 def identitySite : CallSite := {
+  declared := { convention := 0x10, returnType := .parameter 0, parameters := [.parameter 0] },
   method := {
     owner := owner, name := name!"Identity", hasThis := false, genericArity := 1,
     returnType := word, parameters := [word], methodArguments := [word] },

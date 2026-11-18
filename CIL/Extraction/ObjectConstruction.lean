@@ -20,7 +20,7 @@ def objectConstructorMethod : MethodRef :=
 
 /-- A `call` of the `System.Object` constructor only consumes its receiver. -/
 def objectConstructorEntry : ModelEntry :=
-  .exact .call objectConstructorMethod .objectConstructor
+  .exact .call objectConstructorMethod { convention := 0x20 } .objectConstructor
 
 /-- The raw opcodes of `call`, `calli`, `callvirt` and `newobj`. -/
 def callFamilyOpcodes : List Nat := [40, 41, 111, 115]

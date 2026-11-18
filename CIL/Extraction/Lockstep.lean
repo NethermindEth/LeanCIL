@@ -16,6 +16,20 @@ def all3 (check : α → β → γ → Bool) : List α → List β → List γ �
   | [], [], [] => true
   | _, _, _ => false
 
+/-- A passing lockstep check consumes all three lists together. -/
+theorem all3_lengths {check : α → β → γ → Bool} :
+    ∀ {first : List α} {second : List β} {third : List γ}, all3 check first second third = true →
+      first.length = second.length ∧ first.length = third.length
+  | [], [], [], _ => ⟨rfl, rfl⟩
+  | _ :: rest, _ :: states, _ :: code, checked => by
+    have lengths := all3_lengths (Bool.and_eq_true_iff.mp checked).2
+    exact ⟨congrArg Nat.succ lengths.1, congrArg Nat.succ lengths.2⟩
+  | [], _ :: _, _, checked | _ :: _, [], _, checked | [], [], _ :: _, checked => by
+    simp [all3] at checked
+  | _ :: _, _ :: _, [], checked => by simp [all3] at checked
+
+#print axioms all3_lengths
+
 /-- A passing lockstep check holds at every index present in all three lists. -/
 theorem all3_at {check : α → β → γ → Bool} :
     ∀ {as : List α} {bs : List β} {cs : List γ} {k : Nat} {a : α} {b : β} {c : γ},

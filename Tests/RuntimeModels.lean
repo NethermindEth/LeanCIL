@@ -220,12 +220,13 @@ private def spanLength (element : TypeExpr) : MethodRef :=
 /-- `get_Length` of every span instance, an instance method of no parameters. -/
 private def spanLengthEntry : ModelEntry :=
   { opcode := .call, owner := .constructor runtimeScope "System.Span`1", name := name!"get_Length",
+    declares := (· == { convention := 0x20, returnType := runtimeType "System.Int32" }),
     resolve := fun _ method =>
       if method.hasThis && method.parameters.isEmpty then some (.memory .spanLength) else none }
 
 /-- BigMul by its exact reference, and `get_Length` of every span instance. -/
 private def entries : List ModelEntry :=
-  [ModelEntry.exact .call bigMul (.memory (.bigMul64 false)), spanLengthEntry]
+  [ModelEntry.exact .call bigMul (bigMul.signature 0) (.memory (.bigMul64 false)), spanLengthEntry]
 
 /-- The table of `entries`, accounting for the wide arithmetic and span length emissions. -/
 private def catalog : ModelCatalog where
@@ -237,9 +238,10 @@ private def catalog : ModelCatalog where
     | _ => none
 
 /-- A call or `newobj` of `method`. -/
-private def site (method : MethodRef) (opcode : Nat := 40) : RawInstruction :=
+private def site (method : MethodRef) (opcode : Nat := 40)
+    (declared := method.signature (if method.hasThis then 0x20 else 0)) : RawInstruction :=
   ⟨0, opcode, .call {
-    method := method, target := .external "", typeArguments := [],
+    method, declared, target := .external "", typeArguments := [],
     parameterCount := method.parameters.length, returnsValue := true }⟩
 
 -- The literal table is the balanced table of its entries.
@@ -303,8 +305,8 @@ example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [true] [.memory (.
 /-- error: model table: two entries share an opcode, owner and name -/
 #guard_msgs in
 example : ModelTable :=
-  model_table% [ModelEntry.exact .call bigMul (.memory (.bigMul64 false)),
-    ModelEntry.exact .call bigMul (.memory (.bigMul64 true))]
+  model_table% [ModelEntry.exact .call bigMul (bigMul.signature 0) (.memory (.bigMul64 false)),
+    ModelEntry.exact .call bigMul (bigMul.signature 0) (.memory (.bigMul64 true))]
 
 -- The runtime table models the exact `System.Object` constructor under `call` and nothing else.
 example : runtimeModel {} .call objectConstructorMethod = some .objectConstructor := by
@@ -329,7 +331,8 @@ example : RuntimeModelsAgree (method
 
 -- An entry filed under `newobj` does not model a `call` of its method.
 example : ModelTable.find
-    (model_table% [ModelEntry.exact .newobj objectConstructorMethod .objectConstructor])
+    (model_table% [ModelEntry.exact .newobj objectConstructorMethod
+      { convention := 0x20 } .objectConstructor])
     {} .call objectConstructorMethod = none := by decide +kernel
 
 /-- A body whose only instruction is `emitted`, with the link table `links`. -/
@@ -353,7 +356,8 @@ example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site objectCon
     [true] (emitting (.call bigMul {}) []) := by decide +kernel
 
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method ⟨0, 40, .call {
-      method := objectConstructorMethod, target := .managed 0, typeArguments := [],
+      method := objectConstructorMethod, declared := { convention := 0x20 },
+      target := .managed 0, typeArguments := [],
       parameterCount := 0, returnsValue := false }⟩) [true]
     (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
 
@@ -481,7 +485,8 @@ private def avx2And : MethodRef :=
   { owner := runtimeType "System.Runtime.Intrinsics.X86.Avx2", name := name!"And",
     hasThis := false, genericArity := 0, returnType := word, parameters := [word, word] }
 private def avx2Catalog : ModelCatalog :=
-  { table := model_table% [ModelEntry.exact .call avx2And (.intrinsic (.avx2 .band) 2)],
+  { table := model_table% [ModelEntry.exact .call avx2And (avx2And.signature 0)
+      (.intrinsic (.avx2 .band) 2)],
     lowered := fun _ => none }
 example : avx2Catalog.siteAgrees {} {} (site avx2And) (.call avx2And {}) = false := by
   decide +kernel
@@ -539,23 +544,61 @@ example : runtimeModel {} .call
     none := by decide +kernel
 example : runtimeModel {} .newobj createScalarUnsafeMethod = none := by decide +kernel
 
+/-- A call of the generic lane reader with its member declaration. -/
+private def laneSite := site getElement128Method 40
+  (getElementSignature "System.Runtime.Intrinsics.Vector128`1")
+
+/-- A call of the 256-bit lane reader with its member declaration. -/
+private def lane256Site := site getElement256Method 40
+  (getElementSignature "System.Runtime.Intrinsics.Vector256`1")
+
+/-- Whether the model accepts a kept call with this member declaration. -/
+private def accepts (method : MethodRef) (declared : OpenSignature) : Bool :=
+  runtimeCatalog.siteAgrees {} {} (site method 40 declared) (.call method {})
+
+/-- Changing the convention alone invalidates each member declaration. -/
+private def refusesConventions (method : MethodRef) (signature : OpenSignature) : Bool :=
+  [0x40, 0x60, 0x01].all fun convention => !accepts method { signature with convention }
+
+example : refusesConventions objectConstructorMethod { convention := 0x20 } := by decide +kernel
+example : refusesConventions mathMin (mathMin.signature 0) := by decide +kernel
+example : refusesConventions getElement128Method
+    (getElementSignature "System.Runtime.Intrinsics.Vector128`1") := by decide +kernel
+example : refusesConventions createScalarUnsafeMethod (createScalarUnsafeMethod.signature 0) := by
+  decide +kernel
+
+/-- The decision after the caller specializes a member whose return is its type variable. -/
+private def specializedCall (catalog : ModelCatalog) (reference : MethodRef) : Option Bool := do
+  let openRef := { reference with returnType := .parameter 0 }
+  let operand := (site openRef 40 (openRef.signature 0)).operand
+  let .call closed ← substituteOperand [reference.returnType] [] 1 operand | none
+  pure (catalog.siteAgrees {} {} ⟨0, 40, .call closed⟩ (.call closed.method {}))
+
+example : specializedCall runtimeCatalog mathMin = some false := by decide +kernel
+example : specializedCall catalog bigMul = some false := by decide +kernel
+example : accepts getElement128Method { getElementSignature "System.Runtime.Intrinsics.Vector128`1"
+    with returnType := word } = false := by decide +kernel
+example : catalog.siteAgrees {} {} (site bigMul 40
+    { bigMul.signature 0 with returnType := .parameter 0 }) (.memory (.bigMul64 false)) = false :=
+  by decide +kernel
+
 -- A vector helper site keeps its call; the intrinsic it was lowered to is refused there, which a
 -- table without the helpers accepted.
 private def extractLowered : CIL.Instruction := .intrinsic (.vector (.extract64 128)) 2
 private def createLowered : CIL.Instruction := .intrinsic (.vector .createScalarUnsafe64) 1
-example : RuntimeModelsAgree (method (site getElement128Method)) [true]
+example : RuntimeModelsAgree (method laneSite) [true]
     (emitting (.call getElement128Method {}) []) := by decide +kernel
-example : ¬ RuntimeModelsAgree (method (site getElement128Method)) [true]
+example : ¬ RuntimeModelsAgree (method laneSite) [true]
     (emitting extractLowered []) := by decide +kernel
 example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
-    {} {} (method (site getElement128Method)) [true] [extractLowered] := by decide +kernel
+    {} {} (method laneSite) [true] [extractLowered] := by decide +kernel
 example : ¬ RuntimeModelsAgree (method (site createScalarUnsafeMethod)) [true]
     (emitting createLowered []) := by decide +kernel
 example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
     {} {} (method (site createScalarUnsafeMethod)) [true] [createLowered] := by decide +kernel
-example : ManagedCallsValid [] [] (callModelled body) (method (site getElement256Method)) [true]
+example : ManagedCallsValid [] [] (callModelled body) (method lane256Site) [true]
     (emitting (.call getElement256Method {}) []) := by decide +kernel
-example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site getElement256Method)) [true]
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method lane256Site) [true]
     (emitting (.call getElement256Method {}) [(0, .direct 0)]) := by decide +kernel
 
 end Table

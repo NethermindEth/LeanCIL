@@ -152,8 +152,17 @@ private def method (instruction : RawInstruction) : RawMethod :=
 /-- A call of `method`. -/
 private def site (method : MethodRef) : RawInstruction :=
   ⟨0, 40, .call {
-    method := method, target := .external "", typeArguments := [],
+    method, declared := method.signature 0, target := .external "", typeArguments := [],
     parameterCount := method.parameters.length, returnsValue := true }⟩
+
+/-- The bit and byte-order members require the default static calling convention. -/
+example : [popCount, reverseUlong].all (fun method =>
+    [0x40, 0x60, 0x01].all fun header =>
+      let operand : CallSite := {
+        method, declared := method.signature header,
+        target := .external "", typeArguments := [], parameterCount := 1, returnsValue := true }
+      !runtimeCatalog.siteAgrees {} {} ⟨0, 40, .call operand⟩ (.call method {})) := by
+  decide +kernel
 
 /-- A method with no code, on the scalar profile. -/
 private def body : CIL.Method := { code := [], locals := [], returnsValue := false }

@@ -231,10 +231,13 @@ What `MetadataResolution` and `MetadataBinding` check:
   and `StaticIdentitiesValid.pairs` states what it guarantees.
   A field's name, index and static flag,
   the generic arguments of a type or method instantiation,
-  the parameter and return types after substitution, the definition a member reference resolves to
+  the full calling-convention byte and parameter and return types before and after generic
+  substitution, the definition a member reference resolves to
   in a pinned assembly (its name, its signature and its place in its type's members) and the
   external identity of a call (the scope and Cecil's `result Owner::name(parameters)`) are
   recomputed from the bytes.
+  At each live modelled call, the runtime model entry also checks the member's open declaration.
+  For example, the generic vector lane reader must declare its method type parameter as the result.
 - The local variable types are checked against the standalone signature the body header names.
 - The method's own identity is checked against four columns of its `MethodDef` row. `Flags` and
   `ImplFlags` must equal the evidence's attributes and implementation flags. The `Signature` blob

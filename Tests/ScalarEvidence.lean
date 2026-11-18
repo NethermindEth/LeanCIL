@@ -352,6 +352,7 @@ example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 .su
 example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
+  declared := { convention := 0, returnType := word, parameters := [word, word] },
   method := {
     owner := .atom scope.identity "Fixture", name := name!"", hasThis := false, genericArity := 0,
     returnType := word, parameters := [word, word] },
@@ -562,7 +563,8 @@ theorem local_slot_sites :
 
 /-- A static method of no parameters whose address `ldftn` takes and `calli` calls. -/
 private def handler : CallSite :=
-  { method := {
+  { declared := { convention := 0 },
+    method := {
       owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
       parameters := [] },
     target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
@@ -620,6 +622,7 @@ theorem pointer_local_storage :
 
 private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
 private def byteSpanSite : CallSite := {
+  declared := { convention := 0x20, parameters := [.pointer .void, intType] },
   method := {
     owner := byteSpanType, name := name!".ctor", hasThis := true, genericArity := 0,
     returnType := .void, parameters := [.pointer .void, intType] },
@@ -660,6 +663,7 @@ private theorem span_constructor_cases :
 private def tupleType : TypeExpr := .aggregate
   (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
 private def tupleSite : CallSite := {
+  declared := { convention := 0, returnType := tupleType, parameters := [word, word, word] },
   method := {
     owner := .atom
       "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
@@ -700,6 +704,10 @@ private theorem tuple_field_cases :
 
 private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.UInt32")
 private def spanSite : CallSite := {
+  declared := {
+    convention := 0x20,
+    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
+    parameters := [intType] },
   method := {
     owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
     returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
@@ -757,6 +765,7 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 
 -- Defaulted signature fields are accepted only where they are the true signature.
 private def unsignedSite : CallSite := {
+  declared := { convention := 0 },
   method := {
     owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
     parameters := [] },
@@ -910,13 +919,15 @@ private def typed (opcode : Nat) (type : TypeExpr) (emitted : Instruction) : Ind
   else store 129 emitted (operand := .type type)
 /-- A static call taking one word and returning one, the stack effect of a 64-bit load. -/
 private def loadSite : CallSite :=
-  { method := {
+  { declared := { convention := 0, returnType := word, parameters := [word] },
+    method := {
       owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := word,
       parameters := [word] },
     target := .managed 0x06000002, typeArguments := [], parameterCount := 1, returnsValue := true }
 /-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
 private def storeSite : CallSite :=
-  { method := {
+  { declared := { convention := 0, parameters := [word, word] },
+    method := {
       owner := .void, name := name!"", hasThis := false, genericArity := 0,
       returnType := .void, parameters := [word, word] },
     target := .managed 0x06000002, typeArguments := [], parameterCount := 2,
@@ -1185,7 +1196,9 @@ example : scalarEmissionMatches #[] none none (i 114 (.text "a")) [] .nop = fals
 private def guardSite (owner methodName suffix : String) (arguments parameters : List TypeExpr) :
     RawInstruction :=
   ⟨0, 40, .call
-    { method := {
+    { declared := {
+        convention := (if arguments.isEmpty then 0 else 0x10), parameters := parameters },
+      method := {
         owner := .atom runtimeScope owner,
         name := (MetadataName.ofBytes? (bytesOf methodName)).getD ⟨0⟩, hasThis := false,
         genericArity := arguments.length, returnType := .void, parameters := parameters,
@@ -1246,6 +1259,7 @@ private def sizeCode (bits : W32) : List Instruction := [.ldc_i4 bits, .pop, .ld
 private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
   decide (ScalarFlowValid #[] (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
 private def sizeOfSite (type : TypeExpr) : CallSite := {
+  declared := { convention := 0x10, returnType := intType },
   method := {
     owner := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := name!"SizeOf",
     hasThis := false, genericArity := 1, returnType := intType, parameters := [],
@@ -1278,6 +1292,8 @@ private def otherSite : CallSite := { sizeOfSite intType with
 /-- Size intrinsics require the expected declaring identity. -/
 private theorem size_identity_cases :
     (sizeAt (i 40 (.call otherSite)) 4 = false) ∧
+    (sizeAt (i 40 (.call { sizeOfSite intType with declared.returnType := .parameter 0 }))
+      4 = false) ∧
     (sizeAt (i 40 (.call { sizeOfSite intType with
         method.owner := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
       4 = false) := by
@@ -1328,6 +1344,7 @@ example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
 theorem closed_generic_fill_signature :
     let element := TypeExpr.aggregate ("Scope::Pair`1<" ++ runtime ++ "::System.UInt64>") 0
     let site : CallSite := {
+      declared := { convention := 0x20, parameters := [element] },
       method := {
         owner := .apply (.constructor runtime "System.Span`1") element, name := name!"Fill",
         hasThis := true, genericArity := 0, returnType := .void, parameters := [element] },

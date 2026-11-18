@@ -18,6 +18,11 @@ private def other : TypeExpr := .aggregate (owner ++ "::Fixture.Other") 1
 
 private def typeCall (name : String) (methodName : MetadataName) (signature : String)
     (parameters : Nat) : RawOperand := .call {
+  declared := {
+    convention := 0, returnType := .atom runtime
+      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
+      else [.atom runtime "System.Type", .atom runtime "System.Type"] },
   method := {
     owner := .atom runtime "System.Type", name := methodName, hasThis := false, genericArity := 0,
     returnType := .atom runtime

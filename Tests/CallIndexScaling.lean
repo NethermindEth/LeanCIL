@@ -19,6 +19,7 @@ def emitted (code : List Instruction) : Method :=
   { locals := [], returnsValue := false, code := code }
 /-- A managed call site of the scalar-free signature every table position holds. -/
 def site : CallSite := {
+  declared := { convention := 0 },
   method := {
     owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
     returnType := .void, parameters := [] },

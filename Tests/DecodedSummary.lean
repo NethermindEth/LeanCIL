@@ -27,6 +27,7 @@ cil_resolution_facts addMethod
 
 /-- The call site of the adder, the world's `Program.Main` given two `uint64` parameters. -/
 def addSite : CallSite := {
+  declared := { convention := 0, returnType := uint64, parameters := [uint64, uint64] },
   method := {
     owner := .object ownIdentity "Program", name := name!"Main", hasThis := false,
     genericArity := 0, returnType := uint64, parameters := [uint64, uint64] },

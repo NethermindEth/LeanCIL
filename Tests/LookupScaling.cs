@@ -840,7 +840,8 @@ void CallCheckCosts()
               owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
               returnType := .void, parameters := [] }
             def site : RawInstruction := ⟨0, 40, .call {
-              method := callMethod, target := .managed 1, typeArguments := [], parameterCount := 0,
+              method := callMethod, declared := { convention := 0 }, target := .managed 1,
+              typeArguments := [], parameterCount := 0,
               returnsValue := false }⟩
             def raw : RawMethod := { callee with code := [{{raw}}] }
             def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
@@ -1743,7 +1744,10 @@ void ModelTableCosts()
     string[] positions = ["first", "middle", "last"];
     int Queried(string position, int size) => position switch { "first" => 0, "middle" => size / 2, _ => size - 1 };
     string Entries(int size) => string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
-        $"ModelEntry.exact .call (method name!\"Model{index:D4}\") (.memory (.divRemOut {index}))"));
+        $$"""
+        ModelEntry.exact .call (method name!"Model{{index:D4}}") { convention := 0 }
+          (.memory (.divRemOut {{index}}))
+        """));
     string Table(int size) => $$"""
         /-- {{size}} modelled methods. -/
         def entries{{size}} : List ModelEntry := [
@@ -1758,9 +1762,10 @@ void ModelTableCosts()
             some (.memory (.divRemOut {{Queried(position, size)}})))
         """;
     string Emitted(int index) => $".memory (.divRemOut {index})";
-    string Site(int index) =>
-        $"⟨{index}, 40, .call {{ method := method name!\"Model{index:D4}\", target := .external \"\", " +
-        "typeArguments := [], parameterCount := 0, returnsValue := true }⟩";
+    string Site(int index) => $$"""
+        ⟨{{index}}, 40, .call { method := method name!"Model{{index:D4}}", declared := { convention := 0 },
+          target := .external "", typeArguments := [], parameterCount := 0, returnsValue := true }⟩
+        """.ReplaceLineEndings(" ");
     string Sites(int count) => $$"""
         /-- {{count}} live calls of distinct modelled methods, the call at index i to method i. -/
         def raw{{count}} : RawMethod := { shell with code := [
@@ -2832,7 +2837,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         open CIL CIL.Extraction
         def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
         def handler : CallSite :=
-          { method := {
+          { declared := { convention := 0 }, method := {
               owner := .void, name := name!"", hasThis := false, genericArity := 0,
               returnType := .void, parameters := [] },
             target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
