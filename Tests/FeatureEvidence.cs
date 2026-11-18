@@ -332,8 +332,8 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
     var controlPath = Path.Combine(output, obligation + "-reference-query.lean");
     File.WriteAllText(controlPath, narrowed);
     queryControls.Add(controlPath, "PASS exact reference-content control: " + obligation, obligation);
-    var aggregate = Regex.Match(narrowed, "typeArguments := \\[\\.aggregate \"[^\"]+\" [0-9]+\\]").Value;
-    if (aggregate.Length == 0) throw new InvalidOperationException("Missing query-only aggregate layout");
+    var aggregate = FeatureLayoutPattern.QueryArgument().Match(narrowed);
+    if (!aggregate.Success) throw new InvalidOperationException("Missing query-only aggregate layout");
     foreach (var (name, before, after) in new[]
     {
         ("answer", ".ldc_i4 0", ".ldc_i4 1"),
@@ -341,7 +341,7 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
             ".atom \"forged\" \"System.Runtime.CompilerServices.RuntimeHelpers\""),
         ("byref", "typeArguments := [.atom Extraction.runtimeScope \"System.Int32\"]",
             "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Int32\")]"),
-        ("layout", aggregate, Regex.Replace(aggregate, "\"[^\"]+\"", "\"forged\"")),
+        ("layout", aggregate.Value, $"""typeArguments := [.aggregate "forged" {aggregate.Groups["index"].Value}]"""),
         ("signature", "parameterCount := 0, returnsValue := true", "parameterCount := 1, returnsValue := true")
     })
     {
@@ -591,3 +591,9 @@ if (invalid.Code == 0 || !invalid.Output.Contains("bmi2-only: x86 ISA flags requ
     throw new InvalidOperationException("Profile without X86Base64 was not rejected by name: " + invalid.Output);
 Console.WriteLine("PASS x86 ISA flags without X86Base64 rejected with the rule");
 Console.WriteLine("PASS raw feature analysis, join/backedge weakening, local eligibility, switches and emitted-code binding");
+
+static partial class FeatureLayoutPattern
+{
+    [GeneratedRegex("""typeArguments := \[\.aggregate \("[^"]+" \+\+ "[^"]+"\) (?<index>\d+)\]""")]
+    internal static partial Regex QueryArgument();
+}

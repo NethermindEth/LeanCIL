@@ -73,11 +73,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".array ({(ReferenceArrays.Is(array) ? ObjectType(array.ElementType) : Type(array.ElementType))})";
         if (type is PointerType pointer) return $".pointer ({Type(pointer.ElementType)})";
         if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
-            return $".aggregate {Quote(LayoutEvidence.Identity(type))} {tuple}";
+            return $".aggregate {layouts.IdentityTerm(tuple)} {tuple}";
         if (type is GenericInstanceType generic)
         {
             if (!preserveGeneric && GenericStructs.Is(type) && layouts.Index(type) is >= 0 and var aggregate)
-                return $".aggregate {Quote(LayoutEvidence.Identity(type))} {aggregate}";
+                return $".aggregate {layouts.IdentityTerm(aggregate)} {aggregate}";
             var result = $"{Head(generic)} {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
             foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Type(argument)})";
             return result;
@@ -91,7 +91,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         if (ObjectTypes.Reference(type)) return ObjectType(type);
         var index = layouts.Index(type);
         if (index >= 0 && !layouts.Metadata.IsImported(type))
-            return $".aggregate {Quote(LayoutEvidence.Identity(type))} {index}";
+            return $".aggregate {layouts.IdentityTerm(index)} {index}";
         return $".atom {Scope(type)} {Quote(type.FullName)}";
     }
 
@@ -101,8 +101,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     // Signatures name an imported layout by scoped atom, as the import boundary requires; only a
     // local declaration binds it to the table entry that sizes its storage.
-    string LocalType(TypeReference type) => layouts.Metadata.IsImported(type)
-        ? $".aggregate {Quote(LayoutEvidence.Identity(type))} {layouts.Index(type)}" : Type(type);
+    string LocalType(TypeReference type)
+    {
+        if (!layouts.Metadata.IsImported(type)) return Type(type);
+        int index = layouts.Index(type);
+        if (index < 0) throw new InvalidDataException($"Missing imported layout for {type.FullName}");
+        return $".aggregate {layouts.IdentityTerm(index)} {index}";
+    }
 
     string Call(MethodReference reference, Instruction instruction, IReadOnlySet<Instruction> reachable)
     {

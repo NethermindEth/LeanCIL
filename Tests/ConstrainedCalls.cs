@@ -426,14 +426,14 @@ foreach (var (name, type) in new[]
 // The emitted call must name the resolved instance: another method, a hidden override or a changed
 // method type argument each leave the caller's constrained obligation unprovable.
 var (spendDefault, spendOverride) = (defaultNarrowed["SpendDefault"], defaultNarrowed["SpendOverride"]);
-var defaultSite = Regex.Match(spendDefault, @"target := \.managed (\d+), typeArguments := \[(\.aggregate ""[^""]+" +
-    @"TriplePrice"" \d+), (\.aggregate ""[^""]+Allowance"" \d+)\], ownerArgumentCount := 1");
-var overrideSite = Regex.Match(spendOverride, @"target := \.managed (\d+), typeArguments := \[\.aggregate ""[^""]+" +
-    @"TriplePrice"" \d+, \.aggregate ""[^""]+DoublingAllowance"" \d+\], ownerArgumentCount := 1");
-var hiddenOverride = overrideSite.Success ? Regex.Match(spendOverride,
-    @"overrides := \[\(" + overrideSite.Groups[1].Value + @", [^\r\n]+?DoublingAllowance"" \d+\)\)\]") : Match.Empty;
-var defaultBody = Regex.Match(spendDefault, @"def method(\d+)Original : Extraction.RawMethod := " +
-    @"\{ token := \d+, owner := ""[^""]+::Examples.IAllowance\\u00601""");
+Match SpendSite(string source, string allowance) => ConstrainedLayoutPattern.SpendSite().Matches(source)
+    .FirstOrDefault(match => match.Groups["owner"].Value == allowance) ?? Match.Empty;
+var defaultSite = SpendSite(spendDefault, "Examples.Allowance");
+var overrideSite = SpendSite(spendOverride, "Examples.DoublingAllowance");
+var hiddenOverride = ConstrainedLayoutPattern.Override().Matches(spendOverride)
+    .FirstOrDefault(match => overrideSite.Success && match.Groups["token"].Value == overrideSite.Groups["token"].Value)
+    ?? Match.Empty;
+var defaultBody = ConstrainedLayoutPattern.DefaultBody().Match(spendDefault);
 var defaultCalls = defaultBody.Success
     ? DirectLinks(spendDefault,
         int.Parse(defaultBody.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
@@ -445,7 +445,8 @@ foreach (var (mutation, forgedSource) in new[]
     ("wrong-target", ForgeLink(spendDefault, defaultCalls[0].Method, defaultCalls[0].Pc, ".direct 0")),
     ("hidden-override", spendOverride.Replace(hiddenOverride.Value, "overrides := []", StringComparison.Ordinal)),
     ("method-argument", spendDefault.Replace(defaultSite.Value, defaultSite.Value.Replace(
-        defaultSite.Groups[2].Value + ", ", defaultSite.Groups[3].Value + ", ", StringComparison.Ordinal),
+        $"{defaultSite.Groups["price"].Value}, ", $"{defaultSite.Groups["argument"].Value}, ",
+        StringComparison.Ordinal),
         StringComparison.Ordinal))
 })
 {
@@ -791,3 +792,22 @@ const string returnRejection = "Custom modifiers are unsupported in method retur
 if (returnResult.Code == 0 || !returnResult.Output.Contains(returnRejection, StringComparison.Ordinal))
     throw new Exception("Incorrect in-modifier return rejection\n" + returnResult.Output);
 Console.WriteLine("PASS in-modifier rejection: ref readonly return");
+
+static partial class ConstrainedLayoutPattern
+{
+    const string Price = """(?<price>\.aggregate \("[^"]+" \+\+ "Examples\.TriplePrice"\) \d+)""";
+    const string Argument = """(?<argument>\.aggregate \("[^"]+" \+\+ "(?<owner>[^"]+)"\) \d+)""";
+
+    const string Target = """target := \.managed (?<token>\d+), typeArguments := """;
+
+    [GeneratedRegex($"""{Target}\[{Price}, {Argument}\], ownerArgumentCount := 1""")]
+    internal static partial Regex SpendSite();
+
+    [GeneratedRegex("""overrides := \[\((?<token>\d+), [^\]\r\n]+?DoublingAllowance"\) \d+\)\)\]""")]
+    internal static partial Regex Override();
+
+    const string Definition = """def method(\d+)Original : Extraction\.RawMethod := """;
+
+    [GeneratedRegex($$"""{{Definition}}\{ token := \d+, owner := "[^"]+::Examples\.IAllowance\\u00601["]""")]
+    internal static partial Regex DefaultBody();
+}

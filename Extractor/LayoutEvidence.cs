@@ -10,6 +10,7 @@ namespace Nethermind.LeanCIL;
 internal sealed class LayoutEvidence
 {
     readonly TypeReference[] rawTypes;
+    readonly string[] identityTerms;
     // Raw metadata is topological; emitted layout constants retain the caller supplied order.
     readonly Dictionary<string, int> emittedIndices = new(StringComparer.Ordinal);
     readonly Dictionary<string, int> typeIndices = new(StringComparer.Ordinal);
@@ -22,8 +23,15 @@ internal sealed class LayoutEvidence
         for (var index = 0; index < types.Length; index++)
             emittedIndices.TryAdd(Identity(types[index]), index);
         rawTypes = Topological(types);
+        identityTerms = new string[rawTypes.Length];
         for (var index = 0; index < rawTypes.Length; index++)
-            typeIndices.TryAdd(Identity(rawTypes[index]), index);
+        {
+            var type = rawTypes[index];
+            var identity = Identity(type);
+            typeIndices.Add(identity, index);
+            identityTerms[index] = rawTypes.Length == 1 ? JsonSerializer.Serialize(identity) :
+                ScopedIdentityTerm(identity, Scope(type).Length + "::".Length);
+        }
     }
 
     TypeReference[] Topological(TypeReference[] entries)
@@ -82,6 +90,16 @@ internal sealed class LayoutEvidence
 
     internal int Index(TypeReference type) => typeIndices.GetValueOrDefault(Identity(type), -1);
 
+    // Layouts in one assembly share the UTF-8 encoding of its scope during kernel reduction.
+    static string ScopedIdentityTerm(string identity, int boundary)
+    {
+        var scope = JsonSerializer.Serialize(identity[..boundary]);
+        var name = JsonSerializer.Serialize(identity[boundary..]);
+        return $"({scope} ++ {name})";
+    }
+
+    internal string IdentityTerm(int index) => identityTerms[index];
+
     internal string RawFieldType(TypeReference type, ModuleDefinition module)
     {
         if (MetadataValidation.IsAggregate(type, module) || layouts.IsImported(type))
@@ -113,7 +131,7 @@ internal sealed class LayoutEvidence
     internal void EmitLayouts(StringBuilder lean)
     {
         lean.AppendLine("def rawLayouts : List Extraction.RawLayout := [");
-        lean.AppendLine(string.Join(",\n", rawTypes.Select(type =>
+        lean.AppendLine(string.Join(",\n", rawTypes.Select((type, index) =>
         {
             var metadata = ValueTuples.Is(type) ? ((GenericInstanceType)type).ElementType.Resolve() : type.Resolve();
             var genericEvidence = "";
@@ -132,15 +150,18 @@ internal sealed class LayoutEvidence
             }
             var fields = layouts.Fields(type).Select(field =>
                 $"{{ type := {RawFieldType(field.Type, type.Module)}, offset := {(field.Definition.Offset < 0 ? "none" : $"some {field.Definition.Offset}")} }}");
-            return $"  {{ identity := {JsonSerializer.Serialize(Identity(type))}, {genericEvidence}" +
-                $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, " +
-                (metadata.IsAutoLayout ? "auto := true, " : "") +
-                (MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "") +
-                // An imported entry repeats its published layout, which carries no interfaces.
-                (layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ", metadata.Interfaces.Select(
-                    implementation => JsonSerializer.Serialize(InterfaceIdentity(GenericStructs.Substitute(
-                        implementation.InterfaceType, type as GenericInstanceType)))))}], ") +
-                $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}, fields := [{string.Join(", ", fields)}] }}";
+            var kind = $"explicit := {metadata.IsExplicitLayout.ToString().ToLowerInvariant()}, ";
+            var auto = metadata.IsAutoLayout ? "auto := true, " : "";
+            var marker = MetadataValidation.IsByRefLike(type) ? "byRefLike := true, " : "";
+            // An imported entry repeats its published layout, which carries no interfaces.
+            var interfaces = layouts.IsImported(type) ? "" : $"interfaces := [{string.Join(", ",
+                metadata.Interfaces.Select(implementation => JsonSerializer.Serialize(InterfaceIdentity(
+                    GenericStructs.Substitute(implementation.InterfaceType, type as GenericInstanceType)))))}], ";
+            var attributes = $"{genericEvidence}{kind}{auto}{marker}{interfaces}";
+            var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
+            var fieldList = string.Join(", ", fields);
+            var identity = IdentityTerm(index);
+            return $$"""  { identity := {{identity}}, {{attributes}}{{size}}, fields := [{{fieldList}}] }""";
         })));
         lean.AppendLine("]");
         lean.AppendLine("def computedLayouts : Array Extraction.ComputedLayout := #[" +

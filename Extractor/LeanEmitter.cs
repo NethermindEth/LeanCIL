@@ -304,8 +304,9 @@ internal static class LeanEmitter
                     (op is ClassField { Reference: { } field } access
                         ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             }
-            lean.AppendLine($"theorem method{n}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts " +
-                $"computedLayouts method{n} method{n}LayoutUses := {Decide}");
+            const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
+            var layoutCheck = $"{layoutTables} method{n} method{n}LayoutUses";
+            lean.AppendLine($"theorem method{n}_layouts_validated : {layoutCheck} := ⟨layouts_validated, {Decide}⟩");
             lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
                 $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);

@@ -247,9 +247,9 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         rejected.Add(path, "PASS distinct aggregate callable identity rejected", "ManagedCallsValid");
         foreach (var (label, pattern) in new[]
         {
-            ("calli-layout", ManagedPatterns.IndirectCallLayout),
-            ("address-layout", ManagedPatterns.ReturnLayout),
-            ("address-type-argument", ManagedPatterns.TypeArgumentLayout)
+            ("calli-layout", ManagedPatterns.IndirectCallLayout()),
+            ("address-layout", ManagedPatterns.ReturnLayout()),
+            ("address-type-argument", ManagedPatterns.TypeArgumentLayout())
         })
         {
             var match = pattern.Match(narrowed);
@@ -261,7 +261,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         }
         var local = NarrowEvidence(source, "method0_specialization_validated")
             .Replace("by constructor <;> rfl", "by decide +kernel", StringComparison.Ordinal);
-        var signature = ManagedPatterns.FunctionPointerLayout.Match(local);
+        var signature = ManagedPatterns.FunctionPointerLayout().Match(local);
         if (!signature.Success) throw new Exception("Missing callable local type");
         var invalidLocal = Path.Combine(root, "Rejected-local-layout.lean");
         File.WriteAllText(invalidLocal,
@@ -288,15 +288,17 @@ static partial class ManagedPatterns
     internal static partial Regex EmptyAggregate { get; }
 
     // Each layout pattern captures the text before the layout index it ends with.
-    [GeneratedRegex("""(\.indirectCall \(\.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex IndirectCallLayout { get; }
+    const string ScopedIdentity = """\("[^"]+" \+\+ "[^"]+"\)""";
 
-    [GeneratedRegex("""(\.call \{[^\r\n]*?returnType := \.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex ReturnLayout { get; }
+    [GeneratedRegex($"""(\.indirectCall \(\.aggregate {ScopedIdentity} )\d+""")]
+    internal static partial Regex IndirectCallLayout();
 
-    [GeneratedRegex("""(typeArguments := \[\.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex TypeArgumentLayout { get; }
+    [GeneratedRegex($$"""(\.call \{[^\r\n]*?returnType := \.aggregate {{ScopedIdentity}} )\d+""")]
+    internal static partial Regex ReturnLayout();
 
-    [GeneratedRegex("""(\.functionPointer \(\.aggregate "[^"]+" )\d+""")]
-    internal static partial Regex FunctionPointerLayout { get; }
+    [GeneratedRegex($"""(typeArguments := \[\.aggregate {ScopedIdentity} )\d+""")]
+    internal static partial Regex TypeArgumentLayout();
+
+    [GeneratedRegex($"""(\.functionPointer \(\.aggregate {ScopedIdentity} )\d+""")]
+    internal static partial Regex FunctionPointerLayout();
 }
