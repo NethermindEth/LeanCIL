@@ -71,6 +71,12 @@ theorem nestedAccepted : layoutsValidIndexed [leaf, parent] #[leafLayout, parent
     true ∧ LayoutsValid [leaf, parent] #[leafLayout, parentLayout] .scalar := by decide +kernel
 #print axioms nestedAccepted
 
+/-- A repeated identity is rejected even when both rows have correct computed layouts. -/
+theorem repeatedIdentity :
+    ¬ LayoutsValid [leaf, { parent with identity := leaf.identity }]
+      #[leafLayout, parentLayout] .scalar := by decide +kernel
+#print axioms repeatedIdentity
+
 /-- The proof form of the extraction header: the kernel runs the `Decidable` instance, which
     decides the indexed check. -/
 theorem headerForm : LayoutsValid [leaf, parent] #[leafLayout, parentLayout] .scalar := by

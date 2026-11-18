@@ -1,6 +1,5 @@
 import CIL.Extraction.Layout
 import CIL.Extraction.FlowIndex
-import Std.Data.TreeSet.Lemmas
 
 /-!
 # Public layout projection
@@ -12,45 +11,6 @@ metadata lists, and ordered sets check identity and index uniqueness.
 -/
 
 namespace CIL.Extraction
-
-/-- Reject repeated values and values already in the ordered set. -/
-private def distinctFrom [Ord α] : Std.TreeSet α → List α → Bool
-  | _, [] => true
-  | seen, value :: rest => !seen.contains value && distinctFrom (seen.insert value) rest
-
-/-- Ordered membership preserves the exact list uniqueness condition. -/
-private theorem distinctFrom_correct [Ord α] [Std.TransOrd α] [Std.LawfulEqOrd α]
-    (seen : Std.TreeSet α) (values : List α) :
-    distinctFrom seen values = true ↔ values.Nodup ∧ ∀ value ∈ values, value ∉ seen := by
-  induction values generalizing seen with
-  | nil => simp [distinctFrom]
-  | cons value rest ih =>
-    simp only [distinctFrom, Bool.and_eq_true, Bool.not_eq_true', Bool.eq_false_iff,
-      ih, List.nodup_cons, List.forall_mem_cons,
-      Std.TreeSet.mem_insert, Std.compare_eq_iff_eq, not_or]
-    constructor
-    · rintro ⟨fresh, distinct, remaining⟩
-      refine ⟨⟨?_, distinct⟩, fresh, ?_⟩
-      · intro member
-        exact (remaining value member).1 rfl
-      · intro other member
-        exact (remaining other member).2
-    · rintro ⟨⟨fresh, distinct⟩, unseen, remaining⟩
-      refine ⟨unseen, distinct, ?_⟩
-      intro other member
-      exact ⟨fun same => fresh (same ▸ member), remaining other member⟩
-
-#print axioms distinctFrom_correct
-
-/-- Check uniqueness using logarithmic ordered membership instead of repeated list scans. -/
-def projectionDistinct [Ord α] (values : List α) : Bool := distinctFrom ∅ values
-
-/-- The ordered uniqueness check accepts exactly the duplicate-free lists. -/
-theorem projectionDistinct_iff [Ord α] [Std.TransOrd α] [Std.LawfulEqOrd α]
-    (values : List α) : projectionDistinct values = true ↔ values.Nodup := by
-  simp [projectionDistinct, distinctFrom_correct]
-
-#print axioms projectionDistinct_iff
 
 /-- Maps a nested-struct field's public index to its artifact index. -/
 private def expandPublicField (lookup : Nat → Option Nat) (field : RawField) :
@@ -97,9 +57,7 @@ def LayoutProjectionValid (artifact : List RawLayout) (computed : Array Computed
     (indices : List Nat) (architecture : Architecture) : Prop :=
   LayoutsValid artifact computed architecture ∧
     LayoutsValid published publicComputed architecture ∧
-  projectionDistinct (artifact.map RawLayout.identity) = true ∧
-  projectionDistinct (published.map RawLayout.identity) = true ∧
-  indices.length = published.length ∧ projectionDistinct indices = true ∧
+  indices.length = published.length ∧ orderedDistinct indices = true ∧
   projectionMetadataMatches artifact published indices ∧
   indices.mapM (fun index => computed[index]?) = some publicComputed.toList
 
@@ -108,7 +66,7 @@ instance (artifact : List RawLayout) (computed : Array ComputedLayout)
     (indices : List Nat) (architecture : Architecture) :
     Decidable
       (LayoutProjectionValid artifact computed published publicComputed indices architecture) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- The indexed validator accepts exactly the original list-based projection conditions. -/
 theorem LayoutProjectionValid_iff_list (artifact : List RawLayout)
@@ -122,7 +80,12 @@ theorem LayoutProjectionValid_iff_list (artifact : List RawLayout)
       published.mapM (expandPublicLayout indices) =
         indices.mapM (fun index => artifact[index]?) ∧
       indices.mapM (fun index => computed[index]?) = some publicComputed.toList := by
-  simp only [LayoutProjectionValid, projectionDistinct_iff, projectionMetadataMatches_iff]
+  simp only [LayoutProjectionValid, orderedDistinct_iff, projectionMetadataMatches_iff]
+  constructor
+  · rintro ⟨source, target, rest⟩
+    exact ⟨source, target, source.1, target.1, rest⟩
+  · rintro ⟨source, target, _, _, rest⟩
+    exact ⟨source, target, rest⟩
 
 #print axioms LayoutProjectionValid_iff_list
 

@@ -1,12 +1,16 @@
 import CIL.Extraction.LayoutUses
 
+/-! Raw and computed struct layouts and their field uses. -/
+
 open CIL CIL.Extraction
 
 namespace Tests.ExtractionLayout
 
 def raw : List RawLayout := [
-  { explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.unsigned32, none⟩] },
-  { explicit := false, packing := 1, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.aggregate 0, none⟩] }]
+  { identity := "Leaf", explicit := false, packing := 0, declaredSize := -1,
+    fields := [⟨.unsigned8, none⟩, ⟨.unsigned32, none⟩] },
+  { identity := "Parent", explicit := false, packing := 1, declaredSize := -1,
+    fields := [⟨.unsigned8, none⟩, ⟨.aggregate 0, none⟩] }]
 
 def computed : Array ComputedLayout := #[
   ⟨⟨8, [⟨0, 1, false⟩, ⟨4, 4, false⟩]⟩, 4⟩,

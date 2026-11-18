@@ -60,12 +60,11 @@ def ImportSignature.supported (signature : ImportSignature) (layouts : List RawL
 def ImportLayoutCatalog.Valid (catalog : ImportLayoutCatalog) (architecture : Architecture) :
     Prop :=
   catalog.published = catalog.actual ∧ LayoutsValid catalog.actual catalog.computed architecture ∧
-  (catalog.actual.map RawLayout.identity).Nodup ∧
   catalog.actual.all (fun layout => !layout.identity.isEmpty) = true
 
 instance (catalog : ImportLayoutCatalog) (architecture : Architecture) :
     Decidable (catalog.Valid architecture) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
 theorem ImportLayoutCatalog.Valid.metadata {catalog : ImportLayoutCatalog}
     {architecture : Architecture} (valid : catalog.Valid architecture) :

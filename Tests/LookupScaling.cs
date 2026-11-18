@@ -12,6 +12,11 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
+if (args.Contains("--layout-identities-only", StringComparer.Ordinal))
+{
+    LayoutIdentityCosts();
+    return;
+}
 if (args.Contains("--exception-types-only", StringComparer.Ordinal))
 {
     ExceptionDecisionCosts();
@@ -130,6 +135,7 @@ PrefixEntryCosts();
 ClosureCosts();
 ClosedArgumentsCosts();
 
+LayoutIdentityCosts();
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
     "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
@@ -1398,6 +1404,41 @@ void ClosureCosts()
 // How many times as much each added unit costs between the last two sizes as between the first two.
 static double ClosureGrowth(double[] units, double[] costs) =>
     (costs[2] - costs[1]) / (units[2] - units[1]) / ((costs[1] - costs[0]) / (units[1] - units[0]));
+
+// Four times the rows allow logarithmic index growth but rule out repeated scans of the table.
+void LayoutIdentityCosts()
+{
+    var directory = At("artifacts/LookupScaling/LayoutIdentities");
+    Directory.CreateDirectory(directory);
+    double previousPerRow = 0;
+    foreach (int count in new[] { 32, 128, 512 })
+    {
+        var names = Enumerable.Range(0, count).Select(index => $"row \"Scope::Layout{index:D4}\"");
+        var header = $$"""
+            import CIL.Extraction.Layout
+            /-! Cost of validating distinct layouts with fixed-width type identities. -/
+            set_option maxRecDepth 65536
+            set_option maxHeartbeats 0
+            namespace LayoutIdentityCost
+            open CIL CIL.Extraction
+            /-- An empty sequential struct with the given identity. -/
+            def row (name : String) : RawLayout :=
+              { identity := name, explicit := false, packing := 0, declaredSize := 0, fields := [] }
+            /-- The rows compared by identity. -/
+            def raw := [{{string.Join(", ", names)}}]
+            /-- Each empty struct occupies one byte. -/
+            def layouts : Array ComputedLayout := Array.replicate {{count}} ⟨⟨1, []⟩, 1⟩
+
+            """;
+        var path = Path.Combine(directory, $"Rows{count}.lean");
+        long cost = DecideCost(path, header, "LayoutsValid raw layouts", "LayoutIdentityCost");
+        double perRow = (double)cost / count;
+        Console.WriteLine($"Layout identities at {count} rows cost {cost} heartbeats ({perRow:F1} per row)");
+        if (cost < KernelDecisionFloor || previousPerRow > 0 && perRow > 1.5 * previousPerRow)
+            throw new InvalidOperationException($"Layout validation exceeds its growth bound at {count} rows.");
+        previousPerRow = perRow;
+    }
+}
 
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
 void ClosedArgumentsCosts()

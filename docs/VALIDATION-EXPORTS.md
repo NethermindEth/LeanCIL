@@ -193,10 +193,11 @@ These regressions cover the extractor's own C# indexes:
   arbitrary layouts, architectures and nested-layout lookups. `Tests.LayoutAccumulation` covers
   order, explicit overlaps, empty layouts, missing children, packing/offset failures and vector
   architecture restrictions.
-- The `Decidable` instance of `LayoutsValid` runs `layoutsValidIndexed`, one pass over the raw
-  and claimed tables, so the emitted `Extracted.layouts_validated` theorem, the layout theorem
-  emitted for each method, import catalog checks and layout projection checks all decide it that
-  way. The pass
+- The `Decidable` instance of `LayoutsValid` runs `layoutsValidIndexed` on the raw
+  and claimed tables for `Extracted.layouts_validated`, import catalogs and projections. Each
+  method reuses the extraction's table proof and checks its own layout uses.
+  Each identity names one row. Validation checks uniqueness with an ordered set of UTF-8
+  keys. Two successful reads with equal identities have equal indices. The field check
   reads raw entries and claimed layouts through balanced indexes built once, lets each entry read
   only claimed layouts at earlier positions, and finds closed generic owners through an ordered
   map keyed by closed type that returns the first match. For `L` layouts with `A` fields in total
@@ -221,11 +222,10 @@ These regressions cover the extractor's own C# indexes:
   `constrainedSiteWindow`, `constrainedSites`, `lowerConstrainedInstruction`,
   `lowerConstrainedCode` and their streaming equivalence theorems accept a resolver function.
 - Public layout projection validation indexes artifact selection and nested public-index
-  expansion, and uses ordered sets for its three uniqueness checks.
+  expansion. Both catalogs satisfy `LayoutsValid`, and the selected artifact indices are distinct.
   `LayoutProjectionValid_iff_list` proves exact equivalence to all list-based conditions for
   arbitrary inputs, including malformed indices and catalogs. The unfolded proposition exposes
-  `projectionDistinct ... = true` and `projectionMetadataMatches`; recover the list-based
-  uniqueness and metadata conditions through `LayoutProjectionValid_iff_list`.
+  `orderedDistinct` for the indices and `projectionMetadataMatches` for the layout rows.
   `Tests.LayoutProjectionIndexes` checks reordering, empty catalogs, duplicate identities/indices,
   case-sensitive identity, missing indices and nested expansion.
 

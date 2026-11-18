@@ -38,7 +38,7 @@ theorem duplicatePublic : ¬ LayoutProjectionValid [leaf "a"] #[byteLayout]
 #print axioms duplicatePublic
 
 /-- The ordered index uniqueness check rejects a distant duplicate. -/
-theorem duplicateIndex : projectionDistinct [5, 2, 8, 1, 5] = false := by decide +kernel
+theorem duplicateIndex : orderedDistinct [5, 2, 8, 1, 5] = false := by decide +kernel
 #print axioms duplicateIndex
 
 /-- Missing artifact entries retain option lookup failure. -/

@@ -11,7 +11,7 @@ cannot substitute for it.
 
 | Evidence | Independently checked relation | Remaining assumption or limit |
 | --- | --- | --- |
-| Layouts | Recompute layouts from raw fields, packing and size; check required use sites and bounds | Faithful metadata/serialization and runtime layout correspondence |
+| Layouts | Require one row per type identity, recompute field placement and size, and check use sites and bounds | Faithful raw metadata, including the byref-like declaration marker, and runtime layout correspondence |
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
 | Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [deep verification](CLI.md#deep-verification)) and the PE container stay trusted; bodies with exception sections are rejected |

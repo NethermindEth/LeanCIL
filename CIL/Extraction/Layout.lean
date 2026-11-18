@@ -2,6 +2,7 @@ import CIL.Layout
 import CIL.Features
 import CIL.TypeExpr
 import CIL.Extraction.FlowIndex
+import Std.Data.TreeSet.Lemmas
 
 /-!
 # Aggregate layouts from raw metadata
@@ -10,8 +11,8 @@ The extractor emits both raw struct metadata (field types, packing, explicit off
 declared size) and the computed layout table its instructions use. This file recomputes
 CoreCLR's layout of reference-free structs from the raw metadata alone, so `LayoutsValid`
 binds every emitted field offset and struct size to an independent calculation.
-`layoutsValidIndexed` decides `LayoutsValid` in one pass that reads both tables through
-indexes built once, and the `Decidable` instance of `LayoutsValid` runs it.
+`layoutsValidIndexed` checks distinct identities by their UTF-8 bytes and reads both tables
+through indexes built once. The `Decidable` instance of `LayoutsValid` runs it.
 -/
 
 namespace CIL.Extraction
@@ -496,10 +497,82 @@ def computeLayouts (raw : List RawLayout) (architecture : Architecture := .scala
     raw.foldlM (init := #[]) fun previous entry => do
       return previous.push (← computeLayout (previous[·]?) entry architecture)
 
-/-- The claimed table is checked against a separate raw metadata table. -/
+/-- Reject repeated values and values already in the ordered set. -/
+private def distinctFrom [Ord α] : Std.TreeSet α → List α → Bool
+  | _, [] => true
+  | seen, value :: rest => !seen.contains value && distinctFrom (seen.insert value) rest
+
+/-- Ordered membership preserves the exact list uniqueness condition. -/
+private theorem distinctFrom_correct [Ord α] [Std.TransOrd α] [Std.LawfulEqOrd α]
+    (seen : Std.TreeSet α) (values : List α) :
+    distinctFrom seen values = true ↔ values.Nodup ∧ ∀ value ∈ values, value ∉ seen := by
+  induction values generalizing seen with
+  | nil => simp [distinctFrom]
+  | cons value rest ih =>
+    simp only [distinctFrom, Bool.and_eq_true, Bool.not_eq_true', Bool.eq_false_iff,
+      ih, List.nodup_cons, List.forall_mem_cons,
+      Std.TreeSet.mem_insert, Std.compare_eq_iff_eq, not_or]
+    constructor
+    · rintro ⟨fresh, distinct, remaining⟩
+      refine ⟨⟨?_, distinct⟩, fresh, ?_⟩
+      · intro member
+        exact (remaining value member).1 rfl
+      · intro other member
+        exact (remaining other member).2
+    · rintro ⟨⟨fresh, distinct⟩, unseen, remaining⟩
+      refine ⟨unseen, distinct, ?_⟩
+      intro other member
+      exact ⟨fun same => fresh (same ▸ member), remaining other member⟩
+
+#print axioms distinctFrom_correct
+
+/-- Check uniqueness using logarithmic ordered membership instead of repeated list scans. -/
+def orderedDistinct [Ord α] (values : List α) : Bool := distinctFrom ∅ values
+
+/-- The ordered uniqueness check accepts exactly the duplicate-free lists. -/
+theorem orderedDistinct_iff [Ord α] [Std.TransOrd α] [Std.LawfulEqOrd α]
+    (values : List α) : orderedDistinct values = true ↔ values.Nodup := by
+  simp [orderedDistinct, distinctFrom_correct]
+
+#print axioms orderedDistinct_iff
+
+/-- Distinct UTF-8 keys denote distinct layout identities. -/
+private theorem keyBytes_inj {left right : String} :
+    keyBytes left = keyBytes right ↔ left = right := by
+  simp only [keyBytes, Array.toList_inj, ← ByteArray.ext_iff, String.toByteArray_inj]
+
+#print axioms keyBytes_inj
+
+/-- Suffix-first byte keys distinguish type names before their common assembly prefix. -/
+def layoutIdentitiesDistinct (raw : List RawLayout) : Bool :=
+  orderedDistinct (raw.map fun row => (keyBytes row.identity).reverse)
+
+/-- The byte-key check accepts exactly the tables with distinct identity strings. -/
+theorem layoutIdentitiesDistinct_iff (raw : List RawLayout) :
+    layoutIdentitiesDistinct raw = true ↔ (raw.map RawLayout.identity).Nodup := by
+  simp only [layoutIdentitiesDistinct, orderedDistinct_iff, List.Nodup, List.pairwise_map,
+    ne_eq, List.reverse_inj, keyBytes_inj]
+
+#print axioms layoutIdentitiesDistinct_iff
+
+/-- Each identity names one raw row, and its recomputed layout agrees with the claimed row. -/
 def LayoutsValid (raw : List RawLayout) (claimed : Array ComputedLayout)
     (architecture : Architecture := .scalar) : Prop :=
-  computeLayouts raw architecture = some claimed ∧ ∀ item ∈ claimed.toList, item.layout.Valid
+  (raw.map RawLayout.identity).Nodup ∧ computeLayouts raw architecture = some claimed ∧
+    ∀ item ∈ claimed.toList, item.layout.Valid
+
+/-- Two indexed reads of the same validated type identity select the same layout row. -/
+theorem LayoutsValid.index_eq_of_identity_eq {raw : List RawLayout}
+    {claimed : Array ComputedLayout} {architecture : Architecture}
+    (valid : LayoutsValid raw claimed architecture) {first second : Nat}
+    {left right : RawLayout} (readLeft : raw[first]? = some left)
+    (readRight : raw[second]? = some right) (same : left.identity = right.identity) :
+    first = second := by
+  apply valid.1.eq_of_getElem?_eq
+  · simpa using (List.getElem?_eq_some_iff.mp readLeft).choose
+  · simp [List.getElem?_map, readLeft, readRight, same]
+
+#print axioms LayoutsValid.index_eq_of_identity_eq
 
 /-- Check raw entries against claimed entries in table order. The entry at `position` reads only
     claimed layouts at earlier positions, and both lists must end together. -/
@@ -514,15 +587,16 @@ private def layoutEntriesValid (table : LayoutTable) (architecture : Architectur
   | _, [], [] => true
   | _, _, _ => false
 
-/-- `LayoutsValid` decided in one pass. Raw entries are read through `LayoutTable.indexed` and
+/-- Read raw entries through `LayoutTable.indexed` and
     claimed layouts through one balanced index, so `L` layouts with `A` fields in total cost
     `O((L + A) log L)` lookups. A generic layout also looks up the closed owner of each `.apply`
     node of its argument and original field types by that node's type key, so a type of size `s`
     and depth `d` adds `O(s * d * log L)`. -/
 def layoutsValidIndexed (raw : List RawLayout) (claimed : Array ComputedLayout)
     (architecture : Architecture) : Bool :=
-  layoutEntriesValid (.indexed raw) architecture (FlowIndex.ofList claimed.toList).get? 0 raw
-    claimed.toList
+  layoutIdentitiesDistinct raw &&
+    layoutEntriesValid (.indexed raw) architecture (FlowIndex.ofList claimed.toList).get? 0 raw
+      claimed.toList
 
 /-- Each step of the layout fold appends one computed layout to its accumulator. -/
 private theorem layoutFold_extends (architecture : Architecture) (raw : List RawLayout)
@@ -621,7 +695,7 @@ private theorem layoutEntriesValid_iff (table : LayoutTable) (architecture : Arc
 
 #print axioms layoutEntriesValid_iff
 
-/-- The one-pass indexed check accepts exactly the layout tables that `LayoutsValid` admits. -/
+/-- The indexed checks are equivalent to identity uniqueness, recomputation and field bounds. -/
 theorem layoutsValidIndexed_iff (raw : List RawLayout) (claimed : Array ComputedLayout)
     (architecture : Architecture) :
     layoutsValidIndexed raw claimed architecture = true ↔
@@ -632,7 +706,9 @@ theorem layoutsValidIndexed_iff (raw : List RawLayout) (claimed : Array Computed
     claimed.toList (by simp)
   rw [Array.size_empty] at entries
   unfold layoutsValidIndexed LayoutsValid computeLayouts
-  rw [LayoutTable.indexed_eq, lookup, entries]
+  rw [Bool.and_eq_true, layoutIdentitiesDistinct_iff, LayoutTable.indexed_eq, lookup, entries]
+  apply and_congr_right
+  intro _
   by_cases checks : (raw.all fun layout => genericLayoutValid (.ofList raw) layout &&
       byRefLikeFieldsValid (.ofList raw) layout) = true
   · have holds := checks
@@ -682,6 +758,6 @@ theorem validated_layout_within_bounds {raw : List RawLayout} {claimed : Array C
     (checked : LayoutsValid raw claimed architecture) (item : ComputedLayout)
     (member : item ∈ claimed.toList) (field : FieldLayout) (present : field ∈ item.layout.fields) :
     field.offset + field.width ≤ item.layout.size :=
-  field_within_layout item.layout (checked.2 item member) field present
+  field_within_layout item.layout (checked.2.2 item member) field present
 
 end CIL.Extraction
