@@ -402,3 +402,63 @@ if (elsewhereRun.Code != 1 || File.Exists(Path.Combine(sameText, "verified.json"
     throw new InvalidOperationException(
         $"A refutation of another program was reported against this one:\n{elsewhereRun.Output}");
 Console.WriteLine("PASS a counterexample about another program is refused, not reported against the extraction");
+
+// A refutation at the first index past the extraction's methods names no method of it, so verify refuses it.
+var sameTextIdentity = File.ReadAllText(Path.Combine(sameText, "identity.json"));
+var sameTextMethods = JsonSerializer.Deserialize<JsonElement>(sameTextIdentity).GetProperty("methods")
+    .GetArrayLength();
+var outOfRange = $$"""
+    import Extracted
+    import CIL.Safety.MethodContract
+
+    /-! A counterexample at the first method index the extraction does not have. -/
+
+    open CIL.Safety
+    namespace Past
+
+    /-- Promises a return from any memory. -/
+    def returns : MethodContract Unit :=
+      { args := fun _ => [], pre := fun _ _ => True, footprint := fun _ => [], post := fun _ _ _ _ => True }
+
+    /-- The extraction has no method at this index, so a call to it faults. -/
+    theorem refuted : returns.Refuted Extracted.program {{sameTextMethods}} :=
+      .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
+        (fault := { method := {{sameTextMethods}}, instruction := 0, fault := .invalidState })
+        trivial (by decide) rfl
+
+    #print axioms refuted
+    end Past
+    """;
+var outOfRangeProof = Path.Combine(root, "Past.lean");
+File.WriteAllText(outOfRangeProof, outOfRange);
+var outOfRangeRun = Execute([.. cli, "verify", sameText, "--proof", outOfRangeProof, "--theorem", "Past.refuted"]);
+var outOfRangeReport = Failure(sameText);
+var pastLast = $"method {sameTextMethods}; a refutation states Extracted.program and one of its {
+    sameTextMethods} methods";
+if (outOfRangeRun.Code != 1 || File.Exists(Path.Combine(sameText, "verified.json")) ||
+    Text(outOfRangeReport, "kind") != "replay-or-audit-rejected" ||
+    Text(outOfRangeReport, "message")?.Contains(pastLast, StringComparison.Ordinal) != true)
+    throw new InvalidOperationException(
+        $"A refutation past the extraction's last method was not refused:\n{outOfRangeRun.Output}");
+Console.WriteLine("PASS a counterexample at the first index past the extraction's methods is refused");
+
+// A refutation may name the extraction's program through a definition whose value is that constant.
+var aliasRefuted = Path.Combine(root, "Out", "AliasRefuted");
+Run([.. cli, "extract", arithmetic, Selector, aliasRefuted]);
+var aliasProof = Path.Combine(root, "AliasRefuted.lean");
+File.WriteAllText(aliasProof, $$"""
+    {{Contracts.Replace("namespace Client", "namespace ExampleProof").Replace("end Client", "")}}
+    /-- The extraction's program under another name. -/
+    def aliasedProgram : CIL.Program := Extracted.program
+
+    {{Refutation.Replace("Refuted Extracted.program mix", "Refuted aliasedProgram mix")}}
+    end ExampleProof
+    """);
+var aliasRun = Execute([.. cli, "verify", aliasRefuted, "--proof", aliasProof]);
+var aliasReport = Failure(aliasRefuted);
+if (Text(aliasReport, "kind") != "refutation" || !File.Exists(Path.Combine(aliasRefuted, "verified.json")) ||
+    aliasReport.GetProperty("method").GetProperty("entry").GetString() !=
+        "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)")
+    throw new InvalidOperationException(
+        $"A refutation naming an alias of the program was not bound:\n{aliasRun.Output}");
+Console.WriteLine("PASS a refutation naming the program through an alias is bound to the refuted method");

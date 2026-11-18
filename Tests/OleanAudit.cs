@@ -700,6 +700,25 @@ if (target.matches != true || target.refutes is not { contract: "CIL.Safety.Meth
         JsonSerializer.Serialize(target)}");
 Console.WriteLine("PASS a compared refutation reports the subject of the statement it was compared with");
 
+// A program named through definitions whose value is a constant is reported as that constant, and Nat.zero as 0.
+Compile("AliasProgram", """
+    import Refutations
+    /-- The program the aliases name. -/
+    def AliasProgram.base : CIL.Program := []
+    /-- `AliasProgram.base` under another name. -/
+    def AliasProgram.alias : CIL.Program := AliasProgram.base
+    /-- `AliasProgram.alias` under another name. -/
+    def AliasProgram.again : CIL.Program := AliasProgram.alias
+    theorem AliasProgram.refuted : Refutations.returns.Refuted AliasProgram.again Nat.zero :=
+      Refutations.refuted
+    """);
+var aliased = verification.AuditOleans(fixtureSearch, ["AliasProgram"], [ProofTheorem("AliasProgram.refuted")])
+    .theorems[0];
+if (aliased.refutes is not { contract: "CIL.Safety.MethodContract.Holds", program: "AliasProgram.base", method: 0 })
+    throw new InvalidOperationException($"An aliased program was not reported as the constant it names: {
+        JsonSerializer.Serialize(aliased)}");
+Console.WriteLine("PASS a refutation's program is read through aliases and its method through Nat.zero");
+
 // A user module cannot replace a toolchain module on the audit's search path.
 Compile("Init", "prelude\n");
 var resolved = verification.AuditOleans(fixtures, ["Init"], []).modules["Init"];
