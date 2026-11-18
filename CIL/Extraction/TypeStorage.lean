@@ -97,12 +97,6 @@ private theorem primitiveField_eq (name : String) : primitiveField name = (match
   repeat' (split <;> simp_all)
 #print axioms primitiveField_eq
 
-/-- The integer types an enum may have as its underlying type. -/
-private def enumField : FieldType → Bool
-  | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
-  | .signed64 | .unsigned64 => true
-  | _ => false
-
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
 def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
   match type with
@@ -163,7 +157,7 @@ def callableType : TypeExpr → TypeExpr
 def managedParameter : TypeExpr → Bool
   | .atom scope name => scope == runtimeScope && (primitiveField name).isSome
   | .enum _ (.atom scope name) => scope == runtimeScope &&
-      ((primitiveField name).map enumField).getD false
+      ((primitiveField name).map FieldType.enumUnderlying).getD false
   | .byref element => match element with
       | .atom .. | .enum .. | .aggregate .. | .apply .. => managedParameter element
       | _ => false
@@ -204,7 +198,7 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     if metadata.identity = identity then return .field (.aggregate index) else none
   | .enum _ underlying => do
     let .field kind ← typeStorage layouts underlying | none
-    if enumField kind then return .field kind else none
+    if kind.enumUnderlying then return .field kind else none
   | .byref _ => some .reference
   -- An array of class references is itself an object on the heap.
   | .array (.object _ _) => some .object

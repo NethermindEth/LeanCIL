@@ -31,6 +31,13 @@ inductive FieldType where
   | aggregate (index : Nat)
   deriving DecidableEq, Repr
 
+/-- Whether an enum may have field kind `kind` as its underlying type: only the eight integer
+    kinds. -/
+def FieldType.enumUnderlying : FieldType → Bool
+  | .signed8 | .unsigned8 | .signed16 | .unsigned16 | .signed32 | .unsigned32
+  | .signed64 | .unsigned64 => true
+  | _ => false
+
 /-- The lane of a vector whose elements have field kind `kind`; `none` for a kind no vector
     field holds. -/
 def VectorLane.ofField? : FieldType → Option VectorLane
@@ -374,7 +381,9 @@ def closeLayoutType (layouts : List RawLayout) : TypeExpr → TypeExpr :=
 
 /-- Field storage is derived from substituted metadata, including exact aggregate identities. -/
 private def genericFieldType (table : LayoutTable) : TypeExpr → Option FieldType
-  | .enum _ underlying => genericFieldType table underlying
+  | .enum _ underlying => do
+    let kind ← genericFieldType table underlying
+    if kind.enumUnderlying then some kind else none
   | type =>
   match closeLayoutTypeWith table type with
   | .aggregate identity index =>

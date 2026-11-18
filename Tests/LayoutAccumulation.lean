@@ -1,9 +1,11 @@
 import CIL.Extraction.Layout
+import CIL.Extraction.TypeStorage
 
 /-! Field accumulation preserves declaration order and all metadata rejection boundaries. Named
 tables with a wrong offset, size, length, child position or generic owner are rejected by both
 `layoutsValidIndexed` and `LayoutsValid`, a class owner included, the owner index finds the first
-matching owner, and a class application never closes to a layout entry. -/
+matching owner, a class application never closes to a layout entry, and an enum argument over
+a vector is refused. -/
 namespace Tests.LayoutAccumulation
 open CIL CIL.Extraction
 
@@ -246,4 +248,26 @@ theorem classApplicationStaysClass :
     closeLayoutType [leaf, wrap 1 (.parameter 0) 0] (wrapType 1) =
       .aggregate "S::Wrap1`1<Leaf>" 1 := by decide +kernel
 #print axioms classApplicationStaysClass
+
+/-- `System.Runtime.Intrinsics.Vector128<ulong>`. -/
+def vectorOfWords : TypeExpr :=
+  .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
+    (.atom runtimeScope "System.UInt64")
+
+/-- `S::Wrap1<E>` for an enum `E` over `underlying`, stored with the one field `kind`. -/
+def enumWrap (underlying : TypeExpr) (kind : FieldType) : RawLayout := {
+  identity := "S::Wrap1`1<E>", explicit := false, packing := 0, declaredSize := 0,
+  generic := some {
+    owner := .constructor "S" "Wrap1`1", arity := 1, arguments := [.enum "E" underlying],
+    fields := [.parameter 0], constraints := [(0, [])] },
+  fields := [⟨kind, none⟩] }
+
+/-- An enum argument is stored as its underlying integer, and an enum claimed over a vector is
+    refused: no enum has a vector as its underlying type. -/
+theorem enumArgumentNeedsIntegerUnderlying :
+    genericLayoutValid (.ofList []) (enumWrap (.atom runtimeScope "System.Int32") .signed32) =
+      true ∧
+    genericLayoutValid (.ofList []) (enumWrap vectorOfWords (.vector128 .unsigned64)) = false := by
+  decide +kernel
+#print axioms enumArgumentNeedsIntegerUnderlying
 end Tests.LayoutAccumulation
