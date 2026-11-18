@@ -19,7 +19,7 @@ var indexType = extractor.GetType("Nethermind.LeanCIL.InstructionIndex", true)!;
 var position = indexType.GetMethod("Position", BindingFlags.Instance | BindingFlags.NonPublic)!;
 var isTarget = indexType.GetMethod("IsTarget", BindingFlags.Instance | BindingFlags.NonPublic)!;
 var validateEntry = extractor.GetType("Nethermind.LeanCIL.InstructionPrefixes", true)!
-    .GetMethod("ValidateEntry", BindingFlags.Static | BindingFlags.NonPublic)!;
+    .GetMethod("Validate", BindingFlags.Static | BindingFlags.NonPublic)!;
 object Index(MethodDefinition method) => Activator.CreateInstance(indexType,
     BindingFlags.Instance | BindingFlags.NonPublic, null, [method], null)!;
 using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));

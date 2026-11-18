@@ -42,9 +42,12 @@ internal static class InstructionPrefixes
                 break;
             case Code.Constrained:
                 if (instruction.Operand is not TypeReference || next?.Operand is not MethodReference target ||
-                    next.OpCode.Code != (target.HasThis ? Code.Callvirt : Code.Call) ||
-                    !target.HasThis && !IsStaticVirtualSlot(target.Resolve()))
+                    next.OpCode.Code is not (Code.Call or Code.Callvirt))
                     throw new InvalidDataException("Constrained prefix requires an adjacent constrained call");
+                // An instance slot is called with callvirt and a static virtual slot with call.
+                if (next.OpCode.Code != (target.HasThis ? Code.Callvirt : Code.Call) ||
+                    !target.HasThis && !IsStaticVirtualSlot(target.Resolve()))
+                    throw new InvalidDataException("Unsupported constrained method slot");
                 break;
             case Code.Readonly:
                 if (instruction.Operand is not null ||

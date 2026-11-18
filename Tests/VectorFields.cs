@@ -192,8 +192,7 @@ foreach ((string name, string changed) in new[]
     // Same width, another lane: the layouts still check, so the field site must refuse it.
     ("vector-lane", baseline.Replace("type := (.vector256 .unsigned64)", "type := (.vector256 .signed64)")),
     ("computed-width", baseline.Replace("⟨3, 32, false⟩", "⟨3, 16, false⟩")),
-    ("omitted-uses", Regex.Replace(baseline,
-        @"def method0LayoutUses : List Extraction.LayoutUse := [^\r\n]*",
+    ("omitted-uses", LayoutUsesDefinition.Replace(baseline,
         "def method0LayoutUses : List Extraction.LayoutUse := []"))
 })
 {
@@ -208,12 +207,25 @@ foreach ((string name, string changed) in new[]
 
 string architectureBaseline = File.ReadAllText(Path.Combine(root, "Read256", "Extracted.lean"));
 string otherArchitecture = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "x64" : "arm64";
-string mismatched = Regex.Replace(architectureBaseline, @"def profile : FeatureProfile := [^\r\n]*",
-    "def profile : FeatureProfile := { architecture := ." + otherArchitecture + " }");
+string mismatched = ProfileDefinition.Replace(architectureBaseline,
+    $"def profile : FeatureProfile := {{ architecture := .{otherArchitecture} }}");
 if (mismatched == architectureBaseline) throw new InvalidOperationException("Architecture mutation did not change source");
 string architecturePath = Path.Combine(root, "Evidence-architecture.lean");
 File.WriteAllText(architecturePath, mismatched);
 (int Code, string Output, string Stdout, string Stderr) architectureResult = Execute(["lake", "env", "lean", architecturePath], cwd: FixturePackage());
-if (architectureResult.Code == 0 || !architectureResult.Output.Contains("decide"))
-    throw new InvalidOperationException("Vector layout accepted under a different method architecture\n" + architectureResult.Output);
+// The layout table is certified at the extraction's architecture, so another profile cannot use that proof.
+if (architectureResult.Code == 0 || !architectureResult.Output.Contains("LayoutsValid", StringComparison.Ordinal))
+    throw new InvalidOperationException(
+        $"Vector layout accepted under a different method architecture\n{architectureResult.Output}");
 Console.WriteLine("PASS vector field evidence rejects method architecture mismatch");
+
+partial class Program
+{
+    /// <summary>The generated definition of the first method's layout uses, to the end of its line.</summary>
+    [GeneratedRegex(@"def method0LayoutUses : List Extraction.LayoutUse := [^\r\n]*")]
+    internal static partial Regex LayoutUsesDefinition { get; }
+
+    /// <summary>The generated feature profile definition, to the end of its line.</summary>
+    [GeneratedRegex(@"def profile : FeatureProfile := [^\r\n]*")]
+    internal static partial Regex ProfileDefinition { get; }
+}
