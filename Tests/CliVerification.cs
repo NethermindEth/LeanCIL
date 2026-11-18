@@ -87,7 +87,7 @@ void Verified(params string[] options)
         throw new InvalidOperationException("The certificate does not list the 12 binding facts as trusted: " +
             binding.GetRawText());
 
-    if (report.GetProperty("schema").GetInt32() != 6 ||
+    if (report.GetProperty("schema").GetInt32() != CertificateSchema ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid"))
         throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
 

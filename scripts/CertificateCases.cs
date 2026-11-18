@@ -94,7 +94,8 @@ static class CertificateCases
             change(report);
             return (name, report.ToJsonString());
         }
-        yield return Changed("schema 5", report => report["schema"] = 5);
+        const int previous = Program.CertificateSchema - 1;
+        yield return Changed($"schema {previous}", report => report["schema"] = previous);
         yield return Changed("no binding section", report => report.AsObject().Remove("binding"));
         yield return Changed("a missing fact", report => Facts(report).RemoveAt(3));
         yield return Changed("reordered facts", report =>

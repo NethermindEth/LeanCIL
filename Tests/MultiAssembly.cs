@@ -164,6 +164,44 @@ void Decided(params (string Name, bool Stepped)[] runs)
 }
 
 Verified("Direct", "MultiFixture.Application::Direct(ulong)", "Tests/MultiAssembly/Direct.lean", referencedBody: true);
+// A refutation of a callee from the reference names that callee with its own assembly and digest.
+_ = Extract("StepRefuted", "MultiFixture.Application::Direct(ulong)", referencedBody: true, []);
+string stepRefutation = Path.Combine(root, "StepRefuted.lean");
+File.WriteAllText(stepRefutation, """
+    import Extracted
+    import CIL.Safety.MethodContract
+
+    /-! A counterexample about Lib's `Mix.Step`, a callee of App's `Direct`. -/
+
+    open CIL.Safety
+    namespace MultiAssemblyProof
+
+    /-- Promises that `Step` never returns. -/
+    def neverReturns : MethodContract CIL.W64 CIL.W64 where
+      args x := [.scalar (.i64 x)]
+      results v := [.scalar (.i64 v)]
+      pre _ _ := True
+      footprint _ := []
+      post _ _ _ _ := False
+
+    /-- `Step 0` returns. -/
+    theorem refuted : neverReturns.Refuted Extracted.program 1 :=
+      .of_return (input := 0) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 16 1 (neverReturns.args 0) Memory.empty = .ok _)
+        (fun holds => holds.2.elim fun _ returned => returned.2)
+
+    #print axioms refuted
+    end MultiAssemblyProof
+    """);
+var refutedStep = Execute([.. cli, "verify", Artifact("StepRefuted"), "--proof", stepRefutation, "--theorem",
+    "MultiAssemblyProof.refuted"]);
+var refutedMethod = JsonDocument.Parse(File.ReadAllText(Path.Combine(Artifact("StepRefuted"), "failed.json")))
+    .RootElement.GetProperty("method");
+if (refutedMethod.GetProperty("entry").GetString() != "System.UInt64 MultiFixture.Mix::Step(System.UInt64)" ||
+    refutedMethod.GetProperty("assembly").GetString()?.StartsWith(libName + ", ", StringComparison.Ordinal) != true ||
+    refutedMethod.GetProperty("assemblySha256").GetString() != libSha)
+    throw new InvalidOperationException($"A refuted callee was reported with another assembly:\n{refutedStep.Output}");
+Console.WriteLine("PASS a refuted callee from a reference is reported with that assembly's identity and digest");
 Proved("Nested", "MultiFixture.Application::Nested(ulong)", "Tests/MultiAssembly/Nested.lean", referencedBody: true);
 Proved("Local", "MultiFixture.Application::Local(ulong)", "Tests/MultiAssembly/Local.lean", referencedBody: true);
 // Only the layout comes from Lib here, so no body is attributed to it.

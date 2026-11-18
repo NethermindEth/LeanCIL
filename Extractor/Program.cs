@@ -433,7 +433,9 @@ internal static partial class Program
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
                 // Where each body sits in the image is recorded here, outside the Lean evidence, for the strict audit.
-                methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
+                // A method's assembly is its pin index: 0 the selected assembly, k its k-th reference.
+                methods = methods.Select(m => new { signature = m.FullName, assembly = pinned.Index(m.Module),
+                    token = m.MetadataToken.ToInt32(),
                     bodyAddress = ((MethodDefinition)pinned.Original(m.Module).LookupToken(m.MetadataToken)).RVA,
                     specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),

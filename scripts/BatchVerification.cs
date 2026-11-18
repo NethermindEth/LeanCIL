@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -173,10 +174,12 @@ partial class Program
                 var theorem = $"BatchCase{i}.{request.Theorem}";
                 var axioms = AuditedAxioms(audited.theorems[2 * i]);
                 AuditedAxioms(audited.theorems[2 * i + 1]);
+                // The manifest a refutation is bound to is the bytes whose digest matched, read once.
+                var manifest = File.ReadAllBytes(Path.Combine(request.Output, "identity.json"));
                 if (!Same(before[i], Inputs(commonAfter, request.Proof)) ||
-                    hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
+                    hashes[i] != Convert.ToHexStringLower(SHA256.HashData(manifest)))
                     throw new InvalidOperationException("Batch inputs changed during verification");
-                var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
+                var extraction = JsonSerializer.Deserialize<JsonElement>(manifest);
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
                 reports[i] = new Report(CertificateSchema, Sha(request.Assembly!), hashes[i], request.Theorem, axioms,
@@ -187,7 +190,8 @@ partial class Program
                     imports: PublishedImports(extraction),
                     contractDependencies: DeploymentDependencies(extraction),
                     initializationAssumptions: InitializationAssumptions(extraction),
-                    refutation: audited.theorems[2 * i].refutes);
+                    refutation: ExtractedRefutation(audited.theorems[2 * i], extraction,
+                        $"BatchCase{i}.{ExtractedProgram}"));
             }
             // A package may require the same library by path and have built into it since the last snapshot.
             RequireUnchangedLibrary();

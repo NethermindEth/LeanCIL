@@ -1013,7 +1013,7 @@ Verified: ExampleProof.addTwo_holds
   its arguments or recurses is printed as Lean elaborates it, in terms of the auxiliary
   definitions it compiles to, and the field accessors of a structure the proof declares are not
   listed. Definitions of modules the proof imports are named in the statement and not printed.
-- `verified.json` is the certificate, schema 6. Its `binding` section has the run's `mode`, the
+- `verified.json` is the certificate, schema 7. Its `binding` section has the run's `mode`, the
   `digests` file, statement `sources` and `images` the run read, and, as `facts`, every fact about
   the assembly image that verification trusts, each with its `id`, `status`, `theorem` and
   `reason`, in this order: `body-bytes`, `metadata-rows`, `platform-type-kinds`,
@@ -1207,8 +1207,12 @@ refutation, as reported by the theorem audit; an unsolved goal is never a refuta
 rejects a requested theorem that states `Not` applied to a contract's `Holds`, as kind
 `replay-or-audit-rejected`: a run the model does not cover, such as an `unsupported` fault, proves
 such a negation without any fault of the method. A lemma the requested theorem uses may state it. A
-verified refutation keeps its `verified.json`, the certificate of the refutation, and also
-writes `failed.json` with kind `refutation`, located at the theorem's name.
+refutation names `Extracted.program` and one of the extraction's methods, callees included;
+`verify` refuses any other subject at stage `theorem audit`. A verified refutation keeps its
+`verified.json`, the certificate of the refutation, whose `refutation` records the contract, the
+refuted method's signature with the identity and SHA-256 of the assembly defining it, and the
+theorem's position. It also writes `failed.json` with kind `refutation`, located at the
+theorem's name, whose `method` is that method and assembly.
 
 ### Machine-readable verify output
 

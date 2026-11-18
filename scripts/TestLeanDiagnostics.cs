@@ -232,10 +232,13 @@ Require(unrooted is { kind: FailureReports.UnsolvedGoal, module: "Proof", line: 
     "unrooted proof copy and rerun");
 const string Audit = "ExampleProof.correctness : mixContract.Refuted Extracted.program mix\n" +
     "'ExampleProof.correctness' depends on axioms: [propext]\n";
-var refuted = FailureReports.Refuted(new("CIL.Safety.MethodContract.Holds", "Extracted.program", null, 21, 0),
-    Audit,
-    "ExampleProof.correctness", proof, output, package);
-Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage: "theorem audit" } &&
+const string Mix = "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)";
+var refuted = FailureReports.Refuted(new("CIL.Safety.MethodContract.Holds",
+        new(Mix, "Contracts.Lib, Version=1.0.0.0", "digest"), 21, 0),
+    Audit, "ExampleProof.correctness", proof, output, package);
+// The report names the method and assembly verification bound the refutation to, and reads no file for them.
+Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage: "theorem audit",
+        method: { entry: Mix, assembly: "Contracts.Lib, Version=1.0.0.0", assemblySha256: "digest" } } &&
     refuted.file == proof && refuted.rerun[^2..].SequenceEqual(["--proof-root", package]),
     "verified refutation");
 // Only the audit's structured result makes a refutation; statement text never does.

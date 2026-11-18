@@ -3581,30 +3581,53 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// </summary>
     internal sealed record AuditRefutation(string contract, string? program, int? method, int line, int column);
 
+    /// <summary>
+    /// A method of an extraction by signature, with the identity and digest of the assembly defining it.
+    /// </summary>
+    internal sealed record ExtractedMethod(string signature, string assembly, string assemblySha256);
+
+    /// <summary>
+    /// A verified refutation: the contract it refutes, the extracted method it refutes it for, and the theorem's
+    /// position.
+    /// </summary>
+    internal sealed record VerifiedRefutation(string contract, ExtractedMethod method, int line, int column);
+
     /// <summary>The program constant of an extraction, which a refutation of one of its methods names.</summary>
     const string ExtractedProgram = "Extracted.program";
 
     /// <summary>
-    /// Refuses a refutation theorem unless it names the extracted program and one of its methods, callees
-    /// included, so a counterexample about another program is never reported against this extraction. When
-    /// `required`, the request asked for a refutation and the theorem must be one.
+    /// The refutation `audited` states, bound to the method of `identity`, the verified extraction's manifest, that
+    /// it names, or null when it states none. A refutation must name `program`, the extraction's program constant,
+    /// and one of its methods, callees included, so a counterexample about another program is never reported
+    /// against this extraction. When `required`, the request asked for a refutation and the theorem must be one.
     /// </summary>
-    static void RequireExtractedRefutation(AuditedTheorem audited, ExtractionIdentity extraction,
-        bool required = false)
+    static VerifiedRefutation? ExtractedRefutation(AuditedTheorem audited, JsonElement identity,
+        string program = ExtractedProgram, bool required = false)
     {
-        var methods = extraction.Root.GetProperty("methods").GetArrayLength();
+        var methods = identity.GetProperty("methods");
         if (audited.refutes is not { } refutes)
         {
-            if (!required) return;
+            if (!required) return null;
             throw new InvalidOperationException(
                 $"{audited.name} was accepted as a refutation but states no counterexample predicate the audit reads.");
         }
-        if (refutes is { program: ExtractedProgram, method: { } method } && method < methods) return;
-        var program = refutes.program ?? "a program that is not a constant";
-        var index = refutes.method?.ToString() ?? "that is not a numeral";
-        var subject = $"{audited.name} refutes {refutes.contract} for {program}, method {index}";
-        throw new InvalidOperationException(
-            $"{subject}; a refutation states {ExtractedProgram} and one of its {methods} methods.");
+        if (refutes.program != program || refutes.method is not { } index || index >= methods.GetArrayLength())
+        {
+            var named = refutes.program ?? "a program that is not a constant";
+            var subject = $"{audited.name} refutes {refutes.contract} for {named}, method {
+                refutes.method?.ToString() ?? "that is not a numeral"}";
+            throw new InvalidOperationException(
+                $"{subject}; a refutation states {program} and one of its {methods.GetArrayLength()} methods.");
+        }
+        var method = methods[index];
+        // A method's assembly is its pin index: 0 the extracted assembly, k its k-th reference.
+        var pin = method.GetProperty("assembly").GetInt32();
+        var (assembly, digest) = pin == 0
+            ? (identity.GetProperty("assemblyIdentity"), identity.GetProperty("assemblySha256"))
+            : (identity.GetProperty("references")[pin - 1].GetProperty("assemblyIdentity"),
+                identity.GetProperty("references")[pin - 1].GetProperty("sha256"));
+        return new(refutes.contract, new(method.GetProperty("signature").GetString()!, assembly.GetString()!,
+            digest.GetString()!), refutes.line, refutes.column);
     }
     sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement,
         AuditRefutation? refutes,
@@ -4404,7 +4427,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>The version of the certificate `verified.json` holds; every reader rejects any other.</summary>
-    internal const int CertificateSchema = 6;
+    internal const int CertificateSchema = 7;
 
     /// <summary>
     /// A fact the default verification trusts about the assembly images, which a deep check reconfirms from them.
@@ -4630,7 +4653,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
         JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null,
         StatementDefinition[]? specification = null, string[]? libraryModules = null,
-        StatementIdentity? statementIdentity = null, AuditRefutation? refutation = null);
+        StatementIdentity? statementIdentity = null, VerifiedRefutation? refutation = null);
 
     static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("initializationAssumptions", out var assumptions)
@@ -4819,7 +4842,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var fresh = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fresh);
         string audit;
-        AuditRefutation? refutation;
+        VerifiedRefutation? refutation;
         string extractionAudit = "";
         string[] axioms;
         FullImportResult? fullResult = null;
@@ -5160,8 +5183,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(auditedTheorems[theorem]);
             audit = AuditText(auditedTheorems[theorem]);
-            RequireExtractedRefutation(auditedTheorems[theorem], extraction);
-            refutation = auditedTheorems[theorem].refutes;
+            refutation = ExtractedRefutation(auditedTheorems[theorem], extraction.Root);
             RequireOriginalProofSources();
             RequireStagedProofSources();
             RequireOriginalProofSources();

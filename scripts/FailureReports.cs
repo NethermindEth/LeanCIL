@@ -136,11 +136,12 @@ internal static partial class FailureReports
     /// A refutation report when the audit found the verified theorem to state a contract's `Refuted`, else null;
     /// `audit` is shown as the message and decides nothing.
     /// </summary>
-    internal static Report? Refuted(Program.AuditRefutation? refutation, string audit, string theorem, string proof,
+    internal static Report? Refuted(Program.VerifiedRefutation? refutation, string audit, string theorem, string proof,
         string output, string? proofRoot) =>
         refutation is null ? null
             : new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output,
-                MethodOf(output, refutation.method), proof, refutation.line, refutation.column, [], audit,
+                new(refutation.method.signature, refutation.method.assembly, refutation.method.assemblySha256), proof,
+                refutation.line, refutation.column, [], audit,
                 Rerun(theorem, proof, output, proofRoot));
 
     static (string Kind, string? Resource) KindOf(string stage, string first)
@@ -169,16 +170,12 @@ internal static partial class FailureReports
     static string ModuleOf(string proof, string? proofRoot) => proofRoot is null ? "Proof"
         : Path.GetRelativePath(proofRoot, proof).Replace('\\', '/')[..^".lean".Length].Replace('/', '.');
 
-    /// <summary>The extraction's entry, or its method at `index` when given, with the assembly it came from.</summary>
-    internal static Method? MethodOf(string output, int? index = null)
+    internal static Method? MethodOf(string output)
     {
         try
         {
             var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-            var entry = index is { } method
-                ? identity.GetProperty("methods")[method].GetProperty("signature").GetString()!
-                : identity.GetProperty("entry").GetString()!;
-            return new(entry, identity.GetProperty("assemblyIdentity").GetString()!,
+            return new(identity.GetProperty("entry").GetString()!, identity.GetProperty("assemblyIdentity").GetString()!,
                 identity.GetProperty("assemblySha256").GetString()!);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)

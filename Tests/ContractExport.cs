@@ -237,7 +237,7 @@ if (cohort != "core")
 
         CallerVerify();
         var report = JsonNode.Parse(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")))!;
-        if (report["schema"]!.GetValue<int>() != 6 || report["contractImports"]!.AsArray().Count != 1 ||
+        if (report["schema"]!.GetValue<int>() != CertificateSchema || report["contractImports"]!.AsArray().Count != 1 ||
             report["imports"]![0]!["acceptedVia"]!.GetValue<string>() != "published-certification" ||
             !report["imports"]![0]!["deploymentObligation"]!.GetValue<string>()
                 .Contains("exact implementation bytes", StringComparison.Ordinal))
@@ -291,8 +291,8 @@ if (cohort != "core")
 completed.CompleteCase("core.publication");
 CallerVerify();
 JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
-if (initialCaller.GetProperty("schema").GetInt32() != 6)
-    throw new InvalidOperationException("Imported contract verification did not produce the schema-6 trust report.");
+if (initialCaller.GetProperty("schema").GetInt32() != CertificateSchema)
+    throw new InvalidOperationException("Imported contract verification did not produce the current trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 
