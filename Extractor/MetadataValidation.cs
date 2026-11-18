@@ -180,7 +180,11 @@ internal static class MetadataValidation
 
         internal AggregateInfo AggregateLayout(TypeReference reference)
         {
-            if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached)) return cached;
+            if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached))
+            {
+                if (ValueTuples.Is(reference)) ValueTuples.RequirePrimitiveArguments((GenericInstanceType)reference);
+                return cached;
+            }
             if (imported.TryGetValue(LayoutEvidence.Identity(reference), out TypeDefinition? definition))
             {
                 // The selected module's own metadata computes an imported layout, as admission did.
@@ -341,9 +345,6 @@ internal static class MetadataValidation
     {
         RuntimeModels.ValidateTypeIdentity(reference, module, architecture);
         var fields = ValueTuples.Fields(reference);
-        foreach (var field in fields)
-            if (field.Type is TypeSpecification || EnumTypes.IsEnum(field.Type) || IsAggregate(field.Type, module))
-                throw new InvalidDataException($"Unsupported field type: {field.Type.FullName}");
         var width = PrimitiveWidth(fields[0].Type);
         if (fields.Any(field => PrimitiveWidth(field.Type) != width))
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName} (auto layout reorders fields of different widths)");

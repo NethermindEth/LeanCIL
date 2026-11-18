@@ -202,7 +202,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its generic
   signature marks the head as a value type and its own `TypeRef` names the supported
   `System.Runtime` assembly with the exact version, culture and public key token.
-  The extractor reads the marker on each signature use. Both arguments must be primitive integers, booleans or chars of the same storage width
+  The extractor reads the marker on each signature use. Both arguments must use primitive
+  element codes for integers, booleans or chars of the same storage width
   (1, 2, 4 or 8 bytes, including 8 for native integers).
   The field references must declare `Item1` as `!0` and `Item2` as `!1`, or the check fails
   with `operandMismatch`. Any other instance field of an owner outside the

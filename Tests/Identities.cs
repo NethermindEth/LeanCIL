@@ -264,7 +264,7 @@ static void CheckExceptionTypes()
 }
 
 // The fixture contains metadata and an abstract method with no body.
-static byte[] PairSignatureImage(bool secondValueType = true)
+static byte[] PairSignatureImage(bool secondValueType = true, bool namedArgument = false)
 {
     var rows = new MetadataBuilder();
     var fixture = rows.GetOrAddString("PairSignatures");
@@ -275,7 +275,9 @@ static byte[] PairSignatureImage(bool secondValueType = true)
         rows.GetOrAddBlob(runtime.PublicKeyToken), 0, default);
     var system = rows.GetOrAddString("System");
     var pair = rows.AddTypeReference(scope, system, rows.GetOrAddString("ValueTuple`2"));
+    var integer = rows.AddTypeReference(scope, system, rows.GetOrAddString("Int32"));
     byte pairIndex = checked((byte)CodedIndex.TypeDefOrRef(pair));
+    byte intIndex = checked((byte)CodedIndex.TypeDefOrRef(integer));
     var firstField = MetadataTokens.FieldDefinitionHandle(1);
     var method = MetadataTokens.MethodDefinitionHandle(1);
     rows.AddTypeDefinition(0, default, rows.GetOrAddString("<Module>"), default, firstField, method);
@@ -283,7 +285,8 @@ static byte[] PairSignatureImage(bool secondValueType = true)
     Srm.BlobHandle Blob(params byte[] bytes) => rows.GetOrAddBlob(bytes);
     rows.AddFieldDefinition(0, rows.GetOrAddString("First"), Blob(6, 0x15, 0x11, pairIndex, 2, 8, 8));
     byte kind = secondValueType ? (byte)0x11 : (byte)0x12;
-    rows.AddFieldDefinition(0, rows.GetOrAddString("Second"), Blob(6, 0x15, kind, pairIndex, 2, 8, 8));
+    byte[] argument = namedArgument ? [0x11, intIndex] : [8];
+    rows.AddFieldDefinition(0, rows.GetOrAddString("Second"), Blob([6, 0x15, kind, pairIndex, 2, .. argument, 8]));
     rows.AddMethodDefinition(System.Reflection.MethodAttributes.Abstract | System.Reflection.MethodAttributes.Virtual,
         0, rows.GetOrAddString("Anchor"), Blob(0x20, 0, 1), -1, MetadataTokens.ParameterHandle(1));
     var output = new Srm.BlobBuilder();
@@ -306,17 +309,23 @@ static void CheckPairSignatures()
         failures.Add(test);
         Console.WriteLine($"FAIL {test}: accepted");
     }
-    static int Layout(byte[] image)
+    static int Layout(byte[] image, bool cached = false)
     {
         using var pins = new PinnedAssemblies(image, Convert.ToHexStringLower(SHA256.HashData(image)), []);
         var module = pins.Selected;
         var fields = module.Types[1].Fields;
-        return MetadataValidation.AggregateLayout(fields[1].FieldType, module).Size;
+        if (!cached) return MetadataValidation.AggregateLayout(fields[1].FieldType, module).Size;
+        var context = new MetadataValidation.LayoutContext(module, "scalar");
+        context.AggregateLayout(fields[0].FieldType);
+        return context.AggregateLayout(fields[1].FieldType).Size;
     }
     var control = PairSignatureImage();
     if (Layout(control) != 8) throw new InvalidOperationException("Unexpected primitive pair size");
     Refuses("CLASS after VALUETYPE", "value-type signature",
         () => Layout(PairSignatureImage(secondValueType: false)));
+    var named = PairSignatureImage(namedArgument: true);
+    Refuses("named Int32 argument", "Unsupported field type", () => Layout(named));
+    Refuses("named Int32 after cached primitive layout", "Unsupported field type", () => Layout(named, cached: true));
     if (failures.Count != 0) throw new InvalidOperationException(string.Join(", ", failures));
 }
 

@@ -284,6 +284,9 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
             .Concat(types.Skip(1).Select(id => (long)id))));
     }
 
+    /// <summary>Whether Cecil read an implicit element type through its module's TypeSystem.</summary>
+    internal bool IsPrimitiveElement(TypeReference type) => primitives.ContainsKey(type);
+
     internal Primitive[] Prepare(ModuleDefinition module, MetadataImage image, AssemblyNameReference[] scopes)
     {
         var system = module.TypeSystem;

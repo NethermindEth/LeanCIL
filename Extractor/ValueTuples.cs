@@ -9,10 +9,19 @@ internal static class ValueTuples
         type is GenericInstanceType { ElementType.FullName: "System.ValueTuple`2", GenericArguments.Count: 2 } tuple &&
         RuntimeModels.ExactScope(tuple.ElementType, PlatformAssemblies.SystemRuntime);
 
+    // Only primitive element codes may supply the fields of a certified pair layout.
+    internal static void RequirePrimitiveArguments(GenericInstanceType tuple)
+    {
+        foreach (var argument in tuple.GenericArguments)
+            if (!StructuralSignatures.Current.IsPrimitiveElement(argument))
+                throw new InvalidDataException($"Unsupported field type: {argument.FullName}");
+    }
+
     // Item1 and Item2 with the instance's type arguments, checked against the resolved runtime definition.
     internal static MetadataValidation.InstanceField[] Fields(TypeReference type)
     {
         var tuple = (GenericInstanceType)type;
+        RequirePrimitiveArguments(tuple);
         var definition = tuple.ElementType.Resolve() ?? throw new InvalidDataException($"Unresolved aggregate: {type.FullName}");
         var fields = definition.Fields.Where(field => !field.IsStatic).ToArray();
         if (!tuple.IsValueType || !tuple.ElementType.IsValueType || !definition.IsValueType || !definition.IsAutoLayout ||
