@@ -686,12 +686,13 @@ partial class Program
         return generated;
     }
 
-    static void AddConsumerLibrary(string directory, string name, string[]? leanArguments = null)
+    internal static void AddConsumerLibrary(string directory, string name, string[]? leanArguments = null)
     {
         var toml = Path.Combine(directory, "lakefile.toml");
-        // TOML and Lean string literals both accept a JSON-quoted string.
-        var quoted = string.Join(", ", (leanArguments ?? []).Select(argument => JsonSerializer.Serialize(argument)));
-        if (File.Exists(toml))
+        bool useToml = File.Exists(toml);
+        Func<string, string> quote = useToml ? value => JsonSerializer.Serialize(value) : LeanString;
+        var quoted = string.Join(", ", (leanArguments ?? []).Select(quote));
+        if (useToml)
             File.AppendAllText(toml, $"\n[[lean_lib]]\nname = \"{name}\"\n" +
                 (quoted.Length == 0 ? "" : $"moreLeanArgs = [{quoted}]\n"));
         else

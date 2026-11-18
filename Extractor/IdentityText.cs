@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 
 namespace Nethermind.LeanCIL;
 
@@ -143,4 +144,11 @@ internal static class IdentityText
     internal static string Quote(string text) => WellFormed(text)
         ? $"\"{Escaped(text, quoted: true, sourceLiteral: true)}\""
         : throw new InvalidDataException("A Lean string cannot represent an unpaired surrogate.");
+
+    /// <summary>A Lean list whose strings preserve the scalar values in enumeration order.</summary>
+    internal static string QuoteList(IEnumerable<string> values) => $"""[{string.Join(",", values.Select(Quote))}]""";
+
+    /// <summary>Source literals from Quote use the common Lean and JSON escapes.</summary>
+    internal static string ReadLiteral(string literal) =>
+        JsonSerializer.Deserialize<string>(literal) ?? throw new JsonException("Expected a quoted source path.");
 }

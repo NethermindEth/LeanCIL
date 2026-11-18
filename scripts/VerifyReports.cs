@@ -114,7 +114,8 @@ internal static partial class VerifyReports
         return File.ReadAllLines(path).SkipWhile(line => !line.StartsWith("def points ", StringComparison.Ordinal))
             .Skip(1).TakeWhile(line => line.StartsWith("  [", StringComparison.Ordinal))
             .Select(line => SymbolPoint.Matches(line).Select(point => new SourcePoint(
-                int.Parse(point.Groups["pc"].Value), JsonSerializer.Deserialize<string>(point.Groups["file"].Value)!,
+                int.Parse(point.Groups["pc"].Value),
+                Nethermind.LeanCIL.IdentityText.ReadLiteral(point.Groups["file"].Value),
                 int.Parse(point.Groups["line"].Value), int.Parse(point.Groups["column"].Value)))
                 .OrderBy(point => point.Pc).ToArray())
             .ToArray();

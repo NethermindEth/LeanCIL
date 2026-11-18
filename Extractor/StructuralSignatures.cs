@@ -224,10 +224,17 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
         return new(this, Intern(new long[] { 16, types.Length }.Concat(types.Select(id => (long)id))));
     }
 
-    int[] Types(TypeReference[] roots)
+    /// <summary>All roots in one read-only layout collection share their completed descendants.</summary>
+    internal Func<TypeReference, Signature> LayoutSnapshot()
+    {
+        Dictionary<TypeReference, int> complete = new(ReferenceEqualityComparer.Instance);
+        return type => new(this, Types([type], complete)[0]);
+    }
+
+    int[] Types(TypeReference[] roots, Dictionary<TypeReference, int>? complete = null)
     {
         RequireLive();
-        var complete = new Dictionary<TypeReference, int>(ReferenceEqualityComparer.Instance);
+        complete ??= new(ReferenceEqualityComparer.Instance);
         var visiting = new HashSet<TypeReference>(ReferenceEqualityComparer.Instance);
         var work = new Stack<(TypeReference Type, Snapshot? Snapshot)>();
         for (int index = roots.Length - 1; index >= 0; index--) work.Push((roots[index], null));

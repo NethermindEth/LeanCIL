@@ -12,7 +12,7 @@
 ExportCaseLedger completed = new("resolution");
 
 using Program paths = new();
-string root = At("artifacts/FullModuleResolution-" + Guid.NewGuid().ToString("N"));
+string root = At($"artifacts/FullModuleResolution-\U00010400-{Guid.NewGuid():N}");
 Directory.CreateDirectory(root);
 string library = Path.GetFullPath(Path.Combine(paths.Toolchain, "lib", "lean"));
 SortedDictionary<string, string> accepted = new(StringComparer.Ordinal)

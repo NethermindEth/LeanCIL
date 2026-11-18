@@ -111,11 +111,13 @@ internal static class LeanEmitter
         List<TypeReference> layouts = [];
         HashSet<TypeReference> seenReferences = new(ReferenceEqualityComparer.Instance);
         Dictionary<string, StructuralSignatures.Signature> identities = new(StringComparer.Ordinal);
+        Func<TypeReference, StructuralSignatures.Signature>? signatureOf = null;
         void IncludeLayout(TypeReference reference)
         {
             if (!seenReferences.Add(reference)) return;
             var spelling = LayoutEvidence.Identity(reference);
-            var signature = StructuralSignatures.Current.Type(reference);
+            signatureOf ??= StructuralSignatures.Current.LayoutSnapshot();
+            var signature = signatureOf(reference);
             if (identities.TryGetValue(spelling, out var previous))
             {
                 if (previous != signature) throw new InvalidDataException($"Ambiguous layout identity: {spelling}");
@@ -123,7 +125,7 @@ internal static class LeanEmitter
             }
             identities.Add(spelling, signature);
             var type = metadata.Canonical(reference);
-            if (!ReferenceEquals(type, reference) && StructuralSignatures.Current.Type(type) != signature)
+            if (!ReferenceEquals(type, reference) && signatureOf(type) != signature)
                 throw new InvalidDataException($"Ambiguous imported layout identity: {spelling}");
             layouts.Add(type);
             foreach (MetadataValidation.InstanceField field in metadata.Fields(type))

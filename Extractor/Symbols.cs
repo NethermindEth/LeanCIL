@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -73,8 +72,6 @@ internal static class Symbols
             ? "\n  Source: " + at : null;
     }
 
-    static string Quote(string text) => JsonSerializer.Serialize(text);
-
     internal static string Emit(MethodDefinition[] methods, string origin)
     {
         var definitions = methods.Select(MethodSpecialization.Definition).ToArray();
@@ -102,7 +99,7 @@ internal static class Symbols
                 {
                     var end = scope.End.IsEndOfMethod ? count : pcs.GetValueOrDefault(scope.End.Offset, count);
                     foreach (var variable in scope.Variables.Where(v => !v.IsDebuggerHidden && !string.IsNullOrEmpty(v.Name)))
-                        scoped.Add($"({variable.Index}, {start}, {end}, {Quote(variable.Name)})");
+                        scoped.Add($"({variable.Index}, {start}, {end}, {IdentityText.Quote(variable.Name)})");
                 }
                 foreach (var inner in scope.Scopes) Visit(inner);
             }
@@ -115,7 +112,11 @@ internal static class Symbols
         {
             var pcs = Pcs(definition);
             return "  [" + string.Join(", ", Points(definition).Where(p => pcs.ContainsKey(p.Offset))
-                .Select(p => $"({pcs[p.Offset]}, {Quote(Display(p.Document.Url))}, {p.StartLine}, {p.StartColumn})")) + "]";
+                .Select(p =>
+                {
+                    var path = IdentityText.Quote(Display(p.Document.Url));
+                    return $"({pcs[p.Offset]}, {path}, {p.StartLine}, {p.StartColumn})";
+                })) + "]";
         })) + "]");
         lean.AppendLine("end ExtractedSymbols");
         return lean.ToString();

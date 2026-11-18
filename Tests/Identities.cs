@@ -9,6 +9,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
+#:include LeanStringEmissions.cs
 
 extern alias IdentityExtractor;
 
@@ -26,6 +27,11 @@ using Srm = System.Reflection.Metadata;
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's
 // display; that text must equal ToDisplay(). Each record is first checked against the raw metadata rows it reads.
 var clock = Stopwatch.StartNew();
+if (args.Length == 0 || args.Contains("--emissions-only", StringComparer.Ordinal))
+{
+    CheckLeanStringEmissions();
+    if (args.Length != 0) return;
+}
 if (args.Contains("--exception-types-only", StringComparer.Ordinal))
 {
     CheckExceptionTypes();

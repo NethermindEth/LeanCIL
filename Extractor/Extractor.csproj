@@ -13,6 +13,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DefineConstants>$(DefineConstants);LEANCIL_TOOL</DefineConstants>
+    <!-- Verification.cs also declares its source dependency for file-based callers. -->
+    <Features>$(Features);FileBasedProgram</Features>
     <StartupObject>Nethermind.LeanCIL.Program</StartupObject>
   </PropertyGroup>
 

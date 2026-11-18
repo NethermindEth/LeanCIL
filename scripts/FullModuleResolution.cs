@@ -16,7 +16,7 @@ private structure ExpectedResolution where
   deriving Lean.FromJson
 run_cmd do
   let expected : Array ExpectedResolution <- IO.ofExcept <|
-    (Lean.Json.parse (<- IO.FS.readFile {{JsonSerializer.Serialize(manifest)}})).bind Lean.fromJson?
+    (Lean.Json.parse (<- IO.FS.readFile {{LeanString(manifest)}})).bind Lean.fromJson?
   for item in expected do
     let path <- Lean.findOLean item.name.toName
     -- Lean joins roots verbatim; compare canonical files, not spellings.

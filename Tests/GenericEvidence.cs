@@ -10,7 +10,6 @@
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
-#:include ../Extractor/IdentityText.cs
 
 using System.Text;
 using System.Text.Json;

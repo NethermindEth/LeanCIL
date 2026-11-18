@@ -8,7 +8,6 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
-#:include ../Extractor/IdentityText.cs
 
 using System.Text;
 using System.Text.RegularExpressions;

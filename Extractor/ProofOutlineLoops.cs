@@ -7,6 +7,20 @@ namespace Nethermind.LeanCIL;
 // operations symbolically. A path the evaluation cannot follow becomes a hole, never a guess.
 internal static partial class ProofOutline
 {
+    /// <summary>A callee's exact signature, optionally continued across a Lean string gap.</summary>
+    internal static string CalleeLiteral(string signature, int column)
+    {
+        const int Room = 96;
+        var literal = IdentityText.Quote(signature);
+        if (column + literal.Length <= Room) return literal;
+        int cut = literal.LastIndexOf(',', Math.Clamp(Room - column - 2, 0, literal.Length - 1));
+        if (cut < 0) cut = literal.IndexOf('(');
+        if (cut < 0) return literal;
+        // Lean consumes whitespace after the gap, so spaces in the signature precede it.
+        while (literal[cut + 1] == ' ') cut++;
+        return literal.Insert(cut + 1, "\\\n    ");
+    }
+
     /// <summary>The emitted operations of one method and its control flow.</summary>
     sealed class Body(Operation[] operations)
     {
@@ -411,7 +425,7 @@ internal static partial class ProofOutline
             var output = callee.ReturnType.FullName == "System.Void" ? (int?)null : ElementWidth(callee.ReturnType)
                 ?? throw Unsupported($"callee {callee.Name} returns {callee.ReturnType.FullName}");
             var binding = $"bind_callee {name} {name}Body := ";
-            lean.Line(binding + Quoted(callee.FullName, binding.Length));
+            lean.Line($"""{binding}{CalleeLiteral(callee.FullName, binding.Length)}""");
             lean.Line("  from Extracted.method0");
             lean.Line();
             // An object callee whose body the outline reads gets the contract that body meets, proved.
@@ -688,16 +702,6 @@ internal static partial class ProofOutline
 
         static string Variable(string name) => Regex.IsMatch(name, @"\A[A-Za-z][A-Za-z0-9_]*\z") &&
             !Reserved.Contains(name) ? name : "argument";
-
-        // A long signature literal continues on the next line through a Lean string gap.
-        static string Quoted(string text, int column)
-        {
-            const int Room = 96;
-            if (column + text.Length + 2 <= Room) return $"\"{text}\"";
-            var cut = text.LastIndexOf(',', Math.Min(text.Length - 1, Room - column - 3));
-            if (cut < 0) cut = text.IndexOf('(');
-            return $"\"{text[..(cut + 1)]}\\\n    {text[(cut + 1)..]}\"";
-        }
 
         IEnumerable<(string Name, string Type)> EntryBinders =>
             (spec.Symbolic ? new[] { ("memory", "Memory") } : [])

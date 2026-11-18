@@ -20,6 +20,48 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericLayouts");
 Directory.CreateDirectory(root);
 var extractor = Assembly.LoadFrom(ExtractorPath);
+if (!LayoutVisits() || args.Contains("--layout-visits-only", StringComparer.Ordinal)) return;
+
+bool LayoutVisits()
+{
+    const BindingFlags members = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+    using var pinned = new PinnedMetadata(extractor, assembly);
+    var module = pinned.Module;
+    var box = module.GetType("Examples.IndirectValues/Box`1");
+    var method = new MethodDefinition("LayoutVisits", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+    module.GetType("Examples.IndirectValues").Methods.Add(method);
+    var validation = extractor.GetType("Nethermind.LeanCIL.MetadataValidation", true)!;
+    var context = validation.GetNestedType("LayoutContext", members)!;
+    var emitter = extractor.GetType("Nethermind.LeanCIL.LeanEmitter", true)!;
+    var collect = emitter.GetMethod("LayoutTypes", members)!;
+    var signatures = pinned.Context.GetType().GetProperty("Signatures", members)!.GetValue(pinned.Context)!;
+    var visits = signatures.GetType().GetProperty("NodeVisits", members)!;
+    long Count() => (long)visits.GetValue(signatures)!;
+    bool passed = true;
+    foreach (int depth in new[] { 8, 16, 32 })
+    {
+        TypeReference nested = module.TypeSystem.UInt64;
+        for (int index = 0; index < depth; index++)
+        {
+            var instance = new GenericInstanceType(box);
+            instance.GenericArguments.Add(nested);
+            nested = instance;
+        }
+        method.Body.Variables.Clear();
+        method.Body.Variables.Add(new VariableDefinition(nested));
+        var layouts = Activator.CreateInstance(context, members | BindingFlags.Public, null, [module, "scalar"], null);
+        long before = Count();
+        var rows = (TypeReference[])collect.Invoke(null, [new[] { method }, layouts])!;
+        long observed = Count() - before;
+        // Each application, the shared Box constructor and the UInt64 leaf are distinct nodes.
+        int distinct = depth + 2;
+        Console.WriteLine($"Layout depth {depth}: {rows.Length} rows, {observed} visits, {distinct} distinct nodes");
+        passed &= rows.Length == depth && observed == distinct;
+    }
+    if (!passed) Environment.ExitCode = 1;
+    return passed;
+}
+
 // Identities are read from metadata rows, so the same-named definition is written into an image.
 var shadowImage = Path.Combine(root, "Shadowed.dll");
 using (var source = ModuleDefinition.ReadModule(assembly))

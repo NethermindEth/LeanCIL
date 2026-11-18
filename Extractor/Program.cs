@@ -372,8 +372,12 @@ internal static partial class Program
             var opaqueStaticValues = new SortedSet<string>(loadedValues.Where(value => value.Opaque)
                 .Select(value => value.Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
-                source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
-                    "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
+                source += $"""
+
+                    -- Caller assumption: these types completed initialization successfully before invocation.
+                    def Extracted.initializedTypes : List String := {IdentityText.QuoteList(initializedTypes)}
+
+                    """;
             var initializationAssumptions = InitializationAssumption.Normalize(initializedTypes.Select(type =>
                 new InitializationAssumption(assemblyIdentity, type)).Concat(imports.InitializationAssumptions()));
             if (initializationAssumptions.Length > 0)
@@ -381,12 +385,17 @@ internal static partial class Program
                     "def Extracted.initializationAssumptions : List (String × String) := " +
                     InitializationAssumption.Lean(initializationAssumptions) + "\n";
             if (staticValues.Count > 0)
-                source += "-- Caller assumption: these fields keep the values their static constructors stored.\n" +
-                    "def Extracted.staticValues : List String := " + JsonSerializer.Serialize(staticValues) + "\n";
+                source += $"""
+                    -- Caller assumption: these fields keep the values their static constructors stored.
+                    def Extracted.staticValues : List String := {IdentityText.QuoteList(staticValues)}
+
+                    """;
             if (opaqueStaticValues.Count > 0)
-                source += "-- Not computed by extraction: loads read the caller's static binding.\n" +
-                    "def Extracted.opaqueStaticValues : List String := " +
-                    JsonSerializer.Serialize(opaqueStaticValues) + "\n";
+                source += $"""
+                    -- Not computed by extraction: loads read the caller's static binding.
+                    def Extracted.opaqueStaticValues : List String := {IdentityText.QuoteList(opaqueStaticValues)}
+
+                    """;
             SortedDictionary<string, string> importModules = imports.InterfaceModules();
             if (imports.Bindings.Count > 0) importModules.Add("ExtractedImports", imports.EmitImports(methods.Length));
             SortedDictionary<string, string> importModuleHashes = new(importModules.ToDictionary(pair => pair.Key,

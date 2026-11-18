@@ -831,8 +831,8 @@ partial class Program
         !(package.TryGetProperty("subDir", out JsonElement subdirectory) &&
             subdirectory.ValueKind == JsonValueKind.String && subdirectory.GetString() is not ("" or "."));
 
-    string CaptureFullTerms(string session, string proofModule, string destination, InterfaceModule[] interfaces,
-        string leanPath)
+    internal string CaptureFullTerms(string session, string proofModule, string destination,
+        InterfaceModule[] interfaces, string leanPath)
     {
         string toolchainLibrary = Path.Combine(Toolchain, "lib/lean");
         string[] shared = Directory.EnumerateFiles(toolchainLibrary, "*.olean", SearchOption.AllDirectories)
@@ -843,10 +843,10 @@ partial class Program
             .Distinct(StringComparer.Ordinal).ToArray();
         string captured = Path.Combine(session, destination + ".transfer");
         string probe = Path.Combine(session, "LeanCILCapture" + destination + ".lean");
-        string sharedNames = JsonSerializer.Serialize(shared);
+        string sharedNames = Nethermind.LeanCIL.IdentityText.QuoteList(shared);
         string capture =
             $"CIL.Interface.FullTransfer.capture (<- Lean.getEnv) shared `{destination} #[`{ExportTheorem}]";
-        string capturedPath = JsonSerializer.Serialize(captured);
+        string capturedPath = LeanString(captured);
         // Composition uses only the certified theorem; its closure carries the producer program.
         File.WriteAllText(probe, $$"""
 import {{proofModule}}

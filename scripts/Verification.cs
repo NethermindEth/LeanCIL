@@ -1,3 +1,4 @@
+#:include ../Extractor/IdentityText.cs
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -4209,7 +4210,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     [GeneratedRegex(@"\A(?<file>[^\n]+?):(?<line>[0-9]+):(?<column>[0-9]+): (?<text>.*)\z", RegexOptions.Singleline)]
     private static partial Regex LocatedMessage { get; }
 
-    static string LeanString(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+    static string LeanString(string value) => Nethermind.LeanCIL.IdentityText.Quote(value);
 
     /// <summary>
     /// Prints `theorem` from the checked proof module `olean` with only its imports' notation, writing the
