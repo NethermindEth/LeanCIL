@@ -3574,7 +3574,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     sealed record AuditRequest(string name, object? type = null, string[]? axioms = null,
         bool statement = false, bool refutation = false, string[]? allowedModules = null, bool term = false,
         object? expected = null);
-    sealed record AuditRefutation(string contract, int line, int column);
+    /// <summary>The contract a refutation theorem refutes, as the audit read it, and the theorem's position.</summary>
+    internal sealed record AuditRefutation(string contract, int line, int column);
     sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement,
         AuditRefutation? refutes,
         JsonElement? term = null, string? termError = null, bool? matches = null, string? mismatch = null);
@@ -4039,11 +4040,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             ".Holds _root_." + import.GetProperty("contractConstant").GetString() + " linked " +
             (extraction.GetProperty("methods").GetArrayLength() + import.GetProperty("slot").GetInt32())).ToArray() : [];
 
-    // Keeps the `#check` and `#print axioms` text shape that statement display and refutation reports read.
+    // Keeps the `#check` and `#print axioms` text shape that statement display reads; no decision reads it.
     static string AuditText(AuditedTheorem audited) => (audited.statement is null ? "" : audited.statement + "\n") +
         (audited.axioms is not { Length: > 0 } axioms ? $"'{audited.name}' does not depend on any axioms"
-            : $"'{audited.name}' depends on axioms: [{string.Join(", ", axioms)}]") + "\n" +
-        (audited.refutes is { } refutes ? $"LeanCIL refutes: {refutes.contract} at {refutes.line}:{refutes.column}\n" : "");
+            : $"'{audited.name}' depends on axioms: [{string.Join(", ", axioms)}]") + "\n";
 
     /// <summary>An informational or warning message Lean reported while checking the selected proof.</summary>
     internal sealed record ProofMessage(string severity, int line, int column, string text);
@@ -4374,7 +4374,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>The version of the certificate `verified.json` holds; every reader rejects any other.</summary>
-    internal const int CertificateSchema = 5;
+    internal const int CertificateSchema = 6;
 
     /// <summary>
     /// A fact the default verification trusts about the assembly images, which a deep check reconfirms from them.
@@ -4600,7 +4600,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
         JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null,
         StatementDefinition[]? specification = null, string[]? libraryModules = null,
-        StatementIdentity? statementIdentity = null);
+        StatementIdentity? statementIdentity = null, AuditRefutation? refutation = null);
 
     static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("initializationAssumptions", out var assumptions)
@@ -4789,6 +4789,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var fresh = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fresh);
         string audit;
+        AuditRefutation? refutation;
         string extractionAudit = "";
         string[] axioms;
         FullImportResult? fullResult = null;
@@ -5129,6 +5130,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(auditedTheorems[theorem]);
             audit = AuditText(auditedTheorems[theorem]);
+            refutation = auditedTheorems[theorem].refutes;
             RequireOriginalProofSources();
             RequireStagedProofSources();
             RequireOriginalProofSources();
@@ -5183,7 +5185,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 imports: fullResult?.Imports ?? PublishedImports(extraction.Root),
                 contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction.Root),
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
-                initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules);
+                initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules,
+                refutation: refutation);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireDeepStable();
             var deepPublication = deep is null ? null : StageDeepResult(deep, fresh);

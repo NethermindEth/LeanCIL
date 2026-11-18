@@ -1013,7 +1013,7 @@ Verified: ExampleProof.addTwo_holds
   its arguments or recurses is printed as Lean elaborates it, in terms of the auxiliary
   definitions it compiles to, and the field accessors of a structure the proof declares are not
   listed. Definitions of modules the proof imports are named in the statement and not printed.
-- `verified.json` is the certificate, schema 5. Its `binding` section has the run's `mode`, the
+- `verified.json` is the certificate, schema 6. Its `binding` section has the run's `mode`, the
   `digests` file, statement `sources` and `images` the run read, and, as `facts`, every fact about
   the assembly image that verification trusts, each with its `id`, `status`, `theorem` and
   `reason`, in this order: `body-bytes`, `metadata-rows`, `platform-type-kinds`,

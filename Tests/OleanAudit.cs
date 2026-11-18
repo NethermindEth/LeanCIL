@@ -414,9 +414,7 @@ var refutations = verification.AuditOleans(fixtureSearch, ["Refutations"], [Proo
     ProofTheorem("Refutations.negated"), ProofTheorem("Refutations.uses")]);
 AuditedAxioms(refutations.theorems[0]);
 if (refutations.theorems[0].refutes is not { contract: "CIL.Safety.MethodContract.Holds", column: 8 } refutes ||
-    refutes.line != refutedLine ||
-    !AuditText(refutations.theorems[0]).Contains(
-        $"LeanCIL refutes: CIL.Safety.MethodContract.Holds at {refutedLine}:8\n"))
+    refutes.line != refutedLine)
     throw new InvalidOperationException("Refutation not located: " +
         JsonSerializer.Serialize(refutations.theorems[0]));
 Rejected(refutations.theorems[1], "which a run the model does not cover can prove");

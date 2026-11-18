@@ -2578,7 +2578,8 @@ partial class Program
                     contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction),
                     compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
                     initializationAssumptions: InitializationAssumptions(extraction),
-                    statementIdentity: requests[i].Statement is null ? null : Identity(audits[i].Proof));
+                    statementIdentity: requests[i].Statement is null ? null : Identity(audits[i].Proof),
+                    refutation: audits[i].Proof.refutes);
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

@@ -280,7 +280,8 @@ partial class Program
             // A verified refutation is a certificate and a failed contract; any other pass leaves no failure.
             var failure = outcome.Located() is { } error
                 ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
-                : outcome.Report is { } report ? FailureReports.Refuted(report.theoremAudit, request.theorem, proofs[i], outputs[i], proofRoot)
+                : outcome.Report is { } report ? FailureReports.Refuted(report.refutation, report.theoremAudit,
+                    request.theorem, proofs[i], outputs[i], proofRoot)
                 : outcome.Checked ? null
                 : FailureReports.Classify(outcome.Stage, outcome.Detail ?? "Verification produced no result.", outcome.Hidden,
                     request.theorem, proofs[i], outputs[i], proofRoot, outcome.Sources);
@@ -534,7 +535,8 @@ partial class Program
                     JsonSerializer.Serialize(report with { specification = specification }, Json) + "\n");
             if (json)
             {
-                var refutation = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
+                var refutation = FailureReports.Refuted(report.refutation, report.theoremAudit, theorem, proof,
+                    output, proofRoot);
                 if (refutation is not null) FailureReports.Write(output, refutation);
                 ProofMessagesReport(Observed(verification.ProofMessages, trace, goals).Messages, proof, output);
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("verified", refutation, report.theorem,
@@ -575,7 +577,8 @@ partial class Program
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
             foreach (var line in BindingLines(report.binding)) Console.WriteLine("  " + line);
-            var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
+            var refuted = FailureReports.Refuted(report.refutation, report.theoremAudit, theorem, proof, output,
+                proofRoot);
             if (refuted is not null)
             {
                 FailureReports.Write(output, refuted);

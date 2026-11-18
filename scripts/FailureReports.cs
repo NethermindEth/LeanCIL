@@ -74,9 +74,6 @@ internal static partial class FailureReports
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    [GeneratedRegex(@"^LeanCIL refutes: (?<name>\S+) at (?<line>\d+):(?<column>\d+)\r?$", RegexOptions.Multiline)]
-    private static partial Regex RefutationMarker { get; }
-
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
     private static partial Regex Location { get; }
 
@@ -136,17 +133,15 @@ internal static partial class FailureReports
     }
 
     /// <summary>
-    /// A refutation report when the audit marks the verified theorem as a contract's `Refuted`, else null.
+    /// A refutation report when the audit found the verified theorem to state a contract's `Refuted`, else null;
+    /// `audit` is shown as the message and decides nothing.
     /// </summary>
-    internal static Report? Refuted(string audit, string theorem, string proof, string output, string? proofRoot)
-    {
-        var markers = RefutationMarker.Matches(audit);
-        if (markers.Count != 1) return null;
-        var marker = markers[0];
-        return new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output, MethodOf(output),
-            proof, int.Parse(marker.Groups["line"].Value), int.Parse(marker.Groups["column"].Value), [], audit,
-            Rerun(theorem, proof, output, proofRoot));
-    }
+    internal static Report? Refuted(Program.AuditRefutation? refutation, string audit, string theorem, string proof,
+        string output, string? proofRoot) =>
+        refutation is null ? null
+            : new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output,
+                MethodOf(output), proof, refutation.line, refutation.column, [], audit,
+                Rerun(theorem, proof, output, proofRoot));
 
     static (string Kind, string? Resource) KindOf(string stage, string first)
     {

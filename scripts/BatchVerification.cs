@@ -186,7 +186,8 @@ partial class Program
                     opaqueStaticValues: OpaqueStaticValues(extraction),
                     imports: PublishedImports(extraction),
                     contractDependencies: DeploymentDependencies(extraction),
-                    initializationAssumptions: InitializationAssumptions(extraction));
+                    initializationAssumptions: InitializationAssumptions(extraction),
+                    refutation: audited.theorems[2 * i].refutes);
             }
             // A package may require the same library by path and have built into it since the last snapshot.
             RequireUnchangedLibrary();
