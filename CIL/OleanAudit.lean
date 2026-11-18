@@ -59,7 +59,8 @@ predicate of the contract whose `Holds` heads T applied to T's arguments, struct
 definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why. `refutation`
 reports a theorem stating a library contract's counterexample predicate as `refutes`, and fails
 one stating `Not` of a library contract's `Holds`, each read through the definitions at the
-statement's head as the kernel comparison unfolds them.
+statement's head as the kernel comparison unfolds them. A theorem that `matches` when `refuted`
+reports as `refutes` the subject of the counterexample predicate it was compared with.
 
 RESULT (JSON):
   { "modules": { N: olean path },
@@ -577,11 +578,17 @@ def theorem? (env : Environment) (req : Json)
       | return result (fields ++
           [("error", toJson "A statement comparison requires expected.term")])
     let target := decodeStatement kernel ownerOf info.levelParams term
-    fields := fields ++ match target.bind (if refuted then refutedAt ownerOf else pure) with
-      | .ok target => match acceptsAt kernel thm info.levelParams type target with
-        | none => [("matches", toJson true)]
-        | some error => [("matches", toJson false), ("mismatch", toJson error)]
-      | .error error => [("matches", toJson false), ("mismatch", toJson error)]
+    match target.bind (if refuted then refutedAt ownerOf else pure) with
+    | .ok target => match acceptsAt kernel thm info.levelParams type target with
+      | none =>
+        fields := fields ++ [("matches", toJson true)]
+        -- The kernel accepted the theorem at production's counterexample predicate, so it refutes
+        -- that predicate's subject, whatever form the theorem states it in.
+        if refuted then
+          if let .ok (some refutes) ← refutation env ownerOf thm target then
+            fields := fields.filter (·.1 != "refutes") ++ [("refutes", refutes)]
+      | some error => fields := fields ++ [("matches", toJson false), ("mismatch", toJson error)]
+    | .error error => fields := fields ++ [("matches", toJson false), ("mismatch", toJson error)]
   if let .ok spec := req.getObjVal? "type" then
     unless info.levelParams == (names req "levelParams").toList &&
         (← IO.ofExcept (fits spec type)) do

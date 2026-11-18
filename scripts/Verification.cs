@@ -3586,13 +3586,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     /// <summary>
     /// Refuses a refutation theorem unless it names the extracted program and one of its methods, callees
-    /// included, so a counterexample about another program is never reported against this extraction.
+    /// included, so a counterexample about another program is never reported against this extraction. When
+    /// `required`, the request asked for a refutation and the theorem must be one.
     /// </summary>
-    static void RequireExtractedRefutation(AuditedTheorem audited, ExtractionIdentity extraction)
+    static void RequireExtractedRefutation(AuditedTheorem audited, ExtractionIdentity extraction,
+        bool required = false)
     {
         var methods = extraction.Root.GetProperty("methods").GetArrayLength();
-        if (audited.refutes is not { } refutes ||
-            refutes is { program: ExtractedProgram, method: { } method } && method < methods) return;
+        if (audited.refutes is not { } refutes)
+        {
+            if (!required) return;
+            throw new InvalidOperationException(
+                $"{audited.name} was accepted as a refutation but states no counterexample predicate the audit reads.");
+        }
+        if (refutes is { program: ExtractedProgram, method: { } method } && method < methods) return;
         var program = refutes.program ?? "a program that is not a constant";
         var index = refutes.method?.ToString() ?? "that is not a numeral";
         var subject = $"{audited.name} refutes {refutes.contract} for {program}, method {index}";

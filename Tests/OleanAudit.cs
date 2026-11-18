@@ -662,6 +662,44 @@ Console.WriteLine(Run([verification.LeanExecutable, At("Tests/AuditKeyScaling.le
     fixtures, fixtureSearch, environment: environment));
 Console.WriteLine("PASS the kernel compares statements by unfolding, refuses weaker ones and forged constants");
 
+// A refutation compared with production's statement refutes production's subject, whatever form the variant
+// states it in, so the audit reports that subject for verification to bind to the extraction.
+string TargetProgram(string methods) => $$"""
+    import CIL.Safety.MethodContract
+    /-- Returns at once. -/
+    def TargetProgram.stop : CIL.Method := { code := [.ret], locals := [], returnsValue := false }
+    /-- The program both legs name, with the methods this build gives it. -/
+    def TargetProgram.program : CIL.Program := {{methods}}
+    """;
+Compile("TargetProgram", TargetProgram("[TargetProgram.stop, TargetProgram.stop]"));
+Compile("TargetProduction", """
+    import TargetProgram
+    import Refutations
+    open CIL.Safety
+    theorem TargetProduction.holds : Refutations.returns.Holds (TargetProgram.program.drop 1) 0 :=
+      fun _ memory _ => MethodContract.Holds.intro (c := Refutations.returns) memory []
+        (Exists.intro 1 rfl) (Confined.refl _ memory) trivial
+    """);
+var targetProduction = verification.AuditOleans(fixtureSearch, ["TargetProduction"],
+    [new StatementRequest(true).Apply(ProofTheorem("TargetProduction.holds"))]).theorems[0];
+// The variant's build leaves the slot production names empty, and its theorem is a redex no reading classifies.
+Compile("TargetProgram", TargetProgram("[TargetProgram.stop]"));
+Compile("TargetVariant", """
+    import TargetProgram
+    import Refutations
+    theorem TargetVariant.refuted :
+        (fun program => Refutations.returns.Refuted program 0) (TargetProgram.program.drop 1) :=
+      Refutations.refuted
+    """);
+var target = verification.AuditOleans(fixtureSearch, ["TargetVariant"],
+    [new StatementRequest(false, targetProduction.term!.Value.GetRawText(), Refuted: true)
+        .Apply(ProofTheorem("TargetVariant.refuted"))]).theorems[0];
+if (target.matches != true || target.refutes is not { contract: "CIL.Safety.MethodContract.Holds", program: null,
+        method: 0 })
+    throw new InvalidOperationException($"A compared refutation did not report production's subject: {
+        JsonSerializer.Serialize(target)}");
+Console.WriteLine("PASS a compared refutation reports the subject of the statement it was compared with");
+
 // A user module cannot replace a toolchain module on the audit's search path.
 Compile("Init", "prelude\n");
 var resolved = verification.AuditOleans(fixtures, ["Init"], []).modules["Init"];
