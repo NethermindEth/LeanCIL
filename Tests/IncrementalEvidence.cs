@@ -79,8 +79,8 @@ string Extracted(string assembly, string selector, string name)
 // The assembly block and every definition and theorem of one method's component, the decoded definition included.
 string Component(string text, int method, string name)
 {
-    var lines = Regex.Matches(text, @"(?m)^(?:def assembly\d+Metadata |(?:@\[[^\r\n]*\] )?" +
-            @"(?:def|theorem|cil_decoded_method) method" + method + @"(?![0-9]))[^\n]*$")
+    var lines = IncrementalPatterns.ComponentLine().Matches(text)
+        .Where(match => !match.Groups["method"].Success || match.Groups["method"].Value == $"{method}")
         .Select(match => match.Value.TrimEnd('\r'))
         // The composed theorem names the method's position in the whole program, which is not part of its component.
         .Where(line => !line.Contains("_evidence_validated", StringComparison.Ordinal)).ToArray();
@@ -132,10 +132,11 @@ var genericA = Extracted(baseline, "Workspace.Shared::EntryGenericA(ulong)", "En
 var genericB = Extracted(baseline, "Workspace.Shared::EntryGenericB(ulong)", "EntryGenericB");
 string Instantiation(string text, string argument, string name)
 {
-    var index = Regex.Match(text, @"(?m)^def method(\d+)Signature : String := ""[^""]*Shared::Size\\u003C" + argument +
-        @"\\u003E").Groups[1].Value;
-    if (index.Length == 0) throw new InvalidOperationException($"No Size<{argument}> in {name}.");
-    return Regex.Replace(Component(text, int.Parse(index), name), "method" + index + "(?![0-9])", "method#");
+    var index = IncrementalPatterns.SizeSignature().Matches(text)
+        .FirstOrDefault(match => match.Groups["argument"].Value == argument)?.Groups[1].Value
+        ?? throw new InvalidOperationException($"No Size<{argument}> in {name}.");
+    return IncrementalPatterns.MethodName().Replace(Component(text, int.Parse(index), name),
+        match => match.Groups[1].Value == index ? "method#" : match.Value);
 }
 var (uintIndexA, uintIndexB) = (IncrementalPatterns.UIntSizeSignature().Match(genericA).Groups[1].Value,
     IncrementalPatterns.UIntSizeSignature().Match(genericB).Groups[1].Value);
@@ -202,4 +203,19 @@ static partial class IncrementalPatterns
 
     [GeneratedRegex(@"(?m)^def method0Body :")]
     internal static partial Regex FirstBody();
+
+    const string MethodDeclaration =
+        """(?:@\[[^\r\n]*\] )?(?:def|theorem|cil_decoded_method) method(?<method>[0-9]+)(?![0-9])""";
+
+    /// <summary>The assembly block, or a declaration of the method that the method group numbers.</summary>
+    [GeneratedRegex($"""(?m)^(?:def assembly\d+Metadata |{MethodDeclaration})[^\n]*$""")]
+    internal static partial Regex ComponentLine();
+
+    const string SizeArgument = """Shared::Size\\u003C(?<argument>[^"\\]*)\\u003E""";
+
+    [GeneratedRegex($"""(?m)^def method(\d+)Signature : String := "[^"]*{SizeArgument}""")]
+    internal static partial Regex SizeSignature();
+
+    [GeneratedRegex("method([0-9]+)")]
+    internal static partial Regex MethodName();
 }

@@ -11,7 +11,6 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -201,7 +200,11 @@ rejected.Check();
 // Replaces `original` only where it occurs exactly `count` times, so a mutation changes exactly the evidence it names.
 static string ReplaceExactly(string text, string original, string replacement, int count)
 {
-    var found = Regex.Count(text, Regex.Escape(original));
+    ArgumentException.ThrowIfNullOrEmpty(original);
+    var found = 0;
+    for (var at = text.IndexOf(original, StringComparison.Ordinal); at >= 0;
+        at = text.IndexOf(original, at + original.Length, StringComparison.Ordinal))
+        found++;
     if (found != count)
         throw new InvalidOperationException($"Expected {count} occurrences, found {found}: {original}");
     return text.Replace(original, replacement, StringComparison.Ordinal);

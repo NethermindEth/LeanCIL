@@ -28,9 +28,35 @@ partial class Program
     [GeneratedRegex(@"\Adef method(\d+) : Method := .* code := \[\r?\z")]
     private static partial Regex LiteralMethodHeader();
 
-    [GeneratedRegex(@"(?m)^(?:def method(?<number>\d+) : Method|" +
-        @"cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?) :=")]
+    const string LiteralMethodDefinition = """def method(?<number>\d+) : Method""";
+    const string DecodedMethodDefinition = """cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?""";
+
+    [GeneratedRegex($"""(?m)^(?:{LiteralMethodDefinition}|{DecodedMethodDefinition}) :=""")]
     private static partial Regex DefinedMethod();
+
+    // A decoded method's definition line: its options, then its decoder over the method's own definitions.
+    const string DecodedMethodHead = """(?m)^cil_decoded_method method(?<number>\d+)( \[[^\]\r\n]*\])? := """;
+    const string DecoderCall = """Method\.ofRaw\? profile environment method\k<number>Links """;
+    const string DecoderInput = """method\k<number>Original method\k<number>TypeArgumentsRaw""";
+
+    [GeneratedRegex($"""{DecodedMethodHead}{DecoderCall}{DecoderInput}(?=\r?$)""")]
+    private static partial Regex DecodedMethod();
+
+    [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := [^\r\n]*")]
+    private static partial Regex RawDefinition();
+
+    [GeneratedRegex(@"(?m)^def method(?<number>\d+)Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ")]
+    private static partial Regex ClosedReturnType();
+
+    [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := [^\r\n]*")]
+    private static partial Regex MethodLink();
+
+    [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct (\d+)\r?$")]
+    private static partial Regex DirectLink();
+
+    // The head of a one-line theorem, up to its proof.
+    [GeneratedRegex(@"(?m)^(theorem (?<name>[\w?!']+) : [^\r\n]*?) := [^\r\n]*")]
+    private static partial Regex TheoremHead();
 
     // A theorem and its indented continuation lines; a Lean name may end in ?, ! or '.
     [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n")]
@@ -95,9 +121,8 @@ partial class Program
     }
 
     // An extraction's definition of method `method` from its decoder, with the field operand definitions it names.
-    static Match DecodedDefinition(string source, int method) => new Regex(
-        $@"(?m)^cil_decoded_method method{method}( \[[^\]\r\n]*\])? := Method\.ofRaw\? profile environment " +
-        $@"method{method}Links method{method}Original method{method}TypeArgumentsRaw(?=\r?$)").Match(source);
+    static Match DecodedDefinition(string source, int method) => DecodedMethod().Matches(source)
+        .FirstOrDefault(match => match.Groups["number"].Value == $"{method}") ?? Match.Empty;
 
     /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
@@ -114,7 +139,8 @@ partial class Program
     {
         if (!IsDecodedMethod(source, method))
             throw new InvalidOperationException($"method{method} is not defined from its decoder");
-        return Regex.Match(source, $@"(?m)^def method{method}Original : Extraction\.RawMethod := [^\r\n]*").Value;
+        return RawDefinition().Matches(source)
+            .FirstOrDefault(match => match.Groups[1].Value == $"{method}")?.Value ?? "";
     }
 
     /// <summary>
@@ -159,9 +185,9 @@ partial class Program
     /// </summary>
     static string ForgeDecodedReturnType(string source, int method, string atom, string replacement)
     {
-        var closed = Regex.Match(source,
-            $@"(?m)^def method{method}Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ");
-        var returnType = closed.Groups["type"].Value;
+        var closed = ClosedReturnType().Matches(source)
+            .FirstOrDefault(match => match.Groups["number"].Value == $"{method}");
+        var returnType = closed?.Groups["type"].Value ?? "";
         if (!returnType.Contains(atom, StringComparison.Ordinal))
             throw new InvalidOperationException($"method{method}Closed returns no {atom}");
         return ForgeDecodedMethod(source, method, "declared := { method.declared with returnType := " +
@@ -174,8 +200,9 @@ partial class Program
     /// </summary>
     static string ForgeLink(string source, int method, int pc, string link)
     {
-        var definition = Regex.Match(source, $@"(?m)^@\[cil_code\] def method{method}Link{pc} : Link := [^\r\n]*");
-        if (!definition.Success) throw new InvalidOperationException($"method{method} has no link at pc {pc}");
+        var definition = MethodLink().Matches(source).FirstOrDefault(match =>
+                match.Groups[1].Value == $"{method}" && match.Groups[2].Value == $"{pc}")
+            ?? throw new InvalidOperationException($"method{method} has no link at pc {pc}");
         return source[..definition.Index] + $"@[cil_code] def method{method}Link{pc} : Link := {link}" +
             source[(definition.Index + definition.Length)..];
     }
@@ -188,8 +215,8 @@ partial class Program
         $"method{method}Closed profile method{method}FeatureStates method{method}Reachable";
 
     /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
-    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. Regex.Matches(source,
-            $@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct {callee}\r?$")
+    static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. DirectLink().Matches(source)
+        .Where(match => match.Groups[3].Value == $"{callee}")
         .Select(match => (int.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture),
             int.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)))];
 
@@ -234,10 +261,10 @@ partial class Program
         foreach (var theorem in theorems)
         {
             var witness = $"evidenceControl{index}_{theorem}";
-            var pattern = @"(?m)^(theorem " + Regex.Escape(theorem) + @" : [^\r\n]*?) := [^\r\n]*";
-            var originalMatches = Regex.Matches(original, pattern);
-            var narrowedMatches = Regex.Matches(narrowed, pattern);
-            if (narrowedMatches.Count != 1 || originalMatches.Count != 1 ||
+            Match[] Stated(string text) =>
+                [.. TheoremHead().Matches(text).Where(match => match.Groups["name"].Value == theorem)];
+            var (originalMatches, narrowedMatches) = (Stated(original), Stated(narrowed));
+            if (narrowedMatches.Length != 1 || originalMatches.Length != 1 ||
                 narrowedMatches[0].Groups[1].Value != originalMatches[0].Groups[1].Value)
                 throw new InvalidOperationException("Missing unique control obligation: " + theorem);
             var header = originalMatches[0].Groups[1].Value;

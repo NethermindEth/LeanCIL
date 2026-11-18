@@ -7,11 +7,10 @@ partial class Program
     // obligation a mutation breaks is shown false, not merely unprovable by the tactic that proves it when true.
     static string KernelRefutation(string mutated, string theorem, string refutation)
     {
-        var obligation = Regex.Match(mutated,
-            @"(?m)^(?:@\[[^\r\n]*\] )?theorem " + Regex.Escape(theorem) + @" : ([^\r\n]*?) := [^\r\n]*");
-        if (!obligation.Success) throw new InvalidOperationException("Missing obligation to refute: " + theorem);
+        var obligation = SingleLineTheorem().Matches(mutated).FirstOrDefault(match => match.Groups[1].Value == theorem)
+            ?? throw new InvalidOperationException("Missing obligation to refute: " + theorem);
         return mutated.Replace(obligation.Value,
-            $"theorem {refutation} : ¬ ({obligation.Groups[1].Value}) := by decide +kernel");
+            $"theorem {refutation} : ¬ ({obligation.Groups[2].Value}) := by decide +kernel");
     }
 
     // Each mutation must produce its own expected diagnostic. A different failing case
@@ -81,16 +80,14 @@ partial class Program
             var path = Path.GetFullPath(Path.Combine(directory, "RejectedBatch.lean"));
             File.WriteAllText(path, source);
             var result = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
-            var diagnostics = Regex.Matches(result.Output,
-                @"(?m)^" + Regex.Escape(path.Replace('\\', '/')) +
-                @":(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:");
-            if (diagnostics.Count == 0)
-                diagnostics = Regex.Matches(result.Output,
-                    @"(?m)^" + Regex.Escape(path) +
-                    @":(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:");
+            // Lean names the file with either separator.
+            var located = LocatedDiagnostic().Matches(result.Output);
+            Match[] diagnostics = [.. located.Where(match => match.Groups["file"].Value == path.Replace('\\', '/'))];
+            if (diagnostics.Length == 0)
+                diagnostics = [.. located.Where(match => match.Groups["file"].Value == path)];
             var starts = ranges.Select(range => range.Start).ToArray();
             var errors = cases.Select(_ => new StringBuilder()).ToArray();
-            for (var diagnostic = 0; diagnostic < diagnostics.Count; diagnostic++)
+            for (var diagnostic = 0; diagnostic < diagnostics.Length; diagnostic++)
             {
                 var match = diagnostics[diagnostic];
                 if (match.Groups[2].Value != "error") continue;
@@ -98,7 +95,9 @@ partial class Program
                 var index = Array.BinarySearch(starts, location);
                 if (index < 0) index = ~index - 1;
                 if (index < 0 || location >= ranges[index].End) continue;
-                var end = diagnostic + 1 < diagnostics.Count ? diagnostics[diagnostic + 1].Index : result.Output.Length;
+                var end = diagnostic + 1 < diagnostics.Length
+                    ? diagnostics[diagnostic + 1].Index
+                    : result.Output.Length;
                 errors[index].Append(result.Output.AsSpan(match.Index, end - match.Index));
             }
             for (var index = 0; index < cases.Count; index++)
@@ -164,8 +163,11 @@ partial class Program
     private static partial Regex RejectedImport();
 
     // A theorem stated and proved on one line; a Lean name may end in ?, ! or '.
-    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) : [^\r\n]*? := [^\r\n]*\r?$")]
+    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) : ([^\r\n]*?) := [^\r\n]*(?=\r?$)")]
     private static partial Regex SingleLineTheorem();
+
+    [GeneratedRegex(@"(?m)^(?<file>[^\r\n]*?):(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:")]
+    private static partial Regex LocatedDiagnostic();
 
     [GeneratedRegex(@"\AexternalIdentity|_tables_valid\z")]
     private static partial Regex CarriedWitnessName();

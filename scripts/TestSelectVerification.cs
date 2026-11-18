@@ -86,7 +86,7 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
         "Jobs do not start longest first");
     Require(groups.Select(group => group.Suite).Distinct().Count() == groups.Length &&
         groups.All(group => group.Suite.StartsWith(group.Suites[0], StringComparison.Ordinal) &&
-            Regex.IsMatch(group.Suite, @"\A[a-z+-]+(\+\d+more)?\z")), "A job name is ambiguous or not its first suite");
+            WorkflowPatterns.JobName().IsMatch(group.Suite)), "A job name is ambiguous or not its first suite");
     // Eight runners, with the setup every job repeats: packing must cost neither wall time nor jobs.
     const double setupSeconds = 52;
     double Wall(IEnumerable<double> jobs)
@@ -497,7 +497,7 @@ Test("required gate, all 192 actual Bash status combinations", () =>
     const string marker = "        run: |\n";
     var start = workflow.LastIndexOf(marker, StringComparison.Ordinal);
     Require(start >= 0, "Missing workflow gate");
-    var gate = Regex.Replace(workflow[(start + marker.Length)..], @"(?m)^ {10}", "");
+    var gate = WorkflowPatterns.StepIndent().Replace(workflow[(start + marker.Length)..], "");
     string[] statuses = ["success", "failure", "cancelled", "skipped"];
     foreach (var planned in statuses)
     foreach (var selected in new[] { "true", "false", "" })
@@ -763,4 +763,16 @@ static partial class ExternalSources
     private static bool Within(string root, string path) =>
         path.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
             StringComparison.Ordinal);
+}
+
+/// <summary>The patterns that read job names and steps of the verification workflow.</summary>
+static partial class WorkflowPatterns
+{
+    /// <summary>A job name: its first suite, then the count of the suites packed with it.</summary>
+    [GeneratedRegex(@"\A[a-z+-]+(\+\d+more)?\z")]
+    internal static partial Regex JobName();
+
+    /// <summary>The indentation of a line of a step's script.</summary>
+    [GeneratedRegex(@"(?m)^ {10}")]
+    internal static partial Regex StepIndent();
 }

@@ -439,17 +439,32 @@ static partial class RenderedLeanReaders
     [GeneratedRegex("\"\\.([a-z][A-Za-z0-9]*)")]
     private static partial Regex RenderedConstructor();
 
-    [GeneratedRegex(@"(?:Contains|StartsWith|EndsWith|IndexOf|Split|Matches|Replace|IsMatch|Match|" +
-        @"GeneratedRegex|new Regex)\((?<rest>.*)$")]
+    const string SearchMethods =
+        "Contains|StartsWith|EndsWith|IndexOf|Split|Matches|Replace|IsMatch|Match|GeneratedRegex|new Regex";
+
+    [GeneratedRegex($"""(?:{SearchMethods})\((?<rest>.*)$""")]
     private static partial Regex SearchCall();
 
-    [GeneratedRegex(@"""[^""]*(?:\b(?:def|theorem|lemma|namespace|structure|instance)\s*\(?[A-Za-z.]|" +
-        @"method\\?d|method\[0-9\])[^""]*""")]
+    const string DeclarationKeywords = "def|theorem|lemma|namespace|structure|instance";
+
+    [GeneratedRegex($"""
+        "[^"]*(?:\b(?:{DeclarationKeywords})\s*\(?[A-Za-z.]|method\\?d|method\[0-9\])[^"]*"
+        """)]
     private static partial Regex GeneratedDeclaration();
 
-    [GeneratedRegex(@"\b(?:op|operation|ops\[\w+\]|values\[\w+\])\.ToLean\(|\bop\.Link\(|" +
-        @"new Unadmitted\(.*\)\.ToLean\(")]
+    const string RenderedReceivers = """op|operation|ops\[\w+\]|values\[\w+\]""";
+
+    [GeneratedRegex($"""\b(?:{RenderedReceivers})\.ToLean\(|\bop\.Link\(|new Unadmitted\(.*\)\.ToLean\(""")]
     private static partial Regex RenderedOperation();
+
+    /// <summary>A dotted name, with its dot escaped or not, that no word or dot precedes.</summary>
+    [GeneratedRegex(@"(?<![\w.])\\?\.(?<name>\w+)\b")]
+    private static partial Regex DottedName();
+
+    /// <summary>Whether text holds a string literal that names one of the constructors after a dot.</summary>
+    static bool NamesConstructor(string text, HashSet<string> constructors) =>
+        DottedName().Matches(text).Any(match => constructors.Contains(match.Groups["name"].Value) &&
+            text.LastIndexOf('"', match.Index) >= 0 && text.IndexOf('"', match.Index + match.Length) >= 0);
 
     [GeneratedRegex(@"\$""[^""]*\{(?:op|ops\[\w+\])\.ToLean\(\)\}|""\s*\+\s*operation\.ToLean\(\)")]
     private static partial Regex OperationInMessage();
@@ -461,8 +476,7 @@ static partial class RenderedLeanReaders
     /// <summary>One finding per line that reads generated Lean or misuses a rendered operation.</summary>
     internal static List<Finding> Scan(IReadOnlyDictionary<string, string> files, string[] constructors)
     {
-        var constructor = new Regex("\"[^\"]*(?<![\\w.])\\\\?\\.(?:" + string.Join("|", constructors) +
-            @")\b[^""]*""");
+        var rendered = constructors.ToHashSet(StringComparer.Ordinal);
         var found = new List<Finding>();
         foreach (var (file, text) in files)
         {
@@ -473,7 +487,7 @@ static partial class RenderedLeanReaders
                 var line = lines[index];
                 var search = SearchCall().Match(line);
                 var searched = search.Success && (GeneratedDeclaration().IsMatch(search.Groups["rest"].Value) ||
-                    constructor.IsMatch(search.Groups["rest"].Value));
+                    NamesConstructor(search.Groups["rest"].Value, rendered));
                 if (searched) found.Add(new(file, index + 1, "reads generated Lean"));
                 if (!RenderedOperation().IsMatch(line)) continue;
                 var allowed = Emitters.Contains(file) ||

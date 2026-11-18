@@ -123,7 +123,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         StringComparison.Ordinal));
     var address = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.address ",
         StringComparison.Ordinal));
-    var changedTarget = Regex.Replace(call, @"method := \d+", "method := 999999");
+    var changedTarget = ManagedPatterns.LinkTarget().Replace(call, "method := 999999");
     // The link definition repeats the catalog, so these two mutations change it too and only the binding can
     // reject. A change that matched no definition would leave the links check as the only rejection.
     string Linked(string text, Func<string, string> change)
@@ -233,7 +233,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         if (entry.Name != "Generic") continue;
         var call = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.call ",
             StringComparison.Ordinal));
-        var aggregate = Regex.Match(call, @"\.aggregate ""[^""]+"" 0").Value;
+        var aggregate = ManagedPatterns.EmptyAggregate().Match(call).Value;
         var pair = ".aggregate " + System.Text.Json.JsonSerializer.Serialize(
             module.Assembly.Name.FullName + "::Examples.IndirectValues/Pair") + " 0";
         var catalog = call.IndexOf(" } [", StringComparison.Ordinal);
@@ -247,12 +247,12 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         rejected.Add(path, "PASS distinct aggregate callable identity rejected", "ManagedCallsValid");
         foreach (var (label, pattern) in new[]
         {
-            ("calli-layout", @"(\.indirectCall \(\.aggregate ""[^""]+"" )\d+"),
-            ("address-layout", @"(\.call \{[^\r\n]*?returnType := \.aggregate ""[^""]+"" )\d+"),
-            ("address-type-argument", @"(typeArguments := \[\.aggregate ""[^""]+"" )\d+")
+            ("calli-layout", ManagedPatterns.IndirectCallLayout()),
+            ("address-layout", ManagedPatterns.ReturnLayout()),
+            ("address-type-argument", ManagedPatterns.TypeArgumentLayout())
         })
         {
-            var match = Regex.Match(narrowed, pattern);
+            var match = pattern.Match(narrowed);
             if (!match.Success) throw new Exception("Missing raw callable layout: " + label);
             var changed = narrowed.Replace(match.Value, match.Groups[1].Value + "999999", StringComparison.Ordinal);
             var invalid = Path.Combine(root, "Rejected-" + label + ".lean");
@@ -261,7 +261,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         }
         var local = NarrowEvidence(source, "method0_specialization_validated")
             .Replace("by constructor <;> rfl", "by decide +kernel", StringComparison.Ordinal);
-        var signature = Regex.Match(local, @"(\.functionPointer \(\.aggregate ""[^""]+"" )\d+");
+        var signature = ManagedPatterns.FunctionPointerLayout().Match(local);
         if (!signature.Success) throw new Exception("Missing callable local type");
         var invalidLocal = Path.Combine(root, "Rejected-local-layout.lean");
         File.WriteAllText(invalidLocal,
@@ -282,4 +282,21 @@ static partial class ManagedPatterns
     /// <summary>The method a link names.</summary>
     [GeneratedRegex(@"method := \d+")]
     internal static partial Regex LinkTarget();
+
+    /// <summary>An aggregate type with no layout index beyond zero.</summary>
+    [GeneratedRegex("""\.aggregate "[^"]+" 0""")]
+    internal static partial Regex EmptyAggregate();
+
+    // Each layout pattern captures the text before the layout index it ends with.
+    [GeneratedRegex("""(\.indirectCall \(\.aggregate "[^"]+" )\d+""")]
+    internal static partial Regex IndirectCallLayout();
+
+    [GeneratedRegex("""(\.call \{[^\r\n]*?returnType := \.aggregate "[^"]+" )\d+""")]
+    internal static partial Regex ReturnLayout();
+
+    [GeneratedRegex("""(typeArguments := \[\.aggregate "[^"]+" )\d+""")]
+    internal static partial Regex TypeArgumentLayout();
+
+    [GeneratedRegex("""(\.functionPointer \(\.aggregate "[^"]+" )\d+""")]
+    internal static partial Regex FunctionPointerLayout();
 }

@@ -20,7 +20,7 @@ partial class Program
         var compiled = Path.Combine(session, ".lake/build/lib/lean");
         var records = new ConcurrentDictionary<string, PreparedLeanModule>(StringComparer.Ordinal);
         foreach (var module in modules)
-            if (!Regex.IsMatch(module, @"\ATests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z"))
+            if (!FixtureModule().IsMatch(module))
                 throw new ArgumentException("Expected a test fixture module: " + module);
         // A fixture's imports of other test modules are compiled and recorded with it, so no list has to name them.
         var dependencies = new Dictionary<string, string[]>(StringComparer.Ordinal);
@@ -110,4 +110,7 @@ partial class Program
 
     [GeneratedRegex(@"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")]
     private static partial Regex TestImport();
+
+    [GeneratedRegex(@"\ATests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z")]
+    private static partial Regex FixtureModule();
 }

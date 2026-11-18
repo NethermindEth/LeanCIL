@@ -1748,7 +1748,7 @@ long Heartbeats(string path, string text, bool equations = true) => Reported(pat
 {
     var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
-    if (equations && Regex.Matches(output, @"_instruction[0-9]+' depends on axioms: \[propext\]").Count != 1)
+    if (equations && LookupPatterns.EquationAxioms().Count(output) != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
     return (count, output);
 }
@@ -1843,7 +1843,7 @@ string WithEvidenceCosts(string extracted)
     // instruction per line after its header, and the hand-written body copies that code.
     const string Header =
         "@[cil_code] def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := ";
-    var definition = Regex.Match(templates, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
+    var definition = LookupPatterns.FirstTemplate().Match(templates);
     var depth = LookupPatterns.RecursionDepth().Match(extracted);
     if (!definition.Success || !depth.Success ||
         !IsDecodedMethod(extracted, 0) ||
@@ -2158,12 +2158,12 @@ Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Relea
 var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
 // The heartbeats per token of the whole extraction, less the imports, and of its call check alone. A call check that
 // reads each pc's link by a scan of the link table grows with the tokens that each carry a link.
-(double Total, double Calls) TokenCost(string name, string selector, int count, string distinctPattern)
+(double Total, double Calls) TokenCost(string name, string selector, int count, Regex distinctToken)
 {
     var output = Path.Combine(directory, "Tokens" + name);
     Run(Extract("extract", tokenAssembly, "Tokens", selector, output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var distinct = Regex.Matches(extracted, distinctPattern).Count;
+    var distinct = distinctToken.Count(extracted);
     if (distinct < count)
         throw new InvalidOperationException($"Expected {count} distinct tokens in {name}; found {distinct}.");
     var report = Reported(Path.Combine(output, "Measured.lean"), WithEvidenceCosts(extracted), equations: false);
@@ -2172,10 +2172,10 @@ var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
 foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
 {
     ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)",
-        @"\(\d+, \.text ""[^""]*""\)", FewTokens, ManyTokens),
+        LookupPatterns.StringToken(), FewTokens, ManyTokens),
     ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
-        @"\(\d+, \.field ", FewTokens, ManyTokens),
-    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ", FewCalledMethods,
+        LookupPatterns.FieldToken(), FewTokens, ManyTokens),
+    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", LookupPatterns.CallToken(), FewCalledMethods,
         ManyCalledMethods)
 })
 {
@@ -2230,11 +2230,9 @@ var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
 // The index of a method in an extraction, found by the name in its signature.
 string MethodNumber(string extracted, string method, string name)
 {
-    var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
-        Regex.Escape(method) + @"\(").Groups[1].Value;
-    return number.Length == 0
-        ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
-        : number;
+    return LookupPatterns.BodySignature().Matches(extracted)
+        .FirstOrDefault(match => match.Groups["method"].Value == method)?.Groups[1].Value
+        ?? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.");
 }
 // The heartbeats of the method's `method{n}_body_validated` and, for `tablesMethod`, of that method's
 // `tables_valid`, read in one file of the extraction narrowed to the body obligation. Each is read after the same
@@ -2246,10 +2244,10 @@ string MethodNumber(string extracted, string method, string name)
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var body = $"method{MethodNumber(extracted, method, name)}_body_validated";
     var narrowed = NarrowEvidence(extracted, body);
-    var obligations = new List<(Match Proof, string Kind)> { (Obligation(narrowed, body, @"⟨[^\r\n]*⟩"), "body") };
+    var obligations = new List<(Match Proof, string Kind)> { (Obligation(narrowed, body, decided: false), "body") };
     if (tablesMethod is not null)
         obligations.Add((Obligation(narrowed, $"method{MethodNumber(extracted, tablesMethod, name)}_tables_valid",
-            @"by decide \+kernel"), "tables"));
+            decided: true), "tables"));
     var parts = new List<string>();
     var readAt = new Dictionary<string, int>();
     var start = 0;
@@ -2267,13 +2265,12 @@ string MethodNumber(string extracted, string method, string name)
     long Cost(string kind) => costs[readAt[kind]] - costs[readAt[kind] - 1];
     return (Cost("body"), tablesMethod is null ? 0 : Cost("tables"));
 }
-// The line of obligation `theorem` in `narrowed`, proved by a term matching `proof`.
-static Match Obligation(string narrowed, string theorem, string proof)
-{
-    var line = Regex.Match(narrowed,
-        @"(?m)^theorem (?<name>" + theorem + @") : (?<statement>[^\r\n]*?) := " + proof + @"\r?\n");
-    return line.Success ? line : throw new InvalidOperationException("Missing obligation " + theorem);
-}
+// The line of obligation `theorem` in `narrowed`, proved by `decide +kernel` when `decided` and by an anonymous
+// constructor otherwise.
+static Match Obligation(string narrowed, string theorem, bool decided) =>
+    LookupPatterns.ProvedObligation().Matches(narrowed).FirstOrDefault(match =>
+        match.Groups["name"].Value == theorem && match.Groups["decision"].Success == decided)
+    ?? throw new InvalidOperationException("Missing obligation " + theorem);
 long BodyCheck(string name, string entry, string method) => BodyChecks(name, entry, method).Body;
 var chainCosts = chainLengths.Select(count => (double)BodyCheck("Chain" + count, "Chain" + count,
     $"Chain{count}_{count - 1}")).ToArray();
@@ -3016,4 +3013,31 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"(?m)^cil_instruction_equations method0\r?$")]
     internal static partial Regex FirstEquations();
+
+    [GeneratedRegex(@"_instruction[0-9]+' depends on axioms: \[propext\]")]
+    internal static partial Regex EquationAxioms();
+
+    const string TemplateBinder = """\(profile : FeatureProfile\) \(environment : LayoutEnvironment\)""";
+
+    /// <summary>The template of method 0: its header line, then one indented instruction per line.</summary>
+    [GeneratedRegex($"""(?m)^@\[cil_code\] def method0 {TemplateBinder} : Method := [^\r\n]*(\r?\n  [^\r\n]*)+""")]
+    internal static partial Regex FirstTemplate();
+
+    [GeneratedRegex("""\(\d+, \.text "[^"]*"\)""")]
+    internal static partial Regex StringToken();
+
+    [GeneratedRegex(@"\(\d+, \.field ")]
+    internal static partial Regex FieldToken();
+
+    [GeneratedRegex(@"\(\d+, \.call ")]
+    internal static partial Regex CallToken();
+
+    [GeneratedRegex("""def method(\d+)Signature : String := "[^"]*?Bodies::(?<method>[^"(]*)\(""")]
+    internal static partial Regex BodySignature();
+
+    const string ProofTerm = """(?:⟨[^\r\n]*⟩|(?<decision>by decide \+kernel))""";
+
+    /// <summary>A one-line theorem proved by a constructor or, in its decision group, by the kernel.</summary>
+    [GeneratedRegex($"""(?m)^theorem (?<name>[\w?!']+) : (?<statement>[^\r\n]*?) := {ProofTerm}\r?\n""")]
+    internal static partial Regex ProvedObligation();
 }
