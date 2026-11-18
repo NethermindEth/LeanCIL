@@ -206,9 +206,10 @@ These regressions cover the extractor's own C# indexes:
   and `LayoutTable.indexed_eq` proves the indexed reads equal to the list scans that
   `computeLayouts` uses. `Tests.LayoutAccumulation` checks that a wrong offset, a wrong size, a
   child at, after or past its parent, and a wrong length are rejected by both checks. Of the
-  generic cases, a mismatched owner identity is rejected before any owner lookup, while a missing
-  owner, an owner at another position and the wrong one of two same-shaped owners are rejected
-  through the owner index, which also finds the first of two equal closed types.
+  generic cases, a class owner and a mismatched owner identity are rejected before any owner
+  lookup, while a missing owner, an owner at another position and the wrong one of two
+  same-shaped owners are rejected through the owner index, which also finds the first of two
+  equal closed types. A class application never closes to a layout entry that claims it.
 - Constrained dispatch validation and lowering each build ordered dispatch candidate indexes
   once per invocation and reuse them across call sites, never across invocations. The indexes
   support type identity, method token/name and explicit interface override lookup. Candidate

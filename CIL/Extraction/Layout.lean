@@ -345,13 +345,15 @@ theorem LayoutTable.indexed_eq (layouts : List RawLayout) :
 
 #print axioms LayoutTable.indexed_eq
 
-/-- Resolve specialized storage tokens after substituting owner or method parameters. -/
+/-- Resolve specialized storage tokens after substituting owner or method parameters. A class
+    application stays a class whatever layout the table lists for it. -/
 def closeLayoutTypeWith (table : LayoutTable) : TypeExpr → TypeExpr
   | .byref type => .byref (closeLayoutTypeWith table type)
   | .pointer type => .pointer (closeLayoutTypeWith table type)
   | .array type => .array (closeLayoutTypeWith table type)
   | .apply owner argument =>
     let type := .apply (closeLayoutTypeWith table owner) (closeLayoutTypeWith table argument)
+    if (TypeExpr.apply owner argument).objectApplication then type else
     match table.owner type with
     | some index => .aggregate ((table.entry index).map RawLayout.identity |>.getD "") index
     | none => type
@@ -460,11 +462,13 @@ def genericConstraintValid (layouts : List RawLayout) (argument : TypeExpr)
     (flags : Nat) (types : List String) : Bool :=
   genericConstraintValidWith (.ofList layouts) argument flags types
 
-/-- Generic layouts cannot replace their argument ordering or original field storage. -/
+/-- Generic layouts cannot replace their argument ordering or original field storage, and only
+    a struct's generic definition owns one, since a class instance is a reference. -/
 def genericLayoutValid (table : LayoutTable) (layout : RawLayout) : Bool :=
   match layout.generic with
   | none => true
   | some generic =>
+    generic.owner matches .constructor .. &&
     genericOwnerIdentity generic.owner generic.arguments == some layout.identity &&
       !layout.explicit && !layout.auto && generic.arity > 0 &&
       generic.arguments.length == generic.arity &&

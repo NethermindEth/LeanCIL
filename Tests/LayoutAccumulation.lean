@@ -2,7 +2,8 @@ import CIL.Extraction.Layout
 
 /-! Field accumulation preserves declaration order and all metadata rejection boundaries. Named
 tables with a wrong offset, size, length, child position or generic owner are rejected by both
-`layoutsValidIndexed` and `LayoutsValid`, and the owner index finds the first matching owner. -/
+`layoutsValidIndexed` and `LayoutsValid`, a class owner included, the owner index finds the first
+matching owner, and a class application never closes to a layout entry. -/
 namespace Tests.LayoutAccumulation
 open CIL CIL.Extraction
 
@@ -211,4 +212,31 @@ theorem firstOwner :
     genericLayoutIndex [leaf, wrap 1 (.parameter 0) 0, wrap 1 (.parameter 0) 0] (wrapType 1) =
       some 1 := by decide +kernel
 #print axioms firstOwner
+/-- `Wrap1<Leaf>` stored with a class as its generic owner; its identity is spelled as the
+    struct's is. -/
+def classWrap : RawLayout := {
+  wrap 1 (.parameter 0) 0 with
+  generic := some {
+    owner := .objectConstructor "S" "Wrap1`1", arity := 1, arguments := [.aggregate "Leaf" 0],
+    fields := [.parameter 0], constraints := [(0, [])] } }
+
+/-- `Wrap1<Leaf>` applied as a class. -/
+def classWrapType : TypeExpr := .apply (.objectConstructor "S" "Wrap1`1") (.aggregate "Leaf" 0)
+
+/-- A generic layout whose owner is a class is rejected, while the same layout with a struct
+    owner is accepted: a class instance is a reference and never a struct's storage. -/
+theorem classOwnerRejected :
+    layoutsValidIndexed [leaf, wrap 1 (.parameter 0) 0] (genericLayouts.extract 0 2) .scalar =
+      true ∧
+    layoutsValidIndexed [leaf, classWrap] (genericLayouts.extract 0 2) .scalar = false ∧
+    ¬ LayoutsValid [leaf, classWrap] (genericLayouts.extract 0 2) .scalar := by decide +kernel
+#print axioms classOwnerRejected
+
+/-- Closing a class application never looks it up, so it stays a class even against a table
+    that claims it; the struct application still closes to its entry. -/
+theorem classApplicationStaysClass :
+    closeLayoutType [leaf, classWrap] classWrapType = classWrapType ∧
+    closeLayoutType [leaf, wrap 1 (.parameter 0) 0] (wrapType 1) =
+      .aggregate "S::Wrap1`1<Leaf>" 1 := by decide +kernel
+#print axioms classApplicationStaysClass
 end Tests.LayoutAccumulation
