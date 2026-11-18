@@ -140,7 +140,7 @@ internal static partial class FailureReports
         string output, string? proofRoot) =>
         refutation is null ? null
             : new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output,
-                MethodOf(output), proof, refutation.line, refutation.column, [], audit,
+                MethodOf(output, refutation.method), proof, refutation.line, refutation.column, [], audit,
                 Rerun(theorem, proof, output, proofRoot));
 
     static (string Kind, string? Resource) KindOf(string stage, string first)
@@ -169,12 +169,16 @@ internal static partial class FailureReports
     static string ModuleOf(string proof, string? proofRoot) => proofRoot is null ? "Proof"
         : Path.GetRelativePath(proofRoot, proof).Replace('\\', '/')[..^".lean".Length].Replace('/', '.');
 
-    internal static Method? MethodOf(string output)
+    /// <summary>The extraction's entry, or its method at `index` when given, with the assembly it came from.</summary>
+    internal static Method? MethodOf(string output, int? index = null)
     {
         try
         {
             var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "identity.json")));
-            return new(identity.GetProperty("entry").GetString()!, identity.GetProperty("assemblyIdentity").GetString()!,
+            var entry = index is { } method
+                ? identity.GetProperty("methods")[method].GetProperty("signature").GetString()!
+                : identity.GetProperty("entry").GetString()!;
+            return new(entry, identity.GetProperty("assemblyIdentity").GetString()!,
                 identity.GetProperty("assemblySha256").GetString()!);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)

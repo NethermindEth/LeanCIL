@@ -63,7 +63,8 @@ one stating `Not` of a library contract's `Holds`.
 RESULT (JSON):
   { "modules": { N: olean path },
     "theorems":  [{ "name": N, "error": string?, "axioms": [N, ...], "statement": string?,
-                    "refutes": { "contract": N, "line": n, "column": n }?,
+                    "refutes": { "contract": N, "program": N?, "method": n?, "line": n,
+                                 "column": n }?,
                     "term": T?, "termError": string?, "matches": bool?, "mismatch": string? }],
     "constants": [{ "name": N, "error": string?, "axioms": [N, ...] }],
     "interfaces": { "error": string? },
@@ -290,9 +291,26 @@ def statement (env : Environment) (thm : Name) (type : Expr) : IO String :=
       catch _ => pure (toString type)
     return s!"{thm} : {text}"
 
+/-- How many definitions `methodIndex?` unfolds to reach a numeral, as `bind_method` defines
+    one. -/
+def methodIndexDepth : Nat := 8
+
+/-- The `Nat` that `e` denotes when it is a canonical numeral, a raw literal, or a definition
+    without universe parameters whose value is one, unfolding at most `depth` definitions. -/
+def methodIndex? (env : Environment) : Nat → Expr → Option Nat
+  | _, .lit (.natVal n) => some n
+  | _, e@(.app (.app (.app _ _) (.lit (.natVal n))) _) =>
+    if e == canonicalNat n then some n else none
+  | depth + 1, .const name [] => match env.find? name with
+    | some (.defnInfo info) => methodIndex? env depth (stripMData info.value)
+    | _ => none
+  | _, _ => none
+
 /-- When `type` is a library contract's counterexample predicate applied to arguments, the
-    contract it refutes and the source position of `thm`; otherwise `none`. A statement `Not`
-    applied to a library contract's `Holds` is an error: a run the model does not cover proves it,
+    contract it refutes, the program and method it names, and the source position of `thm`;
+    otherwise `none`. The program is reported only as a constant and the method only as the
+    number `methodIndex?` reads, so a caller can bind the refutation to an extraction. A
+    statement `Not` applied to a library contract's `Holds` is an error: a run the model does not cover proves it,
     so it is no evidence of a counterexample. -/
 def refutation (env : Environment) (ownerOf : Name → Option Name) (thm : Name) (type : Expr) :
     IO (Except String (Option Json)) := do
@@ -303,7 +321,11 @@ def refutation (env : Environment) (ownerOf : Name → Option Name) (thm : Name)
   let some contract := contractAt ownerOf (·.refuted) type | return .ok none
   let some ranges ← run env (findDeclarationRanges? thm)
     | throw (IO.userError s!"Missing refutation location for {thm}")
+  let arguments := type.getAppArgs
+  let program := arguments[3]?.bind fun argument => (stripMData argument).constName?
+  let method := arguments[4]?.bind (methodIndex? env methodIndexDepth ∘ stripMData)
   return .ok <| some <| Json.mkObj [("contract", toJson contract.holds.toString),
+    ("program", toJson (program.map toString)), ("method", toJson method),
     ("line", toJson ranges.selectionRange.pos.line),
     ("column", toJson ranges.selectionRange.pos.column)]
 

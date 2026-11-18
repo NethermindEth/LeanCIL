@@ -232,7 +232,8 @@ Require(unrooted is { kind: FailureReports.UnsolvedGoal, module: "Proof", line: 
     "unrooted proof copy and rerun");
 const string Audit = "ExampleProof.correctness : mixContract.Refuted Extracted.program mix\n" +
     "'ExampleProof.correctness' depends on axioms: [propext]\n";
-var refuted = FailureReports.Refuted(new("CIL.Safety.MethodContract.Holds", 21, 0), Audit,
+var refuted = FailureReports.Refuted(new("CIL.Safety.MethodContract.Holds", "Extracted.program", null, 21, 0),
+    Audit,
     "ExampleProof.correctness", proof, output, package);
 Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage: "theorem audit" } &&
     refuted.file == proof && refuted.rerun[^2..].SequenceEqual(["--proof-root", package]),

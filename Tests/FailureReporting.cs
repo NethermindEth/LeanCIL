@@ -293,7 +293,10 @@ Console.WriteLine("PASS an arithmetic bug and an unproved aliasing precondition 
 
 var refutation = results[2].GetProperty("failure");
 var (refutedLine, _) = Lines(refuted);
+// The refutation names the callee it refutes, not the extraction's entry.
 if (Text(refutation, "kind") != "refutation" || Text(refutation, "file") != refuted || Number(refutation, "line") != refutedLine ||
+    refutation.GetProperty("method").GetProperty("entry").GetString() !=
+        "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)" ||
     Number(refutation, "column") != "theorem ".Length || !File.Exists(Path.Combine(outputs["Refuted"], "verified.json")) ||
     results.Where((_, i) => i != 2).Any(item => item.GetProperty("failure") is { ValueKind: JsonValueKind.Object } other &&
         Text(other, "kind") == "refutation"))
@@ -365,3 +368,36 @@ if (forgedRun.Code != 1 || File.Exists(Path.Combine(sameText, "verified.json")) 
         forgedRun.Output);
 Console.WriteLine("PASS a negated contract proved from a run the model does not cover is refused as no " +
     "counterexample");
+
+// A genuine counterexample about another program refutes nothing in this extraction, so verify refuses it.
+const string Elsewhere = """
+    import Extracted
+    import CIL.Safety.MethodContract
+
+    /-! A counterexample about the empty program, verified against an extraction it does not name. -/
+
+    open CIL.Safety
+    namespace Elsewhere
+
+    /-- Promises a return from any memory. -/
+    def returns : MethodContract Unit :=
+      { args := fun _ => [], pre := fun _ _ => True, footprint := fun _ => [], post := fun _ _ _ _ => True }
+
+    /-- The empty program has no method zero, so a call to it faults. -/
+    theorem refuted : returns.Refuted [] 0 :=
+      .of_fault (input := ()) (initial := Memory.empty) (observed := 1)
+        (fault := ⟨0, 0, .invalidState⟩) trivial (by decide) rfl
+
+    #print axioms refuted
+    end Elsewhere
+    """;
+var elsewhereProof = Path.Combine(root, "Elsewhere.lean");
+File.WriteAllText(elsewhereProof, Elsewhere);
+var elsewhereRun = Execute([.. cli, "verify", sameText, "--proof", elsewhereProof, "--theorem", "Elsewhere.refuted"]);
+var elsewhereReport = Failure(sameText);
+if (elsewhereRun.Code != 1 || File.Exists(Path.Combine(sameText, "verified.json")) ||
+    Text(elsewhereReport, "kind") != "replay-or-audit-rejected" ||
+    Text(elsewhereReport, "message")?.Contains("a refutation states Extracted.program", StringComparison.Ordinal) != true)
+    throw new InvalidOperationException(
+        $"A refutation of another program was reported against this one:\n{elsewhereRun.Output}");
+Console.WriteLine("PASS a counterexample about another program is refused, not reported against the extraction");

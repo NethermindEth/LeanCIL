@@ -413,7 +413,9 @@ var refutedLine = Array.FindIndex(RefutationSource.Split('\n'), line => line.Sta
 var refutations = verification.AuditOleans(fixtureSearch, ["Refutations"], [ProofTheorem("Refutations.refuted"),
     ProofTheorem("Refutations.negated"), ProofTheorem("Refutations.uses")]);
 AuditedAxioms(refutations.theorems[0]);
-if (refutations.theorems[0].refutes is not { contract: "CIL.Safety.MethodContract.Holds", column: 8 } refutes ||
+// The audit reports the program only as a constant, so the empty list names none, and the method as its numeral.
+if (refutations.theorems[0].refutes is not
+        { contract: "CIL.Safety.MethodContract.Holds", program: null, method: 0, column: 8 } refutes ||
     refutes.line != refutedLine)
     throw new InvalidOperationException("Refutation not located: " +
         JsonSerializer.Serialize(refutations.theorems[0]));

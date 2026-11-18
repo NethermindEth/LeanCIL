@@ -2440,6 +2440,7 @@ partial class Program
                         deepRun?.Attempt);
                     foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
                     var proofAudit = namedAudits[proofAudits[0].name];
+                    RequireExtractedRefutation(proofAudit, extractions[i]);
                     audits[i] = (AuditText(proofAudit), AuditedAxioms(proofAudit), audited, proofAudit);
                 }
                 catch (Exception error) { Fail([i], error); }

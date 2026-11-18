@@ -3575,8 +3575,30 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     sealed record AuditRequest(string name, object? type = null, string[]? axioms = null,
         bool statement = false, bool refutation = false, string[]? allowedModules = null, bool term = false,
         object? expected = null);
-    /// <summary>The contract a refutation theorem refutes, as the audit read it, and the theorem's position.</summary>
-    internal sealed record AuditRefutation(string contract, int line, int column);
+    /// <summary>
+    /// The contract a refutation theorem refutes, the program constant and method index it names when the audit
+    /// could read them, and the theorem's position.
+    /// </summary>
+    internal sealed record AuditRefutation(string contract, string? program, int? method, int line, int column);
+
+    /// <summary>The program constant of an extraction, which a refutation of one of its methods names.</summary>
+    const string ExtractedProgram = "Extracted.program";
+
+    /// <summary>
+    /// Refuses a refutation theorem unless it names the extracted program and one of its methods, callees
+    /// included, so a counterexample about another program is never reported against this extraction.
+    /// </summary>
+    static void RequireExtractedRefutation(AuditedTheorem audited, ExtractionIdentity extraction)
+    {
+        var methods = extraction.Root.GetProperty("methods").GetArrayLength();
+        if (audited.refutes is not { } refutes ||
+            refutes is { program: ExtractedProgram, method: { } method } && method < methods) return;
+        var program = refutes.program ?? "a program that is not a constant";
+        var index = refutes.method?.ToString() ?? "that is not a numeral";
+        var subject = $"{audited.name} refutes {refutes.contract} for {program}, method {index}";
+        throw new InvalidOperationException(
+            $"{subject}; a refutation states {ExtractedProgram} and one of its {methods} methods.");
+    }
     sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement,
         AuditRefutation? refutes,
         JsonElement? term = null, string? termError = null, bool? matches = null, string? mismatch = null);
@@ -5131,6 +5153,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             stage?.Invoke("theorem audit");
             axioms = AuditedAxioms(auditedTheorems[theorem]);
             audit = AuditText(auditedTheorems[theorem]);
+            RequireExtractedRefutation(auditedTheorems[theorem], extraction);
             refutation = auditedTheorems[theorem].refutes;
             RequireOriginalProofSources();
             RequireStagedProofSources();
