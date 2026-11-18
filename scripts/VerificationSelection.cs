@@ -167,7 +167,8 @@ internal static class VerificationSelection
         inputs["intrinsics"].Add("Tests/ExactIntrinsics.lean");
         inputs["stepping"].Add("scripts/ProofCost.lean");
         // Self-admission scans the extractor itself, so every source compiled into it can change the result.
-        inputs["blockers"].UnionWith(["Tests/SelfAdmissionBaseline.txt", "Tests/canonical-methods.txt"]);
+        inputs["blockers"].UnionWith(["Tests/SelfAdmissionBaseline.txt", "Tests/canonical-methods.txt",
+            "Tests/canonical-examples.txt"]);
         inputs["blockers"].UnionWith(["Tests/HoleCorpus.cs", "Tests/HoleCorpusBaseline.txt"]);
         inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
             @"<Compile Include=""\.\./([^""]+\.cs)""").Select(path => path.Replace('\\', '/')));

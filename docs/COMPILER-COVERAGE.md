@@ -106,3 +106,9 @@ call translated to another instruction, or an unreachable pc), most frequent fir
 checked-in [list](../Tests/canonical-methods.txt), named as the baseline names methods. A method
 that leaves the list fails the scan; a method that joins it fails until
 `dotnet run --file Tests/CanonicalMethods.cs -- --update` records it, so the list only grows.
+
+The same script runs `leancil blockers` over every method `leancil list` prints for the examples
+assembly, under the `scalar`, `x64-v3` and `arm64-advsimd` profiles at once, and compares the
+methods each defines from its decoder, as `<profile> <name>` lines, with a second checked-in
+[list](../Tests/canonical-examples.txt), by the same rules. The runs only read the built extractor, and the check fails
+if its hash changes while they run.
