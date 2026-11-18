@@ -514,7 +514,7 @@ def MetadataEnv.resolve (env : MetadataEnv) (position : Nat) (type : SigType) :
 /-- The signature of a TypeSpec, including the marker and token of a generic head. -/
 def MetadataIndex.typeSpec (index : MetadataIndex) (token : Nat) :
     Except MetadataError SigType := do
-  decodeTypeSpec (<- index.blob (<- index.signatureOf Table.typeSpec token))
+  decodeTypeSpec (← index.blob (← index.signatureOf Table.typeSpec token))
 
 /-- The type a `TypeDef`, `TypeRef` or `TypeSpec` token names. -/
 def MetadataEnv.resolveToken (env : MetadataEnv) (position token : Nat) :
@@ -526,7 +526,7 @@ def MetadataEnv.resolveToken (env : MetadataEnv) (position token : Nat) :
     .ok (.named named)
   | 0x1B => do
     let index ← env.slice position token
-    env.resolve position (<- index.typeSpec token)
+    env.resolve position (← index.typeSpec token)
   | _ => .error (.unsupportedTable token)
 
 /-! ## Spelling -/

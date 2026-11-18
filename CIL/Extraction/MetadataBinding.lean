@@ -160,13 +160,13 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
           declared := ← env.resolveBlob 0 token row.signature, definition := some (0, token) }
   else
     let row ← index.memberRef token
-    let (owner, valueHead) <- if metadataTableOf row.parent == Table.typeSpec then do
-      let signature <- index.typeSpec row.parent
+    let (owner, valueHead) ← if metadataTableOf row.parent == Table.typeSpec then do
+      let signature ← index.typeSpec row.parent
       let head := match signature with
         | .genericInst true token _ => some token
         | _ => none
-      pure (<- env.resolve 0 signature, head)
-    else pure (<- env.resolveToken 0 row.parent, none)
+      pure (← env.resolve 0 signature, head)
+    else pure (← env.resolveToken 0 row.parent, none)
     let name ← index.string row.name
     let declared ← env.resolveBlob 0 token row.signature
     let definition ← match owner.head with
@@ -222,7 +222,7 @@ def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classO
   else .ok before
 
 /-- Storage width of a primitive field signature on the supported 64-bit profiles. -/
-private def primitiveWidth : Nat -> Option Nat
+private def primitiveWidth : Nat → Option Nat
   | 0x02 | 0x04 | 0x05 => some 1
   | 0x03 | 0x06 | 0x07 => some 2
   | 0x08 | 0x09 => some 4
@@ -253,7 +253,7 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
     else .ok (← env.instanceIndex position definition classOwner, held, some false)
   | none =>
     -- The pair is known by its own reference, never by the slice's `corlib` number.
-    let pair <- match site.owner, site.valueHead with
+    let pair ← match site.owner, site.valueHead with
       | .genericInst head (.cons (.primitive first) (.cons (.primitive second) .nil)),
           some reference => do
         if metadataTableOf reference != Table.typeRef ||
@@ -261,8 +261,8 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
             !(primitiveWidth first).any (fun width => primitiveWidth second == some width) then
           pure false
         else
-          let index <- env.slice 0 token
-          let scope := (<- index.typeRef reference).scope
+          let index ← env.slice 0 token
+          let scope := (← index.typeRef reference).scope
           if metadataTableOf scope == Table.assemblyRef then
             pure ((← index.assemblyRefName scope runtimeAssembly) == some runtimeAssembly)
           else pure false

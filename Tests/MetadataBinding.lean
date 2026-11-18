@@ -1038,13 +1038,13 @@ theorem refuses_a_method_parameter_past_the_arity :
 /-- `T` with `System.ValueTuple<int, int>` and references to its fields `Item1` and
     `Item2` whose field signatures end with the type bytes `first` and `second`. -/
 private def tupleWorldWith (first second : List Nat) : Step (Nat × Nat) := do
-  let _ <- ownWorld
+  let _ ← ownWorld
   let tupleName ← string "ValueTuple`2"
   let systemName ← string "System"
   let firstName ← string "Item1"
   let secondName ← string "Item2"
   let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
-  let tupleBlob <- blob [0x15, 0x11, typeRefCoded tupleRef, 2, 0x08, 0x08]
+  let tupleBlob ← blob [0x15, 0x11, typeRefCoded tupleRef, 2, 0x08, 0x08]
   let tupleSpec ← row Table.typeSpec [tupleBlob]
   let firstSignature ← blob (0x06 :: first)
   let secondSignature ← blob (0x06 :: second)
@@ -1074,9 +1074,9 @@ private def pairField (index : Nat) (name : MetadataName) : RawOperand :=
 theorem reads_the_pair_from_its_own_reference :
     passes (tupleSlice 1).1 lib (tupleSlice 1).2.2 (pairField 1 name!"Item2") = true ∧
     rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 1 name!"Item2")
-      (.operandMismatch (tupleSlice 0).2.2) = true /\
+      (.operandMismatch (tupleSlice 0).2.2) = true ∧
     rejects (tupleSlice 0).1 lib (tupleSlice 0).2.1 (pairField 0 name!"Item1")
-      (.operandMismatch (tupleSlice 0).2.1) = true /\
+      (.operandMismatch (tupleSlice 0).2.1) = true ∧
     rejects (tupleSlice 1).1 lib (tupleSlice 1).2.2 (pairField 0 name!"Item2")
       (.fieldIndexMismatch (tupleSlice 1).2.2 0 1) = true ∧
     rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 0 name!"Item2")

@@ -852,7 +852,7 @@ private structure AssemblyRefParts where
 /-- Supported assembly references carry an eight-byte token or no token, and zero flags. -/
 private def MetadataIndex.assemblyRefParts (index : MetadataIndex) (token : Nat) :
     Except MetadataError AssemblyRefParts := do
-  let row <- index.assemblyRef token
+  let row ← index.assemblyRef token
   if row.flags != 0 then throw (.unsupportedAssemblyRef token)
   let name ← index.string row.name
   let culture ← index.string row.culture
@@ -865,7 +865,7 @@ private def MetadataIndex.assemblyRefParts (index : MetadataIndex) (token : Nat)
 /-- The scoped assembly identity in the byte spelling used for slice lookup. -/
 def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
     Except MetadataError (List Nat) := do
-  let parts <- index.assemblyRefParts token
+  let parts ← index.assemblyRefParts token
   let spelled := if parts.publicKeyToken.isEmpty then nullToken else hexDigits parts.publicKeyToken
   let version := parts.version
   return assemblySpelling parts.name version.major version.minor version.build version.revision
