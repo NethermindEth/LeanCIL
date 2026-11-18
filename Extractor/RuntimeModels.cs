@@ -149,7 +149,8 @@ internal static class RuntimeModels
             return vector;
         }
         if (BitModels.Call(reference, profile) is { } bits) return bits;
-        if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
+        if (reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
+            reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||
             !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             !IntegerMathCalls.TryGetValue(reference.FullName, out var model)) return null;
@@ -212,7 +213,7 @@ internal static class RuntimeModels
     {
         var convention = reference is GenericInstanceMethod
             ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
-        if (reference.HasThis || reference.CallingConvention != convention ||
+        if (reference.HasThis || reference.ExplicitThis || reference.CallingConvention != convention ||
             !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics)) return null;
         string signature = reference.FullName;
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")

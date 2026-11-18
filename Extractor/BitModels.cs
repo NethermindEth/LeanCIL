@@ -29,7 +29,8 @@ internal static class BitModels
     /// </summary>
     internal static Operation? Call(MethodReference reference, FeatureProfile profile)
     {
-        if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
+        if (reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
+            reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||
             !Calls.TryGetValue(reference.FullName, out var model)) return null;
         var scope = reference.DeclaringType.FullName == BinaryPrimitives

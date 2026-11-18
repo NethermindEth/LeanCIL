@@ -44,6 +44,8 @@ var primitiveNames = new[] { "Byte", "SByte", "Int16", "UInt16", "Int32", "UInt3
 const int batchSize = 512;
 bool checkedMissingContext = false;
 int unsupported = 0;
+var conventionChecks = new HashSet<string>(StringComparer.Ordinal);
+var acceptedConventions = new List<string>();
 foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runtime.Intrinsics" })
 {
     using var reference = ModuleDefinition.ReadModule(Path.Combine(toolchain.References, assembly + ".dll"));
@@ -104,6 +106,17 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
                 {
                     var operation = TranslatePinned(method, profile);
                     if (operation is null) continue;
+                    if (!conventionChecks.Contains(method.Name) &&
+                        (method.DeclaringType.FullName, method.Name) is
+                            ("System.Object", ".ctor") or ("System.Math", "Min") or
+                            ("System.Numerics.BitOperations", "PopCount") or
+                            ("System.Buffers.Binary.BinaryPrimitives", "ReverseEndianness") or
+                            ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe" or "GetElement") &&
+                        callModel.Invoke(null, [method, profile]) is not null)
+                    {
+                        conventionChecks.Add(method.Name);
+                        CheckConventions(method, profile);
+                    }
                     if (!admitted.TryGetValue(label.Family, out var definitions))
                         admitted.Add(label.Family, definitions = new(StringComparer.Ordinal));
                     definitions.Add(label.Definition);
@@ -125,6 +138,9 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
     }
 }
 var entries = admitted.Values.SelectMany(values => values).Order(StringComparer.Ordinal).ToArray();
+if (conventionChecks.Count != 6 || acceptedConventions.Count != 0)
+    throw new InvalidOperationException(
+        $"Checked {conventionChecks.Count} names. Accepted conventions: {string.Join(", ", acceptedConventions)}");
 if (entries.Length == 0 || instances.Count == 0 || unsupported == 0 || !checkedMissingContext)
     throw new InvalidOperationException("The runtime inventory must exercise admission and unsupported methods.");
 var baseline = At("Tests/RuntimeModelInventory.txt");
@@ -159,6 +175,31 @@ object? TranslatePinned(MethodReference method, object? profile)
     {
         throw new InvalidOperationException("Inventory candidate: " + method.FullName, exception);
     }
+}
+
+void CheckConventions(MethodReference method, object? profile)
+{
+    var member = method.GetElementMethod();
+    var convention = member.CallingConvention;
+    var hasThis = member.HasThis;
+    foreach (byte header in new byte[] { 0x40, 0x60, 0x01 })
+    {
+        member.ExplicitThis = (header & 0x40) != 0;
+        member.HasThis = (header & 0x20) != 0;
+        member.CallingConvention = (MethodCallingConvention)(header & 0x1f);
+        if (callModel.Invoke(null, [method, profile]) is not null)
+            acceptedConventions.Add($"{method.Name} 0x{header:X2}");
+    }
+    // Keep the generic flag while checking EXPLICITTHIS on a genuine generic MethodSpec.
+    member.CallingConvention = convention;
+    member.HasThis = hasThis;
+    if (method is GenericInstanceMethod)
+    {
+        member.ExplicitThis = true;
+        if (callModel.Invoke(null, [method, profile]) is not null)
+            acceptedConventions.Add($"{method.Name} ExplicitThis");
+    }
+    member.ExplicitThis = false;
 }
 
 static IEnumerable<string?> Arguments(bool generic, string[] elements) =>
