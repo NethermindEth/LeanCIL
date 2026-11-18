@@ -252,7 +252,7 @@ theorem run_padded {unpadded program : CIL.Program} {extra : Nat → List LocalS
     cases thrown
   | succ fuel ih =>
     intro method pc args frame stack memory outcome ran transported
-    rw [run] at ran ⊢
+    rw [run_succ] at ran ⊢
     cases fetched : unpadded[method]? with
     | none =>
       simp only [fetched] at ran
@@ -405,7 +405,7 @@ theorem invoke_padded {unpadded program : CIL.Program} {extra : Nat → List Loc
     {memory : Memory} {outcome : Except LocatedFault (Memory × List Value)}
     (invoked : invoke unpadded fuel method args memory = outcome)
     (transported : Transported outcome) : invoke program fuel method args memory = outcome := by
-  unfold invoke at invoked ⊢
+  rw [invoke_eq] at invoked ⊢
   cases fetched : unpadded[method]? with
   | none =>
     simp only [fetched] at invoked

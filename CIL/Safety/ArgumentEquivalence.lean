@@ -49,13 +49,13 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
   | zero => rfl
   | succ fuel ih =>
     cases fetched : body.code[pc]? with
-    | none => simp [run, lookup, fetched]
+    | none => simp [run_succ, lookup, fetched]
     | some op =>
       have same := step_arguments_eq body op pc args other frame stack memory (by
         intro index equal
         subst op
         exact agreement index (List.mem_of_getElem? fetched))
-      simp only [run, lookup, fetched]
+      simp only [run_succ, lookup, fetched]
       rw [same]
       cases haction : step body op pc other frame stack memory with
       | error fault => rfl
@@ -80,7 +80,7 @@ theorem invoke_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.M
     (checkedOther : other.mapM (checkedValue memory) = .ok other)
     (setup : enterFrame body args memory = enterFrame body other memory) :
     invoke program fuel method args memory = invoke program fuel method other memory := by
-  simp only [invoke, lookup, checkedArgs, checkedOther, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, lookup, checkedArgs, checkedOther, Except.mapError, Bind.bind, Except.bind]
   rw [setup]
   cases setupResult : enterFrame body other memory with
   | error fault => rfl

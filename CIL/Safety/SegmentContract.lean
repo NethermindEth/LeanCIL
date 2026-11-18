@@ -35,7 +35,7 @@ theorem SegmentRun.reaches {program : CIL.Program} {method start finish cost : N
       have zero := exactRun 0
       rw [Nat.zero_add] at zero
       rw [show fuel + (cost - fuel) = cost by omega, zero] at more
-      simp only [run] at more
+      simp only [run_zero] at more
       rw [<- more] at settled
       exact settled rfl
     exact And.intro bound (by
@@ -113,11 +113,11 @@ theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
     intro fuel outcome settled ran
     cases fuel with
     | zero =>
-      simp only [run] at ran
+      simp only [run_zero] at ran
       subst outcome
       exact False.elim (settled rfl)
     | succ fuel =>
-      simp only [run, found, instruction, stepped, calleeFound, enter,
+      simp only [run_succ, found, instruction, stepped, calleeFound, enter,
         Bind.bind, Except.bind, Except.mapError] at ran
       cases childRun : run program fuel callee 0 values childFrame [] entered with
       | error fault =>
@@ -145,7 +145,7 @@ theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
     have continuation := run_mono program fuel calleeFuel method (pc + 1) arguments frame
       (results ++ rest) final outcome settled ran
     refine Exists.intro (calleeFuel + fuel + 1) ?_
-    simpa only [run, found, instruction, stepped, calleeFound, enter,
+    simpa only [run_zero, run_succ, found, instruction, stepped, calleeFound, enter,
       Bind.bind, Except.bind, Except.mapError, childRun, Nat.add_comm fuel calleeFuel]
       using continuation
 
@@ -287,7 +287,7 @@ theorem Segment.contract {program : CIL.Program} {method start finish : Nat}
     cases cost with
     | zero =>
       have zero := exactRun 0
-      simp only [run, Except.error.injEq, LocatedFault.mk.injEq] at zero
+      simp only [Nat.add_zero, run_zero, Except.error.injEq, LocatedFault.mk.injEq] at zero
       omega
     | succ cost => omega
   exact Exists.intro (.reaches finish after)
@@ -581,7 +581,7 @@ theorem SegmentContract.branch {program : CIL.Program} {method pc target : Nat}
       (if taken arguments before then target else pc + 1) 1 arguments before
       { frame := before.frame, stack := popped arguments before, memory := before.memory } := by
     intro fuel
-    simp only [run, found, instruction, stepped arguments before permitted,
+    simp only [run_succ, found, instruction, stepped arguments before permitted,
       Bind.bind, Except.bind, Except.mapError]
   exact Exists.intro (.reaches (if taken arguments before then target else pc + 1)
     { frame := before.frame, stack := popped arguments before, memory := before.memory })

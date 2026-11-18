@@ -38,7 +38,7 @@ var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (!extracted.Contains("method5_evidence_validated") || extracted.Contains("set_option maxHeartbeats"))
     throw new InvalidOperationException("Expected six independently checked methods at the default heartbeat budget.");
 var start = extracted.IndexOf("theorem translation_valid :", StringComparison.Ordinal);
-var end = extracted.IndexOf("@[cil_code] theorem lookup0", start, StringComparison.Ordinal);
+var end = extracted.IndexOf("def programLength", start, StringComparison.Ordinal);
 var monolithicSource = extracted[..start] +
     "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
     "methodEvidence imports program := by decide\n" + extracted[end..];
@@ -96,7 +96,7 @@ Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the 
         extraction));
     var full = File.ReadAllText(Path.Combine(extraction, "Extracted.lean"));
     var from = full.IndexOf("theorem translation_valid :", StringComparison.Ordinal);
-    var to = full.IndexOf("@[cil_code] theorem lookup0", from, StringComparison.Ordinal);
+    var to = full.IndexOf("def programLength", from, StringComparison.Ordinal);
     var kernelFile = Path.Combine(work, "Monolithic.lean");
     File.WriteAllText(kernelFile, NarrowEvidence(full[..from] +
         "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +

@@ -68,7 +68,8 @@ partial class Program
     [GeneratedRegex(@"\A(?:method\d+_tables_valid|assembly\d+_identified|pinned_identities_spelled)\z")]
     private static partial Regex RetainedObligationName { get; }
 
-    [GeneratedRegex(@"(?m)^#print axioms [^\r\n]*\r?\n")]
+    // A generated report names one theorem or a bracketed group spanning several lines.
+    [GeneratedRegex(@"(?m)^#print axioms (?:\[(?<members>[\w'?!.,\s]+)\]|[\w'?!.]+)[ \t]*\r?(?:\n|\z)")]
     private static partial Regex AxiomsCommand { get; }
 
     [GeneratedRegex(@"""(?:\\.|[^""\\])*""")]

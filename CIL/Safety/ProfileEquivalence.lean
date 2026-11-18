@@ -66,15 +66,15 @@ theorem run_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
   | zero => rfl
   | succ fuel ih =>
     cases hb : program[method]? with
-    | none => simp [run, hb]
+    | none => simp [run_succ, hb]
     | some body =>
       cases ho : body.code[pc]? with
-      | none => simp [run, hb, ho]
+      | none => simp [run_succ, hb, ho]
       | some op =>
         have same := step_profile_eq body op p q
           (agreement body (List.mem_of_getElem? hb) op (List.mem_of_getElem? ho))
           pc args frame stack memory
-        simp only [run, CIL.reprofile_lookup, hb, Option.map_some, ho]
+        simp only [run_succ, CIL.reprofile_lookup, hb, Option.map_some, ho]
         rw [same]
         cases haction : step { body with profile := q } op pc args frame stack memory with
         | error fault => rfl
@@ -111,9 +111,9 @@ theorem invoke_reprofile_eq (program : CIL.Program) (p q : CIL.FeatureProfile)
     invoke (CIL.reprofile program p) fuel method args memory =
       invoke (CIL.reprofile program q) fuel method args memory := by
   cases hb : program[method]? with
-  | none => simp [invoke, hb]
+  | none => simp [invoke_eq, hb]
   | some body =>
-    simp only [invoke, CIL.reprofile_lookup, hb, Option.map_some, enterFrame_profile]
+    simp only [invoke_eq, CIL.reprofile_lookup, hb, Option.map_some, enterFrame_profile]
     simp only [run_reprofile_eq program p q agreement]
 
 /-- A program whose methods all use profile `p` behaves exactly as its reprofiling to `q`. -/

@@ -770,5 +770,5 @@ in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` b
 the method accesses class instance fields, naming the operand definitions the literal would name,
 followed by
 `cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
-its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.lookup{n}`
+its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.program_method{n}`
 equations.

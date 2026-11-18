@@ -498,7 +498,7 @@ theorem Memory.Equivalent.run {m n : Memory} (same : m.Equivalent n)
   induction fuel generalizing m n method pc args frame stack with
   | zero => exact .error _
   | succ fuel ih =>
-    simp only [CIL.Safety.run]
+    simp only [CIL.Safety.run_succ]
     split <;> try exact .error _
     split <;> try exact .error _
     apply ResultEquivalent.bind ((same.step _ _ _ _ _ _).mapError _)
@@ -563,7 +563,7 @@ theorem Memory.Equivalent.invoke {m n : Memory} (same : m.Equivalent n)
     (program : CIL.Program) (fuel method : Nat) (args : List Value) :
     ResultEquivalent MemoryFirstEquivalent (invoke program fuel method args m)
       (invoke program fuel method args n) := by
-  unfold CIL.Safety.invoke
+  rw [CIL.Safety.invoke_eq, CIL.Safety.invoke_eq]
   split <;> try exact .error _
   simp only [same.checkedValues]
   apply ResultEquivalent.bind_same

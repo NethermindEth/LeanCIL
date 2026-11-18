@@ -158,7 +158,7 @@ theorem invoke_eq_of_run {program : CIL.Program} {fuel method : Nat} {body : CIL
     (setup : enterFrame body args memory = .ok (frame, entered))
     (executed : run program fuel method 0 args frame [] entered = outcome) :
     invoke program fuel method args memory = outcome := by
-  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
   exact executed
 
 theorem root_unlinked (input : RootInput) (m : Memory) (permitted : rootContract.pre input m) (fuel : Nat) :

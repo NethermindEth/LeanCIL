@@ -114,26 +114,32 @@ open Lean Meta in
 /-- The cells of a list term, unfolded until its spine is literal; the cells stay as written. -/
 def literalCells (list : Expr) : MetaM (Array Expr) := do
   let mut cells := #[]
-  let mut rest ← whnf list
+  let mut rest := list
   repeat
-    match_expr rest with
+    -- A literal tail already exposes its constructor, even in a long shared list spine.
+    let literal := rest.isAppOf ``List.cons || rest.isAppOf ``List.nil
+    let spine ← if literal then pure rest else whnf rest
+    match_expr spine with
     | List.cons _ head tail =>
       cells := cells.push head
-      rest ← whnf tail
+      rest := tail
     | List.nil _ => return cells
-    | _ => throwError "the list does not unfold to literal cells: {rest}"
+    | _ => throwError "the list does not unfold to literal cells: {spine}"
   return cells
 
 open Lean Meta in
-/-- The literal index `FlowIndex.build` makes of `cells`, split at the same middles. -/
+/-- The literal index of `cells`, split at the same middles as `FlowIndex.build`. -/
 partial def literalFlowIndex (type : Expr) (cells : Array Expr) : Expr :=
-  if cells.size = 0 then mkApp (mkConst ``FlowIndex.empty) type
-  else if cells.size = 1 then mkApp2 (mkConst ``FlowIndex.leaf) type cells[0]!
-  else
-    let middle := cells.size / 2
-    mkApp4 (mkConst ``FlowIndex.branch) type (mkNatLit middle)
-      (literalFlowIndex type (cells.extract 0 middle))
-      (literalFlowIndex type (cells.extract middle cells.size))
+  build 0 cells.size
+where
+  /-- The subtree covering `count` consecutive cells starting at `start`. -/
+  build (start count : Nat) : Expr :=
+    if count = 0 then mkApp (mkConst ``FlowIndex.empty) type
+    else if count = 1 then mkApp2 (mkConst ``FlowIndex.leaf) type cells[start]!
+    else
+      let middle := count / 2
+      mkApp4 (mkConst ``FlowIndex.branch) type (mkNatLit middle)
+        (build start middle) (build (start + middle) (count - middle))
 
 open Lean Meta Elab Term in
 /-- `program_index% values` is `FlowIndex.ofList values` written out as a literal tree whose

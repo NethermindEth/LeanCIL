@@ -207,6 +207,25 @@ proved by `cil_kernel_rfl`. `simp only [cil_step, fact]` then leaves the operand
 arity check and the checked arguments, which reduce as for a direct call once the signature's
 parameter count is a numeral.
 
+A closed proof by `rfl` or `cil_kernel_rfl` walks the method list at each interpreter step.
+Use `rw [CIL.Safety.invoke_eq_invokeWith Extracted.programIndex_get?]` before evaluating an
+invocation, or `CIL.Safety.run_eq_runWith` for a run. Each method lookup then takes logarithmic
+time in the program length. Stepping simplifies method lookups with the generated
+`Extracted.program_method{n}` equations, other `cil_code` rules and the facts supplied to the
+tactic. A rule can describe the lookup function before it receives its index. Supplying the
+program name keeps its method equations available without expanding the list for each lookup.
+If simplification leaves the goal open, the stepper tries the registered equation at that index
+against the original lookup. For proofs, use the list equations `CIL.Safety.run_zero`,
+`CIL.Safety.run_succ` and `CIL.Safety.invoke_eq`. For functional
+induction over a list program, specialize the induction principle to its method lookup.
+
+```lean
+import CIL.Safety.Execution
+
+variable (program : CIL.Program)
+#check CIL.Safety.runWith.induct (lookup := fun i => program[i]?)
+```
+
 At a fetched `.ret`, narrow returns included, the tactic leaves the equation between the computed
 checked result and the stated result as a goal over the returned values, with no unexecuted `run`.
 The goal closes automatically only when `with_reducible rfl` succeeds after frame cleanup, list

@@ -690,7 +690,7 @@ theorem exhausted (fuel : Nat) (args : List CIL.Safety.Value)
   induction fuel with
   | zero => rfl
   | succ fuel ih =>
-    rw [CIL.Safety.run_next Extracted.lookup0 Extracted.method0_instruction0 (show
+    rw [CIL.Safety.run_next Extracted.program_method0 Extracted.method0_instruction0 (show
       CIL.Safety.step Extracted.method0 (.br 0) 0 args frame [] memory =
         .ok (.next 0 [] frame memory) from rfl)]
     exact ih

@@ -20,7 +20,7 @@ Directory.CreateDirectory(output);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples", "Arithmetic::Add(ulong,ulong)", output));
 var baseline = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-var declaration = new Regex(@"theorem translation_valid\s*:[\s\S]*?(?=@\[cil_code\] theorem lookup0)");
+var declaration = TranslationPatterns.Certificate;
 if (declaration.Matches(baseline).Count != 1)
     throw new InvalidOperationException("Expected exactly one complete extraction certificate");
 var prefix = new CheckedExtractionPrefix(baseline, "theorem translation_valid :", output);
@@ -63,7 +63,7 @@ var requests = new List<AuditRequest>();
 for (var index = 0; index < cases.Count; index++)
 {
     batch.AppendLine($"namespace AuditCase{index}\nopen _root_.Extracted");
-    batch.AppendLine(Regex.Replace(cases[index].Source, @"(?m)^import [^\r\n]+\r?\n", ""));
+    batch.AppendLine(TranslationPatterns.ImportLine.Replace(cases[index].Source, ""));
     batch.AppendLine($"end AuditCase{index}");
     requests.Add(ExtractionCertificate($"AuditCase{index}.Extracted.translation_valid"));
     if (cases[index].Accepted) batch.AppendLine(Wrapper(index));
@@ -103,3 +103,13 @@ for (var index = 0; index < cases.Count; index++)
             diagnostic.Contains("Type mismatch", StringComparison.Ordinal));
 }
 rejected.Check(prefix.LeanPath);
+
+/// <summary>The certificate and imports of an extracted Lean module.</summary>
+static partial class TranslationPatterns
+{
+    [GeneratedRegex(@"theorem translation_valid\s*:[\s\S]*?(?=\r?\ndef programLength)")]
+    internal static partial Regex Certificate { get; }
+
+    [GeneratedRegex(@"(?m)^import [^\r\n]+\r?\n")]
+    internal static partial Regex ImportLine { get; }
+}

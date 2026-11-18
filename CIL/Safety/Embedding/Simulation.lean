@@ -289,7 +289,7 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
     cases thrown
   | succ fuel ih =>
     intro method pc args frame stack m outcome h transported
-    rw [run] at h ⊢
+    rw [run_succ] at h ⊢
     cases fetched : expected[method]? with
     | none =>
       simp only [fetched] at h
@@ -479,7 +479,7 @@ theorem invoke_outcome_refines {expected actual : CIL.Program} {maps : Nat → N
     {m : Memory} {outcome : Except LocatedFault (Memory × List Value)}
     (h : invoke expected fuel method args m = outcome) (transported : Transported outcome) :
     invoke actual fuel method args m = outcome.mapError (·.relocate maps) := by
-  unfold invoke at h ⊢
+  rw [invoke_eq] at h ⊢
   cases fetched : expected[method]? with
   | none =>
     simp only [fetched] at h

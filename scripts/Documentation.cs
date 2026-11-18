@@ -634,12 +634,14 @@ static partial class Documentation
 
     /// <summary>
     /// The interpreter's own functions, by full name: the instruction dispatchers, the run and invocation
-    /// loops, and the checks of arguments and results. The stepping tactics rewrite past them, so a proof
-    /// whose simp list names one runs the method by unfolding the interpreter and breaks when it changes.
+    /// loops with their equations, and the checks of arguments and results. A proof whose simp list names one
+    /// runs the method by unfolding the interpreter and breaks when it changes.
     /// </summary>
     static readonly string[] EvaluatorInternals =
     [
         "CIL.step", "CIL.Safety.step", "CIL.Safety.run", "CIL.Safety.invoke", "CIL.Safety.pureArity",
+        "CIL.Safety.runWith", "CIL.Safety.invokeWith", "CIL.Safety.run_zero", "CIL.Safety.run_succ",
+        "CIL.Safety.invoke_eq",
         "CIL.Safety.scalars", "CIL.Safety.instructionStep", "CIL.Safety.staticInstruction",
         "CIL.Safety.checkedIntrinsic", "CIL.Safety.checkedValue", "CIL.Safety.numericValue",
         "CIL.Safety.checkedAt", "CIL.Safety.formValue", "CIL.Safety.storeValue",

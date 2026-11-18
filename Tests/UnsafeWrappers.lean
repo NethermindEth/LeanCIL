@@ -37,7 +37,7 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
       have rejected := operation
       simp [memoryInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands,
         Value.hasUnspecified, unknown] at rejected
-  simp only [invoke, addMethod, List.getElem?_cons_zero, List.mapM_cons, List.mapM_nil,
+  simp only [invoke_eq, addMethod, List.getElem?_cons_zero, List.mapM_cons, List.mapM_nil,
     valid, numeric, enterFrame, makeSelectedLocals, List.isEmpty, ↓reduceIte, makeLocals,
     makeParameterHomes,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
@@ -73,7 +73,7 @@ theorem add_error {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEn
       .error fault) :
     (invoke [addMethod size signed profile declared environment] 8 0
       [.reference reference, .scalar offset] memory).map Prod.snd = .error ⟨0, 2, fault⟩ := by
-  simp only [invoke, addMethod, List.getElem?_cons_zero, List.mapM_cons, List.mapM_nil,
+  simp only [invoke_eq, addMethod, List.getElem?_cons_zero, List.mapM_cons, List.mapM_nil,
     valid, numeric, enterFrame, makeSelectedLocals, List.isEmpty, ↓reduceIte, makeLocals,
     makeParameterHomes,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,

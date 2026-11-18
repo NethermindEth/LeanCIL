@@ -762,54 +762,146 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       let (memory, values) ← instruction op stack m
       return .next (pc + 1) values frame memory
 
-/-- Every executed instruction goes through the checked dispatcher. Fuel has
+/-- The interpreter over the methods `lookup` gives. Every executed instruction goes through the
+    checked dispatcher. Fuel has
     the same recursive call structure as the original interpreter. Constructor
     storage belongs to its caller, so expiration of the constructor's private
     frame does not destroy the value being constructed. Static instructions use
     extraction-bound field identities and readonly allocation storage. -/
-def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame →
+def runWith (lookup : Nat → Option CIL.Method) : Nat → Nat → Nat → List Value → Frame →
     List Value → Memory → Except LocatedFault (Memory × List Value)
   | 0, method, pc, _, _, _, _ => .error ⟨method, pc, .fuelExhausted⟩
   | fuel + 1, method, pc, args, frame, stack, memory => do
-    let some body := program[method]? | .error ⟨method, pc, .invalidState⟩
+    let some body := lookup method | .error ⟨method, pc, .invalidState⟩
     let some op := body.code[pc]? | .error ⟨method, pc, .invalidState⟩
-    let action ← (step body op pc args frame stack memory).mapError fun fault => ⟨method, pc, fault⟩
+    let action ← (step body op pc args frame stack memory).mapError
+      fun fault => ⟨method, pc, fault⟩
     match action with
-    | .next target stack frame memory => run program fuel method target args frame stack memory
+    | .next target stack frame memory => runWith lookup fuel method target args frame stack memory
     | .call callee arguments rest memory =>
-      let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
-      let (childFrame, memory) ← (enterFrame child arguments memory).mapError fun fault => ⟨method, pc, fault⟩
-      let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
-      run program fuel method (pc + 1) args frame (result ++ rest) memory
+      let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+      let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+        fun fault => ⟨method, pc, fault⟩
+      let (memory, result) ← runWith lookup fuel callee 0 arguments childFrame [] memory
+      runWith lookup fuel method (pc + 1) args frame (result ++ rest) memory
     | .tailCall callee arguments memory =>
-      let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
+      let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
       if child.returnsValue != body.returnsValue then .error ⟨method, pc, .invalidState⟩ else
         let memory := leaveFrame frame memory
         let arguments ← (arguments.mapM (checkedValue memory)).mapError
           fun fault => ⟨method, pc, fault⟩
         let (childFrame, memory) ← (enterFrame child arguments memory).mapError
           fun fault => ⟨method, pc, fault⟩
-        run program fuel callee 0 arguments childFrame [] memory
+        runWith lookup fuel callee 0 arguments childFrame [] memory
     | .construct callee arguments rest frame temporary kind memory =>
-      let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
-      let (childFrame, memory) ← (enterFrame child arguments memory).mapError fun fault => ⟨method, pc, fault⟩
-      let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
+      let some child := lookup callee | .error ⟨method, pc, .invalidState⟩
+      let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+        fun fault => ⟨method, pc, fault⟩
+      let (memory, result) ← runWith lookup fuel callee 0 arguments childFrame [] memory
       if !result.isEmpty then .error ⟨method, pc, .invalidState⟩ else
         let value ← (loadLocal memory (.bytes kind temporary)).mapError
           fun fault => ⟨method, pc, fault⟩
-        run program fuel method (pc + 1) args frame (value :: rest) memory
+        runWith lookup fuel method (pc + 1) args frame (value :: rest) memory
     | .returned result memory =>
       let memory := leaveFrame frame memory
       let result ← (result.mapM (checkedValue memory)).mapError fun fault => ⟨method, pc, fault⟩
       return (memory, result)
 
-/-- Calls `method` with checked `args` in a fresh frame. -/
-def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : Memory) :
-    Except LocatedFault (Memory × List Value) := do
-  let some body := program[method]? | .error ⟨method, 0, .invalidState⟩
+/-- Calls the method `lookup` gives at `method` with checked `args` in a fresh frame. -/
+def invokeWith (lookup : Nat → Option CIL.Method) (fuel method : Nat) (args : List Value)
+    (m : Memory) : Except LocatedFault (Memory × List Value) := do
+  let some body := lookup method | .error ⟨method, 0, .invalidState⟩
   let args ← (args.mapM (checkedValue m)).mapError fun fault => ⟨method, 0, fault⟩
   let (frame, memory) ← (enterFrame body args m).mapError fun fault => ⟨method, 0, fault⟩
-  run program fuel method 0 args frame [] memory
+  runWith lookup fuel method 0 args frame [] memory
+
+/-- The interpreter over `program`, reading each method by its index in the list. A proof that
+    evaluates it rewrites by `run_eq_runWith` to read an index of the program instead. -/
+def run (program : CIL.Program) : Nat → Nat → Nat → List Value → Frame → List Value → Memory →
+    Except LocatedFault (Memory × List Value) :=
+  runWith (program[·]?)
+
+/-- Calls `method` of `program` with checked `args` in a fresh frame. -/
+def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : Memory) :
+    Except LocatedFault (Memory × List Value) :=
+  invokeWith (program[·]?) fuel method args m
+
+/-- Out of fuel, `run` stops at the method and pc it would execute. -/
+theorem run_zero (program : CIL.Program) (method pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value) (memory : Memory) :
+    run program 0 method pc args frame stack memory = .error ⟨method, pc, .fuelExhausted⟩ := rfl
+
+#print axioms run_zero
+
+/-- `run` takes one step as the interpreter over the list reads it. -/
+theorem run_succ (program : CIL.Program) (fuel method pc : Nat) (args : List Value)
+    (frame : Frame) (stack : List Value) (memory : Memory) :
+    run program (fuel + 1) method pc args frame stack memory = (do
+      let some body := program[method]? | .error ⟨method, pc, .invalidState⟩
+      let some op := body.code[pc]? | .error ⟨method, pc, .invalidState⟩
+      let action ← (step body op pc args frame stack memory).mapError
+        fun fault => ⟨method, pc, fault⟩
+      match action with
+      | .next target stack frame memory => run program fuel method target args frame stack memory
+      | .call callee arguments rest memory =>
+        let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
+        let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+          fun fault => ⟨method, pc, fault⟩
+        let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
+        run program fuel method (pc + 1) args frame (result ++ rest) memory
+      | .tailCall callee arguments memory =>
+        let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
+        if child.returnsValue != body.returnsValue then .error ⟨method, pc, .invalidState⟩ else
+          let memory := leaveFrame frame memory
+          let arguments ← (arguments.mapM (checkedValue memory)).mapError
+            fun fault => ⟨method, pc, fault⟩
+          let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+            fun fault => ⟨method, pc, fault⟩
+          run program fuel callee 0 arguments childFrame [] memory
+      | .construct callee arguments rest frame temporary kind memory =>
+        let some child := program[callee]? | .error ⟨method, pc, .invalidState⟩
+        let (childFrame, memory) ← (enterFrame child arguments memory).mapError
+          fun fault => ⟨method, pc, fault⟩
+        let (memory, result) ← run program fuel callee 0 arguments childFrame [] memory
+        if !result.isEmpty then .error ⟨method, pc, .invalidState⟩ else
+          let value ← (loadLocal memory (.bytes kind temporary)).mapError
+            fun fault => ⟨method, pc, fault⟩
+          run program fuel method (pc + 1) args frame (value :: rest) memory
+      | .returned result memory =>
+        let memory := leaveFrame frame memory
+        let result ← (result.mapM (checkedValue memory)).mapError
+          fun fault => ⟨method, pc, fault⟩
+        return (memory, result)) := rfl
+
+#print axioms run_succ
+
+/-- `invoke` enters the method it reads from the list and runs it. -/
+theorem invoke_eq (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : Memory) :
+    invoke program fuel method args m = (do
+      let some body := program[method]? | .error ⟨method, 0, .invalidState⟩
+      let args ← (args.mapM (checkedValue m)).mapError fun fault => ⟨method, 0, fault⟩
+      let (frame, memory) ← (enterFrame body args m).mapError fun fault => ⟨method, 0, fault⟩
+      run program fuel method 0 args frame [] memory) := rfl
+
+#print axioms invoke_eq
+
+/-- A lookup that gives each method of `program` at its index runs as the list does. -/
+theorem run_eq_runWith {program : CIL.Program} {lookup : Nat → Option CIL.Method}
+    (agrees : ∀ index, lookup index = program[index]?) : run program = runWith lookup := by
+  have same : lookup = (program[·]?) := funext agrees
+  subst same
+  rfl
+
+#print axioms run_eq_runWith
+
+/-- A lookup that gives each method of `program` at its index invokes as the list does. -/
+theorem invoke_eq_invokeWith {program : CIL.Program} {lookup : Nat → Option CIL.Method}
+    (agrees : ∀ index, lookup index = program[index]?) : invoke program = invokeWith lookup := by
+  have same : lookup = (program[·]?) := funext agrees
+  subst same
+  rfl
+
+#print axioms invoke_eq_invokeWith
 
 /-- Consumer macros name the dispatchers' `eq_def`, which a quotation cannot generate itself. -/
 private theorem dispatch_eq_def_generated : True := by

@@ -46,7 +46,7 @@ theorem word_holds : wordContract.Holds Extracted.program 0 := by
     memory input.first ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
   cil_supply_fuel
   dsimp only [wordContract]
-  simp only [Safety.invoke, Extracted.lookup0]
+  simp only [Safety.invoke_eq, Extracted.program_method0]
   simp [checkedValue, valid, enterFrame, Extracted.method0, makeLocals,
     makeParameterHomes, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]

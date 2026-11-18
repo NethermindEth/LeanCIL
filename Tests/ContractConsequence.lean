@@ -556,7 +556,7 @@ def isZeroContract : MethodContract CIL.W64 Bool where
 /-- `IsZero` meets its contract by stepping its body. -/
 theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
   intro v memory _
-  cil_contract_steps [isZeroContract, NarrowKind.extend_ite_ofNat_one_zero]
+  cil_contract_steps [isZeroContract, CIL.NarrowKind.extend_ite_ofNat_one_zero]
   refine ⟨Confined.refl _ memory, decide (v = 0), ?_, rfl⟩
   simp [isZeroContract, CIL.NarrowKind.extend_ite_ofNat_one_zero]
 

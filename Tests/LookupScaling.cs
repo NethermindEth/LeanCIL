@@ -7,6 +7,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
+#:include ../Extractor/ProgramLookupFacts.cs
 
 using System.Globalization;
 using System.Text;
@@ -83,6 +84,11 @@ if (args.Contains("--closure-only", StringComparer.Ordinal))
     ClosureCosts();
     return;
 }
+if (args.Contains("--run-only", StringComparer.Ordinal))
+{
+    RunCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -133,6 +139,7 @@ DecodedDefinitionCosts();
 DecodedProgramCosts();
 PrefixEntryCosts();
 ClosureCosts();
+RunCosts();
 ClosedArgumentsCosts();
 
 LayoutIdentityCosts();
@@ -1297,14 +1304,14 @@ void ClosureCosts()
     string Statement(ClosureShape shape, int size)
     {
         var program = shape.Program(size);
-        var name = shape.Name + size;
+        var name = $"{shape.Name}{size}";
         var expected = $"some [{string.Join(", ", Enumerable.Range(0, shape.Methods(size)))}]";
         var list = ListMeasured(shape)
             ? $"#kernel_cost \"list closure {shape.Name} {size}\" (({name}.closure 0).map Prod.snd = {expected})\n"
             : "";
         // The tail programs also state their index as an extraction does, between two heartbeat marks.
+        var start = shape.Name == "tail" ? $"#heartbeat_mark \"index {size} start\"" : "";
         var stated = shape.Name != "tail" ? "" : $$"""
-            #heartbeat_mark "index {{size}} start"
             /-- The length of the {{name}} program. -/
             def {{name}}Length : Nat := {{program.Length}}
             theorem {{name}}Length_eq : {{name}}Length = {{name}}.length := by cil_kernel_rfl
@@ -1312,12 +1319,14 @@ void ClosureCosts()
             theorem {{name}}Index_get? (index : Nat) : {{name}}Index.get? index = {{name}}[index]? := by
               rw [{{name}}Index_eq]; exact FlowIndex.get?_ofList {{name}} index
             #heartbeat_mark "index {{size}} end"
+            #print axioms [{{name}}Length_eq, {{name}}Index_eq, {{name}}Index_get?]
 
             """;
         return $$"""
             /-- The {{shape.Name}} program of size {{size}}. -/
             def {{name}} : Program :=
               [{{string.Join(", ", program.Select(callees => $"stub [{string.Join(", ", callees)}]"))}}]
+            {{start}}
             /-- The index of the {{name}} program. -/
             def {{name}}Index : FlowIndex Method := program_index% {{name}}
             {{stated}}#kernel_cost "closure {{shape.Name}} {{size}}"
@@ -1333,16 +1342,47 @@ void ClosureCosts()
         set_option maxHeartbeats 0
         open CIL CIL.Extraction Lean Elab Command
         {{KernelCostCommand}}
+        /-- Build a literal list outside the measured elaboration of its index. -/
+        elab "sample_cells% " size:num : term => do
+          let cells := List.replicate size.getNat (mkNatLit 0)
+          Meta.mkListLit (mkConst ``Nat) cells
+        /-- The smaller input to the native index construction check. -/
+        def smallCells : List Nat := sample_cells% 2048
+        /-- Sixteen times the smaller input. -/
+        def largeCells : List Nat := sample_cells% 32768
+        -- Heartbeats omit native list traversal when the reads allocate nothing.
+        run_cmd liftTermElabM do
+          let measure (input : Term) : Term.TermElabM Nat := do
+            let mut samples := #[]
+            for _ in [:3] do
+              let before <- IO.monoNanosNow
+              let tree <- Term.elabTerm (<- `(program_index% $input)) none
+              let after <- IO.monoNanosNow
+              unless tree.isAppOf ``FlowIndex.branch do throwError "Expected a literal branch"
+              samples := samples.push (after - before)
+            return samples.foldl min samples[0]!
+          let small <- measure (<- `(smallCells))
+          let large <- measure (<- `(largeCells))
+          logInfo m!"Index construction at 2048 / 32768 cells: {small} / {large} ns"
+          -- Sixteen times as many cells allow four times the linear growth for timing variation.
+          unless 0 < small && large <= 64 * small do
+            throwError "Index construction grows faster than the traversal bound"
         /-- Logs the heartbeats spent so far, so two marks give the cost of the commands between them. -/
         elab "#heartbeat_mark " label:str : command => do
-          logInfo m!"mark {label.getString} {← IO.getNumHeartbeats}"
+          let count <- IO.getNumHeartbeats
+          logInfo m!"mark {label.getString} {count}"
         /-- A method whose link table enters `callees` in order, one call pc each. -/
         def stub (callees : List Nat) : Method :=
           { code := [], locals := [], returnsValue := false,
             links := callees.zipIdx.map fun (callee, pc) => (pc, .direct callee) }
         {{string.Join("\n", shapes.SelectMany(shape => shape.Sizes.Select(size => Statement(shape, size))))}}
-        """ + "\n");
+
+        """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException($"A closure certificate depends on sorryAx in {path}");
+    Console.WriteLine(output.Split('\n').Single(line => line.StartsWith("Index construction at",
+        StringComparison.Ordinal)).TrimEnd());
     var costs = LookupPatterns.ClosureCost.Matches(output).ToDictionary(
         match => (match.Groups[1].Value.Length > 0, match.Groups[2].Value,
             int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture)),
@@ -1353,7 +1393,7 @@ void ClosureCosts()
     var tail = shapes.Single(shape => shape.Name == "tail");
     if (costs.Count != shapes.Sum(shape => shape.Sizes.Length * (ListMeasured(shape) ? 2 : 1)) ||
         costs.Values.Min() < KernelDecisionFloor || marks.Count != 2 * tail.Sizes.Length)
-        throw new InvalidOperationException("Missing closure costs:\n" + output);
+        throw new InvalidOperationException($"Missing closure costs:\n{output}");
     string Measured(ClosureShape shape, bool list) => string.Join(", ", shape.Sizes.Select(size =>
         string.Create(CultureInfo.InvariantCulture, $"{costs[(list, shape.Name, size)]} at {size}")));
     foreach (var shape in shapes)
@@ -1370,22 +1410,30 @@ void ClosureCosts()
             shape.Sizes.All(size => shape.Methods(size) == shape.Program(size).Length) &&
             ClosureGrowth(units, listReads) <= AllowedClosureGrowth)
             throw new InvalidOperationException($"The {shape.Name} bound accepts list reads of its methods");
-        var growth = ClosureGrowth(units, [.. shape.Sizes.Select(size => (double)costs[(false, shape.Name, size)])]);
-        if (growth > AllowedClosureGrowth)
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-                $"The {shape.Name} closure costs {Measured(shape, false)} heartbeats; its cost per unit of " +
-                $"n * log P + e grows {growth:F2} times, more than {AllowedClosureGrowth}"));
-        var read = ListMeasured(shape) ? $", and {Measured(shape, true)} read from the list" : "";
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-            $"PASS the {shape.Name} closure costs {Measured(shape, false)} heartbeats, {growth:F2} times as much per " +
-            $"unit of n * log P + e between its last sizes as between its first{read}"));
+        void CheckGrowth(bool list, double[] work, string unit)
+        {
+            var samples = shape.Sizes.Select(size => (double)costs[(list, shape.Name, size)]).ToArray();
+            var growth = ClosureGrowth(work, samples);
+            var route = list ? "list" : "index";
+            var measured = string.Create(CultureInfo.InvariantCulture, $$"""
+                The {{shape.Name}} closure through the {{route}} costs {{Measured(shape, list)}} heartbeats.
+                Each added unit of {{unit}} costs {{growth:F2}} times as much between the last two sizes.
+                """);
+            if (!double.IsFinite(growth) || growth > AllowedClosureGrowth)
+                throw new InvalidOperationException($"{measured} The limit is {AllowedClosureGrowth}.");
+            Console.WriteLine($"PASS {measured}");
+        }
+        CheckGrowth(false, units, "n * log P + e");
+        if (ListMeasured(shape)) CheckGrowth(true, listReads, "n * P + e");
     }
     // A closure of a few methods must cost less through the index than through the list at every program size.
     foreach (var size in tail.Sizes)
         if (costs[(false, "tail", size)] >= costs[(true, "tail", size)])
             throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-                $"The tail closure of {size} costs {costs[(false, "tail", size)]} heartbeats through the index, " +
-                $"not less than {costs[(true, "tail", size)]} through the list"));
+                $$"""
+                The tail closure of {{size}} costs {{costs[(false, "tail", size)]}} heartbeats through the index.
+                It must cost less than the list lookup's {{costs[(true, "tail", size)]}} heartbeats.
+                """));
     // Stating the index, its length and its lookup theorem costs time linear in P.
     var programs = tail.Sizes.Select(size => (double)size).ToArray();
     var stating = tail.Sizes.Select(size => (double)(marks[(size, "end")] - marks[(size, "start")])).ToArray();
@@ -1394,11 +1442,195 @@ void ClosureCosts()
         $"{marks[(size, "end")] - marks[(size, "start")]} at {size}")));
     if (statingGrowth > AllowedClosureGrowth)
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Stating the program index costs {statingMeasured} heartbeats; its cost per method grows " +
-            $"{statingGrowth:F2} times, more than {AllowedClosureGrowth}"));
+            $$"""
+            Stating the program index costs {{statingMeasured}} heartbeats.
+            Its cost per added method grows {{statingGrowth:F2}} times, more than {{AllowedClosureGrowth}}.
+            """));
     Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-        $"PASS stating the program index costs {statingMeasured} heartbeats, {statingGrowth:F2} times as much per " +
-        $"method between its last sizes as between its first"));
+        $$"""
+        PASS stating the program index costs {{statingMeasured}} heartbeats.
+        Each added method costs {{statingGrowth:F2}} times as much between the last two sizes.
+        """));
+}
+
+// Each caller executes a direct call and returns the result. Its callee's position varies
+// independently of its two-instruction body. The stepper uses the emitted method equations.
+void RunCosts()
+{
+    var runDirectory = At("artifacts/LookupScaling/Runs");
+    Directory.CreateDirectory(runDirectory);
+    // Allow the extra tree depth when the program grows from 16 to 256 methods.
+    const double AllowedRunSpread = 1.15;
+    int[] sizes = [16, 64, 256];
+    int[] Positions(int size) => [0, size / 2 - 1, size - 1];
+    string[] routes = ["rfl list", "rfl index", "kernel list", "kernel index", "stepper"];
+    string Statement(int size)
+    {
+        var name = $"run{size}";
+        var source = new StringBuilder();
+        var positions = Positions(size);
+        foreach (var index in Enumerable.Range(0, size))
+        {
+            var body = index is >= 1 and <= 3
+                ? $$"""code := [.call runTarget {}, .ret], links := [(0, .direct {{positions[index - 1]}})]"""
+                : $$"""code := [.ldc_i4 {{index}}, .ret]""";
+            source.AppendLine(CultureInfo.InvariantCulture, $$"""
+                /-- Method {{index}} of the {{size}}-method program. -/
+                def {{name}}m{{index}} : Method :=
+                  { returnsValue := true, locals := [], {{body}} }
+                cil_instruction_equations {{name}}m{{index}}
+                """);
+        }
+        source.AppendLine(CultureInfo.InvariantCulture, $$"""
+            /-- The {{size}}-method program. -/
+            def {{name}} : Program :=
+              [{{string.Join(", ", Enumerable.Range(0, size).Select(index => $"{name}m{index}"))}}]
+            """);
+        source.AppendLine(CultureInfo.InvariantCulture, $$"""
+            /-- The index of the {{size}}-method program. -/
+            def {{name}}Index : FlowIndex Method := program_index% {{name}}
+            /-- The number of methods in the program. -/
+            def {{name}}Length : Nat := {{size}}
+            theorem {{name}}Length_eq : {{name}}Length = {{name}}.length := by cil_kernel_rfl
+            theorem {{name}}Index_eq : {{name}}Index = FlowIndex.ofList {{name}} := by cil_kernel_rfl
+            theorem {{name}}Index_get? (index : Nat) : {{name}}Index.get? index = {{name}}[index]? := by
+              rw [{{name}}Index_eq]; exact FlowIndex.get?_ofList {{name}} index
+            """);
+        var equations = new StringBuilder();
+        Nethermind.LeanCIL.ProgramLookupFacts.Append(equations, name, $"{name}m", size);
+        var emitted = equations.ToString();
+        var report = AxiomsCommand.Matches(emitted).Single();
+        var members = report.Groups["members"].Value.Split(',', StringSplitOptions.TrimEntries);
+        string[] expected = [$"{name}Length_eq", $"{name}Index_eq", $"{name}Index_get?",
+            .. Enumerable.Range(0, size).Select(index => $"{name}_method{index}")];
+        var exactGroup = members.Length == expected.Length && expected.ToHashSet(StringComparer.Ordinal)
+            .SetEquals(members);
+        var wrapped = report.Value.Split('\n').All(line => line.TrimEnd('\r').Length < 100);
+        if (!exactGroup || !wrapped || report.Index + report.Length != emitted.Length)
+            throw new InvalidOperationException($"Invalid axiom report for {name}: {report.Value}");
+        source.AppendLine($"#heartbeat_mark \"index {size} equations\"");
+        source.Append(emitted.AsSpan(0, report.Index));
+        source.AppendLine($"#heartbeat_mark \"index {size} start\"");
+        source.Append(emitted.AsSpan(report.Index));
+        source.AppendLine($"#heartbeat_mark \"index {size} end\"");
+        foreach (var index in Enumerable.Range(0, size))
+            source.AppendLine(CultureInfo.InvariantCulture, $$"""
+                example : {{name}}[{{index}}]? = some {{name}}m{{index}} := by cil_lookup [{{name}}]
+                """);
+        source.AppendLine($"#heartbeat_mark \"index {size} lookups\"");
+        foreach (var (ordinal, position) in positions.Index())
+        {
+            var caller = ordinal + 1;
+            var statement = $$"""
+                (invoke {{name}} 5 {{caller}} [] Memory.empty).map Prod.snd =
+                    .ok [.scalar (.i32 {{position}})]
+                """;
+            var rewrite = $"rw [invoke_eq_invokeWith {name}Index_get?]";
+            string[] proofs = ["rfl", $"{rewrite}; rfl", "cil_kernel_rfl", $"{rewrite}; cil_kernel_rfl"];
+            foreach (var (route, proof) in routes.Zip(proofs))
+                source.AppendLine(CultureInfo.InvariantCulture, $$"""
+                    #heartbeat_mark "{{size}} {{position}} {{route}} start"
+                    example : {{statement}} := by {{proof}}
+                    #heartbeat_mark "{{size}} {{position}} {{route}} end"
+                    """);
+            source.AppendLine(CultureInfo.InvariantCulture, $$"""
+                #heartbeat_mark "{{size}} {{position}} stepper start"
+                theorem {{name}}_invoke{{position}} (memory : Safety.Memory) :
+                    invoke {{name}} 5 {{caller}} [] memory = .ok (memory, [.scalar (.i32 {{position}})]) := by
+                  cil_checked_steps
+                #heartbeat_mark "{{size}} {{position}} stepper end"
+                #print axioms {{name}}_invoke{{position}}
+                """);
+        }
+        source.AppendLine(CultureInfo.InvariantCulture, $$"""
+            run_meta do
+              let info <- getConstInfo ``{{name}}_invoke{{positions[^1]}}
+              let some proof := info.value? (allowOpaque := true) | throwError "Missing call proof"
+              let used := proof.getUsedConstants
+              for name in [``{{name}}_method3, ``{{name}}_method{{positions[^1]}}] do
+                unless used.contains name do throwError "The call proof did not use {name}"
+            """);
+        return source.ToString();
+    }
+    var path = Path.Combine(runDirectory, "Runs.lean");
+    File.WriteAllText(path, $$"""
+        import CIL
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        open CIL CIL.Safety CIL.Extraction Lean Elab Command
+        /-- The direct call operand shared by the three callers. -/
+        def runTarget : MethodRef :=
+          { owner := .void, name := ⟨1⟩, hasThis := false, genericArity := 0,
+            returnType := .void, parameters := [] }
+        /-- Logs the heartbeats spent so far, so two marks give the cost of the commands between them. -/
+        elab "#heartbeat_mark " label:str : command => do
+          let count <- IO.getNumHeartbeats
+          logInfo m!"mark {label.getString} {count}"
+        {{string.Join("\n", sizes.Select(Statement))}}
+
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException($"A measured call or lookup fact depends on sorryAx in {path}");
+    var auditMarks = LookupPatterns.HeartbeatMark.Matches(output).ToDictionary(
+        match => (int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), match.Groups[2].Value),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    var audits = sizes.Select(size => (double)(auditMarks[(size, "end")] - auditMarks[(size, "start")])).ToArray();
+    var equations = sizes.Select(size => (double)(auditMarks[(size, "start")] - auditMarks[(size, "equations")]))
+        .ToArray();
+    var equationGrowth = ClosureGrowth([.. sizes.Select(size => size * Math.Log2(size))], equations);
+    var equationCosts = string.Join(", ", equations.Zip(sizes, (cost, size) => $"{cost} at {size}"));
+    if (equations.Any(cost => cost <= 0) || !double.IsFinite(equationGrowth) || equationGrowth > AllowedRunSpread)
+        throw new InvalidOperationException(
+            $"Method equations cost {equationCosts} heartbeats; growth {equationGrowth}");
+    Console.WriteLine($"PASS method equations cost {equationCosts} heartbeats; growth {equationGrowth:F3}");
+    var auditGrowth = ClosureGrowth([.. sizes.Select(size => (double)size)], audits);
+    var auditCosts = string.Join(", ", audits.Zip(sizes, (cost, size) => $"{cost} at {size}"));
+    if (audits.Any(cost => cost <= 0) || !double.IsFinite(auditGrowth) || auditGrowth > AllowedRunSpread)
+        throw new InvalidOperationException(
+            $"Method axiom reports cost {auditCosts} heartbeats; growth {auditGrowth}");
+    Console.WriteLine($"PASS method axiom reports cost {auditCosts} heartbeats");
+    var lookups = sizes.Select(size => (double)(auditMarks[(size, "lookups")] - auditMarks[(size, "end")])).ToArray();
+    var lookupGrowth = ClosureGrowth([.. sizes.Select(size => (double)size)], lookups);
+    var lookupCosts = string.Join(", ", lookups.Zip(sizes, (cost, size) => $"{cost} at {size}"));
+    if (lookups.Any(cost => cost <= 0) || !double.IsFinite(lookupGrowth) || lookupGrowth > AllowedRunSpread)
+        throw new InvalidOperationException(
+            $"Supplied-program lookups cost {lookupCosts} heartbeats; growth {lookupGrowth}");
+    Console.WriteLine($"PASS supplied-program lookups cost {lookupCosts} heartbeats; growth {lookupGrowth:F3}");
+    var marks = LookupPatterns.RunMark.Matches(output).ToDictionary(
+        match => (int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+            int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture), match.Groups[3].Value,
+            match.Groups[4].Value),
+        match => long.Parse(match.Groups[5].Value, CultureInfo.InvariantCulture));
+    if (marks.Count != 2 * routes.Length * sizes.Sum(size => Positions(size).Length))
+        throw new InvalidOperationException($"Missing run costs:\n{output}");
+    long Cost(int size, int position, string route) =>
+        marks[(size, position, route, "end")] - marks[(size, position, route, "start")];
+    string Measured(string route) => string.Join("; ", sizes.Select(size => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{string.Join(" / ", Positions(size).Select(position => Cost(size, position, route)))} at {size}")));
+    void Flat(string route)
+    {
+        var measured = sizes.SelectMany(size => Positions(size).Select(position => Cost(size, position, route)))
+            .ToArray();
+        var spread = (double)measured.Max() / measured.Min();
+        if (spread > AllowedRunSpread)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $$"""
+                The {{route}} route costs {{Measured(route)}} heartbeats.
+                The maximum/minimum ratio {{spread:F4}} exceeds {{AllowedRunSpread}}.
+                """));
+    }
+    foreach (var route in new[] { "rfl index", "kernel index", "stepper" })
+        Flat(route);
+    // A list read walks to its position, so the last method of the largest program costs most through the list.
+    var largest = sizes[^1];
+    foreach (var (list, index) in new[] { ("rfl list", "rfl index"), ("kernel list", "kernel index") })
+        if (Cost(largest, largest - 1, list) <= Cost(largest, largest - 1, index) ||
+            Cost(largest, largest - 1, list) <= Cost(largest, 0, list))
+            throw new InvalidOperationException($"The {list} route no longer walks the list: {Measured(list)}");
+    foreach (var route in routes)
+        Console.WriteLine($"PASS the {route} route costs {Measured(route)} heartbeats at methods 1, n/2 and n");
 }
 
 // How many times as much each added unit costs between the last two sizes as between the first two.
@@ -3044,6 +3276,10 @@ record ClosureShape(string Name, int[] Sizes, Func<int, int[][]> Program, Func<i
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
+    [GeneratedRegex(
+        @"\bmark ([0-9]+) ([0-9]+) (rfl list|rfl index|kernel list|kernel index|stepper) (start|end) ([0-9]+)")]
+    internal static partial Regex RunMark { get; }
+
     [GeneratedRegex(@"\bevidence (calls|assembly) ([0-9]+) heartbeats")]
     internal static partial Regex EvidenceCost { get; }
 
@@ -3119,7 +3355,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\b(list )?closure (chain|longchain|fan|tail) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ClosureCost { get; }
 
-    [GeneratedRegex(@"\bmark index ([0-9]+) (start|end) ([0-9]+)")]
+    [GeneratedRegex(@"\bmark index ([0-9]+) (start|end|equations|lookups) ([0-9]+)")]
     internal static partial Regex HeartbeatMark { get; }
 
     [GeneratedRegex(@"(?m)^set_option maxRecDepth [0-9]+")]

@@ -304,7 +304,7 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
       (run lib fuel method pc args frame stack memory).mapError
         (LocatedFault.relocateMethod f) := by
   induction fuel generalizing method pc args frame stack memory with
-  | zero => simp only [run, Except.mapError, LocatedFault.relocateMethod]
+  | zero => simp only [run_zero, Except.mapError, LocatedFault.relocateMethod]
   | succ fuel ih =>
     have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
     have moved := relocates method bound
@@ -312,31 +312,32 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
     cases ho : body.code[pc]? with
     | none =>
       have lo : (body.relocate f).code[pc]? = none := ho
-      simp only [run, found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
+      simp only [run_succ, found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
     | some op =>
       have lo : (body.relocate f).code[pc]? = some op := ho
       have ls := step_relocate f body op pc args frame stack memory
       cases hs : step body op pc args frame stack memory with
       | error fault =>
-        simp only [run, found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind,
+        simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind,
           Except.mapError, LocatedFault.relocateMethod]
       | ok action =>
         cases action with
         | next target values nextFrame updated =>
-          simp only [run, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate, Bind.bind,
-            Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
+            Bind.bind, Except.bind, Except.mapError]
           exact ih method target args nextFrame values updated bound
         | returned values updated =>
-          simp only [run, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate, Bind.bind,
-            Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
+            Bind.bind, Except.bind, Except.mapError]
           cases values.mapM (checkedValue (leaveFrame frame updated)) <;> rfl
         | call callee arguments rest updated =>
           have inside := closed.callee found hs rfl
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved, enterFrame_relocate,
-            Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+            enterFrame_relocate, Except.map, FrameAction.relocate, Bind.bind, Except.bind,
+            Except.mapError]
           cases he : enterFrame callBody arguments updated with
           | error fault => rfl
           | ok entered =>
@@ -353,7 +354,7 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved,
+          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
             Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
           change (if (callBody.returnsValue != body.returnsValue) then _ else _) = _
           cases returns : callBody.returnsValue != body.returnsValue with
@@ -372,8 +373,9 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved, enterFrame_relocate,
-            Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+            enterFrame_relocate, Except.map, FrameAction.relocate, Bind.bind, Except.bind,
+            Except.mapError]
           cases he : enterFrame callBody arguments updated with
           | error fault => rfl
           | ok entered =>
@@ -402,7 +404,7 @@ theorem invoke_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : C
   have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
   have moved := relocates method bound
   generalize lib[method] = body at found moved
-  simp only [invoke, found, moved, enterFrame_relocate, Bind.bind, Except.bind, Except.mapError]
+  simp only [invoke_eq, found, moved, enterFrame_relocate, Bind.bind, Except.bind, Except.mapError]
   cases args.mapM (checkedValue memory) with
   | error fault => rfl
   | ok checked =>

@@ -34,9 +34,8 @@ static string Narrowed(string source, out string control)
     var methodCount = DefinedMethods(source).Length;
     if (methodCount == 0 || obligations.Count != methodCount)
         throw new Exception("Unexpected constrained obligation count");
-    var declarations = Regex.Replace(source,
-        @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
-    declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    var declarations = GeneratedTheorem.Replace(source, "");
+    declarations = AxiomsCommand.Replace(declarations, "");
     declarations = ResolutionFactsCommand.Replace(declarations, "");
     var names = obligations.Select(match => Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value).ToArray();
     var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Zip(names).Select(pair =>

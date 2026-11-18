@@ -724,7 +724,7 @@ theorem correctness (value : W32) : Ensures Extracted.program 0
   obtain ⟨home0, entered, enter⟩ := entry.checked value
   have setup := enter.setup
   have entryFrame := enter.frame
-  refine invoke_loop_satisfies Extracted.lookup0 rfl setup (header home0) (invariant value)
+  refine invoke_loop_satisfies Extracted.program_method0 rfl setup (header home0) (invariant value)
       (measure value) (fun start => ?_) ?_
   · have entryFrame := entryFrame []
     cil_loop_recurse start value

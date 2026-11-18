@@ -175,7 +175,8 @@ states the loop-head state. The proof supplies an invariant and a natural-number
 from entry to the first head, then splits each iteration on its test:
 
 ```lean excerpt Examples/Proofs/Countdown.lean
-refine invoke_loop_satisfies Extracted.lookup0 rfl enter.setup (header home) (fun _ => True)
+refine invoke_loop_satisfies Extracted.program_method0 rfl enter.setup (header home)
+  (fun _ => True)
   (fun s => s.values.toNat) (fun start => ?_) ?_
 · cil_loop_recurse start x
   case invariant => trivial

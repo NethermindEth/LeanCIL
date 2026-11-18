@@ -26,6 +26,11 @@ theorem ascii_name_spelled :
 #guard_msgs in
 #print axioms ascii_name_spelled
 
+-- Each member contributes a distinct dependency to the shared report.
+/-- depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (substring := true) in
+#print axioms [ascii_name_spelled, Classical.choice, Quot.sound]
+
 /-- A name accepted through `spelled?` has the bytes it was read from, as `bytesOf` spells them. -/
 theorem spelled_name_has_its_bytes : bytesOf "Examples.Arithmetic" = arithmeticBytes :=
   bytesOf_of_spelled ascii_name_spelled

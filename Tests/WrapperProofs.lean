@@ -11,7 +11,7 @@ theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
     (failed : CIL.Safety.step body op pc args frame stack memory = .error fault) :
     CIL.Safety.run program (fuel + 1) method pc args frame stack memory =
       .error ⟨method, pc, fault⟩ := by
-  simp only [CIL.Safety.run, found, instruction, failed, Except.mapError,
+  simp only [CIL.Safety.run_succ, found, instruction, failed, Except.mapError,
     Bind.bind, Except.bind]
 
 /-- Simplify one known intrinsic step through its step equation, without unfolding the

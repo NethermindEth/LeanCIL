@@ -915,7 +915,7 @@ theorem invoke_of_run {program : CIL.Program} {fuel method : Nat} {body : CIL.Me
     (setup : enterFrame body args memory = .ok (frame, entered))
     (executed : run program fuel method 0 args frame [] entered = .ok (final, result)) :
     invoke program fuel method args memory = .ok (final, result) := by
-  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
   exact executed
 
 /-- A fetched step that continues at `target` costs one unit of fuel. -/
@@ -928,7 +928,8 @@ theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
       .ok (.next target values nextFrame updated)) :
     run program (fuel + 1) method pc args frame stack memory =
       run program fuel method target args nextFrame values updated := by
-  simp only [run, methodFound, instructionFound, stepped, Except.mapError, Bind.bind, Except.bind]
+  simp only [run_succ, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
+    Except.bind]
 #print axioms run_next
 
 /-- Return through frame expiration and the checked result validation. -/
@@ -941,7 +942,7 @@ theorem run_return {program : CIL.Program} {fuel method pc : Nat}
     (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values) :
     run program (fuel + 1) method pc args frame stack memory =
       .ok (leaveFrame frame updated, values) := by
-  simp only [run, methodFound, instructionFound, stepped, checked,
+  simp only [run_succ, methodFound, instructionFound, stepped, checked,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms run_return
@@ -954,7 +955,8 @@ theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
     (instructionFound : body.code[pc]? = some op)
     (failed : step body op pc args frame stack memory = .error fault) :
     run program (fuel + 1) method pc args frame stack memory = .error ⟨method, pc, fault⟩ := by
-  simp only [run, methodFound, instructionFound, failed, Except.mapError, Bind.bind, Except.bind]
+  simp only [run_succ, methodFound, instructionFound, failed, Except.mapError, Bind.bind,
+    Except.bind]
 
 #print axioms run_fault
 
@@ -966,7 +968,7 @@ theorem invoke_of_run_fault {program : CIL.Program} {fuel method : Nat} {body : 
     (setup : enterFrame body args memory = .ok (frame, entered))
     (executed : run program fuel method 0 args frame [] entered = .error fault) :
     invoke program fuel method args memory = .error fault := by
-  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
   exact executed
 
 #print axioms invoke_of_run_fault

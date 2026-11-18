@@ -48,118 +48,118 @@ theorem run_extend {base linked : CIL.Program} (links : Links base linked) (fuel
     (h : run base fuel method pc args frame stack memory = outcome) :
     run linked fuel method pc args frame stack memory = outcome := by
   induction fuel generalizing method pc args frame stack memory outcome with
-  | zero => simpa only [run] using h
+  | zero => simpa only [run_zero, run_succ] using h
   | succ fuel ih =>
     cases hb : base[method]? with
     | none =>
-      simp only [run, hb] at h
+      simp only [run_succ, hb] at h
       exact absurd rfl (resolved _ h.symm)
     | some body =>
       have hl := links.found hb
       cases ho : body.code[pc]? with
       | none =>
-        simp only [run, hb, ho] at h
+        simp only [run_succ, hb, ho] at h
         exact absurd rfl (resolved _ h.symm)
       | some op =>
         cases hs : step body op pc args frame stack memory with
         | error fault =>
-          simp only [run, hb, hl, ho, hs, Bind.bind, Except.bind, Except.mapError] at h ⊢
+          simp only [run_succ, hb, hl, ho, hs, Bind.bind, Except.bind, Except.mapError] at h ⊢
           exact h
         | ok action =>
           cases action with
           | next target values nextFrame updated =>
-            simp only [run, hb, hl, ho, hs, Bind.bind, Except.bind, Except.mapError] at h ⊢
+            simp only [run_succ, hb, hl, ho, hs, Bind.bind, Except.bind, Except.mapError] at h ⊢
             exact ih method target args nextFrame values updated outcome resolved h
           | returned values updated =>
-            simp only [run, hb, hl, ho, hs, Bind.bind, Except.bind, Except.mapError] at h ⊢
+            simp only [run_succ, hb, hl, ho, hs, Bind.bind, Except.bind, Except.mapError] at h ⊢
             exact h
           | call callee arguments rest updated =>
             cases hc : base[callee]? with
             | none =>
-              simp only [run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
+              simp only [run_succ, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
               exact absurd rfl (resolved _ h.symm)
             | some child =>
               have hlc := links.found hc
               cases he : enterFrame child arguments updated with
               | error fault =>
-                simp only [run, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind,
+                simp only [run_succ, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind,
                   Except.mapError] at h ⊢
                 exact h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run base fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                  simp only [run_succ, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
                     Except.mapError] at h
                   subst h
                   have more := ih callee 0 arguments childFrame [] childMemory _ resolved hr
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                  simp only [run_succ, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
                     Except.mapError]
                 | ok childResult =>
                   obtain ⟨final, values⟩ := childResult
                   have more := ih callee 0 arguments childFrame [] childMemory
                     (.ok (final, values)) (by intro _ h; cases h) hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                  simp only [run_succ, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
                     Except.mapError] at h
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                  simp only [run_succ, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
                     Except.mapError]
                   exact ih method (pc + 1) args frame (values ++ rest) final outcome resolved h
           | tailCall callee arguments updated =>
             cases hc : base[callee]? with
             | none =>
-              simp only [run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
+              simp only [run_succ, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
               exact absurd rfl (resolved _ h.symm)
             | some child =>
               have hlc := links.found hc
               cases returns : child.returnsValue != body.returnsValue with
               | true =>
-                simpa [run, hb, hl, ho, hs, hc, hlc, returns, Bind.bind, Except.bind,
-                  Except.mapError] using h
+                simpa [run_zero, run_succ, hb, hl, ho, hs, hc, hlc, returns, Bind.bind,
+                  Except.bind, Except.mapError] using h
               | false =>
                 cases check : arguments.mapM (checkedValue (leaveFrame frame updated)) with
                 | error fault =>
-                  simpa [run, hb, hl, ho, hs, hc, hlc, returns, check, Bind.bind,
+                  simpa [run_zero, run_succ, hb, hl, ho, hs, hc, hlc, returns, check, Bind.bind,
                     Except.bind, Except.mapError] using h
                 | ok checked =>
                   cases enter : enterFrame child checked (leaveFrame frame updated) with
                   | error fault =>
-                    simpa [run, hb, hl, ho, hs, hc, hlc, returns, check, enter, Bind.bind,
-                      Except.bind, Except.mapError] using h
+                    simpa [run_zero, run_succ, hb, hl, ho, hs, hc, hlc, returns, check, enter,
+                      Bind.bind, Except.bind, Except.mapError] using h
                   | ok entered =>
                     obtain ⟨childFrame, childMemory⟩ := entered
-                    simp only [run, hb, hl, ho, hs, hc, hlc, returns, check, enter,
+                    simp only [run_succ, hb, hl, ho, hs, hc, hlc, returns, check, enter,
                       Bind.bind, Except.bind, Except.mapError, Bool.false_eq_true,
                       ite_false] at h ⊢
                     exact ih callee 0 checked childFrame [] childMemory outcome resolved h
           | construct callee arguments rest parentFrame temporary kind updated =>
             cases hc : base[callee]? with
             | none =>
-              simp only [run, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
+              simp only [run_succ, hb, ho, hs, hc, Bind.bind, Except.bind, Except.mapError] at h
               exact absurd rfl (resolved _ h.symm)
             | some child =>
               have hlc := links.found hc
               cases he : enterFrame child arguments updated with
               | error fault =>
-                simp only [run, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind,
+                simp only [run_succ, hb, hl, ho, hs, hc, hlc, he, Bind.bind, Except.bind,
                   Except.mapError] at h ⊢
                 exact h
               | ok entered =>
                 obtain ⟨childFrame, childMemory⟩ := entered
                 cases hr : run base fuel callee 0 arguments childFrame [] childMemory with
                 | error fault =>
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                  simp only [run_succ, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
                     Except.mapError] at h
                   subst h
                   have more := ih callee 0 arguments childFrame [] childMemory _ resolved hr
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                  simp only [run_succ, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
                     Except.mapError]
                 | ok childResult =>
                   obtain ⟨final, values⟩ := childResult
                   have more := ih callee 0 arguments childFrame [] childMemory
                     (.ok (final, values)) (by intro _ h; cases h) hr
-                  simp only [run, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
+                  simp only [run_succ, hb, ho, hs, hc, he, hr, Bind.bind, Except.bind,
                     Except.mapError] at h
-                  simp only [run, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
+                  simp only [run_succ, hl, ho, hs, hlc, he, more, Bind.bind, Except.bind,
                     Except.mapError]
                   cases hn : !values.isEmpty with
                   | true =>
@@ -183,24 +183,24 @@ theorem invoke_extend {base linked : CIL.Program} (links : Links base linked) (f
     invoke linked fuel method args memory = outcome := by
   cases hb : base[method]? with
   | none =>
-    simp only [invoke, hb] at h
+    simp only [invoke_eq, hb] at h
     exact absurd rfl (resolved _ h.symm)
   | some body =>
     have hl := links.found hb
     cases hc : (args.mapM (checkedValue memory)).mapError
         (fun fault => (⟨method, 0, fault⟩ : LocatedFault)) with
     | error fault =>
-      simp only [invoke, hb, hl, hc, Bind.bind, Except.bind] at h ⊢
+      simp only [invoke_eq, hb, hl, hc, Bind.bind, Except.bind] at h ⊢
       exact h
     | ok checked =>
       cases he : (enterFrame body checked memory).mapError
           (fun fault => (⟨method, 0, fault⟩ : LocatedFault)) with
       | error fault =>
-        simp only [invoke, hb, hl, hc, he, Bind.bind, Except.bind] at h ⊢
+        simp only [invoke_eq, hb, hl, hc, he, Bind.bind, Except.bind] at h ⊢
         exact h
       | ok entered =>
         obtain ⟨frame, entered⟩ := entered
-        simp only [invoke, hb, hl, hc, he, Bind.bind, Except.bind] at h ⊢
+        simp only [invoke_eq, hb, hl, hc, he, Bind.bind, Except.bind] at h ⊢
         exact run_extend links fuel method 0 checked frame [] entered outcome resolved h
 
 /-- A raised exception is not `invalidState`, so it is raised in every linked program. -/
@@ -250,7 +250,7 @@ theorem run_call_unlinked {program : CIL.Program} {fuel method pc callee : Nat}
     (missing : program[callee]? = none) :
     run program (fuel + 1) method pc args frame stack memory =
       .error ⟨method, pc, .invalidState⟩ := by
-  simp only [run, methodFound, instructionFound, stepped, missing, Except.mapError, Bind.bind,
+  simp only [run_succ, methodFound, instructionFound, stepped, missing, Except.mapError, Bind.bind,
     Except.bind]
 
 /-- Invoking a method the program lacks faults `invalidState` at its entry. -/
@@ -258,7 +258,7 @@ theorem invoke_unlinked {program : CIL.Program} {fuel method : Nat} {args : List
     {memory : Memory}
     (missing : program[method]? = none) :
     invoke program fuel method args memory = .error ⟨method, 0, .invalidState⟩ := by
-  simp only [invoke, missing]
+  simp only [invoke_eq, missing]
 
 /-- `claim` holds in every program that links `base` and whose imports meet `imports`. -/
 def HoldsGiven (base : CIL.Program) (imports claim : CIL.Program → Prop) : Prop :=

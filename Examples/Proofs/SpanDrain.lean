@@ -32,7 +32,7 @@ theorem drain (memory : Memory) (view : SpanView) (valid : view.validate memory 
     (width : view.width = 4) (readOnly : view.writable = false) :
     ∃ fuel, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (memory, [.scalar (.i32 0)]) := by
-  refine invoke_loop_returns Extracted.lookup0 (by simp [cil_checked, valid])
+  refine invoke_loop_returns Extracted.program_method0 (by simp [cil_checked, valid])
     (entry.checked memory view valid width readOnly) (header memory) (fun _ => True)
     (·.val.length) ⟨view, valid, width, readOnly⟩ (by cil_loop_steps) trivial ?_
   rintro ⟨view, valid, width, readOnly⟩ -

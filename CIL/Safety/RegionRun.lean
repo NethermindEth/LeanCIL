@@ -66,17 +66,17 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
   | zero => rfl
   | succ fuel ih =>
     rcases agrees.found inside with ⟨hb, hb'⟩ | ⟨body, body', hb, hb', same, code⟩
-    · simp only [run, hb, hb']
+    · simp only [run_succ, hb, hb']
     rw [same] at hb'
     cases ho : body.code[pc]? with
-    | none => simp only [run, hb, hb', ← same, code, ho]
+    | none => simp only [run_succ, hb, hb', ← same, code, ho]
     | some op =>
       obtain ⟨continues, targets⟩ := closed.1 method pc body op inside hb ho
       -- A method the step enters is listed by a link entry at this region pc.
       have callees : ∀ callee ∈ body.calleesAt pc, region callee 0 := fun callee member => by
         obtain ⟨entry, listed, located, member⟩ := CIL.Method.calleesAt_mem member
         exact closed.2 method body hb entry listed (located ▸ inside) callee member
-      simp only [run, hb, hb', ← same, code, ho]
+      simp only [run_succ, hb, hb', ← same, code, ho]
       rw [same, show step { body with code := body'.code } op pc args frame stack m =
         step body op pc args frame stack m from rfl]
       cases hs : step body op pc args frame stack m with

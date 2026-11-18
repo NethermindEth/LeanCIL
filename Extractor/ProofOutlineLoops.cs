@@ -965,7 +965,7 @@ internal static partial class ProofOutline
             var checkedArguments = !spec.Symbolic ? "rfl"
                 : WordArrays.Any() ? $"(by cil_checked_side [{string.Join(", ", formed)}])"
                 : "(by simp [cil_checked" + string.Concat(formed.Select(fact => ", " + fact)) + "])";
-            lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.lookup0", checkedArguments, "setup",
+            lean.Wrapped("  refine invoke_loop_satisfies", ["Extracted.program_method0", checkedArguments, "setup",
                 HeaderTerm(),
                 $"(invariant {Arguments})", $"(measure {Arguments})", "(fun start => ?_)", "?_"], "");
             lean.Wrapped("  · have entryFrame := entryFrame", [Writes ? $"(footprint {Arguments})" : "[]"], "");

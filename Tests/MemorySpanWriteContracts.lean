@@ -62,7 +62,7 @@ theorem write_holds : writeContract.Holds Extracted.program 2 := by
     ?_ (Confined.write written (by simp [writeContract])) updated
   cil_supply_fuel
   dsimp only [writeContract]
-  simp only [Safety.invoke, Extracted.lookup2]
+  simp only [Safety.invoke_eq, Extracted.program_method2]
   simp [writeContract, checkedValue, numericValue, valid, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure] at entered ⊢
   rw [entered]
@@ -125,7 +125,7 @@ theorem read_holds : readContract.Holds Extracted.program 1 := by
     memory input.expected ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
   cil_supply_fuel
   dsimp only [readContract]
-  simp only [Safety.invoke, Extracted.lookup1]
+  simp only [Safety.invoke_eq, Extracted.program_method1]
   simp [checkedValue, numericValue, valid, entered, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
   cil_checked_steps [readContract, ReadInput.view, makeParameterHomes, makeLocal, storeLocal,

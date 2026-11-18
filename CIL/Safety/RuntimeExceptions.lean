@@ -190,7 +190,7 @@ theorem raisesCLR_of_run {program : CIL.Program} {method : Nat} {body : CIL.Meth
     RaisesCLR program method args memory exception := by
   obtain ⟨fuel, fault, ran, named⟩ := raised
   refine ⟨fuel, fault, ?_, named⟩
-  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
   exact ran
 
 theorem run_next_raisesCLR {program : CIL.Program} {method pc target : Nat}
@@ -214,7 +214,7 @@ theorem run_fault_raisesCLR {program : CIL.Program} {method pc : Nat}
     (named : fault.clrException = some exception) :
     RunRaisesCLR program method pc args frame stack memory exception :=
   ⟨1, ⟨method, pc, fault⟩, by
-    simp only [run, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
+    simp only [run_succ, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
       Except.bind], named⟩
 
 /-- Propagate the CLR exception a callee's contract names for this input. -/

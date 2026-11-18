@@ -25,7 +25,8 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
     (fun _ _ _ values => values = [.scalar (.i32 0)]) := by
   rintro args initial ⟨x, rfl, rfl⟩
   obtain ⟨home, entered, enter⟩ := entry.checked x
-  refine invoke_loop_satisfies Extracted.lookup0 rfl enter.setup (header home) (fun _ => True)
+  refine invoke_loop_satisfies Extracted.program_method0 rfl enter.setup (header home)
+    (fun _ => True)
     (fun s => s.values.toNat) (fun start => ?_) ?_
   · cil_loop_recurse start x
     case invariant => trivial

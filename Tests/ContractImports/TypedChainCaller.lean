@@ -13,7 +13,7 @@ open CIL.Safety
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => TypedImportInterface.copy.Holds linked 0) := by
   rintro linked links imported ⟨source, destination, value⟩ memory ⟨formed, readable, writable⟩
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : TypedImportInterface.copy.Holds linked 1 := imported
   obtain ⟨middle, entered, made, middleWritable, -⟩ :=
     make_fitting_local memory memory.nextIdentity (.aggregate 8) (.aggregate (List.replicate 8 0))

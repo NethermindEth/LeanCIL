@@ -25,19 +25,20 @@ theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
       run program fuel method (pc + 1) args frame (returned ++ rest) childResult = outcome) :
     run program (fuel + 1) method pc args frame stack memory = outcome := by
   cases hb : program[callee]? with
-  | none => simp [invoke, hb] at child
+  | none => simp [invoke_eq, hb] at child
   | some childBody =>
     cases ha : arguments.mapM (checkedValue updated) with
-    | error fault => simp [invoke, hb, ha, Except.mapError, Bind.bind, Except.bind] at child
+    | error fault => simp [invoke_eq, hb, ha, Except.mapError, Bind.bind, Except.bind] at child
     | ok checked =>
       have same := (checkedValues_valid _ _ _ ha).1
       subst checked
       cases he : enterFrame childBody arguments updated with
-      | error fault => simp [invoke, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
+      | error fault => simp [invoke_eq, hb, ha, he, Except.mapError, Bind.bind,
+                         Except.bind] at child
       | ok entered =>
         obtain ⟨childFrame, childMemory⟩ := entered
-        simp only [invoke, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
-        simp only [run, methodFound, instructionFound, stepped, hb, he, child,
+        simp only [invoke_eq, hb, ha, he, Except.mapError, Bind.bind, Except.bind] at child
+        simp only [run_succ, methodFound, instructionFound, stepped, hb, he, child,
           continuation, Except.mapError, Bind.bind, Except.bind]
 
 /-- Independently sufficient budgets combine without requiring equal proof fuel. -/

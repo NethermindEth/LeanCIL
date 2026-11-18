@@ -1980,4 +1980,109 @@ run_meta do
   for name in [``CIL.Safety.step_call_model, ``CIL.Safety.step_call_direct] do
     unless used.contains name do throwError "modelled_then_linked does not use {name}"
 
+/-- A return whose list spine depends on the flag. -/
+def conditionalReturn (flag : Bool) : CIL.Method :=
+  { returnsValue := false, locals := [], code := if flag then [.ret, .nop] else [.ret] }
+
+/-- The same body with the return visible at the head. -/
+def leadingReturn (flag : Bool) : CIL.Method :=
+  { returnsValue := false, locals := [], code := .ret :: (if flag then [.nop] else []) }
+
+/-- A program with one conditional body. -/
+def returnProgram (flag : Bool) : CIL.Program := [conditionalReturn flag]
+
+/-- The generated lookup finds the stored body. -/
+@[cil_code] theorem returnProgram_method0 (flag : Bool) :
+    (returnProgram flag)[0]? = some (conditionalReturn flag) := rfl
+#print axioms returnProgram_method0
+
+/-- The preferred lookup exposes the return for both values of the flag. -/
+theorem returnProgram_leading (flag : Bool) :
+    (returnProgram flag)[0]? = some (leadingReturn flag) := by cases flag <;> rfl
+#print axioms returnProgram_leading
+
+/-- A caller can supply the lookup that exposes the return. -/
+theorem supplied_return_steps (flag : Bool) (memory : Memory) :
+    invoke (returnProgram flag) 1 0 [] memory = .ok (memory, []) := by
+  cil_checked_steps [returnProgram_leading flag]
+#print axioms supplied_return_steps
+
+/-- The preferred lookup can describe the indexing function before its position is supplied. -/
+theorem returnProgram_lookup (flag : Bool) :
+    (GetElem?.getElem? (returnProgram flag) : Nat → Option CIL.Method) =
+      (fun index => match index with | 0 => some (leadingReturn flag) | _ + 1 => none) := by
+  funext index
+  cases index with
+  | zero => cases flag <;> rfl
+  | succ => rfl
+#print axioms returnProgram_lookup
+
+section
+attribute [local cil_code high] returnProgram_lookup
+
+/-- Stepping uses the partially applied lookup at method zero. -/
+theorem partial_lookup_return_steps (flag : Bool) (memory : Memory) :
+    invoke (returnProgram flag) 1 0 [] memory = .ok (memory, []) := by
+  cil_checked_steps
+#print axioms partial_lookup_return_steps
+end
+
+attribute [cil_code high] returnProgram_leading
+
+/-- Stepping honors the higher-priority lookup with the flag still symbolic. -/
+theorem conditional_return_steps (flag : Bool) (memory : Memory) :
+    invoke (returnProgram flag) 1 0 [] memory = .ok (memory, []) := by
+  cil_checked_steps
+#print axioms conditional_return_steps
+
+namespace MethodLookup
+
+/-- The immediate return shared by both branches of the program. -/
+def body : CIL.Method := { returnsValue := false, locals := [], code := [.ret] }
+
+/-- Both program lengths have the same first method. -/
+def prog (flag : Bool) : CIL.Program := if flag then [body] else [body, body]
+
+/-- The first method is available before the branch is known. -/
+@[cil_code] theorem prog_method0 (flag : Bool) : (prog flag)[0]? = some body := by
+  cases flag <;> rfl
+#print axioms prog_method0
+
+example (flag : Bool) : (prog flag)[0]? = some body := by cil_lookup [prog]
+
+example (flag : Bool) (memory : Memory) :
+    invoke (prog flag) 1 0 [] memory = .ok (memory, []) := by cil_checked_steps [prog]
+
+section
+attribute [local cil_code] prog
+
+example (flag : Bool) : (prog flag)[0]? = some body := by cil_lookup []
+
+example (flag : Bool) (memory : Memory) :
+    invoke (prog flag) 1 0 [] memory = .ok (memory, []) := by cil_checked_steps
+end
+
+/-- A program with no method at position zero. -/
+def vacant : CIL.Program := []
+
+/-- The lookup equation can certify an absent method. -/
+@[cil_code] theorem vacant_method0 : vacant[0]? = none := rfl
+#print axioms vacant_method0
+
+example : vacant[0]? = none := by cil_lookup_equation
+
+/-- The named result of a successful method lookup. -/
+def hit : Option CIL.Method := some body
+
+/-- A program with a named lookup result. -/
+def singleton : CIL.Program := [body]
+
+/-- The generated equation can state its result by name. -/
+@[cil_code] theorem singleton_method0 : singleton[0]? = hit := rfl
+#print axioms singleton_method0
+
+example : singleton[0]? = hit := by cil_lookup_equation
+
+end MethodLookup
+
 end Tests.Automation

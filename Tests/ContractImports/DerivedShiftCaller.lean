@@ -21,7 +21,7 @@ def shiftContract : OutcomeContract CIL.W64 CIL.W64 where
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => shiftContract.Holds linked 0) := by
   intro linked links imported value memory formed
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : DerivedInterface.percentBounded.Holds linked 1 := imported
   dsimp only [shiftContract]
   cases raised : DerivedInterface.percentRaises value with

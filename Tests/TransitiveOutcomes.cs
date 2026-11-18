@@ -71,7 +71,7 @@ const string forwardProof = """
     theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
         (fun linked => DerivedInterface.percentBounded.Holds linked 0) := by
       intro linked links imported value memory formed
-      have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+      have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
       have holds : DerivedInterface.percentBounded.Holds linked 1 := imported
       dsimp only [DerivedInterface.percentBounded]
       cases raised : DerivedInterface.percentRaises value with

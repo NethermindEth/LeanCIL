@@ -29,7 +29,7 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List CIL.W32)
     (contents : SpanContents memory view 4 values) :
     ∃ fuel, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (memory, [.scalar (.i32 (if values.all (· == 0) then 1 else 0))]) := by
-  refine invoke_loop_returns Extracted.lookup0 (by simp [cil_checked, valid])
+  refine invoke_loop_returns Extracted.program_method0 (by simp [cil_checked, valid])
     (entry.checked memory view valid contents.elementWidth readOnly) (header memory)
     (fun state => state.values.all (· == 0) = values.all (· == 0)) (·.values.length)
     ⟨view, values, valid, readOnly, contents⟩ (by cil_loop_steps) rfl ?_

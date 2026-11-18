@@ -131,7 +131,7 @@ internal static partial class ProofOutline
             Line($"      .ok {spec.ArgumentValues} := by simp [cil_checked, ← same, state.formed]");
             Line($"  have setup : enterFrame Extracted.method0 {spec.ArgumentValues} initial =");
             Line("      .ok (⟨initial.nextIdentity, [], [], 0⟩, initial) := by rfl");
-            Line($"  refine invoke_loop_satisfies Extracted.lookup0 checked setup {HeaderTerm}");
+            Line($"  refine invoke_loop_satisfies Extracted.program_method0 checked setup {HeaderTerm}");
             Line($"    (invariant {Parameters} initial) (measure {Parameters} initial) (fun start => ?_) ?_");
             Line("  ·");
             var entry = Path("state");

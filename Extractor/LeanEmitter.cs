@@ -433,16 +433,18 @@ internal static class LeanEmitter
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
-        for (int n = 0; n < methods.Length; n++)
-            lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
         // One index of the program, checked once, serves every closure and run that reads it.
+        lean.AppendLine("/-- The number of methods in the extracted program. -/");
         lean.AppendLine($"def programLength : Nat := {methods.Length}");
         lean.AppendLine("theorem programLength_eq : programLength = program.length := by cil_kernel_rfl");
+        lean.AppendLine("/-- The balanced index of the extracted methods in program order. -/");
         lean.AppendLine("def programIndex : Extraction.FlowIndex Method := program_index% program");
-        lean.AppendLine("theorem programIndex_eq : programIndex = Extraction.FlowIndex.ofList program := " +
-            "by cil_kernel_rfl");
+        lean.AppendLine("""
+            theorem programIndex_eq : programIndex = Extraction.FlowIndex.ofList program := by cil_kernel_rfl
+            """);
         lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
         lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
+        ProgramLookupFacts.Append(lean, "program", "method", methods.Length);
         var classViews = ClassViews.Views(fieldAccesses);
         var views = ClassViews.Emit(fieldAccesses, classViews);
         if (views.Length > 0)

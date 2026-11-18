@@ -351,4 +351,18 @@ elab "cil_kernel_rfl" : tactic => do
   goal.assign (mkConst lemmaName (lemmaLevels.map .param))
   replaceMainGoal []
 
+open Lean Elab Command Meta in
+/-- Report the axioms of a group of facts with one traversal of their shared dependencies. -/
+elab "#print " &"axioms " "[" facts:ident,+ "]" : command => withoutModifyingEnv do
+  let audit ← liftTermElabM do
+    let mut proof := mkConst ``True.intro
+    -- Each closed binding retains its fact as a dependency. The result type stays constant.
+    for fact in facts.getElems do
+      let name ← realizeGlobalConstNoOverloadWithInfo fact
+      let constant ← mkConstWithLevelParams name
+      proof := .letE .anonymous (← inferType constant) constant proof true
+    mkAuxLemma (collectLevelParams {} proof).params.toList (mkConst ``True) proof
+      (kind? := some `axiomReport) (cache := false)
+  elabCommand (← `(#print axioms $(mkCIdent audit)))
+
 end CIL.Extraction

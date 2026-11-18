@@ -249,7 +249,7 @@ open CIL.Safety
 theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => PublishedTable.read.Holds linked 0) := by
   intro linked links imported input memory permitted
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : PublishedTable.read.Holds linked 1 := imported
   apply WP.enter found (by rfl) (by rfl)
   apply WP.call found (by rfl) (by cil_checked_step []) (holds input memory permitted)

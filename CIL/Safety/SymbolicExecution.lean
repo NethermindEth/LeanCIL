@@ -461,15 +461,56 @@ private def indexedLookup? (lookup : Expr) : Option (Expr × Expr) :=
   else none
 
 open Lean Elab Tactic Meta in
-/-- Reuse a generated equation directly for a named body and a closed instruction position. -/
-elab "cil_lookup_equation" : tactic => withMainContext do
-  let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
+/-- The lookup rules retain caller-supplied facts while keeping a supplied program named. -/
+private def methodLookupContext (program : Name) (facts : Array Term) (registered : SimpTheorems) :
+    TacticM (Simp.Context × Simp.SimprocsArray) := do
+  -- Even preparing a simp entry for the program definition costs work in its list length.
+  let lookupFacts ← facts.filterM fun (fact : Term) => do
+    if !fact.raw.isIdent then return true
+    return !(← Term.resolveId? fact).any (·.isConstOf program)
+  let (ctx, simprocs) ← if lookupFacts.isEmpty then do
+      let some procs ← Simp.getSimprocExtension? `cil_code | throwError "Missing cil_code simprocs"
+      let ctx ← Simp.mkContext (simpTheorems := #[registered])
+        (congrTheorems := ← getSimpCongrTheorems)
+      pure (ctx, #[← procs.getSimprocs])
+    else do
+      let tactic ← `(tactic| simp only [cil_code, Nat.reduceAdd, Nat.reduceMul,
+        $[$lookupFacts:term],*])
+      let { ctx, simprocs, .. } ← mkSimpContext tactic (eraseLocal := false)
+      pure (ctx, simprocs)
+  if lookupFacts.size == facts.size then return (ctx, simprocs)
+  return (ctx.setSimpTheorems (ctx.simpTheorems.eraseTheorem (.decl program)), simprocs)
+
+open Lean Elab Tactic Meta in
+/-- Close a named lookup using its registered equations and the caller's method facts. -/
+private def closeLookupEquation (facts : Array Term) : TacticM Unit := withMainContext do
+  let some (_, lookup, expected) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
     | throwError "Expected an instruction lookup"
   let some (code, index) := indexedLookup? lookup | throwError "Expected an indexed lookup"
-  unless code.isAppOfArity ``CIL.Method.code 1 do throwError "Expected a named method body"
+  let some position ← getNatValue? index | throwError "Expected a closed position"
+  unless code.isAppOfArity ``CIL.Method.code 1 do
+    let some name := code.getAppFn.constName? | throwError "Expected a named program"
+    let equation := name.appendAfter s!"_method{position}"
+    unless (← getEnv).contains equation do throwError "No generated method equation"
+    let some rules ← getSimpExtension? `cil_code | throwError "Missing cil_code rules"
+    let registered ← rules.getTheorems
+    let (context, simprocs) ← methodLookupContext name facts registered
+    let (result, _) ← simp lookup context simprocs steppingDischarge?
+    let goal ← getMainGoal
+    if result.expr != lookup && (← withReducible (isDefEq expected result.expr)) then
+      goal.assign (← result.getProof)
+    else
+      -- A cil_code unfold can erase the program name before its lookup equation fires.
+      unless registered.isLemma (.decl equation) || registered.isLemma (.decl equation false) do
+        throwError "No registered method equation"
+      let proof := mkAppN (← mkConstWithFreshMVarLevels equation) code.getAppArgs
+      unless ← withReducible (isDefEq (← goal.getType) (← inferType proof)) do
+        throwError "The method equation does not prove this lookup"
+      goal.assign proof
+    replaceMainGoal []
+    return
   let body ← lastArgument "cil_lookup_equation" code
   let some name := body.getAppFn.constName? | throwError "Expected a named method body"
-  let some position ← getNatValue? index | throwError "Expected a closed position"
   let equation := name.appendAfter s!"_instruction{position}"
   unless (← getEnv).contains equation do throwError "No generated equation at this position"
   let proof := mkAppN (← mkConstWithFreshMVarLevels equation) body.getAppArgs
@@ -488,6 +529,10 @@ elab "cil_lookup_equation" : tactic => withMainContext do
   let goals ← (← getMainGoal).apply proof
   unless goals.isEmpty do throwError "The instruction equation left premises"
   replaceMainGoal []
+
+open Lean Elab Tactic in
+/-- Fetch a named method by simplifying its lookup, or an instruction by its equation. -/
+elab "cil_lookup_equation" : tactic => closeLookupEquation #[]
 
 /-- Close a lookup goal `lookup = result`, possibly quantified, with a hypothesis, up to reducible
     unfolding, trying only equation hypotheses whose left side may unify with `lookup`; fails
@@ -665,7 +710,7 @@ elab_rules : tactic
         let equal := mkIdent (← mkFreshUserName `positionCase)
         let close ← `(tactic| (
           simp only [$equal:term, Nat.reduceMul, Nat.reduceAdd]
-          all_goals first | cil_lookup_equation | cil_lookup [$[$facts:term],*]))
+          all_goals cil_lookup [$[$facts:term],*]))
         match remaining with
         | 0 => `(tactic| (
             have $equal : $value = $numeral := by omega
@@ -701,11 +746,12 @@ elab_rules : tactic
       try evalTactic tactic; return true
       catch _ => saved.restore; return false
     if ← attempt (← `(tactic| cil_lookup_assumption)) then return
-    if ← attempt (← `(tactic| cil_lookup_equation)) then return
+    if (← observing? (closeLookupEquation facts.getElems)).isSome then return
     let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
       | throwError "Expected a lookup equation"
     if !lookup.hasFVar && !lookup.hasMVar then
-      evalTactic (← `(tactic| cil_try_simp_only [cil_code, Nat.reduceAdd, Nat.reduceMul]))
+      evalTactic (← `(tactic| cil_try_simp_only [cil_code, Nat.reduceAdd, Nat.reduceMul,
+        $[$facts:term],*]))
       pruneSolvedGoals
       if (← getGoals).isEmpty then return
       if ← attempt (← `(tactic| cil_lookup_rfl [$facts:term,*])) then return
@@ -1479,7 +1525,13 @@ open Lean Elab Tactic Meta in
 def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
   let roots := (← getLCtx).foldl (init := #[← getMainTarget]) fun roots declaration =>
     if declaration.isImplementationDetail then roots else roots.push declaration.type
-  let nativeStores ← mayStoreNativeInt roots
+  -- Only an eight-byte write needs the opcode scan. Its answer is shared by all such facts.
+  let nativeStoreCache ← IO.mkRef (none : Option Bool)
+  let nativeStores : MetaM Bool := do
+    if let some answer ← nativeStoreCache.get then return answer
+    let answer ← mayStoreNativeInt roots
+    nativeStoreCache.set (some answer)
+    return answer
   -- `mkAppM` leaves an auto-parameter as a premise of the derived fact, so each width side
   -- condition is decided here; a premise left in place blocks the step the fact states.
   let narrowStores (width : Nat) (kind : Name) (written : Expr) :
@@ -1548,13 +1600,14 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                   let narrow ← match reading, narrowKind? with
                     | false, some kind => narrowStores width kind applied
                     | _, _ => pure #[]
+                  let includeNative ← if !reading && width == 8 then nativeStores else pure false
                   let bridges : Array (Name × Array Expr) := match reading, width with
                     | true, 8 => #[(``load_word64_of_read, #[applied])]
                     | true, 16 => #[(``load_vector128_of_read, #[applied])]
                     | true, 32 => #[(``load_vector256_of_read, #[applied])]
                     | true, 64 => #[(``load_vector512_of_read, #[applied])]
                     | false, 8 => #[(``step_stind_i8_of_write, #[applied])] ++
-                        if nativeStores then #[(``step_stind_i_of_write, #[applied])] else #[]
+                        if includeNative then #[(``step_stind_i_of_write, #[applied])] else #[]
                     | false, 16 => #[(``step_store128_of_write, #[applied])]
                     | false, 32 => #[(``step_store256_of_write, #[applied])]
                     | false, 64 => #[(``step_store512_of_write, #[applied])]

@@ -43,7 +43,7 @@ theorem certify_invocation (program : CIL.Program) (method : Nat) (body : CIL.Me
     (finished : run program fuel method 0 args frame [] entered = .ok (final, values)) :
     InvocationCertificate program method args initial fuel final values := by
   refine ⟨?_, body, frame, entered, lookup, checked, setup, finished, live, ?_, ?_⟩
-  · simpa only [invoke, lookup, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  · simpa only [invoke_eq, lookup, checked, setup, Except.mapError, Bind.bind, Except.bind]
       using finished
   · intro observedArgs observedFrame observedStack observed visit
     exact runningVisits_live_state visit live
@@ -78,19 +78,20 @@ theorem InvocationCertificate.of_invoke {program : CIL.Program} {method : Nat}
     (invoked : invoke program fuel method args initial = .ok (final, values)) :
     InvocationCertificate program method args initial fuel final values := by
   cases lookup : program[method]? with
-  | none => simp [invoke, lookup] at invoked
+  | none => simp [invoke_eq, lookup] at invoked
   | some body =>
     cases checking : args.mapM (checkedValue initial) with
     | error fault =>
-      simp [invoke, lookup, checking, Except.mapError, Bind.bind, Except.bind] at invoked
+      simp [invoke_eq, lookup, checking, Except.mapError, Bind.bind, Except.bind] at invoked
     | ok checked =>
       obtain ⟨rfl, -⟩ := checkedValues_valid _ _ _ checking
       cases setup : enterFrame body checked initial with
       | error fault =>
-        simp [invoke, lookup, checking, setup, Except.mapError, Bind.bind, Except.bind] at invoked
+        simp [invoke_eq, lookup, checking, setup, Except.mapError, Bind.bind,
+          Except.bind] at invoked
       | ok entry =>
         obtain ⟨frame, entered⟩ := entry
-        simp only [invoke, lookup, checking, setup, Except.mapError, Bind.bind, Except.bind]
+        simp only [invoke_eq, lookup, checking, setup, Except.mapError, Bind.bind, Except.bind]
           at invoked
         exact .of_run formed world lookup checking setup invoked
 

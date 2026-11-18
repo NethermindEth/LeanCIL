@@ -171,23 +171,23 @@ theorem run_call_error {program : CIL.Program} {fuel method pc callee : Nat}
       located.fault = fault.fault := by
   cases hb : program[callee]? with
   | none =>
-    simp only [invoke, hb] at child
+    simp only [invoke_eq, hb] at child
     cases child
     exact ⟨⟨method, pc, .invalidState⟩, by
-      simp only [run, methodFound, instructionFound, stepped, hb, Except.mapError, Bind.bind,
+      simp only [run_succ, methodFound, instructionFound, stepped, hb, Except.mapError, Bind.bind,
         Except.bind], rfl⟩
   | some childBody =>
     cases he : enterFrame childBody arguments updated with
     | error entry =>
-      simp only [invoke, hb, checked, he, Except.mapError, Bind.bind, Except.bind] at child
+      simp only [invoke_eq, hb, checked, he, Except.mapError, Bind.bind, Except.bind] at child
       cases child
       exact ⟨⟨method, pc, entry⟩, by
-        simp only [run, methodFound, instructionFound, stepped, hb, he, Except.mapError,
+        simp only [run_succ, methodFound, instructionFound, stepped, hb, he, Except.mapError,
           Bind.bind, Except.bind], rfl⟩
     | ok entered =>
       obtain ⟨childFrame, childMemory⟩ := entered
-      simp only [invoke, hb, checked, he, Except.mapError, Bind.bind, Except.bind] at child
-      exact ⟨fault, by simp only [run, methodFound, instructionFound, stepped, hb, he, child,
+      simp only [invoke_eq, hb, checked, he, Except.mapError, Bind.bind, Except.bind] at child
+      exact ⟨fault, by simp only [run_succ, methodFound, instructionFound, stepped, hb, he, child,
         Except.mapError, Bind.bind, Except.bind], rfl⟩
 
 /-- A method raises when its body, started in the frame `invoke` would set up, raises. -/
@@ -200,7 +200,7 @@ theorem raises_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
     Raises program method args memory exception := by
   obtain ⟨fuel, fault, ran, thrown⟩ := raised
   refine ⟨fuel, fault, ?_, thrown⟩
-  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
   exact ran
 
 /-- A run raises if it raises after one ordinary step. -/
@@ -224,7 +224,7 @@ theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
     (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :
     RunRaises program method pc args frame stack memory exception :=
   ⟨1, ⟨method, pc, .thrown exception⟩, by
-    simp only [run, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
+    simp only [run_succ, methodFound, instructionFound, stepped, Except.mapError, Bind.bind,
       Except.bind], rfl⟩
 
 /-- Propagate the exception a callee's contract names for this input. -/

@@ -278,24 +278,55 @@ n methods with e link callees in a program of P methods reads each method from t
 gives each callee one packed table entry, so it costs O(n * log P + e). The suite fails when, in
 any shape, the heartbeats each added unit of n * log P + e costs grow more than 1.15 times from
 the first two sizes to the last two, and checks that the bound refuses the n * P of list reads
-in a growing whole-program closure.
+in a growing whole-program closure. For the three shapes measured through the list, the same
+1.15 limit applies to the cost per added unit of n * P + e.
 
 | Shape | Sizes | Through the index | Through the list |
 | --- | --- | --- | --- |
-| chain | 8 / 32 / 128 | 87,394 / 335,656 / 1,422,953 | 90,395 / 437,519 / 3,533,840 |
-| long chain | 128 / 256 / 512 | 1,422,542 / 3,013,064 / 6,568,957 | not measured |
-| fan | 32 / 128 / 512 | 140,799 / 367,218 / 1,273,057 | 144,084 / 370,459 / 1,276,182 |
-| tail | 128 / 512 / 2,048 | 55,819 / 58,512 / 61,237 | 81,699 / 179,818 / 571,795 |
+| chain | 8 / 32 / 128 | 87,300 / 335,424 / 1,423,146 | 90,411 / 437,548 / 3,533,801 |
+| long chain | 128 / 256 / 512 | 1,422,768 / 3,013,631 / 6,569,794 | not measured |
+| fan | 32 / 128 / 512 | 140,789 / 367,239 / 1,272,991 | 144,007 / 370,505 / 1,276,294 |
+| tail | 128 / 512 / 2,048 | 55,798 / 58,520 / 61,171 | 81,738 / 179,808 / 571,770 |
 
 The chain through the list grows with the square of its methods, since its closure is the whole
 program; through the index each added unit costs 0.84 times as much at the larger sizes, and the
 long chain 1.02 times. The suite fails unless the tail, a closure of four methods, costs less
-through the index than through the list at every size. Stating the index of the tail programs,
-with its length and its lookup theorem, costs 260,137, 857,704 and 3,248,483 heartbeats, about
-1,600 to 2,000 per method once, and the suite fails when that cost per method grows more than
-1.15 times. A search that folded over its state instead cost 2.33 times as much per callee from
-128 to 512 callees as from 32 to 128. Run this row alone with
+through the index than through the list at every size. Building each tail program's literal index
+and proving its length and lookup equations costs 323,143, 934,058 and 3,383,553 heartbeats.
+Each additional method costs about 1,591 heartbeats from 128 to 512 and 1,595 from 512 to 2,048.
+The suite limits the ratio to 1.15 and audits all three certificate theorems after timing them.
+
+The native elaboration check times the same literal index at 2,048 and 32,768 cells. It takes the
+fastest of three runs at each size and allows up to 64 times the smaller time. This includes list
+traversal that allocates no memory and therefore consumes no heartbeats. Run the closure checks with
 `dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
+
+Three callers each execute a direct call and return. Their callees occupy positions 1, n/2 and n
+in programs of 16, 64 and 256 methods. Each callee pushes its own index and returns. Each proof
+covers four CIL instructions. The closed proofs evaluate the list interpreter or rewrite the
+invocation with `invoke_eq_invokeWith` and evaluate the index. The symbolic proofs use
+`cil_checked_steps` with an arbitrary initial memory and prove that the call preserves it.
+
+| Proof route | 16 methods | 64 methods | 256 methods |
+| --- | --- | --- | --- |
+| List, `rfl` | 269,536 / 277,919 / 287,544 | 269,390 / 301,940 / 335,187 | 270,547 / 398,335 / 526,622 |
+| Indexed, `rfl` | 297,495 / 298,328 / 298,798 | 304,040 / 305,652 / 306,059 | 310,995 / 312,991 / 313,378 |
+| List, `cil_kernel_rfl` | 87,144 / 89,896 / 93,132 | 87,416 / 98,959 / 110,968 | 88,286 / 134,968 / 182,133 |
+| Indexed, `cil_kernel_rfl` | 106,285 / 106,520 / 106,657 | 107,905 / 108,369 / 108,531 | 110,145 / 110,840 / 110,978 |
+| Symbolic, `cil_checked_steps` | 1,452,716 / 1,406,526 / 1,406,648 | 1,404,382 / 1,406,963 / 1,406,683 | 1,404,730 / 1,407,064 / 1,406,423 |
+
+These are raw heartbeats for the statement and proof. Divide by four for the cost per executed
+instruction. For each indexed proof route and for symbolic stepping, the most expensive of
+the nine calls must cost at most 1.15 times the cheapest. The list measurements include the
+walk to the callee on each fetch. Constructing all method equations costs 648,941, 2,649,459 and
+10,822,764 heartbeats at the three sizes. The suite bounds growth per added unit of P * log2(P)
+at 1.15 times. Printing their shared axiom report costs 29,166, 99,872 and 383,823 heartbeats,
+with the same growth limit per additional method. The suite checks that the report names each
+method equation and all three index certificates exactly once. A separate interval measures one
+`cil_lookup [program]` proof at every method position and bounds marginal cost per added method
+at 1.15 times its value in the smaller interval. The proofs cost 561,305, 2,249,666 and
+9,137,207 heartbeats, with a marginal cost ratio of 1.020. Run the comparison with
+`dotnet run --file Tests/LookupScaling.cs -- --run-only`.
 
 ## Reference figures
 
