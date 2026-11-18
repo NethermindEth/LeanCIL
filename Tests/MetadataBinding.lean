@@ -1012,6 +1012,48 @@ private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
   .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
 
+/-- A generic application with `count` method-parameter arguments. -/
+private def application : Nat → TypeExpr
+  | 0 => .constructor "L" "G"
+  | count + 1 => .apply (application count) (.parameter count)
+
+/-- A resolved generic instance of the same arity. -/
+private def instanceArguments (count : Nat) : ResolvedType :=
+  .genericInst (namedIn "L" "G" .valueType)
+    (ResolvedList.ofList ((List.range count).map ResolvedType.mvar))
+
+/-- Splitting a whole application visits each argument once. -/
+private def splitApplication (count : Nat) : Bool :=
+  (appliedArguments (application count)).2.length == count
+
+/-- Structural comparison admits the matching arguments with enough fuel for their count. -/
+private def admitsApplication (count : Nat) : Bool :=
+  typeAdmits { pairFrame with arity := count } (count + 4)
+    (instanceArguments count) (application count)
+
+/-- A single expected argument whose type differs from the outermost claimed argument. -/
+private def refusesApplication (count : Nat) : Bool :=
+  !pairFrame.admits (instanceArguments 1) (.apply (application count) .void)
+
+open Lean Meta Elab Command in
+run_cmd do
+  for check in [``splitApplication, ``admitsApplication, ``refusesApplication] do
+    let mut previous := 0
+    for count in [16, 64, 256] do
+      let (statement, proof) ← liftTermElabM do
+        let decision := mkApp (mkConst check) (mkNatLit count)
+        pure (← mkEq decision (mkConst ``Bool.true), ← mkEqRefl (mkConst ``Bool.true))
+      let start ← IO.getNumHeartbeats
+      match Kernel.check (← getEnv) {} (.letE `checked statement proof (.bvar 0) false) with
+      | .error error => throwKernelException error
+      | .ok _ => pure ()
+      let cost := (← IO.getNumHeartbeats) - start
+      logInfo m!"{check.getString!} {count} arguments: {cost} kernel heartbeats"
+      let growth := if check == ``refusesApplication then 2 else 5
+      if previous != 0 && cost > previous * growth then
+        throwError "generic application comparison exceeded its heartbeat growth bound"
+      previous := cost
+
 /-- The carried struct `L.S<T>` closed over the given argument. -/
 private def structOf (argument : ResolvedType) : ResolvedType :=
   .genericInst (namedIn "L" "S`1" .valueType true) (.cons argument .nil)

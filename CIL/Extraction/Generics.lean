@@ -209,11 +209,12 @@ private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : 
     | some _ => true
 
 /-- A generic type application split into its constructor and ordered arguments. -/
-def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
-  | .apply constructor argument =>
-    let (head, arguments) := appliedArguments constructor
-    (head, arguments ++ [argument])
-  | type => (type, [])
+def appliedArguments (type : TypeExpr) : TypeExpr × List TypeExpr := collect type []
+where
+  /-- Peeled arguments form the suffix after the remaining constructor's own arguments. -/
+  collect : TypeExpr → List TypeExpr → TypeExpr × List TypeExpr
+    | .apply constructor argument, suffix => collect constructor (argument :: suffix)
+    | head, suffix => (head, suffix)
 
 /-- An interface constraint naming generic parameters holds when its closure at `arguments`
     is among the direct interfaces of the constrained argument's layout. -/

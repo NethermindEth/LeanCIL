@@ -975,26 +975,28 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         cecilName false fuel (.modified required modifier element) == some (bytesOf name)
     | _, _ => false
 
-/-- A generic instance whose head and arguments the `apply` chain of `expr` repeats. -/
+/-- A generic instance binds the constructor's scope, name and value or reference kind. -/
 def appliedAdmits (frame : Frame) : Nat → NamedType → ResolvedList → TypeExpr → Bool
   | 0, _, _, _ => false
   | fuel + 1, head, arguments, expr =>
-    match appliedArguments expr with
-    | (.constructor scope name, expected) =>
-      head.kind.reference? == some false && bytesOf scope == head.scope &&
-        bytesOf name == head.name && argumentsAdmit frame fuel arguments expected
-    | (.objectConstructor scope name, expected) =>
-      head.kind.reference? == some true && bytesOf scope == head.scope &&
-        bytesOf name == head.name && argumentsAdmit frame fuel arguments expected
-    | _ => false
+    argumentsAdmit frame fuel arguments (fun
+      | .constructor scope name =>
+        head.kind.reference? == some false && bytesOf scope == head.scope &&
+          bytesOf name == head.name
+      | .objectConstructor scope name =>
+        head.kind.reference? == some true && bytesOf scope == head.scope &&
+          bytesOf name == head.name
+      | _ => false) expr
 
-/-- Whether each resolved argument is named by the matching extractor type. -/
-def argumentsAdmit (frame : Frame) : Nat → ResolvedList → List TypeExpr → Bool
-  | 0, _, _ => false
-  | _ + 1, .nil, [] => true
-  | fuel + 1, .cons head tail, expr :: rest =>
-    typeAdmits frame fuel head expr && argumentsAdmit frame fuel tail rest
-  | _ + 1, _, _ => false
+/-- The last decoded argument matches the outermost application. Each match consumes one
+    constructor, stopping on the first mismatch and preserving the fuel of each decoded type. -/
+def argumentsAdmit (frame : Frame) : Nat → ResolvedList → (TypeExpr → Bool) → TypeExpr → Bool
+  | 0, _, _, _ => false
+  | _ + 1, .nil, prefixMatches, expr => prefixMatches expr
+  | fuel + 1, .cons argument rest, prefixMatches, expr =>
+    argumentsAdmit frame fuel rest (fun
+      | .apply constructor last => typeAdmits frame fuel argument last && prefixMatches constructor
+      | _ => false) expr
 
 /-- Whether the parameters of a function pointer are the `signatureParameter` chain, which
     ends in `void`. -/
