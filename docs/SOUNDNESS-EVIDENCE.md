@@ -81,6 +81,11 @@ against the metadata it carries ([Metadata binding](#metadata-binding)):
   does the instantiated code of every method whose evidence is valid
   (`MethodEvidenceValid.prefixEntryFree`). The extractor refuses such a body with the blocker
   "Branch enters the instruction after a prefix".
+- Direct raw method construction enforces the same branch-entry rule. Both raw construction
+  and method shape evidence check each prefix and its taker, including unreachable sites.
+  A constrained static call requires a static virtual method on an interface. Lean binds that
+  claim to the declaring type and method flags in the carried metadata. A tail transfer
+  requires matching return types and an adjacent return.
 - A token operand is read from the four bytes in the body, looked up in the table, and must
   belong to a metadata table the opcode accepts. A token has one entry, and a field access names
   a static or instance field as its opcode requires.

@@ -166,16 +166,22 @@ theorem Instruction.ofType?_opcode {previous : Option RawInstruction} {opcode : 
 
 #print axioms Instruction.ofType?_opcode
 
-/-- The instruction `opcode` denotes on a call site: `call` (40) of the method it names, without
-    prefixes, whose target the method's link table gives, or the construction `newobj` (115) of
-    it. -/
-def Instruction.ofCallSite? (opcode : Nat) (site : CallSite) : Option Instruction :=
-  if opcode == 40 then some (.call site.method {})
+/-- The transfer or dispatch modifier carried by a direct call. -/
+private def callPrefixes : Option RawInstruction → CallPrefixes
+  | some ⟨_, 0xFE14, .none⟩ => { tail := true }
+  | some ⟨_, 0xFE16, .type receiver⟩ => { constrained := some receiver }
+  | _ => {}
+
+/-- A direct call names its method and carries its prefix. A construction names its constructor. -/
+def Instruction.ofCallSite? (previous : Option RawInstruction) (opcode : Nat)
+    (site : CallSite) : Option Instruction :=
+  if opcode == 40 then some (.call site.method (callPrefixes previous))
   else if opcode == 115 then some (.newobj site.method) else none
 
 /-- Only `call` (40) and `newobj` (115) denote an instruction on a call site. -/
-theorem Instruction.ofCallSite?_opcode {opcode : Nat} {site : CallSite}
-    {instruction : Instruction} (named : Instruction.ofCallSite? opcode site = some instruction) :
+theorem Instruction.ofCallSite?_opcode {previous : Option RawInstruction} {opcode : Nat}
+    {site : CallSite} {instruction : Instruction}
+    (named : Instruction.ofCallSite? previous opcode site = some instruction) :
     opcode = 40 ∨ opcode = 115 := by
   unfold Instruction.ofCallSite? at named
   revert named
@@ -224,16 +230,16 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
     it, so after `readonly.` only `ldelema` decodes, and `ldelema` after any other prefix does
     not. `readonly.` decodes to `nop`, and not after any prefix. The integer `ldind` and `stind`
     forms take `unaligned.` and decode as without it, since the model accesses memory at
-    alignment 1; decoding reads no other prefix yet. -/
+    alignment 1. A direct call records its tail transfer or constrained receiver. -/
 def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction) :
     Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
-  if (previous.any fun before => before.opcode == 65054) && raw.opcode != 143 then none else
+  if invalidPredecessor previous raw then none else
   match raw.operand with
   | .type type => Instruction.ofType? previous raw.opcode type
   | .field (.object _ _) _ _ _ false =>
     (FieldRef.ofOperand? raw.operand).bind (Instruction.classField? raw.opcode)
-  | .call site => Instruction.ofCallSite? raw.opcode site
+  | .call site => Instruction.ofCallSite? previous raw.opcode site
   | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   match raw.opcode, raw.operand with
@@ -639,10 +645,40 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
 
 #print axioms Instruction.sameValue_eq
 
-/-- Instantiation changes a decoded instruction only in the type a type operand names, the method
-    a call or construction names, or through a field operand: an operand that is none of these
-    decodes as before, and an instruction on a type operand or a call site decodes exactly when the
-    original does, to the instruction of the same opcode on the substituted type or call site. -/
+/-- Instantiation preserves the operand information that a preceding modifier checks. -/
+private theorem invalidPredecessor_substitute {previous : Option RawInstruction}
+    {raw : RawInstruction} {operand : RawOperand} {arguments : List TypeExpr}
+    {layouts : List RawLayout} {arity : Nat}
+    (substituted : substituteOperand arguments layouts arity raw.operand = some operand) :
+    invalidPredecessor previous { raw with operand } = invalidPredecessor previous raw := by
+  cases previous with
+  | none => rfl
+  | some modifier =>
+    simp only [invalidPredecessor, Option.any_some]
+    congr 2
+    obtain ⟨offset, opcode, original⟩ := raw
+    cases original <;> simp only [substituteOperand, Option.map_eq_map, Option.map_eq_some_iff,
+      Option.bind_eq_bind, Option.bind_eq_some_iff, pure, Option.some.injEq] at substituted
+    case' type =>
+      obtain ⟨_, _, rfl⟩ := substituted
+    case' field owner index type name isStatic =>
+      obtain ⟨_, _, _, _, rfl⟩ := substituted
+      cases isStatic
+    case' call =>
+      obtain ⟨_, _, substituted⟩ := substituted
+      split at substituted <;>
+        simp only [Option.bind_eq_some_iff, Option.some.injEq] at substituted
+      all_goals obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := substituted
+    case' indirectCall =>
+      obtain ⟨_, _, _, _, rfl⟩ := substituted
+    all_goals try (subst operand; rfl)
+    all_goals unfold prefixTakes
+    all_goals dsimp only
+    all_goals split <;> first | rfl | (split <;> simp_all <;> subst_vars <;> rfl)
+#print axioms invalidPredecessor_substitute
+
+/-- Substitution preserves refusal of a non-field operand and decodes an admitted type or call
+    operand at the same opcode over its instantiated type or call site. -/
 theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : RawInstruction}
     {operand : RawOperand} {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
@@ -653,8 +689,10 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
         (Instruction.ofRaw? previous raw).bind fun _ =>
           Instruction.ofType? previous raw.opcode type
       | .call _, .call site =>
-        (Instruction.ofRaw? previous raw).bind fun _ => Instruction.ofCallSite? raw.opcode site
+        (Instruction.ofRaw? previous raw).bind fun _ =>
+          Instruction.ofCallSite? previous raw.opcode site
       | _, _ => Instruction.ofRaw? previous raw := by
+  have sameGuard := invalidPredecessor_substitute (previous := previous) (raw := raw) substituted
   obtain ⟨sameKind, sameType, sameCall, sameField, unchanged⟩ :=
     substituteOperand_mentionsType substituted
   obtain ⟨offset, opcode, original⟩ := raw
@@ -666,6 +704,7 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
       show Option.filter _ (if _ then none else Instruction.ofType? previous opcode type) =
         (Option.filter _ (if _ then none else Instruction.ofType? previous opcode before)).bind
           fun _ => Instruction.ofType? previous opcode type
+      rw [sameGuard]
       split
       · rfl
       · unfold Instruction.ofType? Instruction.ldelemaAfter?
@@ -677,14 +716,24 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
   case call before =>
     cases operand
     case call site =>
-      show Option.filter _ (if _ then none else Instruction.ofCallSite? opcode site) =
-        (Option.filter _ (if _ then none else Instruction.ofCallSite? opcode before)).bind
-          fun _ => Instruction.ofCallSite? opcode site
+      show Option.filter _ (if _ then none else Instruction.ofCallSite? previous opcode site) =
+        (Option.filter _ (if _ then none else Instruction.ofCallSite? previous opcode before)).bind
+          fun _ => Instruction.ofCallSite? previous opcode site
+      rw [sameGuard]
       split
       · rfl
       · unfold Instruction.ofCallSite?
         cases opcode == 40 <;> cases opcode == 115 <;> rfl
     all_goals exact absurd sameCall Bool.false_ne_true
+  case indirectCall =>
+    cases operand <;> try exact absurd sameKind Bool.false_ne_true
+    all_goals first
+      | exact absurd sameType.symm Bool.false_ne_true
+      | exact absurd sameCall.symm Bool.false_ne_true
+      | exact absurd sameField.symm Bool.false_ne_true
+      | (change Option.filter _ (if _ then none else (none : Option Instruction)) =
+            Option.filter _ (if _ then none else (none : Option Instruction))
+         simp only [ite_self] <;> rfl)
   -- Any other original either is unchanged or, like its substitute, is refused by the guard.
   all_goals first
     | (cases unchanged rfl <;> rfl)
@@ -699,16 +748,15 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
 #print axioms Instruction.ofRaw?_substitute
 
 /-- Instantiation keeps a class field operand's owner, an object type that no argument
-    replaces, and substitutes its held type; the instantiated instruction, which no `readonly.`
-    precedes, decodes to the class field instruction of the same opcode over the substituted
-    reference. -/
+    replaces, and substitutes its held type. With an admissible predecessor the instantiated
+    instruction decodes to the same field opcode over the substituted reference. -/
 theorem Instruction.ofRaw?_substitute_field {previous : Option RawInstruction}
     {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     {scope name : String} {index : Nat} {held : TypeExpr} {fieldName : MetadataName}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
     (named : raw.operand = .field (.object scope name) index held fieldName false)
-    (untaken : (previous.any fun before => before.opcode == 65054) = false) :
+    (accepted : invalidPredecessor previous { raw with operand } = false) :
     ∃ closed, substituteStorageType layouts arguments held = some closed ∧
       operand = .field (.object scope name) index closed fieldName false ∧
       Instruction.ofRaw? previous { raw with operand } =
@@ -725,7 +773,7 @@ theorem Instruction.ofRaw?_substitute_field {previous : Option RawInstruction}
   subst closedOwner
   refine ⟨closed, holdsClosed, rfl, ?_⟩
   show Option.filter _ (if _ then none else Instruction.classField? opcode _) = _
-  simp only [untaken, Bool.false_and, Bool.false_eq_true, ite_false]
+  simp only [accepted, Bool.false_eq_true, ite_false]
   unfold Instruction.classField?
   split
   · rfl

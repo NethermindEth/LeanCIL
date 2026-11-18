@@ -207,6 +207,58 @@ theorem unaligned_indirect_unchanged :
   decide +kernel
 #print axioms unaligned_indirect_unchanged
 
+/-- A direct call retains the tail transfer or the static dispatch receiver named by its prefix. -/
+theorem direct_call_prefixes :
+    let raw : RawInstruction := ⟨3, 40, .call callSite⟩
+    let slot := { callSite with staticVirtualInterfaceSlot := true }
+    valueEncodingMatches (some ⟨0, 0xFE14, .none⟩) raw (.call callSite.method { tail := true }) &&
+    valueEncodingMatches (some ⟨0, 0xFE16, .type int32⟩) { raw with operand := .call slot }
+      (.call callSite.method { constrained := some int32 }) := by
+  decide +kernel
+#print axioms direct_call_prefixes
+
+/-- Suppressed checks have no scalar emission for any byte operand. -/
+theorem no_prefix_refused :
+    (List.range 256).all (fun flags =>
+      !scalarEmissionMatches #[] none none ⟨0, 0xFE19, .integer flags⟩ [] .nop) = true := by
+  decide +kernel
+#print axioms no_prefix_refused
+
+/-- Reserved check flags cannot authorize an ordinary instance field load. -/
+theorem malformed_field_prefix_refused :
+    let previous := some (⟨0, 0xFE19, .integer 255⟩ : RawInstruction)
+    let raw : RawInstruction := ⟨3, 123, classOperand⟩
+    (Instruction.ofRaw? previous raw).isNone &&
+      !scalarEmissionMatches #[] none previous raw [.object] (.ldfld classField) := by
+  decide +kernel
+#print axioms malformed_field_prefix_refused
+
+/-- A forged operand on a block copy cannot emit the aligned copy at its taker. -/
+theorem malformed_block_operand_refused :
+    !indirectAccessMatches (some ⟨0, 0xFE12, .integer 1⟩)
+      ⟨3, 0xFE17, .integer 1⟩ (.memory (.copyBlock 1)) := by
+  decide +kernel
+#print axioms malformed_block_operand_refused
+
+/-- Supported memory and call prefixes pass whole-body validation with their takers. -/
+theorem valid_prefix_sequences :
+    let ret : RawInstruction := ⟨8, 42, .none⟩
+    let call : RawInstruction := ⟨3, 40, .call callSite⟩
+    let instanceSite := { callSite with method := { callSite.method with hasThis := true } }
+    let tailCall : RawInstruction := ⟨0, 0xFE14, .none⟩
+    let constrainedCall : RawInstruction := ⟨0, 0xFE16, .type int32⟩
+    alignments.all (fun alignment => indirectAccesses.all fun (raw, _) =>
+      prefixSequenceValid .void [⟨0, 0xFE12, .integer alignment⟩, raw]) &&
+    prefixSequenceValid .void [⟨0, 0xFE12, .integer 2⟩, ⟨3, 123, classOperand⟩] &&
+    prefixSequenceValid .void [⟨0, 0xFE1E, .none⟩, ⟨2, 143, .type int32⟩] &&
+    prefixSequenceValid .void [tailCall, call, ret] &&
+    prefixSequenceValid .void [tailCall, ⟨2, 41, .indirectCall .void [] false false 0⟩, ret] &&
+    prefixSequenceValid .void [constrainedCall,
+      { call with operand := .call { callSite with staticVirtualInterfaceSlot := true } }] &&
+    prefixSequenceValid .void [constrainedCall, ⟨6, 111, .call instanceSite⟩] := by
+  decide +kernel
+#print axioms valid_prefix_sequences
+
 /-- The `readonly.` prefix with no operand, the form it takes. -/
 private def readOnlyPrefix : RawInstruction := ⟨0, 65054, .none⟩
 
@@ -368,6 +420,19 @@ info: 'CIL.Instruction.ofRaw?_substitute' depends on axioms:
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms Instruction.ofRaw?_substitute
+
+/-- Instantiating the type operand of a refused isinst preserves its refusal. -/
+theorem substitute_refused_type :
+    let previous := some (⟨0, 0xFE1E, .none⟩ : RawInstruction)
+    let raw : RawInstruction := ⟨2, 117, .type (.parameter 0)⟩
+    Instruction.ofRaw? previous raw = none ∧
+      Instruction.ofRaw? previous { raw with operand := .type int32 } = none := by
+  intro previous raw
+  constructor
+  · rfl
+  · exact Instruction.ofRaw?_substitute (previous := previous) (raw := raw)
+      (operand := .type int32) (arguments := [int32]) (layouts := []) (arity := 1) rfl rfl
+#print axioms substitute_refused_type
 
 /-- `classOperand` holding the first generic argument instead of `int32`. -/
 private def genericOperand : RawOperand :=

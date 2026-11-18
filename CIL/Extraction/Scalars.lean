@@ -427,12 +427,13 @@ def readOnlyDecodedMatches (previous : Option RawInstruction) (instruction : Raw
 /-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
     `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
     word, a size constant or an exact runtime query may emit a scalar operation. `previous` is
-    the raw instruction before `instruction`, `none` at the first pc, and the decoded
-    `readonly.` rule holds (`readOnlyDecodedMatches`). -/
+    the raw instruction before `instruction`, `none` at the first pc. A `no.` prefix has no
+    scalar emission, and `readonly.` must agree with the decoded address. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (previous : Option RawInstruction) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) : Bool :=
-  if !readOnlyDecodedMatches previous instruction emitted then false
+  if instruction.opcode == 0xFE19 || invalidPredecessor previous instruction then false
+  else if !readOnlyDecodedMatches previous instruction emitted then false
   else if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
     match emitted with | .ldc_i4 bits => bits == if value then 1 else 0 | _ => false
@@ -959,7 +960,7 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
     `PrefixEntryFree` keeps every branch out of. Translated sites never consult the decoder, so
     the rule holds them to it until no site is translated. -/
 def readOnlyPrefixMatches (next : Option RawInstruction) (instruction : RawInstruction) : Bool :=
-  instruction.opcode != 65054 || next.any (fun following => following.opcode == 143)
+  instruction.opcode != 65054 || next.any (prefixTakes instruction)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, satisfy the indirect access rule and the `readonly.` rule

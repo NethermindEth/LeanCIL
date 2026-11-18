@@ -16,20 +16,12 @@ reading the neighbouring raw instructions through an index of the body built onc
 
 namespace CIL.Extraction
 
-/-- The opcodes extraction admits after `unaligned.`: the integer `ldind` and `stind` forms,
-    `ldfld`, `stfld`, `ldobj`, `stobj`, `cpblk` and `initblk`. -/
-def unalignedTaker (opcode : Nat) : Bool :=
-  (70 ≤ opcode && opcode ≤ 77) || (82 ≤ opcode && opcode ≤ 85) ||
-    opcode ∈ [223, 123, 125, 113, 129, 65047, 65048]
-
 /-- The alignment the instruction before an access gives it: `some none` without a prefix and
     `some (some n)` after `unaligned. n` for an `n` of 1, 2 or 4. `volatile.` and any other
     alignment give `none`, since extraction refuses both. -/
 def accessAlignment : Option RawInstruction → Option (Option Nat)
-  | some ⟨_, 65042, .integer alignment⟩ =>
-    if alignment == 1 || alignment == 2 || alignment == 4 then some (some alignment.toNat)
-    else none
-  | some ⟨_, 65042, _⟩ | some ⟨_, 65043, _⟩ => none
+  | some ⟨_, 65042, operand⟩ => (prefixAlignment operand).map some
+  | some ⟨_, 65043, _⟩ => none
   | _ => some none
 
 /-- The one instruction extraction emits for a `cpblk` or `initblk` whose prefix gives
@@ -88,9 +80,10 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
         typedTransferMatches [] type (instruction.opcode == 113) emitted
       -- A span `ldobj` copies nothing; extraction refuses every other operand type.
       else instruction.opcode == 113 && spanLocal type && (emitted matches .nop)
-    | some alignment, opcode, _ =>
+    | some alignment, opcode, .none =>
       valueEncodingMatches previous instruction emitted ||
         (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)
+    | _, _, _ => false
 
 /-- The indirect access rule at `pc`, reading the raw instructions next to it through `rawAt`:
     `unaligned.` has an admitted alignment, precedes an instruction that takes it and emits
@@ -100,8 +93,7 @@ def indirectSiteWindow (rawAt : Nat → Option RawInstruction) (pc : Nat)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match instruction.opcode with
   | 65042 =>
-    (accessAlignment (some instruction)).any Option.isSome &&
-      (rawAt (pc + 1)).any (fun next => unalignedTaker next.opcode) && (emitted matches .nop)
+    (rawAt (pc + 1)).any (prefixTakes instruction) && (emitted matches .nop)
   | 65043 => false
   | _ => indirectAccessMatches (rawBefore rawAt pc) instruction emitted
 

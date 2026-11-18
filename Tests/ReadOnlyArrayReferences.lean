@@ -259,12 +259,12 @@ private def deadPrefixRaw : RawMethod :=
     returnType := .void
     code := [⟨0, 43, .target 2⟩, ⟨2, 65054, .none⟩, ⟨4, 42, .none⟩] }
 
-/-- A live instruction other than `ldelema` after a dead `readonly.` passes the scalar check,
-    which checks no unreachable prefix, and is refused by `PrefixEntryFree`, since a branch reaches
-    it. -/
+/-- Scalar validation refuses the return after a dead readonly modifier. Branch entry also
+    fails because the branch targets the modifier's follower. -/
 theorem dead_prefix_follower_refused :
-    ScalarFlowValid #[] deadPrefixRaw [some ⟨[], []⟩, none, some ⟨[], []⟩] [some [], none, some []]
-      [.br 2, .unadmitted 65054, .ret] ∧ ¬ PrefixEntryFree deadPrefixRaw.code := by
+    (¬ ScalarFlowValid #[] deadPrefixRaw [some ⟨[], []⟩, none, some ⟨[], []⟩]
+      [some [], none, some []] [.br 2, .unadmitted 65054, .ret]) ∧
+      ¬ PrefixEntryFree deadPrefixRaw.code := by
   decide +kernel
 #print axioms dead_prefix_follower_refused
 

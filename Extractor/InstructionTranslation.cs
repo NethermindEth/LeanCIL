@@ -17,6 +17,8 @@ internal static class InstructionTranslation
         IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
         MetadataValidation.LayoutContext? layouts = null, ConstrainedCalls.TargetIndex? constrainedTargets = null)
     {
+        InstructionPrefixes.ValidatePrefix(m, i);
+        if (i.Previous is { } previous) InstructionPrefixes.ValidatePrefix(m, previous);
         if (imports is not null && imports.TryTranslate(i, methods.Count, out Operation? imported)) return imported;
         profile ??= FeatureProfile.Scalar;
         layouts?.Require(m.Module, profile.Architecture);
@@ -46,7 +48,6 @@ internal static class InstructionTranslation
             nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
             tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
             throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
-        InstructionPrefixes.ValidateTaker(i);
         if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));

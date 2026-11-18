@@ -1014,17 +1014,22 @@ void DecodeCosts()
     Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
 }
 
-// Deciding prefix entry over the destination mask must stay within `AllowedLocalGrowth` per instruction from 500 to
-// 8000 instructions.
+// Body evidence checks prefix structure. Raw construction also decides branch entry.
 void PrefixEntryCosts()
 {
     const int SegmentLength = 4;
+    const double DestinationOrderTolerance = 0.02;
     var directory = At("artifacts/LookupScaling/PrefixEntry");
     Directory.CreateDirectory(directory);
-    var samples = new List<(int Instructions, long Cost)>();
+    var samples = new Dictionary<string, List<(int Instructions, long Cost)>>
+        { ["body"] = [], ["ascending"] = [], ["descending"] = [], ["shuffled"] = [] };
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
         var path = Path.Combine(directory, $"Instructions{instructions}.lean");
+        var ascending = Enumerable.Range(0, instructions / SegmentLength).Select(index => SegmentLength * index)
+            .ToArray();
+        var shuffled = ascending.ToArray();
+        new Random(1701).Shuffle(shuffled);
         File.WriteAllText(path, $$"""
             import CIL.Extraction.Scalars
             set_option maxRecDepth 100000
@@ -1034,32 +1039,52 @@ void PrefixEntryCosts()
             namespace PrefixEntryCost
             /-- The element type of every address. -/
             def intType : TypeExpr := .atom runtimeScope "System.Int32"
-            /-- One segment: a `readonly.` prefix, the element address it modifies, a pop and a branch
-                to the prefix of the next segment. -/
-            def segment (index : Nat) : List RawInstruction :=
+            /-- Each segment branches to the prefix at the given destination. -/
+            def segment (destination index : Nat) : List RawInstruction :=
               let start := {{SegmentLength}} * index
               [⟨start, 65054, .none⟩, ⟨start + 1, 143, .type intType⟩, ⟨start + 2, 38, .none⟩,
-                ⟨start + 3, 43, .target (start + {{SegmentLength}})⟩]
-            /-- A body of {{instructions}} raw instructions. -/
-            def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
-            #kernel_cost "prefix entry {{instructions}}"
-              prefixEntryFreeWith (branchTargetMask raw).testBit 0 raw = true
+                ⟨start + 3, 43, .target destination⟩]
+            /-- The same {{instructions}} instructions with the given branch operands. -/
+            def raw (targets : List Nat) :=
+              targets.zipIdx.flatMap fun (target, pc) => segment target pc
+            /-- The branch targets in increasing order. -/
+            def ascending := raw [{{string.Join(",", ascending)}}]
+            /-- The same branch targets in decreasing order. -/
+            def descending := raw [{{string.Join(",", ascending.Reverse())}}]
+            /-- A fixed permutation of the same branch targets. -/
+            def shuffled := raw [{{string.Join(",", shuffled)}}]
+            #kernel_cost "prefix body {{instructions}}"
+              prefixSequenceValid .void ascending = true
+            #kernel_cost "prefix ascending {{instructions}}" rawPrefixesValid .void ascending = true
+            #kernel_cost "prefix descending {{instructions}}" rawPrefixesValid .void descending = true
+            #kernel_cost "prefix shuffled {{instructions}}" rawPrefixesValid .void shuffled = true
             end PrefixEntryCost
-            """ + "\n");
+
+            """);
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.PrefixEntry.Match(output);
-        if (!cost.Success) throw new InvalidOperationException($"Missing the prefix entry cost:\n{output}");
-        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+        var costs = LookupPatterns.PrefixEntry.Matches(output);
+        foreach (var (kind, rows) in samples)
+        {
+            var cost = costs.Single(match => match.Groups[1].Value == kind);
+            rows.Add((instructions, long.Parse(cost.Groups[2].Value, CultureInfo.InvariantCulture)));
+        }
     }
-    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
-    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
-        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
-    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
-        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
-        throw new InvalidOperationException(
-            $"Deciding prefix entry costs {measured} heartbeats per instruction; the limit is " +
-            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
-    Console.WriteLine($"PASS deciding prefix entry costs {measured} heartbeats per instruction");
+    var failures = new List<string>();
+    foreach (var (kind, rows) in samples)
+    {
+        var costs = rows.Select(row => (double)row.Cost / row.Instructions).ToArray();
+        var measured = string.Join("; ", rows.Select(row => string.Create(CultureInfo.InvariantCulture,
+            $"{(double)row.Cost / row.Instructions:F1} at {row.Instructions}")));
+        if (rows.Any(row => row.Cost < KernelDecisionFloor) ||
+            costs.Skip(1).Zip(costs).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+            failures.Add($"Prefix {kind} exceeds the growth limit at {measured}");
+        Console.WriteLine($"Prefix {kind} costs {measured} heartbeats per instruction");
+        if (kind is "descending" or "shuffled" && rows.Zip(samples["ascending"]).Any(pair =>
+            Math.Abs((double)pair.First.Cost / pair.Second.Cost - 1) > DestinationOrderTolerance))
+            failures.Add($"Prefix {kind} differs from ascending by more than 2% at {measured}");
+    }
+    if (failures.Count != 0) throw new InvalidOperationException(string.Join(Environment.NewLine, failures));
+    Console.WriteLine("PASS prefix validation growth and destination order");
 }
 
 // The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
@@ -2996,7 +3021,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedDefinition { get; }
 
-    [GeneratedRegex(@"prefix entry [0-9]+ (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"prefix (body|ascending|descending|shuffled) [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex PrefixEntry { get; }
 
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]

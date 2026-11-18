@@ -53,6 +53,27 @@ theorem accepts_external_call :
     passes own.1 lib tokens.writeLine (.call writeLineSite) = true := by decide +kernel
 theorem accepts_managed_call :
     passes own.1 lib tokens.getRef (.call getSite) = true := by decide +kernel
+/-- A virtual interface slot requires a carried method declared on an interface. -/
+theorem static_slot_requires_metadata :
+    rejects own.1 lib tokens.writeLine
+      (.call { writeLineSite with staticVirtualInterfaceSlot := true })
+      (.operandMismatch tokens.writeLine) &&
+    rejects own.1 lib tokens.getRef (.call { getSite with staticVirtualInterfaceSlot := true })
+      (.operandMismatch tokens.getRef) := by decide +kernel
+#print axioms static_slot_requires_metadata
+
+/-- Both the interface owner and the virtual method flag are required for a static slot. -/
+theorem static_slot_flags :
+    let markInterface := fun (slice : MetadataSlice) =>
+      mutateRow slice (tokenOf Table.typeDef 2) fun bytes => bytes.set 0 0xA1
+    let markVirtual := fun (slice : MetadataSlice) =>
+      mutateRow slice (tokenOf Table.methodDef 1) fun bytes => bytes.set 6 0xD6
+    let slot := RawOperand.call { getSite with staticVirtualInterfaceSlot := true }
+    passes own.1 (markVirtual (markInterface lib)) tokens.getRef slot &&
+      !passes own.1 (markVirtual lib) tokens.getRef slot &&
+      !passes own.1 (markInterface lib) tokens.getRef slot := by
+  decide +kernel
+#print axioms static_slot_flags
 theorem accepts_generic_call :
     passes own.1 lib tokens.idSpec (.call idSite) = true := by decide +kernel
 theorem accepts_string :

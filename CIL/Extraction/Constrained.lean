@@ -35,10 +35,6 @@ private def selectedImplementation (methods : Nat → Option SpecializedMethod) 
       count == resolved.parameters.length + (if resolved.hasThis then 1 else 0)
   | _, _, _ => false
 
-/-- The call opcode a constrained prefix may precede: `callvirt` for an instance slot and
-    `call` for a static one. -/
-def constrainedCallOpcode (site : CallSite) : Nat := if site.hasThis then 111 else 40
-
 /-- Check prefix adjacency, branch integrity, metadata resolution and the emitted target, and
     that a type test comes from `castclass` or `isinst` against a `castable` class. -/
 def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option ConstrainedTarget)

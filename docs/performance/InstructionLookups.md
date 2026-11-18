@@ -138,12 +138,14 @@ at 256 or 512 exceeds 1.15 times the cost at 128. The check reads the raw instru
 site from a `FlowIndex` built once per body, only at the sites that need them, and measures
 1.01 for plain and 1.02 for prefixed addresses.
 
-It also decides `PrefixEntryFree` through `prefixEntryFreeWith` and `branchTargetMask` on generated
-bodies of 500, 2,000 and 8,000 instructions, whose segments each hold a `readonly.` prefix, its
-`ldelema`, a `pop` and a branch to the prefix of the next segment. It fails when the cost per
-instruction at 2,000 or 8,000 exceeds 1.25 times the cost at the size before. The rule tests bits
-of a mask of the branch destinations built in one pass and costs about 1,380 heartbeats per
-instruction at every size. Run this row alone with
+The prefix measurements use bodies of 500, 2,000 and 8,000 instructions. Each segment
+contains `readonly.`, `ldelema`, `pop` and a branch to a segment's prefix.
+The body evidence row measures `prefixSequenceValid`. Three raw construction rows measure
+`rawPrefixesValid` with the same destinations in ascending, descending and shuffled order.
+Each branch or switch destination requires one lookup of its preceding instruction. Compiled
+code reads a single array for the method. Kernel reduction shares the suffix at each pc.
+Each row permits at most 25% growth in heartbeats per instruction when the size quadruples.
+Each reordered row must also stay within 2% of ascending at each size. Run the rows with
 `dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
 
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of

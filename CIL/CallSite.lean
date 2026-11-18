@@ -57,6 +57,8 @@ structure CallSite where
   returnsValue : Bool
   /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
   ownerArgumentCount : Nat := 0
+  /-- The target is a static virtual MethodDef declared on an interface in a carried slice. -/
+  staticVirtualInterfaceSlot : Bool := false
   deriving DecidableEq, Repr
 
 /-- The type that declares the method a site calls. -/

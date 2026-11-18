@@ -123,8 +123,7 @@ static MethodHoles Inspect(MethodDefinition method)
             allHomes.Add(argument);
             if (live) liveHomes.Add(argument);
         }
-        if (!live && instruction.OpCode.OpCodeType == OpCodeType.Prefix &&
-            instruction.OpCode.Code != Code.Unaligned)
+        if (!live && instruction.OpCode.OpCodeType == OpCodeType.Prefix)
             prefixes.Add(new(pc, instruction.Offset, instruction.OpCode.Name));
     }
     allHomes.ExceptWith(liveHomes);
@@ -144,8 +143,6 @@ static void CheckInspection()
     using var module = ModuleDefinition.CreateModule("HoleChecks", ModuleKind.Dll);
     var owner = new TypeDefinition("", "Receiver", TypeAttributes.Public, module.TypeSystem.Object);
     module.Types.Add(owner);
-    var field = new FieldDefinition("Value", FieldAttributes.Static, module.TypeSystem.Int32);
-    owner.Fields.Add(field);
     var method = new MethodDefinition("Body", MethodAttributes.Public, module.TypeSystem.Void);
     owner.Methods.Add(method);
     var first = new ParameterDefinition(module.TypeSystem.Int32);
@@ -160,8 +157,9 @@ static void CheckInspection()
         Instruction.Create(OpCodes.Starg, second), Instruction.Create(OpCodes.Ldc_I4_0),
         Instruction.Create(OpCodes.Starg_S, first), Instruction.Create(OpCodes.Ldnull),
         Instruction.Create(OpCodes.Unaligned, (byte)1), Instruction.Create(OpCodes.Ldind_I4),
-        Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Volatile),
-        Instruction.Create(OpCodes.Ldsfld, field), Instruction.Create(OpCodes.Pop), finish
+        Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ldnull), Instruction.Create(OpCodes.Ldc_I4_0),
+        Instruction.Create(OpCodes.Readonly), Instruction.Create(OpCodes.Ldelema, module.TypeSystem.Int32),
+        Instruction.Create(OpCodes.Pop), finish
     ];
     foreach (var instruction in body) method.Body.Instructions.Add(instruction);
     // Decoded instructions have byte offsets independently of their instruction indices.
@@ -173,7 +171,8 @@ static void CheckInspection()
     string[] expected =
     [
         "homes\tSystem.Void Receiver::Body(System.Int32,System.Int32)\t2",
-        "prefix\tSystem.Void Receiver::Body(System.Int32,System.Int32)\tpc=11\tIL_0016\tvolatile."
+        "prefix\tSystem.Void Receiver::Body(System.Int32,System.Int32)\tpc=8\tIL_0011\tunaligned.",
+        "prefix\tSystem.Void Receiver::Body(System.Int32,System.Int32)\tpc=13\tIL_0018\treadonly."
     ];
     if (!Rows(result).SequenceEqual(expected, StringComparer.Ordinal))
         throw new InvalidOperationException("Incorrect argument or prefix position:\n" +

@@ -182,15 +182,16 @@ def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature 
   returnType := closed.returnType
   initLocals := closed.initLocals
 
-/-- Bind non-instruction method fields that affect frame setup and return behavior. -/
+/-- Bind frame and return metadata, static-field instructions and all raw prefix sequences. -/
 def MethodShapeValid (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.locals = method.localKinds.map (LocalKind.initialValue closed.initLocals) ∧
-  methodShapeInstructions closed method = true
+  methodShapeInstructions closed method = true ∧
+  prefixSequenceValid closed.returnType closed.code = true
 
 instance (closed : RawMethod) (method : Method) :
     Decidable (MethodShapeValid closed method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- The method's declared signature is the one its closed metadata implies. -/
 def DeclaredValid (closed : RawMethod) (method : Method) : Prop :=

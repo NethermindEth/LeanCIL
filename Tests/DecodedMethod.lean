@@ -49,6 +49,94 @@ theorem add_decodes :
   cil_kernel_rfl
 #print axioms add_decodes
 
+/-- A dead constrained call whose target is an ordinary static method. -/
+private def ordinaryStaticRaw := method 8 false [] [instr 0 42, instr 1 22,
+  instr 2 0xFE16 (.type objectType), instr 8 40 (.call writeLineSite), instr 13 42]
+
+/-- A dead tail call returning an integer in a void method. -/
+private def wrongTailRaw := method 8 false [] [instr 0 42, instr 1 0xFE14,
+  instr 3 40 (.call getSite), instr 8 42]
+
+/-- An unreachable indirect tail call returning an integer from a void method. -/
+private def wrongIndirectTailRaw := method 8 false [] [instr 0 42, instr 1 0xFE14,
+  instr 3 41 (.indirectCall int32 [] false false 0), instr 8 42]
+
+/-- A static method without a virtual interface slot cannot take a constrained receiver. -/
+theorem ordinary_static_prefix_refused :
+    (Method.ofRaw? .scalar {} [] ordinaryStaticRaw []).isNone &&
+      !decide (MethodShapeValid ordinaryStaticRaw (frame [])) := by
+  decide +kernel
+#print axioms ordinary_static_prefix_refused
+
+/-- An unreachable tail transfer still returns the enclosing method's declared result. -/
+theorem tail_result_mismatch_refused :
+    (Method.ofRaw? .scalar {} [] wrongTailRaw []).isNone &&
+      !decide (MethodShapeValid wrongTailRaw (frame [])) := by
+  decide +kernel
+#print axioms tail_result_mismatch_refused
+
+/-- Refusal by the closed method shape excludes every full evidence record for these bodies. -/
+theorem dead_call_evidence_refused (item : MethodEvidence) (emitted : Method)
+    (layouts : List RawLayout) (computed : Array ComputedLayout) (pins : List AssemblyPin)
+    (items : List MethodEvidence) (imports : List ImportSlot)
+    (body : item.closed = ordinaryStaticRaw ∨ item.closed = wrongTailRaw ∨
+      item.closed = wrongIndirectTailRaw) :
+    ¬ MethodEvidenceValid layouts computed pins items imports item emitted := by
+  intro valid
+  have prefixes := valid.2.2.2.2.2.2.1.2.2.2.2
+  rcases body with invalid | invalid | invalid <;> rw [invalid] at prefixes <;>
+    exact absurd prefixes (by decide +kernel)
+#print axioms dead_call_evidence_refused
+
+/-- Bytes that decode to either invalid body cannot construct a method. -/
+theorem dead_call_bytes_refused {pins : List AssemblyPin} {assembly : AssemblyPin}
+    {body : BodyEvidence} {raw : RawMethod} {signature : String}
+    (decodes : BodyDecodes pins assembly body raw [] signature)
+    (invalid : raw = ordinaryStaticRaw ∨ raw = wrongTailRaw) :
+    Method.ofBody? .scalar {} [] body raw [] = none := by
+  rw [Method.ofBody?_of_decodes decodes]
+  rcases invalid with rfl | rfl <;> decide +kernel
+#print axioms dead_call_bytes_refused
+
+/-- Branch entry must include the readonly modifier when constructing a method from raw code. -/
+theorem raw_prefix_entry_refused :
+    let raw := method 8 false [] [instr 0 20, instr 1 22, instr 2 43 (.target 4),
+      instr 4 0xFE1E, instr 6 143 (.type int32), instr 11 38, instr 12 42]
+    (Method.ofRaw? .scalar {} [] raw []).isNone = true := by
+  decide +kernel
+#print axioms raw_prefix_entry_refused
+
+/-- An unordered switch may target the prefix and return, but cannot enter the element address. -/
+theorem raw_switch_prefix_entry :
+    let raw := fun targets => [instr 0 69 (.targets targets), instr 16 0xFE1E,
+      instr 18 143 (.type int32), instr 23 42]
+    rawPrefixesValid .void (raw [3, 1, 3, 2^128]) && !rawPrefixesValid .void (raw [3, 2, 3]) := by
+  decide +kernel
+#print axioms raw_switch_prefix_entry
+
+/-- A malformed prefix anywhere in a method precludes both decoding and shape evidence. -/
+theorem invalid_prefix_sequences_refused :
+    let modifier := instr 0 0xFE12 (.integer 1)
+    let load := instr 3 0x4A
+    let add := instr 3 0x58
+    let readOnly := instr 0 0xFE1E
+    let owner := TypeExpr.object "T" "Account"
+    let field := instr 3 123 (.field owner 0 (.atom runtimeScope "System.Int32") name!"n" false)
+    let address := instr 4 143 (.type owner)
+    let ret := instr 8 42
+    let cases := [[modifier, add], [instr 0 0xFE12 (.integer 3), field], [instr 0 0xFE12, load],
+      [instr 0 0xFE13, load], [instr 0 0xFE14, add], [instr 0 0xFE16 (.type owner), add],
+      [instr 0 0xFE19 (.integer 7), add], [instr 0 0xFE19 (.integer 255), field],
+      [instr 0 0xFE1E (.integer 3), address], [readOnly, ret], [readOnly, readOnly, address],
+      [modifier, instr 3 0xFE13, load], [ret, readOnly], [ret, instr 1 0xFE19 (.integer 4), field],
+      [modifier, instr 3 0xFE17 (.integer 1)], [modifier, instr 3 0x4A (.integer 1)]]
+    cases.all (fun code =>
+      let raw := { addRaw with code }
+      (Method.ofRaw? .scalar {} [] raw []).isNone && !decide (MethodShapeValid raw (frame []))) =
+        true := by
+  decide +kernel
+#print axioms invalid_prefix_sequences_refused
+
 /-- An explicit receiver cannot be decoded as an additional implicit argument. -/
 theorem explicit_this_has_no_raw_method :
     (Method.ofRaw? .scalar {} [] { addRaw with explicitThis := true } []).isNone = true := by

@@ -27,7 +27,7 @@ namespace CIL.Extraction
     or opaque vector locals. The table is not read here; `ManagedCallsValid` ties each entry to
     its raw site. Every instruction decodes, so `none` means the instantiation failed (an
     explicit receiver signature has none), a parameter, local or homed argument type has no
-    storage or slot kind, or the code fails the argument rule of the evidence check,
+    storage or slot kind, a prefix sequence is invalid, or the code fails the argument rule,
     `validateArgumentOpAt`, at some pc. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (source : RawMethod) (arguments : List TypeExpr) :
@@ -40,7 +40,8 @@ def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnv
   let parameterHomes ← expectedHomes environment.layouts storage reachable
   -- An argument instruction outside the declared arguments has no frame slot or incoming value.
   let homes := requiredHomeIndices storage reachable
-  unless argumentInstructionsValid storage homes reachable code do none
+  unless rawPrefixesValid closed.returnType closed.code &&
+      argumentInstructionsValid storage homes reachable code do none
   return {
     profile := profile, code := code, localKinds := localKinds,
     locals := localKinds.map (LocalKind.initialValue source.initLocals),

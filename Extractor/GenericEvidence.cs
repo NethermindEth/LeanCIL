@@ -108,15 +108,19 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var (method, name, owners, extracted, typeArguments) = MethodOperand(reference);
         var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
+        var resolved = extracted ? definition.Resolve() : null;
+        var slot = InstructionPrefixes.IsStaticVirtualSlot(resolved) ? "staticVirtualInterfaceSlot := true, " : "";
         var target = extracted
-            ? $".managed {definition.Resolve().MetadataToken.ToUInt32()}"
+            ? $".managed {resolved!.MetadataToken.ToUInt32()}"
             : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
                 (LayoutEvidence.Scope(definition.DeclaringType) + "::" + ExternalSignature(definition)),
                 reachable.Contains(instruction));
-        return $"{{ method := {method.ToLean()}, name := {Quote(name)}, target := {target}, " +
-            $"typeArguments := {typeArguments}, ownerArgumentCount := {owners}, " +
-            $"parameterCount := {reference.Parameters.Count}, " +
-            $"returnsValue := {Bool(Returned(reference).FullName != "System.Void")} }}";
+        return $$"""
+            { method := {{method.ToLean()}}, name := {{Quote(name)}}, target := {{target}},
+            typeArguments := {{typeArguments}}, ownerArgumentCount := {{owners}},
+            {{slot}}parameterCount := {{reference.Parameters.Count}},
+            returnsValue := {{Bool(Returned(reference).FullName != "System.Void")}} }
+            """.ReplaceLineEndings(" ");
     }
 
     /// <summary>

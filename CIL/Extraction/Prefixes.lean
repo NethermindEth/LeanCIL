@@ -1,15 +1,15 @@
 import CIL.Extraction.Generics
 
 /-!
-# Branch entry after instruction prefixes
+# Instruction prefixes and branch entry
 
 A prefix modifies the instruction after it, so ECMA-335 forbids a branch into that instruction.
 `PrefixEntryFree` states the rule for every pc of raw code, live or not. Body decoding refuses
 such a branch, so the code of every method with body evidence satisfies it
 (`checkBody_prefixEntryFree`, `MethodEvidenceValid.prefixEntryFree`) and the evidence check
-decides nothing more. `prefixEntryFreeWith` decides the rule in one pass from
-`branchTargetMask`, a bit mask of the branch destinations built once per body
-(`prefixEntryFree_iff`), for code no body evidence covers.
+decides nothing more. Raw construction checks branch destinations and prefix structure in the
+same walk with `rawPrefixesValid`. Shape evidence checks the prefix operand and taker. A tail
+transfer also requires the enclosing return type and the adjacent return.
 -/
 
 namespace CIL.Extraction
@@ -21,112 +21,169 @@ def isPrefixOpcode (opcode : Nat) : Bool :=
     (opcode == 0xFE12 || opcode == 0xFE13 || opcode == 0xFE14 || opcode == 0xFE16 ||
       opcode == 0xFE19 || opcode == 0xFE1E)
 
+/-- A modeled unaligned access with the operand its opcode encodes. -/
+def unalignedTaker (raw : RawInstruction) : Bool :=
+  match raw.operand with
+  | .none => (70 ≤ raw.opcode && raw.opcode ≤ 77) || (82 ≤ raw.opcode && raw.opcode ≤ 85) ||
+      raw.opcode == 223 || raw.opcode == 65047 || raw.opcode == 65048
+  | .field _ _ _ _ false => raw.opcode == 123 || raw.opcode == 125
+  | .type _ => raw.opcode == 113 || raw.opcode == 129
+  | _ => false
+
+/-- The alignment in bytes specified by a well-formed `unaligned.` operand. -/
+def prefixAlignment : RawOperand → Option Nat
+  | .integer 1 => some 1
+  | .integer 2 => some 2
+  | .integer 4 => some 4
+  | _ => none
+
+/-- The call opcode for a constrained instance or static slot. -/
+def constrainedCallOpcode (site : CallSite) : Nat := if site.hasThis then 111 else 40
+
+/-- Whether the model admits the prefix operand and the immediately following instruction.
+    Volatile accesses and suppressed runtime checks have no modeled form. -/
+def prefixTakes (modifier next : RawInstruction) : Bool :=
+  match modifier.opcode, modifier.operand with
+  | 0xFE12, operand => (prefixAlignment operand).isSome && unalignedTaker next
+  | 0xFE13, _ | 0xFE19, _ => false
+  | 0xFE14, .none => match next.opcode, next.operand with
+    | 40, .call _ | 41, .indirectCall .. => true
+    | 111, .call site => site.hasThis
+    | _, _ => false
+  | 0xFE16, .type _ => match next.operand with
+    | .call site => next.opcode == constrainedCallOpcode site &&
+      (site.hasThis || site.staticVirtualInterfaceSlot)
+    | _ => false
+  | 0xFE1E, .none => next.opcode == 143 && (next.operand matches .type _)
+  | _, _ => false
+
+/-- The preceding instruction carries a modifier that the current instruction cannot take. -/
+def invalidPredecessor (previous : Option RawInstruction) (raw : RawInstruction) : Bool :=
+  previous.any fun before => isPrefixOpcode before.opcode && !prefixTakes before raw
+
+/-- A tail transfer returns the method's result and ends at an adjacent operandless return. -/
+private def tailResultValid (result : TypeExpr) (rest : List RawInstruction) : Bool :=
+  match rest with
+  | call :: ⟨_, 42, .none⟩ :: _ => match call.operand with
+    | .call site => site.returnType == result
+    | .indirectCall returned .. => returned == result
+    | _ => false
+  | _ => false
+
+/-- Each modifier takes the next instruction, and a tail transfer returns the enclosing result.
+    Raw construction also checks each instruction's branch operands during this walk. -/
+def prefixSequenceValid (result : TypeExpr) (code : List RawInstruction)
+    (entriesValid : RawInstruction → Bool := fun _ => true) : Bool :=
+  match code with
+  | [] => true
+  | instruction :: rest =>
+    entriesValid instruction && (!isPrefixOpcode instruction.opcode ||
+      (rest.head?.any (prefixTakes instruction) &&
+        (instruction.opcode != 0xFE14 || tailResultValid result rest))) &&
+      prefixSequenceValid result rest entriesValid
+
 /-- No branch or switch of the code enters the instruction after a prefix; a branch to the
     prefix itself stays allowed. -/
 def PrefixEntryFree (code : List RawInstruction) : Prop :=
   ∀ pc instruction, code[pc]? = some instruction → isPrefixOpcode instruction.opcode = true →
     code.any (branchesTo (pc + 1)) = false
 
-/-- Whether no instruction of `code`, the first at `pc`, is a prefix whose next pc
-    `targeted` names. -/
-def prefixEntryFreeWith (targeted : Nat → Bool) : Nat → List RawInstruction → Bool
-  | _, [] => true
-  | pc, instruction :: rest =>
-    (!isPrefixOpcode instruction.opcode || !targeted (pc + 1)) &&
-      prefixEntryFreeWith targeted (pc + 1) rest
+/-- The source suffix at a pc. Kernel reduction shares each preceding suffix across lookups. -/
+private def suffixAt (code : List RawInstruction) : Nat → List RawInstruction
+  | 0 => code
+  | pc + 1 => (suffixAt code pc).tail
 
-/-- The one-pass rule holds exactly when no prefix of the code, the first at `start`, has a
-    targeted next pc. -/
-theorem prefixEntryFreeWith_iff (targeted : Nat → Bool) (start : Nat)
-    (code : List RawInstruction) :
-    prefixEntryFreeWith targeted start code = true ↔
-      ∀ pc instruction, code[pc]? = some instruction → isPrefixOpcode instruction.opcode = true →
-        targeted (start + pc + 1) = false := by
-  induction code generalizing start with
-  | nil => simp [prefixEntryFreeWith]
-  | cons first rest restFree =>
-    simp only [prefixEntryFreeWith, Bool.and_eq_true, Bool.or_eq_true, Bool.not_eq_true',
-      restFree]
-    constructor
-    · rintro ⟨firstFree, restClear⟩ pc instruction found isPrefix
-      cases pc with
-      | zero =>
-        simp only [List.getElem?_cons_zero, Option.some.injEq] at found
-        subst found
-        rcases firstFree with notPrefix | clear
-        · rw [notPrefix] at isPrefix; cases isPrefix
-        · simpa using clear
-      | succ pc =>
-        have := restClear pc instruction (by simpa using found) isPrefix
-        rwa [show start + 1 + pc + 1 = start + (pc + 1) + 1 by omega] at this
-    · intro clear
-      refine ⟨?_, fun pc instruction found isPrefix => ?_⟩
-      · cases isPrefix : isPrefixOpcode first.opcode
-        · exact .inl rfl
-        · exact .inr (by simpa using clear 0 first rfl isPrefix)
-      · have := clear (pc + 1) instruction (by simpa using found) isPrefix
-        rwa [show start + (pc + 1) + 1 = start + 1 + pc + 1 by omega] at this
+/-- The shared suffix begins at exactly its pc. -/
+private theorem suffixAt_eq_drop (code : List RawInstruction) (pc : Nat) :
+    suffixAt code pc = code.drop pc := by
+  induction pc with
+  | zero => rfl
+  | succ pc ih => rw [suffixAt, ih, List.tail_drop]
+#print axioms suffixAt_eq_drop
 
-#print axioms prefixEntryFreeWith_iff
+/-- Kernel lookup bounds the pc before reducing any suffix. -/
+private def instructionAt? (code : Array RawInstruction) (pc : Nat) : Option RawInstruction :=
+  if pc < code.size then (suffixAt code.toList pc).head? else none
 
-/-- Set bit `target` of `mask` for each of `targets`. -/
-def maskTargets (targets : List Nat) (mask : Nat) : Nat :=
-  targets.foldr (fun target mask => mask ||| 1 <<< target) mask
+/-- Compiled validation reads the instruction directly from the method's indexed code. -/
+private def arrayInstructionAt? (code : Array RawInstruction) (pc : Nat) := code[pc]?
 
-/-- The branch and switch destinations of `code` as a bit mask, built in one pass, whose bits
-    the kernel tests in constant work (`testBit_branchTargetMask`). -/
-def branchTargetMask : List RawInstruction → Nat
-  | [] => 0
-  | instruction :: rest =>
-    match instruction.operand with
-    | .target target => branchTargetMask rest ||| 1 <<< target
-    | .targets targets => maskTargets targets (branchTargetMask rest)
-    | _ => branchTargetMask rest
+/-- The array and shared-suffix lookups return the same instruction at every pc. -/
+@[csimp] private theorem instructionAt?_eq : instructionAt? = arrayInstructionAt? := by
+  funext code pc
+  simp only [instructionAt?, arrayInstructionAt?, suffixAt_eq_drop, List.head?_drop,
+    Array.getElem?_toList]
+  split
+  · rfl
+  · exact (getElem?_neg code pc (by assumption)).symm
+#print axioms instructionAt?_eq
 
-/-- A bit of `maskTargets` is set for each listed target and each bit already set. -/
-theorem testBit_maskTargets (targets : List Nat) (mask bit : Nat) :
-    (maskTargets targets mask).testBit bit = (targets.contains bit || mask.testBit bit) := by
-  induction targets with
-  | nil => simp [maskTargets]
-  | cons first rest restBits =>
-    simp only [maskTargets, List.foldr_cons] at restBits ⊢
-    rw [Nat.testBit_or, restBits, Nat.one_shiftLeft, Nat.testBit_two_pow]
-    by_cases same : first = bit
-    · subst same; simp
-    · have other : bit ≠ first := fun equal => same equal.symm
-      simp [same, other]
+/-- A branch may enter the first pc or any pc without a prefix immediately before it. -/
+private def entryAllowed (code : Array RawInstruction) : Nat → Bool
+  | 0 => true
+  | pc + 1 => !(instructionAt? code pc).any (isPrefixOpcode ·.opcode)
 
-#print axioms testBit_maskTargets
+/-- Every destination of the instruction satisfies the given entry rule. -/
+private def branchEntriesValid (allowed : Nat → Bool) (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target target => allowed target
+  | .targets targets => targets.all allowed
+  | _ => true
 
-/-- Bit `target` of the mask is set exactly when some instruction branches to `target`. -/
-theorem testBit_branchTargetMask (code : List RawInstruction) (target : Nat) :
-    (branchTargetMask code).testBit target = code.any (branchesTo target) := by
+/-- The combined walk checks prefix structure and all branch and switch operands. -/
+theorem prefixSequenceValid_eq (result : TypeExpr) (code : List RawInstruction)
+    (allowed : Nat → Bool) :
+    prefixSequenceValid result code (branchEntriesValid allowed) =
+      (prefixSequenceValid result code && (branchTargets code).all allowed) := by
   induction code with
-  | nil => simp [branchTargetMask]
-  | cons instruction rest restBits =>
-    simp only [branchTargetMask, List.any_cons]
-    cases operand : instruction.operand
-    case target destination =>
-      simp only [operand, Nat.testBit_or, restBits, Nat.one_shiftLeft, Nat.testBit_two_pow,
-        branchesTo]
-      by_cases same : destination = target
-      · subst same; simp
-      · simp [same]
-    case targets destinations =>
-      simp [operand, testBit_maskTargets, branchesTo, restBits]
-    all_goals simp [operand, branchesTo, restBits]
+  | nil => rfl
+  | cons first rest ih =>
+    have entries : (branchTargets (first :: rest)).all allowed =
+        (branchEntriesValid allowed first && (branchTargets rest).all allowed) := by
+      cases first with
+      | mk offset opcode operand =>
+        cases operand <;> simp [branchTargets, branchEntriesValid]
+    simp only [prefixSequenceValid, ih, entries, Bool.true_and]
+    ac_rfl
+#print axioms prefixSequenceValid_eq
 
-#print axioms testBit_branchTargetMask
-
-/-- Read through the body's branch-target mask, the one-pass rule decides `PrefixEntryFree`. -/
+/-- Looking up each destination's preceding instruction decides prefix-entry freedom. -/
 theorem prefixEntryFree_iff (code : List RawInstruction) :
-    prefixEntryFreeWith (branchTargetMask code).testBit 0 code = true ↔ PrefixEntryFree code := by
-  rw [prefixEntryFreeWith_iff]
-  simp only [testBit_branchTargetMask, Nat.zero_add, PrefixEntryFree]
-
+    (branchTargets code).all (entryAllowed code.toArray) = true ↔ PrefixEntryFree code := by
+  rw [List.all_eq_true]
+  constructor
+  · intro clear pc instruction found isPrefix
+    rw [← branchTargets_contains, Bool.eq_false_iff]
+    intro contains
+    have blocked := clear _ (List.contains_iff_mem.mp contains)
+    simp [entryAllowed, instructionAt?_eq, arrayInstructionAt?, found, isPrefix] at blocked
+  · intro free target member
+    cases target with
+    | zero => rfl
+    | succ pc =>
+      simp only [entryAllowed, instructionAt?_eq, arrayInstructionAt?, List.getElem?_toArray]
+      cases found : code[pc]? with
+      | none => rfl
+      | some instruction =>
+        simp only [Option.any_some, Bool.not_eq_true', Bool.eq_false_iff]
+        intro isPrefix
+        have clear := free pc instruction found isPrefix
+        rw [← branchTargets_contains] at clear
+        exact Bool.noConfusion ((List.contains_iff_mem.mpr member).symm.trans clear)
 #print axioms prefixEntryFree_iff
 
 instance (code : List RawInstruction) : Decidable (PrefixEntryFree code) :=
   decidable_of_iff _ (prefixEntryFree_iff code)
+
+/-- Raw construction checks prefix windows and every transfer using one indexed body. -/
+def rawPrefixesValid (result : TypeExpr) (code : List RawInstruction) : Bool :=
+  prefixSequenceValid result code (branchEntriesValid (entryAllowed code.toArray))
+
+/-- Raw method validation checks prefix structure and every branch into a prefix's follower. -/
+theorem rawPrefixesValid_iff (result : TypeExpr) (code : List RawInstruction) :
+    rawPrefixesValid result code = true ↔
+      prefixSequenceValid result code = true ∧ PrefixEntryFree code := by
+  rw [rawPrefixesValid, prefixSequenceValid_eq, Bool.and_eq_true, prefixEntryFree_iff]
+#print axioms rawPrefixesValid_iff
 
 end CIL.Extraction

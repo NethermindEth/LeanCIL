@@ -430,6 +430,13 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
     | none => throw (.unresolvedType token)
   if bytesOf call.name != site.name then throw (.operandMismatch token)
   if !call.method.name.spells site.name then throw (.operandMismatch token)
+  if call.staticVirtualInterfaceSlot then
+    let some (position, definition) := site.definition | throw (.operandMismatch token)
+    let index ← env.slice position definition
+    let row ← index.methodDef definition
+    -- MethodAttributes.Static and Virtual, on a type whose metadata declares an interface.
+    if call.hasThis || head.kind != .interfaceType || row.flags &&& 0x50 != 0x50 then
+      throw (.operandMismatch token)
   let expected := site.methodArguments.getD [] ++ (if extracted then ownerList else [])
   if call.typeArguments.length != expected.length || !(expected.zip call.typeArguments).all
       (fun (type, claimed) => frame.admits type claimed) then
