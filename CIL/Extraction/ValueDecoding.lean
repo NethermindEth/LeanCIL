@@ -7,8 +7,9 @@ import CIL.Extraction.Prefixes
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
 conversions, comparisons, integer indirect loads and stores, array allocations, lengths and element
 loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst` and the
-class instance field accesses `ldfld`, `ldflda` and `stfld`, the call `call` and the construction
-`newobj`, with every short and macro form folded into its constructor. `valueEncodingMatches`
+class instance field accesses `ldfld`, `ldflda` and `stfld`, direct and constrained calls, and
+construction by `newobj`, with every short and macro form folded into its constructor.
+`valueEncodingMatches`
 accepts an emitted instruction exactly when it is that decoded instruction, and
 `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand. Instantiation
 changes a decoded instruction only in the type a type operand names, the method a call or
@@ -114,14 +115,14 @@ open Extraction
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
   opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 || opcode == 40 ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
-    (88 <= opcode && opcode <= 106) || opcode == 109 || opcode == 110 || opcode == 115 ||
+    (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 111) || opcode == 115 ||
     opcode == 116 ||
     opcode == 117 || (123 <= opcode && opcode <= 125) || (130 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
     opcode == 224 || (65025 <= opcode && opcode <= 65029) ||
-    (65033 <= opcode && opcode <= 65039) || opcode == 65054
+    (65033 <= opcode && opcode <= 65039) || opcode == 65046 || opcode == 65054
 
 /-- `ldelema` (143) of the element type `type` after `previous`: a read-only address after
     `readonly.`, which it takes, and nothing after any other prefix. -/
@@ -133,36 +134,25 @@ def Instruction.ldelemaAfter? (previous : Option RawInstruction) (type : TypeExp
 
 /-- The instruction `opcode` denotes on the type operand `type` after `previous`: the class
     type test `castclass` (116) or `isinst` (117), or the array instruction `newarr` (141),
-    `ldelem` (163), `stelem` (164) or `ldelema` (143) of that element type. -/
+    `ldelem` (163), `stelem` (164) or `ldelema` (143), or the `constrained.` prefix. -/
 def Instruction.ofType? (previous : Option RawInstruction) (opcode : Nat) (type : TypeExpr) :
     Option Instruction :=
   if opcode == 116 then some (.castclass type) else if opcode == 117 then some (.isinst type)
   else if opcode == 141 then some (.newarr type) else if opcode == 163 then some (.ldelem_any type)
   else if opcode == 164 then some (.stelem_any type)
-  else if opcode == 143 then Instruction.ldelemaAfter? previous type else none
+  else if opcode == 143 then Instruction.ldelemaAfter? previous type
+  else if opcode == 0xFE16 then some .nop else none
 
 /-- Only `castclass` (116), `isinst` (117), `newarr` (141), `ldelem` (163), `stelem` (164)
-    and `ldelema` (143) denote an instruction on a type operand. -/
+    `ldelema` (143) and `constrained.` (0xFE16) denote an instruction on a type operand. -/
 theorem Instruction.ofType?_opcode {previous : Option RawInstruction} {opcode : Nat}
     {type : TypeExpr} {instruction : Instruction}
     (named : Instruction.ofType? previous opcode type = some instruction) :
-    opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 ∨ opcode = 143 := by
+    opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 ∨
+      opcode = 143 ∨ opcode = 0xFE16 := by
   unfold Instruction.ofType? at named
-  revert named
-  cases castclass : opcode == 116
-  · cases isinst : opcode == 117
-    · cases allocation : opcode == 141
-      · cases load : opcode == 163
-        · cases store : opcode == 164
-          · cases address : opcode == 143
-            · intro named
-              first | cases named | simp at named
-            · exact fun _ => .inr (.inr (.inr (.inr (.inr (beq_iff_eq.mp address)))))
-          · exact fun _ => .inr (.inr (.inr (.inr (.inl (beq_iff_eq.mp store)))))
-        · exact fun _ => .inr (.inr (.inr (.inl (beq_iff_eq.mp load))))
-      · exact fun _ => .inr (.inr (.inl (beq_iff_eq.mp allocation)))
-    · exact fun _ => .inr (.inl (beq_iff_eq.mp isinst))
-  · exact fun _ => .inl (beq_iff_eq.mp castclass)
+  repeat' split at named
+  all_goals first | contradiction | simp_all
 
 #print axioms Instruction.ofType?_opcode
 
@@ -176,21 +166,19 @@ private def callPrefixes : Option RawInstruction → CallPrefixes
 def Instruction.ofCallSite? (previous : Option RawInstruction) (opcode : Nat)
     (site : CallSite) : Option Instruction :=
   if opcode == 40 then some (.call site.method (callPrefixes previous))
-  else if opcode == 115 then some (.newobj site.method) else none
+  else if opcode == 115 then some (.newobj site.method)
+  else if opcode == 111 && (callPrefixes previous).constrained.isSome then
+    some (.call site.method (callPrefixes previous))
+  else none
 
-/-- Only `call` (40) and `newobj` (115) denote an instruction on a call site. -/
+/-- Call sites decode at `call` (40), constrained `callvirt` (111), and `newobj` (115). -/
 theorem Instruction.ofCallSite?_opcode {previous : Option RawInstruction} {opcode : Nat}
     {site : CallSite} {instruction : Instruction}
     (named : Instruction.ofCallSite? previous opcode site = some instruction) :
-    opcode = 40 ∨ opcode = 115 := by
+    opcode = 40 ∨ opcode = 115 ∨ opcode = 111 := by
   unfold Instruction.ofCallSite? at named
-  revert named
-  cases called : opcode == 40
-  · cases constructed : opcode == 115
-    · intro named
-      cases named
-    · exact fun _ => .inr (beq_iff_eq.mp constructed)
-  · exact fun _ => .inl (beq_iff_eq.mp called)
+  repeat' split at named
+  all_goals first | contradiction | simp_all
 
 #print axioms Instruction.ofCallSite?_opcode
 
@@ -220,7 +208,7 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
     with short and macro forms folded into it. A type operand gives the type test or typed array
     instruction its opcode names, an instance field of a class the field instruction its opcode
     names and a call site the `call` of the method it names, whose target the method's link table
-    gives, when its opcode is `call`, and its construction when its opcode is `newobj`; any other
+    gives, at `call` or constrained `callvirt`, and its construction at `newobj`. Any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
     operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can write one where
     this admits nothing.
@@ -230,7 +218,7 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
     it, so after `readonly.` only `ldelema` decodes, and `ldelema` after any other prefix does
     not. `readonly.` decodes to `nop`, and not after any prefix. The integer `ldind` and `stind`
     forms take `unaligned.` and decode as without it, since the model accesses memory at
-    alignment 1. A direct call records its tail transfer or constrained receiver. -/
+    alignment 1. A constrained prefix decodes to `nop` and its call records the receiver. -/
 def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction) :
     Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
@@ -355,12 +343,12 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
     · cases found
     · split at found
       · rcases Instruction.ofType?_opcode found
-          with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+          with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
       · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
         rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-      · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs <;>
+      · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
       · rw [opcodeValue, Bool.not_false, Bool.or_true,
           ite_eq_left_of_eq_true _ _ (eq_true rfl)] at found
@@ -390,11 +378,13 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
   · cases found
   · split at found
     · rcases Instruction.ofType?_opcode found
-        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;> cases opcodeIs
+        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
     · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
       rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
-    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs <;> cases opcodeIs
+    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
     · cases operand
       case none =>
         have prefixNop : (if (previous.any fun before => isPrefixOpcode before.opcode) = true
@@ -436,7 +426,8 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
     · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
       rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
-    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs <;> cases opcodeIs
+    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
+        cases opcodeIs
     · cases operand <;> cases found
 
 #print axioms Instruction.ofRaw?_ldelema
@@ -708,10 +699,7 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
       split
       · rfl
       · unfold Instruction.ofType? Instruction.ldelemaAfter?
-        cases opcode == 116 <;> cases opcode == 117 <;> cases opcode == 141 <;>
-          cases opcode == 163 <;> cases opcode == 164 <;> cases opcode == 143 <;>
-          cases previous.any (fun before => before.opcode == 65054) <;>
-          cases previous.any (fun before => isPrefixOpcode before.opcode) <;> rfl
+        repeat' first | rfl | split
     all_goals exact absurd sameType Bool.false_ne_true
   case call before =>
     cases operand
@@ -723,7 +711,7 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
       split
       · rfl
       · unfold Instruction.ofCallSite?
-        cases opcode == 40 <;> cases opcode == 115 <;> rfl
+        repeat' first | rfl | split
     all_goals exact absurd sameCall Bool.false_ne_true
   case indirectCall =>
     cases operand <;> try exact absurd sameKind Bool.false_ne_true

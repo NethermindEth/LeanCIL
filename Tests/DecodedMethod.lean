@@ -263,6 +263,18 @@ theorem generic_cast_tests_its_argument :
   cil_kernel_rfl
 #print axioms generic_cast_tests_its_argument
 
+/-- Instantiation substitutes the method argument into the receiver of the decoded call. -/
+theorem generic_constrained_receiver :
+    let slot := { getSite with method.hasThis := true }
+    let caller := { method 8 false [] [instr 0 2, instr 1 0xFE16 (.type (.parameter 0)),
+        instr 7 111 (.call slot), instr 12 42] with
+      genericParameters := [{ flags := 0, types := [] }], returnType := int32,
+      parameters := [.byref (.parameter 0)] }
+    (Method.ofRaw? .scalar {} [(2, .direct 1)] caller [int32]).map (·.code) =
+      some [.ldarg 0, .nop, .call slot.method { constrained := some int32 }, .ret] := by
+  cil_kernel_rfl
+#print axioms generic_constrained_receiver
+
 /-- `ldnull; unbox.any object; pop; ret`, with the type token of the world's `System.Object`. -/
 private def unboxBytes : List Nat :=
   [0x22, 0x14, 0xA5] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]

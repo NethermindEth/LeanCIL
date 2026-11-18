@@ -754,11 +754,11 @@ errors, so a file builds only when the kernel confirms what compiled code comput
 `FieldRef` constant as that constant, so the facts `cil_field_shape` states about the constant
 apply to the method; a listed constant that names no field operand is an error.
 
-The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs, the
-extraction translates each `call` to the plain call the decoder gives rather than to a model, a
-constrained or a tail call, and each `newobj` to a construction rather than to a runtime model,
-and every pc is reachable under the profile; a method with a pc the reachability certificate rules
-out keeps its literal, whose `.unadmitted` hole at that pc the feature check requires. Its
+The extractor defines a method this way when every pc is reachable under the profile, each
+instruction decodes, and each call or construction has the operation its decoder gives.
+A constrained prefix decodes with its adjacent instance `callvirt` or static `call`. A method
+with a pc the reachability certificate rules out keeps its literal, whose `.unadmitted` hole at
+that pc the feature check requires. Its
 `Extracted.lean` then states the method as
 
 ```text

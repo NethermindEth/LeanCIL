@@ -302,6 +302,10 @@ at most four loads.
 
 ### Constrained struct calls
 
+The decoder represents `constrained. T` as a no-op at the prefix pc. The adjacent call names the
+slot and carries the closed receiver type `T`. Lean checks the link at the call pc against the
+implementation selected for that receiver. An unprefixed `callvirt` still requires literal emission.
+
 An adjacent `constrained. T; callvirt` pair supports a concrete, reference-free struct `T` and a
 method declared on that struct or a directly implemented interface. `T`, the slot's interface and,
 for an interface-level body, every interface of `T` must be declared in the extracted assembly or a

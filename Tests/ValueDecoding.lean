@@ -46,6 +46,13 @@ private def accountConstruction : CallSite := {
   name := ".ctor", target := .managed 1, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
+/-- The constrained instance slot, which decodes only after the receiver prefix. -/
+private def instanceSite : CallSite := { callSite with method.hasThis := true }
+
+/-- The prefix carried by a named decode-table row. -/
+private def predecessor (raw : RawInstruction) : Option RawInstruction :=
+  if raw.opcode == 111 then some ⟨0, 0xFE16, .type int32⟩ else none
+
 /-- One raw instruction per value opcode, every short, long and macro form, with the instruction
     ECMA-335 assigns it; constants include the extremes of each form's range and locals the largest
     index each width encodes. -/
@@ -145,10 +152,12 @@ def named : List (RawInstruction × Instruction) := [
   -- Array allocations and element accesses that name their element type.
   (⟨0, 141, .type int32⟩, .newarr int32), (⟨0, 163, .type int32⟩, .ldelem_any int32),
   (⟨0, 164, .type int32⟩, .stelem_any int32), (⟨0, 143, .type int32⟩, .ldelema int32 false),
-  -- The `readonly.` prefix, which only `ldelema` takes.
+  -- Prefixes recorded by the following address or call.
   (⟨0, 65054, .none⟩, .nop),
+  (⟨0, 0xFE16, .type int32⟩, .nop),
   -- Calls and constructions, whose target the link at their pc gives.
   (⟨0, 40, .call callSite⟩, .call callSite.method),
+  (⟨6, 111, .call instanceSite⟩, .call instanceSite.method { constrained := some int32 }),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
@@ -163,8 +172,9 @@ def undecoded : List Name := [
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
   ``Instruction.ldtoken]
 
-/-- What each named opcode decodes to. -/
-def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? none ·.1)
+/-- What each named opcode decodes to after its predecessor. -/
+def decodedNamed : List (Option Instruction) :=
+  named.map fun (raw, _) => Instruction.ofRaw? (predecessor raw) raw
 
 /-- Raw instructions over every one-byte and two-byte opcode with each operand kind the value
     family reads, plus text, a type, a class field and a call site; `ofRaw?` must give `none`
@@ -183,7 +193,8 @@ theorem ofRaw?_exact :
       (Instruction.ofRaw? none raw).isNone || Instruction.valueOpcode raw.opcode) = true ∧
     probes.all (fun raw => !Instruction.valueOpcode raw.opcode ||
       named.any (·.1.opcode == raw.opcode)) = true ∧
-    named.all (fun (raw, expected) => valueEncodingMatches none raw expected) = true := by
+    named.all (fun (raw, expected) => valueEncodingMatches (predecessor raw) raw expected) =
+      true := by
   decide +kernel
 
 /-- info: 'Tests.ValueDecoding.ofRaw?_exact' depends on axioms: [propext] -/
@@ -218,6 +229,32 @@ theorem direct_call_prefixes :
       (.call callSite.method { constrained := some int32 }) := by
   decide +kernel
 #print axioms direct_call_prefixes
+
+/-- Both constrained call forms decode to the prefix pc and the slot with its receiver. -/
+theorem constrained_call_windows :
+    let modifier : RawInstruction := ⟨0, 0xFE16, .type int32⟩
+    let staticSite := { callSite with staticVirtualInterfaceSlot := true }
+    Instruction.ofRawCode none [modifier, ⟨6, 111, .call instanceSite⟩] =
+      [.nop, .call instanceSite.method { constrained := some int32 }] ∧
+    Instruction.ofRawCode none [modifier, ⟨6, 40, .call staticSite⟩] =
+      [.nop, .call callSite.method { constrained := some int32 }] := by
+  exact ⟨rfl, rfl⟩
+#print axioms constrained_call_windows
+
+/-- Invalid constrained windows fail the method prefix check, including at the end of a body. -/
+theorem invalid_constrained_windows :
+    let modifier : RawInstruction := ⟨0, 0xFE16, .type int32⟩
+    let instanceCall : RawInstruction := ⟨6, 111, .call instanceSite⟩
+    let staticSite := { callSite with staticVirtualInterfaceSlot := true }
+    let windows := [[modifier, ⟨6, 111, .call staticSite⟩],
+      [modifier, ⟨6, 40, .call instanceSite⟩],
+      [modifier, ⟨6, 0, .none⟩], [⟨0, 0xFE1E, .none⟩, modifier, instanceCall], [modifier],
+      [{ modifier with operand := .integer 1 }, instanceCall],
+      [⟨0, 0xFE14, .none⟩, modifier, instanceCall, ⟨11, 42, .none⟩]]
+    windows.all (fun code => !rawPrefixesValid .void code) &&
+      (Instruction.ofRaw? none instanceCall).isNone := by
+  decide +kernel
+#print axioms invalid_constrained_windows
 
 /-- Suppressed checks have no scalar emission for any byte operand. -/
 theorem no_prefix_refused :

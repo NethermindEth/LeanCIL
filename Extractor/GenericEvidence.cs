@@ -540,8 +540,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Ldelem_I8, Code.Ldelem_I, Code.Ldelem_Ref, Code.Stelem_I, Code.Stelem_I1, Code.Stelem_I2,
         Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref, Code.Newarr, Code.Ldelem_Any, Code.Stelem_Any,
         Code.Ldelema, Code.Readonly,
-        // Class type tests, class instance field accesses, direct calls and constructions.
-        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Newobj,
+        // Class type tests and instance fields, direct and constrained calls, and constructions.
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
+        Code.Call, Code.Constrained, Code.Callvirt, Code.Newobj,
         // Branches.
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
@@ -583,8 +584,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>
     /// Why the extraction does not define `method` from its decoder, or null when it does: `Method.ofRaw?` writes no
-    /// hole at any pc, every pc is in the reachability certificate, each `call` is translated, as the decoder gives
-    /// it, to a plain call and each `newobj` to a construction, which `operations` holds by pc. A wrong null fails
+    /// hole at any pc, every pc is reachable, and each call or construction has the operation its decoder gives.
+    /// An unprefixed callvirt has no decoding. A wrong null fails
     /// the build at the method's `cil_decoded_method` definition or its call check. One pass over the body.
     /// </summary>
     internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
@@ -596,10 +597,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var instruction = instructions[pc];
             if (!reachable.Contains(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
-            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
+            var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
+            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction) ||
+                (instruction.OpCode.Code == Code.Callvirt && !constrained))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
             var translated = instruction.OpCode.Code switch
             {
+                Code.Call or Code.Callvirt when constrained => operations[pc] is Call { Constrained: true },
                 Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
                 Code.Newobj => operations[pc] is Newobj,
                 _ => true

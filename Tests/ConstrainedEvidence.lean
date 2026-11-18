@@ -1,4 +1,5 @@
 import CIL.Extraction.Constrained
+import CIL.Extraction.ValueDecoding
 import Tests.Support
 
 /-! # Constrained-call evidence
@@ -69,6 +70,17 @@ private def callAs (op : Instruction) : Method := { emitted with code := emitted
 theorem concrete_call_valid :
     ConstrainedCallsValid types methods raw [true, true, true, true] emitted := by decide +kernel
 #print axioms concrete_call_valid
+
+/-- A decoded call must link to the resolved body and name its dispatch receiver. -/
+theorem forged_decoded_call_rejected :
+    let valid := fun (source : RawMethod) (link : Nat) =>
+      ConstrainedCallsValid types methods source [true, true, true, true]
+        { emitted with
+          code := Instruction.ofRawCode none source.code, links := [(2, .direct link)] }
+    let other := raw.code.set 1 ⟨1, 0xFE16, .type (.aggregate "Fixture::Other" 1)⟩
+    valid raw 1 ∧ ¬ valid raw 0 ∧ ¬ valid { raw with code := other } 1 := by
+  decide +kernel
+#print axioms forged_decoded_call_rejected
 
 /-- A link to any body but the resolved implementation, or no direct link, is rejected. -/
 theorem changed_target_rejected :
