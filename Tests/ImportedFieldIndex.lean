@@ -266,24 +266,24 @@ theorem static_flagged_access_of_y_rejected :
 /-! ## The platform pair -/
 
 /-- A fixture that returns the member tokens for Item1, Item2 and Rest in that order. -/
-private abbrev PairWorld := Step (Prod Nat (Prod Nat Nat))
+private abbrev PairWorld := Step (Nat × Nat × Nat)
 
 /-- A tuple with the given assembly, type marker, arity and argument bytes. Its member
     references declare Item1 and Rest as !0 and Item2 with the signature type `second`. -/
 private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01])
-    (assembly := runtimeAssembly) (marker := 0x11) (arity := 2) : PairWorld := do
-  let name <- Tests.MetadataBuilder.stringBytes (assembly.name.bytes?.getD [])
-  let culture <- Tests.MetadataBuilder.stringBytes (assembly.culture.bytes?.getD [])
-  let publicKeyToken <- blob (assembly.publicKeyToken.elim [] fun key => fixedDigits 8 8 key [])
+    (assembly := runtimeAssembly) (marker := 0x11) (headArity := 2) (arity := 2) : PairWorld := do
+  let name ← Tests.MetadataBuilder.stringBytes (assembly.name.bytes?.getD [])
+  let culture ← Tests.MetadataBuilder.stringBytes (assembly.culture.bytes?.getD [])
+  let publicKeyToken ← blob (assembly.publicKeyToken.elim [] fun key => fixedDigits 8 8 key [])
   let version := assembly.version
-  let _ <- row Table.assemblyRef
+  let _ ← row Table.assemblyRef
     [version.major, version.minor, version.build, version.revision, 0, publicKeyToken, name,
      culture, 0]
   modify fun builder => { builder with corlib := 1 }
-  let tupleName <- string s!"ValueTuple`{arity}"
+  let tupleName ← string s!"ValueTuple`{headArity}"
   let systemName ← string "System"
   let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
-  let tupleBlob <- blob ([0x15, marker, tokenRow tupleRef * 4 + 1, arity] ++ arguments)
+  let tupleBlob ← blob ([0x15, marker, tokenRow tupleRef * 4 + 1, arity] ++ arguments)
   let tupleSpec ← row Table.typeSpec [tupleBlob]
   let parent := (tupleSpec - 0x1B000000) * 8 + 4
   let firstSignature ← blob [0x06, 0x13, 0x00]
@@ -308,7 +308,7 @@ private def pair : TypeExpr :=
 /-- The error checking `operand` against `token` of the pair world gives, if any. -/
 private def checkPair (token : Nat) (operand : RawOperand) (slice := pairSlice.1) :
     Option MetadataError :=
-  match (do checkEntry (MetadataEnv.ofSlices [<- slice.index]) 0 token operand) with
+  match (do checkEntry (MetadataEnv.ofSlices [← slice.index]) 0 token operand) with
   | .ok _ => none
   | .error found => some found
 
@@ -383,6 +383,13 @@ theorem refuses_unequal_width_pair :
       some (.unboundInstanceField 0x0A000001) := by decide +kernel
 #print axioms refuses_unequal_width_pair
 
+/-- Two unsupported primitives have no certified storage width. -/
+theorem refuses_single_pair :
+    itemError (pairWorldWith [0x0C, 0x0C]) 0 (tupleOwner "System.Single" "System.Single")
+      (.atom runtimeScope "System.Single") = some (.unboundInstanceField 0x0A000001) := by
+  decide +kernel
+#print axioms refuses_single_pair
+
 /-- CoreCLR places the four-byte Item2 of (byte, uint) at offset 0. Its index cannot certify
     the sequential offset 4, even when the MemberRef correctly declares Item2 as !1. -/
 theorem refuses_byte_uint_second_item :
@@ -395,8 +402,8 @@ theorem refuses_byte_uint_second_item :
 theorem binds_equal_width_items :
     let bytes := pairWorldWith [0x05, 0x02]
     let owner := tupleOwner "System.Byte" "System.Boolean"
-    itemError (pairWorldWith [0x08, 0x09]) 0 mixedPair int32 = none /\
-    itemError bytes 0 owner (.atom runtimeScope "System.Byte") = none /\
+    itemError (pairWorldWith [0x08, 0x09]) 0 mixedPair int32 = none ∧
+    itemError bytes 0 owner (.atom runtimeScope "System.Byte") = none ∧
     itemError bytes 1 owner (.atom runtimeScope "System.Boolean") = none := by decide +kernel
 #print axioms binds_equal_width_items
 
@@ -418,6 +425,13 @@ theorem refuses_unsigned_pair :
     scopedItem { runtimeAssembly with publicKeyToken := none } =
       some (.unboundInstanceField 0x0A000001) := by decide +kernel
 #print axioms refuses_unsigned_pair
+
+/-- Two signed references with different eight-byte tokens identify different assemblies. -/
+theorem refuses_other_signed_pair :
+    scopedItem { runtimeAssembly with
+      publicKeyToken := some (runtimeAssembly.publicKeyToken.getD 0 + 1) } =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_other_signed_pair
 
 /-- A different reference assembly version cannot name the platform pair. -/
 theorem refuses_other_version_pair :
@@ -441,8 +455,15 @@ theorem refuses_literal_neutral_culture :
 /-- Three primitive arguments cannot use the two-item layout. -/
 theorem refuses_three_item_tuple :
     itemError (pairWorldWith [8, 8, 8] (arity := 3)) 0
-      (.aggregate (runtimeScope ++ "::System.ValueTuple`3<System.Int32,System.Int32,System.Int32>")
+      (.aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32,System.Int32>")
         0) int32 = some (.unboundInstanceField 0x0A000001) := by decide +kernel
 #print axioms refuses_three_item_tuple
+
+/-- Two arguments cannot give the three-item head a pair layout. -/
+theorem refuses_three_item_head :
+    itemError (pairWorldWith [8, 8] (headArity := 3)) 0
+      (.aggregate (runtimeScope ++ "::System.ValueTuple`3<System.Int32,System.Int32>") 0) int32 =
+      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+#print axioms refuses_three_item_head
 
 end Tests.ImportedFieldIndex
