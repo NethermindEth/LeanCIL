@@ -200,7 +200,11 @@ What `MetadataResolution` and `MetadataBinding` check:
 - Each `.type`, `.field`, `.call`, `.indirectCall` and string operand of the token table is
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
-  allows. An instance field access needs its owner's definition in a carried slice, which gives the
+  allows. For a closed generic aggregate, the identity must match the resolved instance, and every
+  argument must be a primitive value, an enum, a value-like named type or another value-like
+  instance whose arguments meet the same rule. A class argument at any depth fails this check,
+  including when an array or a byref contains the aggregate.
+  An instance field access needs its owner's definition in a carried slice, which gives the
   field's index. Lean also binds the two fields of a platform ``ValueTuple`2`` when its generic
   signature marks the head as a value type and its own `TypeRef` names the supported
   `System.Runtime` assembly with the exact version, culture and public key token.

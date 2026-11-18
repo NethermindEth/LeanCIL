@@ -901,6 +901,68 @@ private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
   .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
 
+/-- The carried struct `L.S<T>` closed over the given argument. -/
+private def structOf (argument : ResolvedType) : ResolvedType :=
+  .genericInst (namedIn "L" "S`1" .valueType true) (.cons argument .nil)
+
+/-- The aggregate identity of `S<B>` cannot name `S<A>` even when both arguments are structs. -/
+theorem refuses_another_struct_argument :
+    pairFrame.admits (structOf (.named (namedIn "L" "A" .valueType true)))
+      (.aggregate "L::S`1<L::B>" 1) = false := by decide +kernel
+#print axioms refuses_another_struct_argument
+
+/-- The aggregate identity shared by the class and struct spellings of the inner `G<int>`. -/
+private def structOfInstance : TypeExpr := .aggregate "L::S`1<L::G`1<C::System.Int32>>" 1
+
+/-- A class instance cannot supply the value argument of a preclosed aggregate. -/
+theorem refuses_a_class_argument :
+    pairFrame.admits (structOf (instanceOf .classType true)) structOfInstance = false := by
+  decide +kernel
+#print axioms refuses_a_class_argument
+
+/-- Array element admission checks the generic argument of its aggregate element. -/
+theorem refuses_an_array_of_structs_with_a_class_argument :
+    pairFrame.admits (.szarray (structOf (instanceOf .classType true)))
+      (.array structOfInstance) = false := by decide +kernel
+#print axioms refuses_an_array_of_structs_with_a_class_argument
+
+/-- Byref admission checks the generic argument of its target aggregate. -/
+theorem refuses_a_byref_to_a_struct_with_a_class_argument :
+    pairFrame.admits (.byref (structOf (instanceOf .classType true)))
+      (.byref structOfInstance) = false := by decide +kernel
+#print axioms refuses_a_byref_to_a_struct_with_a_class_argument
+
+/-- A struct argument that itself takes a class prevents admission of the outer aggregate. -/
+theorem refuses_a_class_inside_a_struct_argument :
+    pairFrame.admits (structOf (structOf (instanceOf .classType true)))
+      (.aggregate "L::S`1<L::S`1<L::G`1<C::System.Int32>>>" 2) = false := by decide +kernel
+#print axioms refuses_a_class_inside_a_struct_argument
+
+/-- An integer, a struct closed over an integer and a carried enum are value arguments. -/
+theorem admits_aggregate_value_arguments :
+    pairFrame.admits (structOf (.primitive 8)) (.aggregate "L::S`1<C::System.Int32>" 0) &&
+    pairFrame.admits (structOf (instanceOf .valueType true)) structOfInstance &&
+    pairFrame.admits (structOf (.named (namedIn "L" "E" (.enumType 8) true)))
+      (.aggregate "L::S`1<L::E>" 0) := by decide +kernel
+#print axioms admits_aggregate_value_arguments
+
+/-- An external head uses Cecil's spelling, including for arguments following a value argument. -/
+private def externalPairAdmits (argument : ResolvedType) (name : String) : Bool :=
+  let pair := ResolvedType.genericInst (namedIn "L" "Pair`2" (.external (some true)))
+    (.cons (.primitive 8) (.cons argument .nil))
+  pairFrame.admits pair (.aggregate ("L::Pair`2<System.Int32," ++ name ++ ">") 0)
+
+/-- A matching Cecil spelling cannot give a reference, an address or a variable value storage. -/
+theorem refuses_nonvalue_arguments_of_an_external_struct :
+    ([(.named (namedIn "L" "C" .classType), "C"),
+      (.named (namedIn "L" "I" .interfaceType), "I"),
+      (.primitive 0x0E, "System.String"), (.primitive 0x1C, "System.Object"),
+      (.szarray (.primitive 8), "System.Int32[]"), (.pointer (.primitive 8), "System.Int32*"),
+      (.byref (.primitive 8), "System.Int32&"), (.var 0, "!0"), (.mvar 0, "!!0")] :
+      List (Prod ResolvedType String)).all (fun (arg, name) => !externalPairAdmits arg name) := by
+  decide +kernel
+#print axioms refuses_nonvalue_arguments_of_an_external_struct
+
 /-- One pairing for each way `typeAdmits` accepts, by resolved and extractor constructor. -/
 private def acceptedPairings : List (ResolvedType × TypeExpr) := [
   -- Primitives: `void`, an atom of the primitive assembly, and a string as an object.

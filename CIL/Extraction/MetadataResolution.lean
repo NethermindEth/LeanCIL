@@ -873,6 +873,25 @@ def NamedType.isEnum (named : NamedType) : Bool :=
   | .enumType _ => true
   | _ => false
 
+mutual
+
+/-- A value argument of a closed aggregate may itself be a closed value instance. -/
+private def aggregateValueArgument : Nat -> ResolvedType -> Bool
+  | 0, _ => false
+  | _ + 1, .primitive code => code != 0x0E && code != 0x1C
+  | _ + 1, .named named => valueLike named.kind || named.isEnum
+  | fuel + 1, .genericInst head arguments =>
+    valueLike head.kind && aggregateValueArgs fuel arguments
+  | _ + 1, _ => false
+
+/-- Every argument of a preclosed aggregate must have a value kind throughout its type. -/
+private def aggregateValueArgs : Nat -> ResolvedList -> Bool
+  | 0, _ => false
+  | _ + 1, .nil => true
+  | fuel + 1, .cons head tail => aggregateValueArgument fuel head && aggregateValueArgs fuel tail
+
+end
+
 /-- Whether a name is that of a primitive type to which `typeStorage` gives value storage as an
     atom of the runtime scope: the boolean, character, integer and native integer types. -/
 def valueAtomName (name : List Nat) : Bool :=
@@ -922,7 +941,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
     | .pointer element, .pointer inner => typeAdmits frame fuel element inner
     | .szarray element, .array inner => typeAdmits frame fuel element inner
     | .genericInst head arguments, .aggregate identity _ =>
-      valueLike head.kind &&
+      valueLike head.kind && aggregateValueArgs fuel arguments &&
         (if head.pinned then
           match frame.corlib with
           | some corlib => aggregateSpelling corlib fuel (.genericInst head arguments)
