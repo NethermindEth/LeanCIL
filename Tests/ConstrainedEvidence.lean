@@ -682,6 +682,15 @@ theorem distinct_generic_interface_call_valid :
   decide +kernel
 #print axioms distinct_generic_interface_call_valid
 
+/-- A bare Counter constructor cannot select token 21 from the Counter<> aggregate. -/
+theorem bare_constructor_slot_rejected :
+    let counter : TypeExpr := .aggregate "Fixture::Counter<>" 0
+    resolveConstrained [{ concrete with identity := counter, interfaces := [] }] counter
+      { site with
+        method.owner := .constructor "Fixture" "Counter", target := .managed 21,
+        typeArguments := [], ownerArgumentCount := 0 } = none := by decide +kernel
+#print axioms bare_constructor_slot_rejected
+
 /-- A class of the fixture assembly that type tests name. -/
 private def dogClass : TypeExpr := .object "Fixture" "Fixture.Dog"
 private def dogEntry : DispatchType := {

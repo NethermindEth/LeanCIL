@@ -88,8 +88,8 @@ def dispatchOwnerMatches (receiver : TypeExpr) (target : DispatchMethod) : Bool 
     genericOwnerIdentity owner target.ownerArguments == some identity
   | _, _ => false
 
-/-- A matching struct owner denotes the receiver. A reference-type head at that identity
-    conflicts with the receiver's kind. Other slots retain their declared type. -/
+/-- A matching struct head denotes the receiver only with at least one owner argument.
+    A reference-type head at that identity conflicts. Other slots retain their declared type. -/
 private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : Option TypeExpr :=
   match receiver with
   | .aggregate identity _ =>
@@ -98,7 +98,7 @@ private def declaringIdentity (receiver : TypeExpr) (site : CallSite) : Option T
     let owner := ownerBase site.declaringType
     if genericOwnerIdentity owner site.typeArguments == some identity then
       match owner with
-      | .constructor .. => some receiver
+      | .constructor .. => if site.ownerArgumentCount > 0 then some receiver else none
       | _ => none
     else some site.declaringType
   | _ => some site.declaringType
