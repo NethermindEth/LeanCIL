@@ -57,6 +57,15 @@ of these forms, except a call, whose Unsafe and runtime-model checks bind it. `v
 `unaligned.` alignment other than 1, 2 or 4, and `unaligned.` before an instruction that does
 not take it are rejected.
 
+Each `ldfld`, `ldflda` and `stfld` of an instance field of a struct, or of a class that is not
+a generic instance, must emit the field instruction of the same opcode over the operand's field
+reference, which `Instruction.ofRaw?` decodes, and the step resolves the field's offset and
+width from the method's checked layouts (`CIL.Method.fieldShape`). `ldfld` and `stfld` decode
+after `unaligned.` to the same instruction as without it, since the model gives a field access no
+alignment of its own; `ldflda` after `unaligned.` and any of the three after `volatile.` do not
+decode. The scalar check requires a struct field load to read a struct reference or value, a
+struct field address or store to go through a reference, and a stored value to suit the field.
+
 Mixed native/int32 operations execute the decoded arithmetic opcode with operand widening.
 Native/int64 arithmetic mixtures are rejected. The 64-bit representation interchange at homes
 and returns does not justify arithmetic interchange. Native shift counts use their low 32 bits;

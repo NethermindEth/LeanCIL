@@ -614,12 +614,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return null;
     }
 
-    // The decoder reads a field instruction only on a class instance field, whose raw owner `Type` writes as
-    // `.object`: a reference type that is not a generic instance. A wrong answer fails at `cil_decoded_method`.
+    // The decoder reads a field instruction on any instance field except one of a generic class instance, whose
+    // raw owner `Type` writes as an object application. A wrong answer fails at `cil_decoded_method`.
     static bool UndecodedFieldAccess(Instruction instruction) =>
         instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld &&
-        ((FieldReference)instruction.Operand).DeclaringType is var owner &&
-        (owner is GenericInstanceType || !ObjectTypes.Reference(owner));
+        ((FieldReference)instruction.Operand).DeclaringType is GenericInstanceType owner &&
+        ObjectTypes.Reference(owner);
 
     static HoleFamily FamilyOf(Code opcode) => opcode switch
     {

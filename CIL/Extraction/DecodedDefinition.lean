@@ -16,7 +16,8 @@ passed to the decoder, such as an extraction's `profile`, `environment` and link
 as that constant, and `cil_decoded_method name [field, ...] := decoder` writes each field operand
 equal to a listed `FieldRef` constant as that constant, as an extraction's literal names it, so
 the facts `cil_field_shape` states about the constant apply. A decoded constrained call keeps
-the identity expressions from its raw layouts. The kernel checks `name_decoder_eq` and every fact.
+the identity expressions from its raw layouts, and a closed decoder keeps the raw type expressions
+in the declared signature. The kernel checks `name_decoder_eq` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -193,8 +194,7 @@ private def constrainedLayoutIdentities (decoder : Expr) (method : Method) :
   modifyEnv (layoutIdentityCache.modifyState · (·.insert name identities))
   return identities
 
-/-- The term `method` denotes, with each field whose type is that of a constant in `passed`
-    written as that constant and every other field as its constructors. -/
+/-- The term `method` denotes, using the decoder's expressions for fields of matching types. -/
 def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
   let written : List (Name × Expr) := [(`code, toExpr method.code),
     (`locals, toExpr method.locals), (`localKinds, toExpr method.localKinds),
@@ -205,10 +205,10 @@ def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
   let mut fields := #[]
   for field in getStructureFields (← getEnv) ``CIL.Method do
     let fieldType := (← inferType (mkConst (``CIL.Method ++ field))).bindingBody!
-    let mut constant := none
+    let mut shared := none
     for candidate in passed do
-      if (← inferType candidate) == fieldType then constant := some candidate
-    match constant, written.lookup field with
+      if (← inferType candidate) == fieldType then shared := some candidate
+    match shared, written.lookup field with
     | some candidate, _ => fields := fields.push candidate
     | none, some value => fields := fields.push value
     | none, none => throwError "cil_decoded_method: no term is written for the field {field}"
@@ -256,6 +256,14 @@ def proveByReduction (name : Name) (doc : String) (statement : Expr) : MetaM Uni
     throwError "cil_decoded_method: the kernel does not reduce both sides of {name} to one term"
   addDocStringCore name doc
 
+/-- The decoder's constant arguments and its declared signature with the raw parameter types. -/
+private def decoderFields (decoder : Expr) : MetaM (Array Expr) := do
+  let inputs := decoder.getAppArgs.filter (·.isConst)
+  let_expr Method.ofClosed? _ _ _ closed _ := decoder | return inputs
+  let signature ← kernelWhnf (mkApp (mkConst ``DeclaredSignature.ofRaw) closed)
+  let fields ← signature.getAppArgs.mapM kernelWhnf
+  return inputs.push (mkAppN signature.getAppFn fields)
+
 /-- The `FieldRef` constants a decoded method's field operands are written as. -/
 syntax decodedFields := "[" ident,* "]"
 
@@ -281,7 +289,7 @@ elab_rules : command
     let some simpSet ← getSimpExtension? `cil_code
       | throwError "cil_decoded_method: the cil_code simp set is not registered"
     let name := (← getCurrNamespace) ++ nameSyntax.getId
-    let passed := decoder.getAppArgs.filter (·.isConst)
+    let passed ← decoderFields decoder
     let fieldIdents : Array Ident ← match fieldsSyntax with
       | none => pure #[]
       | some listedSyntax =>

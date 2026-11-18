@@ -149,6 +149,8 @@ workflow.
   `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
   against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
   offset, scope, instantiation, field index, local or link at a time, each with its exact error.
+  It checks each claim of a struct field operand, including the owner kind and the arity of a
+  generic struct owner.
   `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
   method specification row of `Examples.dll`, with the links that locate nested types and the
   definitions of its own methods and Cecil's full name for each method reference, and Lean must
@@ -413,7 +415,11 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   stored into a native-int local that no `calli` consumes and the address of a local that a
   `calli` consumes, as the metadata lists do. `closedArguments`, which reads pointer locals from a
   set built once per body, gives a method pointer home only to the native-int local a `calli`
-  consumes, as scanning the pointer local list does. It runs in the `evidence` suite.
+  consumes, as scanning the pointer local list does. It accepts a struct field site through each
+  receiver kind and for an integer, enum, vector, nested struct and generic instance field, and
+  refuses each forged struct field site: a load where the raw opcode stores, a load from an object
+  receiver, a field address or store through a value, a stored value of the wrong kind, and a field
+  of another index, owner, held type or name. It runs in the `evidence` suite.
 - `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping:
   - Vector and int32 stores, reloads and overwrites with abstract homes and memory, plus
     signed-byte narrowing. The mixed-width case carries Vector256, Vector128 and int32 locals

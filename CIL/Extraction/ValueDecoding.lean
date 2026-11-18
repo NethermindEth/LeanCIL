@@ -6,17 +6,17 @@ import CIL.Extraction.Prefixes
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
 conversions, comparisons, integer indirect loads and stores, array allocations, lengths and element
-loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst` and the
-class instance field accesses `ldfld`, `ldflda` and `stfld`, direct and constrained calls, and
-construction by `newobj`, with every short and macro form folded into its constructor.
-`valueEncodingMatches`
-accepts an emitted instruction exactly when it is that decoded instruction, and
-`Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand. Instantiation
-changes a decoded instruction only in the type a type operand names, the method a call or
-construction names, or through a field operand (`Instruction.ofRaw?_substitute`), so a closed
-generic body decodes like its original with each type test and typed array instruction at the
-instantiated type, each call and construction of the instantiated method, and each class field
-access at the same owner with its held type instantiated (`Instruction.ofRaw?_substitute_field`).
+loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst`, the
+instance field accesses `ldfld`, `ldflda` and `stfld` of a class or a struct, direct and
+constrained calls, and construction by `newobj`, with every short and macro form folded into its
+constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded
+instruction, and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some
+operand. Instantiation changes a decoded instruction only in the type a type operand names,
+the method a call or construction names, or through a field operand
+(`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original with each
+type test and typed array instruction at the instantiated type, each call and construction of
+the instantiated method, and each instance field access at its instantiated owner and held type
+(`Instruction.ofRaw?_substitute_instance_field`).
 `Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw opcode,
 exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`). Both take the raw
 instruction before the decoded one, where a prefix would stand, and `Instruction.ofRawCode`
@@ -182,18 +182,18 @@ theorem Instruction.ofCallSite?_opcode {previous : Option RawInstruction} {opcod
 
 #print axioms Instruction.ofCallSite?_opcode
 
-/-- The class field instruction `opcode` denotes on `field`: `ldfld` (123), `ldflda` (124)
+/-- The instance field instruction `opcode` denotes on `field`: `ldfld` (123), `ldflda` (124)
     or `stfld` (125). -/
-def Instruction.classField? (opcode : Nat) (field : FieldRef) : Option Instruction :=
+def Instruction.instanceField? (opcode : Nat) (field : FieldRef) : Option Instruction :=
   if opcode == 123 then some (.ldfld field) else if opcode == 124 then some (.ldflda field)
   else if opcode == 125 then some (.stfld field) else none
 
-/-- Only `ldfld` (123), `ldflda` (124) and `stfld` (125) denote a class field instruction. -/
-theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
+/-- Only `ldfld` (123), `ldflda` (124) and `stfld` (125) denote an instance field instruction. -/
+theorem Instruction.instanceField?_opcode {opcode : Nat} {field : FieldRef}
     {instruction : Instruction}
-    (accessed : Instruction.classField? opcode field = some instruction) :
+    (accessed : Instruction.instanceField? opcode field = some instruction) :
     opcode = 123 ∨ opcode = 124 ∨ opcode = 125 := by
-  unfold Instruction.classField? at accessed
+  unfold Instruction.instanceField? at accessed
   split at accessed
   · exact .inl (beq_iff_eq.mp ‹_›)
   · split at accessed
@@ -202,7 +202,7 @@ theorem Instruction.classField?_opcode {opcode : Nat} {field : FieldRef}
       · exact .inr (.inr (beq_iff_eq.mp ‹_›))
       · cases accessed
 
-#print axioms Instruction.classField?_opcode
+#print axioms Instruction.instanceField?_opcode
 
 /-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
     value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
@@ -302,7 +302,7 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldelema expected readOnly => match emitted with
     | .ldelema actual actualReadOnly => expected == actual && readOnly == actualReadOnly
     | _ => false
-  -- Class field instructions compare the field they name.
+  -- Instance field instructions compare the field they name.
   | .ldfld expected => match emitted with | .ldfld actual => expected == actual | _ => false
   | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
   | .stfld expected => match emitted with | .stfld actual => expected == actual | _ => false
@@ -439,7 +439,7 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. A type operand gives the type test or typed array
-    instruction its opcode names, an instance field of a class the field instruction its opcode
+    instruction its opcode names, a struct or nongeneric class field the instruction its opcode
     names and a call site the `call` of the method it names, whose target the method's link table
     gives, at `call` or constrained `callvirt`, and its construction at `newobj`. Any other
     opcode, another operand kind that instantiation rewrites, or a malformed or out-of-range
@@ -458,8 +458,9 @@ def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction)
   if invalidPredecessor previous raw then none else
   match raw.operand with
   | .type type => Instruction.ofType? previous raw.opcode type
-  | .field (.object _ _) _ _ _ false =>
-    (FieldRef.ofOperand? raw.operand).bind (Instruction.classField? raw.opcode)
+  | .field owner _ _ _ false =>
+    if owner.objectApplication then none else
+      (FieldRef.ofOperand? raw.operand).bind (Instruction.instanceField? raw.opcode)
   | .call site => Instruction.ofCallSite? previous raw.opcode site
   | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
@@ -477,8 +478,10 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
       · rcases Instruction.ofType?_opcode found
           with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-      · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
-        rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+      · split at found
+        · cases found
+        obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+        rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
       · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
@@ -512,8 +515,10 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
     · rcases Instruction.ofType?_opcode found
         with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
-    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
-      rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+    · split at found
+      · cases found
+      obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
     · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
@@ -555,8 +560,10 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
         · cases after
         · cases after
           simp [unprefixed]
-    · obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
-      rcases Instruction.classField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
+    · split at found
+      · cases found
+      obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
+      rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
     · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
@@ -670,8 +677,10 @@ theorem Instruction.sameValue_self_of_ofRaw? {previous : Option RawInstruction}
       all_goals try unfold Instruction.ldelemaAfter? at found
       all_goals repeat' split at found
       all_goals cases found <;> simp [Instruction.sameValue]
-    · obtain ⟨_, _, found⟩ := Option.bind_eq_some_iff.mp found
-      unfold Instruction.classField? at found
+    · split at found
+      · cases found
+      obtain ⟨_, _, found⟩ := Option.bind_eq_some_iff.mp found
+      unfold Instruction.instanceField? at found
       repeat' split at found
       all_goals cases found <;> simp [Instruction.sameValue]
     · unfold Instruction.ofCallSite? at found
@@ -783,41 +792,45 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
 
 #print axioms Instruction.ofRaw?_substitute
 
-/-- Instantiation keeps a class field operand's owner, an object type that no argument
-    replaces, and substitutes its held type. With an admissible predecessor the instantiated
-    instruction decodes to the same field opcode over the substituted reference. -/
-theorem Instruction.ofRaw?_substitute_field {previous : Option RawInstruction}
+/-- Instantiation closes an instance field operand's owner and held type, and the instantiated
+    instruction, after no prefix it does not take, decodes to the field instruction of the same
+    opcode over the closed reference unless the closed owner is a generic class instance. -/
+theorem Instruction.ofRaw?_substitute_instance_field {previous : Option RawInstruction}
     {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
-    {scope name : String} {index : Nat} {held : TypeExpr} {fieldName : MetadataName}
+    {owner : TypeExpr} {index : Nat} {held : TypeExpr} {fieldName : MetadataName}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
-    (named : raw.operand = .field (.object scope name) index held fieldName false)
+    (named : raw.operand = .field owner index held fieldName false)
     (accepted : invalidPredecessor previous { raw with operand } = false) :
-    ∃ closed, substituteStorageType layouts arguments held = some closed ∧
-      operand = .field (.object scope name) index closed fieldName false ∧
+    ∃ closedOwner closed, substituteStorageType layouts arguments owner = some closedOwner ∧
+      substituteStorageType layouts arguments held = some closed ∧
+      operand = .field closedOwner index closed fieldName false ∧
       Instruction.ofRaw? previous { raw with operand } =
-        Instruction.classField? raw.opcode
-          { owner := .object scope name, index, type := closed, name := fieldName } := by
+        if closedOwner.objectApplication then none
+        else Instruction.instanceField? raw.opcode
+          { owner := closedOwner, index, type := closed, name := fieldName } := by
   obtain ⟨offset, opcode, original⟩ := raw
   dsimp only at named
   subst named
   simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
     Option.some.injEq] at substituted
-  obtain ⟨owner, closedOwner, closed, holdsClosed, rfl⟩ := substituted
-  simp only [substituteStorageType, substituteType, Option.map_eq_map, Option.map_some,
-    Option.some.injEq] at closedOwner
-  subst closedOwner
-  refine ⟨closed, holdsClosed, rfl, ?_⟩
-  show Option.filter _ (if _ then none else Instruction.classField? opcode _) = _
+  obtain ⟨closedOwner, holdsOwner, closed, holdsClosed, rfl⟩ := substituted
+  refine ⟨closedOwner, closed, holdsOwner, holdsClosed, rfl, ?_⟩
+  show Option.filter _ (if _ then none else
+    if closedOwner.objectApplication then none
+    else Instruction.instanceField? opcode _) = _
   simp only [accepted, Bool.false_eq_true, ite_false]
-  unfold Instruction.classField?
-  split
-  · rfl
-  · split
+  cases closedOwner.objectApplication
+  · simp only [Bool.false_eq_true, ite_false]
+    unfold Instruction.instanceField?
+    split
     · rfl
-    · split <;> rfl
+    · split
+      · rfl
+      · split <;> rfl
+  · rfl
 
-#print axioms Instruction.ofRaw?_substitute_field
+#print axioms Instruction.ofRaw?_substitute_instance_field
 
 end CIL
 

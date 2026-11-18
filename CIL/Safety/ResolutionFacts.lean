@@ -928,11 +928,18 @@ def sharedShape? (resolver : Name) (expression : Expr) : MetaM (Option Simp.Step
   let some (_, _, environment) := shared.eq? | return none
   if environment.hasLooseBVars then return none
   let environmentOf := mkApp (mkConst ``CIL.Method.environment) body
-  let shared ← match ← findLocalDeclWithType? (← mkEq environmentOf environment) with
-    | some hypothesis => pure (mkFVar hypothesis)
-    | none =>
-      unless ← withDefault (isDefEq environmentOf environment) do return none
+  let shared ← if ← withDefault (isDefEq environmentOf environment) then
       mkEqRefl environment
+    else
+      let stated ← mkEq environmentOf environment
+      -- A candidate states equality of layout environments.
+      let hypothesis? ← (← getLCtx).findDeclRevM? fun decl => do
+        if decl.isImplementationDetail then return none
+        let some (type, _, _) := (← whnfR decl.type).eq? | return none
+        unless ← withReducible (isDefEq type (mkConst ``CIL.LayoutEnvironment)) do return none
+        return if ← withDefault (isDefEq decl.type stated) then some decl.fvarId else none
+      let some hypothesis := hypothesis? | return none
+      pure (mkFVar hypothesis)
   let proof := mkApp2 (mkConst fact) body shared
   let some (_, resolved, shape) := (← inferType proof).eq? | return none
   unless resolved == expression do return none

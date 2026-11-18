@@ -103,6 +103,68 @@ theorem reads_after_writes (memory : Memory) (left right output : Reference)
 
 #print axioms reads_after_writes
 
+/-- `T::Words`, four `UInt64` fields. -/
+def wordsLayouts : List CIL.Extraction.RawLayout := [
+  { identity := "T::Words", explicit := false, packing := 0, declaredSize := 0,
+    fields := List.replicate 4 { type := .unsigned64 } }]
+
+/-- The layout CoreCLR computes for `T::Words`: the fields at offsets 0, 8, 16 and 24. -/
+def wordsComputed : Array CIL.Extraction.ComputedLayout := #[
+  ⟨{ size := 32, fields := [{ offset := 0, width := 8 }, { offset := 8, width := 8 },
+    { offset := 16, width := 8 }, { offset := 24, width := 8 }] }, 8⟩]
+
+theorem words_valid : CIL.Extraction.LayoutsValid wordsLayouts wordsComputed .x64 := by
+  decide +kernel
+#print axioms words_valid
+
+/-- The environment the decoded writer resolves its fields in. -/
+@[cil_code] def wordsEnvironment : CIL.LayoutEnvironment :=
+  { rawLayouts := wordsLayouts, layouts := wordsComputed }
+
+/-- The field of `T::Words` at `index`. -/
+def wordField (index : Nat) : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "T::Words" 0, index, name := name!"word",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
+/-- The first, second, third and fourth words. -/
+def word0 : CIL.Extraction.FieldRef := wordField 0
+/-- The output word at byte offset 8. -/
+def word1 : CIL.Extraction.FieldRef := wordField 1
+/-- The output word at byte offset 16. -/
+def word2 : CIL.Extraction.FieldRef := wordField 2
+/-- The output word at byte offset 24. -/
+def word3 : CIL.Extraction.FieldRef := wordField 3
+
+cil_field_shape wordsEnvironment word0
+cil_field_shape wordsEnvironment word1
+cil_field_shape wordsEnvironment word2
+cil_field_shape wordsEnvironment word3
+
+/-- `repeatedWriter` with its field accesses decoded: each store and the load name a field. -/
+@[cil_code] def decodedWriter : CIL.Method :=
+  { locals := [], returnsValue := true, environment := wordsEnvironment, code := [
+    .ldarg 2, .ldc_i8 1, .storeScalar 8,
+    .ldarg 2, .ldc_i8 2, .stfld word1,
+    .ldarg 2, .ldc_i8 3, .stfld word2,
+    .ldarg 2, .ldc_i8 4, .stfld word3,
+    .ldarg 0, .ldfld word0, .ret] }
+
+/-- A decoded field store writes an output word through `ValidCall` as the lowered store of its
+    shape does. -/
+theorem decoded_reads_after_writes (memory : Memory) (left right output : Reference)
+    (call : ValidCall memory [words left, words right] [words output]) :
+    WP (Execution (fun fuel => invoke [decodedWriter] fuel 0
+      [.reference (.address left), .reference (.address right),
+        .reference (.address output)] memory))
+      (fun (final, values) =>
+        values = [.scalar (.i64 ((words left).word final 0))] ∧
+        read final { output with offset := output.offset + 24 } 8 1 =
+          .ok (numberBytes 4 8) ∧
+        ValidCall final [words left, words right] [words output]) := by
+  cil_contract_steps []
+  exact ⟨rfl, readback_3, storedCall_3⟩
+
+#print axioms decoded_reads_after_writes
+
 /-- An explicit successful write retains its exact final memory when automation can derive
     another existential write from the same permissions. -/
 theorem supplied_write_priority (memory after : Memory) (output : Reference) (word : CIL.W64)

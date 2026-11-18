@@ -232,7 +232,10 @@ evaluates the shape instead of reading the fact. The struct fields bodies have 1
 instructions and load and pop the `int64` field at byte 8 of the struct their reference argument
 addresses, then store their `int64` argument there, per cycle; each `ldfld` and `stfld` reads the
 field's `cil_field_shape` fact and supplied facts that locate the field and read or write it, and
-the struct fields contract bodies step the same bodies under contract stepping. The statics bodies have 16, 64 and 256
+the struct fields contract bodies step the same bodies under contract stepping. The lowered struct
+fields bodies write each access as the `fieldAt` or `setFieldAt` of its shape, and a decoded body
+may cost at most 1.03 times its lowered body's frontend heartbeats per instruction and 1.08 times
+its kernel heartbeats, at each size and under either stepping. The statics bodies have 16, 64 and 256
 instructions and load a static field and pop it per cycle, with one static site per load, so each
 step resolves its pc among all the body's sites. The constructions bodies have 16, 64 and 256
 instructions and construct and pop a class instance per cycle, each `newobj` reading its link and

@@ -692,12 +692,15 @@ private theorem tuple_result_cases :
 
 private def tupleFieldRaw :=
   raw [i 2, i 123 (.field tupleType 0 word name!"Item1" false), i 42] [.byref tupleType]
+/-- The tuple's first field, as its raw operand names it. -/
+private def tupleItem1 : FieldRef :=
+  { owner := tupleType, index := 0, type := word, name := name!"Item1" }
 /-- Tuple field loads preserve the declared scalar result kind. -/
 private theorem tuple_field_cases :
     (ScalarFlowValid #[] tupleFieldRaw [unknown 0, unknown 1, unknown 1] [some [], some
-      [.reference], some [.word64]] [.ldarg 0, .fieldAt 0 8, .ret]) ∧
+      [.reference], some [.word64]] [.ldarg 0, .ldfld tupleItem1, .ret]) ∧
     (¬ ScalarFlowValid #[] tupleFieldRaw [unknown 0, unknown 1, unknown 1] [some [], some
-      [.reference], some [.other]] [.ldarg 0, .fieldAt 0 8, .ret]) := by
+      [.reference], some [.other]] [.ldarg 0, .ldfld tupleItem1, .ret]) := by
   decide +kernel
 
 #print axioms tuple_field_cases
@@ -1178,6 +1181,56 @@ example : scalarEmissionMatches #[] none none (i 125 samplesField) [.array .sign
     (.stfld samples) = false := by decide
 example : scalarEmissionMatches #[] none none (i 125 samplesField) [.object, .object]
     (.stfld samples) = false := by decide
+
+/-- `Scope.Pair`, a struct at layout 0, with fields of each kind the step resolves: an integer,
+    an enum, a vector, a nested struct and a generic struct instance. -/
+private def pairType : TypeExpr := .aggregate "Scope::Scope.Pair" 0
+private def modeType : TypeExpr := .enum "Scope::Scope.Mode" intType
+private def laneType : TypeExpr :=
+  .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") word
+private def innerType : TypeExpr := .aggregate "Scope::Scope.Inner" 1
+/-- The field of `Scope.Pair` at raw index `index` holding `type`, as a reference. -/
+private def pairField (index : Nat) (type : TypeExpr) : FieldRef :=
+  { owner := pairType, index, type, name := name!"item" }
+/-- Whether a struct field instruction of `opcode` on the field at `index` holding `type`
+    emits `emitted` over `stack`. -/
+private def structSite (opcode index : Nat) (type : TypeExpr) (stack : List ScalarKind)
+    (emitted : Instruction) : Bool :=
+  scalarEmissionMatches #[] none none (i opcode (.field pairType index type name!"item" false))
+    stack emitted
+
+/-- A struct field site emits the decoded access of the field its operand names: a load through
+    a reference or from a value, an address and a store through a reference, for a field of each
+    kind, storing a value of the field's stack kind. -/
+theorem struct_field_sites_accepted :
+    structSite 123 0 word [.reference] (.ldfld (pairField 0 word)) = true ∧
+    structSite 123 0 word [.other] (.ldfld (pairField 0 word)) = true ∧
+    structSite 124 0 word [.reference] (.ldflda (pairField 0 word)) = true ∧
+    structSite 125 0 word [.word64, .reference] (.stfld (pairField 0 word)) = true ∧
+    structSite 125 1 modeType [.word32, .reference] (.stfld (pairField 1 modeType)) = true ∧
+    structSite 125 2 laneType [.other, .reference] (.stfld (pairField 2 laneType)) = true ∧
+    structSite 125 3 innerType [.other, .reference] (.stfld (pairField 3 innerType)) = true ∧
+    structSite 125 4 tupleType [.other, .reference] (.stfld (pairField 4 tupleType)) = true := by
+  decide +kernel
+#print axioms struct_field_sites_accepted
+
+/-- A struct field site refuses each forged emission: a load where the raw instruction is a
+    store, a receiver of the wrong kind, a stored value of another stack kind, and a reference
+    naming another index, owner, held type or name than the operand. -/
+theorem struct_field_forgeries_refused :
+    structSite 125 0 word [.word64, .reference] (.ldfld (pairField 0 word)) = false ∧
+    structSite 123 0 word [.object] (.ldfld (pairField 0 word)) = false ∧
+    structSite 124 0 word [.other] (.ldflda (pairField 0 word)) = false ∧
+    structSite 125 0 word [.word64, .other] (.stfld (pairField 0 word)) = false ∧
+    structSite 125 0 word [.word32, .reference] (.stfld (pairField 0 word)) = false ∧
+    structSite 123 0 word [.reference] (.ldfld (pairField 1 word)) = false ∧
+    structSite 123 0 word [.reference] (.ldfld { pairField 0 word with owner := innerType }) =
+      false ∧
+    structSite 123 0 word [.reference] (.ldfld (pairField 0 intType)) = false ∧
+    structSite 123 0 word [.reference] (.ldfld { pairField 0 word with name := name!"other" }) =
+      false := by
+  decide +kernel
+#print axioms struct_field_forgeries_refused
 
 -- `ldstr` loads exactly its own text, nothing else loads a literal, and a folded throw's
 -- message emits nothing.

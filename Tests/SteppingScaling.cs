@@ -16,6 +16,12 @@ const double WorkGrowthLimit = 1.35;
 // Unifying each lookup with every equation hypothesis added 600 to 1,950. A lookup outside a stepping
 // driver reads each hypothesis once, about 25 heartbeats; building an index for it took about 410.
 const double HypothesisCostLimit = 100.0;
+// A decoded field access shares the lowered body's memory facts. These limits bound the extra frontend and
+// kernel heartbeats per instruction for resolving the field operand.
+const double DecodedFrontendLimit = 1.03;
+const double DecodedKernelLimit = 1.08;
+// The suffix of a workload that steps its decoded workload's body with each field access lowered to its shape.
+const string LoweredSuffix = "lowered";
 const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
@@ -75,7 +81,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("typedsteps", [16, 64, 256], false), ("addresses", [16, 64, 256], false),
     ("addresssteps", [16, 64, 256], false), ("instance", [16, 64, 256], false), ("virtual", [1, 16, 64], false),
     ("intrinsiccalls", [16, 64, 256], false), ("structfields", [16, 64, 256], false),
-    ("structfieldscontract", [16, 64, 256], false)
+    ("structfieldscontract", [16, 64, 256], false), ("structfieldslowered", [16, 64, 256], false),
+    ("structfieldscontractlowered", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -119,6 +126,11 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
     if (workload.Key.StartsWith("hypotheses"))
         CheckHypothesisCost(measurements[0], measurements[^1]);
 }
+foreach (var lowered in rows.Where(row => row.Workload.EndsWith(LoweredSuffix, StringComparison.Ordinal)))
+{
+    var decoded = rows.SingleOrDefault(row => row.Workload == DecodedOf(lowered.Workload) && row.Size == lowered.Size);
+    if (decoded is not null) CheckDecodedOverLowered(decoded, lowered);
+}
 Console.WriteLine("PASS stepping growth budgets for " +
     string.Join(", ", rows.Select(row => row.Workload).Distinct()) + "; results: " + reportPath);
 
@@ -159,11 +171,11 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // The struct fields body loads and pops the int64 field at byte 8 of the struct its byref argument
 // addresses, then stores its int64 argument there, per cycle; the contract body is the same body under
 // contract stepping. Each access reads the field's shape fact, then its address and its load or write
-// from supplied facts.
+// from supplied facts. The lowered bodies write each access as the instruction its shape lowers it to.
 // The addresses body forms a writable and a readonly address of one int32 element of its array argument
 // and pops each, per cycle, each stepped by a fact derived from the element fact and the generated shape
 // fact; the address steps body steps the same body by one supplied fact per address.
-static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
+static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload, int field = 0) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call calleeMethod"], [".ret"]),
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".stind .i8", ".ldarg 0", ".ldind .i8", ".pop"],
@@ -192,8 +204,10 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "typedelements" or "typedsteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelem_any ({Int32Type})", ".pop", ".ldarg 0",
         ".ldarg 1", ".ldarg 1", $".stelem_any ({Int32Type})", ".ldarg 2", ".ldarg 1", ".ldarg 2", ".ldarg 1",
         $".ldelem_any ({PairType})", $".stelem_any ({PairType})"], [".ldc_i4 0", ".ret"]),
-    "structfields" or "structfieldscontract" => ([], [".ldarg 0", ".ldfld second", ".pop", ".ldarg 0", ".ldarg 1",
-        ".stfld second"], [".ldc_i4 0", ".ret"]),
+    "structfields" or "structfieldscontract" => ([], [".ldarg 0", $".ldfld word{field}", ".pop",
+        ".ldarg 0", ".ldarg 1", $".stfld word{field}"], [".ldc_i4 0", ".ret"]),
+    "structfieldslowered" or "structfieldscontractlowered" => ([], [".ldarg 0", ".fieldAt 8 8 false", ".pop",
+        ".ldarg 0", ".ldarg 1", ".setFieldAt 8 8"], [".ldc_i4 0", ".ret"]),
     "addresses" or "addresssteps" => ([], [".ldarg 0", ".ldarg 1", $".ldelema ({Int32Type}) false", ".pop",
         ".ldarg 0", ".ldarg 1", ".nop", $".ldelema ({Int32Type}) true", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
@@ -224,8 +238,37 @@ static string SnapshotResult(int stores) =>
 static string DepthSum(int depth) =>
     "right" + string.Concat(Enumerable.Repeat(" + (right", depth - 1)) + new string(')', depth - 1);
 
+// An explicit layout gives each named word the same address, so each cycle uses the same memory facts.
+static string StructFieldDefinitions(int count)
+{
+    var definitions = Enumerable.Range(0, count).Select(index => $$"""
+        /-- The word selected by field index {{index}}. -/
+        def word{{index}} : CIL.Extraction.FieldRef :=
+          { owner := {{PairType}}, index := {{index}}, type := {{Int64Type}}, name := name!"Word{{index}}" }
+        cil_field_shape environment word{{index}}
+        """);
+    return $$"""
+        /-- An explicit struct with one named word per cycle, all at byte eight. -/
+        def pairLayout : CIL.Extraction.RawLayout :=
+          { identity := "Examples.Pair", explicit := true, packing := 0, declaredSize := 16,
+            fields := List.replicate {{count}} { type := .signed64, offset := some 8 } }
+        /-- The sixteen-byte layout shared by every field access. -/
+        def pairComputed : CIL.Extraction.ComputedLayout :=
+          { layout := { size := 16, fields := List.replicate {{count}} { offset := 8, width := 8 } },
+            alignment := 8 }
+        /-- The method environment containing the struct's raw and computed layouts. -/
+        @[cil_code] def environment : CIL.LayoutEnvironment :=
+          { rawLayouts := [pairLayout], layouts := #[pairComputed] }
+        {{string.Join('\n', definitions)}}
+        set_option cil.requireFieldShapeFacts true
+
+        """;
+}
+
 SteppingMeasurement Measure(string workload, int requested, bool full)
 {
+    // A lowered body shares its decoded body's definitions and statement.
+    var stepped = DecodedOf(workload);
     var memory = workload == "memory";
     var depth = Math.Max(2, requested / 2);
     var (opening, cycle, ending) = Shape(workload);
@@ -247,13 +290,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         "homes" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".pop" })
             .Prepend(".ldarg 0").Append(".ret").ToArray(),
         "snapshots" => SnapshotOperations(requested),
+        "structfields" or "structfieldscontract" => Enumerable.Range(0, cycles)
+            .SelectMany(index => Shape(workload, index).Cycle).Concat(ending).ToArray(),
         _ => opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray()
     };
     var parameterType = workload == "homes" ? $".byref ({Int32Type})" : Int32Type;
     var parameterTypes = string.Join(", ", Enumerable.Repeat(parameterType, parameters));
     var signature = $"{{ parameters := [{parameterTypes}], returnType := {parameterType} }}";
     var homes = string.Join(", ", Enumerable.Range(0, parameters).Select(index => $"({index}, .reference)"));
-    var declaredField = workload switch
+    var declaredField = stepped switch
     {
         "arguments" => $" declared := {signature},",
         "homes" => $" declared := {signature}, parameterHomes := [{homes}],",
@@ -308,7 +353,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         """ + "\n" : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
-    var extraImports = workload switch
+    var extraImports = stepped switch
     {
         "contract" or "loop" or "loopfacts" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup"
             or "structfieldscontract" =>
@@ -326,7 +371,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     };
     // The objects body reads field 1 of a class, an int64 in the slot at model offset 8; a step that
     // evaluates the shape instead of reading the fact fails the row.
-    var fieldDefinitions = workload switch
+    var fieldDefinitions = stepped switch
     {
         "objects" => $$"""
             @[cil_code] def environment : CIL.LayoutEnvironment := {}
@@ -336,23 +381,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             cil_field_shape environment counter
             set_option cil.requireFieldShapeFacts true
             """ + "\n",
-        "structfields" or "structfieldscontract" => $$"""
-            /-- A struct of two `int64` fields. -/
-            def pairLayout : CIL.Extraction.RawLayout :=
-              { identity := "Examples.Pair", explicit := false, packing := 0, declaredSize := 0,
-                fields := [{ type := .signed64 }, { type := .signed64 }] }
-            /-- The checked layout of `pairLayout`: sixteen bytes. -/
-            def pairComputed : CIL.Extraction.ComputedLayout :=
-              { layout := { size := 16, fields := [{ offset := 0, width := 8 }, { offset := 8, width := 8 }] },
-                alignment := 8 }
-            @[cil_code] def environment : CIL.LayoutEnvironment :=
-              { rawLayouts := [pairLayout], layouts := #[pairComputed] }
-            /-- The `int64` field 1 of the struct, at byte 8. -/
-            def second : CIL.Extraction.FieldRef :=
-              { owner := {{PairType}}, index := 1, type := {{Int64Type}}, name := name!"second" }
-            cil_field_shape environment second
-            set_option cil.requireFieldShapeFacts true
-            """ + "\n",
+        "structfields" or "structfieldscontract" => StructFieldDefinitions(cycles),
         "typedelements" or "typedsteps" => """
             /-- A struct of two `int32` fields. -/
             def pairLayout : CIL.Extraction.RawLayout :=
@@ -485,7 +514,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
               {{(setup ? "sorry" : "cil_checked_steps")}}
             """
     };
-    var statement = workload switch
+    var statement = stepped switch
     {
         "hypotheses" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup" or "hypothesesdirect" =>
             HypothesesStatement(false),
@@ -987,6 +1016,12 @@ static void ScalingChecks()
     CheckGrowth(reduced, linearInArguments, linearInArguments: true);
     if (!Rejects(() => CheckGrowth(reduced, linearInArguments with { KernelHeartbeats = 16 * 6400 }, true)))
         throw new InvalidOperationException("The argument budget accepted a per-instruction quadratic mutant.");
+    // A decoded body within the limits of its lowered body passes; one that costs twice as much does not.
+    var loweredBody = baseline with { Workload = "structfieldslowered" };
+    CheckDecodedOverLowered(loweredBody with { Workload = "structfields" }, loweredBody);
+    if (!Rejects(() => CheckDecodedOverLowered(
+            loweredBody with { Workload = "structfields", KernelHeartbeats = 2 * 1600 }, loweredBody)))
+        throw new InvalidOperationException("The decoded field limit accepted twice the lowered kernel cost.");
     // With the same instructions at every size, per-instruction cost must stay flat in the size: a
     // step that scans each hypothesis in scope grows with it.
     var flat = baseline with { Size = 256, FrontendHeartbeats = 17000, KernelHeartbeats = 1700 };
@@ -999,6 +1034,27 @@ static void ScalingChecks()
         return;
     }
     throw new InvalidOperationException("The hypothesis budget accepted a cost that grows with the hypotheses.");
+}
+
+// The decoded workload a lowered workload's body steps, or the workload itself.
+static string DecodedOf(string workload) => workload.EndsWith(LoweredSuffix, StringComparison.Ordinal)
+    ? workload[..^LoweredSuffix.Length] : workload;
+
+// A decoded struct field body costs per instruction at most the limits over its lowered body of the same size.
+static void CheckDecodedOverLowered(SteppingMeasurement decoded, SteppingMeasurement lowered)
+{
+    Check("frontend heartbeats", decoded.FrontendHeartbeatsPerInstruction,
+        lowered.FrontendHeartbeatsPerInstruction, DecodedFrontendLimit);
+    Check("kernel heartbeats", decoded.KernelHeartbeatsPerInstruction,
+        lowered.KernelHeartbeatsPerInstruction, DecodedKernelLimit);
+
+    void Check(string metric, double decodedCost, double loweredCost, double limit)
+    {
+        var ratio = decodedCost / loweredCost;
+        if (loweredCost <= 0 || ratio > limit)
+            throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"""{decoded.Workload} {metric}: {ratio:F4} of lowered at size {decoded.Size}; limit {limit:F4}"""));
+    }
 }
 
 static bool Rejects(Action check)

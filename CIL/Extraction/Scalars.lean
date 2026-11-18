@@ -381,13 +381,19 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- An instance field instruction on a class, or an emitted class field instruction. -/
-private def classFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+/-- An instance field instruction, or an emitted field instruction. -/
+private def instanceFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
-    | .field (.object _ _) _ _ _ false => true
+    | .field _ _ _ _ false => true
     | _ => false) ||
   match emitted with
   | .ldfld _ | .ldflda _ | .stfld _ => true
+  | _ => false
+
+/-- Whether the raw operand names an instance field of a class or a generic class instance. -/
+private def classOwned (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .field owner _ _ _ false => owner matches .object .. || owner.objectApplication
   | _ => false
 
 /-- The kinds a class instance field holding references stores: an opaque reference or null in
@@ -412,6 +418,19 @@ private def classFieldMatches (previous : Option RawInstruction) (instruction : 
       (!referenceFieldType field.type || value ∈ storedReferences field.type) &&
       (valueArrayFieldElement field.type).all (fun declared => value == .array declared) &&
       ((objectFieldShape field.type).isNone || storageCompatible value (scalarType field.type))
+  | _, _ => false
+
+/-- `ldfld`, `ldflda` and `stfld` of a struct instance field emit the instruction the raw one
+    decodes to after `previous`, naming the field its operand names. A load reads through a
+    reference or from a struct value, an address and a store go through a reference, and a stored
+    value has the field's stack kind; the step takes the offset and width from the layouts. -/
+private def structFieldMatches (previous : Option RawInstruction) (instruction : RawInstruction)
+    (stack : List ScalarKind) (emitted : Instruction) (skipEncoding : Bool) : Bool :=
+  (skipEncoding || valueEncodingMatches previous instruction emitted) && match emitted, stack with
+  | .ldfld _, receiver :: _ => receiver ∈ [.reference, .other]
+  | .ldflda _, receiver :: _ => receiver == .reference
+  | .stfld field, value :: receiver :: _ =>
+    receiver == .reference && storageCompatible value (scalarType field.type)
   | _, _ => false
 
 /-- Only `ldstr` loads a literal, and only its own text; inside a folded throw it emits nothing. -/
@@ -474,8 +493,10 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     stringLiteralMatches role instruction emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
-  else if classFieldSite instruction emitted then
-    classFieldMatches previous instruction stack emitted skipEncoding
+  else if instanceFieldSite instruction emitted then
+    if classOwned instruction then
+      classFieldMatches previous instruction stack emitted skipEncoding
+    else structFieldMatches previous instruction stack emitted skipEncoding
   else if scalarCovered instruction.opcode then
     scalarOpMatches previous instruction stack emitted skipEncoding
   else !scalarEmission emitted || match role, emitted with
@@ -1112,7 +1133,7 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
     | (cases emitted <;> rfl)
     | (unfold checkScalarSite
        delta indirectSiteWindow scalarEmissionMatches indirectAccessMatches scalarOpMatches
-         arrayMatches classFieldMatches readOnlyDecodedMatches
+         arrayMatches classFieldMatches structFieldMatches readOnlyDecodedMatches
        simp only [Bool.true_and, Bool.false_and, redundant, Bool.false_or])
 
 #print axioms decodedSite_eq

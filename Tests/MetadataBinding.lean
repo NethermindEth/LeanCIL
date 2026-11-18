@@ -568,6 +568,91 @@ theorem rejects_a_pinned_struct_field_whose_slice_is_missing :
       (.missingSlice tokens.pairRef) = true := by decide +kernel
 #print axioms rejects_a_pinned_struct_field_whose_slice_is_missing
 
+/-- `Lib.Pair` as the extractor names a struct owner, by identity and layout index. -/
+private def pairOwner : TypeExpr := .aggregate (libScope ++ "::Lib.Pair") 0
+
+/-- A field of `Lib.Pair` as an operand claims it: owner, index, held type and name. -/
+private def pairFieldOf (owner : TypeExpr) (index : Nat) (held : TypeExpr) (name : MetadataName) :
+    RawOperand :=
+  .field owner index held name false
+
+/-- A struct field operand states its owner as a value type, its index among the owner's
+    instance fields, its held type and its name, and the token refuses each other claim: a class
+    owner's index walks the struct's bases to `System.ValueType`, which no class chain has, and
+    a class field's token refuses an owner named as a struct. -/
+theorem checks_each_claim_of_a_struct_field :
+    passes own.1 lib tokens.firstRef (pairFieldOf pairOwner 0 int32 name!"first") = true ∧
+    rejects own.1 lib tokens.firstRef (pairFieldOf pairOwner 1 int32 name!"first")
+      (.fieldIndexMismatch tokens.firstRef 1 0) = true ∧
+    rejects own.1 lib tokens.firstRef
+      (pairFieldOf (.object libScope "Lib.Pair") 0 int32 name!"first")
+      (.unsupportedBase (tokenOf Table.typeDef 3)) = true ∧
+    rejects own.1 lib tokens.firstRef
+      (pairFieldOf (.aggregate (libScope ++ "::Lib.Box") 0) 0 int32 name!"first")
+      (.operandMismatch tokens.firstRef) = true ∧
+    rejects own.1 lib tokens.countField
+      (pairFieldOf (.aggregate (ownIdentity ++ "::Program") 0) 0 int32 name!"count")
+      (.operandMismatch tokens.countField) = true ∧
+    rejects own.1 lib tokens.firstRef (pairFieldOf pairOwner 0 uint32 name!"first")
+      (.operandMismatch tokens.firstRef) = true ∧
+    rejects own.1 lib tokens.firstRef (pairFieldOf pairOwner 0 int32 name!"second")
+      (.operandMismatch tokens.firstRef) = true := by decide +kernel
+#print axioms checks_each_claim_of_a_struct_field
+
+/-- `T` with the generic struct `Pair`1` and its instance field `first : !0`, referenced
+    through `Pair<int>` and through a specification that gives `Pair` two arguments. -/
+private def genericPairWorld : Step (Nat × Nat) := do
+  let runtimeName ← string "System.Runtime"
+  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let valueTypeName ← string "ValueType"
+  let systemName ← string "System"
+  let valueTypeRef ← row Table.typeRef [1 * 4 + 2, valueTypeName, systemName]
+  let moduleName ← string "<Module>"
+  let _ ← row Table.typeDef [0, moduleName, 0, 0, 1, 1]
+  let pairName ← string "Pair`1"
+  let pair ← row Table.typeDef [0x101, pairName, 0, (valueTypeRef - 0x01000000) * 4 + 1, 1, 1]
+  let parameterName ← string "T"
+  let _ ← row Table.genericParam [0, 0, (pair - 0x02000000) * 2, parameterName]
+  let firstName ← string "first"
+  let parameterField ← blob [0x06, 0x13, 0x00]
+  let first ← row Table.field [0x0006, firstName, parameterField]
+  link linkDeclaring first 0 pair
+  let pairCoded := (pair - 0x02000000) * 4
+  let oneBlob ← blob [0x15, 0x11, pairCoded, 1, 0x08]
+  let twoBlob ← blob [0x15, 0x11, pairCoded, 2, 0x08, 0x08]
+  let oneSpec ← row Table.typeSpec [oneBlob]
+  let twoSpec ← row Table.typeSpec [twoBlob]
+  let oneRef ← row Table.memberRef [(oneSpec - 0x1B000000) * 8 + 4, firstName, parameterField]
+  let twoRef ← row Table.memberRef [(twoSpec - 0x1B000000) * 8 + 4, firstName, parameterField]
+  link linkDefinition oneRef 0 first
+  link linkDefinition twoRef 0 first
+  pure (oneRef, twoRef)
+
+/-- The generic pair's slice, with its references through `Pair<int>` and `Pair<int, int>`. -/
+private def genericPair : MetadataSlice × Nat × Nat :=
+  build genericPairWorld (bytesOf "T") ownIdentity
+
+/-- `Pair<int>` as the extractor names it, and as an owner with one argument too many. -/
+private def pairOfInt : TypeExpr :=
+  .aggregate (ownIdentity ++ "::Pair`1<" ++ runtimeScope ++ "::System.Int32>") 0
+private def pairOfTwoInts : TypeExpr := .aggregate
+  (ownIdentity ++ "::Pair`1<" ++ runtimeScope ++ "::System.Int32," ++ runtimeScope ++
+    "::System.Int32>") 0
+
+/-- A field of a generic struct instance holds its argument, read through the instance; a
+    specification giving the one-parameter definition two arguments is refused by its arity, and
+    an owner claiming two arguments names no instance the token gives. -/
+theorem checks_the_arity_of_a_generic_struct_owner :
+    passes genericPair.1 lib genericPair.2.1 (.field pairOfInt 0 int32 name!"first" false) =
+      true ∧
+    rejects genericPair.1 lib genericPair.2.2 (.field pairOfInt 0 int32 name!"first" false)
+      (.genericMismatch 0x02000002) = true ∧
+    rejects genericPair.1 lib genericPair.2.1 (.field pairOfTwoInts 0 int32 name!"first" false)
+      (.operandMismatch genericPair.2.1) = true := by decide +kernel
+#print axioms checks_the_arity_of_a_generic_struct_owner
+
 /-- A call into a struct of a pinned assembly whose core-library number is wrong: the struct is
     still a value type, so a call that names it as a class is refused. -/
 theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :

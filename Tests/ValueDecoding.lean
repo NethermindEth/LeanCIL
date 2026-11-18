@@ -22,6 +22,13 @@ def classField : FieldRef :=
   { owner := .object "T" "T.Account", index := 1, type := .atom runtimeScope "System.Int32",
     name := name!"balance" }
 
+/-- An `int32` instance field of a struct, at raw index 1. -/
+def structOperand : RawOperand :=
+  .field (.aggregate "T::Pair" 0) 1 (.atom runtimeScope "System.Int32") name!"balance" false
+
+/-- The field `structOperand` names. -/
+def structField : FieldRef := { classField with owner := .aggregate "T::Pair" 0 }
+
 /-- The class the type test rows name. -/
 private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 
@@ -142,9 +149,11 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 217, .none⟩, .mul_ovf_un), (⟨0, 218, .none⟩, .sub_ovf), (⟨0, 219, .none⟩, .sub_ovf_un),
   (⟨0, 65025, .none⟩, .ceq), (⟨0, 65026, .none⟩, .cgt), (⟨0, 65027, .none⟩, .cgt_un),
   (⟨0, 65028, .none⟩, .clt), (⟨0, 65029, .none⟩, .clt_un),
-  -- Class instance field accesses.
+  -- Instance field accesses of a class and of a struct.
   (⟨0, 123, classOperand⟩, .ldfld classField), (⟨0, 124, classOperand⟩, .ldflda classField),
   (⟨0, 125, classOperand⟩, .stfld classField),
+  (⟨0, 123, structOperand⟩, .ldfld structField), (⟨0, 124, structOperand⟩, .ldflda structField),
+  (⟨0, 125, structOperand⟩, .stfld structField),
   -- Dynamic frame storage.
   (⟨0, 65039, .none⟩, .localloc),
   -- Class type tests.
@@ -266,9 +275,11 @@ theorem no_prefix_refused :
 /-- Reserved check flags cannot authorize an ordinary instance field load. -/
 theorem malformed_field_prefix_refused :
     let previous := some (⟨0, 0xFE19, .integer 255⟩ : RawInstruction)
-    let raw : RawInstruction := ⟨3, 123, classOperand⟩
-    (Instruction.ofRaw? previous raw).isNone &&
-      !scalarEmissionMatches #[] none previous raw [.object] (.ldfld classField) := by
+    [(classOperand, classField, ScalarKind.object), (structOperand, structField, .reference)].all
+      (fun (operand, field, receiver) =>
+        let raw : RawInstruction := ⟨3, 123, operand⟩
+        (Instruction.ofRaw? previous raw).isNone &&
+          !scalarEmissionMatches #[] none previous raw [receiver] (.ldfld field)) := by
   decide +kernel
 #print axioms malformed_field_prefix_refused
 
@@ -297,6 +308,32 @@ theorem valid_prefix_sequences :
     prefixSequenceValid .void [constrainedCall, ⟨6, 111, .call instanceSite⟩] := by
   decide +kernel
 #print axioms valid_prefix_sequences
+
+/-- A class field and a struct field, each with the reference it decodes to. -/
+private def fieldOperands : List (RawOperand × FieldRef) :=
+  [(classOperand, classField), (structOperand, structField)]
+
+/-- After `unaligned.` of each alignment, `ldfld` and `stfld` of a class or a struct field decode
+    to the instruction they decode to alone, so a field access carries no alignment. -/
+theorem unaligned_fields_unchanged :
+    fieldOperands.all (fun (operand, field) => alignments.all fun alignment =>
+      Instruction.ofRaw? (some ⟨0, 65042, .integer alignment⟩) ⟨1, 123, operand⟩ ==
+          some (.ldfld field) &&
+        Instruction.ofRaw? (some ⟨0, 65042, .integer alignment⟩) ⟨1, 125, operand⟩ ==
+          some (.stfld field)) = true := by
+  decide +kernel
+#print axioms unaligned_fields_unchanged
+
+/-- `ldflda` after `unaligned.`, which ECMA-335 does not let that prefix precede, and `ldfld`,
+    `ldflda` and `stfld` after `volatile.` do not decode, on a class or a struct field. -/
+theorem prefixed_fields_refused :
+    fieldOperands.all (fun (operand, _) =>
+      alignments.all (fun alignment =>
+        (Instruction.ofRaw? (some ⟨0, 65042, .integer alignment⟩) ⟨1, 124, operand⟩).isNone) &&
+      [123, 124, 125].all fun opcode =>
+        (Instruction.ofRaw? (some ⟨0, 65043, .none⟩) ⟨1, opcode, operand⟩).isNone) = true := by
+  decide +kernel
+#print axioms prefixed_fields_refused
 
 /-- The `readonly.` prefix with no operand, the form it takes. -/
 private def readOnlyPrefix : RawInstruction := ⟨0, 65054, .none⟩
@@ -370,14 +407,15 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 143, .none⟩, .ldelema int32 false), (⟨0, 65054, .integer 0⟩, .nop),
   (⟨0, 163, .none⟩, .ldelem_any int32), (⟨0, 148, .none⟩, .ldelem_any int32),
   (⟨0, 158, .none⟩, .stelem_any int32), (⟨0, 141, .none⟩, .newarr int32),
-  -- Another field, another access to the field, a static field or a field of a struct.
+  -- Another field, another access to the field, a static field or another owner.
   (⟨0, 123, classOperand⟩, .ldfld { classField with index := 2 }),
   (⟨0, 123, classOperand⟩, .ldfld { classField with name := name!"limit" }),
   (⟨0, 123, classOperand⟩, .ldflda classField), (⟨0, 125, classOperand⟩, .ldfld classField),
   (⟨0, 123, .field (.object "T" "T.Account") 1 (.atom runtimeScope "System.Int32")
     name!"balance" true⟩, .ldfld classField),
-  (⟨0, 123, .field (.aggregate "T::Pair" 0) 1 (.atom runtimeScope "System.Int32")
-    name!"balance" false⟩, .ldfld { classField with owner := .aggregate "T::Pair" 0 }),
+  (⟨0, 123, structOperand⟩, .ldfld classField), (⟨0, 123, classOperand⟩, .ldfld structField),
+  (⟨0, 125, structOperand⟩,
+    .stfld { structField with type := .atom runtimeScope "System.UInt32" }),
   -- Another method or constructor than the site names, a prefix the bytes do not hold, or a call
   -- operand under another opcode.
   (⟨0, 40, .call callSite⟩, .call { callSite.method with name := name!"Withdraw" }),
@@ -483,12 +521,22 @@ example : ((substituteOperand [.atom runtimeScope "System.Int32"] [] 0 genericOp
       (·.sameValue (.ldfld classField)) = true := by
   decide +kernel
 
+/-- `structOperand` holding the first generic argument instead of `int32`. -/
+private def genericStructOperand : RawOperand :=
+  .field (.aggregate "T::Pair" 0) 1 (.parameter 0) name!"balance" false
+
+-- Instantiating a struct field with `int32` decodes to the access of `structField`.
+example : ((substituteOperand [.atom runtimeScope "System.Int32"] [] 0 genericStructOperand).bind
+    (fun operand => Instruction.ofRaw? none ⟨0, 125, operand⟩)).any
+      (·.sameValue (.stfld structField)) = true := by
+  decide +kernel
+
 /--
-info: 'CIL.Instruction.ofRaw?_substitute_field' depends on axioms:
+info: 'CIL.Instruction.ofRaw?_substitute_instance_field' depends on axioms:
   [propext, Classical.choice, Quot.sound]
 -/
 #guard_msgs (whitespace := lax) in
-#print axioms Instruction.ofRaw?_substitute_field
+#print axioms Instruction.ofRaw?_substitute_instance_field
 
 /-- The constructor at the head of each decoded named opcode, failing on any `none`. -/
 private def decodedHeads : MetaM (List Name) := do

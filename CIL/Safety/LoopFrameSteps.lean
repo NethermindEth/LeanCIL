@@ -300,7 +300,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let some parts ← loopStateParts? source | return false
   let fetched ← observing? (loopFetch facts)
   saved.restore
-  let some { op, found, instruction, .. } := fetched | return false
+  let some { op, lowering, found, instruction, .. } := fetched | return false
   let op ← whnfR op
   let #[_, _, stackList, memory] := parts | return false
   let stack ← listEntries stackList
@@ -386,8 +386,14 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   try
     let found ← Term.exprToSyntax found
     let instruction ← Term.exprToSyntax instruction
+    -- A struct field store steps as its lowered store, which the frame lemma states.
+    let storing ← match lowering with
+      | some lowering => do
+        let lowering ← Term.exprToSyntax lowering
+        `(Eq.trans ($lowering _ _ _ _ _) ($stepped _ _ _ _ _))
+      | none => `($stepped _ _ _ _ _)
     Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
-      refine CIL.Safety.loop_terminates_next $found $instruction ($stepped _ _ _ _ _) ?_))
+      refine CIL.Safety.loop_terminates_next $found $instruction $storing ?_))
   catch _ => taken.restore
   return true
 

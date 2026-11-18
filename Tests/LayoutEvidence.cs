@@ -38,19 +38,31 @@ foreach (var (selector, index) in samples.Select((selector, index) => (selector,
 
 evidence.Check();
 var baseline = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
-void Reject(string name, string mutated)
+var snapshot = File.ReadAllText(Path.Combine(output, "2", "Extracted.lean"));
+void Reject(string name, string source, string mutated, string marker = "decide")
 {
-    if (mutated == baseline) throw new InvalidOperationException("Mutation did not change generated source: " + name);
-    var path = Path.Combine(output, name + ".lean");
+    if (mutated == source)
+        throw new InvalidOperationException($"""Mutation did not change generated source: {name}""");
+    var path = Path.Combine(output, $"""{name}.lean""");
     File.WriteAllText(path, mutated);
-    rejected.Add(path, "PASS layout evidence rejects " + name, "decide");
+    rejected.Add(path, $"""PASS layout evidence rejects {name}""", marker);
 }
 
-// Change lookup lemmas and instructions together: lookup rfl lemmas still hold.
-Reject("field-offset", Regex.Replace(baseline, @"\.fieldAt 4 4", ".fieldAt 3 4"));
+// A field operand naming another field of the struct no longer matches the decoded body.
+Reject("field-index", baseline, baseline.Replace("index := 1, type := .atom", "index := 0, type := .atom"),
+    "the decoded method has no field operand");
 // Offset 3 remains within the 8-byte aggregate, so old bounds-only validation passes.
-Reject("computed-offset", baseline.Replace("⟨4, 4, false⟩", "⟨3, 4, false⟩"));
-Reject("packing", baseline.Replace("packing := -1", "packing := 3").Replace("packing := 0", "packing := 3"));
-Reject("omitted-layout-uses", Regex.Replace(baseline, @"def method0LayoutUses : List Extraction.LayoutUse := [^\r\n]*", "def method0LayoutUses : List Extraction.LayoutUse := []"));
+Reject("computed-offset", baseline, baseline.Replace("⟨4, 4, false⟩", "⟨3, 4, false⟩"));
+Reject("packing", baseline,
+    baseline.Replace("packing := -1", "packing := 3").Replace("packing := 0", "packing := 3"));
+// A struct field access reads its layout from the checked environment, so the omitted uses are a local's.
+Reject("omitted-layout-uses", snapshot,
+    LayoutUsesDefinition.Replace(snapshot, "def method0LayoutUses : List Extraction.LayoutUse := []"));
 rejected.Check();
 Console.WriteLine("PASS raw sequential/nested layout recomputation and output binding");
+
+partial class Program
+{
+    [GeneratedRegex(@"def method0LayoutUses : List Extraction.LayoutUse := [^\r\n]*")]
+    internal static partial Regex LayoutUsesDefinition { get; }
+}

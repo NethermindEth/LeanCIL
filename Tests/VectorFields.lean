@@ -105,7 +105,7 @@ example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHold
     (vector "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
       PublicKeyToken=cc7b13ffcd2ddd51")
     name!"value" false⟩ =
-    some [.field 0 0 0 .load] := by decide
+    some [] := by decide
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
     (vector "Spoofed.Intrinsics") name!"value" false⟩ = none := by decide

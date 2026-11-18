@@ -778,25 +778,70 @@ register_option cil.requireFieldShapeFacts : Bool := {
 }
 
 open Lean Meta in
-/-- How `body` resolves `field`, reduced to a `FieldShape` constructor where it can be, with
-    its proof: from the operand's shared shape fact, by compiled evaluation for a closed body and
-    operand, which the kernel checks again, or else as simp rewrites the shape with the facts in
-    scope. An evaluated shape is the literal a shape fact states, so both paths give one term. -/
-def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
+/-- How `body` resolves `field` as a `FieldShape` literal, with its proof: from the operand's
+    shared shape fact, or by compiled evaluation for a closed body and operand, which the kernel
+    checks again. An evaluated shape is the literal a shape fact states, so both give one term. -/
+def fieldShapeKnown? (body field : Expr) : MetaM (Option (Expr × Expr)) := do
   let resolver := mkApp2 (mkConst ``CIL.Method.fieldShape) body field
   if let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.fieldShape resolver then
-    if let some proof := shared.proof? then return (shared.expr, proof)
-  unless resolver.hasFVar || resolver.hasMVar do
-    if cil.requireFieldShapeFacts.get (← getOptions) then
-      throwError "field {field} of a closed body has no shape fact"
-    -- A body the compiler cannot run, such as one over an axiom, is left to simp.
-    let evaluated? ← try
-        pure (some (toExpr (← unsafe evalExpr CIL.FieldShape (mkConst ``CIL.FieldShape) resolver)))
-      catch _ => pure none
-    if let some evaluated := evaluated? then
-      return (evaluated, ← mkExpectedTypeHint (← mkEqRefl evaluated) (← mkEq resolver evaluated))
+    if let some proof := shared.proof? then return some (shared.expr, proof)
+  if resolver.hasFVar || resolver.hasMVar then return none
+  if cil.requireFieldShapeFacts.get (← getOptions) then
+    throwError "field {field} of a closed body has no shape fact"
+  -- A body the compiler cannot run, such as one over an axiom, is left to simp.
+  let evaluated? ← try
+      pure (some (toExpr (← unsafe evalExpr CIL.FieldShape (mkConst ``CIL.FieldShape) resolver)))
+    catch _ => pure none
+  evaluated?.mapM fun evaluated => do
+    return (evaluated, ← mkExpectedTypeHint (← mkEqRefl evaluated) (← mkEq resolver evaluated))
+
+open Lean Meta in
+/-- How `body` resolves `field`, as `fieldShapeKnown?` finds it, or else as simp rewrites the
+    shape with the facts in scope. -/
+def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
+  if let some known ← fieldShapeKnown? body field then return known
+  let resolver := mkApp2 (mkConst ``CIL.Method.fieldShape) body field
   let shape ← Simp.simp resolver
   return (← whnfR (← instantiateMVars shape.expr), ← shape.getProof)
+
+open Lean Meta in
+/-- The lowered instruction a struct field access `op` of `body` steps as, with a proof of
+    `∀ pc args frame memory stack` that both step alike; `none` for any other instruction and for
+    a field whose shape no fact or evaluation shows to be a struct field. -/
+def structFieldLowering? (body op : Expr) : MetaM (Option (Expr × Expr)) := do
+  let (name, #[field]) := (← whnfR op).getAppFnArgs | return none
+  let accesses := [``CIL.Instruction.ldfld, ``CIL.Instruction.stfld, ``CIL.Instruction.ldflda]
+  unless accesses.contains name do
+    return none
+  let some (shape, proof) ← (try fieldShapeKnown? body field catch _ => pure none) | return none
+  let lowering (equation : Name) (lowered : Expr) (premises : Array Expr) := do
+    let type ← inferType (mkApp (mkConst equation) body)
+    forallBoundedTelescope type (some 4) fun variables _ => do
+      let proof := mkAppN (mkConst equation) (#[body] ++ variables ++ #[field] ++ premises)
+      return some (lowered, ← mkLambdaFVars variables proof)
+  match name, shape.getAppFnArgs with
+  | ``CIL.Instruction.ldfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
+    lowering ``step_ldfld_value_eq (mkApp3 (mkConst ``CIL.Instruction.fieldAt) offset width signed)
+      #[offset, width, signed, proof]
+  | ``CIL.Instruction.ldfld, (``CIL.FieldShape.aggregate, #[offset, size]) =>
+    lowering ``step_ldfld_aggregate_eq
+      (mkApp2 (mkConst ``CIL.Instruction.aggregateFieldAt) offset size) #[offset, size, proof]
+  | ``CIL.Instruction.stfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
+    lowering ``step_stfld_value_eq (mkApp2 (mkConst ``CIL.Instruction.setFieldAt) offset width)
+      #[offset, width, signed, proof]
+  | ``CIL.Instruction.stfld, (``CIL.FieldShape.aggregate, #[offset, size]) =>
+    lowering ``step_stfld_aggregate_eq
+      (mkApp2 (mkConst ``CIL.Instruction.setAggregateFieldAt) offset size) #[offset, size, proof]
+  | ``CIL.Instruction.ldflda, (``CIL.FieldShape.value, #[offset, _, _])
+  | ``CIL.Instruction.ldflda, (``CIL.FieldShape.aggregate, #[offset, _]) =>
+    let addressed ← mkCongrArg (mkConst ``CIL.FieldShape.structOffset?) proof
+    let resolved := mkApp (mkConst ``CIL.FieldShape.structOffset?)
+      (mkApp2 (mkConst ``CIL.Method.fieldShape) body field)
+    let placed ← mkAppM ``Option.some #[offset]
+    let addressed ← mkExpectedTypeHint addressed (← mkEq resolved placed)
+    lowering ``step_ldflda_struct_eq (mkApp (mkConst ``CIL.Instruction.fieldAddress) offset)
+      #[offset, addressed]
+  | _, _ => return none
 
 open Lean Meta in
 /-- The step a class field instruction takes by `equation`, showing the field's owner as the

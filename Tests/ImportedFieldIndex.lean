@@ -168,8 +168,6 @@ private def evidence (owner : TypeExpr) (opcode index : Nat) (flagged := false) 
   let unknown (count : Nat) : Option FeatureState := some ⟨List.replicate count none, []⟩
   let argument : StorageType := if classOwner then .object else .reference
   let receiver : ScalarKind := if classOwner then .object else .reference
-  let access : FieldAccess :=
-    if opcode == ldfld then .load else if opcode == ldflda then .address else .store
   let stored := opcode == stfld
   let operations : List ArgumentOp :=
     if stored then [.load 0, .other, .other, .other] else [.load 0, .other, .other]
@@ -184,7 +182,7 @@ private def evidence (owner : TypeExpr) (opcode index : Nat) (flagged := false) 
       if stored then [some [], some [receiver], some [.word32, receiver], some []]
       else [some [], some [receiver],
         some [if opcode == ldfld then .word32 else .reference]],
-    layoutUses := if classOwner then [] else [.field (if stored then 2 else 1) 0 index access],
+    layoutUses := [],
     assembly := pin,
     signature := (spelled? (body owner opcode index flagged).names.signature).getD "" }
 
@@ -195,14 +193,15 @@ private def rawLayouts : List RawLayout :=
 private def layouts : Array ComputedLayout :=
   #[⟨{ size := 8, fields := [{ offset := 0, width := 4 }, { offset := 4, width := 4 }] }, 4⟩]
 
-/-- The emitted struct method, accessing the field at `offset`. -/
-private def structMethod (opcode offset : Nat) : Method :=
+/-- The emitted struct method, accessing `Y` at the claimed index. -/
+private def structMethod (opcode index : Nat) : Method :=
+  let field : FieldRef := { owner := point, index, type := int32, name := name!"Y" }
   { locals := [], returnsValue := opcode != stfld,
     declared := DeclaredSignature.ofRaw (raw point opcode 0),
     code :=
-      if opcode == ldfld then [.ldarg 0, .fieldAt offset 4 false, .ret]
-      else if opcode == ldflda then [.ldarg 0, .fieldAddress offset, .ret]
-      else [.ldarg 0, .ldc_i4 1, .setFieldAt offset 4, .ret],
+      if opcode == ldfld then [.ldarg 0, .ldfld field, .ret]
+      else if opcode == ldflda then [.ldarg 0, .ldflda field, .ret]
+      else [.ldarg 0, .ldc_i4 1, .stfld field, .ret],
     environment := { rawLayouts := rawLayouts, layouts := layouts } }
 
 /-- The emitted class method, accessing `Y` claimed at `index`. -/
@@ -271,7 +270,8 @@ private abbrev PairWorld := Step (Nat × Nat × Nat)
 /-- A tuple with the given assembly, type marker, arity and argument bytes. Its member
     references declare Item1 and Rest as !0 and Item2 with the signature type `second`. -/
 private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01])
-    (assembly := runtimeAssembly) (marker := 0x11) (headArity := 2) (arity := 2) : PairWorld := do
+    (assembly := runtimeAssembly) (marker := 0x11) (headArity := 2) (arity := 2)
+    (first := [0x13, 0x00]) : PairWorld := do
   let name ← Tests.MetadataBuilder.stringBytes (assembly.name.bytes?.getD [])
   let culture ← Tests.MetadataBuilder.stringBytes (assembly.culture.bytes?.getD [])
   let publicKeyToken ← blob (assembly.publicKeyToken.elim [] fun key => fixedDigits 8 8 key [])
@@ -286,7 +286,7 @@ private def pairWorldWith (arguments : List Nat) (second := [0x13, 0x01])
   let tupleBlob ← blob ([0x15, marker, tokenRow tupleRef * 4 + 1, arity] ++ arguments)
   let tupleSpec ← row Table.typeSpec [tupleBlob]
   let parent := (tupleSpec - 0x1B000000) * 8 + 4
-  let firstSignature ← blob [0x06, 0x13, 0x00]
+  let firstSignature ← blob (0x06 :: first)
   let secondSignature ← blob (0x06 :: second)
   let firstName ← string "Item1"
   let secondName ← string "Item2"
@@ -353,6 +353,12 @@ private def itemError (world : PairWorld) (index : Nat) (owner held : TypeExpr) 
   let (slice, first, second, _) := build world (bytesOf "T") pin.identity
   if index == 0 then checkPair first (.field owner index held name!"Item1" false) slice
   else checkPair second (.field owner index held name!"Item2" false) slice
+
+/-- A member reference declaring the first int32 item as int64 fails signature binding. -/
+theorem refuses_int64_first_item :
+    itemError (pairWorldWith [0x08, 0x08] (first := [0x0A])) 0 pair int32 =
+      some (.operandMismatch 0x0A000001) := by decide +kernel
+#print axioms refuses_int64_first_item
 
 /-- The extractor's aggregate operand for two tuple arguments in the given assembly. -/
 private def tupleOwner (first second : String) (scope := runtimeScope) (layout := 0) : TypeExpr :=

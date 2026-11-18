@@ -232,6 +232,7 @@ internal static class LeanEmitter
                     TypedElementAccess access => access with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ElementAddress address => address with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
+                    StructField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                     StaticFieldInstruction access => access with { Field = genericEvidence.FieldReferenceOf(m, pc) },
                     Newobj construction =>
                         construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
@@ -295,7 +296,7 @@ internal static class LeanEmitter
                 };
             if (collectTemplates)
                 templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
-            // A class field access names its operand's definition, so stepping reads that operand's shape fact.
+            // A field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);
             var decoded = refusals[n] is null;
@@ -303,9 +304,9 @@ internal static class LeanEmitter
             {
                 // The decoder's raw definition is the method's only source; the command states its field facts and
                 // writes each field operand as the definition the literal form names.
-                var naming = string.Join(", ", ops.OfType<ClassField>().Select(access =>
+                var naming = string.Join(", ", ops.OfType<INamedField>().Select(access =>
                     operandShapes.FieldName(access.Reference ?? throw new InvalidOperationException(
-                        "A class field access has no field operand."))).Distinct());
+                        "A field access has no field operand."))).Distinct());
                 var fields = naming.Length == 0 ? "" : $"[{naming}] ";
                 var method = $"method{n}";
                 var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable}";
@@ -330,7 +331,7 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
                     $"links := {linkTable}, code := [");
                 lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
-                    (op is ClassField { Reference: { } field } access
+                    (op is INamedField { Reference: { } field } access
                         ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             }
             const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";

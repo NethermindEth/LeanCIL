@@ -26,16 +26,15 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
   -- struct array element, from the checked layouts.
   | 0x7b, .field (.object _ _) _ _ _ false | 0x7c, .field (.object _ _) _ _ _ false
   | 0x7d, .field (.object _ _) _ _ _ false => return []
-  -- `ldfld`, `ldflda` and `stfld` on an instance field, whose declared type must match.
+  -- `ldfld`, `ldflda` and `stfld` on a struct instance field, whose declared type must match.
+  -- The step reads the offset and width from the checked layouts, so the site needs no use.
   | 0x7b, .field owner index type _ false
   | 0x7c, .field owner index type _ false
   | 0x7d, .field owner index type _ false =>
     let .field (.aggregate parent) ← typeStorage layouts owner | none
     let metadata ← layouts[parent]?
     let field ← metadata.fields[index]?
-    if fieldKind? layouts type != some field.type then none else
-      return [.field pc parent index (if instruction.opcode = 0x7b then .load
-        else if instruction.opcode = 0x7c then .address else .store)]
+    if fieldKind? layouts type != some field.type then none else return []
   -- `ldobj`, `stobj`, `initobj`, `cpobj` and `sizeof` of a struct.
   | 0xfe15, .type (.apply (.constructor scope owner) (.aggregate identity index)) =>
     if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] then

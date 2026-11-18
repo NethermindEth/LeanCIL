@@ -1,6 +1,7 @@
 import CIL.Safety.ResolutionFacts
 import CIL.Safety.ObjectSteps
 import CIL.Safety.FuelLemmas
+import CIL.Safety.SymbolicExecution
 
 /-!
 # Field and value shapes
@@ -110,6 +111,21 @@ theorem hypothesis_reads_low (method : Method) (shared : method.environment = en
   simp only [cil_code]
 #print axioms hypothesis_reads_low
 
+/-- A reducible environment hypothesis supplies the shared shape of an open method. -/
+theorem reducible_environment_reads_low (method : Method)
+    (shared : id method.environment = environment) :
+    method.fieldShape lowField = .value 0 2 true := by
+  simp only [cil_code]
+#print axioms reducible_environment_reads_low
+
+/-- A supplied step on a decoded field applies while the goal still names that field. -/
+theorem supplied_decoded_field_step (frame : Safety.Frame) (memory : Safety.Memory)
+    (result : Safety.ExecutionResult Safety.FrameAction)
+    (loaded : Safety.step body (.ldfld highField) 0 [] frame [] memory = result) :
+    Safety.step body (.ldfld highField) 0 [] frame [] memory = result := by
+  cil_checked_step [loaded]
+#print axioms supplied_decoded_field_step
+
 -- An index whose declared type is not the held type, and an index past the fields, are refused.
 theorem refuses_a_mismatched_index :
     environment.fieldShape { highField with index := 0 } =
@@ -120,6 +136,18 @@ theorem refuses_an_index_past_the_fields :
     environment.fieldShape { highField with index := 3 } =
       .unsupported "Field outside the checked layouts" := by decide +kernel
 #print axioms refuses_an_index_past_the_fields
+
+-- A held type the declaration does not store, at the declared index, is refused.
+theorem refuses_another_held_type :
+    environment.fieldShape { lowField with type := uint32 } =
+      .unsupported "Field outside the checked layouts" := by decide +kernel
+#print axioms refuses_another_held_type
+
+-- An owner naming one struct with another's layout index resolves to neither.
+theorem refuses_an_identity_at_another_layout :
+    environment.fieldShape { highField with owner := .aggregate "T::Pair" 0 } =
+      .unsupported "Field owner is not a value type" := by decide +kernel
+#print axioms refuses_an_identity_at_another_layout
 
 theorem refuses_an_owner_that_is_not_a_value_type :
     environment.fieldShape { highField with owner := uint32 } =

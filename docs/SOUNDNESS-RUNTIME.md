@@ -487,11 +487,9 @@ so the field's declared element is what the load trusts.
 The extractor emits these operations for a field typed as a single-dimensional array of an
 integer, Boolean, char, integer-backed enum, reference-free struct or integer vector, and Lean
 rechecks the emitted element against the raw field token, and a stored value against an array of
-that element on the evaluation stack. A vector's width is fixed by its type. A struct's comes
-from its layout: the raw body names the field access as a layout use of the struct
-(`LayoutUsesComplete`), and `MethodLayoutsValid` requires the emitted width to be the size Lean
-computes for that layout, as for any other array of the struct
-([TilePairs](../Examples/Proofs/TilePairs.lean)).
+that element on the evaluation stack. A vector's type fixes its width. For an array of structs,
+`Method.fieldShape` resolves the field through the method's checked layout environment and reads
+the element size from the struct's computed layout. See [TilePairs](../Examples/Proofs/TilePairs.lean).
 
 The extractor admits a single-dimensional array of an admitted class or of `string` as a
 parameter, local, return or `newarr` type, typed as an object on the evaluation stack. An array of

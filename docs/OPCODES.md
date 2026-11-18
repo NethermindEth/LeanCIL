@@ -215,7 +215,9 @@ rejected.
 
 `unaligned.` is also accepted before supported integer `ldind.*`/`stind.*`, `ldobj`/`stobj` and
 `ldfld`/`stfld`. These accesses already use byte alignment, so the prefix lowers to a no-op and
-bypasses no safety check.
+bypasses no safety check: `ldfld` and `stfld` after it decode to the same field instruction as
+without it. `ldflda` after `unaligned.`, and any field instruction after `volatile.`, are
+rejected.
 
 The exact managed-reference and pointer overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`,
 `CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer arguments must come from

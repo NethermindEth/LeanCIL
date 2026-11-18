@@ -1,5 +1,6 @@
 import CIL.Extraction.Layout
 import CIL.Extraction.TypeStorage
+import CIL.Extraction.ValueDecoding
 
 /-! Field accumulation preserves declaration order and all metadata rejection boundaries. Named
 tables with a wrong offset, size, length, child position or generic owner are rejected by both
@@ -247,6 +248,16 @@ theorem classApplicationStaysClass :
     closeLayoutType [leaf, wrap 1 (.parameter 0) 0] (wrapType 1) =
       .aggregate "S::Wrap1`1<Leaf>" 1 := by decide +kernel
 #print axioms classApplicationStaysClass
+
+/-- A generic class field keeps its owner through substitution and refuses struct decoding. -/
+theorem classFieldRefusesStructLayout :
+    let head := TypeExpr.objectConstructor "S" "Wrap1`1"
+    let argument := TypeExpr.aggregate "Leaf" 0
+    let source := RawOperand.field (.apply head (.parameter 0)) 0 (.parameter 0) name!"first" false
+    let closed := RawOperand.field classWrapType 0 argument name!"first" false
+    substituteOperand [argument] [leaf, classWrap] 0 source = some closed ∧
+      Instruction.ofRaw? none ⟨0, 123, closed⟩ = none := by decide +kernel
+#print axioms classFieldRefusesStructLayout
 
 /-- A class keeps its second argument even when a layout claims that exact closed owner. -/
 theorem twoArgumentClassStaysClass :

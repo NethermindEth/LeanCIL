@@ -23,7 +23,7 @@ private def body : RawMethod := {
 private def arguments : RawArguments :=
   ⟨[.field (.aggregate 0)], [.field (.aggregate 0)], [.other, .other, .address 0]⟩
 private def uses : List LayoutUse :=
-  [.field 0 0 0 .load, .size 1 0 .initialize, .local 0 0, .parameter 0 0]
+  [.size 1 0 .initialize, .local 0 0, .parameter 0 0]
 
 example : LayoutUsesComplete layouts body arguments [true, true, true] uses := by decide
 -- Omitting any instruction, local or parameter site cannot evade validation.
@@ -31,8 +31,14 @@ example : ∀ index ∈ List.range uses.length,
     ¬ LayoutUsesComplete layouts body arguments [true, true, true] (uses.eraseIdx index) := by decide
 example : ¬ LayoutUsesComplete layouts body arguments [true] uses := by decide
 example : ¬ LayoutUsesComplete layouts body arguments [true, true, true] uses.reverse := by decide
+-- A struct field access needs no use: the step reads its entry from the checked layouts.
+example : instructionLayoutUses layouts 0
+    ⟨0, 0x7b, .field packet 0 word name!"first" false⟩ = some [] := by decide
 example : instructionLayoutUses layouts 0
     ⟨0, 0x7b, .field packet 1 word name!"first" false⟩ = none := by decide
+-- An owner naming another identity at Packet's layout index has no checked layout.
+example : instructionLayoutUses layouts 0
+    ⟨0, 0x7b, .field (.aggregate "Counter" 0) 0 word name!"first" false⟩ = none := by decide
 example : instructionLayoutUses layouts 0
     ⟨0, 0x7b, .field packet 0 packet name!"first" false⟩ = none := by decide
 example : instructionLayoutUses layouts 0

@@ -710,7 +710,10 @@ struct field access as the `fieldAt`, `setFieldAt`, `aggregateFieldAt`, `setAggr
 `fieldAddress` step of its shape (`step_ldfld_value_eq` and its siblings); a closed method and
 operand without a fact resolve by compiled evaluation to the literal shape a fact would state,
 which the kernel checks again; `set_option cil.requireFieldShapeFacts true` makes that case an
-error instead, so a proof can require that every field step reads a fact.
+error instead, so a proof can require that every field step reads a fact. `cil_checked_steps`,
+`cil_contract_steps` and the loop steppers rewrite a struct field step to the step of its shape
+before they read supplied facts, so the facts a proof supplies for a struct field access are
+those of that lowered step.
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared tag. For an enum,
 `Extraction.fieldKind?` requires an immediate runtime integer atom from the eight supported types
@@ -745,7 +748,9 @@ The kernel then checks by reduction the theorem, named with the suffix `_decoder
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
 `_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
-`Extracted.method0_decoder_eq`, `Extracted.method0_profile` and so on. The extraction derives
+`Extracted.method0_decoder_eq`, `Extracted.method0_profile` and so on. For a `Method.ofClosed?` decoder, the
+`declared` field and the `method0_declared` fact use the signature constructor with the closed
+method's parameter and return type expressions. The extraction derives
 `Extracted.method0_decoded` from the closed equation and the validated specialization.
 It states that decoding the original method at its type arguments gives the same method.
 A decoder with a hole, a
@@ -768,8 +773,8 @@ cil_decoded_method method0 := Method.ofClosed? profile environment method0Links 
 ```
 
 in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when
-the method accesses class instance fields, naming the operand definitions the literal would name,
-followed by
+the method accesses instance fields of a struct or class. The list names the field operands
+used by the decoded instructions. The extractor follows the definition with
 `cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
 its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.program_method{n}`
 equations.

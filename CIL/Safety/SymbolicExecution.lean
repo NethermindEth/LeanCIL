@@ -1195,6 +1195,29 @@ def linkedOpcodes : List Lean.Name :=
     ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
 
 open Lean Elab Tactic Meta in
+/-- Apply a supplied step fact at the current instruction, unfolding named bodies as needed. -/
+private def applyCheckedStepFact (facts : Array Term) : TacticM Bool := do
+  -- A lookup can expose either a named body or its literal. A fact about the named body
+  -- matches the literal after unfolding its cil_code definitions.
+  let candidates ← stepFacts (← getMainTarget) facts
+  for fact in candidates do
+    let saved ← saveState
+    try
+      evalTactic (← `(tactic| cil_strict ((with_reducible_and_instances apply $fact); done)))
+      return true
+    catch _ => saved.restore
+  if !candidates.isEmpty then
+    let normalize ← `(tactic| simp only [cil_code])
+    let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
+    for fact in candidates do
+      let saved ← saveState
+      try
+        applyUnfoldedStepFact ctx simprocs fact
+        return true
+      catch _ => saved.restore
+  return false
+
+open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     let initial := (← instantiateMVars (← getMainTarget)).consumeMData
@@ -1203,25 +1226,21 @@ elab_rules : tactic
           (argument? step 1).any (·.isConstOf ``CIL.Instruction.nop) then
         evalTactic (← `(tactic| exact step_nop_eq ..))
         return
-    -- A body reached through a lookup hypothesis stays named; one reached by unfolding a
-    -- `cil_code` program is already a literal, so a fact on the named body needs its own
-    -- `cil_code` unfolded to match it.
-    let candidates ← stepFacts (← getMainTarget) facts.getElems
-    for fact in candidates do
-      let saved ← saveState
-      try
-        evalTactic (← `(tactic| cil_strict ((with_reducible_and_instances apply $fact); done)))
-        return
-      catch _ => saved.restore
-    if !candidates.isEmpty then
-      let normalize ← `(tactic| simp only [cil_code])
-      let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
-      for fact in candidates do
-        let saved ← saveState
-        try
-          applyUnfoldedStepFact ctx simprocs fact
-          return
-        catch _ => saved.restore
+    if !facts.getElems.isEmpty && (← applyCheckedStepFact facts.getElems) then return
+    -- A struct field access steps as the lowered access of its shape, which facts are stated over.
+    if let some (_, step, result) := initial.eq? then
+      if let some #[body, op, pc, args, frame, stack, memory] :=
+          argumentsOf? step ``CIL.Safety.step 7 then
+        if let some (lowered, lowering) ← structFieldLowering? body op then
+          let equation := (mkAppN lowering #[pc, args, frame, memory, stack]).headBeta
+          let steppedLowered :=
+            mkAppN step.getAppFn #[body, lowered, pc, args, frame, stack, memory]
+          let stated ← withLocalDeclD `stepped (← inferType step) fun stepped => do
+            mkLambdaFVars #[stepped] (← mkEq stepped result)
+          let rewritten ← mkCongrArg stated equation
+          let target ← mkEq steppedLowered result
+          replaceMainGoal [← (← getMainGoal).replaceTargetEq target rewritten]
+          if ← applyCheckedStepFact facts.getElems then return
     if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
       let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
@@ -1766,6 +1785,14 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     try (conv => lhs; arg 4; cil_literal_nat)
     cil_stack_cleanup))
 
+open Lean Meta in
+/-- The instruction the fetched `op` steps as: for a struct field access, the lowered instruction
+    of its shape, read from the method `lookup` (`body.code[pc]? = some op`) names; else `op`. -/
+def cilSteppedOp (lookup op : Expr) : MetaM Expr := do
+  let some code := lookup.find? (·.isAppOfArity ``CIL.Method.code 1) | return op
+  let some (lowered, _) ← structFieldLowering? code.appArg! op | return op
+  return lowered
+
 open Lean Elab Tactic Meta in
 /-- Instantiate `lemma` against the goal through `select`, close its method and instruction
     lookups (the premises `lookups` places from the end) with `cil_lookup`, and return both
@@ -1789,7 +1816,7 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
     unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
   let fetched ← instantiateMVars (← inferType instructionFound)
   let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
-  let fetchedOp ← lastArgument "cilFetchedOp" found
+  let fetchedOp ← cilSteppedOp fetched (← lastArgument "cilFetchedOp" found)
   let operation :=
     ((← cilReducedOp? fetchedOp).bind (·.getAppFn.constName?)).getD Name.anonymous
   let lookupSyntax (proof : Expr) : TacticM Term := do
@@ -1883,7 +1910,7 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   let instruction ← inferType (← Term.elabTerm instructionFound none)
   let some (_, _, found) := instruction.eq? | return facts
   let some fetchedOp := lastArgument? found | return facts
-  let opcode ← whnf fetchedOp
+  let opcode ← whnf (← cilSteppedOp instruction fetchedOp)
   let mut offset := mkNatLit 0
   if operation == ``CIL.Instruction.storeScalar then
     let some width := lastArgument? opcode | return facts

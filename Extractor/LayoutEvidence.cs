@@ -218,18 +218,7 @@ internal sealed class LayoutEvidence
                         ".ctor" or "get_Empty"))
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
-            // Class fields sit at model offsets that Lean rechecks without a layout table.
-            if (instruction.OpCode.Code is Code.Ldfld or Code.Stfld or Code.Ldflda &&
-                !ObjectTypes.Candidate(((FieldReference)instruction.Operand).DeclaringType))
-            {
-                var reference = (FieldReference)instruction.Operand;
-                var field = reference.Resolve();
-                var owner = reference.DeclaringType;
-                var fieldIndex = layouts.FieldIndex(owner, field);
-                var access = instruction.OpCode.Code switch { Code.Ldfld => "load", Code.Stfld => "store", _ => "address" };
-                uses.Add($".field {pc} {Index(owner)} {fieldIndex} .{access}");
-            }
-            else if (instruction.OpCode.Code == Code.Initobj &&
+            if (instruction.OpCode.Code == Code.Initobj &&
                 instruction.Operand is GenericInstanceType span && Spans.Is(span) &&
                 MetadataValidation.IsAggregate(span.GenericArguments[0], method.Module))
                 uses.Add($".size {pc} {Index(span.GenericArguments[0])} .spanElement");

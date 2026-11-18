@@ -151,8 +151,12 @@ def loopStateParts? (state : Expr) : MetaM (Option (Array Expr)) := do
 /-- The instruction a loop goal's source state fetches, the proofs of its method and
     instruction lookups, and the step obligation taking it leaves. -/
 structure LoopFetched where
-  /-- The fetched instruction. -/
+  /-- The instruction the step takes: the fetched one, or the lowered instruction of a struct
+      field access's shape. -/
   op : Lean.Expr
+  /-- For a struct field access, a proof that the fetched and lowered instructions step alike,
+      over `pc args frame memory stack`. -/
+  lowering : Option Lean.Expr
   /-- A proof that the program holds the goal's method. -/
   found : Lean.Expr
   /-- A proof that the method's code holds `op` at the goal's pc. -/
@@ -185,9 +189,13 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
   let found ← instantiateMVars methodLookup
   let instruction ← instantiateMVars instructionLookup
   let op ← lastArgument "loopFetch" op
+  let lowered ← match fetched.find? (·.isAppOfArity ``CIL.Method.code 1) with
+    | some code => structFieldLowering? code.appArg! op
+    | none => pure none
   let .mvar step := stepPremise
     | throwError "loopFetch: expected a step premise, but found{indentExpr stepPremise}"
-  return { op, found, instruction, step }
+  let lowering := lowered.map (·.2)
+  return { op := (lowered.map (·.1)).getD op, lowering, found, instruction, step }
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
