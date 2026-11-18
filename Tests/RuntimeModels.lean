@@ -596,6 +596,11 @@ example : ¬ RuntimeModelsAgree (method (site createScalarUnsafeMethod)) [true]
     (emitting createLowered []) := by decide +kernel
 example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
     {} {} (method (site createScalarUnsafeMethod)) [true] [createLowered] := by decide +kernel
+/-- Keeping a valid 256-bit call still requires its own generic member declaration. -/
+example : ¬ RuntimeModelsAgree (method (site getElement256Method 40
+    { getElementSignature "System.Runtime.Intrinsics.Vector256`1" with returnType := word }))
+    [true] (emitting (.call getElement256Method {}) []) := by decide +kernel
+
 example : ManagedCallsValid [] [] (callModelled body) (method lane256Site) [true]
     (emitting (.call getElement256Method {}) []) := by decide +kernel
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method lane256Site) [true]

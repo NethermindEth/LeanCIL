@@ -121,6 +121,26 @@ example :
       passes member.1 lib member.2 (.call (genericOwnerCall (.parameter 0) "!!0")) := by
   decide +kernel
 
+/-- The signed BigMul(int,int) operand has a concrete Int64 result before substitution. -/
+private def signedProduct (declared : TypeExpr) (identity : String) : CallSite :=
+  let result := TypeExpr.atom runtimeScope "System.Int64"
+  memberCall (.atom runtimeScope "System.Math") name!"BigMul" "BigMul"
+    (identity ++ " System.Math::BigMul(System.Int32,System.Int32)") 0 []
+    { convention := 0, returnType := declared, parameters := [int32, int32] } result [int32, int32]
+
+example :
+    let result := TypeExpr.atom runtimeScope "System.Int64"
+    let member := memberFixture "System" "Math" "BigMul" [0, 2, 0x0A, 8, 8] none
+    passes member.1 lib member.2 (.call (signedProduct result "System.Int64")) := by decide +kernel
+
+example :
+    let member := memberFixture "System" "Math" "BigMul" [0, 2, 0x1E, 0, 8, 8] none
+    let openCall := { signedProduct (.parameter 0) "!!0" with method.returnType := .parameter 0 }
+    rejects member.1 lib member.2 (.call openCall) (.operandMismatch member.2) 1 &&
+      (substituteOperand [.atom runtimeScope "System.Int64"] [] 1 (.call openCall)).any
+        (fun | .call site => site.method.returnType == .atom runtimeScope "System.Int64"
+             | _ => false) := by decide +kernel
+
 /-- Replace the bytes of a row of a slice. -/
 private def mutateRow (slice : MetadataSlice) (token : Nat) (change : List Nat → List Nat) :
     MetadataSlice :=
