@@ -15,9 +15,13 @@ private def transferOf (environment : CallLayouts) (type : TypeExpr) :
     Option (TransferKind × Nat) := do
   match environment.valueShape type with
   | .primitive width signed => return (.scalar width signed, width)
-  | .vector 16 => return (.snapshot .vector128, 16)
-  | .vector 32 => return (.snapshot .vector256, 32)
-  | .vector 64 => return (.snapshot .vector512, 64)
+  | .vector width =>
+    _root_.guard (integerVectorWidth type == some width)
+    match width with
+    | 16 => return (.snapshot .vector128, width)
+    | 32 => return (.snapshot .vector256, width)
+    | 64 => return (.snapshot .vector512, width)
+    | _ => none
   | .aggregate size =>
     let .aggregate _ index := type | none
     let layout ← environment.layouts[index]?

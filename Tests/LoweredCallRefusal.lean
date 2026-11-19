@@ -259,6 +259,43 @@ theorem mathModel :
       name!"Max" "Max" = some (.unadmitted 40) := by rfl
 #print axioms mathModel
 
+/-- Both helpers use the same scoped vector type in each occurrence of their type argument. -/
+private def vectorSite (read : Bool) (element : String) : RawInstruction := Id.run do
+  let vector := fun name => TypeExpr.apply (.constructor intrinsicsScope
+    "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope name)
+  let source := vector element
+  let target := vector "System.UInt64"
+  let arguments := if read then [source] else [source, target]
+  let byteRef := TypeExpr.byref (.atom runtimeScope "System.Byte")
+  let signature := if read then
+    "!!0 System.Runtime.CompilerServices.Unsafe::ReadUnaligned(System.Byte&)"
+    else "!!1 System.Runtime.CompilerServices.Unsafe::BitCast(!!0)"
+  return ⟨0, 40, .call {
+    method := {
+      owner := .atom runtimeScope "System.Runtime.CompilerServices.Unsafe",
+      name := if read then name!"ReadUnaligned" else name!"BitCast", hasThis := false,
+      genericArity := arguments.length, methodArguments := arguments,
+      parameters := [if read then byteRef else source],
+      returnType := if read then source else target }
+    declared := {
+      convention := 0x10, returnType := .parameter (if read then 0 else 1),
+      parameters := [if read then byteRef else .parameter 0] }
+    name := if read then "ReadUnaligned" else "BitCast", typeArguments := arguments,
+    target := .external (runtimeScope ++ "::" ++ signature), parameterCount := 1,
+    returnsValue := true }⟩
+
+/-- A change of vector element alone is sufficient to refuse either transfer. -/
+theorem integerVectorTransfers :
+    let resolve := fun family raw => LoweredFamily.resolve family
+      (LayoutEnvironment.callLayouts {}) .scalar none raw
+    resolve .bitCast (vectorSite false "System.Byte") =
+        some (.memory (.bitcastValue .vector128 .vector128)) ∧
+      resolve .bitCast (vectorSite false "System.Double") = none ∧
+      resolve .unsafeTransfer (vectorSite true "System.Byte") = some (.memory .load128) ∧
+      resolve .unsafeTransfer (vectorSite true "System.Double") = none := by decide +kernel
+
+#print axioms integerVectorTransfers
+
 /-- The empty layout environment of the method with an unknown call. -/
 private def emptyEnvironment : LayoutEnvironment := {}
 
