@@ -123,6 +123,26 @@ theorem bigMulBinding :
 
 #print axioms bigMulBinding
 
+/-- A crossed result selects no arithmetic overload even before target text or layouts are read. -/
+theorem arithmetic_result_signedness :
+    let unsigned := TypeExpr.atom runtimeScope "System.UInt32"
+    let multiply : MethodRef := {
+      owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
+      genericArity := 0, parameters := [unsigned, unsigned],
+      returnType := .atom runtimeScope "System.Int64" }
+    let pair := fun element => s!"{runtimeScope}::System.ValueTuple`2<{element},{element}>"
+    let divide := { multiply with
+      name := name!"DivRem", parameters := [int32Type, int32Type],
+      returnType := .aggregate (pair "System.UInt32") 0 }
+    let distinguishes := fun (crossed : MethodRef) (result : TypeExpr) =>
+      (runtimeCatalog.table.entry? .call crossed).any fun entry =>
+        (entry.select? { crossed with returnType := result }).isSome &&
+          (entry.select? crossed).isNone
+    distinguishes multiply (.atom runtimeScope "System.UInt64") ∧
+      distinguishes divide (.aggregate (pair "System.Int32") 0) := by decide +kernel
+
+#print axioms arithmetic_result_signedness
+
 /-- DivRem binds the tuple's indexed declaration, both field types, packing and alignment. -/
 theorem divRemTupleLayout :
     let pair := "System.ValueTuple`2<System.UInt64,System.UInt64>"
