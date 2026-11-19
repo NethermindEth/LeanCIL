@@ -150,8 +150,8 @@ internal static class LeanEmitter
     /// <summary>Lean's default heartbeat budget, which the instruction checks of a shorter body fit in.</summary>
     const int BaseHeartbeats = 200_000;
 
-    /// <summary>Twice the 60 heartbeats per instruction the kernel measured on the decided instruction checks.</summary>
-    const int HeartbeatsPerInstruction = 120;
+    /// <summary>The instruction checks measure 168 heartbeats per instruction on a body of calls and 60 on arithmetic.</summary>
+    const int HeartbeatsPerInstruction = 400;
 
     // The kernel decides the instruction checks once per site, so their budget follows the body length.
     internal static int InstructionCheckHeartbeats(int instructions) =>
