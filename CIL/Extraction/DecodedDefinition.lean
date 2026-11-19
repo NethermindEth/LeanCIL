@@ -143,7 +143,6 @@ deriving instance ToExpr for NarrowKind
 deriving instance ToExpr for Intrinsic
 deriving instance ToExpr for Feature
 deriving instance ToExpr for ManagedOp
-deriving instance ToExpr for SpanConstructor
 deriving instance ToExpr for ConvTarget
 deriving instance ToExpr for TokenOperand
 deriving instance ToExpr for Instruction

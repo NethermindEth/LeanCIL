@@ -1,9 +1,11 @@
 import CIL.Extraction.SpanModels
 
 /-!
-# Value-producing span constructors
+# Span constructors
 
 Each overload binds an external MemberRef to the checked construction for its closed element.
+`newobj` pushes the constructed span; `call` on the home of a span local or homed parameter
+stores it in the slot the home names.
 -/
 
 namespace CIL.Extraction
@@ -32,49 +34,61 @@ private def Source.operand (source : Source) : ModelOperand :=
     return s!"{runtimeScope}::System.Void {owner}<{name}>::.ctor({parameters})"
 
 /-- Array views require admissible array storage. Aggregate widths use the checked layout. -/
-private def Source.operation (source : Source) (writable : Bool) (reader : CallLayouts)
-    (method : MethodRef) : Option MemoryOp := do
+private def Source.constructor (source : Source) (writable : Bool) (reader : CallLayouts)
+    (method : MethodRef) : Option SpanConstructor := do
   let .apply _ element := method.owner | none
   let _ ← spanElementName element
   let width ← match element with
     | .aggregate .. => (reader.valueShape element).size?
     | _ => spanElementWidth element
   match source with
-  | .reference => return .spanSingleReference width writable
+  | .reference => return .singleReference width writable
   | .pointer =>
-    if !writable && element == .atom runtimeScope "System.Byte" then return .spanCreate
-    return .spanFromReference width writable
+    if !writable && element == .atom runtimeScope "System.Byte" then return .staticBytes
+    return .reference width writable
   | .array | .range =>
     let _ ← reader.storage (.array element)
     let range := match source with | .range => ArraySpanRange.counted | _ => .whole
-    return .arraySpan (← arrayElementType element width) writable range
+    return .array (← arrayElementType element width) writable range
 
-/-- The closed instance constructor must agree with the declaration on its result and arguments. -/
-private def Source.overload (source : Source) (writable : Bool) : ModelOverload :=
+/-- The closed instance constructor must agree with the declaration on its result and arguments;
+    `model` says what the opcode does with the constructed span. -/
+private def Source.overload (source : Source) (writable : Bool)
+    (model : SpanConstructor → RuntimeModel) : ModelOverload :=
   { operand := source.operand
     accepts := fun method => match method.owner with
       | .apply head element => head == spanHead writable && method.name == name!".ctor" &&
           method.hasThis && method.genericArity == 0 && method.methodArguments.isEmpty &&
           method.signature 0x20 == source.signature element
       | _ => false
-    resolve := fun reader method =>
-      RuntimeModel.memory <$> source.operation writable reader method }
+    resolve := fun reader method => model <$> source.constructor writable reader method }
 
-/-- Both span owners reserve their constructor name for the four value-producing overloads. -/
-def spanConstructorEntries : List ModelEntry := [true, false].map fun writable =>
-  { opcode := .newobj, owner := spanHead writable, name := name!".ctor", ownsName := true,
-    overloads := [Source.array, .range, .pointer, .reference].map (·.overload writable) }
+/-- The four overloads, in the order their rows are tried. -/
+private def sources : List Source := [.array, .range, .pointer, .reference]
 
-/-- Every resolved span constructor executes a checked memory operation. -/
+/-- Both span owners reserve their constructor name under `newobj` and under `call`. -/
+def spanConstructorEntries : List ModelEntry := [true, false].flatMap fun writable =>
+  [{ opcode := .newobj, owner := spanHead writable, name := name!".ctor", ownsName := true,
+     overloads := sources.map (·.overload writable fun constructor =>
+       .memory constructor.operation) },
+   { opcode := .call, owner := spanHead writable, name := name!".ctor", ownsName := true,
+     overloads := sources.map (·.overload writable .spanInPlace) }]
+
+/-- A resolved span constructor executes its checked memory operation, or runs in place. -/
 theorem spanConstructorEntries_yields {property : RuntimeModel → Prop}
-    (memory : ∀ operation, property (.memory operation)) :
+    (memory : ∀ operation, property (.memory operation))
+    (inPlace : ∀ constructor, property (.spanInPlace constructor)) :
     ∀ entry ∈ spanConstructorEntries, entry.Yields property := by
   intro entry member reader method model found
-  obtain ⟨writable, _, rfl⟩ := List.mem_map.mp member
+  obtain ⟨writable, _, member⟩ := List.mem_flatMap.mp member
   obtain ⟨row, selected, resolved⟩ := Option.bind_eq_some_iff.mp found
-  obtain ⟨source, _, rfl⟩ := List.mem_map.mp (ModelEntry.select?_mem selected)
-  obtain ⟨op, _, rfl⟩ := Option.map_eq_some_iff.mp resolved
-  exact memory op
+  simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+  rcases member with rfl | rfl
+  all_goals
+    obtain ⟨source, _, rfl⟩ := List.mem_map.mp (ModelEntry.select?_mem selected)
+    obtain ⟨constructor, _, rfl⟩ := Option.map_eq_some_iff.mp resolved
+  · exact memory _
+  · exact inPlace constructor
 
 #print axioms spanConstructorEntries_yields
 

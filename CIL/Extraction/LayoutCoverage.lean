@@ -4,8 +4,8 @@ import CIL.Extraction.Generics
 # Layout coverage
 
 `MethodLayoutsValid` checks only the layout uses it is given. `LayoutUsesComplete` closes
-that gap by deriving the rows for model calls, folded span resets, constructions,
-struct-typed locals and homed parameters. Typed object instructions resolve their operands
+that gap by deriving the rows for model calls, constructions, struct-typed locals and homed
+parameters. Typed object instructions resolve their operands
 through the method's checked layout environment.
 -/
 
@@ -34,12 +34,6 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     let metadata ← layouts[parent]?
     let field ← metadata.fields[index]?
     if fieldKind? layouts type != some field.type then none else return []
-  -- A folded span reset records its element stride.
-  | 0xfe15, .type (.apply (.constructor scope owner) (.aggregate identity index)) =>
-    if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] then
-      if typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
-        none else return [.size pc index .spanElement]
-    else return []
   | _, .type type =>
     match aggregateIndex type with
     | none => return []
@@ -49,20 +43,14 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
   -- `newobj` of a struct, then `Unsafe.Add<T>`.
   | 0x73, .call site =>
     return (aggregateIndex (closeLayoutType layouts site.declaringType)).toList.map
-      fun index => .size pc index .construct
+      fun index => .size pc index
   | 0x28, .call site =>
     match site.declaringType, site.typeArguments with
     | .apply (.constructor scope owner) (.aggregate identity index), [] =>
       let spanOwner := scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"]
       if !spanOwner && site.name == "get_Empty" &&
           typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
-        none else
-      if spanOwner && site.name == ".ctor" &&
-          (site.parameterTypes.head?.map fun type => match type with
-            | .array _ => true | _ => false).getD false then
-        return [.size pc index .arrayElement]
-      else if spanOwner && site.name == ".ctor" then
-        return [.size pc index .spanElement] else return []
+        none else return []
     | _, _ => return []
   | _, _ => return []
 

@@ -5,8 +5,9 @@ import CIL.Extraction.CallLayouts
 /-!
 # Object operand admission
 
-Live object instructions use the storage shape of their closed type operand. A span load
-requires a direct address of the same view, and a span reset requires a folded local constructor.
+Live object instructions use the storage shape of their closed type operand. A span load or reset
+requires a direct address of the same view, and a span constructor call requires the address of
+its constructed type before its argument pushes.
 -/
 
 namespace CIL.Extraction
@@ -18,6 +19,13 @@ def objectShapeAdmitted (opcode : Nat) (type : TypeExpr) (shape : ValueShape) : 
   | .unsupported _ => false
   | _ => objectOpcode opcode
 
+/-- The declared type of the local or parameter whose home `instruction` addresses. -/
+private def addressedType (parameter localAt : Nat → Option TypeExpr)
+    (instruction : RawInstruction) : Option TypeExpr :=
+  match argumentOperation instruction with
+  | some (.address index) => parameter index
+  | _ => if instruction.opcode ∉ [18, 65037] then none else (encodedLocal instruction).bind localAt
+
 /-- The type of the span home loaded or addressed immediately before a span copy. -/
 private def spanCopySource (parameter localAt : Nat → Option TypeExpr)
     (previous : RawInstruction) : Option TypeExpr := do
@@ -25,12 +33,28 @@ private def spanCopySource (parameter localAt : Nat → Option TypeExpr)
   | some (.load index) =>
     let .byref type ← parameter index | none
     return type
-  | some (.address index) => parameter index
-  | _ =>
-    if previous.opcode ∉ [18, 65037] then none else
-      localAt (← encodedLocal previous)
+  | _ => addressedType parameter localAt previous
 
-/-- The live opcode and type pairs in instruction order, after checking span copies and resets. -/
+/-- Raw pushes of one value that read no memory: argument and local loads, `ldnull` and int32
+    constants. -/
+private def purePush (opcode : Nat) : Bool :=
+  opcode ∈ [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
+    20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+
+/-- A span constructor call at `pc` runs on the home its raw window names: one pure push per
+    parameter, at most three, after the address of a local or parameter of the constructed type,
+    and no branch target after that address. `recent` holds the raw instructions before the
+    call, nearest first. -/
+private def spanConstructorWindow (parameter localAt : Nat → Option TypeExpr)
+    (targeted : Nat → Bool) (pc : Nat) (recent : List RawInstruction) (site : CallSite) : Bool :=
+  let count := site.parameterCount
+  let pushes := recent.take count
+  count ≤ 3 && pushes.length == count && pushes.all (purePush ·.opcode) &&
+    (recent[count]?).bind (addressedType parameter localAt) == some site.declaringType &&
+    (List.range (count + 1)).all fun offset => !targeted (pc - offset)
+
+/-- The live opcode and type pairs in instruction order, after checking span copies, resets and
+    constructor calls. -/
 def objectSites (raw : RawMethod) (reachable : List Bool) (method : Method) :
     Option (List (Nat × TypeExpr)) := do
   let targets := Std.TreeSet.ofList (branchTargets raw.code) compare
@@ -40,12 +64,20 @@ def objectSites (raw : RawMethod) (reachable : List Bool) (method : Method) :
     parameters.get? (index - raw.hasThis.toNat)
   let mut operands := []
   let mut previous := none
+  let mut recent := []
   let mut pc := 0
-  for (current, live, emitted) in raw.code.zip (reachable.zip method.code) do
+  for (current, live, _) in raw.code.zip (reachable.zip method.code) do
+    if live && current.opcode == 40 then
+      if let .call site := current.operand then
+        if site.name == ".ctor" && spanLocal site.declaringType then
+          unless spanConstructorWindow parameter locals.get? targets.contains pc recent site do
+            return ← none
     if live && objectOpcode current.opcode then
       let .type type := current.operand | return ← none
       if current.opcode == 0xfe15 && spanLocal type then
-        unless emitted matches .initializeSpanLocal _ (.empty ..) do return ← none
+        unless !targets.contains pc &&
+            previous.bind (addressedType parameter locals.get?) == some type do
+          return ← none
       else
         if current.opcode == 0x71 && spanLocal type then
           let source := previous.bind (spanCopySource parameter locals.get?)
@@ -53,6 +85,7 @@ def objectSites (raw : RawMethod) (reachable : List Bool) (method : Method) :
             return ← none
         operands := (current.opcode, type) :: operands
     previous := some current
+    recent := (current :: recent).take 4
     pc := pc + 1
   return operands.reverse
 

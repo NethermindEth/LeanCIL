@@ -16,8 +16,6 @@ def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Instruction → CIL.
   | .ldloc position => .ldloc (indices.index position)
   | .ldloca position => .ldloca (indices.index position)
   | .stloc position => .stloc (indices.index position)
-  | .initializeSpanLocal position constructor =>
-    .initializeSpanLocal (indices.index position) constructor
   | operation => operation
 
 /-- Relocation leaves every instruction's unspecified-operand guard unchanged. -/

@@ -136,8 +136,7 @@ def Instruction.ldelemaAfter? (previous : Option RawInstruction) (type : TypeExp
   else if previous.any fun before => isPrefixOpcode before.opcode then none
   else some (.ldelema type false)
 
-/-- The object, class or array operation a type operand denotes after its prefix. A span reset
-    needs the local address from its folded predecessor. -/
+/-- The object, class or array operation a type operand denotes after its prefix. -/
 def Instruction.ofType? (previous : Option RawInstruction) (opcode : Nat) (type : TypeExpr) :
     Option Instruction :=
   match opcode with
@@ -150,7 +149,7 @@ def Instruction.ofType? (previous : Option RawInstruction) (opcode : Nat) (type 
   | 0x8f => Instruction.ldelemaAfter? previous type
   | 0xa3 => some (.ldelem_any type)
   | 0xa4 => some (.stelem_any type)
-  | 0xfe15 => if type.isRuntimeSpan then none else some (.initobj type)
+  | 0xfe15 => some (.initobj type)
   | 0xfe16 => some .nop
   | 0xfe1c => some (.sizeof type)
   | _ => none

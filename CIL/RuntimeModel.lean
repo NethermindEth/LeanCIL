@@ -5,9 +5,10 @@ import CIL.Instructions
 
 A runtime model is the meaning the checked interpreter gives a call to a runtime library method
 whose body is not extracted: an intrinsic, a checked memory helper, a hardware feature test, a
-constant, a reference comparison or subtraction, an unaligned typed transfer, `Unsafe.SkipInit`
-or the `System.Object` constructor. `CIL.Safety.runModel` executes a model, and
-`MemoryOp.callReached` names the memory operations no opcode emits.
+constant, a reference comparison or subtraction, an unaligned typed transfer, `Unsafe.SkipInit`,
+the `System.Object` constructor or a span constructor run in place on a span local.
+`CIL.Safety.runModel` executes a model, and `MemoryOp.callReached` names the memory operations
+no opcode emits.
 -/
 
 namespace CIL
@@ -43,6 +44,9 @@ inductive RuntimeModel where
   | skipInit
   /-- The `System.Object` constructor, which only consumes its receiver. -/
   | objectConstructor
+  /-- A span constructor called on the home of a span local or homed parameter: `constructor`
+      builds the span from the explicit arguments and the slot the home names then holds it. -/
+  | spanInPlace (constructor : SpanConstructor)
   deriving DecidableEq, Repr
 
 /-- Operands a model observes; the checked interpreter rejects the call when any of them has
@@ -50,6 +54,7 @@ inductive RuntimeModel where
 def RuntimeModel.observerCount : RuntimeModel → Nat
   | .intrinsic .. | .feature _ | .constant _ | .objectConstructor => 0
   | .memory operation => operation.argumentCount
+  | .spanInPlace constructor => constructor.operation.argumentCount
   | .referenceCompare _ | .referenceSubtract => 2
   | .typedTransfer _ store => if store then 2 else 1
   | .skipInit => 1

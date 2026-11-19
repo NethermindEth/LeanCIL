@@ -281,7 +281,7 @@ theorem otherInstructionRefused (family : LoweredFamily) (environment : LayoutEn
     (profile : FeatureProfile) (raw : RawInstruction) (role : Option FoldRole)
     (expected emitted : Instruction) (called : methodTokenCall raw.opcode = true)
     (claimed : siteClaim loweredCallFamily environment none raw = .lowered family)
-    (resolved : family.resolve environment.callLayouts role raw = some expected)
+    (resolved : family.resolve environment.callLayouts raw = some expected)
     (other : emitted ≠ expected) :
     runtimeCatalog.siteAgrees environment profile raw emitted none role true = false := by
   change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.claims =
@@ -297,7 +297,7 @@ theorem missingOverloadRefused (family : LoweredFamily) (environment : LayoutEnv
     (profile : FeatureProfile) (raw : RawInstruction) (role : Option FoldRole)
     (emitted : Instruction) (called : methodTokenCall raw.opcode = true)
     (claimed : siteClaim loweredCallFamily environment none raw = .lowered family)
-    (missing : family.resolve environment.callLayouts role raw = none) :
+    (missing : family.resolve environment.callLayouts raw = none) :
     runtimeCatalog.siteAgrees environment profile raw emitted none role true = false ∧
     (runtimeCatalog.siteAgrees environment profile raw emitted none role false = true ↔
       emitted = .unadmitted raw.opcode) := by

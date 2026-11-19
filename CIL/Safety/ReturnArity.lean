@@ -43,7 +43,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
     | unfold returnFrom at executed
     | unfold localAllocation at executed
     | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ _ executed)
-    | solve | (obtain ⟨_, _, returned⟩ := modelStep_next executed; cases returned)
+    | solve | (obtain ⟨_, _, _, returned, _⟩ := modelStep_frame executed; cases returned)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
           reduceCtorEq, and_false, exists_false] at executed
@@ -138,7 +138,7 @@ theorem step_call_known {body : CIL.Method} {method : Extraction.MethodRef}
   split at executed
   · split at executed
     · cases executed
-    · obtain ⟨_, _, called⟩ := modelStep_next executed
+    · obtain ⟨_, _, _, called, _⟩ := modelStep_frame executed
       cases called
   rename_i link _
   unfold observedCall at executed

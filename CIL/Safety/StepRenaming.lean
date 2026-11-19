@@ -134,9 +134,6 @@ theorem stepTransport : StepTransport := by
         arguments stack bounds observable
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
-    | exact ⟨mapping, .refl mapping,
-        frames.stepInitializeSpanLocal memories sourceFormed sourceBody targetBody _ pc _
-          arguments stack bounds observable⟩
     | exact memories.stepMemory frames sourceFormed sourceBody targetBody _ pc arguments stack
         bounds observable
     | exact memories.stepLocalloc frames sourceFormed targetFormed staticBounds

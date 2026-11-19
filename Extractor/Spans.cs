@@ -3,12 +3,9 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Span constructors initialize typed local storage without exposing a byte address.
+// Span types, their element widths and the span members and constructors the runtime models cover.
 internal static class Spans
 {
-    internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
-        Dictionary<Instruction, Operation> Constructors);
-
     // Shape checks do not select an architecture or recompute aggregate layouts.
     internal static bool Is(TypeReference type) =>
         type is GenericInstanceType span && span.ElementType.FullName is "System.Span`1" or "System.ReadOnlySpan`1" &&
@@ -171,82 +168,56 @@ internal static class Spans
         return operation is null ? MemoryOperation.Other(".spanReadOnly") : MemoryOperation.Of(operation);
     }
 
-    private sealed class Architectures
-    {
-        internal readonly Dictionary<string, Analysis> Results = new(StringComparer.Ordinal);
-    }
+    /// <summary>The model of a span constructor that a call runs on a span home; null for any other method.</summary>
+    internal static Operation? InPlaceConstructor(MethodReference reference, string architecture) =>
+        ConstructorOperation(reference, architecture) is SpanSource source ? new SpanInPlace(source) : null;
 
-    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Architectures> cache = new();
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, HashSet<Instruction>>
+        windows = new();
 
-    internal static Analysis Analyze(MethodDefinition method, FeatureProfile profile)
+    /// <summary>
+    /// The span constructor calls whose receiver is a span home: the address of a local or parameter of the
+    /// constructed type, then one simple push per parameter, at most three, and no branch target after the address.
+    /// </summary>
+    internal static HashSet<Instruction> ConstructorCalls(MethodDefinition method) =>
+        windows.GetValue(method, static method => Windows(method));
+
+    static bool Push(Instruction i) => i.OpCode.Code is Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or
+        Code.Ldloc_2 or Code.Ldloc_3 or Code.Ldarg or Code.Ldarg_S or Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or
+        Code.Ldarg_3 or Code.Ldc_I4 or Code.Ldc_I4_S or Code.Ldc_I4_M1 or Code.Ldnull ||
+        i.OpCode.Code is >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8;
+
+    /// <summary>The declared type of the local or parameter whose home <paramref name="address"/> pushes.</summary>
+    internal static TypeReference? AddressedType(Instruction? address) => address switch
     {
-        var results = cache.GetValue(method, static _ => new()).Results;
-        if (!results.TryGetValue(profile.Architecture, out var analysis))
+        { OpCode.Code: Code.Ldloca or Code.Ldloca_S, Operand: VariableDefinition local } => local.VariableType,
+        { OpCode.Code: Code.Ldarga or Code.Ldarga_S, Operand: ParameterDefinition parameter } =>
+            parameter.ParameterType,
+        _ => null
+    };
+
+    static HashSet<Instruction> Windows(MethodDefinition method)
+    {
+        var instructions = new InstructionIndex(method);
+        HashSet<Instruction> calls = [];
+        foreach (var call in method.Body.Instructions)
         {
-            analysis = Compute(method, profile);
-            results.Add(profile.Architecture, analysis);
-        }
-        return analysis;
-    }
-
-    static bool Address(Instruction i) => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S;
-    static bool Load(Instruction i) => i.OpCode.Code is Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3;
-    static bool Push(Instruction? i) => i is not null && (Load(i) || i.OpCode.Code is Code.Ldarg or Code.Ldarg_S or
-        Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or Code.Ldarg_3 or Code.Ldc_I4 or Code.Ldc_I4_S or Code.Ldc_I4_M1 ||
-        i.OpCode.Code is >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8);
-
-    static Analysis Compute(MethodDefinition method, FeatureProfile profile)
-    {
-        var analysis = new Analysis([], [], []);
-        foreach (var i in method.Body.Instructions)
-        {
-            if (!Address(i) ||
-                !Is(method.Body.Variables[FeatureConstants.Local(i)].VariableType) ||
-                analysis.Operands.Contains(i))
+            if (call is not { OpCode.Code: Code.Call, Operand: MethodReference { Name: ".ctor" } reference } ||
+                !Is(reference.DeclaringType) || reference.Parameters.Count > 3 || instructions.IsTarget(call))
                 continue;
-            var local = FeatureConstants.Local(i);
-            if (Constructor(i, method.Body.Variables[local].VariableType, profile) is { } constructor)
+            var address = call.Previous;
+            var pushes = 0;
+            while (pushes < reference.Parameters.Count && address is not null && Push(address) &&
+                !instructions.IsTarget(address))
             {
-                analysis.Operands.Add(i);
-                for (var interior = i.Next; interior is not null; interior = interior.Next)
-                {
-                    analysis.Interior.Add(interior);
-                    if (interior != constructor.Call) continue;
-                    analysis.Constructors.Add(interior, new InitializeSpanLocal(local, constructor.Source));
-                    break;
-                }
+                pushes++;
+                address = address.Previous;
             }
+            var signatures = StructuralSignatures.Current;
+            if (pushes == reference.Parameters.Count && AddressedType(address) is { } addressed &&
+                signatures.Type(addressed) == signatures.Type(reference.DeclaringType))
+                calls.Add(call);
         }
-        return analysis;
-    }
-
-    // The local address cannot escape: only bounded single-value pushes precede its exact constructor.
-    static (Instruction Call, SpanSource Source)? Constructor(Instruction address, TypeReference localType,
-        FeatureProfile profile)
-    {
-        if (address.Next is { OpCode.Code: Code.Initobj, Operand: TypeReference initialized } reset)
-        {
-            if (StructuralSignatures.Current.Type(initialized) != StructuralSignatures.Current.Type(localType))
-                throw new InvalidDataException("Span default type does not match its local");
-            return Width(localType, profile.Architecture) is int width
-                ? (reset, new SpanEmpty(width, Writable(localType))) : null;
-        }
-        var call = address.Next;
-        var count = 0;
-        while (count < 3 && (Push(call) || call?.OpCode.Code == Code.Ldnull))
-        {
-            count++;
-            call = call!.Next;
-        }
-        if (call is not { OpCode.Code: Code.Call, Operand: MethodReference reference } ||
-            reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
-            reference.Parameters.Count != count)
-            return null;
-        return ConstructorOperation(reference, profile.Architecture) switch
-        {
-            SpanCreate => (call, new SpanFromReference(1, false)),
-            SpanSource source => (call, source),
-            _ => null
-        };
+        return calls;
     }
 }

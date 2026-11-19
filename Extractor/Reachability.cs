@@ -37,7 +37,6 @@ internal static class Reachability
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
         var throws = Throws.Analyze(method);
-        var spans = Spans.Analyze(method, profile);
         InstructionIndex? positions = null;
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
@@ -77,8 +76,6 @@ internal static class Reachability
                     throw new InvalidDataException($"Branch into a folded type comparison: {i}");
                 if (throws.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded throw: {i}");
-                if (spans.Interior.Contains(target))
-                    throw new InvalidDataException($"Branch into a folded span constructor: {i}");
             }
 
             if (i.Operand is Instruction target)

@@ -204,7 +204,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       | _ => return false).getD false
   | .other => match emitted with
       | .ldarg _ | .starg _ | .ldarga _ => false
-      | .ldloc index | .stloc index | .ldloca index | .initializeSpanLocal index _ =>
+      | .ldloc index | .stloc index | .ldloca index =>
         index < localCount
       | _ => true
 

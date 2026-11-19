@@ -224,7 +224,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
             /-- The operation emitted at this pc. -/
             private def expected := {{method}}.code[{{Pc}}]'(by decide +kernel)
             /-- The fold role computed from the complete raw body. -/
-            private def role := (foldRoles {{method}}Closed.locals {{method}}Closed.code)[{{Pc}}]?.join
+            private def role := (foldRoles {{method}}Closed.code)[{{Pc}}]?.join
             /-- The managed link at this pc, if present. -/
             private def link := {{method}}.linkAt {{Pc}}
             /-- The resolving member accepts exactly its emitted instruction. -/
@@ -238,7 +238,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                   | .call site => { raw with operand := .call { site with {{change}} } }
                   | _ => raw
                 let code := {{method}}Closed.code.set {{Pc}} changed
-                let changedRole := (foldRoles {{method}}Closed.locals code)[{{Pc}}]?.join
+                let changedRole := (foldRoles code)[{{Pc}}]?.join
                 let source := { {{method}}Closed with code }
                 let decoded := Method.ofRaw? profile environment {{method}}Links {{method}}Reachable source []
                 And (runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =

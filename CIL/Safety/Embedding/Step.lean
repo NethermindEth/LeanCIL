@@ -30,24 +30,24 @@ theorem modelStep_at (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc :
     modelStep model body pc frame stack memory =
       FrameAction.relabel (fun _ => pc + 1) <$> modelStep model body 0 frame stack memory := by
   unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
-    referenceSubtractCall typedTransferCall skipInitCall
+    referenceSubtractCall typedTransferCall skipInitCall spanInPlaceCall
   repeat' first
     | rfl
     | (simp only [map_bind, map_pure, FrameAction.relabel]; done)
     | (apply bind_congr; intro)
     | split
-    | simp only [map_bind, map_pure, FrameAction.relabel]
+    | simp only [map_bind]
 
 #print axioms modelStep_at
 
 /-- A runtime model that continues at one pc continues alike at another, in a body of the same
     profile. -/
 theorem modelStep_move {model : Option CIL.RuntimeModel} {moved body : CIL.Method} {pc q : Nat}
-    {frame : Frame} {stack values : List Value} {memory final : Memory}
+    {frame changed : Frame} {stack values : List Value} {memory final : Memory}
     (profile : moved.profile = body.profile)
     (executed : modelStep model body pc frame stack memory =
-      .ok (.next (pc + 1) values frame final)) :
-    modelStep model moved q frame stack memory = .ok (.next (q + 1) values frame final) := by
+      .ok (.next (pc + 1) values changed final)) :
+    modelStep model moved q frame stack memory = .ok (.next (q + 1) values changed final) := by
   rw [modelStep_profile_congr profile, modelStep_at (pc := q)]
   rw [modelStep_at (pc := pc)] at executed
   cases zero : modelStep model body 0 frame stack memory with
@@ -391,22 +391,6 @@ theorem step_relabel_stloc (index : Nat) : StepRelabel (.stloc index) := by
   stack_cases =>
     first | fallback_vacuous | lookup_lockstep
 
-/-- Span construction and its typed local store retain the original instruction boundary. -/
-theorem step_relabel_initializeSpanLocal (index : Nat) (constructor : SpanConstructor) :
-    StepRelabel (.initializeSpanLocal index constructor) := by
-  plain_cases
-  split at h
-  · rename_i found
-    try simp only [found]
-    obtain ⟨⟨memory, values⟩, constructed, h⟩ := except_bind_ok h
-    simp only [constructed, ok_bind_eq]
-    cases values with
-    | nil => cases h
-    | cons value rest => lockstep
-  · cases h
-
-#print axioms step_relabel_initializeSpanLocal
-
 /-- A call relocates no pc; a tail call has no continuation and an ordinary one returns to the
     pc after it. -/
 theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPrefixes) :
@@ -420,7 +404,7 @@ theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPr
     · simp [tail] at h
     · simp only [tail, Bool.false_eq_true, ↓reduceIte] at h ⊢
       rw [context.environment]
-      obtain ⟨values, final, rfl⟩ := modelStep_next h
+      obtain ⟨values, final, changed, rfl, _⟩ := modelStep_frame h
       simp only [FrameAction.relabel]
       rw [context.next (by simp [CIL.Instruction.continues, tail])]
       exact modelStep_move context.profile h
@@ -475,7 +459,7 @@ theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
   rcases linked : expected.linkAt pc with _ | link
   · simp only [linked] at h
     rw [context.environment]
-    obtain ⟨values, final, rfl⟩ := modelStep_next h
+    obtain ⟨values, final, changed, rfl, _⟩ := modelStep_frame h
     simp only [FrameAction.relabel]
     rw [context.next (by simp [CIL.Instruction.continues])]
     exact modelStep_move context.profile h
@@ -881,8 +865,6 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case starg index => exact step_relabel_starg index
   case ldarga index => exact step_relabel_ldarga index
   case ldloc index => exact step_relabel_ldloc index
-  case initializeSpanLocal index constructor =>
-    exact step_relabel_initializeSpanLocal index constructor
   case ldloca index => exact step_relabel_ldloca index
   case stloc index => exact step_relabel_stloc index
   case call method prefixes => exact step_relabel_call method prefixes
@@ -1526,18 +1508,6 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case stloc =>
     stack_cases =>
       first | fallback_raise_vacuous | lookup_raise
-  case initializeSpanLocal =>
-    plain_cases
-    split at h
-    · rename_i found
-      try simp only [found]
-      rcases except_bind_error h with constructed | ⟨⟨memory, values⟩, constructed, h⟩
-      · simp only [constructed, error_bind_eq]
-      · simp only [constructed, ok_bind_eq]
-        cases values with
-        | nil => cases h
-        | cons value rest => raise_lockstep
-    · cases h
   case call method prefixes => exact step_raise_call method prefixes
   case callvirt method => exact step_raise_callvirt method
   case newobj constructor => exact step_raise_newobj constructor

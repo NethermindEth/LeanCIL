@@ -59,6 +59,20 @@ internal static class SpanReferences
                 "\n  The span must be loaded directly from its own argument, parameter or local address.");
     }
 
+    /// <summary>
+    /// Requires a span reset to follow the address of its own local or parameter directly, so its home names the
+    /// slot it empties.
+    /// </summary>
+    internal static void ValidateReset(Instruction reset, InstructionIndex instructions)
+    {
+        var type = (TypeReference)reset.Operand;
+        if (Spans.AddressedType(reset.Previous) is not { } addressed ||
+            StructuralSignatures.Current.Type(addressed) != StructuralSignatures.Current.Type(type) ||
+            instructions.IsTarget(reset))
+            throw new InvalidDataException("Unsupported span reset: " + reset +
+                "\n  The span must be reset directly through its own local or parameter address.");
+    }
+
     static int ArgumentIndex(MethodDefinition method, Instruction load) => load.OpCode.Code switch
     {
         Code.Ldarg_0 => 0, Code.Ldarg_1 => 1, Code.Ldarg_2 => 2, Code.Ldarg_3 => 3,

@@ -37,11 +37,11 @@ private def raw (code : List RawInstruction) : RawMethod := {
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 
 -- The exact encoding folds; extra loads, a wrong arity or a non-runtime type do not.
-example : foldRoles [] [i 114 (.text "zero"), i 115 argument, i 122] =
+example : foldRoles [i 114 (.text "zero"), i 115 argument, i 122] =
     [some .head, some .interior, some (.raise .argument)] := by decide
-example : foldRoles [] [i 115 divide, i 122] = [some .head, some (.raise .divideByZero)] := by
+example : foldRoles [i 115 divide, i 122] = [some .head, some (.raise .divideByZero)] := by
   decide
-example : foldRoles [] [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
+example : foldRoles [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
     [none, some .head, some .interior, some (.raise .argument)] := by decide
 example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
@@ -62,14 +62,14 @@ theorem string_and_throw :
 
 /-- Rejecting an oversized message prefix still discovers an admitted fold in its suffix. -/
 theorem long_prefix_suffix :
-    foldRoles [] ([i 20, i 20, i 20] ++
+    foldRoles ([i 20, i 20, i 20] ++
       [i 115 (ctor runtime "System.ArgumentException" 2), i 122]) =
       [none, some .head, some .interior, some .interior,
         some (.raise .argument)] := by decide +kernel
 #print axioms long_prefix_suffix
 
 /-- A long message-only body never invents a constructor or throw. -/
-theorem message_only_body : foldRoles [] (List.replicate 128 (i 20)) =
+theorem message_only_body : foldRoles (List.replicate 128 (i 20)) =
     List.replicate 128 none := by decide +kernel
 #print axioms message_only_body
 
@@ -131,7 +131,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) enteredRaw .sc
 
 /-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
 theorem null_throw_encoding :
-    foldRoles [] [i 20, i 122] =
+    foldRoles [i 20, i 122] =
       [some .head, some (.raise .nullReference)] ∧
     FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar
       [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
@@ -184,9 +184,9 @@ example : ∀ other ∈ ExceptionType.all, other ≠ .nullReference → ¬ Featu
 
 /-- Types outside the constructor allowlist cannot form a throw fold. -/
 theorem rejects_unadmitted_owners :
-    foldRoles [] [i 115 (ctor runtime "System.PlatformNotSupportedException" 0), i 122] =
+    foldRoles [i 115 (ctor runtime "System.PlatformNotSupportedException" 0), i 122] =
       [none, none] ∧
-    foldRoles [] [i 115 (ctor runtime "System.InvalidCastException" 0), i 122] = [none, none] ∧
+    foldRoles [i 115 (ctor runtime "System.InvalidCastException" 0), i 122] = [none, none] ∧
     exceptionOwner? (.atom runtimeScope "System.Object") = none := by decide +kernel
 #print axioms rejects_unadmitted_owners
 

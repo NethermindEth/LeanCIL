@@ -53,7 +53,7 @@ File.WriteAllText(path, $$"""
 
     /-- The instruction selected by a recognized role at its raw pc. -/
     private def folded (code : List RawInstruction) (pc : Nat) : Option Instruction := do
-      let role <- (foldRoles [] code)[pc]?.join
+      let role <- (foldRoles code)[pc]?.join
       let raw <- code[pc]?
       Instruction.ofRole? role (rawBefore (fun i => code[i]?) pc) raw
 
@@ -63,10 +63,10 @@ File.WriteAllText(path, $$"""
         let indirect := RawInstruction.mk 2 {{OpCodes.Calli.Value}} (.indirectCall .void [] false false 0)
         let code := [tailPrefix, indirect, RawInstruction.mk 7 {{OpCodes.Ret.Value}} .none]
         let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
-        foldRoles [] code == [some .head, some .tailCall, some .argument] &&
+        foldRoles code == [some .head, some .tailCall, some .argument] &&
           (folded code 0 matches some .nop) && (folded code 1 matches some (.managed (.call _ true))) &&
           ([0, 1, 2].all fun pc =>
-            foldRoles [] (code.set pc nop) == List.replicate 3 none) := by
+            foldRoles (code.set pc nop) == List.replicate 3 none) := by
       decide +kernel
     #print axioms tail_opcodes
 
@@ -75,9 +75,9 @@ File.WriteAllText(path, $$"""
         let code := [RawInstruction.mk 0 {{OpCodes.Ldnull.Value}} .none,
           RawInstruction.mk 1 {{OpCodes.Throw.Value}} .none]
         let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
-        foldRoles [] code == [some .head, some (.raise .nullReference)] &&
+        foldRoles code == [some .head, some (.raise .nullReference)] &&
           (folded code 1 matches some (.throw .nullReference)) &&
-          ([0, 1].all fun pc => foldRoles [] (code.set pc nop) == [none, none]) := by
+          ([0, 1].all fun pc => foldRoles (code.set pc nop) == [none, none]) := by
       decide +kernel
     #print axioms throw_opcodes
 
@@ -212,9 +212,9 @@ foreach (var (name, selector, method, code) in new[]
                 let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
                 let opcode := fun (pc : Nat) => (code[pc]?).map RawInstruction.opcode
                 (opcode 0, opcode 2) == (some token, some token) &&
-                  foldRoles [] code == [some .head, some .interior, some .interior, some .interior,
+                  foldRoles code == [some .head, some .interior, some .interior, some .interior,
                     some (.result true), none] &&
-                  ([0, 2].all fun pc => foldRoles [] (code.set pc nop) == List.replicate 6 none) := by
+                  ([0, 2].all fun pc => foldRoles (code.set pc nop) == List.replicate 6 none) := by
               decide +kernel
             #print axioms token_opcodes
 

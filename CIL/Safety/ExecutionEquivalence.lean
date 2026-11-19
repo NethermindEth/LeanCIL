@@ -342,6 +342,30 @@ theorem Memory.Equivalent.fieldReference {m n : Memory} (same : m.Equivalent n)
   · exact .error _
 #print axioms Memory.Equivalent.fieldReference
 
+/-- Equivalent memories give a span constructor run in place equivalent results. -/
+theorem Memory.Equivalent.spanInPlaceCall {m n : Memory} (same : m.Equivalent n)
+    (constructor : CIL.SpanConstructor) (pc : Nat) (frame : Frame) (stack : List Value) :
+    ResultEquivalent FrameActionEquivalent (spanInPlaceCall constructor pc frame stack m)
+      (spanInPlaceCall constructor pc frame stack n) := by
+  unfold CIL.Safety.spanInPlaceCall
+  apply ResultEquivalent.bind (same.memoryInstruction _ _)
+  intro left right related
+  obtain ⟨memory, values⟩ := left
+  obtain ⟨otherMemory, otherValues⟩ := right
+  obtain ⟨equivalent, rfl⟩ := related
+  dsimp only
+  split
+  · split
+    · apply ResultEquivalent.bind (equivalent.storeLocal _ _)
+      intro left right related
+      obtain ⟨slot, memory⟩ := left
+      obtain ⟨otherSlot, otherMemory⟩ := right
+      obtain ⟨rfl, stored⟩ := related
+      exact .ok (.next stored _ _ _)
+    · exact .error _
+  · exact .error _
+#print axioms Memory.Equivalent.spanInPlaceCall
+
 /-- Equivalent memories give a call's runtime model equivalent results. -/
 theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
     (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc : Nat) (frame : Frame)
@@ -357,6 +381,7 @@ theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
   all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)
+    | exact same.spanInPlaceCall _ _ _ _
     | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind (same.memoryInstruction _ _)
        intro left right related

@@ -695,11 +695,13 @@ internal sealed record IsInstance(string Type) : Operation
     internal override string Render(Func<int, string> calleeName) => $".isinst ({Type})";
 }
 
-/// <summary>An initialisation of a span local from the span operation that constructs it.</summary>
-internal sealed record InitializeSpanLocal(int Local, SpanSource Source) : Operation
+/// <summary>
+/// The model of a span constructor that a call runs on the span home beneath its arguments: the slot the home
+/// names then holds the span <paramref name="Source"/> builds. It renders as the Lean runtime model.
+/// </summary>
+internal sealed record SpanInPlace(SpanSource Source) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) =>
-        $".initializeSpanLocal {Local} ({Source.SpanDescriptor})";
+    internal override string Render(Func<int, string> calleeName) => $".spanInPlace ({Source.SpanDescriptor})";
 }
 
 /// <summary>

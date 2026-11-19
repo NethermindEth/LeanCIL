@@ -52,17 +52,19 @@ internal sealed record SpanItem(int Width) : MemoryOperation
     internal override string ToLean() => $"(.spanItem {Width})";
 }
 
-/// <summary>The span over a native pointer and a length, which has byte elements.</summary>
-internal sealed record SpanCreate : MemoryOperation
-{
-    internal override string ToLean() => ".spanCreate";
-}
-
-/// <summary>A memory operation that makes a span, and how an in-place constructor of a span local builds it.</summary>
+/// <summary>A memory operation a span constructor runs, which names the Lean span constructor.</summary>
 internal abstract record SpanSource : MemoryOperation
 {
-    /// <summary>The Lean descriptor of the span's source.</summary>
+    /// <summary>The Lean <c>SpanConstructor</c> of the overload.</summary>
     internal abstract string SpanDescriptor { get; }
+}
+
+/// <summary>The span over a native pointer and a length, which has byte elements.</summary>
+internal sealed record SpanCreate : SpanSource
+{
+    internal override string SpanDescriptor => ".staticBytes";
+
+    internal override string ToLean() => ".spanCreate";
 }
 
 internal sealed record ArraySpan(Arrays.Element Element, bool Writable, ArrayRange Range) : SpanSource
@@ -89,10 +91,8 @@ internal sealed record SpanSingleReference(int Width, bool Writable) : SpanSourc
 }
 
 /// <summary>The empty span of elements of the given width.</summary>
-internal sealed record SpanEmpty(int Width, bool Writable) : SpanSource
+internal sealed record SpanEmpty(int Width, bool Writable) : MemoryOperation
 {
-    internal override string SpanDescriptor => $".empty {Width} {LeanText.Bool(Writable)}";
-
     internal override string ToLean() => $"(.spanEmpty {Width} {LeanText.Bool(Writable)})";
 }
 

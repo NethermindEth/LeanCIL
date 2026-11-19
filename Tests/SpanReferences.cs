@@ -228,7 +228,7 @@ foreach (var (name, marker) in new[]
 foreach (var (mutation, marker) in new[]
 {
     ("store", "Unsupported store to a span home"),
-    ("reset", "Unsupported store to a span home"),
+    ("reset", "Unsupported span reset"),
     ("rebind", "Unsupported store to or address of a readonly span reference"),
     ("address", "Unsupported store to or address of a readonly span reference"),
     ("writable", "Unsupported writable by-reference span parameter"),

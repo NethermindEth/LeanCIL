@@ -80,7 +80,7 @@ theorem enum_local_constructor :
       target := .external (runtimeScope ++
         "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)"),
       typeArguments := [], parameterCount := 2, returnsValue := false }
-    spanLocalConstructor constructor = some (.reference 1 true) ∧
+    runtimeModel {} .call constructor.method = some (.spanInPlace (.reference 1 true)) ∧
     scalarTransfer method ⟨0, 40, .call constructor⟩
       [.word32, .reference, scalarType (.byref (span "First"))] = some [] ∧
     scalarTransfer method ⟨0, 40, .call constructor⟩

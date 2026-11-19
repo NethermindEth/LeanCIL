@@ -1,6 +1,7 @@
 import CIL.Safety.FixedStepHelpers
 import CIL.Safety.NativeMethodTableRenaming
 import CIL.Safety.SpanHomeRenaming
+import CIL.Safety.SpanConstructionLemmas
 
 /-! Argument loads, calls and returns preserve checked values and control flow. -/
 
@@ -491,6 +492,62 @@ theorem skipInit_stepRenamed : CIL.RuntimeModel.skipInit.StepRenamed := by
 
 #print axioms skipInit_stepRenamed
 
+/-- A span constructor run in place builds related views and stores them in the slot the renamed
+    home names, or faults alike on both sides. -/
+theorem spanInPlace_stepRenamed (constructor : CIL.SpanConstructor) :
+    (CIL.RuntimeModel.spanInPlace constructor).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames formed _ _ _
+    pc stack bounds observable
+  simp only [modelStep, observedCall, indices.unspecifiedOperands mapping, runModel,
+    CIL.RuntimeModel.observerCount] at observable ⊢
+  by_cases observed : unspecifiedOperands constructor.operation.argumentCount stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  simp only [observed, Bool.false_eq_true, ite_false, spanInPlaceCall] at observable ⊢
+  apply (related.memoryInstructionResult _ formed stack bounds
+    observable.bind_left).bindWithSuccess
+  intro result otherResult constructed results
+  obtain ⟨after, values⟩ := result
+  obtain ⟨otherAfter, otherValues⟩ := otherResult
+  obtain ⟨memories, rfl⟩ := results
+  rcases values with _ | ⟨value, _ | ⟨home, rest⟩⟩
+  · exact .error .invalidState
+  · exact .error .invalidState
+  cases home
+  case spanHome position =>
+    simp only [List.map_cons, LocalIndexMap.value]
+    obtain ⟨rfl, valid⟩ :=
+      spanConstructor_result constructor source after stack value _ constructed
+    have valueBound : value.Below mapping.sourceLimit := by
+      rw [related.sourceLimit]
+      exact valid.below formed
+    have slots := frames.locals.getElem?_all position
+    generalize sourceFound : sourceFrame.locals[position]? = sourceSlot at slots ⊢
+    generalize targetFound : targetFrame.locals[indices.index position]? = targetSlot at slots ⊢
+    cases slots with
+    | none => exact .error .invalidState
+    | @some slot otherSlot slots =>
+      rcases slots with ⟨bounded, rfl⟩
+      cases slot with
+      | span width writable view =>
+        apply (memories.storeLocal (indices := indices) (.span width writable view) value bounded
+          valueBound).bindWithSuccess
+        intro result otherResult stored results
+        obtain ⟨slotAfter, sourceAfter⟩ := result
+        obtain ⟨otherSlotAfter, targetAfter⟩ := otherResult
+        rcases results with ⟨slotsEqual, storedMemories⟩
+        change otherSlotAfter = mapping.localSlot slotAfter at slotsEqual
+        subst otherSlotAfter
+        have positionBound : position < indices.sourceLength := by
+          rw [← frames.locals.lengths.1]
+          exact (List.getElem?_eq_some_iff.mp sourceFound).1
+        exact .ok (.next storedMemories (frames.setLocal position positionBound slotAfter
+          (storeLocal_below bounded valueBound stored)))
+      | _ => exact .error .invalidState
+  all_goals exact .error .invalidState
+
+#print axioms spanInPlace_stepRenamed
+
 open CIL.Extraction in
 /-- Every model of a registered family transports under an allocation renaming. -/
 theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
@@ -530,7 +587,7 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | exact spanEntries_yields memory_stepRenamed entry member
     | exact asSpanEntries_yields memory_stepRenamed entry member
     | exact spanBulkEntries_yields memory_stepRenamed entry member
-    | exact spanConstructorEntries_yields memory_stepRenamed entry member
+    | exact spanConstructorEntries_yields memory_stepRenamed spanInPlace_stepRenamed entry member
 
 #print axioms runtimeModel_stepRenamed
 

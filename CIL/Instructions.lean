@@ -103,20 +103,22 @@ inductive LocalKind where
   | byte | word32 | word64 | vector128 | vector256 | vector512 | reference
   deriving DecidableEq, Repr
 
-/-- Constructors that initialize a typed span local without exposing its storage address. -/
+/-- The span constructor overloads, each building a checked view from its explicit arguments
+    without changing memory. -/
 inductive SpanConstructor where
-  | empty (width : Nat) (writable : Bool)
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   | reference (width : Nat) (writable : Bool)
   | singleReference (width : Nat) (writable : Bool)
+  /-- `ReadOnlySpan<byte>(void*, int)`, which must lie in extracted static data. -/
+  | staticBytes
   deriving DecidableEq, Repr
 
 /-- The checked memory operation underlying a span constructor. -/
 def SpanConstructor.operation : SpanConstructor → MemoryOp
-  | .empty width writable => .spanEmpty width writable
   | .array element writable range => .arraySpan element writable range
   | .reference width writable => .spanFromReference width writable
   | .singleReference width writable => .spanSingleReference width writable
+  | .staticBytes => .spanCreate
 
 /-- Target of an overflow-checked conversion; `i` and `u` are native-sized. -/
 inductive ConvTarget where
@@ -226,7 +228,6 @@ inductive Instruction where
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
-  | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
   /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
   | managed (operation : ManagedOp)
   -- Constants, conversions, arithmetic and stack shuffling.

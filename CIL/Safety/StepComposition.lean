@@ -762,14 +762,13 @@ theorem spanView_home_view {frame : Frame} {memory : Memory} {slot : Nat} {resul
   cases viewed : spanView frame memory (.spanHome slot) with
   | error fault =>
     simp only [step, observerCount, valueShape_span_test body type, shape, viewOperands, viewed,
-      unspecifiedOperands, List.take, List.any, CIL.Value.hasUnspecified, Bool.false_eq_true,
-      ite_false, ite_true, Bind.bind, Except.bind]
+      unspecifiedOperands, List.take, List.any, Bool.false_eq_true, ite_false, ite_true,
+      Bind.bind, Except.bind]
   | ok result =>
     obtain ⟨view, rfl⟩ := spanView_home_view viewed
     simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
-      viewOperands, viewed, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
-      CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, ite_true, Bind.bind, Except.bind,
-      pureArity, staticInstruction]
+      viewOperands, viewed, unspecifiedOperands, List.take, List.any, Bool.false_eq_true,
+      ite_false, ite_true, Bind.bind, Except.bind, pureArity]
     rfl
 #print axioms step_ldobj_span_home
 
@@ -789,8 +788,7 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
       | _ => .error .invalidState := by
   cases stack with
   | nil =>
-    simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
-      pureArity]
+    simp only [step, observerCount, valueShape_span_test body type, shape, transferObject]
     rfl
   | cons head rest =>
     cases head
@@ -1127,24 +1125,6 @@ theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
   rw [step_ldarga_home_eq body pc args frame memory index stack slot access, step_ldloca_eq]
 
 #print axioms step_ldarga_home_ldloca
-
-/-- A constructor checks its arguments and replaces its typed local at the call instruction. -/
-@[cil_step] theorem step_initializeSpanLocal_eq (index : Nat)
-    (constructor : CIL.SpanConstructor) (stack : List Value) :
-    step body (.initializeSpanLocal index constructor) pc args frame stack memory =
-      if unspecifiedOperands constructor.operation.argumentCount stack then
-        .error (.unsupported "Instruction observes unspecified vector bits")
-      else do
-        let some slot := frame.locals[index]? | .error .invalidState
-        let (memory, values) ← memoryInstruction constructor.operation stack memory
-        let value :: rest := values | .error .invalidState
-        let (slot, memory) ← storeLocal memory slot value
-        return FrameAction.next (pc + 1) rest
-          { frame with locals := frame.locals.set index slot } memory := by
-  simp only [step, observerCount]
-  rfl
-
-#print axioms step_initializeSpanLocal_eq
 
 /-- Memory operations fault on unspecified operand bits, then run `staticInstruction`. -/
 @[cil_step] theorem step_memory_eq (operation : CIL.MemoryOp) (stack : List Value) :

@@ -44,23 +44,23 @@ private def spanLayout (name : String) : RawLayout :=
     fields := [⟨.signed32, none⟩]
     generic := some ⟨owner, 1, [int32], [.parameter 0], [(0, [])]⟩ }
 
-/-- The span reset fixture has a valid four-byte layout row and a raw decoder hole. -/
+/-- The span reset fixture has a valid four-byte layout row and decodes to `initobj`. -/
 theorem span_reset_inputs :
     ["System.Span`1", "System.ReadOnlySpan`1"].all (fun name =>
       let span := TypeExpr.apply (.constructor runtimeScope name) int32
       decide (LayoutsValid [spanLayout name] #[⟨⟨4, [⟨0, 4, false⟩]⟩, 4⟩]) &&
-        (Instruction.ofRaw? none ⟨0, 0xfe15, .type span⟩).isNone) = true := by
+        Instruction.ofRaw? none ⟨0, 0xfe15, .type span⟩ == some (.initobj span)) = true := by
   decide +kernel
 #print axioms span_reset_inputs
 
-/-- Specializing a span reset over a matching generic layout preserves its operand and hole. -/
+/-- Specializing a span reset over a matching generic layout preserves its operand and decoding. -/
 theorem span_reset_substitution :
     ["System.Span`1", "System.ReadOnlySpan`1"].all (fun name =>
       let span := TypeExpr.apply (.constructor runtimeScope name) int32
       let closed := substituteOperand [] [spanLayout name] 0 (.type span)
       closed == some (.type span) &&
-        (closed.bind fun operand => Instruction.ofRaw? none ⟨0, 0xfe15, operand⟩).isNone) =
-      true := by decide +kernel
+        (closed.bind fun operand => Instruction.ofRaw? none ⟨0, 0xfe15, operand⟩) ==
+          some (.initobj span)) = true := by decide +kernel
 #print axioms span_reset_substitution
 
 /-- A static call site of `T.Account::Deposit(int32)`. -/
@@ -214,7 +214,7 @@ def undecoded : List Name := [
   ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
-  ``Instruction.initializeSpanLocal, ``Instruction.skipInit, ``Instruction.feature,
+  ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
   ``Instruction.ldtoken]
@@ -266,8 +266,7 @@ theorem role_decodings :
       Instruction.ofRole? .tailCall (some tailPrefix) call =
         some (.call callSite.method { tail := true }) ∧
       Instruction.ofRole? .tailCall (some tailPrefix) indirect =
-        some (.managed (.call ⟨.void, []⟩ true)) ∧
-      decoded (.spanConstructor 0 (.empty 4 true)) call = none := by
+        some (.managed (.call ⟨.void, []⟩ true)) := by
   repeat' first | apply And.intro | rfl | (intro impossible; cases impossible)
 #print axioms role_decodings
 
@@ -358,7 +357,7 @@ theorem object_prefixes :
     let check := fun (operand : RawOperand) (type : TypeExpr) =>
       let rows : List (Nat × Option Instruction) := [(0x70, some (.cpobj type)),
         (0x71, some (.ldobj type)), (0x81, some (.stobj type)),
-        (0xfe15, if type == span then none else some (.initobj type)),
+        (0xfe15, some (.initobj type)),
         (0xfe1c, some (.sizeof type))]
       rows.all fun (opcode, expected) =>
       let raw : RawInstruction := ⟨3, opcode, operand⟩
@@ -709,7 +708,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 92, undecoded 19 of 111 constructors -/
+/-- info: decoded 92, undecoded 18 of 110 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

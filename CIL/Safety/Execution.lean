@@ -410,6 +410,19 @@ def skipInitCall (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memor
     return .next (pc + 1) rest frame memory
   | _ => .error (.unsupported "Not a memory instruction")
 
+/-- A span constructor run in place: `constructor` builds the span from the arguments, and the
+    slot named by the home beneath them then holds it under the slot's width and access. A view or
+    any other receiver names no slot, so the call faults. -/
+def spanInPlaceCall (constructor : CIL.SpanConstructor) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
+  let (memory, values) ← memoryInstruction constructor.operation stack memory
+  match values with
+  | value :: .spanHome index :: rest =>
+    let some (.span width writable view) := frame.locals[index]? | .error .invalidState
+    let (slot, memory) ← storeLocal memory (.span width writable view) value
+    return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
+  | _ => .error .invalidState
+
 /-- Executes `model` as the call at `pc` of `body`. The caller applies `observedCall` with
     `model.observerCount` first. On the stacks a model admits this equals `step` on the
     instruction emitted for the call, and it refuses every other stack. -/
@@ -430,6 +443,7 @@ def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : 
   | .objectConstructor => match stack with
     | _ :: rest => .ok (.next (pc + 1) rest frame memory)
     | [] => .error (.unsupported "Not a memory instruction")
+  | .spanInPlace constructor => spanInPlaceCall constructor pc frame stack memory
 
 /-- A call whose pc states no link runs `model`, the runtime model its method stands for, after
     checking the operands the model observes; without one it faults with `unlinkedCall`. -/
@@ -440,18 +454,25 @@ def modelStep (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc : Nat) (
     observedCall model.observerCount stack fun _ => runModel body model pc frame stack memory
   | none => .error unlinkedCall
 
-/-- A call's runtime model only ever continues at the next pc in the same frame. -/
-theorem modelStep_next {model : Option CIL.RuntimeModel} {body : CIL.Method} {pc : Nat}
+/-- A call's runtime model continues at the next pc. The frame stays the same, except that a span
+    constructor run in place sets the span slot its home names. -/
+theorem modelStep_frame {model : Option CIL.RuntimeModel} {body : CIL.Method} {pc : Nat}
     {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction}
     (executed : modelStep model body pc frame stack memory = .ok action) :
-    ∃ values final, action = .next (pc + 1) values frame final := by
+    ∃ values final changed, action = .next (pc + 1) values changed final ∧
+      (changed = frame ∨ ∃ index width writable view slot,
+        frame.locals[index]? = some (.span width writable view) ∧
+        changed = { frame with locals := frame.locals.set index slot }) := by
   unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
-    referenceSubtractCall typedTransferCall skipInitCall at executed
+    referenceSubtractCall typedTransferCall skipInitCall spanInPlaceCall at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
-    | exact ⟨_, _, (Except.ok.inj executed).symm⟩
+    | exact ⟨_, _, _, (Except.ok.inj executed).symm, .inl rfl⟩
+    | exact ⟨_, _, _, (Except.ok.inj executed).symm, .inr ⟨_, _, _, _, _, by assumption, rfl⟩⟩
     | cases executed
     | split at executed
+
+#print axioms modelStep_frame
 
 /-- A call's runtime model reads its body only through the profile. -/
 theorem modelStep_profile_congr {moved body : CIL.Method} (profile : moved.profile = body.profile)
@@ -833,12 +854,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory
-  | .initializeSpanLocal index constructor, _ =>
-    let some slot := frame.locals[index]? | .error .invalidState
-    let (memory, values) ← memoryInstruction constructor.operation stack m
-    let value :: rest := values | .error .invalidState
-    let (slot, memory) ← storeLocal memory slot value
-    return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
   -- Each receiver call and construction reads the method it enters from the link of its pc.
   | .callvirt method, _ =>
     let argc := method.argumentCount

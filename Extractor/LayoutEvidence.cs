@@ -203,34 +203,10 @@ internal sealed class LayoutEvidence
         {
             var instruction = method.Body.Instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (instruction.OpCode.Code == Code.Call &&
-                instruction.Operand is MethodReference arrayCall &&
-                arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType &&
-                arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan) &&
-                arrayCall.Name != "op_Implicit")
-            {
-                var element = arraySpan.GenericArguments[0];
-                if (MetadataValidation.IsAggregate(element, method.Module))
-                    uses.Add($".size {pc} {Index(element)} .arrayElement");
-            }
-            if (instruction.OpCode.Code == Code.Call &&
-                instruction.Operand is MethodReference spanCall)
-            {
-                if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
-                    Spans.Is(spanOwner) &&
-                    spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
-                    MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name == ".ctor")
-                    uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
-            }
-            if (instruction.OpCode.Code == Code.Initobj &&
-                instruction.Operand is GenericInstanceType span && Spans.Is(span) &&
-                MetadataValidation.IsAggregate(span.GenericArguments[0], method.Module))
-                uses.Add($".size {pc} {Index(span.GenericArguments[0])} .spanElement");
-            else if (instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
+            if (instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
                 MetadataValidation.IsAggregate(constructor.DeclaringType, method.Module))
                 uses.Add($".size {pc} {Index(constructor is MethodDefinition closedConstructor
-                    ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)} .construct");
+                    ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)}");
         }
         foreach (var local in method.Body.Variables)
             if (layouts.IsLayout(local.VariableType))

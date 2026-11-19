@@ -477,17 +477,15 @@ theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedRef
   · exact displaceReference_valid success
   · cases success
 #print axioms referenceSubtract_valid
-/-- Constructing a view and storing it changes only the destination local. -/
-theorem StepContract.initializeSpanLocal {body : CIL.Method} {site : Nat}
-    {operation : CIL.Instruction}
-    {frame : Frame}
-    {stack rest : List Value} {memory result : Memory} {construction : Memory × List Value}
-    {index pc : Nat} {slot final : LocalSlot} {value : Value}
-    {constructor : CIL.SpanConstructor}
+/-- Constructing a span and storing it through the home beneath its arguments changes only the
+    slot the home names. -/
+theorem StepContract.spanInPlace {body : CIL.Method} {site : Nat} {operation : CIL.Instruction}
+    {frame : Frame} {stack rest : List Value} {memory result : Memory}
+    {construction : Memory × List Value} {index pc : Nat} {slot final : LocalSlot}
+    {value home : Value} {constructor : CIL.SpanConstructor}
     (found : frame.locals[index]? = some slot)
-    (constructed : memoryInstruction constructor.operation stack memory =
-      .ok construction)
-    (values : construction.2 = value :: rest)
+    (constructed : memoryInstruction constructor.operation stack memory = .ok construction)
+    (values : construction.2 = value :: home :: rest)
     (stored : storeLocal construction.1 slot value = .ok (final, result)) :
     StepContract body site operation frame stack memory
       (.next pc rest { frame with locals := frame.locals.set index final } result) := by
@@ -495,14 +493,14 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {site : Nat}
   dsimp only at values stored
   subst constructedValues
   obtain ⟨same, _⟩ := spanConstructor_result constructor memory constructedMemory stack
-    value rest constructed
+    value (home :: rest) constructed
   subst constructedMemory
   refine ⟨.store found stored, ?_⟩
   intro formed valid
-  exact ((memoryInstruction_contract _ _ _ _ _ constructed).values formed valid).tail.preserve
+  exact ((memoryInstruction_contract _ _ _ _ _ constructed).values formed valid).tail.tail.preserve
     formed (storeLocal_extends_allocations _ _ _ _ _ stored)
 
-#print axioms StepContract.initializeSpanLocal
+#print axioms StepContract.spanInPlace
 
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
@@ -575,10 +573,11 @@ theorem modelStep_contract {body : CIL.Method} {model : Option CIL.RuntimeModel}
     (executed : modelStep model body pc frame stack memory = .ok action) :
     StepContract body pc operation frame stack memory action := by
   unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
-    referenceSubtractCall typedTransferCall skipInitCall at executed
+    referenceSubtractCall typedTransferCall skipInitCall spanInPlaceCall at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first | split at executed | cases executed
   all_goals first
+    | (apply StepContract.spanInPlace <;> first | assumption | rfl)
     | exact StepContract.instruction (memoryInstruction_contract _ _ _ _ _ (by assumption))
     | exact StepContract.instruction (instruction_contract _ _ _ _ _ (by assumption))
     | exact StepContract.viewed (by assumption)
@@ -620,9 +619,6 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | unfold referenceCompareCall at h
     | unfold referenceSubtractCall at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-    | solve |
-        apply StepContract.initializeSpanLocal
-        all_goals assumption
     | solve | exact .stackAllocation (by assumption)
     | solve | exact .arrayAllocation (by assumption)
     | solve | exact .newarr (by assumption)
@@ -770,7 +766,7 @@ theorem step_homeFree {body : CIL.Method} {operation : CIL.Instruction} {pc : Na
     (h : step body operation pc args frame stack m = .ok action) : action.HomeFree := by
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject modelStep observedCall runModel featureCall
-    typedTransferCall skipInitCall initializeSpanHome at h
+    typedTransferCall skipInitCall initializeSpanHome spanInPlaceCall at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | (cases h; home_free_close; done)

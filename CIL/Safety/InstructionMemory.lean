@@ -121,7 +121,6 @@ def observerCount : CIL.Instruction → Nat
   | .managed (.call signature _) => signature.parameters.length + 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
-  | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
   | .ldc_i8 _ | .ldnull | .dup | .pop | .br _ | .feature _ | .intrinsic ..

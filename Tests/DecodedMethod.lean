@@ -59,12 +59,13 @@ theorem decoded_missing_mask :
     ¬ UnsafeCallsValid source [] (methodCode .scalar {} [] [] source) := by decide +kernel
 #print axioms decoded_missing_mask
 
-/-- A span reset without its local address has no matching empty-span initialization. -/
+/-- A span reset decodes to `initobj`, and object admission refuses it without the address of a
+    local or parameter of its type before it. -/
 theorem decoded_unbound_span_reset :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") uint32
     let source := { addRaw with code := [instr 0 0xfe15 (.type span)] }
     let code := methodCode .scalar {} [] [true] source
-    code = [.unadmitted 0xfe15] ∧ objectSites source [true] (frame code) = none := by
+    code = [.initobj span] ∧ objectSites source [true] (frame code) = none := by
   exact ⟨rfl, rfl⟩
 #print axioms decoded_unbound_span_reset
 

@@ -215,7 +215,7 @@ private def itemOps : List Instruction :=
 
 /-- Storing and addressing a span receiver leaves every instruction outside a fold. -/
 theorem length_receiver_roles :
-    foldRoles [words] [i 10, i 18 (.local 0), i 40 (.call {
+    foldRoles [i 10, i 18 (.local 0), i 40 (.call {
       declared := { convention := 0x20, returnType := intType },
       method := {
         owner := words, name := name!"get_Length", hasThis := true, genericArity := 0,
@@ -228,7 +228,7 @@ theorem length_receiver_roles :
 #print axioms length_receiver_roles
 
 /-- Indexed span receivers retain every raw instruction outside a fold. -/
-theorem item_receiver_roles : foldRoles [words] itemCode = List.replicate 7 none := by
+theorem item_receiver_roles : foldRoles itemCode = List.replicate 7 none := by
   decide +kernel
 #print axioms item_receiver_roles
 
@@ -360,7 +360,7 @@ theorem bulk_vector_models :
 
 #print axioms bulk_vector_models
 
-/-- Exact array constructor used by an in-place local initialization. -/
+/-- `ReadOnlySpan<uint>(uint[])`, the array constructor a call runs on a span home. -/
 private def localConstructor : CallSite := {
   declared := { convention := 0x20, parameters := [.array (.parameter 0)] },
   method := {
@@ -371,32 +371,68 @@ private def localConstructor : CallSite := {
     "::System.Void System.ReadOnlySpan`1<System.UInt32>::.ctor(!0[])"), typeArguments := [],
   parameterCount := 1, returnsValue := false }
 
+/-- The address of span local 0, a null array and the constructor call. -/
 private def constructorCode :=
-  [i 18 (.local 0), i 2, i 40 (.call localConstructor), i 18 (.local 0)]
+  [i 18 (.local 0), i 20, i 40 (.call localConstructor), i 42]
 
-/-- Reused local addresses do not disable exact constructor folding. -/
-theorem constructor_fold : foldRoles [words] constructorCode =
-    [some .head, some .argument, some (.spanConstructor 0 (.array .unsigned32 false .whole)),
-      none] := by decide +kernel
-#print axioms constructor_fold
+/-- Whether object admission accepts the constructor windows and span resets of `source`, with
+    every instruction live. -/
+private def admitted (source : RawMethod) : Bool :=
+  (objectSites source (source.code.map fun _ => true)
+    { code := source.code.map fun _ => .nop, locals := [], returnsValue := false }).isSome
 
-/-- The feature check binds the array constructor's null argument to its raw push. -/
-theorem constructor_argument_exact :
-    let source := raw [words] [i 18 (.local 0), i 20, i 40 (.call localConstructor), i 42]
-    let role := (foldRoles source.locals source.code)[1]?.join
-    role = some .argument ∧
-      featureOpMatchesAt #[] source role (i 20) .ldnull = true ∧
-      featureOpMatchesAt #[] source role (i 20) (.ldc_i4 1) = false := by decide +kernel
-#print axioms constructor_argument_exact
+/-- A constructor call runs on the address of a local or parameter of the constructed span type
+    followed by one pure push per parameter. -/
+theorem constructor_window_admitted :
+    admitted (raw [words] constructorCode) = true ∧
+    admitted (raw [words, .array (.atom runtime "System.UInt32")]
+      [i 18 (.local 0), i 7, i 40 (.call localConstructor), i 42]) = true ∧
+    admitted (raw [] [i 15 (.argument 0), i 20, i 40 (.call localConstructor), i 42]) = true := by
+  decide +kernel
+#print axioms constructor_window_admitted
 
-/-- The folded byte-span constructor consumes its argument and returns with an empty stack. -/
+/-- Admission refuses a constructor whose receiver is not a home of the constructed span type: a
+    store or a duplicate inside the window, a local of another span type, an `in` parameter
+    loaded by value, and a branch to an argument push or to the call. -/
+theorem constructor_window_refused :
+    admitted (raw [words, .array (.atom runtime "System.UInt32")]
+      [i 18 (.local 0), i 20, i 11, i 7, i 40 (.call localConstructor), i 42]) = false ∧
+    admitted (raw [words] [i 18 (.local 0), i 37, i 20, i 40 (.call localConstructor)]) = false ∧
+    admitted (raw [span runtime "System.Int32"] constructorCode) = false ∧
+    admitted { raw [] [i 2, i 20, i 40 (.call localConstructor), i 42] with
+      parameters := [.byref words] } = false ∧
+    admitted (raw [words] (constructorCode ++ [i 43 (.target 1)])) = false ∧
+    admitted (raw [words] (constructorCode ++ [i 43 (.target 2)])) = false := by decide +kernel
+#print axioms constructor_window_refused
+
+/-- A branch may enter at the address itself, since the window starts there. -/
+theorem constructor_window_entry_at_address :
+    admitted (raw [words] (constructorCode ++ [i 43 (.target 0)])) = true := by decide +kernel
+#print axioms constructor_window_entry_at_address
+
+/-- A span `initobj` resets the home its preceding raw instruction addresses, of its own type, and
+    is not a branch target. -/
+theorem span_reset_evidence :
+    admitted (raw [words] [i 18 (.local 0), i 65045 (.type words), i 42]) = true ∧
+    admitted (raw [] [i 15 (.argument 0), i 65045 (.type words), i 42]) = true ∧
+    admitted (raw [words] [i 18 (.local 0), i 0, i 65045 (.type words), i 42]) = false ∧
+    admitted (raw [span runtime "System.Int32"]
+      [i 18 (.local 0), i 65045 (.type words), i 42]) = false ∧
+    admitted (raw [words]
+      [i 18 (.local 0), i 65045 (.type words), i 42, i 43 (.target 1)]) = false := by
+  decide +kernel
+#print axioms span_reset_evidence
+
+/-- The byte-span constructor decodes to the address of its home and a model call, consumes its
+    argument and returns with an empty stack. -/
 theorem decoded_span_constructor_returns :
     let byte := TypeExpr.atom runtimeScope "System.Byte"
     let bytes := TypeExpr.apply (.constructor runtimeScope "System.Span`1") byte
     let ctor := { localConstructor with
       method.owner := bytes,
       method.parameters := [.byref byte], declared.parameters := [.byref (.ownerParameter 0)],
-      target := .external (runtimeScope ++ "::System.Void System.Span`1<System.Byte>::.ctor(!0&)") }
+      target := .external (runtimeScope ++
+        "::System.Void System.Span`1<System.Byte>::.ctor(!0&)") }
     let source := { raw [bytes] [i 18 (.local 0), i 2, i 40 (.call ctor), i 42] with
       parameters := [.byref byte], returnType := .void }
     let method := Method.ofRaw? .scalar {} [] [true, true, true, true] source []
@@ -404,15 +440,15 @@ theorem decoded_span_constructor_returns :
       allocations := fun id => if id == 0 then
         some ⟨.callerStack, ⟨1, 1, []⟩, true, []⟩ else none,
       views := [⟨0, 0, 1, true, true⟩], nextIdentity := 1 }
-    method.map Method.code = some [.nop, .ldarg 0, .initializeSpanLocal 0
-      (.singleReference 1 true), .ret] ∧
+    method.map Method.code = some [.ldloca 0, .ldarg 0, .call ctor.method, .ret] ∧
       (method.bind fun body => (Safety.invoke [body] 5 0 [.reference (.address ⟨0, 0⟩)]
         memory).toOption.map (·.2)) = some [] := by
   exact ⟨rfl, rfl⟩
 
 #print axioms decoded_span_constructor_returns
 
-/-- Resetting an aggregate span uses the frame's checked element width and returns normally. -/
+/-- Resetting an aggregate span decodes to `initobj` on its home and returns normally; without the
+    element layout the method is refused. -/
 theorem decoded_span_reset_returns :
     let identity := "Fixture::Word"
     let element := TypeExpr.aggregate identity 0
@@ -425,41 +461,14 @@ theorem decoded_span_reset_returns :
     let source := { raw [spanType] [i 18 (.local 0), i 65045 (.type spanType), i 42] with
       parameters := [], returnType := .void }
     let method := Method.ofRaw? .scalar environment [] [true, true, true] source []
-    method.map Method.code = some [.nop, .initializeSpanLocal 0 (.empty 8 true), .ret] ∧
+    method.map Method.code = some [.ldloca 0, .initobj spanType, .ret] ∧
       (method.bind fun body => (Safety.invoke [body] 5 0 [] Safety.Memory.empty).toOption.map
         (·.2)) = some [] ∧
-      (methodCode .scalar { environment with layouts := #[] } [] [true, true, true] source)[1]? =
-        some (.unadmitted 65045) := by
+      Method.ofRaw? .scalar { environment with layouts := #[] } [] [true, true, true] source [] =
+        none := by
   exact ⟨rfl, rfl, rfl⟩
 
 #print axioms decoded_span_reset_returns
-
-/-- Constructor arguments and the constructor itself cannot be external branch targets. -/
-theorem constructor_no_interior_entry :
-    foldEntry (foldRoles [words] constructorCode)[0]? = true ∧
-    foldEntry (foldRoles [words] constructorCode)[1]? = false ∧
-    foldEntry (foldRoles [words] constructorCode)[2]? = false := by decide +kernel
-#print axioms constructor_no_interior_entry
-
-/-- Duplicating the local address or changing its declared span type prevents the fold. -/
-theorem constructor_alias_rejected :
-    foldRoles [words] [i 18 (.local 0), i 37, i 2, i 40 (.call localConstructor)] =
-      List.replicate 4 none ∧
-    foldRoles [span runtime "System.Int32"] constructorCode = List.replicate 4 none := by
-  decide +kernel
-#print axioms constructor_alias_rejected
-
-/-- The emitted local and constructor capability are both bound by the raw sequence. -/
-theorem constructor_forgery_rejected :
-    featureOpMatchesAt #[] (raw [words] constructorCode)
-      (some (.spanConstructor 0 (.array .unsigned32 false .whole)))
-      (i 40 (.call localConstructor))
-      (.initializeSpanLocal 1 (.array .unsigned32 false .whole)) = false ∧
-    featureOpMatchesAt #[] (raw [words] constructorCode)
-      (some (.spanConstructor 0 (.array .unsigned32 false .whole)))
-      (i 40 (.call localConstructor))
-      (.initializeSpanLocal 0 (.array .unsigned32 true .whole)) = false := by decide +kernel
-#print axioms constructor_forgery_rejected
 /-- Runtime names omit scopes without discarding nested or adjacent generic arguments. -/
 theorem closed_generic_element_names :
     spanElementName (.aggregate ("Examples::Pair`1<" ++ runtimeScope ++ "::System.UInt64>") 0) =

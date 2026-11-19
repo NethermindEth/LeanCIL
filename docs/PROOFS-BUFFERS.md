@@ -187,11 +187,11 @@ After a successful `writeSnapshot`, rewrite the stored memory's cell function wi
 `writeSnapshot_cells_eq`. Inside the destination it returns the source byte and its
 initialization flag. Other offsets and allocations retain their previous cells.
 
-Single-reference and pointer span constructors, empty getters and in-place local resets use the
-same views.
+Single-reference and pointer span constructors, empty getters and span resets use the same views.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
-a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
-when `initializeSpanLocal` replaces a local's previous view.
+a null, zero-length view without changing memory. `initializeSpanHome` stores that view in the
+slot a span `initobj` addresses, and `spanInPlaceCall` stores the view a constructor builds in
+the slot its receiver home names.
 An `in` or `ref readonly` span parameter is passed as the `.bufferSpan` view the caller's home
 holds when the call runs, so a contract states the same view argument as a by-value span and reuses `SpanView.validate`,
 `Contents` and the span element lemmas, whether the caller passes a span local or a temporary.

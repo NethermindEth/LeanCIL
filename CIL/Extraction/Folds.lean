@@ -6,8 +6,8 @@ import CIL.Extraction.SpanCalls
 # Folded instruction sequences
 
 Some raw instruction sequences have no instruction-by-instruction translation and are
-emitted as a unit: `typeof(A) == typeof(B)` becomes its decided Boolean, `throw new E(...)`
-becomes one `throw`, and span constructors initialize typed local storage.
+emitted as a unit: `typeof(A) == typeof(B)` becomes its decided Boolean and `throw new E(...)`
+becomes one `throw`.
 `foldRoles` finds these sequences from the raw body alone and gives each instruction its
 role, which the feature and scalar checks then enforce.
 -/
@@ -256,15 +256,13 @@ inductive FoldRole where
   | raise (exception : ExceptionType)
   /-- An unchanged argument push protected from non-fallthrough entry. -/
   | argument
-  /-- A checked constructor initializes the local whose address starts the fold. -/
-  | spanConstructor (index : Nat) (constructor : SpanConstructor)
   /-- A direct managed call whose prefix requests frame retirement before transfer. -/
   | tailCall
   /-- A branch enters this candidate after its head, so none of its roles may execute. -/
   | blocked
   deriving DecidableEq, Repr
 
-/-- The instruction fixed by a fold role. Constructors also need their checked layout. -/
+/-- The instruction fixed by a fold role. -/
 def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
     (raw : RawInstruction) : Option Instruction :=
   match role with
@@ -277,7 +275,7 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
   | .argument => Instruction.ofRaw? previous raw
   | .tailCall => if raw.opcode == 40 || raw.opcode == 41 then Instruction.ofRaw? previous raw
       else none
-  | .spanConstructor .. | .blocked => none
+  | .blocked => none
 
 /-- Calls and static field operands need the method's bindings or profile to decode. -/
 def boundSite (raw : RawInstruction) : Bool :=
@@ -291,7 +289,7 @@ def foldOwnsSite : Option FoldRole → Bool
 
 /-- Bound operands outside a recognized fold use their site decoder. -/
 def Instruction.withSiteDecoder (roles : Array (Option FoldRole))
-    (live : Nat → Bool) (localKind : TypeExpr → Option LocalKind) (decodeSite : SiteDecoder) :
+    (live : Nat → Bool) (decodeSite : SiteDecoder) :
     SiteDecoder := fun pc previous raw =>
   if !live pc then .unadmitted raw.opcode
   else
@@ -299,59 +297,23 @@ def Instruction.withSiteDecoder (roles : Array (Option FoldRole))
     if boundSite raw && !foldOwnsSite role then decodeSite pc previous raw
     else match role with
     | none | some .blocked => Instruction.ofClosedValue previous raw
-    | some (.spanConstructor index (.empty ..)) =>
-      match raw.operand with
-      | .type initialized => match localKind initialized with
-        | some (.span width writable) => .initializeSpanLocal index (.empty width writable)
-        | _ => .unadmitted raw.opcode
-      | _ => .unadmitted raw.opcode
     | some role => (Instruction.ofRole? role previous raw).getD (.unadmitted raw.opcode)
-
-/-- Resetting a span local binds its exact type and never exposes its storage address. -/
-private def spanDefaultFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
-    (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
-  let index ← localIndex head
-  let localType ← localAt index
-  let some ⟨_, 65045, .type initialized⟩ := tail.head? | none
-  if initialized != localType then none else pure ()
-  let .span width writable ← spanStorage localType | none
-  return [some .head, some (.spanConstructor index (.empty width writable))]
-
-/-- A constructor fold admits at most three pure single-value argument pushes. -/
-private def spanConstructorFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
-    (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
-  let index ← localIndex head
-  let localType ← localAt index
-  let pushes := (tail.take 4).takeWhile fun instruction => instruction.opcode ∈
-    [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
-      20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
-  if pushes.length > 3 then none else pure ()
-  let call ← tail[pushes.length]?
-  let .call site := call.operand | none
-  if call.opcode != 40 || site.declaringType != localType then none else pure ()
-  let constructor ← spanLocalConstructor site
-  if pushes.length != site.parameterCount then none else
-    some (some .head :: List.replicate pushes.length (some .argument) ++
-      [some (.spanConstructor index constructor)])
 
 /-- The raw head determines which bounded instruction window can form a fold. -/
 private inductive FoldHead where
-  | spanAddress | exception | tailPrefix | typeHandle
+  | exception | tailPrefix | typeHandle
 
 /-- Only these instructions can start a folded sequence. -/
 private def foldHead? : Nat → Option FoldHead
-  | 18 | 65037 => some .spanAddress
   | 20 | 114 | 115 => some .exception
   | 65044 => some .tailPrefix
   | 208 => some .typeHandle
   | _ => none
 
-/-- The roles of a fold starting at `a`, with local types supplied by `localAt`. -/
-private def foldAt (localAt : Nat -> Option TypeExpr)
-    (a : RawInstruction) (tail : List RawInstruction) :
+/-- The roles of a fold starting at `a`. -/
+private def foldAt (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
   match foldHead? a.opcode with
-  | some .spanAddress => spanDefaultFold localAt a tail <|> spanConstructorFold localAt a tail
   | some .exception =>
     if a.opcode == 20 && a.operand == .none && (tail.head? matches some ⟨_, 122, .none⟩) then
       some [some .head, some (.raise .nullReference)]
@@ -377,23 +339,23 @@ def foldEntry : Option (Option FoldRole) → Bool
   | _ => false
 
 /-- Assign all roles of a candidate together, using every encoded target in the body. -/
-private def foldRolesFrom (localAt : Nat → Option TypeExpr) (targeted : Nat → Bool) :
+private def foldRolesFrom (targeted : Nat → Bool) :
     Nat → List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, _, [] => []
-  | pc, role :: pending, _ :: tail => role :: foldRolesFrom localAt targeted (pc + 1) pending tail
+  | pc, role :: pending, _ :: tail => role :: foldRolesFrom targeted (pc + 1) pending tail
   | pc, [], first :: tail =>
-    match foldAt localAt first tail with
+    match foldAt first tail with
     | some (head :: rest) =>
       if (rest.zipIdx (pc + 1)).all (fun (role, atPc) => !targeted atPc || foldEntry (some role))
-      then head :: foldRolesFrom localAt targeted (pc + 1) rest tail
-      else some .blocked :: foldRolesFrom localAt targeted (pc + 1)
+      then head :: foldRolesFrom targeted (pc + 1) rest tail
+      else some .blocked :: foldRolesFrom targeted (pc + 1)
         (List.replicate rest.length (some .blocked)) tail
-    | _ => none :: foldRolesFrom localAt targeted (pc + 1) [] tail
+    | _ => none :: foldRolesFrom targeted (pc + 1) [] tail
 
-/-- Roles derived from raw instructions, their branch targets and the declared local types. -/
-def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
+/-- Roles derived from raw instructions and their branch targets. -/
+def foldRoles (code : List RawInstruction) : List (Option FoldRole) :=
   let targets := Std.TreeSet.ofList (branchTargets code) compare
-  foldRolesFrom (FlowIndex.ofList locals).get? targets.contains 0 [] code
+  foldRolesFrom targets.contains 0 [] code
 
 /-- Every raw instruction is live and independent of call claims and folded sequences. -/
 def plainBody : List RawInstruction → List Bool → Bool
@@ -407,13 +369,12 @@ theorem plainBody_at {closed : RawMethod} {reachable : List Bool}
     (plain : plainBody closed.code reachable)
     {pc : Nat} {raw : RawInstruction} (found : closed.code[pc]? = some raw) :
     reachable[pc]? = some true ∧ boundSite raw = false ∧
-      (foldRoles closed.locals closed.code)[pc]? = some none := by
-  let localAt := (FlowIndex.ofList closed.locals).get?
+      (foldRoles closed.code)[pc]? = some none := by
   let targeted := (Std.TreeSet.ofList (branchTargets closed.code) compare).contains
   suffices walk : ∀ (code : List RawInstruction) (mask : List Bool) (start index : Nat),
       plainBody code mask = true → code[index]? = some raw →
         mask[index]? = some true ∧ boundSite raw = false ∧
-          (foldRolesFrom localAt targeted start [] code)[index]? = some none by
+          (foldRolesFrom targeted start [] code)[index]? = some none by
     exact walk closed.code reachable 0 pc plain found
   intro code
   induction code with

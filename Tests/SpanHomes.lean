@@ -96,6 +96,26 @@ theorem initobj_through_home :
       16 0 [] memory).map Prod.snd = .ok [.scalar (.i32 0)] := rfl
 #print axioms initobj_through_home
 
+/-- `Span<int>(ref int)`, the single-element constructor a call runs on a span home. -/
+private def singleConstructor : MethodRef := {
+  owner := intSpan, name := name!".ctor", hasThis := true, genericArity := 0,
+  returnType := .void, parameters := [.byref (.atom runtimeScope "System.Int32")] }
+
+/-- The address of the first int32 of allocation 0, the element a single-element span views. -/
+private def element : Safety.Value := .reference (.address ⟨0, 0⟩)
+
+/-- A constructor call on the home of a span local replaces the view in the slot: the local held
+    a two-element view, or nothing, and the length read through the home afterwards is 1. -/
+theorem constructor_through_local_home :
+    (invoke [{ savedLength with
+      code := [.ldarg 0, .stloc 0, .ldloca 0, .ldarg 1, .call singleConstructor {}, .ldloca 0,
+        .call getLength {}, .ret] }] 16 0 [view 2, element] memory).map Prod.snd =
+      .ok [.scalar (.i32 1)] ∧
+    (invoke [uninitialized [.ldloca 0, .ldarg 0, .call singleConstructor {}, .ldloca 0,
+        .call getLength {}, .ret]] 16 0 [element] memory).map Prod.snd =
+      .ok [.scalar (.i32 1)] := ⟨rfl, rfl⟩
+#print axioms constructor_through_local_home
+
 /-- A home cannot leave its frame by `ret` or be stored as a value in another local. -/
 theorem home_stays_in_frame :
     (invoke [{ savedLength with code := [.ldarg 0, .stloc 0, .ldloca 0, .ret] }] 16 0
@@ -135,6 +155,13 @@ theorem parameter_home_sees_store :
     (invoke [homedParameter] 16 0 [view 1, view 2] memory).map Prod.snd =
       .ok [.scalar (.i32 2)] := rfl
 #print axioms parameter_home_sees_store
+
+/-- A constructor call on the home of a by-value span parameter replaces the argument's view. -/
+theorem constructor_through_parameter_home :
+    (invoke [{ homedParameter with
+      code := [.ldarga 0, .ldarg 1, .call singleConstructor {}, .ldarga 0, .call getLength {},
+        .ret] }] 16 0 [view 2, element] memory).map Prod.snd = .ok [.scalar (.i32 1)] := rfl
+#print axioms constructor_through_parameter_home
 
 
 
@@ -213,7 +240,7 @@ private def byValueRaw (address : RawInstruction) : RawMethod :=
 /-- No scalar certificate admits `byValueRaw address` when `address` pushes an address: pc 0
     must hand pc 1 exactly that address, and the call refuses it at the by-value parameter. -/
 private theorem byValue_refused {address : RawInstruction}
-    (roles : foldRoles (byValueRaw address).locals (byValueRaw address).code =
+    (roles : foldRoles (byValueRaw address).code =
       [none, none, none])
     (pushes : scalarTransfer (byValueRaw address) address [] = some [.reference])
     (calls : scalarTransfer (byValueRaw address) (takes intSpan) [.reference] = none)

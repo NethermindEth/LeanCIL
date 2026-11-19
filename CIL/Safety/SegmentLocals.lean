@@ -17,7 +17,7 @@ namespace CIL.Safety
 def segmentStores (body : CIL.Method) (code : List CIL.Instruction) : List Nat :=
   code.filterMap fun operation =>
   match operation with
-  | .stloc index | .initializeSpanLocal index _ => some index
+  | .stloc index => some index
   | .starg index =>
     match body.argumentAccess index with
     | .home slot => some slot

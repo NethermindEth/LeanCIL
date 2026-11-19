@@ -624,13 +624,12 @@ internal static class MetadataValidation
                     else if (type is not ByReferenceType || importedByref?.Invoke(type) != true)
                         Type(type, module, architecture: profile.Architecture, strings: true);
                 }, named: true);
-            if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
-                foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () =>
-                    {
-                        if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
-                        else Type(local.VariableType, module, architecture: profile.Architecture, strings: true);
-                    }, named: true);
+            foreach (VariableDefinition local in method.Body.Variables)
+                Check(method, null, () =>
+                {
+                    if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
+                    else Type(local.VariableType, module, architecture: profile.Architecture, strings: true);
+                }, named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
@@ -817,15 +816,14 @@ internal static class MetadataValidation
                                 "Folded throws require an allowlisted System.Runtime constructor with literal strings or null arguments.");
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
                             Spans.Is(reference.DeclaringType) &&
-                            !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
+                            !Spans.ConstructorCalls(method).Contains(instruction))
                             throw Call("Unsupported in-place span constructor", reference, method, instruction,
-                                "The receiver must be a local address followed by at most three simple argument pushes.");
+                                "The receiver must be the address of a local or parameter of the constructed type, " +
+                                "followed by at most three simple argument pushes and no branch target.");
                         if (instruction.OpCode.Code == Code.Call &&
                             RuntimeModels.CallModel(reference, profile) is not null) return;
                         if (instruction.OpCode.Code == Code.Newobj &&
-                            Spans.ConstructorOperation(reference, profile.Architecture) is not null ||
-                            instruction.OpCode.Code == Code.Call && reference.Name == ".ctor" &&
-                            Spans.Analyze(method, profile).Constructors.ContainsKey(instruction)) return;
+                            Spans.ConstructorOperation(reference, profile.Architecture) is not null) return;
                         if (RuntimeModels.Translate(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);

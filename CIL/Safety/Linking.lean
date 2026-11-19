@@ -104,7 +104,7 @@ theorem modelStep_relocate (f : Nat → Nat) (model : Option CIL.RuntimeModel) (
   cases executed : modelStep model body pc frame stack memory with
   | error => rfl
   | ok action =>
-    obtain ⟨_, _, rfl⟩ := modelStep_next executed
+    obtain ⟨_, _, _, rfl, _⟩ := modelStep_frame executed
     rfl
 
 #print axioms modelStep_relocate

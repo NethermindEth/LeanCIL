@@ -140,7 +140,7 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newarr _
+  | .ldloc .. | .ldloca _ | .stloc .. | .localloc | .newarr _
   | .ldobj _ | .stobj _ | .cpobj _ | .initobj _ | .sizeof _
   | .ldelem_any _ | .stelem_any _ | .ldelema ..
   | .newobj _ | .memory _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded

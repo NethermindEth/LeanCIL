@@ -46,7 +46,7 @@ def ModelCatalog.callRequirement (catalog : ModelCatalog) (environment : CallLay
   | .link => catalog.linkedRequirement environment profile raw
   | .refused => missing
   | .lowered family =>
-    ((family.resolve environment role raw).map CallRequirement.instruction).getD missing
+    ((family.resolve environment raw).map CallRequirement.instruction).getD missing
   | .model =>
     match raw.operand, callOpcode? raw.opcode with
     | .call site, some opcode =>
@@ -99,7 +99,7 @@ private def modelSitesAgree (catalog : ModelCatalog) (environment : LayoutEnviro
     (profile : FeatureProfile) (closed : RawMethod) (reachable : List Bool)
     (code : List Instruction) (links : Array (Option Link)) : Bool :=
   let layouts := environment.callLayouts
-  let roles := (foldRoles closed.locals closed.code).toArray
+  let roles := (foldRoles closed.code).toArray
   all3 (fun (raw, pc) live emitted =>
     catalog.emissionAgrees layouts profile raw emitted
       (indexedRead? links pc).join (indexedRead? roles pc).join live)
@@ -148,7 +148,7 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
     {pc : Nat} {raw : RawInstruction} (atRaw : closed.code[pc]? = some raw)
     (atLive : reachable[pc]? = some true) :
     SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true
-      ((foldRoles closed.locals closed.code)[pc]?.join) := by
+      ((foldRoles closed.code)[pc]?.join) := by
   intro ordinary token refused
   simp only [Bool.true_and, Bool.not_eq_true'] at ordinary
   have live := List.contains_iff_mem.mpr (List.mem_of_getElem? atLive)
@@ -192,9 +192,8 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
     (statics : Std.TreeMap Nat RvaField) (occupied : Std.TreeSet Nat)
     (roles : Array (Option FoldRole)) (reachable : Array Bool) :
     SiteDecoder :=
-  let localKind := fun type => (environment.storage type).bind (storageKind environment.layouts)
   let live := fun pc => (indexedRead? reachable pc).getD false
-  Instruction.withSiteDecoder roles live localKind fun pc previous raw =>
+  Instruction.withSiteDecoder roles live fun pc previous raw =>
     if !methodTokenCall raw.opcode then
       if occupied.contains pc || previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
       else (staticInstruction profile statics[pc]? raw).getD (.unadmitted raw.opcode)
@@ -228,7 +227,7 @@ def methodCode (profile : FeatureProfile) (environment : LayoutEnvironment)
   if plainBody closed.code reachable then plainCode none closed.code
   else
     let occupied := Std.TreeSet.ofList (links.map Prod.fst) compare
-    let roles := (foldRoles closed.locals closed.code).toArray
+    let roles := (foldRoles closed.code).toArray
     Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
       (firstEntryIndex closed.rvaSites) occupied roles reachable.toArray)
 
@@ -238,7 +237,7 @@ theorem methodCode_eq (profile : FeatureProfile) (environment : LayoutEnvironmen
     methodCode profile environment links reachable closed =
       Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
         (firstEntryIndex closed.rvaSites) (Std.TreeSet.ofList (links.map Prod.fst) compare)
-        (foldRoles closed.locals closed.code).toArray reachable.toArray) := by
+        (foldRoles closed.code).toArray reachable.toArray) := by
   unfold methodCode
   split
   · rename_i plain
@@ -296,7 +295,7 @@ theorem RuntimeModelsAgree.of_decoded_site {profile : FeatureProfile}
     (decoded : (methodCode profile env links reachable closed)[pc]? = some emitted)
     (admitted : live = true → ∀ opcode, emitted ≠ .unadmitted opcode) :
     runtimeCatalog.emissionAgrees env.callLayouts profile raw emitted (linkLookup links pc)
-      ((foldRoles closed.locals closed.code)[pc]?.join) live = true := by
+      ((foldRoles closed.code)[pc]?.join) live = true := by
   rw [methodCode_eq, Instruction.ofRawCode_getElem? closed.code pc _, Instruction.ofRawAt,
     found] at decoded
   have same := Option.some.inj decoded
@@ -305,7 +304,7 @@ theorem RuntimeModelsAgree.of_decoded_site {profile : FeatureProfile}
   cases live with
   | false => simp_all [ModelCatalog.emissionAgrees]
   | true =>
-    generalize (foldRoles closed.locals closed.code)[pc]?.join = role at *
+    generalize (foldRoles closed.code)[pc]?.join = role at *
     simp only [Bool.not_true, Bool.false_eq_true, ite_false] at same
     simp only [ModelCatalog.emissionAgrees, ite_true]
     cases owned : foldOwnsSite role

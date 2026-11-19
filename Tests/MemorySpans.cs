@@ -67,13 +67,17 @@ foreach (var mutation in new[] { "alias", "branch" })
         if (mutation == "alias")
             processor.InsertAfter(head, processor.Create(Mono.Cecil.Cil.OpCodes.Dup));
         else
-            processor.InsertBefore(head, processor.Create(Mono.Cecil.Cil.OpCodes.Br, head.Next));
+        {
+            // The branch carries the same home the receiver load pushes, so only the window's target check refuses it.
+            var address = processor.Create(head.OpCode, (Mono.Cecil.Cil.VariableDefinition)head.Operand);
+            processor.InsertBefore(head, address);
+            processor.InsertAfter(address, processor.Create(Mono.Cecil.Cil.OpCodes.Br, head.Next));
+        }
         module.Write(dll);
     }
     var result = Execute(["dotnet", ExtractorPath, "extract", dll,
         "MemorySpans::InPlaceArrayConstructor(System.Int32[],System.Int32,System.Int32)", output]);
-    var marker = mutation == "alias" ? "Unsupported in-place span constructor" : "folded span";
-    if (result.Code == 0 || !result.Output.Contains(marker, StringComparison.OrdinalIgnoreCase))
+    if (result.Code == 0 || !result.Output.Contains("Unsupported in-place span constructor", StringComparison.Ordinal))
         throw new InvalidOperationException("Incorrect constructor rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS in-place constructor rejection: " + mutation);
 }
@@ -139,26 +143,19 @@ foreach (var (name, signature, arguments, expected) in new[]
             #print axioms uninitialized_span_local_rejected
 
             theorem constructor_expired_storage_rejected :
-                CIL.Safety.step Extracted.method0
-                  (.initializeSpanLocal 0 (.array .signed32 false .counted)) 4 []
-                  ⟨0, [.span 4 false none], [], 0⟩
-                  [.scalar (.i32 0), .scalar (.i32 0), .array ⟨.address ⟨0, 0⟩, 3, .signed32⟩]
-                  { spanMemory with
-                    allocations := fun _ => some ⟨.callerStack, ⟨12, 1, []⟩, false, []⟩ } =
-                  .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
+                (Extracted.method0.code[4]?).map (fun constructor =>
+                  CIL.Safety.step Extracted.method0 constructor 4 []
+                    ⟨0, [.span 4 false none], [], 0⟩
+                    [.scalar (.i32 0), .scalar (.i32 0), .array ⟨.address ⟨0, 0⟩, 3, .signed32⟩,
+                      .spanHome 0]
+                    { spanMemory with
+                      allocations := fun _ => some ⟨.callerStack, ⟨12, 1, []⟩, false, []⟩ }) =
+                  some (.error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0)) := rfl
             #print axioms constructor_expired_storage_rejected
             """);
-    if (name == "InPlaceArrayConstructor")
-    {
-        const string operation = ".initializeSpanLocal 0 (.array .signed32 true .counted)";
-        if (!source.Contains(operation, StringComparison.Ordinal))
-            throw new InvalidOperationException("Missing compiled in-place span constructor");
-        var forged = Path.Combine(root, "Forged-constructor-local.lean");
-        File.WriteAllText(forged, source.Replace(operation,
-            ".initializeSpanLocal 1 (.array .signed32 true .counted)", StringComparison.Ordinal));
-        rejected.Add(forged, "PASS independent constructor destination rejection",
-            "Extraction.FeatureFlowValid", FeatureObligation(0));
-    }
+    // The constructor's home and model come from the raw call, so the extraction emits no form to forge.
+    if (name == "InPlaceArrayConstructor" && !source.Contains("theorem method0_decoded :", StringComparison.Ordinal))
+        throw new InvalidOperationException("In-place span constructor is not decoded from its raw call");
 }
 
 foreach (var (name, signature, width, arguments, bytes) in new[]

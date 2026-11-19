@@ -477,8 +477,6 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
   | some (.raise raised), .throw exception => raised == exception
-  | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
-    index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .call method prefixes => match instruction.operand with
     | .call site => prefixes.tail && site.returnType == raw.returnType &&
       featureOpMatches layouts raw instruction (.call method { prefixes with tail := false })
@@ -510,7 +508,7 @@ theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
   | result value =>
     cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
     exact eq_comm
-  | argument | tailCall | blocked | spanConstructor => exact fixed.elim
+  | argument | tailCall | blocked => exact fixed.elim
   | head | interior | raise =>
     cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
 
@@ -666,9 +664,9 @@ def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32
   certificate[0]? = some (some { stack := [], locals := [] }) ∧
   (let facts := LocalFacts.known raw.locals.length (FeatureLocalIndex.ofRaw raw).eligible
    all3Flow (fun lookup => checkFeatureSiteWith layouts constants linkAt raw facts profile lookup
-      (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? (FlowIndex.ofList raw.code).get?)
+      (FlowIndex.ofList (foldRoles raw.code)).get? (FlowIndex.ofList raw.code).get?)
     (.ofList certificate) 0
-    (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code) = true
+    (featureSites 0 none raw.code (foldRoles raw.code)) certificate code) = true
 
 instance (layouts : Array RawLayout) (constants : Nat → Option W32)
     (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
@@ -690,9 +688,9 @@ def FeatureListValid (layouts : Array RawLayout) (constants : Nat → Option W32
   all3 (checkFeatureSiteWith layouts constants linkAt raw
       (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
       (fun target => certificate[target]?)
-      (fun target => (foldRoles raw.locals raw.code)[target]?)
+      (fun target => (foldRoles raw.code)[target]?)
       (fun target => raw.code[target]?))
-    (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code = true
+    (featureSites 0 none raw.code (foldRoles raw.code)) certificate code = true
 
 /-- Streaming validation has exactly the same entry, mask, shape and successor checks
     as indexing the complete certificate and fold-role lists at every site. -/
@@ -706,17 +704,17 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
       certificate[0]? = some (some { stack := [], locals := [] }) ∧
       all3 (checkFeatureSiteWith layouts constants linkAt raw (knownLocals raw) profile
           (fun target => certificate[target]?)
-          (fun target => (foldRoles raw.locals raw.code)[target]?)
+          (fun target => (foldRoles raw.code)[target]?)
           (fun target => raw.code[target]?))
-        (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code = true := by
+        (featureSites 0 none raw.code (foldRoles raw.code)) certificate code = true := by
   unfold FeatureFlowValid
   have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
     funext index fact
     exact FeatureLocalIndex.eligible_eq raw index fact
   rw [eligible]
   rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
-  have roles : (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? =
-      (fun target => (foldRoles raw.locals raw.code)[target]?) := by
+  have roles : (FlowIndex.ofList (foldRoles raw.code)).get? =
+      (fun target => (foldRoles raw.code)[target]?) := by
     funext target
     exact FlowIndex.get?_ofList _ _
   have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) := by
@@ -735,7 +733,7 @@ theorem FeatureFlowValid.instruction_checked {layouts : Array RawLayout} {raw : 
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole}
     {state : FeatureState} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
-    (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
+    (roleAt : (foldRoles raw.code)[pc]? = some role)
     (stateAt : certificate[pc]? = some (some state)) (codeAt : code[pc]? = some emitted) :
     featureOpMatchesAt layouts raw role instruction emitted
       (rawBefore (raw.code[·]?) pc) = true := by
@@ -946,10 +944,10 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
   unfold FeatureListValid
   have sitesEqual (allKnown : AllKnown raw certificate) := all3_map
     (Option.map (FeatureState.expand raw.locals.length))
-    (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code
+    (featureSites 0 none raw.code (foldRoles raw.code)) certificate code
     fun site state emitted member =>
       checkFeatureSiteWith_known_eq_list layouts constants linkAt raw profile certificate
-        (fun target => (foldRoles raw.locals raw.code)[target]?)
+        (fun target => (foldRoles raw.code)[target]?)
         (fun target => raw.code[target]?) allKnown site state emitted member
   constructor
   · rintro ⟨length, codeLength, mask, entry, sites⟩
@@ -1144,7 +1142,7 @@ def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32)
     (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (code : List Instruction) (pc target : Nat) : Prop :=
   ∃ instruction role state emitted after successors,
-    (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (instruction, role) ∧
+    (raw.code.zip (foldRoles raw.code))[pc]? = some (instruction, role) ∧
     certificate[pc]? = some (some state) ∧ code[pc]? = some emitted ∧
     featureTransferAt layouts raw profile (calleeConstant constants (linkAt pc) emitted) role
       instruction state = some after ∧

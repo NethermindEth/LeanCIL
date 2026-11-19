@@ -17,13 +17,6 @@ inductive FieldAccess where
   | load | store | address
   deriving DecidableEq, Repr
 
-/-- How an instruction uses a struct's size. -/
-inductive SizeAccess where
-  | construct
-  | spanElement
-  | arrayElement
-  deriving DecidableEq, Repr
-
 /-- The native-width negative stride used to subtract an element offset. -/
 def subtractionStride (width : Nat) : Nat := (-(BitVec.ofNat 64 width)).toNat
 
@@ -40,7 +33,8 @@ def signedField (kind : FieldType) : Bool := kind == .signed8 || kind == .signed
 /-- Raw type/field identities at layout-dependent uses; no computed offsets or sizes. -/
 inductive LayoutUse where
   | field (pc type field : Nat) (access : FieldAccess)
-  | size (pc type : Nat) (access : SizeAccess)
+  /-- A `newobj` of the struct, whose link states the size it allocates. -/
+  | size (pc type : Nat)
   | local (slot type : Nat)
   | parameter (slot type : Nat)
   deriving DecidableEq, Repr
@@ -60,17 +54,6 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
     layout.aggregate && offset == layout.offset && width == layout.width
   | _, _ => false
 
-/-- The emitted size-dependent operation uses exactly the computed struct size. -/
-private def checkSize (size : Nat) : SizeAccess → Instruction → Bool
-  | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
-  | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
-  | .spanElement, .initializeSpanLocal _ (.empty width _)
-  | .spanElement, .memory (.spanFromReference width _)
-  | .spanElement, .memory (.spanSingleReference width _)
-  | .spanElement, .initializeSpanLocal _ (.reference width _)
-  | .spanElement, .initializeSpanLocal _ (.singleReference width _) => width == size
-  | _, _ => false
-
 /-- Bind independently computed layout data to actual instructions and frame slots. -/
 def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
     (method : Method) : LayoutUse → Bool
@@ -81,17 +64,14 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
       let computed ← layout.layout.fields[index]?
       let operation ← method.code[pc]?
       return checkField computed (signedField field.type) access operation).getD false
-  | .size pc type access => (do
-      let metadata ← raw[type]?
-      if access = SizeAccess.arrayElement ∧ metadata.byRefLike = true then none else pure ()
+  | .size pc type => (do
+      let _ ← raw[type]?
       let layout ← layouts[type]?
       let operation ← method.code[pc]?
       -- A construction allocates the size its link states; its operand states none.
-      if access = SizeAccess.construct then
-        return operation.constructs && match method.linkAt pc with
-          | some (.aggregate _ width) => width.val == layout.layout.size
-          | _ => false
-      return checkSize layout.layout.size access operation).getD false
+      return operation.constructs && match method.linkAt pc with
+        | some (.aggregate _ width) => width.val == layout.layout.size
+        | _ => false).getD false
   | .local slot type => (do
       let layout ← layouts[type]?
       match ← method.localKinds[slot]? with

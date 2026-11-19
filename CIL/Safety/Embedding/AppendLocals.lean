@@ -289,12 +289,52 @@ theorem initializeSpanHome_appendLocals (pc : Nat) (frame : Frame) (extra : List
       | _ => simp only [Frame.appendLocals_getElem? found]; rfl
   · exact Or.inl rfl
 
+/-- A span constructor run in place writes the same slot in the padded frame, unless the original
+    frame has no such slot. -/
+theorem spanInPlaceCall_appendLocals (constructor : CIL.SpanConstructor) (pc : Nat)
+    (frame : Frame) (extra : List LocalSlot) (stack : List Value) (memory : Memory) :
+    PaddedAgrees extra (spanInPlaceCall constructor pc (frame.appendLocals extra) stack memory)
+      (spanInPlaceCall constructor pc frame stack memory) := by
+  unfold spanInPlaceCall
+  apply PaddedAgrees.bind_same
+  intro constructed
+  obtain ⟨afterMemory, values⟩ := constructed
+  dsimp only
+  rcases values with _ | ⟨value, _ | ⟨home, rest⟩⟩
+  · exact Or.inl rfl
+  · exact Or.inl rfl
+  cases home
+  case spanHome index =>
+    dsimp only
+    cases found : frame.locals[index]? with
+    | none =>
+      right
+      simp only [StepKept]
+      intro ⟨_, thrown⟩
+      cases thrown
+    | some slot =>
+      left
+      have bound := (List.getElem?_eq_some_iff.mp found).1
+      cases slot with
+      | span width writable view =>
+        simp only [Frame.appendLocals_getElem? found]
+        cases stored : storeLocal afterMemory (.span width writable view) value with
+        | error fault =>
+          simp only [Bind.bind, Except.bind, Functor.map, Except.map]
+        | ok result =>
+          simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Functor.map,
+            Except.map, FrameAction.appendLocals, Frame.appendLocals,
+            List.set_append_left _ _ bound]
+      | _ => simp only [Frame.appendLocals_getElem? found]; rfl
+  all_goals exact Or.inl rfl
+
 #print axioms spanView_appendLocals
 #print axioms callArgument_appendLocals
 #print axioms ReadAgrees.mapM
 #print axioms callArguments_appendLocals
 #print axioms viewOperands_appendLocals
 #print axioms initializeSpanHome_appendLocals
+#print axioms spanInPlaceCall_appendLocals
 
 set_option hygiene false in
 /-- Closes a padded step whose reads may see padded slots: each home read agrees or fails without
@@ -308,6 +348,7 @@ local macro "padded_natural" : tactic => `(tactic| (
      simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]
      done)
   | exact initializeSpanHome_appendLocals _ _ _ _ _
+  | exact spanInPlaceCall_appendLocals _ _ _ _ _ _
   | (apply PaddedAgrees.bind (callArguments_appendLocals _ _ _ _); intro)
   | (apply PaddedAgrees.bind (viewOperands_appendLocals _ _ _ _ _); intro)
   | (apply PaddedAgrees.bind_same; intro)
@@ -735,23 +776,6 @@ theorem step_appendLocals_stloc (index : Nat) : StepAppendLocals (.stloc index) 
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
 #print axioms step_appendLocals_stloc
-
-/-- Span construction updates only its existing typed local slot. -/
-theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.SpanConstructor) :
-    StepAppendLocals (.initializeSpanLocal index constructor) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    simp only [step, found, Frame.appendLocals_getElem? found, Frame.appendLocals_set found]
-    frame_natural
-  | none =>
-    revert kept
-    simp only [step, found]
-    repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
-
-#print axioms step_appendLocals_initializeSpanLocal
 
 /-- `ldc_i4` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldc_i4 (value : W32) :
@@ -1715,8 +1739,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ldarga index
     case ldloc index =>
       exact step_appendLocals_ldloc index
-    case initializeSpanLocal index constructor =>
-      exact step_appendLocals_initializeSpanLocal index constructor
     case ldloca index =>
       exact step_appendLocals_ldloca index
     case stloc index =>

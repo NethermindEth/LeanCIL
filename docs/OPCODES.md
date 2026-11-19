@@ -408,10 +408,12 @@ references.
 
 `Span<T>.Empty` and `ReadOnlySpan<T>.Empty` return a null, zero-length view with the element
 width and readonly capability of the span type. Explicit `default` initialization or
-reassignment of a span local accepts the exact `ldloca; initobj` pair, including resetting a
-nonempty local. The initialized type must match the local, and branches must enter at the
-address load. The raw decoder uses the local's checked element width for the reset. An
-unresolved aggregate layout leaves a hole at `initobj`.
+reassignment of a span local or homed span parameter decodes `ldloca; initobj` or
+`ldarga; initobj` to `initobj` through the home, including resetting a nonempty local. The
+initialized type must match the local or parameter, `initobj` must directly follow the address,
+and no branch may target it. The reset stores the empty view of the slot's checked element width.
+A span local whose aggregate element layout is unresolved has no checked width, so its method
+does not decode.
 
 Span `IsEmpty` and `GetPinnableReference` do not read the view's bytes. An empty span's
 pinnable reference is null, and readonly views return readonly references.
@@ -435,9 +437,11 @@ model accepts a whole array, a start index, or a
 start and length. A null array produces an empty span only for a zero range; an invalid range
 raises `ArgumentOutOfRangeException`. Non-array `AsSpan` overloads are unsupported.
 
-In-place construction of a span local accepts `ldloca`, up to three simple argument loads or
-integer constants, and its exact constructor call. The address cannot escape or be duplicated,
-and control flow cannot enter the sequence after its first instruction. The local may be
+In-place construction of a span local or homed span parameter is a call on its home: `ldloca` or
+`ldarga` of a local or parameter of the constructed type, one local or argument load, `ldnull`
+or int32 constant per constructor parameter (at most three), and the exact constructor call,
+with no branch to an argument or the call. The call's runtime model builds the view as the
+overload's `newobj` model does and stores it in the slot the home names. The local may be
 reused or reinitialized; construction faults remain at the call instruction.
 
 `Array.Fill<T>(T[], T)` and its `(T[], T, int startIndex, int count)` overload support primitive

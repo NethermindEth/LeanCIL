@@ -88,7 +88,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
       | (simp only [Option.map_some, Option.getD_some, CIL.Link.callees]
          exact virtualTarget_mem ‹_›)
     | contradiction
-    | solve | (obtain ⟨_, _, rfl⟩ := modelStep_next h; cases enters)
+    | solve | (obtain ⟨_, _, _, rfl, _⟩ := modelStep_frame h; cases enters)
     | (obtain ⟨_, _, h⟩ := except_bind_ok h)
     | split at h
 #print axioms step_callee
@@ -131,7 +131,8 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
 
 /-- A `call` only ever enters the method its link names, never as a construction: under a `tail.`
     prefix it retires the frame, and otherwise it calls and continues. A call whose pc states no
-    link runs its runtime model, which continues at the next pc in the same frame. -/
+    link runs its runtime model, which continues at the next pc; only a span constructor run in
+    place changes the frame. -/
 theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
     {prefixes : CIL.CallPrefixes} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
@@ -140,15 +141,16 @@ theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
       if prefixes.tail then ∃ arguments updated, action = .tailCall callee arguments updated
       else ∃ arguments rest m', action = .call callee arguments rest m') ∨
     (body.linkAt pc = none ∧ prefixes.tail = false ∧
-      ∃ values final, action = .next (pc + 1) values frame final) := by
+      ∃ values final changed, action = .next (pc + 1) values changed final) := by
   unfold step observedCall at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
   all_goals first
     | (cases h; exact .inl ⟨_, by assumption, by simp_all⟩)
-    | (obtain ⟨_, _, rfl⟩ := modelStep_next (model := Extraction.runtimeModel body.environment
-          .call method) (body := body) (pc := pc) (frame := frame) (stack := stack) (memory := m) h
-       exact .inr ⟨by assumption, by simp_all, _, _, rfl⟩)
+    | (obtain ⟨_, _, _, rfl, _⟩ := modelStep_frame (model := Extraction.runtimeModel
+          body.environment .call method) (body := body) (pc := pc) (frame := frame)
+          (stack := stack) (memory := m) h
+       exact .inr ⟨by assumption, by simp_all, _, _, _, rfl⟩)
 #print axioms step_call_action
 
 /-- A construction under an `.aggregate` link enters the constructor the link names with a

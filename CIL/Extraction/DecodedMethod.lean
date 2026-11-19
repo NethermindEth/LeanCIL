@@ -228,7 +228,7 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc
         (methodInstruction profile environment.callLayouts (firstEntryIndex closed.rvaSites)
           (Std.TreeSet.ofList (links.map Prod.fst))
-          (foldRoles closed.locals closed.code).toArray reachable.toArray) := by
+          (foldRoles closed.code).toArray reachable.toArray) := by
   unfold Method.ofRaw? at decoded
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
   obtain ⟨closed, instantiated, storage, _, built⟩ := decoded

@@ -94,29 +94,30 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse42", "arm
 queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
 {
+    // A reset and an in-place constructor take their width from the home's slot, whose kind the closed
+    // method's declared locals fix.
     const string name = "DefaultReset";
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_features_validated");
-    var body = metadata.GetType("Examples.SpanConstructors").Methods.Single(method => method.Name == name).Body;
-    var pc = body.Instructions.IndexOf(body.Instructions.Single(instruction =>
-        instruction.OpCode.Code == Code.Initobj));
-    const string inputs = "method0Reachable method0.code";
-    var changed = source.Replace(inputs,
-        $"method0Reachable (method0.code.set {pc} (.initializeSpanLocal 0 (.empty 8 true)))", StringComparison.Ordinal);
-    if (changed == source) throw new InvalidOperationException("Missing feature validation inputs");
+        "method0_specialization_validated");
+    const string kinds = "locals := [.span 4 true, .span 4 true]";
+    var changed = source.Replace(kinds, "locals := [.span 8 true, .span 4 true]", StringComparison.Ordinal);
+    if (changed == source) throw new InvalidOperationException("Missing span local kinds");
     var path = Path.Combine(root, "DefaultResetRejected.lean");
     File.WriteAllText(path, changed);
-    rejected.Add(path, "PASS folded reset width rejection", "FeatureFlowValid", "is false");
+    rejected.Add(path, "PASS span home width rejection",
+        "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments");
 }
 {
+    // The checked layouts give an in-place constructor its width, so the site admits only the modelled call.
     const string name = "LayoutLocal-x64-sse42";
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_layouts_validated");
-    var changed = source.Replace(".reference 64 true", ".reference 48 true", StringComparison.Ordinal);
-    if (changed == source) throw new InvalidOperationException("Missing folded pointer constructor");
+    var body = metadata.GetType("Examples.SpanConstructors").Methods.Single(method => method.Name == "LayoutLocal")
+        .Body;
+    var pc = body.Instructions.IndexOf(body.Instructions.Single(instruction =>
+        instruction.OpCode.Code == Code.Call && instruction.Operand is MethodReference { Name: ".ctor" }));
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
     var path = Path.Combine(root, "LayoutLocalRejected.lean");
-    File.WriteAllText(path, changed);
-    rejected.Add(path, "PASS folded constructor layout rejection", "MethodLayoutsValid", "is false");
+    File.WriteAllText(path, ForgeModelEmission(source, pc, ".memory (.spanFromReference 48 true)"));
+    rejected.Add(path, "PASS forged in-place constructor refused", "RuntimeModelsAgree", "is false");
 }
 foreach (var (name, pc, operation) in new[]
 {
@@ -142,14 +143,19 @@ foreach (var (name, width, writable) in new[]
     rejected.Add(path, $"PASS forged empty span refused: {name}", "RuntimeModelsAgree", "is false");
 }
 {
+    // A reset takes its width from its home and its operand from the decoded body, so a forged element identity
+    // names no operand the body decodes.
     const string name = "ReadOnlyDefaultReset";
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_coverage_validated");
-    var changed = Regex.Replace(source, @"\.aggregate ""[^""]+"" 0", ".aggregate \"Wrong.Identity\" 0");
+        "method0_scalars_validated");
+    var operand = source.Split('\n').Single(line => line.StartsWith("def valueType0 :", StringComparison.Ordinal));
+    var changed = source.Replace(operand,
+        AggregateIdentity.Replace(operand, ".aggregate \"Wrong.Identity\" 0"), StringComparison.Ordinal);
     if (changed == source) throw new InvalidOperationException("Missing aggregate identity: " + name);
     var path = Path.Combine(root, name + "IdentityRejected.lean");
     File.WriteAllText(path, changed);
-    rejected.Add(path, "PASS empty span identity rejection: " + name, "LayoutUsesComplete", "is false");
+    rejected.Add(path, "PASS empty span identity rejection: " + name,
+        "cil_decoded_method: the decoded method has no type operand");
 }
 rejected.Check();
 
@@ -175,19 +181,28 @@ foreach (var mutation in new[] { "reset-scope", "reset-unscoped", "reset-interio
     }
     else
     {
-        var branch = method.Body.Instructions.Single(instruction => instruction.Operand == reset.Previous);
-        branch.Operand = reset;
+        // The branch carries the same home the fall-through path pushes, so only the reset's target check refuses it.
+        var processor = method.Body.GetILProcessor();
+        var address = processor.Create(OpCodes.Ldloca_S, (VariableDefinition)reset.Previous.Operand);
+        processor.InsertBefore(method.Body.Instructions[0], address);
+        processor.InsertAfter(address, processor.Create(OpCodes.Br, reset));
     }
     var path = Path.Combine(root, mutation + ".dll");
     altered.Write(path);
     var result = Execute(Extract("extract", path, null, method.FullName, Path.Combine(root, mutation)));
     var expected = mutation switch
     {
-        "reset-interior" => "Branch into a folded span constructor",
-        "reset-unscoped" => "Type reference has no scope",
-        _ => "Span default type does not match its local"
+        "reset-interior" => "Unsupported span reset",
+        "reset-unscoped" => "Unresolved aggregate",
+        _ => "Unsupported type identity"
     };
     if (result.Code == 0 || !result.Output.Contains(expected, StringComparison.Ordinal))
         throw new InvalidOperationException("Wrong empty span rejection: " + result.Output);
     Console.WriteLine("PASS empty span extraction rejection: " + mutation);
+}
+
+partial class Program
+{
+    [GeneratedRegex(@"\.aggregate ""[^""]+"" 0")]
+    private static partial Regex AggregateIdentity { get; }
 }

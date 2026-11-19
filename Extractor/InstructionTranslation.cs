@@ -87,9 +87,7 @@ internal static class InstructionTranslation
                 Constrained: true);
         }
         if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
-        var spans = Spans.Analyze(m, profile);
-        if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
-        if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return StackOperation.Nop;
+        if (throws.Operands.Contains(i)) return StackOperation.Nop;
         Operation JumpTo(JumpKind kind) => new Jump(kind, instructions.Position((Instruction)i.Operand));
         int LocalIndex() => ((VariableDefinition)i.Operand).Index;
         Operation LoadLocal(int index) => new Local(index);
@@ -134,9 +132,10 @@ internal static class InstructionTranslation
             RuntimeModels.ValidateTypeIdentity(operand, m.Module, profile.Architecture);
             if (Spans.Is(operand))
             {
-                if (i.OpCode.Code != Code.Ldobj)
+                if (i.OpCode.Code == Code.Initobj) SpanReferences.ValidateReset(i, instructions);
+                else if (i.OpCode.Code != Code.Ldobj)
                     throw new InvalidDataException($"Unsupported store to a span home: {i}");
-                SpanReferences.ValidateCopy(m, i, instructions);
+                else SpanReferences.ValidateCopy(m, i, instructions);
             }
             else if (i.OpCode.Code == Code.Sizeof)
             {

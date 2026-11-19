@@ -1,6 +1,6 @@
 import CIL.Extraction.LayoutCoverage
 
-/-! Layout coverage for struct fields, folded span resets, locals and parameters. -/
+/-! Layout coverage for struct fields, span resets, locals and parameters. -/
 
 namespace Tests.LayoutCoverage
 open CIL CIL.Extraction
@@ -26,7 +26,7 @@ private def body : RawMethod := {
 private def arguments : RawArguments :=
   ⟨[.field (.aggregate 0)], [.field (.aggregate 0)], [.other, .other, .address 0]⟩
 private def uses : List LayoutUse :=
-  [.size 1 0 .spanElement, .local 0 0, .parameter 0 0]
+  [.local 0 0, .parameter 0 0]
 
 example : LayoutUsesComplete layouts body arguments [true, true, true] uses := by decide
 -- Omitting any instruction, local or parameter site cannot evade validation.
@@ -57,6 +57,6 @@ example : instructionLayoutUses layouts 0
         returnType := .void, parameters := [] },
       target := .managed 1, name := ".ctor", typeArguments := [],
       parameterCount := 0, returnsValue := false }⟩ =
-      some [.size 0 0 .construct] := by decide
+      some [.size 0 0] := by decide
 
 end Tests.LayoutCoverage
