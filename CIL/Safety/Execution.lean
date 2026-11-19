@@ -847,6 +847,13 @@ def invoke (program : CIL.Program) (fuel method : Nat) (args : List Value) (m : 
     Except LocatedFault (Memory × List Value) :=
   invokeWith (program[·]?) fuel method args m
 
+/-- A checked execution with a decidable result can be compared by its fault or return value. -/
+instance {α : Type} [DecidableEq α] : DecidableEq (Except LocatedFault α)
+  | .ok left, .ok right => decidable_of_iff (left = right) ⟨congrArg _, Except.ok.inj⟩
+  | .error left, .error right =>
+    decidable_of_iff (left = right) ⟨congrArg _, Except.error.inj⟩
+  | .ok _, .error _ | .error _, .ok _ => isFalse (by intro equal; cases equal)
+
 /-- Out of fuel, `run` stops at the method and pc it would execute. -/
 theorem run_zero (program : CIL.Program) (method pc : Nat) (args : List Value) (frame : Frame)
     (stack : List Value) (memory : Memory) :

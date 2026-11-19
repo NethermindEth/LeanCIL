@@ -31,10 +31,10 @@ private def leaf (scope name : List Char) : Option (List Char × List Char) :=
   if plainScope scope && plainName name then some (scope, name) else none
 
 /-- Decode ASCII without repeated indexed UTF-8 reads during kernel reduction. -/
-def asciiChars : List UInt8 → Option (List Char)
-  | [] => some []
-  | byte :: bytes =>
-    if byte.toNat < 128 then (Char.ofNat byte.toNat :: ·) <$> asciiChars bytes else none
+def asciiChars (bytes : List UInt8) : Option (List Char) :=
+  if bytes.all (fun byte => byte.toNat < 128) then
+    some (bytes.map fun byte => Char.ofNat byte.toNat)
+  else none
 
 /-- An ASCII byte is the complete UTF-8 encoding of its character. -/
 private theorem asciiByte (byte : UInt8) (small : byte.toNat < 128) :
@@ -49,19 +49,17 @@ private theorem asciiByte (byte : UInt8) (small : byte.toNat < 128) :
 private theorem asciiChars_encode (bytes : List UInt8) (chars : List Char)
     (decoded : asciiChars bytes = some chars) :
     chars.utf8Encode.data.toList = bytes := by
-  induction bytes generalizing chars with
-  | nil => simp [asciiChars] at decoded; subst chars; rfl
-  | cons byte bytes ih =>
-    simp only [asciiChars] at decoded
-    split at decoded
-    next small =>
-      cases tail : asciiChars bytes with
-      | none => simp [tail] at decoded
-      | some rest =>
-        simp [tail] at decoded
-        subst chars
-        simpa [List.utf8Encode, List.flatMap_cons, asciiByte byte small] using ih rest tail
-    next large => simp at decoded
+  unfold asciiChars at decoded
+  split at decoded
+  next small =>
+    cases decoded
+    simp only [List.all_eq_true, decide_eq_true_eq] at small
+    induction bytes with
+    | nil => rfl
+    | cons byte bytes ih =>
+      simp only [List.mem_cons, forall_eq_or_imp] at small
+      simpa [List.utf8Encode, List.flatMap_cons, asciiByte byte small.1] using ih small.2
+  next => cases decoded
 
 #print axioms asciiChars_encode
 

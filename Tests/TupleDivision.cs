@@ -112,11 +112,7 @@ foreach (var (name, result) in methods)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
-        string.Join("", claims.Select((claim, index) =>
-            $"theorem case{index} : {claim} := by cil_kernel_rfl\n#print axioms case{index}\n")) +
-        "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
-        Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) + "\nend ExampleProof\n");
+    File.WriteAllText(proof, BoundaryProof(claims));
     requests.Add(new GeneratedVerification(Selector(name), proof, output));
     cases += claims.Count;
 }
@@ -248,14 +244,21 @@ var operands = new Dictionary<Type, object[]>
     [typeof(nint)] = new object[] { nint.MinValue, (nint)(-7), (nint)(-1), (nint)0, (nint)1, (nint)3, nint.MaxValue },
     [typeof(nuint)] = new object[] { (nuint)0, (nuint)1, (nuint)3, (nuint)(1UL << 63), nuint.MaxValue }
 };
-string BoundaryProof(IReadOnlyList<string> claims) =>
-    "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
-    "def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
-    // The kernel compares each closed run: the elaborator exceeds its recursion limit reducing the model table.
-    string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by cil_kernel_rfl\n")) +
-    "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
-    Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) +
-    "\nend ExampleProof\n";
+string BoundaryProof(IReadOnlyList<string> claims) => $$"""
+    import Extracted
+    import Tests.Support
+    namespace ExampleProof
+    def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => .mk 93 false }
+    {{string.Join("\n", claims.Select((claim, index) => $"""
+        theorem case{index} : {claim} := by rfl
+        #print axioms case{index}
+        """))}}
+    theorem correctness :
+    {{Balanced(claims, false)}} :=
+    {{Balanced(Enumerable.Range(0, claims.Count).Select(index => $"case{index}").ToArray(), true)}}
+    #print axioms correctness
+    end ExampleProof
+    """;
 var mathRequests = new List<GeneratedVerification>();
 var mathCases = 0;
 var faultKinds = new SortedSet<string>(StringComparer.Ordinal);

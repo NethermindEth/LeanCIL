@@ -35,10 +35,18 @@ void Prove(string dll, string selector, string name, List<string> claims)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nset_option maxRecDepth 8192\nnamespace ExampleProof\n" + memory +
-        "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  exact " +
-        (claims.Count == 1 ? "rfl" : "⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩") +
-        "\n#print axioms correctness\nend ExampleProof\n");
+    var proofs = string.Join(", ", claims.Select(_ => "rfl"));
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import Tests.Support
+        namespace ExampleProof
+        {{memory}}
+        theorem correctness :
+        {{string.Join(" \u2227\n", claims)}} := by
+          exact {{(claims.Count == 1 ? "rfl" : $"\u27e8{proofs}\u27e9")}}
+        #print axioms correctness
+        end ExampleProof
+        """);
     queue.Add(new(selector, proof, output, Assembly: dll), () =>
     {
         cases += claims.Count;

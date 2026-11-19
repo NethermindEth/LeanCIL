@@ -15,8 +15,8 @@ extractor writes supplies any part of the method. A field whose type is that of 
 passed to the decoder, such as an extraction's `profile`, `environment` and link table, is written
 as that constant. `cil_decoded_method name [operand, ...] := decoder` writes matching field
 and type operands as their listed `FieldRef` and `TypeExpr` constants. Stepping can then use
-their `cil_field_shape` and `cil_value_shape` facts. A decoded constrained call keeps
-the identity expressions from its raw layouts, and a closed decoder keeps the raw type expressions
+their `cil_field_shape` and `cil_value_shape` facts. Decoded operands share their raw layouts'
+identity expressions, and a closed decoder keeps the raw type expressions
 in the declared signature. The kernel checks `name_decoder_eq` and every fact.
 -/
 
@@ -175,16 +175,12 @@ opaque operandLiteral (operand : Expr) : MetaM Expr
 private initialize layoutIdentityCache : EnvExtension (NameMap (Std.HashMap Expr Expr)) ←
   registerEnvExtension (pure {}) (asyncMode := .local)
 
-/-- Raw identity expressions for methods with a constrained call or an unreachable site.
-    The kernel compares aggregate types by the same terms as the raw metadata. -/
+/-- Decoded aggregate names share the raw layout's spelling during model and operand checks. -/
 private def decodedLayoutIdentities (decoder : Expr) (method : Method) :
     MetaM (Std.HashMap Expr Expr) := do
   let_expr CIL.Method.ofClosed? _ environment _ _ _ _ := decoder | return {}
   let .const name _ := environment | return {}
-  unless method.code.any (fun
-      | .unadmitted _ => true
-      | .call _ prefixes => prefixes.constrained.isSome
-      | _ => false) do return {}
+  if method.environment.rawLayouts.isEmpty then return {}
   if let some identities := (layoutIdentityCache.getState (← getEnv)).find? name then
     return identities
   let mut entries := mkApp (mkConst ``LayoutEnvironment.rawLayouts) environment

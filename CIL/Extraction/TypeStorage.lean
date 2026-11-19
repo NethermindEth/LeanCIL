@@ -127,12 +127,39 @@ def callableLayoutsAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Bool
 def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool :=
   callableLayoutsAt (layouts[·]?)
 
+/-- Four-byte groups bound the nesting of equality decisions on long metadata identities. -/
+private def equalBytes : List UInt8 → List UInt8 → Bool
+  | a :: b :: c :: d :: left, w :: x :: y :: z :: right =>
+    bif decide (a = w) && decide (b = x) && decide (c = y) && decide (d = z)
+    then equalBytes left right else false
+  | left, right => @decide (left = right) (@List.hasDecEq UInt8 UInt8.decEq left right)
+
+/-- The grouped comparison accepts exactly equal byte sequences. -/
+private theorem equalBytes_iff (left right : List UInt8) :
+    equalBytes left right = true ↔ left = right := by
+  fun_induction equalBytes <;> simp_all [List.cons.injEq, and_assoc]
+
+#print axioms equalBytes_iff
+
+/-- Two metadata identities are equal exactly when their UTF-8 bytes agree. -/
+private def identityEq (left right : String) : Decidable (left = right) :=
+  decidable_of_iff (equalBytes left.toByteArray.data.toList right.toByteArray.data.toList = true)
+    (by rw [equalBytes_iff, Array.toList_inj, ← ByteArray.ext_iff, String.toByteArray_inj])
+
+/-- Compiled storage checks use the native string comparison. -/
+@[csimp] private theorem identityEq_eq : identityEq = String.decEq := by
+  funext left right
+  apply Subsingleton.elim
+
+#print axioms identityEq_eq
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
   | .object _ _ => some .object
   | .aggregate identity index => do
     let metadata ← layoutAt index
+    letI := identityEq metadata.identity identity
     if metadata.identity = identity then return .field (.aggregate index) else none
   | .enum _ underlying => StorageType.field <$> enumUnderlyingField underlying
   | .byref _ => some .reference

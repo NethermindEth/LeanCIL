@@ -654,6 +654,38 @@ example : step { body with code := [.call CIL.Extraction.objectConstructorMethod
       step body .pop 0 [] frame [receiver] heapMemory := by
   cil_kernel_rfl
 
+/-- The method loads its arguments, executes one unlinked runtime call and returns. -/
+private def invokeCall (method : CIL.Extraction.MethodRef) (args : List Value)
+    (returnsValue : Bool) : Except LocatedFault (List Value) :=
+  let loads := (List.range args.length).map CIL.Instruction.ldarg
+  let wrapper := { body with code := loads ++ [.call method {}, .ret], returnsValue }
+  (invoke [wrapper] 8 0 args Tests.caller).map Prod.snd
+
+example : invokeCall CIL.Extraction.objectConstructorMethod [.object .null] false =
+    .ok [] := by rfl
+
+example : invokeCall Table.mathMin [.scalar (.i32 3), .scalar (.i32 1)] true =
+    .ok [.scalar (.i32 1)] := by rfl
+
+example : invokeCall (Table.spanLength Table.word) [.span (.address ⟨0, 0⟩) 1] true =
+    .ok [.scalar (.i32 1)] := by rfl
+
+example : invokeCall Table.divRem [.scalar (.i64 7), .scalar (.i64 3), Tests.reference] true =
+    .ok [.scalar (.i64 2)] := by rfl
+
+example : invokeCall Table.divRem [.scalar (.i64 7), .scalar (.i64 0), Tests.reference] true =
+    .error ⟨0, 3, .arithmetic .divideByZero⟩ := by decide
+
+/-- The null guard accepts an object and its parameter name. -/
+private def nullGuard : CIL.Extraction.MethodRef :=
+  { owner := Table.runtimeType "System.ArgumentNullException", name := name!"ThrowIfNull",
+    hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [Table.runtimeType "System.Object", .object CIL.Extraction.runtimeScope
+      "System.String"] }
+
+example : invokeCall nullGuard [.object .null, .object .null] false =
+    .error ⟨0, 2, .thrown .argumentNull⟩ := by rfl
+
 -- Each helper call steps as the scalar intrinsic it was lowered to, faults included.
 /-- A body whose only instruction is a call of `method`, with no link. -/
 private def calling (method : CIL.Extraction.MethodRef) : CIL.Method :=
