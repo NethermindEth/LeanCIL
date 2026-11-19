@@ -715,10 +715,11 @@ error instead, so a proof can require that every field step reads a fact. `cil_c
 before they read supplied facts, so the facts a proof supplies for a struct field access are
 those of that lowered step.
 
-For a closed generic struct at layout index `k`, `Extracted.layoutIdentity{k}` stores the
-checked UTF-8 bytes of its fully scoped name. The layout row and the field and value operands
-that name this struct share that definition. A closed execution proof can compare the layout
-names by reduction without encoding their type arguments' assembly names at each access.
+For a closed generic struct, including a runtime value tuple, `Extracted.layoutIdentity{k}`
+stores the checked UTF-8 bytes of its fully scoped name at layout index `k`. The layout row
+and the field and value operands that name this struct share that definition. A closed execution
+proof can compare the layout names by reduction without encoding their type arguments' assembly
+names at each access.
 
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared tag. For an enum,

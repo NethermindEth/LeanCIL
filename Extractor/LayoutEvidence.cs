@@ -136,7 +136,7 @@ internal sealed class LayoutEvidence
         var rowIdentities = (string[])identityTerms.Clone();
         for (var index = 0; index < rawTypes.Length; index++)
         {
-            if (!GenericStructs.Is(rawTypes[index])) continue;
+            if (rawTypes[index] is not GenericInstanceType) continue;
             var identity = Identity(rawTypes[index]);
             var name = $"layoutIdentity{index}";
             var bytes = MetadataSlices.Bytes(IdentityText.Utf8(identity));
