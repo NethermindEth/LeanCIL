@@ -238,7 +238,7 @@ internal static partial class TemplateEmitter
     static string EmitTemplates(Template[] templates, string space, bool omitEquations)
     {
         var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Rows[0].Ops.Length));
-        var lean = new StringBuilder("import CIL.InstructionEquations\n\n" +
+        var lean = new StringBuilder("import CIL.InstructionEquations\nimport CIL.Extraction.SpanCalls\n\n" +
             "/-! Shared bodies for the selected extraction profiles; bindings establish their CIL identity. -/\n\n" +
             $"namespace {space}\nopen CIL\n\nset_option maxRecDepth {depth}\n\n");
         void Line(string text = "") => lean.Append(text).Append('\n');

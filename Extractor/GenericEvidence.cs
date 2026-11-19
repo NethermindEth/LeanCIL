@@ -32,12 +32,20 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
     static string List(IEnumerable<string> entries) => "[" + string.Join(", ", entries) + "]";
 
-    /// <summary>The Lean term of a type's assembly scope; the runtime scope is the named string the decoder
+    /// <summary>The Lean term of a type's assembly scope; a platform scope is the named string the decoder
     /// writes, so a literal method and a decoded method spell the same scope with the same term.</summary>
     internal static string Scope(TypeReference type) => Scope(LayoutEvidence.Scope(type));
 
+    /// <summary>The platform assembly scopes the Lean library names, with the term of each.</summary>
+    static readonly (string Assembly, string Term)[] NamedScopes =
+    [
+        (TypeTests.RuntimeScope, "Extraction.runtimeScope"),
+        (PlatformAssemblies.SystemRuntimeIntrinsics.ToDisplay(), "Extraction.intrinsicsScope"),
+        (PlatformAssemblies.SystemMemory.ToDisplay(), "Extraction.spanMemoryScope"),
+    ];
+
     static string Scope(string assembly) =>
-        assembly == TypeTests.RuntimeScope ? "Extraction.runtimeScope" : Quote(assembly);
+        NamedScopes.FirstOrDefault(scope => scope.Assembly == assembly).Term ?? Quote(assembly);
 
     internal string Type(TypeReference type) => Type(type, false);
 
