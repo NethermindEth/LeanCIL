@@ -77,7 +77,7 @@ private def unsafeFamily (raw : RawInstruction) (name : String) : Option Lowered
   match name with
   | "Read" | "ReadUnaligned" | "Write" | "WriteUnaligned" => some .unsafeTransfer
   | "InitBlock" | "InitBlockUnaligned" | "CopyBlock" | "CopyBlockUnaligned" => some .unsafeBlock
-  | "ByteOffset" | "AddByteOffset" | "SubtractByteOffset" | "AsRef" => some .unsafeReference
+  | "AddByteOffset" | "SubtractByteOffset" | "AsRef" => some .unsafeReference
   | "Add" | "Subtract" => some .unsafeOffset
   | _ => LoweredFamily.unsafeHelper <$> unsafeHelperFamily raw
 
