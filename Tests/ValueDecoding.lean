@@ -408,6 +408,19 @@ theorem malformed_field_prefix_refused :
   decide +kernel
 #print axioms malformed_field_prefix_refused
 
+/-- A typed indirect load or store binds both its type token and its preceding alignment. -/
+theorem indirect_object_binding :
+    let other := TypeExpr.atom runtimeScope "System.UInt64"
+    let unaligned := fun (n : Int) => some (RawInstruction.mk 0 0xfe12 (.integer n))
+    [(0x71, Instruction.ldobj), (0x81, Instruction.stobj)].all fun (opcode, operation) =>
+      let raw := RawInstruction.mk 3 opcode (.type int32)
+      indirectAccessMatches none raw (operation int32) &&
+        [1, 2, 4].all (fun n => indirectAccessMatches (unaligned n) raw (operation int32)) &&
+        !indirectAccessMatches none raw (operation other) &&
+        !indirectAccessMatches none ⟨3, 0, .none⟩ (operation int32) &&
+        !indirectAccessMatches (unaligned 8) raw (operation int32) := by decide +kernel
+#print axioms indirect_object_binding
+
 /-- A forged operand on a block copy cannot emit the aligned copy at its taker. -/
 theorem malformed_block_operand_refused :
     !indirectAccessMatches (some ⟨0, 0xFE12, .integer 1⟩)

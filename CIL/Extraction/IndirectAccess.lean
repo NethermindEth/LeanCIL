@@ -56,8 +56,9 @@ def indirectOpcode (opcode : Nat) : Bool :=
     `UnsafeCallsValid` binds and which may emit a typed transfer. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (emitted : Instruction) (skipEncoding := false) : Bool :=
-  if instruction.opcode == 0x71 then emitted matches .ldobj _
-  else if instruction.opcode == 0x81 then emitted matches .stobj _
+  if instruction.opcode == 0x71 || instruction.opcode == 0x81 ||
+      (emitted matches .ldobj _ | .stobj _) then
+    skipEncoding || valueEncodingMatches previous instruction emitted
   else if !indirectOpcode instruction.opcode then
     if instruction.opcode == 40 then
       !(emitted matches .ldind _ | .stind _ | .memory (.copyBlock _) | .memory (.initBlock _))
