@@ -62,9 +62,9 @@ each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `s
 `ldelem.ref` and `stelem.ref`, a handler table's `ldlen`, `ldelem.i` and `ldelem` included. A typed
 access or element address takes its element's width from the element shape of the method's checked
 layouts. An `ldelema` decodes read-only exactly when `readonly.` precedes it, and `readonly.`
-decodes to `nop`; no instruction but `ldelema` decodes after `readonly.`, and the scalar check
-requires the raw instruction after each reachable `readonly.` to be `ldelema`, which also holds a
-translated instruction to the rule (`readOnlyPrefixMatches`). Object loads, stores, initializations, copies
+decodes to `nop`. Closed method construction requires the next raw instruction to be
+`ldelema` with a type operand, even at a dead site. The scalar check applies
+`readOnlyPrefixMatches` to reachable prefixes in literal methods. Object loads, stores, initializations, copies
 and sizes decode with their type tokens.
 `ObjectOperandsValid` checks the storage shape for each distinct live opcode and operand.
 For methods with aggregate object instructions, the extractor supplies the named shape fact at

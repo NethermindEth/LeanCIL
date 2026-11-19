@@ -1,5 +1,5 @@
 import CIL.Safety.Execution
-import CIL.Extraction.Translation
+import CIL.Extraction.DecodedMethod
 
 /-! # Readonly element references retain their restriction through frames and certificates -/
 
@@ -173,6 +173,16 @@ private def addressStates (held : Nat) : ScalarCertificate :=
 private def prefixRaw : RawInstruction := ⟨2, 65054, .none⟩
 private def addressRaw (offset : Nat) : RawInstruction := ⟨offset, 143, .type intType⟩
 private def retRaw (offset : Nat) : RawInstruction := ⟨offset, 42, .none⟩
+
+/-- The raw follower must be a typed ldelema even when the reachability mask excludes it. -/
+theorem readonly_requires_element_address :
+    let decode := fun follower =>
+      (CIL.Method.ofRaw? .scalar {} [] [true, true, true, false]
+        (body [prefixRaw, follower]) []).map CIL.Method.code
+    decode (addressRaw 4) = some [.ldarg 0, .ldarg 1, .nop, .unadmitted 143] ∧
+      decode ⟨4, 0, .none⟩ = none := by
+  exact ⟨rfl, rfl⟩
+#print axioms readonly_requires_element_address
 
 /-- Whether the scalar check accepts a body with no layouts. -/
 private def accepted (body : RawMethod) (features : FeatureCertificate)
