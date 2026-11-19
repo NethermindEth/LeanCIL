@@ -741,8 +741,9 @@ private theorem valueShape_span_test (type : Extraction.TypeExpr) :
     (width : (body.valueShape type).size? = some size) (stack : List Value) :
     step body (.sizeof type) pc args frame stack memory =
       step body (.ldc_i4 (BitVec.ofNat 32 size)) pc args frame stack memory := by
-  simp only [step, observerCount, width, unspecifiedOperands, List.take_zero, List.any_nil,
-    pureArity, instruction]
+  change (body.environment.valueShape type).size? = some size at width
+  simp only [step, observerCount, Extraction.CallLayouts.valueShape_eq, width, unspecifiedOperands,
+    List.take_zero, List.any_nil, pureArity, instruction]
   rfl
 #print axioms step_sizeof_eq
 

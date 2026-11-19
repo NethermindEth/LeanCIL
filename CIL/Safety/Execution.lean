@@ -611,7 +611,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (memory, values) ← initializeBytes size stack m
     return .next (pc + 1) values frame memory
   | .sizeof type, _ =>
-    let some size := (body.valueShape type).size? | .error (.unsupported "Object size")
+    let some size := (body.environment.callLayouts.valueShape type).size?
+      | .error (.unsupported "Object size")
     return .next (pc + 1) (.scalar (.i32 (BitVec.ofNat 32 size)) :: stack) frame m
   -- Typed element accesses take the storage the layouts give their declared element type.
   | .ldelem_any element, _ =>

@@ -55,7 +55,8 @@ theorem stepTransport : StepTransport := by
     case ldobj.refl | stobj.refl | cpobj.refl | initobj.refl | sizeof.refl =>
       refine ⟨mapping, .refl mapping, ?_⟩
       simp only [LocalIndexMap.operation, step, observerCount, mapping.unspecifiedOperands,
-        Method.valueShape, metadata.environment] at observable ⊢
+        Extraction.CallLayouts.valueShape_eq, Method.valueShape, metadata.environment]
+        at observable ⊢
       rename_i type
       first
         | (let count := if Extraction.spanLocal type then 0 else 1
