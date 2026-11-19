@@ -39,7 +39,6 @@ partial class Program
                     match => { imports.Add(match.Groups[1].Value); return ""; }));
             }
             const string isolation = """
-                set_option maxErrors 0
                 set_option Elab.async false
                 namespace EvidenceRejectionHarness
                 open Lean Elab Command
@@ -79,7 +78,9 @@ partial class Program
             Directory.CreateDirectory(directory);
             var path = Path.GetFullPath(Path.Combine(directory, "RejectedBatch.lean"));
             File.WriteAllText(path, source);
-            var result = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
+            // Lean caps errors at the command line's maxErrors, not the file's, and drops every later diagnostic.
+            var result = Execute(["lake", "env", "lean", "-DmaxErrors=0", path], cwd: FixturePackage(),
+                leanPath: leanPath);
             // Lean names the file with either separator.
             var located = LocatedDiagnostic.Matches(result.Output);
             Match[] diagnostics = [.. located.Where(match => match.Groups["file"].Value == path.Replace('\\', '/'))];
