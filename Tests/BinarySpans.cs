@@ -141,7 +141,7 @@ rejected.Check();
 
 string RawSite(int pc) => $"(method0Closed.code[{pc}]?).getD ⟨0, 0, .none⟩";
 string EmittedSite(int pc) => $"(method0.code[{pc}]?).getD .nop";
-string SiteType(int pc) => "Extraction.UnsafeCallsValid rawLayouts " +
+string SiteType(int pc) => "Extraction.UnsafeCallsValid " +
     $"{{ method0Closed with code := [{RawSite(pc)}] }} [true] [{EmittedSite(pc)}]";
 
 partial class Program

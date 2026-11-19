@@ -234,19 +234,6 @@ internal sealed class LayoutEvidence
                 MetadataValidation.IsAggregate(constructor.DeclaringType, method.Module))
                 uses.Add($".size {pc} {Index(constructor is MethodDefinition closedConstructor
                     ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)} .construct");
-            else if (instruction.OpCode.Code == Code.Call && instruction.Operand is GenericInstanceMethod generic &&
-                generic.DeclaringType.FullName == "System.Runtime.CompilerServices.Unsafe" &&
-                generic.GenericArguments.Count == 1 &&
-                MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module))
-            {
-                var access = generic.Name switch
-                {
-                    "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
-                    _ => null
-                };
-                if (access is not null)
-                    uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{access}");
-            }
         }
         foreach (var local in method.Body.Variables)
             if (layouts.IsLayout(local.VariableType))

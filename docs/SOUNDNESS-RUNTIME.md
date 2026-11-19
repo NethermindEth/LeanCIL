@@ -51,8 +51,9 @@ assumes .NET 10's native-width multiplication by `sizeof(T)` followed by additio
 They admit existing storage for supported integer,
 enum, vector and reference-free aggregate types; neither fabricates addresses nor grants authority.
 Negative offsets wrap at native width before the resulting reference is checked for lifetime and
-bounds. Null and invalid resulting references fail. Exact signature checks bind the pointer overload;
-primitive/vector stride and signedness are checked directly, and aggregate stride uses layout evidence.
+bounds. Null and invalid resulting references fail. The pointer overload binds the exact external
+target and generic declaration. Its signed Int32 displacement scales by the element size from
+the indexed layout reader.
 
 ### Unspecified vector lanes
 
@@ -89,11 +90,14 @@ An exact external operand binds the member name, target, argument counts and ret
 A reserved name produces the opcode's hole when its overload fails to resolve. Both validation
 and execution read storage, shape and aggregate alignment from the same indexed layout metadata.
 The entries for `Unsafe.SizeOf`, `AreSame`, `IsAddressLessThan`,
-`IsAddressGreaterThan`, `ByteOffset` and `SkipInit` claim their names on the exact runtime owner. Each checks
+`IsAddressGreaterThan`, `ByteOffset`, `Add`, `Subtract`, `AddByteOffset`, `SubtractByteOffset`
+and `SkipInit` claim their names on the exact runtime owner. Each checks
 its static generic declaration and closed operand. Each requires a sized element. For a struct,
 the raw layout at the stated index must name that struct and the computed layout must exist.
 `SizeOf` returns its checked byte size. The comparisons observe allocation-relative references.
 `ByteOffset` returns the signed native displacement between two references in the same allocation.
+Element offsets use the checked width of the selected type. Byte offsets use a unit stride.
+The unsigned native overload zero-extends its offset. Subtraction wraps at native width.
 `SkipInit` forms its reference without writing to it. The table also holds
 the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of
 `Vector128` and `Vector256`, and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and

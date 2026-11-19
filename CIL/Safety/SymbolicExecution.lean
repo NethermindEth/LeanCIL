@@ -1472,7 +1472,9 @@ elab_rules : tactic
              simp only [CIL.Safety.typedTransferInstruction]
              cil_checked_step_normalized [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl _) ?_
-             cil_checked_memory_by_equations [$facts:term,*])
+             first
+             | cil_checked_memory_from_fact [$facts:term,*]
+             | cil_checked_memory_by_equations [$facts:term,*])
           | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
       else if let (true, #[link]) := (operation == ``CIL.Instruction.call, linkFacts) then
         -- A directly linked call rewrites by one equation that never mentions the model.

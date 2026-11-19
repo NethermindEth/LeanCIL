@@ -42,23 +42,27 @@ theorem skipInitOperand :
 #print axioms skipInitOperand
 
 -- No live site emits the dedicated SkipInit instruction.
-example : UnsafeCallsValid [] (raw call) [true] [.call call.method {}] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw call) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] nonCall [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw call) [] [.call call.method {}] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide +kernel
+example : UnsafeCallsValid (raw call) [true] [.call call.method {}] := by decide +kernel
+example : ¬ UnsafeCallsValid (raw call) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid nonCall [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid (raw call) [] [.call call.method {}] := by decide +kernel
+example : ¬ UnsafeCallsValid (raw call) [true] [] := by decide +kernel
+
+-- Only the selected model may perform raw byte displacement.
+example : ¬ UnsafeCallsValid (raw call) [true] [.memory .byteOffset] := by decide +kernel
+example : ¬ UnsafeCallsValid nonCall [true] [.memory .byteOffset] := by decide +kernel
 
 -- A helper operation cannot replace an unrelated instruction.
-example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .isNullRef] := by decide +kernel
-example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide +kernel
+example : ¬ UnsafeCallsValid nonCall [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid nonCall [true] [.memory .isNullRef] := by decide +kernel
+example : UnsafeCallsValid nonCall [true] [.pop] := by decide +kernel
 -- The raw ldnull exception requires an operand-free opcode.
-example : UnsafeCallsValid [] { nonCall with code := [⟨0, 20, .none⟩] } [true]
+example : UnsafeCallsValid { nonCall with code := [⟨0, 20, .none⟩] } [true]
     [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] { nonCall with code := [⟨0, 20, .call call⟩] } [true]
+example : ¬ UnsafeCallsValid { nonCall with code := [⟨0, 20, .call call⟩] } [true]
     [.memory .nullRef] := by decide +kernel
 -- Unreachable sites are emitted as holes and are not bound.
-example : UnsafeCallsValid [] (raw call) [false] [.unadmitted 0x28] := by decide +kernel
+example : UnsafeCallsValid (raw call) [false] [.unadmitted 0x28] := by decide +kernel
 
 end Tests.UnsafeCallEvidence
 
@@ -89,7 +93,7 @@ theorem local_reference_helper_name :
         parameters := localAreSame.parameterTypes, returnType := localAreSame.returnType } }
     let check := validateManagedCallWith 1 (fun i => if i == 0 then some callee else none)
       (fun _ => none) instruction true
-    UnsafeCallsValid [] (raw localAreSame) [true] [emitted] ∧
+    UnsafeCallsValid (raw localAreSame) [true] [emitted] ∧
       siteClaim loweredCallFamily {} (some (.direct 0)) instruction = .link ∧
       check (some (.direct 0)) emitted = true ∧ check (some (.direct 1)) emitted = false := by
   decide +kernel

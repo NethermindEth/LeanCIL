@@ -1,5 +1,5 @@
 import CIL.Extraction.Features
-import CIL.Extraction.UnsafeReferences
+import CIL.Extraction.UnsafeOffsets
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.UnsafeTransferModels
 import CIL.Extraction.SpanCalls
@@ -462,7 +462,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if let .managed operation := emitted then match operation with
     | .address .. => instruction.opcode == 65030
     | .call .. => instruction.opcode == 41
-  else if let some helper := unsafeReferenceHelper instruction then helper.matches emitted
   else if arrayEmission emitted then arrayMatches previous instruction stack emitted skipEncoding
   else if instruction.opcode == 114 ||
       (match emitted with | .memory (.stringLiteral _) => true | _ => false) then
@@ -645,7 +644,7 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
 
 /-- The kind a call pushes. -/
 private def callResult (site : CallSite) : ScalarKind :=
-  if unsafePointerOffset ⟨0, 40, .call site⟩ || spanCallReturnsReference site ||
+  if pointerDisplacementSite site || spanCallReturnsReference site ||
       (viewObservation ⟨0, 40, .call site⟩).any
         (fun operation => operation == .spanPinnable) then .reference
   else match site.target with
@@ -922,7 +921,7 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
           site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
           site.parameterTypes == [.pointer .void] then [.reference] else
       if nullGuardCall instruction then [.object, .object] else
-      if unsafePointerOffset instruction then [.word32, .reference] else
+      if opcode == 40 && pointerDisplacementSite site then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else

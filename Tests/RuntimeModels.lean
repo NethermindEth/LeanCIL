@@ -409,11 +409,11 @@ example :
   decide
 -- The method check applies the rule: a live call emitting `pop` fails it, the same call emitting
 -- its call passes, and a raw `pop` still emits `pop`.
-example : ¬ UnsafeCallsValid [] (method (site bigMul)) [true] [.pop] := by decide +kernel
-example : UnsafeCallsValid [] (method (site bigMul)) [true] [.call bigMul {}] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (method (site objectConstructorMethod)) [true] [.pop] := by
+example : ¬ UnsafeCallsValid (method (site bigMul)) [true] [.pop] := by decide +kernel
+example : UnsafeCallsValid (method (site bigMul)) [true] [.call bigMul {}] := by decide +kernel
+example : ¬ UnsafeCallsValid (method (site objectConstructorMethod)) [true] [.pop] := by
   decide +kernel
-example : UnsafeCallsValid [] (method ⟨0, 38, .none⟩) [true] [.pop] := by decide +kernel
+example : UnsafeCallsValid (method ⟨0, 38, .none⟩) [true] [.pop] := by decide +kernel
 
 -- An external call the table does not model needs a link.
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site unknown)) [true]

@@ -251,8 +251,8 @@ theorem nonCallTransferRefused :
       token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
       attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
       initLocals := true, maxStack := 1, genericParameters := [], code := [⟨0, 0, .none⟩] }
-    UnsafeCallsValid [] raw [true] [.nop] ∧
-      ¬ UnsafeCallsValid [] raw [true] [.memory (.pointerTransfer (.scalar 8 false) 8 false)] := by
+    UnsafeCallsValid raw [true] [.nop] ∧
+      ¬ UnsafeCallsValid raw [true] [.memory (.pointerTransfer (.scalar 8 false) 8 false)] := by
   decide +kernel
 
 #print axioms nonCallTransferRefused

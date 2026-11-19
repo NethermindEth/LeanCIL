@@ -39,7 +39,7 @@ internal static class ScalarEvidence
         var binding = $"{flag} = true -> {method}.code = {code}";
         var witness = decoded ? $"fun _ => {method}_decoded_code" : "fun h => False.elim (Bool.false_ne_true h)";
         var scalarEvidence = $"And ({scalar}) ({binding})";
-        var unsafeCalls = $"Extraction.UnsafeCallsValid rawLayouts {method}Closed {method}Reachable {method}.code";
+        var unsafeCalls = $"Extraction.UnsafeCallsValid {method}Closed {method}Reachable {method}.code";
         var intrinsics = $"Extraction.ExactIntrinsicsValid {method}Closed {method}Reachable {method}";
         var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";
         var otherChecks = $"And ({unsafeCalls}) (And ({intrinsics}) ({models}))";

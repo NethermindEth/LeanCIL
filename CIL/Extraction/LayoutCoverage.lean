@@ -72,10 +72,6 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
         return [.size pc index .spanElement] else return []
     | .atom _ "System.MemoryExtensions", [.aggregate _ index] =>
       if site.name == "AsSpan" then return [.size pc index .arrayElement] else return []
-    | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
-      if site.name = "Add" then return [.size pc index .referenceAdd]
-      else if site.name = "Subtract" then return [.size pc index .referenceSubtract]
-      else return []
     | _, _ => return []
   | _, _ => return []
 

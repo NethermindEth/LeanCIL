@@ -17,9 +17,9 @@ inductive FieldAccess where
   | load | store | address
   deriving DecidableEq, Repr
 
-/-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
+/-- How an instruction uses a struct's size. -/
 inductive SizeAccess where
-  | sizeOf | construct | referenceAdd | referenceSubtract
+  | sizeOf | construct
   | spanElement
   | arrayElement
   deriving DecidableEq, Repr
@@ -74,8 +74,6 @@ private def checkSize (size : Nat) : SizeAccess → Instruction → Bool
   | .spanElement, .memory (.spanSingleReference width _)
   | .spanElement, .initializeSpanLocal _ (.reference width _)
   | .spanElement, .initializeSpanLocal _ (.singleReference width _) => width == size
-  | .referenceAdd, .memory (.add width _) => width == size
-  | .referenceSubtract, .memory (.add stride _) => stride == subtractionStride size
   | _, _ => false
 
 /-- Bind independently computed layout data to actual instructions and frame slots. -/

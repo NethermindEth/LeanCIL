@@ -47,7 +47,7 @@ internal static class UnsafeModels
 
         var sizeOf = modelled && reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
             reference.ReturnType.FullName == "System.Int32";
-        var elementOffset = !modelled && reference.Parameters.Count == 2 &&
+        var elementOffset = modelled && reference.Parameters.Count == 2 &&
             ((reference.Name is "Add" or "Subtract" && Reference(reference.ReturnType) &&
               Reference(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr") ||
@@ -66,10 +66,10 @@ internal static class UnsafeModels
             reference.Name is "AreSame" or "IsAddressLessThan" or "IsAddressGreaterThan";
         var byteOffset = modelled && referencePair && reference.Name == "ByteOffset" &&
             reference.ReturnType.FullName == "System.IntPtr";
-        var addBytes = !modelled && reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
+        var addBytes = modelled && reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
-        var subtractBytes = !modelled && reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
+        var subtractBytes = modelled && reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
         if (!sizeOf && !elementOffset && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&

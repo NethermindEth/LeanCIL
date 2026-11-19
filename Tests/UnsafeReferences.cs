@@ -225,9 +225,9 @@ var controls = new GeneratedEvidence(Path.Combine(root, "OffsetControls"));
 foreach (var (name, theorem) in new[]
 {
     ("ByteOffset", "method0_models_validated"),
-    ("AddPointer", "method0_unsafe_validated"), ("Store", "method0_unsafe_validated"),
-    ("AddPointerAggregate", "method0_layouts_validated"),
-    ("SubtractPointer", "method0_unsafe_validated"), ("SubtractPointerAggregate", "method0_layouts_validated")
+    ("AddPointer", "method0_models_validated"), ("Store", "method0_models_validated"),
+    ("AddPointerAggregate", "method0_models_validated"),
+    ("SubtractPointer", "method0_models_validated"), ("SubtractPointerAggregate", "method0_models_validated")
 })
 {
     var path = Path.Combine(root, name, "OffsetControl.lean");
@@ -237,49 +237,39 @@ foreach (var (name, theorem) in new[]
 }
 controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
-foreach (var (name, before, after) in new[]
+foreach (var (name, pc, operation) in new[]
 {
-    ("AddSigned", ".memory (.add 1 true)", ".memory (.add 8 true)"),
-    ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),
-    ("Subtract", ".sub", ".add"),
-    ("SubtractUnsigned", ".sub", ".add"),
-    ("AddPointer", ".memory (.add 8 true)", ".memory (.add 4 true)"),
-    ("SubtractPointer", ".memory (.add 18446744073709551608 true)", ".memory (.add 8 true)"),
-    ("Store", ".memory (.add 8 true)", ".memory (.add 8 false)"),
-    ("SubtractElements32", ".memory (.add 18446744073709551608 true)", ".memory (.add 8 true)"),
-    ("SubtractElementsUnsigned", ".memory (.add 18446744073709551608 false)",
-        ".memory (.add 18446744073709551608 true)"),
-    ("SubtractVector", ".memory (.add 18446744073709551600 false)", ".memory (.add 16 false)")
+    ("AddSigned", 2, ".memory (.add 8 true)"),
+    ("AddUnsigned", 2, ".memory (.add 1 true)"),
+    ("Subtract", 2, ".add"), ("SubtractUnsigned", 2, ".sub"),
+    ("AddPointer", 2, ".memory (.add 4 true)"),
+    ("SubtractPointer", 2, ".memory (.add 8 true)"),
+    ("Store", 7, ".memory (.add 8 false)"),
+    ("SubtractElements32", 2, ".memory (.add 8 true)"),
+    ("SubtractElementsUnsigned", 2, ".memory (.add 18446744073709551608 true)"),
+    ("SubtractVector", 2, ".memory (.add 16 false)"),
+    ("SubtractAggregate", 2, ".memory (.add 32 true)"),
+    ("AddPointerAggregate", 2, ".memory (.add 8 true)"),
+    ("SubtractPointerAggregate", 2, ".memory (.add 18446744073709551608 true)")
 })
 {
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
-    var narrowed = NarrowEvidence(source, "method0_unsafe_validated");
-    if (!narrowed.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException("Missing mutation target: " + name);
+    var evidence = NarrowEvidence(source, "method0_models_validated");
+    const string original = "method0Reachable method0 := by decide";
+    var body = $$"""{ method0 with code := method0.code.set {{pc}} ({{operation}}) }""";
+    var forged = $"method0Reachable {body} := by decide";
+    if (!evidence.Contains(original, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Missing offset call obligation for {name}");
     var path = Path.Combine(root, name, "WrongOperation.lean");
-    File.WriteAllText(path, narrowed.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact Unsafe operation rejection: " + name, "UnsafeCallsValid");
+    File.WriteAllText(path, evidence.Replace(original, forged, StringComparison.Ordinal));
+    rejected.Add(path, $"PASS offset call emission rejection: {name}", "RuntimeModelsAgree");
 }
-var aggregateSource = File.ReadAllText(Path.Combine(root, "SubtractAggregate", "Extracted.lean"));
-var aggregateEvidence = NarrowEvidence(aggregateSource, "method0_layouts_validated");
-const string aggregateStride = ".memory (.add 18446744073709551584 true)";
-if (!aggregateEvidence.Contains(aggregateStride, StringComparison.Ordinal))
-    throw new InvalidOperationException("Missing aggregate subtraction stride");
-var aggregateForgery = Path.Combine(root, "SubtractAggregate", "WrongStride.lean");
-File.WriteAllText(aggregateForgery, aggregateEvidence.Replace(aggregateStride,
-    ".memory (.add 32 true)", StringComparison.Ordinal));
-rejected.Add(aggregateForgery, "PASS exact aggregate subtraction layout", "MethodLayoutsValid");
-foreach (var (methodName, stride) in new[]
-{
-    ("AddPointer", ".memory (.add 8 true)"),
-    ("SubtractPointer", ".memory (.add 18446744073709551608 true)")
-})
+foreach (var methodName in new[] { "AddPointer", "SubtractPointer" })
 {
     var pointerSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, methodName, "Extracted.lean")),
-        "method0_unsafe_validated");
+        "method0_models_validated");
     foreach (var (name, before, after) in new[]
     {
-        ("signedness", stride, stride.Replace("true", "false", StringComparison.Ordinal)),
         ("offset-type", ".atom Extraction.runtimeScope \"System.Int32\"",
             ".atom Extraction.runtimeScope \"System.UInt32\""),
         ("return", "returnType := .pointer (.void)",
@@ -292,23 +282,8 @@ foreach (var (methodName, stride) in new[]
             throw new InvalidOperationException("Missing pointer offset mutation: " + name);
         var path = Path.Combine(root, methodName, "Wrong-" + name + ".lean");
         File.WriteAllText(path, pointerSource.Replace(before, after, StringComparison.Ordinal));
-        rejected.Add(path, "PASS exact pointer offset rejection: " + methodName + "/" + name, "UnsafeCallsValid");
+        rejected.Add(path, "PASS exact pointer offset rejection: " + methodName + "/" + name, "RuntimeModelsAgree");
     }
-}
-foreach (var (name, stride, wrongStride) in new[]
-{
-    ("AddPointerAggregate", ".memory (.add 32 true)", ".memory (.add 8 true)"),
-    ("SubtractPointerAggregate", ".memory (.add 18446744073709551584 true)",
-        ".memory (.add 18446744073709551608 true)")
-})
-{
-    var pointerLayout = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_layouts_validated");
-    if (!pointerLayout.Contains(stride, StringComparison.Ordinal))
-        throw new InvalidOperationException("Missing aggregate pointer stride");
-    var pointerForgery = Path.Combine(root, name, "WrongStride.lean");
-    File.WriteAllText(pointerForgery, pointerLayout.Replace(stride, wrongStride, StringComparison.Ordinal));
-    rejected.Add(pointerForgery, "PASS exact aggregate pointer offset layout: " + name, "MethodLayoutsValid");
 }
 var byteOffsetSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "ByteOffset", "Extracted.lean")),
     "method0_models_validated");

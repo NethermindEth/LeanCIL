@@ -192,7 +192,9 @@ comparison the runtime model table gives its exact closed reference. Ordering an
 `Unsafe.ByteOffset(origin, target)` require two live references in the same allocation.
 The retained `Unsafe.ByteOffset` call runs the runtime model for its exact generic declaration
 and returns the native-width byte displacement from origin to target.
-`Unsafe.AddByteOffset` and `SubtractByteOffset` accept `nint` or `nuint` offsets.
+The retained `Unsafe.AddByteOffset` and `SubtractByteOffset` calls move a reference by a
+`nint` or `nuint` byte count. The retained `Unsafe.Add` and `Subtract` calls use the checked
+element size as their stride. Each overload binds its own open declaration and external target.
 `Unsafe.Subtract<T>` accepts `int`, `nint` or `nuint` element offsets for admitted scalar,
 aggregate and vector storage. Scaling and subtraction wrap at the native 64-bit width, and the
 resulting reference must still be live and in bounds. These operations grant no read or write

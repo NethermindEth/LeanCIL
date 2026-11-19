@@ -495,13 +495,22 @@ open Lean in
   let env ← getEnv
   [``entry.checked, ``header].mapM fun name => liftM (findDocString? env name : IO _)
 
+/-- The signed element offset of the loop's reference to an Int32. -/
+private def stampOffset : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  { owner := CIL.Extraction.unsafeOwner, name := name!"Add", hasThis := false,
+    genericArity := 1, methodArguments := [word], parameters := [.byref word, word],
+    returnType := .byref word }
+
 /-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.ldc_i4 0, .stloc 0, .br 12, .ldarg 1, .ldloc 0, .memory (.add 4 true),
+  code := [.ldc_i4 0, .stloc 0, .br 12, .ldarg 1, .ldloc 0, .call stampOffset {},
     .ldloc 0, .call (Tests.callee
       2) {}, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .ldarg 0, .bne_un 3,
     .ldloc 0, .ret], links := [(7, .direct 1)] }
+
+cil_runtime_models stamps
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
@@ -660,7 +669,7 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
   cil_loop_advance
 
 -- The stuck step shows its pc as a literal, as the message's first line does.
-/-- (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) 5 -/
+/-- (CIL.Instruction.call stampOffset) 5 -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)

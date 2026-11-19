@@ -48,6 +48,10 @@ internal static partial class ProofOutline
             _ => null
         };
 
+        /// <summary>The checked displacement applied by a retained Unsafe offset call.</summary>
+        internal static AddOffset? OffsetOf(Operation operation) =>
+            operation is ModelCall { Model: Memory { Operation: AddOffset offset } } ? offset : null;
+
         /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
         /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
         internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
@@ -218,8 +222,8 @@ internal static partial class ProofOutline
             var imports = new List<string> { "CIL.Verification", "CIL.StructuralLabels" };
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
-            if (body.Operations.Any(op => op is Memory { Operation: AddOffset } or
-                    StackOperation { Kind: StackOpcode.Add }) &&
+            if (body.Operations.Any(op => Body.OffsetOf(op) is not null ||
+                    op is StackOperation { Kind: StackOpcode.Add }) &&
                 spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
                 callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
@@ -615,13 +619,10 @@ internal static partial class ProofOutline
             operation is StackOperation { IsArithmetic: true } arithmetic ? arithmetic.Symbol : null;
 
         /// <summary>The byte stride of a signed reference addition.</summary>
-        static int? ReferenceStride(Operation operation) => operation switch
-        {
-            Memory { Operation: AddOffset { Signed: true, Stride: <= int.MaxValue } offset } =>
-                Convert.ToInt32(offset.Stride),
-            StackOperation { Kind: StackOpcode.Add } => 1,
-            _ => null
-        };
+        static int? ReferenceStride(Operation operation) =>
+            Body.OffsetOf(operation) is { Signed: true, Stride: <= int.MaxValue } offset
+                ? Convert.ToInt32(offset.Stride)
+                : operation is StackOperation { Kind: StackOpcode.Add } ? 1 : null;
 
         /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
         static bool ReadsWidth(Operation operation, int width) => operation switch
@@ -1673,7 +1674,7 @@ internal static partial class ProofOutline
                 state.Facts.AddRange(ElementWrite(added, stored.Term, StoreLemma(op)));
                 state.Moved = true;
             }
-            else if (op is Memory { Operation: AddOffset })
+            else if (Body.OffsetOf(op) is not null)
                 return Stop("an `Unsafe.Add` other than one of a reference argument by a 32-bit index, written " +
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");

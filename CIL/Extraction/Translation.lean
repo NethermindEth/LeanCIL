@@ -400,7 +400,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
     (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid item.closed method ∧
-  UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
+  UnsafeCallsValid item.closed item.reachable method.code ∧
   ExactIntrinsicsValid item.closed item.reachable method ∧
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
