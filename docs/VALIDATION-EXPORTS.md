@@ -461,8 +461,9 @@ and traces match exactly.
 [OPCODES](OPCODES.md#reference-observations) lists and whose limits
 [reference observations](SOUNDNESS-EVIDENCE.md#reference-observations) states. Generic storage
 types must have a supported managed layout. Lean translation evidence checks exact runtime
-identity, closed signatures, offset signedness and byte scaling; the three comparisons keep their
-calls, which the runtime model table resolves from the closed reference. `ByteOffset` accepts readonly
+identity, closed signatures, offset signedness and byte scaling. The three comparisons and
+`ByteOffset` keep their calls, which the runtime model table resolves from the closed reference.
+`ByteOffset` accepts readonly
 views, and byte and element offsets from a readonly reference stay readonly.
 
 Tests compare native wraparound with the runtime and reject forged strides and signedness in Lean

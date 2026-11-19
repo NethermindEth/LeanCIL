@@ -426,8 +426,11 @@ carries it, so the kernel link is never vacuous for an admitted local.
 Truth tests and equality check formation/lifetime without reading bytes or granting authority.
 Same-allocation equality uses offsets. Different-allocation interiors are distinct; comparisons
 involving end pointers across allocations are unsupported because adjacent addresses may coincide.
-Pointer difference and unsigned ordering require a single live allocation and assume a contiguous,
-non-wrapping runtime address interval. Native displacement arithmetic retains provenance and
+At a live `Unsafe.ByteOffset<T>` call, the decoder checks the external target, the generic
+declaration, both closed reference parameters, the native result and the checked size of `T`.
+The site requires the original call. Pointer difference and unsigned ordering require a single
+live allocation and assume a contiguous, non-wrapping runtime address interval.
+Native displacement arithmetic retains provenance and
 readonly restrictions; no ordering between allocation bases is inferred.
 
 Object `ldnull` has a distinct scalar-flow kind. The certificate admits it in truth tests, in

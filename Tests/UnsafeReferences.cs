@@ -224,6 +224,7 @@ queue.Flush();
 var controls = new GeneratedEvidence(Path.Combine(root, "OffsetControls"));
 foreach (var (name, theorem) in new[]
 {
+    ("ByteOffset", "method0_models_validated"),
     ("AddPointer", "method0_unsafe_validated"), ("Store", "method0_unsafe_validated"),
     ("AddPointerAggregate", "method0_layouts_validated"),
     ("SubtractPointer", "method0_unsafe_validated"), ("SubtractPointerAggregate", "method0_layouts_validated")
@@ -238,7 +239,6 @@ controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
 foreach (var (name, before, after) in new[]
 {
-    ("ByteOffset", ".memory .byteOffset", ".sub"),
     ("AddSigned", ".memory (.add 1 true)", ".memory (.add 8 true)"),
     ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),
     ("Subtract", ".sub", ".add"),
@@ -311,9 +311,11 @@ foreach (var (name, stride, wrongStride) in new[]
     rejected.Add(pointerForgery, "PASS exact aggregate pointer offset layout: " + name, "MethodLayoutsValid");
 }
 var byteOffsetSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "ByteOffset", "Extracted.lean")),
-    "method0_unsafe_validated");
+    "method0_models_validated");
 foreach (var (name, before, after) in new[]
 {
+    ("operation", "method0Reachable method0 := by decide",
+        "method0Reachable { method0 with code := method0.code.set 2 .sub } := by decide"),
     ("scope", "owner := .atom Extraction.runtimeScope", "owner := .atom \"forged\""),
     ("identity", "target := .external externalIdentity0", "target := .external \"forged\""),
     ("result", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\"",
@@ -328,7 +330,7 @@ foreach (var (name, before, after) in new[]
         throw new InvalidOperationException("Missing identity mutation target: " + name);
     var path = Path.Combine(root, "ByteOffset", "Wrong-" + name + ".lean");
     File.WriteAllText(path, byteOffsetSource.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact Unsafe identity rejection: " + name, "UnsafeCallsValid");
+    rejected.Add(path, $"PASS exact ByteOffset evidence rejection: {name}", "RuntimeModelsAgree");
 }
 rejected.Check();
 

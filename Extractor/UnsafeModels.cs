@@ -60,7 +60,7 @@ internal static class UnsafeModels
             Reference(reference.Parameters[0].ParameterType) && Reference(reference.Parameters[1].ParameterType);
         var comparison = modelled && referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
             reference.Name is "AreSame" or "IsAddressLessThan" or "IsAddressGreaterThan";
-        var byteOffset = !modelled && referencePair && reference.Name == "ByteOffset" &&
+        var byteOffset = modelled && referencePair && reference.Name == "ByteOffset" &&
             reference.ReturnType.FullName == "System.IntPtr";
         var addBytes = !modelled && reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&

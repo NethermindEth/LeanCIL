@@ -184,8 +184,9 @@ reference comparisons. Numeric zero never becomes a reference.
 The managed-reference overloads of `Unsafe.AreSame`, `IsAddressLessThan` and
 `IsAddressGreaterThan` use these checked comparisons; a call keeps its `call`, which runs the
 comparison the runtime model table gives its exact closed reference. Ordering and
-`Unsafe.ByteOffset(origin, target)` require two live references in the same allocation;
-`Unsafe.ByteOffset` returns the native-width byte displacement from origin to target.
+`Unsafe.ByteOffset(origin, target)` require two live references in the same allocation.
+The retained `Unsafe.ByteOffset` call runs the runtime model for its exact generic declaration
+and returns the native-width byte displacement from origin to target.
 `Unsafe.AddByteOffset` and `SubtractByteOffset` accept `nint` or `nuint` offsets.
 `Unsafe.Subtract<T>` accepts `int`, `nint` or `nuint` element offsets for admitted scalar,
 aggregate and vector storage. Scaling and subtraction wrap at the native 64-bit width, and the

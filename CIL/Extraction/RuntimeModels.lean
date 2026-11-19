@@ -5,6 +5,7 @@ import CIL.Extraction.VectorModels
 import CIL.Extraction.MarshalModels
 import CIL.Extraction.BitModels
 import CIL.Extraction.UnsafeReinterpretations
+import CIL.Extraction.UnsafeOffsets
 
 /-!
 # Runtime model resolution
@@ -20,7 +21,7 @@ namespace CIL.Extraction
 /-- The runtime methods with a model. -/
 def modelEntries : List ModelEntry :=
   objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries ++ unsafeEntries ++
-    marshalEntries ++ unsafeReinterpretEntries
+    marshalEntries ++ unsafeReinterpretEntries ++ unsafeOffsetEntries
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -69,7 +70,8 @@ theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry �
     entry ∈ modelEntries := by
   simp [runtimeModels, SearchTree.toList, modelEntries, vectorEntries, integerMathEntries,
     marshalEntries, bitEntries, bitHelpers, bitHelperModel,
-    mathOperations, mathIntegers, IntegerMath.signedOnly, unsafeEntries, unsafeReinterpretEntries]
+    mathOperations, mathIntegers, IntegerMath.signedOnly, unsafeEntries, unsafeReinterpretEntries,
+    unsafeOffsetEntries]
 
 #print axioms runtimeModels_entries
 
