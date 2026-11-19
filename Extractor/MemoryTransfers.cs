@@ -5,36 +5,8 @@ namespace Nethermind.LeanCIL;
 // Managed-reference transfers share the exact layouts used by typed CIL loads and stores.
 internal static class MemoryTransfers
 {
-    internal static Operation? Marshal(MethodReference reference, string architecture)
-    {
-        if (reference.DeclaringType.FullName != "System.Runtime.InteropServices.MemoryMarshal" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
-            reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
-            generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
-            (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=
-                MethodCallingConvention.Default)
-            return null;
-        bool Parameter(TypeReference type) => type is GenericParameter parameter &&
-            parameter.Type == GenericParameterType.Method && parameter.Position == 0 &&
-            parameter.Owner == generic.ElementMethod;
-        bool ParameterReference(TypeReference type) => type is ByReferenceType byRef && Parameter(byRef.ElementType);
-        var read = reference.Name is "Read" or "TryRead";
-        var trying = reference.Name is "TryRead" or "TryWrite";
-        if (reference.Name is not ("Read" or "TryRead" or "Write" or "TryWrite") ||
-            reference.Parameters.Count != (read && !trying ? 1 : 2)) return null;
-        var span = read ? "System.ReadOnlySpan`1<System.Byte>" : "System.Span`1<System.Byte>";
-        if (reference.Parameters[0].ParameterType.FullName != span ||
-            (reference.Parameters.Count == 2 && !ParameterReference(reference.Parameters[1].ParameterType)) ||
-            !(trying ? reference.ReturnType.FullName == "System.Boolean" : read ? Parameter(reference.ReturnType) :
-                reference.ReturnType.MetadataType == MetadataType.Void)) return null;
-        RuntimeModels.ValidateSignature(reference, architecture);
-        var type = generic.GenericArguments[0];
-        var (kind, _) = Describe(type, reference.Module, architecture);
-        return MemoryOperation.Other(
-            $"(.marshal{(read ? "Read" : "Write")} ({kind}) {trying.ToString().ToLowerInvariant()})");
-    }
-
-    static (string Kind, int Alignment) Describe(TypeReference type, ModuleDefinition module, string architecture)
+    internal static (string Kind, int Alignment) Describe(TypeReference type, ModuleDefinition module,
+        string architecture)
     {
         if (MetadataValidation.IsAggregate(type, module))
         {

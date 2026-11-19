@@ -177,8 +177,7 @@ internal static class RuntimeModels
         Operation? op = scope switch
         {
             "System.Runtime" => Scalar(reference)
-                ?? SpanReinterpretation.Translate(reference, profile.Architecture)
-                ?? MemoryTransfers.Marshal(reference, profile.Architecture)
+                ?? MarshalModels.CallModel(reference, profile.Architecture)
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
@@ -363,10 +362,6 @@ internal static class RuntimeModels
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", MemoryOperation.Other($"(.createSpan {width})"));
             operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
                 MemoryOperation.Of(new SpanItem(width)));
-            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", MemoryOperation.Other(".spanReference"));
-            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetReference<{element}>(System.Span`1<!!0>)", MemoryOperation.Other(".spanReference"));
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";
@@ -407,15 +402,9 @@ internal static class RuntimeModels
                 operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", MemoryOperation.Of(new SpanSlice(false)));
                 operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)",
                     MemoryOperation.Of(new SpanSlice(true)));
-                var factory = writable ? "CreateSpan" : "CreateReadOnlySpan";
-                operations.Add($"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
-                    $"{factory}<{element}>(!!0&,System.Int32)",
-                    MemoryOperation.Of(new SpanFromReference(width, writable)));
             }
             operations.Add($"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
                 "op_Implicit(System.Span`1<!0>)", MemoryOperation.Other(".spanReadOnly"));
-            operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetArrayDataReference<{element}>(!!0[])", MemoryOperation.Of(new ObserveView(ViewQuery.ArrayData)));
             foreach (var (parameters, range) in new[]
             {
                 ("!!0[]", ArrayRange.Whole), ("!!0[],System.Int32", ArrayRange.FromStart),
