@@ -521,6 +521,21 @@ theorem enum_span_copy :
         [true, true, false] (body [.ldarg 0, .ldobj span, .unadmitted 43]) := by decide +kernel
 #print axioms enum_span_copy
 
+/-- A valid load of a span does not admit a later sizeof of the same span type. -/
+theorem span_load_then_size_refused :
+    let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1")
+      (.atom runtimeScope "System.Int32")
+    let source := { raw call0 with
+      parameters := [.byref span]
+      code := [⟨0, 2, .none⟩, ⟨1, 0x71, .type span⟩] }
+    let input := { source with
+      returnType := .atom runtimeScope "System.Int32"
+      code := source.code ++ [⟨6, 38, .none⟩, ⟨7, 0xfe1c, .type span⟩, ⟨13, 42, .none⟩] }
+    let emitted := body [.ldarg 0, .ldobj span, .pop, .sizeof span, .ret]
+    ObjectOperandsValid source [true, true] (body [.ldarg 0, .ldobj span]) ∧
+      ¬ ObjectOperandsValid input [true, true, true, true, true] emitted := by decide +kernel
+#print axioms span_load_then_size_refused
+
 /-- A literal site binds both opcode and token, including between two supported vectors. -/
 theorem init_vector_binding :
     let target := vectorType "128"
