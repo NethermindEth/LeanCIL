@@ -1,3 +1,4 @@
+import CIL.Extraction.DecodedMethod
 import CIL.Extraction.Features
 
 set_option maxRecDepth 4096
@@ -144,6 +145,19 @@ theorem null_throw_entry :
       [.memory .nullRef, .br 3, .unadmitted 20, .throw .nullReference] :=
   by decide +kernel
 #print axioms null_throw_entry
+
+/-- A direct edge or switch arm into the throw disables just the entered fold. -/
+theorem decoded_throw_entry :
+    let decode := fun edge => (Method.ofRaw? .scalar {} [] (raw
+      [i 2, i 45 (.target 4), i 20, edge, i 115 divide, i 122, i 115 divide, i 122]) []).map
+        fun body => (body.code[5]?, body.code[7]?)
+    let raised := some (Instruction.throw .divideByZero)
+    let hole := some (Instruction.unadmitted 122)
+    decode (i 43 (.target 4)) = some (raised, raised) ∧
+      decode (i 43 (.target 5)) = some (hole, raised) ∧
+      decode (i 69 (.targets [4, 5])) = some (hole, raised) := by decide +kernel
+
+#print axioms decoded_throw_entry
 
 -- A null throw cannot claim another exception type.
 example : ∀ other ∈ ExceptionType.all, other ≠ .nullReference → ¬ FeatureFlowValid #[]

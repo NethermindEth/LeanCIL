@@ -259,6 +259,8 @@ inductive FoldRole where
   | spanConstructor (index : Nat) (constructor : SpanConstructor)
   /-- A direct managed call whose prefix requests frame retirement before transfer. -/
   | tailCall
+  /-- A branch enters this candidate after its head, so none of its roles may execute. -/
+  | blocked
   deriving DecidableEq, Repr
 
 /-- Calls use their site requirement. Other instructions in a fold emit their raw role. -/
@@ -327,28 +329,28 @@ private def foldAt (localAt : Nat -> Option TypeExpr)
   (throwFold (a :: tail)).map fun (count, raised) =>
     some .head :: List.replicate count (some .interior) ++ [some (.raise raised)]
 
-/-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural.
-    Local types come from `localAt`. -/
-def foldRolesFrom (localAt : Nat -> Option TypeExpr) :
-    List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
-  | _, [] => []
-  | role :: pending, _ :: tail => role :: foldRolesFrom localAt pending tail
-  | [], a :: tail => match foldAt localAt a tail with
-    | some (role :: pending) => role :: foldRolesFrom localAt pending tail
-    | _ => none :: foldRolesFrom localAt [] tail
+/-- A non-fallthrough edge may enter ordinary code or the head of a fold. -/
+def foldEntry : Option (Option FoldRole) → Bool
+  | some none | some (some .head) => true
+  | _ => false
 
-/-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold.
-    Local types are read from a `FlowIndex` built once per body. -/
+/-- Assign all roles of a candidate together, using every encoded target in the body. -/
+private def foldRolesFrom (localAt : Nat → Option TypeExpr) (targeted : Nat → Bool) :
+    Nat → List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
+  | _, _, [] => []
+  | pc, role :: pending, _ :: tail => role :: foldRolesFrom localAt targeted (pc + 1) pending tail
+  | pc, [], first :: tail =>
+    match foldAt localAt first tail with
+    | some (head :: rest) =>
+      if (rest.zipIdx (pc + 1)).all (fun (role, atPc) => !targeted atPc || foldEntry (some role))
+      then head :: foldRolesFrom localAt targeted (pc + 1) rest tail
+      else some .blocked :: foldRolesFrom localAt targeted (pc + 1)
+        (List.replicate rest.length (some .blocked)) tail
+    | _ => none :: foldRolesFrom localAt targeted (pc + 1) [] tail
+
+/-- Roles derived from raw instructions, their branch targets and the declared local types. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  foldRolesFrom (FlowIndex.ofList locals).get? [] code
-
-/-- A non-fallthrough edge may enter a fold only at its first instruction. -/
-def foldEntry (role : Option (Option FoldRole)) : Bool :=
-  match role with
-  | some (some .interior) | some (some (.result _)) | some (some (.raise _))
-  | some (some (.typeBranch _))
-  | some (some .argument) | some (some (.spanConstructor ..)) => false
-  | some (some .tailCall) => false
-  | _ => true
+  let targets := Std.TreeSet.ofList (branchTargets code) compare
+  foldRolesFrom (FlowIndex.ofList locals).get? targets.contains 0 [] code
 
 end CIL.Extraction

@@ -674,9 +674,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
           featureSuccessors role pc instruction state.stack with
       | some after, some successors =>
         -- Even an unselected encoded target must be a valid entry, not a fold's interior.
-        let validTarget := fun target =>
-          let role := roles target
-          role.isSome && foldEntry role
+        let validTarget := fun target => foldEntry (roles target)
         (match instruction.operand with
         | .target target => validTarget target
         | .targets targets => targets.all validTarget
