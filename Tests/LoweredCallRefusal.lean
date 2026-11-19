@@ -102,6 +102,7 @@ theorem divRemTupleLayout :
     resolve row 8 = some (.intrinsic (.scalar (.divRem 64 false)) 2) ∧
       resolve { row with fields := row.fields.set 0 ⟨.signed64, none⟩ } 8 = none ∧
       resolve { row with fields := row.fields.set 1 ⟨.signed64, none⟩ } 8 = none ∧
+      resolve { row with fields := List.replicate 512 ⟨.unsigned64, none⟩ } 8 = none ∧
       resolve { row with packing := 1 } 8 = none ∧ resolve row 1 = none := by decide +kernel
 
 #print axioms divRemTupleLayout

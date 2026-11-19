@@ -2033,6 +2033,39 @@ void ModelTableCosts()
           { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
             attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
             initLocals := true, maxStack := 1, genericParameters := [], code := [] }
+        /-- Interleave the three sizes so each median samples the same period of machine load. -/
+        def checkScaling (label : String) (limit : Nat) (measure : Nat → Nat → IO Nat) : IO Unit := do
+          let sizes := #[512, 1024, 2048]
+          let timers := (sizes.map measure).toList.zipIdx
+          let mut samples : Array (Array Nat) := Array.replicate sizes.size #[]
+          for trial in [:9] do
+            for (timer, index) in timers do
+              let elapsed <- timer trial
+              samples := samples.modify index (·.push elapsed)
+          let mut previous := 0
+          for (count, values) in sizes.toList.zip samples.toList do
+            let elapsed := values.qsortOrd[4]!
+            IO.println s!"{label} {count}: {elapsed} ns"
+            if elapsed == 0 || (previous != 0 && elapsed * 100 > previous * limit) then
+              throw (IO.userError s!"{label} exceeded {limit}% of the preceding time per doubling")
+            previous := elapsed
+        /-- Repeated DivRem queries against two identical oversized rows. -/
+        def timeOversizedTuple (count : Nat) : Nat → IO Nat :=
+          let identity := s!"{runtimeScope}::System.ValueTuple`2<System.UInt64,System.UInt64>"
+          let row : RawLayout := {
+            identity, explicit := false, packing := 0, declaredSize := 0,
+            fields := List.replicate count ⟨.unsigned64, none⟩ }
+          let layout : ComputedLayout := ⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, 8⟩
+          let environment := LayoutEnvironment.callLayouts {
+            rawLayouts := [row, row], layouts := #[layout, layout] }
+          fun trial => do
+            let start <- IO.monoNanosNow
+            for i in [:count] do
+              let pair := TypeExpr.aggregate identity ((i + trial) % 2)
+              if integerPairResult environment pair "System.UInt64" 8 then
+                throw (IO.userError "DivRem accepted an oversized tuple")
+            return (← IO.monoNanosNow) - start
+        #eval checkScaling "DivRem oversized tuple queries" 250 timeOversizedTuple
         /-- Decide the production relation on the supplied body. -/
         @[noinline] def liveNops (raw : RawMethod) (reachable : List Bool) (body : Method) : Bool :=
           decide (RuntimeModelsAgree raw reachable body)
@@ -2060,7 +2093,9 @@ void ModelTableCosts()
         {{string.Join("\n", siteCounts.Select(Sites))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    foreach (var line in output.Split('\n').Where(line => line.StartsWith("RuntimeModelsAgree ", StringComparison.Ordinal)))
+    foreach (var line in output.Split('\n').Where(line =>
+        line.StartsWith("RuntimeModelsAgree ", StringComparison.Ordinal) ||
+        line.StartsWith("DivRem ", StringComparison.Ordinal)))
         Console.WriteLine(line.TrimEnd());
     var costs = LookupPatterns.ModelTableCost.Matches(output).ToDictionary(
         match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
