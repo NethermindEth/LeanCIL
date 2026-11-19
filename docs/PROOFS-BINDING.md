@@ -748,9 +748,9 @@ The kernel then checks by reduction the theorem, named with the suffix `_decoder
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
 `_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
-`Extracted.method0_decoder_eq`, `Extracted.method0_profile` and so on. For a `Method.ofClosed?` decoder, the
-`declared` field and the `method0_declared` fact use the signature constructor with the closed
-method's parameter and return type expressions. The extraction derives
+`Extracted.method0_decoder_eq`, `Extracted.method0_profile` and so on. For a `Method.ofClosed?`
+decoder, the `declared` field and the `Extracted.method0_declared` fact use the signature
+constructor with the closed method's parameter and return type expressions. The extraction derives
 `Extracted.method0_decoded` from the closed equation and the validated specialization.
 It states that decoding the original method at its type arguments gives the same method.
 A decoder with a hole, a
