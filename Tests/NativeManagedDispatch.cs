@@ -18,6 +18,8 @@ var root = At("artifacts/NativeManagedDispatch");
 Directory.CreateDirectory(root);
 var dll = Path.Combine(root, "NativeManagedDispatch.dll");
 string selector;
+int loadPc;
+int addPc;
 using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll")))
 {
     var methods = module.GetType("Examples.NativeManagedDispatch").Methods;
@@ -39,6 +41,11 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
     processor.InsertBefore(first, Instruction.Create(OpCodes.Stloc, numeric));
     processor.InsertBefore(first, Instruction.Create(OpCodes.Ldloc, numeric));
     processor.InsertBefore(first, Instruction.Create(OpCodes.Pop));
+    var instructions = dispatch.Body.Instructions;
+    var load = instructions.Single(instruction => instruction.OpCode.Code == Code.Ldind_I);
+    if (load.Previous?.OpCode.Code != Code.Add) throw new InvalidOperationException("Missing native table offset");
+    loadPc = instructions.IndexOf(load);
+    addPc = loadPc - 1;
     selector = dispatch.FullName;
     module.Write(dll);
 }
@@ -125,22 +132,17 @@ var path = Path.Combine(root, "NativeProof.lean");
 File.WriteAllText(path, proof);
 evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local and storage checks");
 var rejected = new RejectedEvidence(root);
-const string nativeLoadLine = "\n  .ldind .i,";
-if (!scalar.Contains(nativeLoadLine, StringComparison.Ordinal))
-    throw new InvalidOperationException("Missing native table load");
-// The dispatcher's table offset is the decoded add that feeds its table load, and raw add at offset 21 of its
-// original and closed bodies; the handler's own add is left unchanged.
-const string emittedAdd = "  .add," + nativeLoadLine;
-const string rawAdd = "{ offset := 21, opcode := 88, operand := .none }";
+// The decoder still reads the genuine body when a mutation changes the closed evidence.
+string ChangeRaw(string narrowed, int pc, string field) =>
+    ForgeClosedCode(narrowed, 0, $$"""modify {{pc}} (fun raw => { raw with {{field}} })""");
 foreach (var (name, mutated) in new[]
 {
-    ("load-kind", ReplaceExactly(scalar, nativeLoadLine, "\n  .ldind .i8,", 1)),
-    ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
-        StringComparison.Ordinal)),
-    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + nativeLoadLine, 1)),
-    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + nativeLoadLine, 1)),
-    ("raw-sub", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2)),
-    ("raw-operand", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 88, operand := .local 0 }", 2)),
+    ("load-kind", ForgeDecodedInstruction(scalar, 0, loadPc, "fun _ => .ldind .i8")),
+    ("raw-load", ChangeRaw(scalar, loadPc, "opcode := 76")),
+    ("emitted-sub", ForgeDecodedInstruction(scalar, 0, addPc, "fun _ => .sub")),
+    ("emitted-add-ovf", ForgeDecodedInstruction(scalar, 0, addPc, "fun _ => .add_ovf")),
+    ("raw-sub", ChangeRaw(scalar, addPc, "opcode := 89")),
+    ("raw-operand", ChangeRaw(scalar, addPc, "operand := .local 0")),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
         ".pointer (.atom Extraction.runtimeScope \"System.Int64\")", StringComparison.Ordinal))
 })
@@ -154,10 +156,12 @@ foreach (var (name, mutated) in new[]
 // No emitted instruction carries the table's signature; the call-site check binds the calli signature to the raw
 // operand, so a changed signature is rejected there.
 var calls = NarrowEvidence(source, "method0_calls_validated");
-var nativeCall = ExtractedInstructions(calls).Single(op => op.Method == 0 && op.Pc == indirect.Pc).Op;
-var changedCall = nativeCall.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal);
-if (nativeCall == changedCall) throw new InvalidOperationException("Missing native call signature");
-var changedCalls = ReplaceExactly(calls, nativeCall, changedCall, 1);
+const string changeCall = """
+    fun op => match op with
+      | .managed (.call signature tail) => .managed (.call { signature with result := .void } tail)
+      | _ => op
+    """;
+var changedCalls = ForgeDecodedInstruction(calls, 0, indirect.Pc, changeCall.ReplaceLineEndings(" "));
 var signaturePath = Path.Combine(root, "Rejected-call-signature.lean");
 File.WriteAllText(signaturePath, changedCalls);
 rejected.Add(signaturePath, "PASS independently rejected native dispatch evidence: call-signature",
@@ -205,23 +209,10 @@ theorem commuted_native_kind :
 #print axioms commuted_native_kind
 """);
 evidence.Add(commutedProof, "PASS commuted native table extraction, certificate and exact offset kinds");
-var wrongAddition = ReplaceExactly(commutedScalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2);
+var wrongAddition = ChangeRaw(commutedScalar, addPc, "opcode := 89");
 var wrongAdditionPath = Path.Combine(root, "Rejected-CommutedAddition.lean");
 File.WriteAllText(wrongAdditionPath, wrongAddition);
 rejected.Add(wrongAdditionPath, "PASS independently rejected commuted subtraction evidence",
     "Extraction.ScalarFlowValid");
 evidence.Check();
 rejected.Check();
-
-// Replaces `original` only where it occurs exactly `count` times, so a mutation changes exactly the evidence it names.
-static string ReplaceExactly(string text, string original, string replacement, int count)
-{
-    ArgumentException.ThrowIfNullOrEmpty(original);
-    var found = 0;
-    for (var at = text.IndexOf(original, StringComparison.Ordinal); at >= 0;
-        at = text.IndexOf(original, at + original.Length, StringComparison.Ordinal))
-        found++;
-    if (found != count)
-        throw new InvalidOperationException($"Expected {count} occurrences, found {found}: {original}");
-    return text.Replace(original, replacement, StringComparison.Ordinal);
-}
