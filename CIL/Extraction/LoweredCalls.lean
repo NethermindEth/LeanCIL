@@ -16,7 +16,7 @@ namespace CIL.Extraction
 inductive LoweredFamily where
   | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
   | unsafeHelper (helper : UnsafeHelper)
-  | unsafeReference | unsafeOffset | unsafeTransfer | unsafeBlock
+  | unsafeReference | unsafeOffset | unsafeBlock
   | integerMath | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
@@ -75,7 +75,6 @@ private def hardwareMember (owner member : String) : Bool :=
 /-- The Unsafe runtime method named by the raw operand. -/
 private def unsafeFamily (raw : RawInstruction) (name : String) : Option LoweredFamily :=
   match name with
-  | "Read" | "ReadUnaligned" | "Write" | "WriteUnaligned" => some .unsafeTransfer
   | "InitBlock" | "InitBlockUnaligned" | "CopyBlock" | "CopyBlockUnaligned" => some .unsafeBlock
   | "AddByteOffset" | "SubtractByteOffset" | "AsRef" => some .unsafeReference
   | "Add" | "Subtract" => some .unsafeOffset

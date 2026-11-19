@@ -1585,7 +1585,7 @@ internal static partial class ProofOutline
                 stack.Add(new Element(components.IndexOf(slots[value.Slot].Components[0])));
             }
             else if (stack.Count > 0 && stack[^1] is Element reading &&
-                ReadsWidth(op, components[reading.Component].Width))
+                ReadsWidth((op as ModelCall)?.Model ?? op, components[reading.Component].Width))
             {
                 var element = (Element)Pop();
                 var span = (SpanTerm)state.State[element.Component];

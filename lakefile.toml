@@ -106,6 +106,9 @@ name = "Tests.BitModels"
 name = "Tests.UnsafeModels"
 
 [[lean_lib]]
+name = "Tests.UnsafeTransferModels"
+
+[[lean_lib]]
 name = "Tests.UnsafeReinterpretations"
 
 [[lean_lib]]

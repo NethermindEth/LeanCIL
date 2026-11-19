@@ -673,7 +673,7 @@ translations into reference, memory or vector operations; they do not make those
 supported as a whole.
 
 Managed byte-reference and pointer `Unsafe.ReadUnaligned<T>` and `WriteUnaligned<T>` support
-admitted integer, aggregate and integer-vector storage. They are the typed loads and stores
+admitted integer, aggregate and integer-vector storage. The calls run typed load and store models
 with byte alignment, keeping bounds, lifetime, access authority and snapshot initialization
 masks. Readonly source references are accepted; writes require writable references and byte
 authority. Pointer overloads require allocation-relative references, not numeric addresses.
@@ -682,6 +682,8 @@ check. Primitive integers require their storage width; aggregates require their 
 alignment, including packing. Integer vectors conservatively require alignment to their full byte
 width. This subset can reject vector addresses that a particular runtime accepts; the unaligned
 overloads remain available. Alignment checks do not repeat the per-byte authority scan.
+Each transfer keeps its call. The decoder emits an opcode-tagged hole when the closed signature,
+open declaration, external target or element layout fails to resolve.
 The checked interpreter runs `Unsafe.As<TFrom,TTo>(ref TFrom)` and both `Unsafe.AsRef<T>`
 overloads as reference formation. They preserve the address, lifetime and access authority.
 `As` reads no size and excludes a byref, pointer or type variable as either type argument.

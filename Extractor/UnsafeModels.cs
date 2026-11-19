@@ -18,7 +18,6 @@ internal static class UnsafeModels
     // Each helper is either modelled or translated, never both, so the two entry points partition the family.
     static Operation? Helper(MethodReference reference, string architecture, bool modelled)
     {
-        if (!modelled && MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
         if ((modelled && reference.Name is "As" or "BitCast") || (!modelled && reference.Name == "AsRef"))
         {
             if (reference.DeclaringType is TypeSpecification ||
@@ -35,6 +34,11 @@ internal static class UnsafeModels
             return null;
 
         var element = generic.GenericArguments[0];
+        if (modelled && reference.Name is "Read" or "Write" or "ReadUnaligned" or "WriteUnaligned")
+            return generic.ElementMethod.CallingConvention == MethodCallingConvention.Generic &&
+                reference.DeclaringType is not TypeSpecification &&
+                IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime)
+                ? MemoryTransfers.CallModel(generic, architecture) : null;
         var definition = generic.ElementMethod;
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 && parameter.Owner == definition;

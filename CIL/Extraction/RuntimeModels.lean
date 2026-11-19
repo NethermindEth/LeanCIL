@@ -6,6 +6,7 @@ import CIL.Extraction.MarshalModels
 import CIL.Extraction.BitModels
 import CIL.Extraction.UnsafeReinterpretations
 import CIL.Extraction.UnsafeOffsets
+import CIL.Extraction.UnsafeTransferModels
 
 /-!
 # Runtime model resolution
@@ -28,6 +29,7 @@ def modelFamilies : List (List ModelEntry) := [
   marshalEntries,
   unsafeReinterpretEntries,
   unsafeOffsetEntries,
+  unsafeTransferEntries,
 ]
 
 /-- The runtime methods with a model. -/

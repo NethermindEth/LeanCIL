@@ -242,8 +242,6 @@ internal sealed class LayoutEvidence
                 var access = generic.Name switch
                 {
                     "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
-                    "ReadUnaligned" or "Read" => "load",
-                    "WriteUnaligned" or "Write" => "store",
                     _ => null
                 };
                 if (access is not null)

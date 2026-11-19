@@ -348,6 +348,24 @@ theorem memory_stepRenamed (operation : CIL.MemoryOp) :
 
 #print axioms memory_stepRenamed
 
+/-- A typed transfer reads or writes the corresponding bytes in the renamed allocations. -/
+theorem typedTransfer_stepRenamed (kind : CIL.TransferKind) (store : Bool) :
+    (CIL.RuntimeModel.typedTransfer kind store).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames formed _ _ _
+    pc stack bounds observable
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel, typedTransferCall,
+    CIL.RuntimeModel.observerCount] at observable ⊢
+  by_cases observed : unspecifiedOperands (if store then 2 else 1) stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  simp only [observed, Bool.false_eq_true, ite_false] at observable ⊢
+  apply (related.instructionResult _ formed stack bounds observable.bind_left).bind
+  intro left right ⟨memories, values⟩
+  rw [values]
+  exact .ok (.next memories frames)
+
+#print axioms typedTransfer_stepRenamed
+
 /-- A constant's model pushes the same scalar on both sides and touches no memory. -/
 theorem constant_stepRenamed (value : CIL.W32) :
     (CIL.RuntimeModel.constant value).StepRenamed := by
@@ -460,6 +478,7 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | exact bitEntries_yields intrinsic_stepRenamed entry member
     | exact unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
         skipInit_stepRenamed entry member
+    | exact unsafeTransferEntries_yields memory_stepRenamed typedTransfer_stepRenamed entry member
     | exact marshalEntries_yields memory_stepRenamed entry member
     | exact unsafeReinterpretEntries_yields memory_stepRenamed entry member
     | exact unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)

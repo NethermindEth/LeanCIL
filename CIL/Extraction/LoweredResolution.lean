@@ -11,38 +11,6 @@ environment and profile, and its role in a fold of the raw method.
 
 namespace CIL.Extraction
 
-/-- The reference-free transfer representation and its natural alignment. -/
-private def transferOf (environment : CallLayouts) (type : TypeExpr) :
-    Option (TransferKind × Nat) := do
-  match environment.valueShape type with
-  | .primitive width signed => return (.scalar width signed, width)
-  | .vector width =>
-    _root_.guard (integerVectorWidth type == some width)
-    match width with
-    | 16 => return (.snapshot .vector128, width)
-    | 32 => return (.snapshot .vector256, width)
-    | 64 => return (.snapshot .vector512, width)
-    | _ => none
-  | .aggregate size =>
-    let .aggregate _ index := type | none
-    let layout ← environment.layouts[index]?
-    return (.snapshot (.aggregate size), layout.alignment)
-  | _ => none
-
-/-- The type and direction fix the unaligned transfer instruction. -/
-private def unalignedTransfer (kind : TransferKind) (read : Bool) : Instruction :=
-  match kind, read with
-  | .scalar width signed, true => .loadScalar width signed
-  | .scalar width _, false => .storeScalar width
-  | .snapshot (.aggregate size), true => .loadAggregate size
-  | .snapshot (.aggregate size), false => .storeAggregate size
-  | .snapshot .vector128, true => .memory .load128
-  | .snapshot .vector128, false => .memory .store128
-  | .snapshot .vector256, true => .memory .load256
-  | .snapshot .vector256, false => .memory .store256
-  | .snapshot .vector512, true => .memory .load512
-  | .snapshot .vector512, false => .memory .store512
-
 /-- A closed generic helper with one of the admitted value storage representations. -/
 private def unsafeReferenceInstruction (environment : CallLayouts) (raw : RawInstruction)
     (site : CallSite) : Option Instruction := do
@@ -112,11 +80,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   | .unsafeHelper helper =>
     _root_.guard (helper.resolvesAt environment.storage site)
     return helper.instruction
-  | .unsafeTransfer =>
-    let (type, read, aligned) ← unsafeValueCall raw
-    let (kind, alignment) ← transferOf environment type
-    return if aligned then .memory (.pointerTransfer kind alignment (!read))
-      else unalignedTransfer kind read
   | .unsafeReference => unsafeReferenceInstruction environment raw site
   | .unsafeOffset =>
     _root_.guard (unsafeElementOffset raw)

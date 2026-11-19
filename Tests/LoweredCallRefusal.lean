@@ -70,8 +70,6 @@ private def vectorSite (read : Bool) (element : String) : RawInstruction := Id.r
 
 /-- A change of vector element alone is sufficient to refuse either transfer. -/
 theorem integerVectorTransfers :
-    let resolve := fun family raw => LoweredFamily.resolve family
-      (LayoutEnvironment.callLayouts {}) .scalar none raw
     let decode := fun raw => methodCode .scalar {} [] [true]
       { body 40 .void name!"Run" "Run" with code := [raw] }
     let control := vectorSite false "System.Byte"
@@ -79,8 +77,10 @@ theorem integerVectorTransfers :
       | .call site => decide (decode control = [.call site.method {}])
       | _ => false) = true ∧
       decode (vectorSite false "System.Double") = [.unadmitted 40] ∧
-      resolve .unsafeTransfer (vectorSite true "System.Byte") = some (.memory .load128) ∧
-      resolve .unsafeTransfer (vectorSite true "System.Double") = none := by decide +kernel
+      (match (vectorSite true "System.Byte").operand with
+       | .call site => decide (decode (vectorSite true "System.Byte") = [.call site.method {}])
+       | _ => false) = true ∧
+      decode (vectorSite true "System.Double") = [.unadmitted 40] := by decide +kernel
 
 #print axioms integerVectorTransfers
 

@@ -132,10 +132,10 @@ def unsafeHelperMatches (layouts : List RawLayout) (raw : RawInstruction)
       | _ => false
     | _ => emittedUnsafeHelper emitted == some helper
 
-/-- The site rule checks calls. Other raw opcodes cannot emit a byte-span transfer,
+/-- The site rule checks calls. Other raw opcodes cannot emit a pointer or byte-span transfer,
     reinterpret a span or take an array's data reference. -/
 private def memoryCallOrigin (raw : RawInstruction) : Instruction → Bool
-  | .memory (.marshalRead ..) | .memory (.marshalWrite ..)
+  | .memory (.pointerTransfer ..) | .memory (.marshalRead ..) | .memory (.marshalWrite ..)
   | .memory (.spanReinterpret ..) | .memory (.observeView .arrayData) => raw.opcode == 40
   | _ => true
 
@@ -145,7 +145,6 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
   all3 (fun instruction live emitted => !live ||
       memoryCallOrigin instruction emitted &&
-      unsafeTransferMatches layouts instruction emitted &&
       unsafeBlockMatches instruction emitted &&
       vector128UnsafeMatches instruction emitted &&
       viewObservationMatches instruction emitted &&

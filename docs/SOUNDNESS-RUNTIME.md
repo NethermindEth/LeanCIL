@@ -100,7 +100,10 @@ the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElem
 `Sign` of `System.Math` and of each integer type that declares them, the bit helpers of
 `System.Numerics.BitOperations` and of each integer type that declares them, and
 `BinaryPrimitives.ReverseEndianness`, whose calls keep their calls, so the table accounts for no
-lowered emission. A helper entry gives the scalar intrinsic of its integer type only to a static,
+lowered emission. `Unsafe.Read` and `Write` run pointer transfers at the element's natural
+alignment. `ReadUnaligned` and `WriteUnaligned` run typed loads and stores at byte alignment.
+These models support integer vectors of 16, 32 and 64 bytes under every profile.
+A helper entry gives the scalar intrinsic of its integer type only to a static,
 non-generic reference of that owner and exact runtime assembly whose parameters and result have
 that type; a bit count's result is `int` under `BitOperations` and the integer type under the
 type that declares it. A model the table gives a kept call must be

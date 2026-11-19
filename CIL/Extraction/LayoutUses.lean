@@ -19,7 +19,7 @@ inductive FieldAccess where
 
 /-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
 inductive SizeAccess where
-  | load | store | sizeOf | construct | referenceAdd | referenceSubtract
+  | sizeOf | construct | referenceAdd | referenceSubtract
   | spanElement
   | arrayElement
   deriving DecidableEq, Repr
@@ -61,13 +61,9 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
   | _, _ => false
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
-private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bool
-  | .load, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual false)
-  | .store, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual true) =>
-    width == size && actual == alignment
+private def checkSize (size : Nat) : SizeAccess → Instruction → Bool
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
   | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
-  | .load, .loadAggregate width | .store, .storeAggregate width => width == size
   | .sizeOf, .ldc_i4 bits => bits.toNat == size
   | .spanElement, .memory (.spanEmpty width _)
   | .spanElement, .initializeSpanLocal _ (.empty width _)
@@ -102,7 +98,7 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
         return operation.constructs && match method.linkAt pc with
           | some (.aggregate _ width) => width.val == layout.layout.size
           | _ => false
-      return checkSize layout.layout.size layout.alignment access operation).getD false
+      return checkSize layout.layout.size access operation).getD false
   | .local slot type => (do
       let layout ← layouts[type]?
       match ← method.localKinds[slot]? with

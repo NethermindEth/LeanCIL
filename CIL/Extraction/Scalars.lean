@@ -1,6 +1,7 @@
 import CIL.Extraction.Features
 import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
+import CIL.Extraction.UnsafeTransferModels
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.GuardCalls
@@ -905,8 +906,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     let .call site := instruction.operand | none
     let expected := if let some (copy, _) := unsafeBlockCall instruction then
         [.word32, if copy then .reference else .word32, .reference] else
-        if let some (type, read, _) := unsafeValueCall instruction then
-        (if read then [] else [scalarType type]) ++ [.reference] else
+      if opcode == 40 && site.parameterTypes.head? == some (.pointer .void) &&
+          unsafeTransferEntries.any (fun entry => entry.name == site.method.name &&
+            entry.bindsSite site) then
+        site.parameterTypes.tail.reverse.map scalarType ++ [.reference]
+      else
       if unsafeReferenceHelper instruction == some .asRef then [.reference] else
       if nullGuardCall instruction then [.object, .object] else
       if unsafePointerOffset instruction then [.word32, .reference] else

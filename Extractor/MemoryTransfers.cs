@@ -24,20 +24,13 @@ internal static class MemoryTransfers
         return ($".scalar {width} {signed.ToString().ToLowerInvariant()}", width);
     }
 
-    internal static Operation? Unsafe(MethodReference reference, string architecture)
+    // The analyses use this transfer for the kept call of the validated generic Unsafe owner.
+    internal static Operation? CallModel(GenericInstanceMethod reference, string architecture)
     {
-        if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
-            reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
-            generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
-            (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=
-                MethodCallingConvention.Default)
-            return null;
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 &&
-            parameter.Owner == generic.ElementMethod;
-        bool Address(TypeReference type) => type is ByReferenceType byRef &&
-            byRef.ElementType.FullName == "System.Byte" ||
+            parameter.Owner == reference.ElementMethod;
+        bool Address(TypeReference type) => type is ByReferenceType { ElementType.MetadataType: MetadataType.Byte } ||
             type is PointerType { ElementType.MetadataType: MetadataType.Void };
         var aligned = reference.Name is "Read" or "Write";
         if (aligned && reference.Parameters.FirstOrDefault()?.ParameterType is not
@@ -49,7 +42,7 @@ internal static class MemoryTransfers
             reference.ReturnType.MetadataType == MetadataType.Void;
         if (!read && !write) return null;
         RuntimeModels.ValidateSignature(reference, architecture);
-        var type = generic.GenericArguments[0];
+        var type = reference.GenericArguments[0];
         if (aligned)
         {
             var (kind, alignment) = Describe(type, reference.Module, architecture);

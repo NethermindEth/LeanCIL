@@ -30,7 +30,7 @@ CallWitness[] witnesses =
     new("unsafeOffset", "UnsafeReferences::AddPointer(System.Byte*,System.Int32)",
         0, 2, ".lowered .unsafeOffset"),
     new("unsafeTransfer", "UnalignedMemory::ReadWord(System.Byte&)",
-        0, 1, ".lowered .unsafeTransfer"),
+        0, 1, ".model"),
     new("bitCast", "ValueBitCasts::From128Byte(System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
         0, 1, ".model"),
     new("asReference", "UnsafeReferences::Word(Examples.FourLimbs&)",
