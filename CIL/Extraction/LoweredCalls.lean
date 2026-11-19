@@ -15,7 +15,6 @@ namespace CIL.Extraction
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
   | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
-  | unsafeHelper (helper : UnsafeHelper)
   | unsafeReference | unsafeOffset | unsafeBlock
   | integerMath | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
@@ -73,12 +72,12 @@ private def hardwareMember (owner member : String) : Bool :=
   | _ => false
 
 /-- The Unsafe runtime method named by the raw operand. -/
-private def unsafeFamily (raw : RawInstruction) (name : String) : Option LoweredFamily :=
+private def unsafeFamily (name : String) : Option LoweredFamily :=
   match name with
   | "InitBlock" | "InitBlockUnaligned" | "CopyBlock" | "CopyBlockUnaligned" => some .unsafeBlock
-  | "AddByteOffset" | "SubtractByteOffset" | "AsRef" => some .unsafeReference
+  | "AddByteOffset" | "SubtractByteOffset" => some .unsafeReference
   | "Add" | "Subtract" => some .unsafeOffset
-  | _ => LoweredFamily.unsafeHelper <$> unsafeHelperFamily raw
+  | _ => none
 
 /-- The family of a method-token call before inspecting its overload, layouts or fold role. -/
 def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
@@ -105,7 +104,7 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
   | .atom scope type =>
     if scope == runtimeScope then
       match type with
-      | "System.Runtime.CompilerServices.Unsafe" => unsafeFamily raw name
+      | "System.Runtime.CompilerServices.Unsafe" => unsafeFamily name
       | "System.Runtime.CompilerServices.RuntimeHelpers" =>
         if name == "CreateSpan" then some .staticSpan
         else if referenceContentQuery site then some .referenceContent else none

@@ -77,9 +77,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     return .memory (.observeView (← viewObservation raw))
   | .binary => binaryInstruction raw
   | .guard => guardInstruction raw
-  | .unsafeHelper helper =>
-    _root_.guard (helper.resolvesAt environment.storage site)
-    return helper.instruction
   | .unsafeReference => unsafeReferenceInstruction environment raw site
   | .unsafeOffset =>
     _root_.guard (unsafeElementOffset raw)

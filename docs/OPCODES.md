@@ -652,15 +652,14 @@ and leaves memory, initialization flags and access permissions unchanged, so rea
 still require initialized bytes. A call keeps its `call`, which runs the model the runtime model
 table gives its exact closed reference.
 
-`Unsafe.NullRef<T>()` and `Unsafe.IsNullRef<T>(ref readonly T)` admit the same
-storage types. `NullRef` pushes the model's null managed reference, which a
+`Unsafe.NullRef<T>()` and `Unsafe.IsNullRef<T>(ref readonly T)` keep their calls. Their models
+require recognized storage for `T` and exclude byref storage. `NullRef` pushes the model's null managed reference, which a
 byref local or argument can hold like any other reference. `IsNullRef` returns
 1 for it and 0 for every other reference, live or not, without accessing memory.
 Every load, store, copy, initialization or field access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
-operations access nothing. Extraction evidence binds each call to its operation in both
-directions.
+operations access nothing. The model table binds the open declaration and external target of each call.
 
 Reference `add` admits either operand order, matching the
 [.NET 10 importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L5093-L5106);
@@ -687,7 +686,8 @@ open declaration, external target or element layout fails to resolve.
 The checked interpreter runs `Unsafe.As<TFrom,TTo>(ref TFrom)` and both `Unsafe.AsRef<T>`
 overloads as reference formation. They preserve the address, lifetime and access authority.
 `As` reads no size and excludes a byref, pointer or type variable as either type argument.
-`AsRef` accepts stored field and vector types for its byref and void-pointer overloads.
+Both `AsRef` overloads keep their call. Each checks its own external target and open declaration
+and accepts field or vector storage for its element.
 
 `Unsafe.BitCast<TFrom,TTo>` is admitted between equal-size validated unmanaged aggregates and
 `Vector128`/`Vector256`/`Vector512` values with `byte`, `int`, `uint`, `long` or `ulong`

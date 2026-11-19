@@ -911,7 +911,10 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
             entry.bindsSite site) then
         site.parameterTypes.tail.reverse.map scalarType ++ [.reference]
       else
-      if unsafeReferenceHelper instruction == some .asRef then [.reference] else
+      -- AsRef takes a formed reference even at its void-pointer overload.
+      if opcode == 40 && site.method.name == name!"AsRef" &&
+          site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
+          site.parameterTypes == [.pointer .void] then [.reference] else
       if nullGuardCall instruction then [.object, .object] else
       if unsafePointerOffset instruction then [.word32, .reference] else
       if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome

@@ -34,17 +34,17 @@ private def vector (width : Nat) (element := "System.Byte") : TypeExpr :=
 
 /-- A closed static call together with the declaration and external identity of its member. -/
 private def site (name : MetadataName) (text signature : String) (args : List TypeExpr)
-    (parameter result : TypeExpr) (declared : OpenSignature) : CallSite :=
+    (parameters : List TypeExpr) (result : TypeExpr) (declared : OpenSignature) : CallSite :=
   let method : MethodRef :=
     { owner := unsafeOwner, name, hasThis := false, genericArity := args.length,
-      parameters := [parameter], returnType := result, methodArguments := args }
+      parameters, returnType := result, methodArguments := args }
   { method, name := text, declared, target := .external (runtimeScope ++ "::" ++ signature),
-    typeArguments := args, parameterCount := 1, returnsValue := true }
+    typeArguments := args, parameterCount := parameters.length, returnsValue := true }
 
 /-- The open byref-to-byref cast closed over source and target. -/
 private def asSite (source target : TypeExpr) :=
   site name!"As" "As" "!!1& System.Runtime.CompilerServices.Unsafe::As(!!0&)"
-    [source, target] (.byref source) (.byref target)
+    [source, target] [.byref source] (.byref target)
     { convention := 16, parameters := [.byref (.parameter 0)],
       returnType := .byref (.parameter 1) }
 
@@ -53,13 +53,23 @@ private def asRefSite (element : TypeExpr) (pointer : Bool) :=
   let parameter := fun arg => if pointer then TypeExpr.pointer .void else .byref arg
   let operand := if pointer then "System.Void*" else "!!0&"
   site name!"AsRef" "AsRef" s!"!!0& System.Runtime.CompilerServices.Unsafe::AsRef({operand})"
-    [element] (parameter element) (.byref element)
+    [element] [parameter element] (.byref element)
     (unsafeDeclaration (fun arg => [parameter arg]) TypeExpr.byref)
+
+/-- The generic null reference and its Boolean observer. -/
+private def nullSite (element : TypeExpr) (test : Bool) :=
+  if test then
+    site name!"IsNullRef" "IsNullRef" "System.Boolean System.Runtime.CompilerServices.Unsafe::\
+      IsNullRef(!!0&)" [element] [.byref element] boolean
+      (unsafeDeclaration (fun arg => [.byref arg]) (fun _ => boolean))
+  else
+    site name!"NullRef" "NullRef" "!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"
+      [element] [] (.byref element) (unsafeDeclaration (fun _ => []) TypeExpr.byref)
 
 /-- The closed value cast from source to target. -/
 private def cast (source target : TypeExpr) :=
   site name!"BitCast" "BitCast" "!!1 System.Runtime.CompilerServices.Unsafe::BitCast(!!0)"
-    [source, target] source target
+    [source, target] [source] target
     { convention := 16, parameters := [.parameter 0], returnType := .parameter 1 }
 
 /-- A span can be a target of As even when its element is a type variable. -/
@@ -101,7 +111,12 @@ private def values : List (CallSite × MemoryOp) :=
 private def references : List (CallSite × MemoryOp) :=
   [byteType, vector 128, packet].map (fun element => (asSite element byteType, .asRef)) ++
   [span byteType, .array byteType, .object "Test" "Class", span (.parameter 0)].map
-    (fun target => (asSite byteType target, .asRef))
+    (fun target => (asSite byteType target, .asRef)) ++
+  [false, true].flatMap (fun pointer => [byteType, vector 128, packet].map
+    (fun element => (asRefSite element pointer, .asRef))) ++
+  [false, true].flatMap (fun test => [byteType, vector 256, packet, span byteType,
+    .array byteType, .object "Test" "Class"].map
+    (fun element => (nullSite element test, if test then .isNullRef else .nullRef)))
 
 /-- Every admitted call runs its expected operation and keeps its operand at the live site. -/
 theorem resolved : (references ++ values).all (fun (call, operation) =>
@@ -143,13 +158,38 @@ theorem bitCastExclusions :
         (model (cast packet arg) (environment words)).isNone) := by decide +kernel
 #print axioms bitCastExclusions
 
-/-- The public decoder keeps both AsRef overloads' field and vector storage checks. -/
+/-- The closed AsRef parameter picks both the open declaration and its exact external target. -/
 theorem asRefStorage : [false, true].all (fun pointer =>
-    [byteType, vector 128, packet].all (fun arg =>
-      decide (decoded (asRefSite arg pointer) = some [.memory .asRef])) &&
-    [span byteType, TypeExpr.array byteType, .object "Test" "Class"].all (fun arg =>
-      decide (decoded (asRefSite arg pointer) = some [.unadmitted 40]))) := by decide +kernel
+    let control := asRefSite byteType pointer
+    let other := asRefSite byteType (!pointer)
+    refuses control { control with declared := other.declared } &&
+    refuses control { control with target := other.target } &&
+    refuses control { control with declared := other.declared, target := other.target } &&
+    [span byteType, TypeExpr.array byteType, .object "Test" "Class", .byref byteType,
+     .aggregate "Other" 0].all (fun arg => refuses control (asRefSite arg pointer))) := by
+  decide +kernel
 #print axioms asRefStorage
+
+/-- The void-pointer overload consumes a reference in the scalar flow certificate. -/
+theorem asRefPointerStack :
+    let call := asRefSite byteType true
+    let transfer := scalarTransfer (caller call) ⟨0, 40, .call call⟩
+    transfer [.reference] = some [.reference] ∧ transfer [.other] = none := by decide +kernel
+#print axioms asRefPointerStack
+
+/-- Missing computed size preserves a field's raw storage identity for all four overloads. -/
+theorem indexedStorage :
+    let env := { environment 2 with layouts := #[] }
+    [asRefSite packet false, asRefSite packet true,
+      nullSite packet false, nullSite packet true].all
+      (fun call => decide (decoded call env = some [.call call.method {}])) := by decide +kernel
+#print axioms indexedStorage
+
+/-- Recognized reference storage and unsupported elements both refuse the two null helpers. -/
+theorem nullStorage : [false, true].all (fun test =>
+    [TypeExpr.byref byteType, .pointer byteType, .void, .aggregate "Other" 0].all
+      (fun arg => refuses (nullSite byteType test) (nullSite arg test))) := by decide +kernel
+#print axioms nullStorage
 
 /-- Each closed type refusal differs from a kept reference or snapshot operand in one argument. -/
 theorem excludedOperands :
@@ -166,7 +206,9 @@ theorem excludedOperands :
 
 /-- Closed operands for mutations that run through the method decoder. -/
 private def controls := [(asSite byteType packet, MemoryOp.asRef), (cast byteType boolean,
-  MemoryOp.bitcastByteBool), (cast (vector 128) packet, .bitcastValue .vector128 (.aggregate 16))]
+  MemoryOp.bitcastByteBool), (cast (vector 128) packet, .bitcastValue .vector128 (.aggregate 16)),
+  (asRefSite packet false, .asRef), (asRefSite packet true, .asRef),
+  (nullSite byteType false, .nullRef), (nullSite byteType true, .isNullRef)]
 
 /-- The owner, receiver, generic arity and closed types identify each overload. -/
 theorem exactReference : controls.all (fun (call, _) =>
@@ -174,9 +216,12 @@ theorem exactReference : controls.all (fun (call, _) =>
     [ { method with owner := .apply unsafeOwner byteType },
       { method with owner := .atom "Other" "System.Runtime.CompilerServices.Unsafe" },
       { method with hasThis := true }, { method with genericArity := method.genericArity + 1 },
-      { method with parameters := [] }, { method with returnType := .void } ].all
+      { method with parameters := method.parameters ++ [byteType] },
+      { method with returnType := .void } ].all
       (fun other => (runtimeModel (environment 2) .call other).isNone &&
         refuses call { call with method := other })) &&
+    refuses (nullSite byteType true) { (nullSite byteType true) with
+      method.returnType := .atom "Other" "System.Boolean" } &&
     (runtimeModel {} .call { (asSite byteType packet).method with
       genericArity := 1, methodArguments := [byteType], parameters := [.object runtimeScope
         "System.Object"], returnType := byteType }).isNone := by decide +kernel
@@ -187,6 +232,10 @@ theorem exactDeclaration : controls.all (fun (call, operation) =>
     let altered := { call with declared.returnType := .void }
     refuses call altered &&
       refuses call { call with target := .external "Other" } &&
+      refuses call { call with parameterCount := call.parameterCount + 1 } &&
+      refuses call { call with returnsValue := false } &&
+      refuses call { call with typeArguments := [] } &&
+      refuses call { call with name := "Other" } &&
       refuses call { call with declared.parameters := [.ownerParameter 0] } &&
       !accepts altered (.call call.method {}) &&
       !accepts altered (.memory operation) &&

@@ -1,6 +1,6 @@
 import CIL.Extraction.DecodedMethod
 
-/-! Exact runtime operands, modelled SkipInit calls and lowered null-reference operations. -/
+/-! Exact runtime operands, modelled reference helpers and the opcodes that can emit null. -/
 
 open CIL CIL.Extraction
 
@@ -19,26 +19,6 @@ private def call : CallSite := {
   target := .external (scope ++ "::System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(\
     !!0&)"),
   typeArguments := [word], parameterCount := 1, returnsValue := false }
-private def nullCall : CallSite := {
-  declared := { convention := 0x10, returnType := .byref (.parameter 0) },
-  method := {
-    owner := unsafeType, name := name!"NullRef", hasThis := false, genericArity := 1,
-    returnType := .byref word, parameters := [], methodArguments := [word] },
-  name := "NullRef",
-  target := .external (scope ++ "::!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"),
-  typeArguments := [word], parameterCount := 0, returnsValue := true }
-private def testCall : CallSite := {
-  declared := {
-    convention := 0x10, returnType := .atom runtimeScope "System.Boolean",
-    parameters := [.byref (.parameter 0)] },
-  method := {
-    owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
-    returnType := .atom scope "System.Boolean", parameters := [.byref word],
-    methodArguments := [word] },
-  name := "IsNullRef",
-  target := .external (scope ++ "::System.Boolean System.Runtime.CompilerServices.Unsafe::\
-    IsNullRef(!!0&)"),
-  typeArguments := [word], parameterCount := 1, returnsValue := true }
 private def raw (site : CallSite) : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
@@ -68,44 +48,17 @@ example : ¬ UnsafeCallsValid [] nonCall [true] [.skipInit] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw call) [] [.call call.method {}] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide +kernel
 
--- `NullRef` must push the null reference: no other operation with its stack effect.
-example : UnsafeCallsValid [] (raw nullCall) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.ldc_i4 0] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true]
-    [.ldsflda { owner := .void, index := 0, type := .void, name := name!"Field" }] := by
-  decide +kernel
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory .isNullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { nullCall with target := .external "forged" }) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { nullCall with parameterCount := 1 }) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { nullCall with returnsValue := false }) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { nullCall with method.hasThis := true }) [true]
-    [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { nullCall with typeArguments := [.byref word] }) [true] [.memory .nullRef] := by decide +kernel
-
--- `IsNullRef` must test for null: a constant or a reinterpretation cannot stand in for it.
-example : UnsafeCallsValid [] (raw testCall) [true] [.memory .isNullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw testCall) [true] [.memory .asRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw testCall) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { testCall with name := "NullRef" }) [true] [.memory .isNullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { testCall with target := .external "forged" }) [true] [.memory .isNullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { testCall with parameterCount := 2 }) [true] [.memory .isNullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { testCall with returnsValue := false }) [true] [.memory .isNullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { testCall with typeArguments := [word, word] }) [true] [.memory .isNullRef] := by decide +kernel
-
-/-- A closed Boolean result includes its defining assembly. -/
-theorem isNullRefResultScope :
-    UnsafeHelper.isNullRef.resolves [] testCall = true ∧
-      UnsafeHelper.isNullRef.resolves [] { testCall with
-        method.returnType := .atom "Fixture" "System.Boolean" } = false := by decide +kernel
-
-#print axioms isNullRefResultScope
-
 -- A helper operation cannot replace an unrelated instruction.
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .isNullRef] := by decide +kernel
 example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide +kernel
+-- The raw ldnull exception requires an operand-free opcode.
+example : UnsafeCallsValid [] { nonCall with code := [⟨0, 20, .none⟩] } [true]
+    [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] { nonCall with code := [⟨0, 20, .call call⟩] } [true]
+    [.memory .nullRef] := by decide +kernel
 -- Unreachable sites are emitted as holes and are not bound.
-example : UnsafeCallsValid [] (raw nullCall) [false] [.unadmitted 0x28] := by decide +kernel
+example : UnsafeCallsValid [] (raw call) [false] [.unadmitted 0x28] := by decide +kernel
 
 end Tests.UnsafeCallEvidence
 
@@ -141,28 +94,5 @@ theorem local_reference_helper_name :
       check (some (.direct 0)) emitted = true ∧ check (some (.direct 1)) emitted = false := by
   decide +kernel
 #print axioms local_reference_helper_name
-
-/-- A helper which resolves to a hole accepts exactly the hole with that raw opcode. -/
-theorem unresolvedHelperOnlyHole (layouts : List RawLayout) (raw : RawInstruction)
-    (helper : UnsafeHelper) (emitted : CIL.Instruction)
-    (family : unsafeHelperFamily raw = some helper)
-    (unresolved : helper.decode layouts raw = .unadmitted raw.opcode) :
-    unsafeHelperMatches layouts raw emitted = true ↔ emitted = .unadmitted raw.opcode := by
-  simp only [unsafeHelperMatches, family, unresolved]
-  cases emitted <;> simp
-
-#print axioms unresolvedHelperOnlyHole
-
-/-- A resolving helper accepts only its own operation. -/
-theorem resolvedHelperOnlyOperation (layouts : List RawLayout) (raw : RawInstruction)
-    (helper : UnsafeHelper) (emitted : CIL.Instruction)
-    (family : unsafeHelperFamily raw = some helper)
-    (resolved : helper.decode layouts raw = helper.instruction) :
-    unsafeHelperMatches layouts raw emitted = true ↔ emitted = helper.instruction := by
-  simp only [unsafeHelperMatches, family, resolved]
-  cases helper <;> cases emitted <;> simp [UnsafeHelper.instruction, emittedUnsafeHelper] <;>
-    rename_i operation <;> cases operation <;> simp
-
-#print axioms resolvedHelperOnlyOperation
 
 end Tests.UnsafeCallEvidence

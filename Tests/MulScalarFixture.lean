@@ -11,21 +11,31 @@ open CIL
 
 def profile : FeatureProfile := { architecture := .scalar, nativeWidth := 64, littleEndian := true, advSimd := false, sse2 := false, ssse3 := false, sse42 := false, avx := false, avx2 := false, avx512F := false, avx512FVL := false, bmi1 := false, sse41 := false, avx512DQ := false, avx512DQVL := false, bmi2 := false, armBase64 := false, vector256Accelerated := false }
 
+/-- The checked four-limb operand of the vector paths. -/
+private def limbsEnvironment : LayoutEnvironment :=
+  let layout : Extraction.RawLayout :=
+    { identity := "Fixture::Limbs", explicit := false, packing := 0, declaredSize := 0,
+      fields := List.replicate 4 { type := .unsigned64 } }
+  let fields : List FieldLayout :=
+    [⟨0, 8, false⟩, ⟨8, 8, false⟩, ⟨16, 8, false⟩, ⟨24, 8, false⟩]
+  { rawLayouts := [layout], layouts := #[⟨⟨32, fields⟩, 8⟩] }
+
 /-- The readonly limb argument is formed with AsRef before As retypes it as a vector. -/
-private def limbsCall : Instruction :=
+private def limbsCall (asVector : Bool) : Instruction :=
   let limbs := Extraction.TypeExpr.aggregate "Fixture::Limbs" 0
   let vector := Extraction.TypeExpr.apply
     (.constructor Extraction.intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
     (.atom Extraction.runtimeScope "System.UInt64")
   let method : Extraction.MethodRef :=
-    { owner := Extraction.unsafeOwner, name := name!"As",
-      hasThis := false, genericArity := 2,
-      returnType := .byref vector, parameters := [.byref limbs],
-      methodArguments := [limbs, vector] }
+    { owner := Extraction.unsafeOwner, name := if asVector then name!"As" else name!"AsRef",
+      hasThis := false, genericArity := if asVector then 2 else 1,
+      returnType := .byref (if asVector then vector else limbs), parameters := [.byref limbs],
+      methodArguments := if asVector then [limbs, vector] else [limbs] }
   .call method {}
 
 /-- The scalar extraction of the four-limb multiply. -/
 def actual : Method := {
+  environment := limbsEnvironment,
   links := [(111, .direct 9), (116, .direct 9), (121, .direct 9), (129, .direct 5),
     (134, .direct 5), (144, .direct 5), (149, .direct 5), (154, .direct 9), (159, .direct 5),
     (168, .direct 9), (173, .direct 5), (182, .direct 9), (187, .direct 5), (200, .direct 7)],
@@ -242,6 +252,7 @@ def actual : Method := {
 
 def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex : Nat)
     (alternative : Bool := false) : CIL.Method := {
+  environment := limbsEnvironment,
   links := [(99, .direct wordIndex), (104, .direct wordIndex), (109, .direct wordIndex),
     (117, .direct countIndex), (122, .direct countIndex), (132, .direct countIndex),
     (137, .direct countIndex), (142, .direct wordIndex), (147, .direct countIndex),
@@ -276,12 +287,12 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   .feature .avx512DQVL,
   .brfalse 36,
   (if profile.avx512DQVL then .ldarg 0 else .unadmitted 0),
-  (if profile.avx512DQVL then .memory .asRef else .unadmitted 0),
-  (if profile.avx512DQVL then limbsCall else .unadmitted 0),
+  (if profile.avx512DQVL then limbsCall false else .unadmitted 0),
+  (if profile.avx512DQVL then limbsCall true else .unadmitted 0),
   (if profile.avx512DQVL then .memory .load256 else .unadmitted 0),
   (if profile.avx512DQVL then .ldarg 1 else .unadmitted 0),
-  (if profile.avx512DQVL then .memory .asRef else .unadmitted 0),
-  (if profile.avx512DQVL then limbsCall else .unadmitted 0),
+  (if profile.avx512DQVL then limbsCall false else .unadmitted 0),
+  (if profile.avx512DQVL then limbsCall true else .unadmitted 0),
   (if profile.avx512DQVL then .memory .load256 else .unadmitted 0),
   (if profile.avx512DQVL then .stloc 22 else .unadmitted 0),
   (if profile.avx512DQVL then .ldloc 22 else .unadmitted 0),
@@ -297,9 +308,9 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
     else if profile.avx2 then .ldarg 0
     else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .memory .asRef else .unadmitted 0),
+    else if profile.avx2 then limbsCall false else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then limbsCall else .unadmitted 0),
+    else if profile.avx2 then limbsCall true else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .memory .load256 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
@@ -309,9 +320,9 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
     else if profile.avx2 then .ldarg 1
     else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .memory .asRef else .unadmitted 0),
+    else if profile.avx2 then limbsCall false else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then limbsCall else .unadmitted 0),
+    else if profile.avx2 then limbsCall true else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .memory .load256 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0

@@ -205,8 +205,10 @@ naming `System.Runtime.CompilerServices.IsExternalInit` from any assembly, as C#
 same twin rejection covers a method equal to the accessor once the modifier is erased.
 
 The model of `Unsafe.As` forms a reference and preserves its address without reading a layout.
-The extractor lowers both `Unsafe.AsRef` overloads to reference formation for stored field or
-vector elements.
+Both `Unsafe.AsRef` overloads keep their call and form a reference for field or vector storage.
+The closed parameter selects the byref or void-pointer overload and its exact external target.
+`Unsafe.NullRef` and `Unsafe.IsNullRef` accept an indexed storage kind other than byref storage.
+Their models push the null managed reference and test a managed reference for null, respectively.
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.

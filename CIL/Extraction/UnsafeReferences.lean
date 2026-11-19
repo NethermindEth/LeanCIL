@@ -11,7 +11,7 @@ namespace CIL.Extraction
 
 /-- Reference helpers whose runtime signatures have checked allocation-relative meanings. -/
 inductive UnsafeReferenceHelper where
-  | addBytes (signed : Bool) | subtractBytes | asRef
+  | addBytes (signed : Bool) | subtractBytes
   deriving DecidableEq, Repr
 
 /-- Exact runtime identity and closed types for a generic Unsafe reference helper. -/
@@ -30,12 +30,7 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
     let reference := TypeExpr.byref type
     let native := TypeExpr.atom runtimeScope "System.IntPtr"
     let unsigned := TypeExpr.atom runtimeScope "System.UIntPtr"
-    if site.name == "AsRef" &&
-        (referenceSignature site reference [.pointer .void]
-          "!!0& System.Runtime.CompilerServices.Unsafe::AsRef(System.Void*)" ||
-         referenceSignature site reference [reference]
-          "!!0& System.Runtime.CompilerServices.Unsafe::AsRef(!!0&)") then some .asRef
-    else if site.name == "AddByteOffset" && referenceSignature site reference [reference, native]
+    if site.name == "AddByteOffset" && referenceSignature site reference [reference, native]
         "!!0& System.Runtime.CompilerServices.Unsafe::AddByteOffset(!!0&,System.IntPtr)" then
       some (.addBytes true)
     else if site.name == "AddByteOffset" && referenceSignature site reference [reference, unsigned]
@@ -54,11 +49,10 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
 def UnsafeReferenceHelper.instruction : UnsafeReferenceHelper → Instruction
   | .addBytes signed => .memory (.add 1 signed)
   | .subtractBytes => .sub
-  | .asRef => .memory .asRef
 
 /-- The exact existing operation implementing each reference helper. -/
 def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Instruction → Bool
-  | .subtractBytes, .sub | .asRef, .memory .asRef => true
+  | .subtractBytes, .sub => true
   | .addBytes expected, .memory (.add width signed) => width == 1 && signed == expected
   | _, _ => false
 
@@ -93,7 +87,7 @@ def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Instructio
       (match site.declaringType with
         | .atom _ "System.Runtime.CompilerServices.Unsafe" => true
         | _ => false) && site.name ∈
-          ["AddByteOffset", "SubtractByteOffset", "AsRef"] ||
+          ["AddByteOffset", "SubtractByteOffset"] ||
         match emitted with | .memory (.add ..) => !unsafeElementOffset instruction | _ => false
     | _, _ => false
 

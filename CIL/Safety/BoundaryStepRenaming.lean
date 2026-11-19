@@ -480,6 +480,7 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
         skipInit_stepRenamed entry member
     | exact unsafeTransferEntries_yields memory_stepRenamed typedTransfer_stepRenamed entry member
     | exact marshalEntries_yields memory_stepRenamed entry member
+    | exact unsafeReferenceEntries_yields memory_stepRenamed entry member
     | exact unsafeReinterpretEntries_yields memory_stepRenamed entry member
     | exact unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)
         (memory_stepRenamed .byteOffset) entry member

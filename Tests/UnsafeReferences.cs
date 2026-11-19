@@ -33,7 +33,7 @@ void Prove(string name, string selector, string claim)
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness : " + claim + " := by rfl\n#print axioms correctness\nend ExampleProof\n");
-    if (name is "Word" or "Half" or "Vector")
+    if (name is "Word" or "Half" or "Vector" or "Mutable" or "Pointer")
         File.AppendAllText(proof, """
 
             /-- The compiled reinterpretation keeps its call and resolves to reference formation. -/

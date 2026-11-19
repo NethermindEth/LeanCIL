@@ -28,6 +28,7 @@ def modelFamilies : List (List ModelEntry) := [
   unsafeEntries,
   marshalEntries,
   unsafeReinterpretEntries,
+  unsafeReferenceEntries,
   unsafeOffsetEntries,
   unsafeTransferEntries,
 ]
@@ -89,7 +90,8 @@ elab "model_entries% " entries:term : term => do
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
   change ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2, entry ∈ model_entries% modelEntries
-  simp [runtimeModels, SearchTree.toList]
+  -- Each table cell is found among the registered cells, so the step count grows with their product.
+  simp (maxSteps := 1000000) [runtimeModels, SearchTree.toList]
 
 #print axioms runtimeModels_entries
 

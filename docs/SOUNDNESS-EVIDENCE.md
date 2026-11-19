@@ -262,7 +262,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   Each Unsafe transfer overload binds the raw target and open declaration to the closed address
   type. The unaligned overloads distinguish a byte reference from a void pointer.
   The entries for Unsafe.As and Unsafe.BitCast bind both method variables. Each resolving site
-  must emit its call.
+  must emit its call. The closed parameter of Unsafe.AsRef selects its byref or void-pointer
+  declaration and external target. Unsafe.NullRef and Unsafe.IsNullRef each bind their single
+  declaration and target. All three names check element storage through the indexed layouts.
 - The local variable types are checked against the standalone signature the body header names.
 - The method's own identity is checked against four columns of its `MethodDef` row. `Flags` and
   `ImplFlags` must equal the evidence's attributes and implementation flags. The `Signature` blob

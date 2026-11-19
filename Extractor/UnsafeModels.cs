@@ -18,7 +18,7 @@ internal static class UnsafeModels
     // Each helper is either modelled or translated, never both, so the two entry points partition the family.
     static Operation? Helper(MethodReference reference, string architecture, bool modelled)
     {
-        if ((modelled && reference.Name is "As" or "BitCast") || (!modelled && reference.Name == "AsRef"))
+        if (modelled && reference.Name is "As" or "AsRef" or "BitCast")
         {
             if (reference.DeclaringType is TypeSpecification ||
                 !IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime))
@@ -56,9 +56,9 @@ internal static class UnsafeModels
               reference.Parameters[1].ParameterType.FullName == "System.Int32"));
         var skipInit = modelled && reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
-        var nullRef = !modelled && reference.Name == "NullRef" && reference.Parameters.Count == 0 &&
+        var nullRef = modelled && reference.Name == "NullRef" && reference.Parameters.Count == 0 &&
             Reference(reference.ReturnType);
-        var isNullRef = !modelled && reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
+        var isNullRef = modelled && reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
         var referencePair = reference.Parameters.Count == 2 &&
             Reference(reference.Parameters[0].ParameterType) && Reference(reference.Parameters[1].ParameterType);
