@@ -101,7 +101,8 @@ private def modelSitesAgree (catalog : ModelCatalog) (environment : LayoutEnviro
   let layouts := environment.callLayouts
   let roles := (foldRoles closed.locals closed.code).toArray
   all3 (fun (raw, pc) live emitted =>
-    catalog.emissionAgrees layouts profile raw emitted links[pc]?.join (roles[pc]?.join) live)
+    catalog.emissionAgrees layouts profile raw emitted
+      (indexedRead? links pc).join (indexedRead? roles pc).join live)
     closed.code.zipIdx reachable code
 
 /-- Every live call fits its claim. Links and raw fold roles are indexed once per body. -/
