@@ -354,4 +354,89 @@ example (memory : CIL.Safety.Memory) :
     (direct := rfl)]
   rfl
 
+/-- Every single-overload Unsafe entry checks the same raw fields as its exact member binding. -/
+theorem singleton_binding (key : MetadataName) (name result parameters : String)
+    (declared : OpenSignature) (resolve : CallLayouts → MethodRef → Option RuntimeModel)
+    (site : CallSite) :
+    let owner := "System.Runtime.CompilerServices.Unsafe"
+    (unsafeEntry key name result parameters declared resolve).bindsSite site =
+      (site.declared == declared &&
+        (site.name == name &&
+         site.target == .external
+           s!"{runtimeScope}::{result} {owner}::{name}({parameters})"
+           && site.ownerArgumentCount == 0 && site.typeArguments == site.method.methodArguments &&
+         site.parameterCount == site.method.parameters.length &&
+         site.returnsValue == (site.returnType != .void))) := by
+  simp [unsafeEntry, unsafeOperand, ModelEntry.single, ModelEntry.bindsSite, ModelEntry.select?,
+    ModelEntry.select?.select, ModelOperand.bindsSite, Bool.and_assoc]
+
+#print axioms singleton_binding
+
+/-- A synthetic overload returns its parameter count as a distinguishable execution result. -/
+private def countedOverload (parameters : List TypeExpr) (target : String) : ModelOverload :=
+  { operand := .external { sizeOfDeclared with parameters } "Count" (fun _ => some target),
+    accepts := fun method => method.parameters == parameters,
+    resolve := fun _ _ => some (.constant (BitVec.ofNat 32 parameters.length)) }
+
+/-- A single reserved slot owns the zero- and one-parameter declarations. -/
+private def countedEntry : ModelEntry :=
+  { opcode := .call, owner := unsafeOwner, name := name!"Count", ownsName := true,
+    overloads := [countedOverload [] "Count()", countedOverload [int32] "Count(Int32)"] }
+
+/-- The raw call to one of the two Count overloads. -/
+private def countedSite (parameters : List TypeExpr) (target : String) : CallSite :=
+  let method := { sizeOf int32 with name := name!"Count", parameters }
+  { method, name := "Count", declared := { sizeOfDeclared with parameters },
+    target := .external target, returnsValue := true, parameterCount := parameters.length,
+    typeArguments := method.methodArguments }
+
+/-- Both signatures resolve. Crossing a target, a declaration or both refuses the closed call. -/
+theorem overload_binding :
+    let catalog : ModelCatalog := ⟨model_table% [countedEntry]⟩
+    let zero := countedSite [] "Count()"
+    let one := countedSite [int32] "Count(Int32)"
+    let raw := fun site => RawInstruction.mk 0 40 (.call site)
+    let needs := fun site => catalog.callRequirement (LayoutEnvironment.callLayouts {})
+      .scalar none none (raw site)
+    let unknown := countedSite [int32, int32] "Count(Int32,Int32)"
+    catalog.table.find {} .call zero.method = some (.constant 0) ∧
+      catalog.table.find {} .call one.method = some (.constant 1) ∧
+      needs zero = .instruction (.call zero.method {}) ∧
+      needs one = .instruction (.call one.method {}) ∧
+      needs { one with target := zero.target } = .hole 40 ∧
+      needs { one with declared := zero.declared } = .hole 40 ∧
+      needs { one with target := zero.target, declared := zero.declared } = .hole 40 ∧
+      catalog.table.claims {} .call unknown.method = true ∧ needs unknown = .hole 40 := by
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+#print axioms overload_binding
+
+/-- When two open declarations accept the same closed type, neither can supply its semantics. -/
+theorem ambiguous_overload_refused :
+    let site := countedSite [] "Count()"
+    let entry := { countedEntry with overloads :=
+      [countedOverload [] "Count()", countedOverload [] "Other()"] }
+    entry.bindsSite site = false ∧ entry.resolve (LayoutEnvironment.callLayouts {}) site.method =
+      none := by decide +kernel
+
+#print axioms ambiguous_overload_refused
+
+/-- Packing changes alignment independently of size. Raw storage survives a missing computed
+    layout, and another identity at the same index supplies neither storage nor alignment. -/
+theorem indexed_layout_reads :
+    let packed := [{ rawPacket "Fixture::Packet" 1 false with packing := 1 }]
+    let environment : LayoutEnvironment :=
+      { rawLayouts := packed, layouts := (computeLayouts packed).getD #[] }
+    let reader := environment.callLayouts
+    let natural := (sized 1).callLayouts
+    let rawOnly := LayoutEnvironment.callLayouts { rawLayouts := packed }
+    reader.valueShape packet = .aggregate 8 ∧ natural.valueShape packet = .aggregate 8 ∧
+      reader.alignment? packet = some 1 ∧ natural.alignment? packet = some 8 ∧
+      rawOnly.storage packet = some (.field (.aggregate 0)) ∧ rawOnly.alignment? packet = none ∧
+      reader.storage (.aggregate "Other" 0) = none ∧
+      reader.alignment? (.aggregate "Other" 0) = none := by
+  decide +kernel
+
+#print axioms indexed_layout_reads
+
 end Tests.UnsafeModels

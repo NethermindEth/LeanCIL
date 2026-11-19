@@ -25,9 +25,12 @@ def ModelCatalog.linkedRequirement (catalog : ModelCatalog) (environment : CallL
   match raw.operand, callOpcode? raw.opcode with
   | .call site, some opcode =>
     if (catalog.table.entry? opcode site.method).any (fun entry =>
-        match entry.resolve environment.valueShape site.method with
-        | some model => !entry.bindsSite site || !model.available profile
-        | none => entry.familyTarget.isSome) then
+        match entry.select? site.method with
+        | none => entry.ownsName
+        | some overload =>
+          match overload.resolve environment site.method with
+          | some model => !overload.operand.bindsSite site || !model.available profile
+          | none => entry.ownsName) then
       .hole raw.opcode
     else .linked
   | _, _ => .linked
@@ -46,9 +49,9 @@ def ModelCatalog.callRequirement (catalog : ModelCatalog) (environment : CallLay
   | .model =>
     match raw.operand, callOpcode? raw.opcode with
     | .call site, some opcode =>
-      if (catalog.table.entry? opcode site.method).any (fun entry =>
-          entry.bindsSite site &&
-            (entry.resolve environment.valueShape site.method).any (·.available profile)) then
+      let overload := (catalog.table.entry? opcode site.method).bind (·.select? site.method)
+      if overload.any (fun selected => selected.operand.bindsSite site &&
+          (selected.resolve environment site.method).any (·.available profile)) then
         match opcode with
         | .call => .instruction (.call site.method {})
         | .newobj => .instruction (.newobj site.method)

@@ -101,10 +101,9 @@ def bitHelpers : List (MetadataName × BitHelper) :=
     whose parameter must be `fixed` when given. -/
 def bitEntry (owner : BitOwner) (declaring : TypeExpr) (fixed : Option TypeExpr)
     (helper : MetadataName × BitHelper) : ModelEntry :=
-  { opcode := .call, owner := declaring, name := helper.1,
-    declares := fun sig => sig.convention == 0 &&
-      (bitOperation owner helper.2 fixed sig.returnType sig.parameters).isSome,
-    resolve := fun _ => bitModel owner helper.2 fixed }
+  .single .call declaring helper.1 (.declaration fun sig => sig.convention == 0 &&
+    (bitOperation owner helper.2 fixed sig.returnType sig.parameters).isSome)
+    (fun _ => bitModel owner helper.2 fixed)
 
 /-- The helpers of `BitOperations`, those each integer type declares on itself, and
     `BinaryPrimitives.ReverseEndianness`. A type has an entry only for a helper it declares

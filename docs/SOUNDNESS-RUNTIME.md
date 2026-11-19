@@ -83,7 +83,12 @@ and states no link, and the checked interpreter runs the model when the pc has n
 `ManagedCallsValid` checks a retained call's link to another method. At a live unlinked modelled
 call, `RuntimeModelsAgree` requires the same method reference and an available model. Its entry
 also checks the member's calling-convention byte and its return and parameter types before
-generic substitution. The entries for `Unsafe.SizeOf`, `AreSame`, `IsAddressLessThan`,
+generic substitution. For an overloaded name, the closed reference selects one overload.
+The validator checks that overload's declaration and raw operand, and execution uses its resolver.
+An exact external operand binds the member name, target, argument counts and return flag.
+A reserved name produces the opcode's hole when its overload fails to resolve. Both validation
+and execution read storage, shape and aggregate alignment from the same indexed layout metadata.
+The entries for `Unsafe.SizeOf`, `AreSame`, `IsAddressLessThan`,
 `IsAddressGreaterThan`, `ByteOffset` and `SkipInit` claim their names on the exact runtime owner. Each checks
 its static generic declaration and closed operand. Each requires a sized element. For a struct,
 the raw layout at the stated index must name that struct and the computed layout must exist.

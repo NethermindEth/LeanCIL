@@ -385,6 +385,9 @@ structure LayoutEnvironment where
   rawLayouts : List Extraction.RawLayout := []
   /-- The checked layout table, indexed like `rawLayouts`. -/
   layouts : Array Extraction.ComputedLayout := #[]
+  /-- The raw table in positional order for model lookups during execution and validation. -/
+  indexedRaw : Array Extraction.RawLayout := rawLayouts.toArray
+  index_eq : indexedRaw = rawLayouts.toArray := by rfl
   deriving DecidableEq, Repr
 
 /-- Where the call-family instruction at one pc goes. Every entry is checked against the call

@@ -60,9 +60,9 @@ def integerMathModel (operation : IntegerMath) (arity : Nat) (fixed : Option Typ
 def integerMathEntry (owner : TypeExpr) (fixed : Option TypeExpr)
     (helper : MetadataName × IntegerMath × Nat) : ModelEntry :=
   let (name, operation, arity) := helper
-  { opcode := .call, owner, name, resolve := fun _ => integerMathModel operation arity fixed,
-    declares := fun sig => sig.convention == 0 &&
-      (integerMathOperand operation arity fixed sig.returnType sig.parameters).isSome }
+  .single .call owner name (.declaration fun sig => sig.convention == 0 &&
+    (integerMathOperand operation arity fixed sig.returnType sig.parameters).isSome)
+    (fun _ => integerMathModel operation arity fixed)
 
 /-- The helpers of `System.Math`, then those each integer type declares on itself; an unsigned
     type declares no `Abs` or `Sign`. -/

@@ -220,10 +220,10 @@ private def spanLength (element : TypeExpr) : MethodRef :=
 
 /-- `get_Length` of every span instance, an instance method of no parameters. -/
 private def spanLengthEntry : ModelEntry :=
-  { opcode := .call, owner := .constructor runtimeScope "System.Span`1", name := name!"get_Length",
-    declares := (· == { convention := 0x20, returnType := runtimeType "System.Int32" }),
-    resolve := fun _ method =>
-      if method.hasThis && method.parameters.isEmpty then some (.memory .spanLength) else none }
+  .single .call (.constructor runtimeScope "System.Span`1") name!"get_Length"
+    (.declaration (· == { convention := 0x20, returnType := runtimeType "System.Int32" }))
+    (fun _ method =>
+      if method.hasThis && method.parameters.isEmpty then some (.memory .spanLength) else none)
 
 /-- BigMul by its exact reference, and `get_Length` of every span instance. -/
 private def entries : List ModelEntry :=

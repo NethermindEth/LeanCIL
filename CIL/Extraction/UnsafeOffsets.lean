@@ -11,9 +11,9 @@ private def offsetPair (element : TypeExpr) : List TypeExpr := [.byref element, 
 private def displacement (_ : TypeExpr) : TypeExpr := .atom runtimeScope "System.IntPtr"
 
 /-- Unsafe.ByteOffset computes a displacement between references to a sized element. -/
-def unsafeByteOffsetModel (shape : TypeExpr → ValueShape) (method : MethodRef) :
+def unsafeByteOffsetModel (reader : CallLayouts) (method : MethodRef) :
     Option RuntimeModel :=
-  unsafeGuarded (unsafeSignature shape method offsetPair displacement) (.memory .byteOffset)
+  unsafeGuarded (unsafeSignature reader method offsetPair displacement) (.memory .byteOffset)
 
 /-- The checked offset operations that keep their call. -/
 def unsafeOffsetEntries : List ModelEntry :=

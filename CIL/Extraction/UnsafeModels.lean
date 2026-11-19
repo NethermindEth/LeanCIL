@@ -31,10 +31,10 @@ def unsafeArgument (method : MethodRef) : Option TypeExpr :=
 
 /-- Whether `method` takes `parameters element` and returns `result element` for an element with a
     checked size. -/
-def unsafeSignature (shape : TypeExpr → ValueShape) (method : MethodRef)
+def unsafeSignature (reader : CallLayouts) (method : MethodRef)
     (parameters : TypeExpr → List TypeExpr) (result : TypeExpr → TypeExpr) : Bool :=
   match unsafeArgument method with
-  | some element => (shape element).size?.isSome &&
+  | some element => (reader.valueShape element).size?.isSome &&
     method.parameters == parameters element && method.returnType == result element
   | none => false
 
@@ -52,30 +52,30 @@ theorem unsafeGuarded_eq {admitted : Bool} {model resolved : RuntimeModel}
 #print axioms unsafeGuarded_eq
 
 /-- The size of the element of `int Unsafe.SizeOf<T>()`. -/
-def unsafeSizeOf (shape : TypeExpr → ValueShape) (method : MethodRef) : Option Nat := do
+def unsafeSizeOf (reader : CallLayouts) (method : MethodRef) : Option Nat := do
   let element ← unsafeArgument method
   if !method.parameters.isEmpty || method.returnType != .atom runtimeScope "System.Int32" then
     none
-  (shape element).size?
+  (reader.valueShape element).size?
 
 /-- `Unsafe.SizeOf<T>` pushes the size of `T`, as `sizeof T` does. -/
-def unsafeSizeOfModel (shape : TypeExpr → ValueShape) (method : MethodRef) :
+def unsafeSizeOfModel (reader : CallLayouts) (method : MethodRef) :
     Option RuntimeModel :=
-  (unsafeSizeOf shape method).map fun size => .constant (BitVec.ofNat 32 size)
+  (unsafeSizeOf reader method).map fun size => .constant (BitVec.ofNat 32 size)
 
 /-- `bool Unsafe.AreSame<T>(ref T, ref T)` and the two address orders compare their references by
     `relation`. -/
-def unsafeCompareModel (relation : ReferenceRelation) (shape : TypeExpr → ValueShape)
+def unsafeCompareModel (relation : ReferenceRelation) (reader : CallLayouts)
     (method : MethodRef) : Option RuntimeModel :=
   let boolean := TypeExpr.atom runtimeScope "System.Boolean"
-  unsafeGuarded (unsafeSignature shape method
+  unsafeGuarded (unsafeSignature reader method
     (fun element => [.byref element, .byref element]) (fun _ => boolean))
     (.referenceCompare relation)
 
 /-- `void Unsafe.SkipInit<T>(out T)` forms its out reference and writes nothing. -/
-def unsafeSkipInitModel (shape : TypeExpr → ValueShape) (method : MethodRef) :
+def unsafeSkipInitModel (reader : CallLayouts) (method : MethodRef) :
     Option RuntimeModel :=
-  unsafeGuarded (unsafeSignature shape method (fun element => [.byref element])
+  unsafeGuarded (unsafeSignature reader method (fun element => [.byref element])
     (fun _ => .void)) .skipInit
 
 /-- The open declaration of a generic Unsafe helper of arity one: the generic convention, and the
@@ -85,13 +85,16 @@ def unsafeDeclaration (parameters : TypeExpr → List TypeExpr) (result : TypeEx
   { convention := 0x10, returnType := result (.parameter 0),
     parameters := parameters (.parameter 0) }
 
-/-- The `call` entry of the Unsafe helper `name`, accepting only the declaration `declared`. -/
-def unsafeEntry (key : MetadataName) (name result parameters : String) (declared : OpenSignature)
-    (resolve : (TypeExpr → ValueShape) → MethodRef → Option RuntimeModel) : ModelEntry :=
+/-- The exact external member and open declaration for one Unsafe overload. -/
+def unsafeOperand (name result parameters : String) (declared : OpenSignature) : ModelOperand :=
   let owner := "System.Runtime.CompilerServices.Unsafe"
   let target := s!"{runtimeScope}::{result} {owner}::{name}({parameters})"
-  { opcode := .call, owner := unsafeOwner, name := key, declares := (· == declared), resolve,
-    familyTarget := some (name, .external target) }
+  .external declared name (fun _ => some target)
+
+/-- The reserved `call` entry for a single Unsafe overload. -/
+def unsafeEntry (key : MetadataName) (name result parameters : String) (declared : OpenSignature)
+    (resolve : CallLayouts → MethodRef → Option RuntimeModel) : ModelEntry :=
+  .single .call unsafeOwner key (unsafeOperand name result parameters declared) resolve true
 
 /-- The open declaration `bool (ref !!0, ref !!0)` of the reference comparisons. -/
 def unsafeComparisonDeclaration : OpenSignature :=
@@ -124,8 +127,8 @@ theorem unsafeEntries_yields {property : RuntimeModel → Prop}
   simp only [unsafeEntries, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp,
     forall_eq]
   refine ⟨?_, ?_, ?_, ?_, ?_⟩ <;> intro environment method model found <;>
-    simp only [unsafeEntry, unsafeSizeOfModel, unsafeCompareModel, unsafeSkipInitModel,
-      Option.map_eq_some_iff] at found
+    simp only [unsafeEntry, ModelEntry.resolve_single, unsafeSizeOfModel, unsafeCompareModel,
+      unsafeSkipInitModel, Option.map_eq_some_iff] at found
   · rcases found with ⟨_, _, rfl⟩
     exact constant _
   all_goals

@@ -1,5 +1,5 @@
 import CIL.RuntimeModel
-import CIL.Resolution
+import CIL.Extraction.CallLayouts
 import CIL.Extraction.Generics
 import CIL.Extraction.Lockstep
 import CIL.Extraction.FlowIndex
@@ -24,33 +24,79 @@ def TypeExpr.genericHead : TypeExpr → TypeExpr
   | .apply head _ => head.genericHead
   | type => type
 
-/-- The methods of one opcode, owner head and name. A modelled call must resolve its closed
-    reference and have a declaration the entry accepts. -/
+/-- The raw operand a closed overload accepts. An external member binds its name, exact target
+    and open declaration. Shared entries can check a declaration for a range of closed types. -/
+inductive ModelOperand where
+  | declaration (accepts : OpenSignature → Bool)
+  | external (declared : OpenSignature) (name : String) (target : MethodRef → Option String)
+
+/-- Whether the raw declaration and redundant fields describe this operand. -/
+def ModelOperand.bindsSite (operand : ModelOperand) (site : CallSite) : Bool :=
+  match operand with
+  | .declaration accepts => accepts site.declared
+  | .external declared name target =>
+    site.declared == declared && site.name == name &&
+      (target site.method).any (fun id => site.target == .external id) &&
+      site.ownerArgumentCount == 0 && site.typeArguments == site.method.methodArguments &&
+      site.parameterCount == site.method.parameters.length &&
+      site.returnsValue == (site.returnType != .void)
+
+/-- One overload's raw operand and runtime semantics. The closed member selects the overload
+    before either the raw fields or the layouts are checked. -/
+structure ModelOverload where
+  operand : ModelOperand
+  resolve : CallLayouts → MethodRef → Option RuntimeModel
+  accepts : MethodRef → Bool := fun _ => true
+
+/-- The overloads filed under one opcode, owner and name. A reserved name claims even a
+    closed reference for which none of its overloads resolves. -/
 structure ModelEntry where
   opcode : CallOpcode
   owner : TypeExpr
   name : MetadataName
-  declares : OpenSignature → Bool
-  resolve : (TypeExpr → ValueShape) → MethodRef → Option RuntimeModel
-  /-- A family owned in full, including unresolved overloads, with its exact external operand. -/
-  familyTarget : Option (String × MethodId) := none
+  overloads : List ModelOverload
+  ownsName : Bool := false
 
-/-- The declaration and the raw call fields agree with the selected member. -/
+/-- A closed reference must identify exactly one overload for binding and execution. -/
+def ModelEntry.select? (entry : ModelEntry) (method : MethodRef) : Option ModelOverload :=
+  select entry.overloads
+where
+  /-- Once a match is found, a second match makes the closed reference ambiguous. -/
+  select : List ModelOverload → Option ModelOverload
+    | [] => none
+    | overload :: rest =>
+      if overload.accepts method then
+        if rest.any (fun other => other.accepts method) then none else some overload
+      else select rest
+
+/-- The selected overload binds the site's declaration and raw operand. -/
 def ModelEntry.bindsSite (entry : ModelEntry) (site : CallSite) : Bool :=
-  entry.declares site.declared && match entry.familyTarget with
-    | none => true
-    | some (name, target) =>
-      site.name == name && site.target == target && site.ownerArgumentCount == 0 &&
-        site.typeArguments == site.method.methodArguments &&
-        site.parameterCount == site.method.parameters.length &&
-        site.returnsValue == (site.returnType != .void)
+  (entry.select? site.method).any (fun overload => overload.operand.bindsSite site)
+
+/-- The model of the selected overload under the checked layouts. -/
+def ModelEntry.resolve (entry : ModelEntry) (reader : CallLayouts) (method : MethodRef) :
+    Option RuntimeModel :=
+  (entry.select? method).bind (fun overload => overload.resolve reader method)
+
+/-- A slot with a single binding needs no closed discriminator beyond its resolver. -/
+def ModelEntry.single (opcode : CallOpcode) (owner : TypeExpr) (name : MetadataName)
+    (operand : ModelOperand) (resolve : CallLayouts → MethodRef → Option RuntimeModel)
+    (ownsName := false) : ModelEntry :=
+  { opcode, owner, name, ownsName, overloads := [{ operand, resolve }] }
+
+/-- A single binding passes the closed reference directly to its resolver. -/
+@[simp] theorem ModelEntry.resolve_single (opcode owner name operand resolve ownsName)
+    (reader : CallLayouts) (method : MethodRef) :
+    (ModelEntry.single opcode owner name operand resolve ownsName).resolve reader method =
+      resolve reader method := rfl
+
+#print axioms ModelEntry.resolve_single
 
 /-- An entry for one declaration and closed method reference under `opcode`. -/
 def ModelEntry.exact (opcode : CallOpcode) (method : MethodRef) (declared : OpenSignature)
     (model : RuntimeModel) : ModelEntry :=
-  { opcode, owner := method.owner.genericHead, name := method.name,
-    declares := (· == declared),
-    resolve := fun _ reference => if reference = method then some model else none }
+  .single opcode method.owner.genericHead method.name (.declaration (· == declared))
+    (fun _ reference => if reference = method then some model else none)
 
 /-- The search key of an entry: the code of its method name. -/
 def ModelEntry.key (entry : ModelEntry) : Nat := entry.name.code
@@ -68,20 +114,21 @@ def ModelTable.entry? (table : ModelTable) (opcode : CallOpcode) (method : Metho
   let entries ← table.find? method.name.code
   entries.find? fun entry =>
     entry.name == method.name && entry.opcode == opcode &&
-      entry.owner == (if entry.familyTarget.isSome then method.owner else method.owner.genericHead)
+      entry.owner == (if entry.ownsName && !(entry.owner matches .constructor ..) then method.owner
+        else method.owner.genericHead)
 
 /-- The model of a call under `opcode` to the closed reference `method`. -/
 def ModelTable.find (table : ModelTable) (environment : LayoutEnvironment)
     (opcode : CallOpcode) (method : MethodRef) : Option RuntimeModel := do
   let entry ← table.entry? opcode method
-  entry.resolve environment.valueShape method
+  entry.resolve environment.callLayouts method
 
 /-- A family claims its name before overload resolution. Other entries share overlapping names
     with lowerings and claim the closed overloads they resolve. -/
 def ModelTable.claims (table : ModelTable) (environment : LayoutEnvironment)
     (opcode : CallOpcode) (method : MethodRef) : Bool :=
   (table.entry? opcode method).any fun entry =>
-    entry.familyTarget.isSome || (entry.resolve environment.valueShape method).isSome
+    entry.ownsName || (entry.resolve environment.callLayouts method).isSome
 
 /-- `groups` with `entry` added at the end of the group of its key. -/
 def ModelTable.insertGroup (entry : ModelEntry) :
@@ -173,9 +220,9 @@ def ModelEntry.Yields (entry : ModelEntry) (property : RuntimeModel → Prop) : 
     (ModelEntry.exact opcode method declared model).Yields property ↔ property model := by
   constructor
   · intro yields
-    exact yields (LayoutEnvironment.valueShape {}) method model (by simp [ModelEntry.exact])
+    exact yields (LayoutEnvironment.callLayouts {}) method model (by simp [ModelEntry.exact])
   · intro holds environment reference resolved found
-    simp only [ModelEntry.exact] at found
+    change (if reference = method then some model else none) = some resolved at found
     split at found
     · cases found
       exact holds
@@ -193,7 +240,7 @@ theorem ModelTable.find_yields {table : ModelTable} {property : RuntimeModel →
   obtain ⟨entry, selected, resolved⟩ := Option.bind_eq_some_iff.mp found
   obtain ⟨entries, filed, member⟩ := Option.bind_eq_some_iff.mp selected
   exact every _ (SearchTree.find?_mem_toList _ _ _ filed) entry
-    (List.mem_of_find?_eq_some member) environment.valueShape method model resolved
+    (List.mem_of_find?_eq_some member) environment.callLayouts method model resolved
 
 #print axioms ModelTable.find_yields
 

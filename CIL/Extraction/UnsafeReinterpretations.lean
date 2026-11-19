@@ -29,14 +29,14 @@ private def asOperation (method : MethodRef) : Option MemoryOp := do
   return .asRef
 
 /-- BitCast reinterprets equally wide snapshots or the byte representation of a Boolean. -/
-private def bitCastOperation (shape : TypeExpr → ValueShape) (method : MethodRef) :
+private def bitCastOperation (reader : CallLayouts) (method : MethodRef) :
     Option MemoryOp := do
   let (source, target) ← unsafeTypePair method
   _root_.guard (method.parameters == [source] && method.returnType == target)
   if source == .atom runtimeScope "System.Byte" && target == .atom runtimeScope "System.Boolean"
     then return .bitcastByteBool
-  let .snapshot fromShape ← transferKind? shape source | none
-  let .snapshot toShape ← transferKind? shape target | none
+  let .snapshot fromShape ← transferKind? reader source | none
+  let .snapshot toShape ← transferKind? reader target | none
   _root_.guard (fromShape.width == toShape.width)
   return .bitcastValue fromShape toShape
 
@@ -52,7 +52,7 @@ def unsafeReinterpretEntries : List ModelEntry :=
      (reinterpretDeclaration (.byref source) (.byref target))
      (fun _ method => (asOperation method).map .memory),
    unsafeEntry name!"BitCast" "BitCast" "!!1" "!!0" (reinterpretDeclaration source target)
-     (fun shape method => (bitCastOperation shape method).map .memory)]
+     (fun reader method => (bitCastOperation reader method).map .memory)]
 
 /-- Each reinterpretation runs a checked memory operation. -/
 theorem unsafeReinterpretEntries_yields {property : RuntimeModel → Prop}
@@ -61,7 +61,7 @@ theorem unsafeReinterpretEntries_yields {property : RuntimeModel → Prop}
   simp only [unsafeReinterpretEntries, List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp,
     forall_eq]
   refine ⟨?_, ?_⟩ <;> intro environment method model found <;>
-    simp only [unsafeEntry, Option.map_eq_some_iff] at found <;>
+    simp only [unsafeEntry, ModelEntry.resolve_single, Option.map_eq_some_iff] at found <;>
     obtain ⟨operation, _, rfl⟩ := found <;> exact memory operation
 
 #print axioms unsafeReinterpretEntries_yields
