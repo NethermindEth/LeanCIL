@@ -7,12 +7,47 @@ import Lean
 
 A balanced index serves branch targets, while adjacent successor states are read directly
 from the remaining certificate. The lookup theorem preserves the list-based validation rules.
-`program_index% values` writes `FlowIndex.ofList values` out as a literal whose leaves are the
-list's own cell terms, so a definition states an index once and the kernel checks it equal to
-`ofList` by comparing those terms, never by unfolding them.
+Monotone reads of indexed method data share list suffixes in the kernel and use array access
+in compiled code. `program_index% values` writes `FlowIndex.ofList values` as a literal whose
+leaves are the list's own cell terms. The kernel checks it equal to `ofList` by comparing those
+terms without unfolding them.
 -/
 
 namespace CIL.Extraction
+
+/-- The suffix at an index, shared by kernel reduction with the lookup at the next index. -/
+private def suffixAt (values : List α) : Nat → List α
+  | 0 => values
+  | index + 1 => (suffixAt values index).tail
+
+/-- The shared suffix contains exactly the elements starting at the given index. -/
+private theorem suffixAt_eq_drop (values : List α) (index : Nat) :
+    suffixAt values index = values.drop index := by
+  induction index with
+  | zero => rfl
+  | succ index ih => rw [suffixAt, ih, List.tail_drop]
+#print axioms suffixAt_eq_drop
+
+/-- Repeated reads share the preceding suffix in the kernel and use array indexing at runtime. -/
+def indexedRead? (values : Array α) (index : Nat) : Option α :=
+  if index < values.size then (suffixAt values.toList index).head? else none
+
+/-- The compiled read of an indexed certificate or method body. -/
+private def arrayRead? (values : Array α) (index : Nat) := values[index]?
+
+/-- Kernel and compiled reads agree both inside and outside the array. -/
+@[csimp] private theorem indexedRead?_eq_arrayRead? : @indexedRead? = @arrayRead? := by
+  funext α values index
+  simp only [indexedRead?, arrayRead?, suffixAt_eq_drop, List.head?_drop, Array.getElem?_toList]
+  split
+  · rfl
+  · exact (getElem?_neg values index (by assumption)).symm
+#print axioms indexedRead?_eq_arrayRead?
+
+/-- Indexed reads return the element at the requested position. -/
+@[simp] theorem indexedRead?_eq (values : Array α) (index : Nat) :
+    indexedRead? values index = values[index]? := by rw [indexedRead?_eq_arrayRead?]; rfl
+#print axioms indexedRead?_eq
 
 /-- A certificate index with explicit subtree lengths and no implicit default values. -/
 inductive FlowIndex (α : Type) where

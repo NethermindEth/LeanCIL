@@ -153,14 +153,16 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
     (occupied : Std.TreeSet Nat) (roles : Array (Option FoldRole)) (reachable : Array Bool) :
     CallDecoder :=
   let localKind := fun type => (environment.storage type).bind (storageKind environment.layouts)
-  let live := fun pc => reachable[pc]?.getD false
+  let live := fun pc => (indexedRead? reachable pc).getD false
   Instruction.withCallDecoder roles live localKind fun pc previous raw =>
     if occupied.contains pc then
       (runtimeCatalog.linkedRequirement environment profile raw).decode
         (fun _ => Instruction.ofRaw previous raw)
     else if previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
-    else (runtimeCatalog.callRequirement environment profile none (roles[pc]?.join) raw).decode
-      (fun _ => Instruction.ofRaw previous raw)
+    else
+      let role := (indexedRead? roles pc).join
+      (runtimeCatalog.callRequirement environment profile none role raw).decode
+        (fun _ => Instruction.ofRaw previous raw)
 
 /-- The closed body's instruction list, including call claims at its occupied and unlinked pcs. -/
 def methodCode (profile : FeatureProfile) (environment : LayoutEnvironment)

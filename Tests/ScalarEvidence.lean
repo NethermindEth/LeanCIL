@@ -1567,6 +1567,8 @@ theorem wrong_decoded_owner_refused (item : MethodEvidence) :
   have different : [Instruction.ldfld field] ≠
       methodCode addMethod.profile addMethod.environment addMethod.links
         item.reachable source := by
+    simp only [methodCode, Instruction.ofRawCode, methodInstruction, Instruction.withCallDecoder,
+      indexedRead?_eq]
     change [Instruction.ldfld field] ≠ [if !item.reachable.toArray[0]?.getD false then
       .unadmitted 123 else .ldfld { field with owner := owner }]
     cases item.reachable.toArray[0]?.getD false <;> decide +kernel

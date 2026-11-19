@@ -88,40 +88,10 @@ def PrefixEntryFree (code : List RawInstruction) : Prop :=
   ∀ pc instruction, code[pc]? = some instruction → isPrefixOpcode instruction.opcode = true →
     code.any (branchesTo (pc + 1)) = false
 
-/-- The source suffix at a pc. Kernel reduction shares each preceding suffix across lookups. -/
-private def suffixAt (code : List RawInstruction) : Nat → List RawInstruction
-  | 0 => code
-  | pc + 1 => (suffixAt code pc).tail
-
-/-- The shared suffix begins at exactly its pc. -/
-private theorem suffixAt_eq_drop (code : List RawInstruction) (pc : Nat) :
-    suffixAt code pc = code.drop pc := by
-  induction pc with
-  | zero => rfl
-  | succ pc ih => rw [suffixAt, ih, List.tail_drop]
-#print axioms suffixAt_eq_drop
-
-/-- Kernel lookup bounds the pc before reducing any suffix. -/
-private def instructionAt? (code : Array RawInstruction) (pc : Nat) : Option RawInstruction :=
-  if pc < code.size then (suffixAt code.toList pc).head? else none
-
-/-- Compiled validation reads the instruction directly from the method's indexed code. -/
-private def arrayInstructionAt? (code : Array RawInstruction) (pc : Nat) := code[pc]?
-
-/-- The array and shared-suffix lookups return the same instruction at every pc. -/
-@[csimp] private theorem instructionAt?_eq : instructionAt? = arrayInstructionAt? := by
-  funext code pc
-  simp only [instructionAt?, arrayInstructionAt?, suffixAt_eq_drop, List.head?_drop,
-    Array.getElem?_toList]
-  split
-  · rfl
-  · exact (getElem?_neg code pc (by assumption)).symm
-#print axioms instructionAt?_eq
-
 /-- A branch may enter the first pc or any pc without a prefix immediately before it. -/
 private def entryAllowed (code : Array RawInstruction) : Nat → Bool
   | 0 => true
-  | pc + 1 => !(instructionAt? code pc).any (isPrefixOpcode ·.opcode)
+  | pc + 1 => !(indexedRead? code pc).any (isPrefixOpcode ·.opcode)
 
 /-- Every destination of the instruction satisfies the given entry rule. -/
 private def branchEntriesValid (allowed : Nat → Bool) (instruction : RawInstruction) : Bool :=
@@ -156,12 +126,12 @@ theorem prefixEntryFree_iff (code : List RawInstruction) :
     rw [← branchTargets_contains, Bool.eq_false_iff]
     intro contains
     have blocked := clear _ (List.contains_iff_mem.mp contains)
-    simp [entryAllowed, instructionAt?_eq, arrayInstructionAt?, found, isPrefix] at blocked
+    simp [entryAllowed, indexedRead?_eq, found, isPrefix] at blocked
   · intro free target member
     cases target with
     | zero => rfl
     | succ pc =>
-      simp only [entryAllowed, instructionAt?_eq, arrayInstructionAt?, List.getElem?_toArray]
+      simp only [entryAllowed, indexedRead?_eq, List.getElem?_toArray]
       cases found : code[pc]? with
       | none => rfl
       | some instruction =>

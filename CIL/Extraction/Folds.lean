@@ -285,7 +285,7 @@ def Instruction.withCallDecoder (roles : Array (Option FoldRole))
     CallDecoder := fun pc previous raw =>
   if !live pc then .unadmitted raw.opcode
   else if methodTokenCall raw.opcode then decodeCall pc previous raw
-  else match roles[pc]?.join with
+  else match (indexedRead? roles pc).join with
     | none | some .blocked => Instruction.ofRaw previous raw
     | some (.spanConstructor index (.empty ..)) =>
       match raw.operand with
