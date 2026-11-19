@@ -178,11 +178,10 @@ theorem sumDeclaration :
       declared := {
         convention := 0x10, returnType := .parameter 0, parameters := [vector (.parameter 0)] }
       target := .external s!"{intrinsicsScope}::!!0 {owner}::Sum({owner}`1<!!0>)" }
-    let resolve := fun operand => LoweredFamily.hardware.resolve
-      (LayoutEnvironment.callLayouts {}) .scalar none ⟨0, 40, .call operand⟩
-    resolve site = some (.intrinsic (.vector (.sum64 128)) 1) ∧
-      resolve { site with declared.parameters := [vector (.ownerParameter 0)] } = none := by
-  decide +kernel
+    runtimeModel {} .call site.method = some (.intrinsic (.vector (.sum64 128)) 1) ∧
+      arithmeticCode {} site = some [.call site.method {}] ∧
+      arithmeticCode {} { site with declared.parameters := [vector (.ownerParameter 0)] } =
+        none := by decide +kernel
 
 #print axioms sumDeclaration
 
@@ -262,7 +261,7 @@ theorem otherInstructionRefused (family : LoweredFamily) (environment : LayoutEn
     (profile : FeatureProfile) (raw : RawInstruction) (role : Option FoldRole)
     (expected emitted : Instruction) (called : methodTokenCall raw.opcode = true)
     (claimed : siteClaim loweredCallFamily environment none raw = .lowered family)
-    (resolved : family.resolve environment.callLayouts profile role raw = some expected)
+    (resolved : family.resolve environment.callLayouts role raw = some expected)
     (other : emitted ≠ expected) :
     runtimeCatalog.siteAgrees environment profile raw emitted none role true = false := by
   change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.claims =
@@ -278,7 +277,7 @@ theorem missingOverloadRefused (family : LoweredFamily) (environment : LayoutEnv
     (profile : FeatureProfile) (raw : RawInstruction) (role : Option FoldRole)
     (emitted : Instruction) (called : methodTokenCall raw.opcode = true)
     (claimed : siteClaim loweredCallFamily environment none raw = .lowered family)
-    (missing : family.resolve environment.callLayouts profile role raw = none) :
+    (missing : family.resolve environment.callLayouts role raw = none) :
     runtimeCatalog.siteAgrees environment profile raw emitted none role true = false ∧
     (runtimeCatalog.siteAgrees environment profile raw emitted none role false = true ↔
       emitted = .unadmitted raw.opcode) := by

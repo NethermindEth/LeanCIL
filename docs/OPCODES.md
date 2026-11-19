@@ -606,8 +606,9 @@ aggregate fields whose value cannot be computed. Each such field is listed in
 
 ## Runtime calls and SIMD
 
-SIMD and hardware features enter compiled CIL mostly through `call`, rather than dedicated SIMD
-CIL opcodes. [SIMD](SIMD.md) lists the admitted vector and hardware-intrinsic overloads with
+Hardware intrinsics keep their CIL `call`. The runtime model table selects the operation and
+argument count from the closed method reference. The decoder checks the open declaration,
+external target and feature profile before admitting the call. [SIMD](SIMD.md) lists the admitted vector and hardware-intrinsic overloads with
 their element types and profile requirements, and links the extractor sources that define them.
 The portable bitwise and equality forms admit no floating-point equality and no observation of
 [unspecified lanes](SOUNDNESS-RUNTIME.md#unspecified-vector-lanes).

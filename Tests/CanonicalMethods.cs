@@ -134,8 +134,6 @@ var reports = await Task.WhenAll(profiles.Select(profile => Task.Run(() =>
 if (ExtractorHash() != extractorHash)
     throw new InvalidOperationException("The extractor changed while the examples' admission ran.");
 
-string Refusal(JsonElement refusal) =>
-    $"{refusal.GetProperty("ilOffset").GetInt32()} {refusal.GetProperty("opcode").GetString()} {Reason(refusal)}";
 string[] decodedExamples =
 [
     "System.Void Examples.Arithmetic::Mutate(System.UInt64&)",
@@ -144,7 +142,7 @@ string[] decodedExamples =
     "System.ReadOnlySpan`1<System.UInt32> Examples.SpanTables::get_Words()",
     "System.ReadOnlySpan`1<System.UInt64> Examples.SpanTables::get_Powers()"
 ];
-const string literalExample = "System.UInt64 Examples.DivisionIntrinsics::And(System.UInt64,System.UInt64)";
+const string avx2And = "System.UInt64 Examples.DivisionIntrinsics::And(System.UInt64,System.UInt64)";
 var examplesDecoded = new List<string>();
 foreach (var (profile, path) in reports)
 {
@@ -156,13 +154,10 @@ foreach (var (profile, path) in reports)
     foreach (var example in decodedExamples)
         if (!names.Contains(example))
             throw new InvalidOperationException($"{example} is not defined from its decoder in {path}.");
-    if (profile != "x64-v3") continue;
-    var stated = kept.TryGetValue(literalExample, out var refusal) ? Refusal(refusal) : "no refusal";
-    if (stated != "12 call translated call or construction")
-        throw new InvalidOperationException(
-            $"{literalExample} must report the translated Avx2.And call at IL_000c, found {stated}.");
+    if (profile == "x64-v3" && !names.Contains(avx2And))
+        throw new InvalidOperationException($"{avx2And} must decode under {profile} in {path}.");
 }
-Console.WriteLine("PASS field sites and Mutate decode across profiles and Avx2.And reports its first refusal");
+Console.WriteLine("PASS field sites and Mutate decode across profiles and Avx2.And decodes under x64-v3");
 var examples = examplesDecoded.Order(StringComparer.Ordinal).ToArray();
 var (examplesLost, examplesAdded) = Compare(examplesListPath, examples);
 foreach (var method in examplesAdded) Console.WriteLine("  added: " + method);

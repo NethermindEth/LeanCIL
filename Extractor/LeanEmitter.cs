@@ -459,7 +459,7 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
-                $"method{n}_intrinsics_validated, method{n}_models_validated, method{n}_opaque_validated, " +
+                $"profile_valid, method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
             lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated, rfl⟩");

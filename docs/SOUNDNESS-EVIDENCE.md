@@ -25,6 +25,12 @@ cannot substitute for it.
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
 | Static values | Checked execution yields emitted bytes without circular reads of the values being justified; unknown values have no initializer and are read only from the caller's binding | Initializer recognition and deployment initialization/immutability |
 
+For each external call operand in the body's token table, `BodyDecodes.externalTarget` binds
+the typed reference and the target identity to the same resolved metadata member. A generic
+import may use the closed contract spelling of that member. Hardware family selection reads the
+closed owner, metadata name, signature and type arguments. The hardware row binds its own open
+declaration and external spelling before the decoder keeps the call.
+
 For a supported `MemoryMarshal` member, `RuntimeModelsAgree` checks the kept call against its
 declaration, closed operand and checked layouts. Both element widths of `Cast` and the transfer
 kind of the read and write operations come from the model. At a site with no link, a missing

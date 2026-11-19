@@ -2,6 +2,7 @@ import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.WideArithmetic
 import CIL.Extraction.VectorModels
+import CIL.Extraction.HardwareModels
 import CIL.Extraction.VectorHelpers
 import CIL.Extraction.PlatformModels
 import CIL.Extraction.ReferenceContentModels
@@ -34,6 +35,7 @@ def modelFamilies : List (List ModelEntry) := [
   [objectConstructorEntry],
   vectorEntries,
   vectorHelperEntries,
+  hardwareEntries,
   integerMathEntries,
   wideArithmeticEntries,
   binaryEntries,
@@ -67,6 +69,15 @@ def runtimeModel (environment : LayoutEnvironment) (opcode : CallOpcode) (method
     Option RuntimeModel :=
   runtimeModels.find environment opcode method
 
+/-- Every exact hardware reference selects the operation of its own closed signature. -/
+theorem runtimeModels_exactHardware (environment : LayoutEnvironment) (method : MethodRef)
+    (member : exactCallFamily method = true) :
+    runtimeModel environment .call method = exactIntrinsic method := by
+  apply ExactHardwareRegistered.resolve _ environment method member
+  hardware_registrations
+
+#print axioms runtimeModels_exactHardware
+
 /-- The mechanism responsible for a method-token call site. -/
 inductive SiteClaim (Family : Type) where
   | link
@@ -99,21 +110,24 @@ private def proveEntryMembership : TacticM Unit := do
   let cells ← literalCells (mkConst ``modelEntries)
   let key (entry : Expr) := unsafe evalExpr Nat (mkConst ``Nat)
     (mkApp (mkConst ``ModelEntry.key) entry)
-  let mut positions : Std.HashMap Nat (List Nat) := {}
+  let mut positions : Std.HashMap Expr Nat := {}
+  let mut byName : Std.HashMap Nat (List Nat) := {}
   for index in [:cells.size] do
+    positions := positions.insert cells[index]!.consumeMData index
     let name ← key cells[index]!
-    positions := positions.insert name (index :: positions.getD name [])
+    byName := byName.insert name (index :: byName.getD name [])
   for goal in ← getGoals do
     let target := (← instantiateMVars (← goal.getType)).consumeMData
     unless target.isApp do throwError "expected entry membership: {target}"
     let entry := target.appArg!.consumeMData
-    let candidates := positions.getD (← key entry) []
-    let some index ← candidates.findM? (fun i => isDefEq cells[i]! entry)
-      | throwError "unregistered model entry: {entry}"
-    let value ← mkAppM ``Option.some #[entry]
-    let proof ← mkAppOptM ``List.mem_of_getElem? #[none, some (mkConst ``modelEntries),
-      some (mkNatLit index), some entry, some (← mkEqRefl value)]
-    goal.assign proof
+    let found ← match positions.get? entry with
+      | some index => pure (some index)
+      | none => (byName.getD (← key entry) []).findM? (fun i => isDefEq cells[i]! entry)
+    let some index := found | throwError "unregistered model entry: {entry}"
+    let type := mkConst ``ModelEntry
+    let value := mkApp2 (mkConst ``Option.some [0]) type entry
+    goal.assign (mkApp5 (mkConst ``List.mem_of_getElem? [0]) type (mkConst ``modelEntries)
+      (mkNatLit index) entry (← mkEqRefl value))
   setGoals []
 
 /-- Every entry of the runtime table is one of `modelEntries`. -/

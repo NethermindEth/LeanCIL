@@ -1,11 +1,10 @@
 import CIL.Extraction.LoweredCalls
-import CIL.Extraction.HardwareCalls
 
 /-!
 # Resolution of lowered calls
 
 Each named family computes its instruction from the call operand, the checked layout
-environment and profile, and its role in a fold of the raw method.
+environment, and its role in a fold of the raw method.
 -/
 
 namespace CIL.Extraction
@@ -27,11 +26,10 @@ private def spanInstruction (environment : CallLayouts) (role : Option FoldRole)
 
 /-- The instruction of this raw member, or no instruction when its overload cannot resolve. -/
 def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
-    (profile : FeatureProfile) (role : Option FoldRole) (raw : RawInstruction) :
+    (role : Option FoldRole) (raw : RawInstruction) :
     Option Instruction := do
   let .call site := raw.operand | none
   match family with
-  | .hardware => hardwareInstruction environment profile raw site
   | .span => spanInstruction environment role raw site
 
 end CIL.Extraction

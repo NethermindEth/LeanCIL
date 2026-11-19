@@ -44,9 +44,8 @@ internal static class ScalarEvidence
         var witness = decoded ? $"fun _ => {method}_decoded_code" : "fun h => False.elim (Bool.false_ne_true h)";
         var scalarEvidence = $"And ({scalar}) ({binding})";
         var unsafeCalls = $"Extraction.UnsafeCallsValid {method}Closed {method}Reachable {method}.code";
-        var intrinsics = $"Extraction.ExactIntrinsicsValid {method}Closed {method}Reachable {method}";
         var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";
-        var otherChecks = $"And ({unsafeCalls}) (And ({intrinsics}) ({models}))";
+        var otherChecks = $"And ({unsafeCalls}) ({models})";
         var objects = $"Extraction.ObjectOperandsValid {method}Closed {method}Reachable {method}";
         var remaining = $"And ({otherChecks}) ({objects})";
         var decided = objectProof is null ? remaining : otherChecks;
@@ -61,8 +60,7 @@ internal static class ScalarEvidence
             #print axioms {method}_instruction_checks
             theorem {method}_scalars_validated : {scalarEvidence} := {method}_instruction_checks.1
             theorem {method}_unsafe_validated : {unsafeCalls} := {method}_instruction_checks.2.1.1
-            theorem {method}_intrinsics_validated : {intrinsics} := {method}_instruction_checks.2.1.2.1
-            theorem {method}_models_validated : {models} := {method}_instruction_checks.2.1.2.2
+            theorem {method}_models_validated : {models} := {method}_instruction_checks.2.1.2
             theorem {method}_object_operands_validated : {objects} := {method}_instruction_checks.2.2
             """);
     }

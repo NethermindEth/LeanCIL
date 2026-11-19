@@ -153,9 +153,11 @@ internal static class RuntimeModels
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
-        if (VectorModel(reference) is { } vector)
+        if (VectorModel(reference, profile) is { } vector)
         {
             ValidateSignature(reference, profile.Architecture);
+            if (ValueTuples.Is(reference.ReturnType))
+                ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
             return vector;
         }
         if (BitModels.Call(reference, profile) is { } bits) return bits;
@@ -228,7 +230,6 @@ internal static class RuntimeModels
         Operation? op = scope switch
         {
             "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture),
-            "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
         if (op is not null) ValidateSignature(reference, profile.Architecture);
@@ -252,7 +253,7 @@ internal static class RuntimeModels
     ];
 
     // Vector helpers must bind a static declaration in the exact intrinsics assembly.
-    static Operation? VectorModel(MethodReference reference)
+    static Operation? VectorModel(MethodReference reference, FeatureProfile profile)
     {
         var convention = reference is GenericInstanceMethod
             ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
@@ -271,7 +272,7 @@ internal static class RuntimeModels
             if (signature == $"{element}({Vector(width, "!!0")},System.Int32)")
                 return Hardware($".vector (.extract64 {width})", 2);
         }
-        return null;
+        return HardwareModel(signature, profile);
     }
 
     private static readonly Dictionary<string, Operation> IntegerMathCalls = BuildIntegerMathCalls();
@@ -392,7 +393,7 @@ internal static class RuntimeModels
         return calls;
     }
 
-    private static Operation? Intrinsic(string signature, FeatureProfile profile)
+    private static Operation? HardwareModel(string signature, FeatureProfile profile)
     {
         if (PortableVectorOperations.TryGetValue(signature, out var operation)) return operation;
         Operation Finish(string family, int argc, Feature? required = null) =>

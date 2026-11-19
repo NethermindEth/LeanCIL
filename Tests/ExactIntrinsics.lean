@@ -23,6 +23,17 @@ private def raw (site : CallSite) : RawMethod := {
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := .void, parameters := [], locals := [], initLocals := false,
   maxStack := 2, genericParameters := [], code := [⟨0, 40, .call site⟩] }
+/-- A resolving call keeps its reference and executes the expected operation. -/
+private def keeps (site : CallSite) (expected : RuntimeModel) (features := profile) : Bool :=
+  runtimeModel {} .call site.method == some expected &&
+    decide ((Method.ofRaw? features {} [] [true] (raw site) []).map Method.code =
+      some [.call site.method {}])
+
+/-- A live unresolved operand produces its own opcode's hole and prevents method construction. -/
+private def refuses (site : CallSite) (features := profile) : Bool :=
+  methodCode features {} [] [true] (raw site) == [.unadmitted 40] &&
+    (Method.ofRaw? features {} [] [true] (raw site) []).isNone
+
 private def call0 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "256",
@@ -36,20 +47,15 @@ private def call0 : CallSite := {
     System.Runtime.Intrinsics.X86.Avx2::And(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call0) [true]
-    (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid
-    (raw { call0 with method.returnType := .atom runtimeScope "System.UInt64" })
-    [true] (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid
-    (raw { call0 with method.parameters := [vectorType "128", vectorType "256"] })
-    [true] (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call0) [true]
-    (body [.intrinsic (.avx2 .band) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call0 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call0 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
+example : keeps call0 (.intrinsic (.avx2 .band) 2) := by decide +kernel
+example : refuses { call0 with method.returnType := .atom runtimeScope "System.UInt64" } := by
+  decide +kernel
+example : refuses { call0 with method.parameters := [vectorType "128", vectorType "256"] } := by
+  decide +kernel
+example : runtimeModel {} .call call0.method ≠ some (.intrinsic (.avx2 .band) 3) := by
+  decide +kernel
+example : refuses { call0 with method.hasThis := true } := by decide +kernel
+example : refuses { call0 with target := .external "forged" } := by decide +kernel
 private def call1 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "256",
@@ -63,14 +69,10 @@ private def call1 : CallSite := {
     System.Runtime.Intrinsics.X86.Avx2::Or(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call1) [true]
-    (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call1) [true]
-    (body [.intrinsic (.avx2 .bor) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call1 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call1 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
+example : keeps call1 (.intrinsic (.avx2 .bor) 2) := by decide +kernel
+example : runtimeModel {} .call call1.method ≠ some (.intrinsic (.avx2 .bor) 3) := by decide +kernel
+example : refuses { call1 with method.hasThis := true } := by decide +kernel
+example : refuses { call1 with target := .external "forged" } := by decide +kernel
 private def call2 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "256",
@@ -84,14 +86,11 @@ private def call2 : CallSite := {
     System.Runtime.Intrinsics.X86.Avx2::Xor(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call2) [true]
-    (body [.intrinsic (.avx2 .bxor) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call2) [true]
-    (body [.intrinsic (.avx2 .bxor) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call2 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx2 .bxor) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call2 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx2 .bxor) 2]) := by decide +kernel
+example : keeps call2 (.intrinsic (.avx2 .bxor) 2) := by decide +kernel
+example : runtimeModel {} .call call2.method ≠ some (.intrinsic (.avx2 .bxor) 3) := by
+  decide +kernel
+example : refuses { call2 with method.hasThis := true } := by decide +kernel
+example : refuses { call2 with target := .external "forged" } := by decide +kernel
 private def call3 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "256",
@@ -106,14 +105,11 @@ private def call3 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call3) [true]
-    (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call3) [true]
-    (body [.intrinsic (.avx2 .andNot) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call3 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call3 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
+example : keeps call3 (.intrinsic (.avx2 .andNot) 2) := by decide +kernel
+example : runtimeModel {} .call call3.method ≠ some (.intrinsic (.avx2 .andNot) 3) := by
+  decide +kernel
+example : refuses { call3 with method.hasThis := true } := by decide +kernel
+example : refuses { call3 with target := .external "forged" } := by decide +kernel
 private def call4 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "256",
@@ -128,14 +124,11 @@ private def call4 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call4) [true]
-    (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call4) [true]
-    (body [.intrinsic (.avx2 .shl64Count) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call4 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call4 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
+example : keeps call4 (.intrinsic (.avx2 .shl64Count) 2) := by decide +kernel
+example : runtimeModel {} .call call4.method ≠ some (.intrinsic (.avx2 .shl64Count) 3) := by
+  decide +kernel
+example : refuses { call4 with method.hasThis := true } := by decide +kernel
+example : refuses { call4 with target := .external "forged" } := by decide +kernel
 private def call5 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "256",
@@ -150,14 +143,11 @@ private def call5 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call5) [true]
-    (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call5) [true]
-    (body [.intrinsic (.avx2 .shr64Count) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call5 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call5 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
+example : keeps call5 (.intrinsic (.avx2 .shr64Count) 2) := by decide +kernel
+example : runtimeModel {} .call call5.method ≠ some (.intrinsic (.avx2 .shr64Count) 3) := by
+  decide +kernel
+example : refuses { call5 with method.hasThis := true } := by decide +kernel
+example : refuses { call5 with target := .external "forged" } := by decide +kernel
 private def call6 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "512",
@@ -172,14 +162,11 @@ private def call6 : CallSite := {
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call6) [true]
-    (body [.intrinsic (.avx512 .ltu512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call6) [true]
-    (body [.intrinsic (.avx512 .ltu512) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call6 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx512 .ltu512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call6 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx512 .ltu512) 2]) := by decide +kernel
+example : keeps call6 (.intrinsic (.avx512 .ltu512) 2) := by decide +kernel
+example : runtimeModel {} .call call6.method ≠ some (.intrinsic (.avx512 .ltu512) 3) := by
+  decide +kernel
+example : refuses { call6 with method.hasThis := true } := by decide +kernel
+example : refuses { call6 with target := .external "forged" } := by decide +kernel
 private def call7 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "512",
@@ -194,14 +181,11 @@ private def call7 : CallSite := {
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call7) [true]
-    (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call7) [true]
-    (body [.intrinsic (.avx512 .gtu512) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call7 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call7 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
+example : keeps call7 (.intrinsic (.avx512 .gtu512) 2) := by decide +kernel
+example : runtimeModel {} .call call7.method ≠ some (.intrinsic (.avx512 .gtu512) 3) := by
+  decide +kernel
+example : refuses { call7 with method.hasThis := true } := by decide +kernel
+example : refuses { call7 with target := .external "forged" } := by decide +kernel
 private def call8 : CallSite := {
   declared := {
     convention := 0, returnType := .atom runtimeScope "System.Int32",
@@ -214,14 +198,11 @@ private def call8 : CallSite := {
   target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
     System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 1, returnsValue := true }
-example : ExactIntrinsicsValid (raw call8) [true]
-    (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call8) [true]
-    (body [.intrinsic (.avx512DQ .moveMask512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call8 with method.hasThis := true }) [true]
-    (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call8 with target := .external "forged" }) [true]
-    (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
+example : keeps call8 (.intrinsic (.avx512DQ .moveMask512) 1) := by decide +kernel
+example : runtimeModel {} .call call8.method ≠ some (.intrinsic (.avx512DQ .moveMask512) 2) := by
+  decide +kernel
+example : refuses { call8 with method.hasThis := true } := by decide +kernel
+example : refuses { call8 with target := .external "forged" } := by decide +kernel
 private def call9 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "512",
@@ -240,13 +221,13 @@ example : runtimeModel {} .call call9.method = some (.intrinsic (.vector .combin
   decide +kernel
 example : runtimeCatalog.siteAgrees {} profile ⟨0, 40, .call call9⟩ (.call call9.method {}) := by
   decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call9) [true]
+example : ¬ RuntimeModelsAgree (raw call9) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call9) [true]
+example : ¬ RuntimeModelsAgree (raw call9) [true]
     (body [.intrinsic (.vector .combine256) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call9 with method.hasThis := true }) [true]
+example : ¬ RuntimeModelsAgree (raw { call9 with method.hasThis := true }) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call9 with target := .external "forged" }) [true]
+example : ¬ RuntimeModelsAgree (raw { call9 with target := .external "forged" }) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
 /-- The same vector equality declaration instantiated at the supplied owner element. -/
 private def equalitySite (width : Nat) (element : String) : CallSite :=
@@ -291,13 +272,13 @@ private def call10 : CallSite := {
     System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)"),
   typeArguments := [], parameterCount := 1, returnsValue := true }
 -- `CreateScalarUnsafe` keeps its call, so its intrinsic is refused at every site, its own too.
-example : ExactIntrinsicsValid (raw call10) [true]
-    (body [.call call10.method {}]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call10) [true]
+example : RuntimeModelsAgree (raw call10) [true] (body [.call call10.method {}]) := by
+  decide +kernel
+example : ¬ RuntimeModelsAgree (raw call10) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call0) [true]
+example : ¬ RuntimeModelsAgree (raw call0) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call10) [true]
+example : ¬ RuntimeModelsAgree (raw call10) [true]
     (body [.intrinsic (.vector (.extract64 128)) 2]) := by decide +kernel
 -- The table states what the site may emit instead.
 example : call10.method = createScalarUnsafeMethod := by decide +kernel
@@ -306,25 +287,19 @@ example : ¬ ModelsAgree runtimeCatalog {} profile (raw call10) [true]
 example : ¬ ModelsAgree runtimeCatalog {} profile
     (raw { call10 with target := .external "forged" }) [true]
     [.intrinsic (.vector (.createScalar64 128)) 1] := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call0 with parameterCount := 1 }) [true]
-    (body [.intrinsic (.vector (.band 256)) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call0) [true]
-    (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call4) [true]
-    (body [.intrinsic (.avx2 .shl64) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call6) [true]
-    (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call0) [true]
-    { body [.intrinsic (.avx2 .band) 2] with profile := .scalar } := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call6) [true]
-    { body [.intrinsic (.avx512 .ltu512) 2] with profile := { profile with avx512F := false } } := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw call8) [true]
-    { body [.intrinsic (.avx512DQ .moveMask512) 1] with profile := { profile with avx512DQ := false } } := by decide +kernel
+example : refuses { call0 with parameterCount := 1 } := by decide +kernel
+example : runtimeModel {} .call call0.method ≠ some (.intrinsic (.avx2 .bor) 2) := by decide +kernel
+example : runtimeModel {} .call call4.method ≠ some (.intrinsic (.avx2 .shl64) 2) := by
+  decide +kernel
+example : runtimeModel {} .call call6.method ≠ some (.intrinsic (.avx512 .gtu512) 2) := by
+  decide +kernel
+example : refuses call0 (.scalar) := by decide +kernel
+example : refuses call6 ({ profile with avx512F := false }) := by decide +kernel
+example : refuses call8 ({ profile with avx512DQ := false }) := by decide +kernel
 example : Intrinsic.available profile (.avx512 .ltu512) = true := by decide +kernel
 example : Intrinsic.available profile (.avx512DQ .moveMask512) = true := by decide +kernel
 
-example : ¬ ExactIntrinsicsValid (raw call0) [true]
-    { body [.intrinsic (.avx2 .band) 2] with profile := { profile with architecture := .arm64 } } := by decide +kernel
+example : ¬ ({ profile with architecture := .arm64 } : FeatureProfile).Valid := by decide +kernel
 
 private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
@@ -359,7 +334,8 @@ example : ¬ OpaqueLocalsValid withLocal
     { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1] } := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] }
     := by decide +kernel
-example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by decide +kernel
+example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by
+  decide +kernel
 
 example : evalIntrinsic (.avx2 .andNot) [.v256 1, .v256 3] = some (.v256 2) := by decide +kernel
 example : evalIntrinsic (.vector .combine256) [.v256 1, .v256 2] = some (.v512 ((2 : BitVec 256) ++ (1 : BitVec 256))) := rfl
@@ -431,7 +407,8 @@ example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 1) 3 =
     := by decide +kernel
 example : Vector.lane64 (Vector.shiftRightCount64 (Vector.pack256 1 1 1 1) 1) 3 = 0
     := by decide +kernel
-example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 63) 3 = 9223372036854775808 := by decide +kernel
+example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 63) 3 = 9223372036854775808 := by
+  decide +kernel
 example : Vector.lane64 (Vector.shiftRightCount64 (Vector.pack256 1 1 1 1) 63) 3 = 0
     := by decide +kernel
 example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 64) 3 = 0
@@ -446,8 +423,10 @@ example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 256) 3
     := by decide +kernel
 example : Vector.lane64 (Vector.shiftRightCount64 (Vector.pack256 1 1 1 1) 256) 3 = 0
     := by decide +kernel
-example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 18446744073709551615) 3 = 0 := by decide +kernel
-example : Vector.lane64 (Vector.shiftRightCount64 (Vector.pack256 1 1 1 1) 18446744073709551615) 3 = 0 := by decide +kernel
+example : Vector.lane64 (Vector.shiftLeftCount64 (Vector.pack256 1 1 1 1) 18446744073709551615) 3 = 0 := by
+  decide +kernel
+example : Vector.lane64 (Vector.shiftRightCount64 (Vector.pack256 1 1 1 1) 18446744073709551615) 3 = 0 := by
+  decide +kernel
 example : Vector.moveMask512 (Vector.pack512 9223372036854775808 0 0 0 0 0 0 0) = 1
     := by decide +kernel
 example : Vector.moveMask512 (Vector.pack512 0 9223372036854775808 0 0 0 0 0 0) = 2
@@ -468,7 +447,7 @@ example : evalIntrinsic (.avx512 .ltu512)
     [.v512 (Vector.pack512 9223372036854775808 1 0 0 0 0 0 0),
      .v512 (Vector.pack512 1 1 0 0 0 0 0 0)] = some (.v512 0) := by decide +kernel
 
-example : ExactIntrinsicsValid (raw {
+example : keeps {
     declared := {
       convention := 0, returnType := vectorType "256",
       parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
@@ -480,10 +459,10 @@ example : ExactIntrinsicsValid (raw {
     target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
       System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
-    typeArguments := [], parameterCount := 2, returnsValue := true }) [true]
-    (body [.intrinsic (.avx2 .shl64) 2]) := by decide +kernel
+    typeArguments := [], parameterCount := 2, returnsValue := true }
+    (.intrinsic (.avx2 .shl64) 2) := by decide +kernel
 
-example : ExactIntrinsicsValid (raw {
+example : keeps {
     declared := {
       convention := 0, returnType := vectorType "256",
       parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
@@ -495,10 +474,10 @@ example : ExactIntrinsicsValid (raw {
     target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(\
       System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
-    typeArguments := [], parameterCount := 2, returnsValue := true }) [true]
-    (body [.intrinsic (.avx2 .shr64) 2]) := by decide +kernel
+    typeArguments := [], parameterCount := 2, returnsValue := true }
+    (.intrinsic (.avx2 .shr64) 2) := by decide +kernel
 
-example : ExactIntrinsicsValid (raw {
+example : keeps {
     declared := {
       convention := 0, returnType := .atom runtimeScope "System.Int32",
       parameters := [vectorType "256"] },
@@ -509,8 +488,8 @@ example : ExactIntrinsicsValid (raw {
     name := "MoveMask",
     target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::\
       MoveMask(System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
-    typeArguments := [], parameterCount := 1, returnsValue := true }) [true]
-    (body [.intrinsic (.avx512DQ .moveMask64) 1]) := by decide +kernel
+    typeArguments := [], parameterCount := 1, returnsValue := true }
+    (.intrinsic (.avx512DQ .moveMask64) 1) := by decide +kernel
 
 
 /-- A method using the specified type at its only instruction. -/
@@ -623,97 +602,42 @@ example : Safety.checkedIntrinsic (.avx2 .shl64Count) [.v128Low64 1, .v128Low64 
 example : Safety.checkedIntrinsic (.scalar (.leadingZeroCount 64 .word32)) [.v128Low64 1] =
     .error (.unsupported "Intrinsic observes unspecified vector bits") := rfl
 
-/-- An admitted call still requires its exact emitted intrinsic and arity. -/
-theorem exact_call_site :
-    ExactIntrinsicsValid (raw call0) [true] (body [.intrinsic (.avx2 .band) 2]) := by
-  decide +kernel
-#print axioms exact_call_site
+/-- Family membership and model selection use the typed reference for both target spellings. -/
+theorem typed_family :
+    let crossed := { call10 with target := call0.target }
+    exactCallFamily call0.method = true ∧ exactCallFamily crossed.method = false ∧
+      exactIntrinsic crossed.method = none ∧
+      exactIntrinsic call0.method = some (.intrinsic (.avx2 .band) 2) := by decide +kernel
 
-/-- A recognized owner and name cannot be hidden behind a forged identity or owner scope. -/
-theorem malformed_family_without_intrinsic :
-    ¬ ExactIntrinsicsValid
-      (raw { call0 with
-        method.owner := .atom "forged" "System.Runtime.Intrinsics.X86.Avx2"
-        target := .external "forged" }) [true] (body [.nop]) := by
-  decide +kernel
-#print axioms malformed_family_without_intrinsic
+#print axioms typed_family
 
-/-- An exact intrinsic identity still marks the family when both owner and name are forged. -/
-theorem identity_family_without_intrinsic :
-    ¬ ExactIntrinsicsValid
-      (raw { call0 with method.owner := .atom "forged" "Other", name := "Other" })
-      [true] (body [.nop]) := by
-  decide +kernel
-#print axioms identity_family_without_intrinsic
+/-- The model row compares the complete external identity and the raw metadata name. -/
+theorem exact_identity_boundaries :
+    refuses { call0 with name := "Andλ" } ∧ refuses { call0 with target := .external scope } ∧
+      refuses { call0 with target := .external (scope ++ "::λ") } := by decide +kernel
 
-/-- Calls outside the admitted family need no exact intrinsic. -/
-theorem unrelated_call_without_intrinsic :
-    ExactIntrinsicsValid
-      (raw { call0 with
-        method.owner := .atom "Other" "Other", name := "Other"
-        target := .external "Other" }) [true] (body [.nop]) := by
-  decide +kernel
-#print axioms unrelated_call_without_intrinsic
+#print axioms exact_identity_boundaries
 
-/-- Live malformed family calls cannot be discarded even when the opcode is not `call`. -/
-theorem family_wrong_opcode :
-    ¬ ExactIntrinsicsValid
-      { raw call0 with code := [⟨0, 111, .call call0⟩] } [true] (body [.nop]) := by
-  decide +kernel
-#print axioms family_wrong_opcode
+/-- A dead call is its opcode's hole even if the closed signature or opcode is unmodelled. -/
+theorem unreachable_call :
+    let source := { raw call0 with code := [⟨0, 111, .call { call0 with name := "Other" }⟩] }
+    (Method.ofRaw? profile {} [] [false] source []).map Method.code = some [.unadmitted 111] ∧
+      (Method.ofRaw? profile {} [] [true] source []).isNone := by decide +kernel
 
-/-- Unreachable sites retain the original exemption from metadata and intrinsic checks. -/
-theorem unreachable_malformed_exact_call :
-    ExactIntrinsicsValid
-      { raw call0 with code := [⟨0, 111, .call { call0 with target := .external "forged" }⟩] }
-      [false] (body [.intrinsic (.avx2 .band) 99]) := by
-  decide +kernel
-#print axioms unreachable_malformed_exact_call
+#print axioms unreachable_call
 
-/-- Exact metadata does not admit a mismatched emitted arity. -/
-theorem exact_call_wrong_arity :
-    ¬ ExactIntrinsicsValid (raw call0) [true] (body [.intrinsic (.avx2 .band) 99]) := by
-  decide +kernel
-#print axioms exact_call_wrong_arity
+/-- A literal method cannot contain a standalone intrinsic at an unrelated instruction. -/
+theorem standalone_intrinsic_refused :
+    let source := { raw call0 with code := [⟨0, 0, .none⟩] }
+    methodShapeInstructions source (body [.intrinsic (.avx2 .band) 2]) = false := rfl
 
-/-- UTF-8 comparisons do not truncate or normalize non-ASCII metadata. -/
-theorem exact_call_non_ascii_name :
-    ¬ ExactIntrinsicsValid (raw { call0 with name := "Andλ" }) [true]
-      (body [.intrinsic (.avx2 .band) 2]) := by
-  decide +kernel
-#print axioms exact_call_non_ascii_name
+#print axioms standalone_intrinsic_refused
 
-/-- A truncated scope or a non-ASCII identity suffix cannot forge a family identity. -/
-theorem exact_call_identity_boundaries :
-    ExactIntrinsicsValid
-      (raw { call0 with
-        method.owner := .atom "Other" "Other", name := "Other"
-        target := .external intrinsicsScope }) [true] (body [.nop]) ∧
-    ExactIntrinsicsValid
-      (raw { call0 with
-        method.owner := .atom "Other" "Other", name := "Other"
-        target := .external (intrinsicsScope ++ "::λ") }) [true] (body [.nop]) := by
-  decide +kernel
-#print axioms exact_call_identity_boundaries
-
-/-- An exact intrinsic still requires its profile feature. -/
-theorem exact_call_unavailable :
-    ({ profile with
-      avx512F := false, avx512FVL := false
-      avx512DQ := false, avx512DQVL := false } : FeatureProfile).Valid ∧
-    ¬ ExactIntrinsicsValid (raw call8) [true]
-      { body [.intrinsic (.avx512DQ .moveMask512) 1] with
-        profile := { profile with
-          avx512F := false, avx512FVL := false
-          avx512DQ := false, avx512DQVL := false } } := by
-  decide +kernel
-#print axioms exact_call_unavailable
-
-/-- Dispatch does not relax either certificate length check. -/
+/-- Model agreement requires the same number of raw instructions, live flags and emissions. -/
 theorem exact_call_lengths :
-    (¬ ExactIntrinsicsValid (raw call0) [] (body [.intrinsic (.avx2 .band) 2])) ∧
-    (¬ ExactIntrinsicsValid (raw call0) [false] (body [])) := by
-  decide +kernel
+    (¬ RuntimeModelsAgree (raw call0) [] (body [.call call0.method {}])) ∧
+      (¬ RuntimeModelsAgree (raw call0) [false] (body [])) := by decide +kernel
+
 #print axioms exact_call_lengths
 
 /-! Generated runtime comparisons apply the broadcast execution facts to extracted bodies, which
@@ -735,13 +659,14 @@ private def emittedAnd : Method :=
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
     code := [.ldarg 0, .call broadcast256Method {}, .ldarg 1,
-      .call broadcast256Method {}, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
+      .call broadcast256Method {}, .call call0.method {}, .ldc_i4 0,
       .call getElement256Method {}, .ret] }
 
 example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 4)] := by
-  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastBinary_word profile .band 0 13 6 4
-    Safety.Memory.empty rfl rfl rfl rfl (by decide) (Safety.checked_broadcast_and 13 6))
+  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastBinary_word profile .band
+    (reference := call0.method) 0 13 6 4
+    Safety.Memory.empty rfl rfl rfl rfl rfl (by decide) (Safety.checked_broadcast_and 13 6))
 
 /-- `Avx2.ShiftLeftLogical` of a broadcast by a full-width count, in the emitted form. -/
 private def emittedShift : Method :=
@@ -749,13 +674,14 @@ private def emittedShift : Method :=
     opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
     code := [.ldarg 1, .call createScalarUnsafeMethod {}, .stloc 0, .ldarg 0,
-      .call broadcast256Method {}, .ldloc 0, .intrinsic (.avx2 .shl64Count) 2,
+      .call broadcast256Method {}, .ldloc 0, .call call4.method {},
       .ldc_i4 0, .call getElement256Method {}, .ret] }
 
 example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 9223372036854775808)] := by
-  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastShift profile .shl64Count 0 1 63
-    9223372036854775808 Safety.Memory.empty rfl rfl rfl rfl (by decide)
+  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastShift profile .shl64Count
+    (reference := call4.method) 0 1 63
+    9223372036854775808 Safety.Memory.empty rfl rfl rfl rfl rfl (by decide)
     (Safety.checked_broadcast_shiftLeft 1 63))
 
 end Tests.ExactIntrinsics

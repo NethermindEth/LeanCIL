@@ -91,8 +91,8 @@ Full integration results come from the CI partition jobs. The routing tests,
   argument count.
 - `Tests/GenericEvidence.cs` also checks exact external-call identity sharing, repeated emission,
   pruned-only identities and Unicode/escaped characters. Changed bytes, versions and tokens fail
-  the generated equality proof. Replacing a raw target with another correctly encoded identity, or
-  changing its emitted intrinsic, fails the unchanged division certificate. The specialization and
+  the generated equality proof. The body decoder rejects a scalar-unsafe reference paired with the external
+  identity of Avx2.And. Model agreement rejects a different instruction at a kept call. The specialization and
   raw/translated metadata rejection cases run alongside.
 - `Tests/AllocationImports.cs`, in `core`, checks that the CIL umbrella omits allocation
   refinement, builds both explicit allocation acceptance modules, and jointly replays every
@@ -368,7 +368,7 @@ These regressions cover joint replay:
   cases.
 - Generic substitution, managed-call and method-shape mutations select their corresponding emitted
   validator; type-test mutations select feature-flow validation. External-call mutation fixtures
-  check only the intended division or intrinsic validator, with a complete positive certificate
+  check body binding and runtime model agreement, with a complete positive certificate
   and a checked unchanged-obligation control in the replayed evidence batch. Unchanged controls
   compile first, with repeated generic controls deduplicated. Byte-backed identity definitions
   keep their UTF-8 witnesses. Evidence-list omission and reordering check the complete

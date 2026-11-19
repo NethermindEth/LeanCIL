@@ -14,7 +14,6 @@
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.Intrinsics;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -254,7 +253,7 @@ foreach (var item in portableCases)
         // The helper's isolated declarations must match its certificate in the complete caller.
         var callEvidence = File.ReadAllText(Path.Combine(callOutput, "Extracted.lean"))
             .Replace("method0", "method1", StringComparison.Ordinal);
-        const string portableObligation = "method1_intrinsics_validated";
+        const string portableObligation = "method1_models_validated";
         File.AppendAllText(proof, CheckedEvidenceControl(evidence,
             NarrowEvidence(callEvidence, portableObligation), [portableObligation], 1));
     }
@@ -328,40 +327,37 @@ string ForgeTransfer(string opcode, string replacement) => ForgeDecodedMethod(ba
     $"""code := method.code.map fun op => match op with | .{opcode} _ => {replacement} | _ => op""");
 var portableBaseline = File.ReadAllText(Path.Combine(root, "PortableCall128/Extracted.lean"))
     .Replace("method0", "method1", StringComparison.Ordinal);
-string RawOnly(string text, Func<string, string> change) => Regex.Replace(text,
-    @"(?m)^def method1(?:Original|Closed) :[^\r\n]*", match => change(match.Value));
-string UnrelatedPortable(string source, int bits)
+// The byte helper consists of two argument loads followed by the bitwise call.
+void RejectPortable(string original, string name, string change)
 {
-    var unrelated = RawOnly(source, text => Regex.Replace(
-        text.Replace($"System.Runtime.Intrinsics.Vector{bits}", $"Unrelated.Vector{bits}"),
-        @"name := ""[^""]*""", "name := \"Unrelated\""));
-    return Regex.Replace(unrelated,
-        $@"\.intrinsic \(\.vector \(\.(?:band|bor|bxor|bnot|equalsAll|zero|ones) {bits}\)\) \d+", ".nop");
-}
-void RejectPortable(string original, string name, string changed)
-{
-    if (changed == original) throw new InvalidOperationException("Ineffective portable mutation: " + name);
+    var changed = ForgeClosedCode(original, 1, $$"""
+        modify 2 (fun raw => match raw.operand with
+          | .call site => { raw with operand := .call { site with {{change}} } }
+          | _ => raw)
+        """);
     var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(changed, "method1_intrinsics_validated"));
-    rejected.Add(path, "PASS independently rejected portable vector evidence: " + name,
-        "Extraction.ExactIntrinsicsValid method1Closed", "is false");
+    File.WriteAllText(path, NarrowEvidence(changed, "method1_models_validated"));
+    rejected.Add(path, $"PASS portable model rejects {name}", "Extraction.RuntimeModelsAgree", "is false");
 }
-foreach (var (name, changed) in new[]
+foreach (var (name, field) in new[]
 {
-    ("portable-operation", portableBaseline.Replace(".vector (.band 128)", ".vector (.bor 128)")),
-    ("portable-element", RawOnly(portableBaseline, text => text.Replace("System.Byte", "System.Int64"))),
-    ("portable-scope", RawOnly(portableBaseline, text => text.Replace("Version=11.0.0.0", "Version=9.0.0.0"))),
-    ("portable-width", portableBaseline.Replace(".vector (.band 128)", ".vector (.band 256)")),
-    ("portable-arity", portableBaseline.Replace(".intrinsic (.vector (.band 128)) 2",
-        ".intrinsic (.vector (.band 128)) 1")),
-    ("portable-target-family", UnrelatedPortable(portableBaseline, 128))
+    ("portable-operation", """method.name := name!"op_BitwiseOr" """),
+    ("portable-element", """method.parameters := [.atom CIL.Extraction.runtimeScope "System.Int64"]"""),
+    ("portable-scope", """method.owner := .atom "Foreign" "System.Runtime.Intrinsics.Vector128`1" """),
+    ("portable-arity", "parameterCount := 1"),
+    ("portable-target", """target := .external "Other member" """)
 })
-    RejectPortable(portableBaseline, name, changed);
+    RejectPortable(portableBaseline, name, field);
 var wideBaseline = File.ReadAllText(Path.Combine(root, "PortableCall512/Extracted.lean"))
     .Replace("method0", "method1", StringComparison.Ordinal);
-RejectPortable(wideBaseline, "portable512-width",
-    wideBaseline.Replace(".vector (.band 512)", ".vector (.band 256)"));
-RejectPortable(wideBaseline, "portable512-target-family", UnrelatedPortable(wideBaseline, 512));
+const string narrowHead = """
+    (.constructor CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
+    """;
+const string byteElement = """(.atom CIL.Extraction.runtimeScope "System.Byte")""";
+const string narrowOwner = $"""method.owner := .apply {narrowHead} {byteElement}""";
+RejectPortable(portableBaseline, "portable-width", narrowOwner);
+RejectPortable(wideBaseline, "portable512-width", narrowOwner);
+RejectPortable(wideBaseline, "portable512-target", """target := .external "Other member" """);
 rejected.Check();
 
 foreach (var mutation in new[] { "element", "scope", "encoding", "field512" })

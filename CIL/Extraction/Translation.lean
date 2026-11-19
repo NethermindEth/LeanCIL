@@ -1,7 +1,7 @@
 import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
-import CIL.Extraction.ExactIntrinsics
+import CIL.Extraction.OpaqueLocals
 import CIL.Extraction.CallAgreement
 import CIL.Extraction.ObjectOperands
 import CIL.Extraction.StaticValues
@@ -123,14 +123,14 @@ private def staticFieldMatches (opcode : Nat) (field : FieldRef)
       descriptor.all (·.field == field)
   | none => false
 
-/-- Every static field instruction names the field of the raw instruction at its pc, whose
-    descriptor the site there carries, and every static load fits that descriptor, using
-    precomputed instruction and site indexes. -/
+/-- Hardware operations require a kept call. Static field instructions agree with the raw field
+    and its site descriptor, and each static load fits that descriptor. -/
 def methodShapeInstructions (closed : RawMethod)
     (method : Method) : Bool :=
   let raw := FlowIndex.ofList closed.code
   let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
+    | .intrinsic .. => false
     | .ldsfld field => staticFieldMatches ldsfldOpcode field (raw.get? pc) sites[pc]? &&
         staticLoadMatches ldsfldOpcode (raw.get? pc) sites[pc]?
     | .ldsflda field => staticFieldMatches ldsfldaOpcode field (raw.get? pc) sites[pc]? &&
@@ -145,6 +145,7 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
     (method : Method) :
     methodShapeInstructions closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
+      | .intrinsic .. => false
       | .ldsfld field =>
           staticFieldMatches ldsfldOpcode field closed.code[pc]? (method.staticAt pc) &&
           staticLoadMatches ldsfldOpcode closed.code[pc]? (method.staticAt pc)
@@ -401,7 +402,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid item.closed method ∧
   UnsafeCallsValid item.closed item.reachable method.code ∧
-  ExactIntrinsicsValid item.closed item.reachable method ∧
+  method.profile.Valid ∧
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   ObjectOperandsValid item.closed item.reachable method ∧

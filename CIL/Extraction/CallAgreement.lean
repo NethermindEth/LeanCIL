@@ -46,7 +46,7 @@ def ModelCatalog.callRequirement (catalog : ModelCatalog) (environment : CallLay
   | .link => catalog.linkedRequirement environment profile raw
   | .refused => missing
   | .lowered family =>
-    ((family.resolve environment profile role raw).map CallRequirement.instruction).getD missing
+    ((family.resolve environment role raw).map CallRequirement.instruction).getD missing
   | .model =>
     match raw.operand, callOpcode? raw.opcode with
     | .call site, some opcode =>

@@ -11,6 +11,7 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 #:include ModelOperandChecks.cs
+#:include HardwareExamples.cs
 
 using System.Buffers.Binary;
 using System.Reflection;
@@ -28,6 +29,48 @@ var divisionMethods = metadata.GetType("Examples.DivisionIntrinsics").Methods.To
 var selectors = divisionMethods.ToDictionary(pair => pair.Key, pair => pair.Value.FullName);
 Type runtime = Assembly.LoadFile(assembly).GetType("Examples.DivisionIntrinsics")!;
 string root = At("artifacts/DivisionIntrinsics");
+verification.EnsureExtractorBuilt();
+var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
+    .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
+var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
+string DeclareAes(string name, string flag)
+{
+    var profile = JsonSerializer.SerializeToNode(selectProfile.Invoke(null, [name]),
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+    profile["name"] = $"{name}-{flag}";
+    profile[flag] = true;
+    var path = Path.Combine(root, $"{name}-{flag}.json");
+    File.WriteAllText(path, profile.ToJsonString());
+    return "@" + path;
+}
+var hardwareRoot = Path.Combine(root, "HardwareMembers");
+Directory.CreateDirectory(hardwareRoot);
+var hardwareImage = Path.Combine(hardwareRoot, "HardwareMembers.dll");
+var hardwareExamples = HardwareExamples.Write(assembly, hardwareImage,
+    DeclareAes("x64-v4", "aes"), DeclareAes("arm64-advsimd", "armAes"));
+ExtractBatch("extract", "Examples", hardwareExamples.Select(example =>
+    new GeneratedExtraction(hardwareImage, example.Selector,
+        Path.Combine(hardwareRoot, example.Name), example.Profile)));
+using (var hardware = ModuleDefinition.ReadModule(hardwareImage))
+{
+    var members = hardware.GetType("Examples.HardwareMembers").Methods.ToDictionary(method => method.Name);
+    // Each evidence batch keeps the kernel's memory bounded across the independent wrappers.
+    foreach (var group in hardwareExamples.Chunk(8))
+    {
+        var evidence = new GeneratedEvidence(Path.Combine(hardwareRoot, $"Batch-{group[0].Name}"));
+        foreach (var example in group)
+        {
+            var folder = Path.Combine(hardwareRoot, example.Name);
+            var proof = Path.Combine(folder, "Operand.lean");
+            File.Copy(Path.Combine(folder, "Extracted.lean"), proof, true);
+            ModelOperandChecks.Append(proof, members[example.Name], _ => example.Model, example.NeedsFeature);
+            evidence.Add(proof, $"PASS checked hardware MemberRef in {example.Selector}");
+        }
+        evidence.Check(replay: false);
+    }
+}
+
+
 var pending = new List<(GeneratedVerification Request, string Profile, Action Passed)>();
 void Flush()
 {
@@ -137,14 +180,18 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
         "ShiftRight" => ShiftProof("shr64Count", 3, "shiftRight"),
         _ => "\n  apply ok_of_toOption\n  decide +kernel"
     };
-    string BroadcastProof(string operation, int lane, string lemma) =>
-        $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word " +
-        $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl rfl rfl rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
-    string ShiftProof(string operation, int lane, string lemma) =>
-        $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift " +
-        $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl rfl rfl rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+    string BroadcastProof(string operation, int lane, string lemma) => $$"""
+        exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word
+          Extracted.profile .{{operation}} {{lane}} {{left}} {{right}} {{expected}} CIL.Safety.Memory.empty
+          rfl rfl rfl Extracted.method0_model4 rfl (by decide)
+          (CIL.Safety.checked_broadcast_{{lemma}} {{left}} {{right}}))
+        """;
+    string ShiftProof(string operation, int lane, string lemma) => $$"""
+        exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift
+          Extracted.profile .{{operation}} {{lane}} {{left}} {{right}} {{expected}} CIL.Safety.Memory.empty
+          rfl rfl rfl Extracted.method0_model6 rfl (by decide)
+          (CIL.Safety.checked_broadcast_{{lemma}} {{left}} {{right}}))
+        """;
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\n" +
         "import CIL.Safety.IntrinsicExecution\nnamespace ExampleProof\n" +
         (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +
@@ -337,42 +384,30 @@ foreach ((string name, int width, string profile, string unavailable, string fea
 
 Flush();
 
-// The shuffle instruction must match the exact intrinsic at its raw call.
-var rejectedShuffles = new RejectedEvidence(Path.Combine(root, "RejectedShuffles"));
-foreach ((string name, string theorem, string before, string after, string validator) in new[]
+// A forged operation at the hardware call must fail the model agreement of the complete method.
+var rejectedHardware = new RejectedEvidence(Path.Combine(root, "RejectedHardware"));
+void RejectHardware(string folder, string example, string member, string operation, string label)
 {
-    ("Shuffle256", "method0_intrinsics_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "ExactIntrinsicsValid"),
-    ("Shuffle128", "method0_intrinsics_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
-        "ExactIntrinsicsValid")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing shuffle mutation: {before}");
-    var path = Path.Combine(root, "RejectedShuffles", $"{name}-{validator}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejectedShuffles.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
+    var method = divisionMethods[example];
+    var pc = method.Body.Instructions.Index().Single(item =>
+        item.Item.Operand is MethodReference reference &&
+        reference.FullName.Contains(member, StringComparison.Ordinal)).Index;
+    var source = File.ReadAllText(Path.Combine(root, folder, "Extracted.lean"));
+    var arity = ((MethodReference)method.Body.Instructions[pc].Operand).Parameters.Count;
+    var changed = ForgeModelEmission(source, pc, $".intrinsic ({operation}) {arity}");
+    var output = Path.Combine(root, "RejectedHardware");
+    Directory.CreateDirectory(output);
+    var path = Path.Combine(output, $"{folder}-{label}.lean");
+    File.WriteAllText(path, changed);
+    rejectedHardware.Add(path, $"PASS {folder} rejects {operation}", "Extraction.RuntimeModelsAgree", "is false");
 }
-rejectedShuffles.Check();
+RejectHardware("Shuffle256", "Shuffle256", "Avx2::Shuffle(", ".avx2 .add64", "add");
+RejectHardware("Shuffle128", "Shuffle128", "Ssse3::Shuffle(", ".sse .shiftLeftBytes", "shift");
 
 // The hash round is compared with the host CPU's AESENC under a custom x64 and a custom ARM64 AES
 // profile; the ARM64 extraction must agree, since AESE with a zero key, AESMC and the key are AESENC.
 if (!X86Aes.IsSupported) throw new InvalidOperationException("The AES differential test needs an x86 AES host");
-verification.EnsureExtractorBuilt();
-var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
-    .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
-var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
-string DeclareAes(string name, string flag)
-{
-    var profile = JsonSerializer.SerializeToNode(selectProfile.Invoke(null, [name]),
-        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
-    profile["name"] = $"{name}-{flag}";
-    profile[flag] = true;
-    var path = Path.Combine(root, $"{name}-{flag}.json");
-    File.WriteAllText(path, profile.ToJsonString());
-    return "@" + path;
-}
+
 const int AesCases = 8;
 var aesRandom = new Random(20261102);
 ulong RandomWord()
@@ -438,23 +473,8 @@ foreach (var profile in new[] { "x64-v4", "arm64-advsimd" })
     Console.WriteLine($"PASS AesRound rejected under {profile}");
 }
 // Forged evidence must not substitute another AES step for the one the raw call names.
-var rejectedRounds = new RejectedEvidence(Path.Combine(root, "RejectedAes"));
-foreach ((string name, string before, string after) in new[]
-{
-    ("AesRound-x64", ".aes .encrypt", ".armAes .encrypt"),
-    ("AesRound-arm64", ".armAes .mixColumns", ".armAes .encrypt")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_intrinsics_validated");
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing AES mutation: {before}");
-    var path = Path.Combine(root, "RejectedAes", $"{name}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejectedRounds.Add(path, $"PASS forged {name} evidence rejected by ExactIntrinsicsValid", "ExactIntrinsicsValid");
-}
-rejectedRounds.Check();
+RejectHardware("AesRound-x64", "AesRound", "X86.Aes::Encrypt(", ".armAes .encrypt", "encrypt");
+RejectHardware("AesRound-arm64", "AesRound", "Arm.Aes::MixColumns(", ".armAes .encrypt", "mix");
 Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
 Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
@@ -715,24 +735,8 @@ static string? VectorModel(MethodReference call)
 }
 
 // Forged evidence cannot change the table select or the lane reversal.
-var rejectedEndian = new RejectedEvidence(Path.Combine(root, "RejectedEndian"));
-foreach ((string name, string theorem, string before, string after, string validator, int index) in new[]
-{
-    ("SignWindow", "method0_intrinsics_validated", ".avx512 .permuteVar4x64x2", ".avx512 .ternaryLogic",
-        "ExactIntrinsicsValid", 0),
-    ("ReverseLimbs", "method0_intrinsics_validated", ".advSimd .reverseElement8", ".avx2 .shuffleBytes",
-        "ExactIntrinsicsValid", 1)
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing {name} mutation: {before}");
-    var path = Path.Combine(root, "RejectedEndian", $"{name}-{index}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejectedEndian.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
-}
-rejectedEndian.Check();
+RejectHardware("SignWindow", "SignWindow", "::PermuteVar4x64x2(", ".avx512 .ternaryLogic", "permute");
+RejectHardware("ReverseLimbs", "ReverseLimbs", "::ReverseElement8(", ".avx2 .shuffleBytes", "reverse");
 
 // PMULUDQ runs on the host CPU and its x64-sse42 extraction must return the same products.
 // Lanes with set high halves and both 32-bit extremes come first, then seeded random words.
@@ -813,22 +817,9 @@ if (rejectedMultiply.Code == 0 || File.Exists(Path.Combine(multiplyRejectedOutpu
 }
 Console.WriteLine("PASS MultiplyEven128 rejected under scalar");
 // Forged evidence must not substitute the 256-bit multiply or another exact SSE call for PMULUDQ.
-var rejectedMultiplies = new RejectedEvidence(Path.Combine(root, "RejectedMultiply"));
-var multiplySource = NarrowEvidence(File.ReadAllText(Path.Combine(multiplyOutput, "Extracted.lean")),
-    "method0_intrinsics_validated");
-if (!multiplySource.Contains(".sse .multiplyEven32", StringComparison.Ordinal))
-{
-    throw new InvalidOperationException("Missing multiply mutation: .sse .multiplyEven32");
-}
-foreach ((string after, int index) in new[] { (".avx2 .multiplyEven32", 0), (".sse .shuffleBytes", 1) })
-{
-    var path = Path.Combine(root, "RejectedMultiply", $"MultiplyEven128-{index}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, multiplySource.Replace(".sse .multiplyEven32", after, StringComparison.Ordinal));
-    rejectedMultiplies.Add(path, "PASS forged MultiplyEven128 evidence rejected by ExactIntrinsicsValid",
-        "ExactIntrinsicsValid");
-}
-rejectedMultiplies.Check();
+RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", ".avx2 .multiplyEven32", "wide");
+RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", ".sse .shuffleBytes", "shuffle");
+rejectedHardware.Check();
 
 // Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
 static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)

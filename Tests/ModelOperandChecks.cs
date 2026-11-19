@@ -3,7 +3,8 @@ using Mono.Cecil;
 // Each witness starts from the caller's real MemberRef and changes one field per refusal.
 internal static class ModelOperandChecks
 {
-    internal static void Append(string proof, MethodDefinition method, Func<MethodReference, string?> expectedModel)
+    internal static void Append(string proof, MethodDefinition method, Func<MethodReference, string?> expectedModel,
+        bool needsFeature = false)
     {
         File.AppendAllText(proof, """
 
@@ -20,6 +21,7 @@ internal static class ModelOperandChecks
             if (instruction.Operand is not MethodReference reference || expectedModel(reference) is not { } model)
                 continue;
             witnessed = true;
+            var availability = needsFeature ? "refusedUnder .scalar site &&" : "";
             File.AppendAllText(proof, $$"""
 
                 namespace Extracted.Site{{pc}}
@@ -28,10 +30,13 @@ internal static class ModelOperandChecks
                 theorem operand_checked :
                     (match (fixtureOperandCode[{{pc}}]? : Option RawInstruction) with
                     | some { operand := .call site, .. } =>
-                      let decode := fun (operand : CallSite) =>
-                        let raw := RawInstruction.mk 0 40 (.call operand)
-                        let source := { method0Closed with code := [raw] }
-                        (Method.ofRaw? profile environment [] [true] source []).map Method.code
+                      let source := fun (operand : CallSite) =>
+                        { method0Closed with code := [RawInstruction.mk 0 40 (.call operand)] }
+                      let decode := fun features operand =>
+                        (Method.ofRaw? features environment [] [true] (source operand) []).map Method.code
+                      let refusedUnder := fun features operand =>
+                        decide (decode features operand = none) &&
+                          decide (methodCode features environment [] [true] (source operand) = [.unadmitted 40])
                       let foreign := match site.method.owner with
                         | .atom _ name => TypeExpr.atom "Foreign" name
                         | .apply (.constructor _ name) element =>
@@ -44,18 +49,30 @@ internal static class ModelOperandChecks
                         return { site with
                           method.returnType := result, method.parameters := parameters,
                           method.methodArguments := [floating], typeArguments := [floating] }
-                      let refused := fun changed => decide (decode changed = none)
+                      let ownerElement : Option CallSite := do
+                        let .apply head (.atom _ original) := site.method.owner | none
+                        let .external identity := site.target | none
+                        let changed := TypeExpr.apply head floating
+                        let close := fun type => if type == site.method.owner then changed else type
+                        return { site with
+                          method.owner := changed,
+                          method.returnType := close site.method.returnType,
+                          method.parameters := site.parameterTypes.map close,
+                          target := .external (identity.replace original "System.Double") }
+                      let refused := refusedUnder profile
                       let bad : List CallSite := [
                         { site with method.owner := foreign },
-                        { site with name := "Unknown" },
+                        { site with name := "Unknown" }, { site with method.name := name!"Unknown" },
                         { site with method.genericArity := site.method.genericArity + 1 },
-                        { site with method.parameters := site.parameterTypes.set 0 (.pointer .void) },
+                        { site with method.parameters := (.pointer .void) :: site.parameterTypes.drop 1 },
                         { site with method.returnType := .pointer .void },
                         { site with declared.convention := 32 },
+                        { site with declared.parameters := .void :: site.declared.parameters },
                         { site with typeArguments := [.atom runtimeScope "System.Double"] },
                         { site with target := .external "Other overload" }]
-                      decide (decode site = some [.call site.method {}]) &&
-                        bad.all refused && (site.method.genericArity == 0 || floatingSite.any refused)
+                      decide (decode profile site = some [.call site.method {}]) && {{availability}}
+                        bad.all refused && ownerElement.all refused &&
+                        (site.method.genericArity == 0 || floatingSite.any refused)
                     | _ => false) = true := by cil_kernel_rfl
                 #print axioms operand_checked
                 /-- The generated model fact names the expected checked operation and all its operands. -/

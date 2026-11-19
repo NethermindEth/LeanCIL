@@ -320,12 +320,20 @@ RejectDeclared(14, "wrong-declared-receiver-kind", 1,
     source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := some .object }"));
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
-// A decoded method's links are the table its decoder is given, so a forged table is a forged decoder input.
+// A missing link at the live call produces the call hole before a method can be defined.
+const string missingCallLink = "CIL.Extraction.MethodDecodeError.liveHole 1 40";
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0Links", line =>
-    Replaced(line, "[(1, method0Link1)]", "[]")), "method0_calls_validated", decisionFailed);
+    Replaced(line, "[(1, method0Link1)]", "[]")), "method0_calls_validated", missingCallLink);
 Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0Links", line =>
     Replaced(line, "[(1, method0Link1)]", "[(0, method0Link1)]")),
-    "method0_calls_validated", decisionFailed);
+    "method0_calls_validated", missingCallLink);
+// Managed-call evidence also rejects the same forged tables in an already decoded method.
+foreach (var (name, links) in new[] { ("dropped-link", "[]"), ("link-at-wrong-pc", "[(0, .direct 1)]") })
+{
+    const string prefix = "method0DispatchTypes method0Closed) method0Reachable";
+    Reject(0, $"emitted-{name}", source => Replaced(source, $"{prefix} method0 :=",
+        $$"""{{prefix}} { method0 with links := {{links}} } :="""), "method0_calls_validated", decisionFailed);
+}
 Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1Links", line =>
     Replaced(line, ":= []", ":= [(0, method0Link1)]")),
     "method1_calls_validated", decisionFailed);
@@ -408,7 +416,7 @@ void CheckExternalCallTargets()
     Run(Extract("extract", assembly, "Examples", "DivisionIntrinsics::UnsafeEquals(ulong)", folder, "x64-v3"));
     var path = Path.Combine(folder, "Extracted.lean");
     var baseline = File.ReadAllText(path);
-    const string theorem = "method0_intrinsics_validated";
+    const string theorem = "method0_models_validated";
     var control = NarrowEvidence(baseline, theorem);
     var positive = Path.Combine(folder, "Checked.lean");
     File.WriteAllText(positive, baseline + "\n" + CheckedEvidenceControl(baseline, control, [theorem], 0));
@@ -419,17 +427,37 @@ void CheckExternalCallTargets()
         // target to its metadata row, refuses another target.
         ("wrong-raw-target", baseline.Replace("target := .external externalIdentity0",
             "target := .external externalIdentity1", StringComparison.Ordinal), bodyTheorem, [bodyDecisionFailed]),
-        // The body keeps every vector call, so an admitted intrinsic emitted at the op_Equality call at pc 4 has
-        // no exact raw call to match.
+        // The typed scalar-unsafe reference and its declaration still name the original member.
+        ("crossed-Avx2-And-target", baseline.Replace(
+            """name := "CreateScalarUnsafe", target := .external externalIdentity0""",
+            $"""name := "CreateScalarUnsafe", target := .external {AndTarget()}""",
+            StringComparison.Ordinal), bodyTheorem, [bodyDecisionFailed]),
+        // The equality slot requires a kept call with its original closed reference.
         ("wrong-emitted-intrinsic", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .intrinsic (.avx2 .band) 2"),
-            theorem, ["Extraction.ExactIntrinsicsValid", "is false"])
+            theorem, ["Extraction.RuntimeModelsAgree", "is false"])
     })
     {
         if (source == baseline) throw new InvalidOperationException("Call mutation was not applied: " + name);
         var rejectedPath = Path.Combine(folder, name + ".lean");
-        File.WriteAllText(rejectedPath, NarrowEvidence(source, obligation));
+        if (name == "crossed-Avx2-And-target")
+        {
+            File.WriteAllText(rejectedPath, source);
+            const string refuted = "crossed_target_fails_body_binding";
+            var refutationPath = Path.Combine(folder, "RefutedCrossedTarget.lean");
+            File.WriteAllText(refutationPath, NarrowEvidence(KernelRefutation(source, obligation, refuted), refuted));
+            evidence.Add(refutationPath,
+                "PASS the kernel refutes BodyDecodes for the crossed Avx2.And target", refuted);
+        }
+        else File.WriteAllText(rejectedPath, NarrowEvidence(source, obligation));
         rejected.Add(rejectedPath, "PASS materialized external call rejects " + name, markers);
     }
+}
+
+static string AndTarget()
+{
+    const string vector = "System.Runtime.Intrinsics.Vector256`1<System.UInt64>";
+    const string owner = "System.Runtime.Intrinsics.X86.Avx2";
+    return $"""(CIL.Extraction.intrinsicsScope ++ "::{vector} {owner}::And({vector},{vector})")""";
 }
 
 /// <summary>The patterns that find the bytes and rows a mutation changes in generated evidence.</summary>

@@ -1,5 +1,5 @@
 import CIL.Extraction.Constrained
-import CIL.Extraction.ExactIntrinsics
+import CIL.Extraction.OpaqueLocals
 
 /-! Standalone comparisons between indexed and streaming sequential metadata checks. -/
 namespace Tests.StreamingValidationScaling
