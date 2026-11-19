@@ -106,8 +106,6 @@ foreach (var (name, before, after, theorem) in new[]
     // The raw token names the struct's checked layout by index, which the layout coverage binds.
     ("Read", pairToken + "0)", pairToken + "1)", "method0_coverage_validated"),
     ("ReadVector", "\"System.UInt64\")) }", "\"System.Int64\")) }", "method0_scalars_validated"),
-    ("ReadOnlyView", " 16) false .whole)", " 16) true .whole)", "method0_scalars_validated"),
-    ("View", " 16) true .whole)", " 8) true .whole)", "method0_layouts_validated"),
     // The address flag is decoded from the raw prefix, so a writable forgery drops the prefix from the raw body,
     // which its bytes bind.
     ("ReadOnlyAddress", "opcode := 65054, operand := .none }", "opcode := 0, operand := .none }",
@@ -120,15 +118,34 @@ foreach (var (name, before, after, theorem) in new[]
         throw new Exception("Typed element access is not decoded from its body: " + name);
     var source = NarrowEvidence(original, theorem);
     if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing array mutation: " + name);
+    Reject(name, theorem, source.Replace(before, after, StringComparison.Ordinal));
+}
+// A span over an array is a kept call whose runtime model forms the view from the checked layout. A view forged at
+// the decoded call, pc 1, is refused by the scalar flow when it is writable and by the model agreement when narrower.
+var pairElement = ".aggregate " + JsonSerializer.Serialize(pairIdentity);
+foreach (var (name, view, theorem) in new[]
+{
+    ("ReadOnlyView", $".arraySpan ({pairElement} 16) true .whole", "method0_scalars_validated"),
+    ("View", $".arraySpan ({pairElement} 8) true .whole", "method0_models_validated")
+})
+{
+    var original = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var forged = ForgeDecodedInstruction(original, 0, 1, $"fun _ => .memory ({view})");
+    Reject(name, theorem, NarrowEvidence(forged, theorem));
+}
+evidence.Check();
+rejected.Check();
+
+void Reject(string name, string theorem, string source)
+{
     var path = Path.Combine(root, "Rejected" + name + theorem + ".lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
+    File.WriteAllText(path, source);
     rejected.Add(path, "PASS aggregate array evidence rejection: " + name, theorem switch
     {
         "method0_layouts_validated" => "MethodLayoutsValid",
         "method0_coverage_validated" => "LayoutUsesComplete",
         "method0_body_validated" => "the decoded method does not match its body bytes or metadata",
+        "method0_models_validated" => "RuntimeModelsAgree",
         _ => "ScalarFlowValid"
     });
 }
-evidence.Check();
-rejected.Check();
