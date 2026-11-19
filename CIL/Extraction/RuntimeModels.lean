@@ -18,10 +18,21 @@ method-token call, the raw selector gives a resolving model priority over a lowe
 
 namespace CIL.Extraction
 
+/-- The families registered in the runtime model table. -/
+def modelFamilies : List (List ModelEntry) := [
+  [objectConstructorEntry],
+  vectorEntries,
+  integerMathEntries,
+  bitEntries,
+  unsafeEntries,
+  marshalEntries,
+  unsafeReinterpretEntries,
+  unsafeOffsetEntries,
+]
+
 /-- The runtime methods with a model. -/
 def modelEntries : List ModelEntry :=
-  objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries ++ unsafeEntries ++
-    marshalEntries ++ unsafeReinterpretEntries ++ unsafeOffsetEntries
+  modelFamilies.flatten
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -65,13 +76,18 @@ def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
 def callModelled (body : Method) (method : MethodRef) : Bool :=
   (runtimeModel body.environment .call method).isSome
 
+open Lean Meta Elab Term in
+/-- The cells of the registered list, for checking membership without unfolding each family. -/
+elab "model_entries% " entries:term : term => do
+  let type := Lean.mkConst ``ModelEntry
+  let list ← elabTermEnsuringType entries (mkApp (mkConst ``List [0]) type)
+  mkListLit type (← literalCells list).toList
+
 /-- Every entry of the runtime table is one of `modelEntries`. -/
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
-  simp [runtimeModels, SearchTree.toList, modelEntries, vectorEntries, integerMathEntries,
-    marshalEntries, bitEntries, bitHelpers, bitHelperModel,
-    mathOperations, mathIntegers, IntegerMath.signedOnly, unsafeEntries, unsafeReinterpretEntries,
-    unsafeOffsetEntries]
+  change ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2, entry ∈ model_entries% modelEntries
+  simp [runtimeModels, SearchTree.toList]
 
 #print axioms runtimeModels_entries
 

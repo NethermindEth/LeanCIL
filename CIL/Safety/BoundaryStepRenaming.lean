@@ -462,28 +462,30 @@ theorem skipInit_stepRenamed : CIL.RuntimeModel.skipInit.StepRenamed := by
 
 #print axioms skipInit_stepRenamed
 
-/-- Every model of the runtime table transports under a renaming; an entry adds its model's
-    case here. -/
+open CIL.Extraction in
+/-- Every model of a registered family transports under an allocation renaming. -/
 theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     {opcode : CIL.CallOpcode} {method : CIL.Extraction.MethodRef} {model : CIL.RuntimeModel}
     (found : CIL.Extraction.runtimeModel environment opcode method = some model) :
-    model.StepRenamed :=
-  CIL.Extraction.runtimeModel_yields (property := CIL.RuntimeModel.StepRenamed)
-    (by
-      intro entry member
-      simp only [CIL.Extraction.modelEntries, List.mem_append, List.mem_cons] at member
-      rcases member with
-        ((((((rfl | member) | member) | member) | member) | member) | member) | member
-      · exact CIL.Extraction.ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
-      · exact CIL.Extraction.vectorEntries_yields intrinsic_stepRenamed entry member
-      · exact CIL.Extraction.integerMathEntries_yields intrinsic_stepRenamed entry member
-      · exact CIL.Extraction.bitEntries_yields intrinsic_stepRenamed entry member
-      · exact CIL.Extraction.unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
-          skipInit_stepRenamed entry member
-      · exact CIL.Extraction.marshalEntries_yields memory_stepRenamed entry member
-      · exact CIL.Extraction.unsafeReinterpretEntries_yields memory_stepRenamed entry member
-      · exact CIL.Extraction.unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)
-          (memory_stepRenamed .byteOffset) entry member) found
+    model.StepRenamed := by
+  refine runtimeModel_yields (property := CIL.RuntimeModel.StepRenamed) ?_ found
+  intro entry member
+  obtain ⟨family, listed, member⟩ := List.mem_flatten.mp member
+  simp only [modelFamilies, List.mem_cons, List.not_mem_nil] at listed
+  repeat' rcases listed with rfl | listed
+  all_goals first
+    | contradiction
+    | obtain rfl := List.mem_singleton.mp member
+      exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
+    | exact vectorEntries_yields intrinsic_stepRenamed entry member
+    | exact integerMathEntries_yields intrinsic_stepRenamed entry member
+    | exact bitEntries_yields intrinsic_stepRenamed entry member
+    | exact unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
+        skipInit_stepRenamed entry member
+    | exact marshalEntries_yields memory_stepRenamed entry member
+    | exact unsafeReinterpretEntries_yields memory_stepRenamed entry member
+    | exact unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)
+        (memory_stepRenamed .byteOffset) entry member
 
 #print axioms runtimeModel_stepRenamed
 
