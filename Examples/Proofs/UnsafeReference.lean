@@ -25,10 +25,6 @@ theorem correctness (memory : Memory) (reference : Reference)
     invoke Extracted.program 4 0 [.reference (.address reference)] memory =
       .ok (memory, [.reference (.address reference)]) := by
   cil_checked_steps [formed]
-  rw [run_next Extracted.lookup0 Extracted.method0_instruction1
-    (reinterpret_preserves _ _ _ _ _ _ _ _
-      Extracted.method0_link1 Extracted.method0_model1 formed)]
-  cil_checked_steps [formed]
 
 #print axioms reinterpret_preserves
 #print axioms correctness
