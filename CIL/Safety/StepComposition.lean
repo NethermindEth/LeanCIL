@@ -361,6 +361,26 @@ theorem step_call_skipInit_reference {method : Extraction.MethodRef} {prefixes :
 
 #print axioms step_call_skipInit_reference
 
+/-- An unaligned transfer call has the same result as its typed instruction on every stack. -/
+theorem step_call_typedTransfer {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {kind : CIL.TransferKind} {store : Bool} (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.typedTransfer kind store)) (direct : prefixes.tail = false) (stack : List Value) :
+    step body (.call method prefixes) pc args frame stack memory =
+      step body (typedTransferInstruction kind store) pc args frame stack memory := by
+  rw [step_call_model (link := link) (found := found) (direct := direct)]
+  cases kind with
+  | scalar width signed => cases store <;> rfl
+  | snapshot shape =>
+    cases shape <;> cases store <;> first
+    | rfl
+    | (simp only [modelStep, observedCall, runModel, typedTransferCall, typedTransferInstruction,
+        CIL.RuntimeModel.observerCount, step, observerCount, staticInstruction, instruction,
+        CIL.MemoryOp.argumentCount]
+       split <;> simp_all)
+
+#print axioms step_call_typedTransfer
+
 /-- A call whose pc links `callee` directly enters it, as `callStep` says; the model it would
     run without a link is never read. Stepping selects it once the link fact is known. -/
 theorem step_call_direct {method : Extraction.MethodRef} {prefixes : CallPrefixes}

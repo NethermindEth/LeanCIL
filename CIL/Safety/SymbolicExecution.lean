@@ -1450,6 +1450,9 @@ elab_rules : tactic
              rfl)
           | (refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
              cil_checked_intrinsic [$facts:term,*])
+          | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
+             simp only [CIL.Safety.typedTransferInstruction]
+             cil_checked_step_normalized [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl _) ?_
              cil_checked_memory_by_equations [$facts:term,*])
           | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
