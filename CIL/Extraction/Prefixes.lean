@@ -145,15 +145,37 @@ theorem prefixEntryFree_iff (code : List RawInstruction) :
 instance (code : List RawInstruction) : Decidable (PrefixEntryFree code) :=
   decidable_of_iff _ (prefixEntryFree_iff code)
 
-/-- Raw construction checks prefix windows and every transfer using one indexed body. -/
+/-- Without prefixes every instruction satisfies its prefix window and every entry is free. -/
+private theorem noPrefixes {code : List RawInstruction} (result : TypeExpr)
+    (absent : code.any (fun raw => isPrefixOpcode raw.opcode) = false) :
+    prefixSequenceValid result code = true ∧ PrefixEntryFree code := by
+  constructor
+  · induction code with
+    | nil => rfl
+    | cons raw rest ih =>
+      simp only [List.any_cons, Bool.or_eq_false_iff] at absent
+      simp [prefixSequenceValid, absent.1, ih absent.2]
+  · intro pc raw found prefixAt
+    have present : code.any (fun instruction => isPrefixOpcode instruction.opcode) = true :=
+      List.any_eq_true.mpr ⟨raw, List.mem_of_getElem? found, prefixAt⟩
+    exact Bool.noConfusion (absent.symm.trans present)
+#print axioms noPrefixes
+
+/-- Only bodies with a prefix need to read predecessors at branch and switch destinations. -/
 def rawPrefixesValid (result : TypeExpr) (code : List RawInstruction) : Bool :=
-  prefixSequenceValid result code (branchEntriesValid (entryAllowed code.toArray))
+  if code.any (fun raw => isPrefixOpcode raw.opcode) then
+    prefixSequenceValid result code (branchEntriesValid (entryAllowed code.toArray))
+  else true
 
 /-- Raw method validation checks prefix structure and every branch into a prefix's follower. -/
 theorem rawPrefixesValid_iff (result : TypeExpr) (code : List RawInstruction) :
     rawPrefixesValid result code = true ↔
       prefixSequenceValid result code = true ∧ PrefixEntryFree code := by
-  rw [rawPrefixesValid, prefixSequenceValid_eq, Bool.and_eq_true, prefixEntryFree_iff]
+  unfold rawPrefixesValid
+  split
+  · rw [prefixSequenceValid_eq, Bool.and_eq_true, prefixEntryFree_iff]
+  · rename_i absent
+    simp [noPrefixes result (Bool.eq_false_iff.mpr absent)]
 #print axioms rawPrefixesValid_iff
 
 /-- Every suffix of prefix-valid code still pairs each prefix with its legal follower. -/

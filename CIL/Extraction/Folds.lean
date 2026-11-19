@@ -298,7 +298,6 @@ def Instruction.withCallDecoder (roles : Array (Option FoldRole))
 /-- Resetting a span local binds its exact type and never exposes its storage address. -/
 private def spanDefaultFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
     (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
-  if !(head.opcode ∈ [18, 65037]) then none else pure ()
   let index ← localIndex head
   let localType ← localAt index
   let some ⟨_, 65045, .type initialized⟩ := tail.head? | none
@@ -309,7 +308,6 @@ private def spanDefaultFold (localAt : Nat → Option TypeExpr) (head : RawInstr
 /-- A constructor fold admits at most three pure single-value argument pushes. -/
 private def spanConstructorFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
     (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
-  if !(head.opcode ∈ [18, 65037]) then none else pure ()
   let index ← localIndex head
   let localType ← localAt index
   let pushes := (tail.take 4).takeWhile fun instruction => instruction.opcode ∈
@@ -324,28 +322,42 @@ private def spanConstructorFold (localAt : Nat → Option TypeExpr) (head : RawI
     some (some .head :: List.replicate pushes.length (some .argument) ++
       [some (.spanConstructor index constructor)])
 
+/-- The raw head determines which bounded instruction window can form a fold. -/
+private inductive FoldHead where
+  | spanAddress | exception | tailPrefix | typeHandle
+
+/-- Only these instructions can start a folded sequence. -/
+private def foldHead? : Nat → Option FoldHead
+  | 18 | 65037 => some .spanAddress
+  | 20 | 114 | 115 => some .exception
+  | 65044 => some .tailPrefix
+  | 208 => some .typeHandle
+  | _ => none
+
 /-- The roles of a fold starting at `a`, with local types supplied by `localAt`. -/
 private def foldAt (localAt : Nat -> Option TypeExpr)
     (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
-  spanDefaultFold localAt a tail <|> spanConstructorFold localAt a tail <|>
-  (match a, tail with
-    | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
+  match foldHead? a.opcode with
+  | some .spanAddress => spanDefaultFold localAt a tail <|> spanConstructorFold localAt a tail
+  | some .exception =>
+    if a.opcode == 20 && a.operand == .none && (tail.head? matches some ⟨_, 122, .none⟩) then
       some [some .head, some (.raise .nullReference)]
-    | ⟨_, 65044, .none⟩, ⟨_, 41, .indirectCall _ _ false false 0⟩ ::
-        ⟨_, 42, .none⟩ :: _ => some [some .head, some .tailCall, some .argument]
-    | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>
-      match site.target with
+    else (throwFold (a :: tail)).map fun (count, raised) =>
+      some .head :: List.replicate count (some .interior) ++ [some (.raise raised)]
+  | some .tailPrefix => match a.operand, tail with
+    | .none, ⟨_, 41, .indirectCall _ _ false false 0⟩ :: ⟨_, 42, .none⟩ :: _ =>
+      some [some .head, some .tailCall, some .argument]
+    | .none, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ => match site.target with
       | .managed _ => some [some .head, some .tailCall, some .argument]
       | _ => none
-    | _, _ => none) <|>
-  (match tail with
+    | _, _ => none
+  | some .typeHandle => match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
-        [some .head, some .interior, some .interior, some .interior,
-          some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
-    | _ => none) <|>
-  (throwFold (a :: tail)).map fun (count, raised) =>
-    some .head :: List.replicate count (some .interior) ++ [some (.raise raised)]
+      [some .head, some .interior, some .interior, some .interior,
+        some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
+    | _ => none
+  | _ => none
 
 /-- A non-fallthrough edge may enter ordinary code or the head of a fold. -/
 def foldEntry : Option (Option FoldRole) → Bool
@@ -370,5 +382,47 @@ private def foldRolesFrom (localAt : Nat → Option TypeExpr) (targeted : Nat �
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
   let targets := Std.TreeSet.ofList (branchTargets code) compare
   foldRolesFrom (FlowIndex.ofList locals).get? targets.contains 0 [] code
+
+/-- Every raw instruction is live and independent of call claims and folded sequences. -/
+def plainBody : List RawInstruction → List Bool → Bool
+  | [], _ => true
+  | first :: rest, true :: live =>
+    !methodTokenCall first.opcode && (foldHead? first.opcode).isNone && plainBody rest live
+  | _, _ => false
+
+/-- At each plain site the mask is live, the role is absent, and no call claim applies. -/
+theorem plainBody_at {closed : RawMethod} {reachable : List Bool}
+    (plain : plainBody closed.code reachable)
+    {pc : Nat} {raw : RawInstruction} (found : closed.code[pc]? = some raw) :
+    reachable[pc]? = some true ∧ methodTokenCall raw.opcode = false ∧
+      (foldRoles closed.locals closed.code)[pc]? = some none := by
+  let localAt := (FlowIndex.ofList closed.locals).get?
+  let targeted := (Std.TreeSet.ofList (branchTargets closed.code) compare).contains
+  suffices walk : ∀ (code : List RawInstruction) (mask : List Bool) (start index : Nat),
+      plainBody code mask = true → code[index]? = some raw →
+        mask[index]? = some true ∧ methodTokenCall raw.opcode = false ∧
+          (foldRolesFrom localAt targeted start [] code)[index]? = some none by
+    exact walk closed.code reachable 0 pc plain found
+  intro code
+  induction code with
+  | nil => simp
+  | cons first rest ih =>
+    intro mask start index checked atIndex
+    cases mask with
+    | nil => cases checked
+    | cons head tail =>
+      cases head with
+      | false => cases checked
+      | true =>
+        simp only [plainBody, Bool.and_eq_true, Bool.not_eq_true',
+          Option.isNone_iff_eq_none] at checked
+        simp only [foldRolesFrom, foldAt, checked.1.2]
+        cases index with
+        | zero =>
+          obtain rfl := Option.some.inj atIndex
+          exact ⟨rfl, checked.1.1, rfl⟩
+        | succ index => exact ih tail (start + 1) index checked.2 atIndex
+
+#print axioms plainBody_at
 
 end CIL.Extraction

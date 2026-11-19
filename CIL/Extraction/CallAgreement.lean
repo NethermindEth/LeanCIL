@@ -164,12 +164,52 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
       (runtimeCatalog.callRequirement environment profile none role raw).decode
         (fun _ => Instruction.ofRaw previous raw)
 
+/-- Decode an ordinary body using only the predecessor required by the value decoder. -/
+private def plainCode (previous : Option RawInstruction) : List RawInstruction → List Instruction
+  | [] => []
+  | raw :: rest => Instruction.ofRaw previous raw :: plainCode (some raw) rest
+
+/-- Ignoring the unused pc in an ordinary body preserves each decoded instruction. -/
+private theorem plainCode_eq (code : List RawInstruction) (previous : Option RawInstruction)
+    (pc : Nat) : plainCode previous code =
+      Instruction.ofRawCode previous code (fun _ => Instruction.ofRaw) pc := by
+  induction code generalizing previous pc with
+  | nil => rfl
+  | cons first rest ih => exact congrArg (List.cons _) (ih (some first) (pc + 1))
+
+#print axioms plainCode_eq
+
 /-- The closed body's instruction list, including call claims at its occupied and unlinked pcs. -/
 def methodCode (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod) : List Instruction :=
-  let occupied := Std.TreeSet.ofList (links.map Prod.fst) compare
-  let roles := (foldRoles closed.locals closed.code).toArray
-  Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
-    occupied roles reachable.toArray)
+  if plainBody closed.code reachable then plainCode none closed.code
+  else
+    let occupied := Std.TreeSet.ofList (links.map Prod.fst) compare
+    let roles := (foldRoles closed.locals closed.code).toArray
+    Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
+      occupied roles reachable.toArray)
+
+/-- Both decoding paths implement the same reachability, link and fold rule at every pc. -/
+theorem methodCode_eq (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod) :
+    methodCode profile environment links reachable closed =
+      Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
+        (Std.TreeSet.ofList (links.map Prod.fst) compare)
+        (foldRoles closed.locals closed.code).toArray reachable.toArray) := by
+  unfold methodCode
+  split
+  · rename_i plain
+    rw [plainCode_eq _ _ 0]
+    apply List.ext_getElem?
+    intro pc
+    simp only [Instruction.ofRawCode_getElem?, Instruction.ofRawAt]
+    cases found : closed.code[pc]? with
+    | none => rfl
+    | some raw =>
+      obtain ⟨live, ordinary, role⟩ := plainBody_at (closed := closed) plain found
+      simp [methodInstruction, Instruction.withCallDecoder, live, ordinary, role]
+  · rfl
+
+#print axioms methodCode_eq
 
 end CIL.Extraction

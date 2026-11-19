@@ -175,7 +175,7 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
   obtain ⟨closed, instantiated, _, _, built⟩ := decoded
   refine ⟨closed, instantiated, fun pc => ?_⟩
-  rw [Method.ofClosed?_code built, methodCode, Instruction.ofRawCode_getElem? closed.code pc _]
+  rw [Method.ofClosed?_code built, methodCode_eq, Instruction.ofRawCode_getElem? closed.code pc _]
 
 #print axioms Method.ofRaw?_code
 

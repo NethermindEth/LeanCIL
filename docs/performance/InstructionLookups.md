@@ -164,6 +164,14 @@ Each row permits at most 25% growth in heartbeats per instruction when the size 
 Each reordered row must also stay within 2% of ascending at each size. Run the rows with
 `dotnet run --file Tests/LookupScaling.cs -- --prefix-entry-only`.
 
+The method-decoding and decoded-definition rows each use 500, 2,000 and 8,000 instructions.
+A fully live body with no method-token calls or possible fold heads uses the ordinary decoder,
+which carries the preceding instruction for prefix handling. Other bodies consult the reachability
+mask and fold roles at each pc. The kernel shares the preceding lookup's list suffix, and
+compiled code reads the array directly. A body without prefixes needs no branch-target lookups
+for prefix validation. Run these rows individually with `--method-decode-only` and
+`--decoded-definition-only`.
+
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or

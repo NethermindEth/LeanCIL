@@ -1551,7 +1551,7 @@ theorem checked_method_encodings (method : Method) (item : MethodEvidence)
     (binding : method.code =
       methodCode method.profile method.environment method.links item.reachable item.closed) :
     ScalarFlowValid #[] item.closed item.featureStates item.scalarStates method.code false :=
-  valid.of_decoded binding
+  valid.of_decoded (binding.trans (methodCode_eq ..))
 
 #print axioms checked_method_encodings
 
@@ -1567,8 +1567,8 @@ theorem wrong_decoded_owner_refused (item : MethodEvidence) :
   have different : [Instruction.ldfld field] ≠
       methodCode addMethod.profile addMethod.environment addMethod.links
         item.reachable source := by
-    simp only [methodCode, Instruction.ofRawCode, methodInstruction, Instruction.withCallDecoder,
-      indexedRead?_eq]
+    rw [methodCode_eq]
+    simp only [methodInstruction, indexedRead?_eq]
     change [Instruction.ldfld field] ≠ [if !item.reachable.toArray[0]?.getD false then
       .unadmitted 123 else .ldfld { field with owner := owner }]
     cases item.reachable.toArray[0]?.getD false <;> decide +kernel
