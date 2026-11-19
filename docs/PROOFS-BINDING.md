@@ -767,7 +767,8 @@ operand as its listed constant. The method can then use the facts from `cil_fiel
 The extractor defines a method this way when every live instruction decodes and each live call
 or construction has the operation its decoder gives. A constrained prefix decodes with its
 adjacent instance `callvirt` or static `call`. A bare `ldstr` decodes to a string literal with
-the text bound to its metadata token. A recognized throw erases its message and constructor,
+the text bound to its metadata token. The decoder refuses backspace, form feed and characters
+that require UTF-16 surrogate pairs. A recognized throw erases its message and constructor,
 then raises the constructed exception at the raw `throw` pc. A folded type test over closed
 type arguments produces its decided word or branch. A branch or switch into a fold's interior
 disables that fold. A direct managed tail call retains its prefix and target. An indirect call
