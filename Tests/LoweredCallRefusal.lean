@@ -106,6 +106,29 @@ theorem divRemTupleLayout :
 
 #print axioms divRemTupleLayout
 
+/-- The open vector parameter of Sum belongs to the method. -/
+theorem sumDeclaration :
+    let owner := "System.Runtime.Intrinsics.Vector128"
+    let vector := TypeExpr.apply (.constructor intrinsicsScope (owner ++ "`1"))
+    let word := TypeExpr.atom runtimeScope "System.UInt64"
+    let site : CallSite := {
+      method := {
+        owner := .atom intrinsicsScope owner, name := name!"Sum", hasThis := false,
+        genericArity := 1, methodArguments := [word], returnType := word,
+        parameters := [vector word] }
+      name := "Sum", parameterCount := 1, returnsValue := true, typeArguments := [word],
+      declared := {
+        convention := 0x10, returnType := .parameter 0, parameters := [vector (.parameter 0)] }
+      target := .external (intrinsicsScope ++ "::!!0 System.Runtime.Intrinsics.Vector128::" ++
+        "Sum(System.Runtime.Intrinsics.Vector128`1<!!0>)") }
+    let resolve := fun operand => LoweredFamily.hardware.resolve
+      (LayoutEnvironment.callLayouts {}) .scalar none ⟨0, 40, .call operand⟩
+    resolve site = some (.intrinsic (.vector (.sum64 128)) 1) ∧
+      resolve { site with declared.parameters := [vector (.ownerParameter 0)] } = none := by
+  decide +kernel
+
+#print axioms sumDeclaration
+
 /-- The empty layout environment of the method with an unknown call. -/
 private def emptyEnvironment : LayoutEnvironment := {}
 

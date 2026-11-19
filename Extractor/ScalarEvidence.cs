@@ -41,11 +41,11 @@ internal static class ScalarEvidence
         var unsafeCalls = $"Extraction.UnsafeCallsValid rawLayouts {method}Closed {method}Reachable {method}.code";
         var intrinsics = $"Extraction.ExactIntrinsicsValid {method}Closed {method}Reachable {method}";
         var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";
+        var otherChecks = $"And ({unsafeCalls}) (And ({intrinsics}) ({models}))";
         lean.AppendLine($"""
-            theorem {method}_instruction_checks : {scalarEvidence} ∧
-                {unsafeCalls} ∧ {intrinsics} ∧ {models} := by
-              have checks : {scalar} ∧ {unsafeCalls} ∧ {intrinsics} ∧ {models} := {LeanEmitter.Decide}
-              exact ⟨⟨checks.1, {witness}⟩, checks.2⟩
+            theorem {method}_instruction_checks : And ({scalarEvidence}) ({otherChecks}) := by
+              have checks : And ({scalar}) ({otherChecks}) := {LeanEmitter.Decide}
+              exact And.intro (And.intro checks.1 ({witness})) checks.2
             #print axioms {method}_instruction_checks
             theorem {method}_scalars_validated : {scalarEvidence} := {method}_instruction_checks.1
             theorem {method}_unsafe_validated : {unsafeCalls} := {method}_instruction_checks.2.1

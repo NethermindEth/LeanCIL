@@ -109,17 +109,23 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
         return $$"""
             namespace Extracted.{{Name}}
             open CIL CIL.Extraction
+            /-- The call operand from the closed metadata body. -/
             private def raw := {{method}}Closed.code[{{Pc}}]'(by decide +kernel)
+            /-- The operation emitted at this pc. -/
             private def expected := {{method}}.code[{{Pc}}]'(by decide +kernel)
+            /-- The fold role computed from the complete raw body. -/
             private def role := (foldRoles {{method}}Closed.locals {{method}}Closed.code)[{{Pc}}]?.join
+            /-- The managed link at this pc, if present. -/
             private def link := {{method}}.linkAt {{Pc}}
+            /-- The resolving member accepts exactly its emitted instruction. -/
             theorem exactEmission :
-                siteClaim loweredCallFamily environment link raw = {{Claim}} ∧
-                ∀ emitted, runtimeCatalog.siteAgrees environment profile raw emitted link role true =
-                  decide (emitted = expected) := by
+                And (siteClaim loweredCallFamily environment link raw = {{Claim}})
+                (forall emitted, runtimeCatalog.siteAgrees environment profile raw emitted link role true =
+                  decide (emitted = expected)) := by
               constructor
-              · cil_kernel_rfl
-              · intro emitted
+              case left => cil_kernel_rfl
+              case right =>
+                intro emitted
                 have token : methodTokenCall raw.opcode = true := by cil_kernel_rfl
                 have resolved : runtimeCatalog.callRequirement environment.callLayouts profile link role raw =
                     .instruction expected := by cil_kernel_rfl
