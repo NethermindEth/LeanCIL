@@ -62,7 +62,10 @@ internal static class ModelOperandChecks
                 theorem checked_model :
                     (match (fixtureOperandCode[{{pc}}]? : Option RawInstruction) with
                     | some { operand := .call site, .. } => runtimeModel environment .call site.method
-                    | _ => none) = some ({{model}}) := method0_model{{pc}}
+                    | _ => none) = some ({{model}}) := by
+                  -- The elaborator would index the literal code list to its end, so the kernel compares the sides.
+                  have _fact : runtimeModel environment .call _ = some ({{model}}) := method0_model{{pc}}
+                  cil_kernel_rfl
                 #print axioms checked_model
                 end Extracted.Site{{pc}}
 
