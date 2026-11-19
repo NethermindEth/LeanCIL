@@ -14,10 +14,19 @@ The same transition applies to vector outputs without assuming any previous init
 namespace Tests.LocalCalls
 open CIL.Safety
 
+/-- The static unsigned multiplication overload taking a low-word destination. -/
+private def multiplyMethod : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  { owner := .atom CIL.Extraction.runtimeScope "System.Math", name := name!"BigMul",
+    hasThis := false, genericArity := 0, parameters := [word, word, .byref word],
+    returnType := word }
+
 /-- The checked body of an unsigned wide multiply with an out reference. -/
 @[cil_code] def multiplyBody : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.ldarg 0, .ldarg 1, .ldarg 2, .memory (.bigMul64 false), .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldarg 2, .call multiplyMethod {}, .ret] }
+
+cil_runtime_models multiplyBody
 
 /-- Inputs name the two factors and the actual low-word destination. -/
 structure BinaryOutputInput where
@@ -42,7 +51,10 @@ theorem multiply_holds {program : CIL.Program} {callee : Nat}
   intro input memory writable
   obtain ⟨final, written, _, readback⟩ := store_word64 (input.left * input.right) writable
   have formed := access_reference_valid _ _ _ _ _ writable
-  cil_contract_steps [found, formed, step_bigMul64_of_write written]
+  cil_contract_steps [found, formed]
+  refine run_next_exists _ found rfl (step_bigMul64_of_write (pc := 3) rfl
+    multiplyBody_model3 written) ?_
+  cil_contract_steps [found]
   exact ⟨Confined.write written (by simp [numberBytes_length]),
     CIL.WideMultiply.high64 input.left input.right, rfl, rfl, readback⟩
 

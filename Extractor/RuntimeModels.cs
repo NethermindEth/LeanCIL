@@ -136,9 +136,8 @@ internal static class RuntimeModels
         ExactScope(owner, PlatformAssemblies.SystemRuntime);
 
     /// <summary>
-    /// The operation a call of a method the Lean model table models runs as, or null. Such a call keeps its call:
-    /// the <c>System.Object</c> constructor pops its receiver, and each integer helper of <c>System.Math</c> or of
-    /// the integer type that declares it runs as its scalar intrinsic. MemoryMarshal calls run their memory operation.
+    /// A modelled call keeps its method operand. Analyses use the returned operation, including
+    /// the checked write for an integer helper with an out parameter.
     /// </summary>
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
@@ -173,6 +172,8 @@ internal static class RuntimeModels
         };
         if (model is null) return null;
         ValidateSignature(reference, profile.Architecture);
+        if (ValueTuples.Is(reference.ReturnType))
+            ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
         return model;
     }
 
@@ -193,8 +194,7 @@ internal static class RuntimeModels
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         Operation? op = scope switch
         {
-            "System.Runtime" => Scalar(reference)
-                ?? UnsafeModels.Translate(reference, profile.Architecture)
+            "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
             "System.Memory" => BinaryTransfers.Translate(reference) ??
                 ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
@@ -221,7 +221,6 @@ internal static class RuntimeModels
         ("Abs", ScalarFunction.Abs, 1), ("Sign", ScalarFunction.Sign, 1)
     ];
 
-    private static readonly Dictionary<string, Operation> ScalarOperations = BuildScalarOperations();
     // The vector helpers a call keeps, each of the exact intrinsics assembly: CreateScalarUnsafe of a ulong and
     // GetElement of a ulong lane of a 128- or 256-bit vector.
     static Operation? VectorModel(MethodReference reference)
@@ -242,43 +241,15 @@ internal static class RuntimeModels
         return null;
     }
 
-    private static readonly Dictionary<string, ScalarIntrinsic> IntegerMathCalls = BuildIntegerMathCalls();
-
-    // Each helper has one model under System.Math and under the integer type that declares it; an unsigned type
-    // has no Abs or Sign.
-    private static Dictionary<string, ScalarIntrinsic> BuildIntegerMathCalls()
-    {
-        var calls = new Dictionary<string, ScalarIntrinsic>(StringComparer.Ordinal);
-        foreach (var (type, width, signed) in MathIntegers)
-        foreach (var (name, function, arity) in MathOperations)
-        {
-            if (!signed && arity == 1) continue;
-            var result = name == "Sign" ? "System.Int32" : type;
-            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-            var model = Scalar(function, width, signed, arity);
-            calls.Add($"{result} System.Math::{name}({parameters})", model);
-            calls.Add($"{result} {type}::{name}({parameters})", model);
-        }
-        return calls;
-    }
-
-    // Match exact non-generic static signatures, including the defining assembly.
-    private static Operation? Scalar(MethodReference reference)
-    {
-        if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
-            reference.CallingConvention != MethodCallingConvention.Default) return null;
-        return reference.DeclaringType.Scope.Name == "System.Runtime" ? RuntimeScalar(reference.FullName) : null;
-    }
-
-    private static Operation? RuntimeScalar(string signature) => ScalarOperations.GetValueOrDefault(signature);
+    private static readonly Dictionary<string, Operation> IntegerMathCalls = BuildIntegerMathCalls();
 
     private static ScalarIntrinsic Scalar(ScalarFunction function, int width, bool signed, int arguments,
         int result = 32) => new(function, width, signed, result, arguments);
 
-    // Exact signatures share the same semantics across Math and primitive integer entry points.
-    private static Dictionary<string, Operation> BuildScalarOperations()
+    // The overload's complete signature selects its scalar intrinsic or checked out-parameter write.
+    private static Dictionary<string, Operation> BuildIntegerMathCalls()
     {
-        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal)
+        var calls = new Dictionary<string, Operation>(StringComparer.Ordinal)
         {
             ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] =
                 Scalar(ScalarFunction.BigMul32, 32, false, 2),
@@ -294,9 +265,19 @@ internal static class RuntimeModels
                 MemoryOperation.Other("(.divRemOut 64)")
         };
         foreach (var (type, width, signed) in MathIntegers)
-            operations.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
+            calls.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
                 Scalar(ScalarFunction.DivRem, width, signed, 2));
-        return operations;
+        foreach (var (type, width, signed) in MathIntegers)
+        foreach (var (name, function, arity) in MathOperations)
+        {
+            if (!signed && arity == 1) continue;
+            var result = name == "Sign" ? "System.Int32" : type;
+            var parameters = string.Join(",", Enumerable.Repeat(type, arity));
+            var model = Scalar(function, width, signed, arity);
+            calls.Add($"{result} System.Math::{name}({parameters})", model);
+            calls.Add($"{result} {type}::{name}({parameters})", model);
+        }
+        return calls;
     }
 
     private static Operation? Runtime(string signature) => signature switch

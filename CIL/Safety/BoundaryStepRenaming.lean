@@ -475,6 +475,7 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
       exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
     | exact vectorEntries_yields intrinsic_stepRenamed entry member
     | exact integerMathEntries_yields intrinsic_stepRenamed entry member
+    | exact wideArithmeticEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
     | exact bitEntries_yields intrinsic_stepRenamed entry member
     | exact unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
         skipInit_stepRenamed entry member

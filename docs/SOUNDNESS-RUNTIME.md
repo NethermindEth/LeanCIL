@@ -678,6 +678,11 @@ overloads remains a runtime assumption backed by exact signature checks and boun
 comparisons.
 See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
 
+The runtime table owns the static `System.Math.DivRem` and `System.Math.BigMul` call entries.
+Each overload binds the raw MemberRef declaration to the selected closed signature and external
+target. A tuple result requires both raw fields to match the declared integer, default packing,
+natural alignment, and two consecutive element-width fields in the checked layout.
+
 `Math.DivRem` and the 32-bit and signed 64-bit `Math.BigMul` overloads are modelled from the
 pinned .NET 10 `Math.cs` source: the quotient reuses CIL `div`, narrow operands divide in
 `int` and wrap, and the remainder is `left - quotient * right`. The equal-width tuple layout is

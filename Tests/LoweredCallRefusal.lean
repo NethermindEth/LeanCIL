@@ -84,14 +84,53 @@ theorem integerVectorTransfers :
 
 #print axioms integerVectorTransfers
 
-/-- A resolving unsigned DivRem overload binds the type of each field, packing and alignment. -/
+/-- The one-instruction decoder exposes the hole's opcode even at a reachable call. -/
+private def arithmeticCode (env : LayoutEnvironment) (site : CallSite) :=
+  (Method.ofRaw? .scalar env [] [true]
+    { body 40 .void name!"Run" "Run" with code := [⟨0, 40, .call site⟩] } []).map Method.code
+
+/-- Both arithmetic members bind the raw operand and the closed signature independently. -/
+private def arithmeticChecks (env : LayoutEnvironment) (site : CallSite)
+    (unsupported : CallSite) (expected : RuntimeModel) : Bool :=
+  let method := site.method
+  let wrong := TypeExpr.atom runtimeScope "System.Boolean"
+  let refusals := [
+    { site with method.owner := .atom "Fixture" "System.Math" },
+    { site with method.name := name!"Wrong" }, { site with name := "Wrong" },
+    { site with method.genericArity := 1 }, { site with method.hasThis := true },
+    { site with parameterCount := site.parameterCount + 1 },
+    { site with method.parameters := method.parameters.set 0 wrong },
+    { site with method.returnType := wrong }, { site with declared.convention := 0x20 },
+    { site with target := .external "Wrong" }, unsupported]
+  runtimeModel env .call method == some expected &&
+    decide (arithmeticCode env site = some [.call method {}]) &&
+    refusals.all fun changed => decide (arithmeticCode env changed = some [.unadmitted 40])
+
+/-- A signed widening multiply accepts int32 input and rejects an int16 widening signature. -/
+theorem bigMulBinding :
+    let site := fun (element : String) =>
+      let word := TypeExpr.atom runtimeScope element
+      let method : MethodRef := {
+        owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
+        genericArity := 0, returnType := .atom runtimeScope "System.Int64",
+        parameters := [word, word] }
+      let target := s!"System.Int64 System.Math::BigMul({element},{element})"
+      ({ method, name := "BigMul", declared := method.signature 0,
+         target := .external s!"{runtimeScope}::{target}",
+         typeArguments := [], parameterCount := 2, returnsValue := true } : CallSite)
+    arithmeticChecks {} (site "System.Int32") (site "System.Int16")
+      (.intrinsic (.scalar (.bigMul32 true)) 2) = true := by decide +kernel
+
+#print axioms bigMulBinding
+
+/-- DivRem binds the tuple's indexed declaration, both field types, packing and alignment. -/
 theorem divRemTupleLayout :
     let pair := "System.ValueTuple`2<System.UInt64,System.UInt64>"
     let identity := s!"{runtimeScope}::{pair}"
     let word := TypeExpr.atom runtimeScope "System.UInt64"
     let method : MethodRef := {
       owner := .atom runtimeScope "System.Math", name := name!"DivRem",
-      genericArity := 0, hasThis := false, returnType := .aggregate identity 0,
+      genericArity := 0, hasThis := false, returnType := .aggregate identity 1,
       parameters := [word, word] }
     let site : CallSite := {
       method, declared := method.signature 0, name := "DivRem",
@@ -100,15 +139,28 @@ theorem divRemTupleLayout :
     let row : RawLayout := {
       identity, auto := true, explicit := false, declaredSize := 0,
       packing := 0, fields := [⟨.unsigned64, none⟩, ⟨.unsigned64, none⟩] }
-    let resolve := fun raw alignment => integerMathInstruction
-      (LayoutEnvironment.callLayouts {
-        rawLayouts := [raw],
-        layouts := #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, alignment⟩] }) site
-    resolve row 8 = some (.intrinsic (.scalar (.divRem 64 false)) 2) ∧
-      resolve { row with fields := row.fields.set 0 ⟨.signed64, none⟩ } 8 = none ∧
-      resolve { row with fields := row.fields.set 1 ⟨.signed64, none⟩ } 8 = none ∧
-      resolve { row with fields := List.replicate 512 ⟨.unsigned64, none⟩ } 8 = none ∧
-      resolve { row with packing := 1 } 8 = none ∧ resolve row 1 = none := by decide +kernel
+    let env := fun (raw : RawLayout) alignment =>
+      let computed := (⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, alignment⟩ : ComputedLayout)
+      ({ rawLayouts := [{ row with identity := "Fixture" }, raw],
+         layouts := #[computed, computed] } : LayoutEnvironment)
+    let refused := fun raw alignment =>
+      arithmeticCode (env raw alignment) site = some [.unadmitted 40]
+    let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+    let result := "System.ValueTuple`2<System.Boolean,System.Boolean>"
+    let invalid := { method with
+      parameters := [boolean, boolean]
+      returnType := .aggregate (runtimeScope ++ "::" ++ result) 1 }
+    let target := s!"{result} System.Math::DivRem(System.Boolean,System.Boolean)"
+    let unsupported := { site with
+      method := invalid, declared := invalid.signature 0,
+      target := .external (runtimeScope ++ "::" ++ target) }
+    arithmeticChecks (env row 8) site unsupported (.intrinsic (.scalar (.divRem 64 false)) 2) ∧
+      arithmeticCode (env row 8) { site with declared.returnType := .aggregate identity 0 } =
+        some [.unadmitted 40] ∧
+      refused { row with fields := row.fields.set 0 ⟨.signed64, none⟩ } 8 ∧
+      refused { row with fields := row.fields.set 1 ⟨.signed64, none⟩ } 8 ∧
+      refused { row with fields := List.replicate 512 ⟨.unsigned64, none⟩ } 8 ∧
+      refused { row with packing := 1 } 8 ∧ refused row 1 := by decide +kernel
 
 #print axioms divRemTupleLayout
 

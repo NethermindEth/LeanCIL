@@ -1,6 +1,6 @@
 import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
-import CIL.Extraction.IntegerMath
+import CIL.Extraction.WideArithmetic
 import CIL.Extraction.VectorModels
 import CIL.Extraction.MarshalModels
 import CIL.Extraction.BitModels
@@ -25,6 +25,7 @@ def modelFamilies : List (List ModelEntry) := [
   [objectConstructorEntry],
   vectorEntries,
   integerMathEntries,
+  wideArithmeticEntries,
   bitEntries,
   unsafeEntries,
   marshalEntries,

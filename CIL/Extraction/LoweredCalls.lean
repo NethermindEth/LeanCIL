@@ -16,7 +16,7 @@ namespace CIL.Extraction
 inductive LoweredFamily where
   | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
   | unsafeReference | unsafeOffset
-  | integerMath | feature | platform | referenceContent | staticSpan
+  | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
 
@@ -107,7 +107,6 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
       | "System.Runtime.CompilerServices.RuntimeHelpers" =>
         if name == "CreateSpan" then some .staticSpan
         else if referenceContentQuery site then some .referenceContent else none
-      | "System.Math" => if name ∈ ["DivRem", "BigMul"] then some .integerMath else none
       | "System.Type" => if typeTestInstruction raw then some .typeTest else none
       | "System.Array" => if name == "Fill" then some .span else none
       | _ =>

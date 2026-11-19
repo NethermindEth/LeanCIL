@@ -66,7 +66,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   | .vectorTransfer =>
     let (write, offset) ← vector128UnsafeCall raw
     return .memory (.vector128Unsafe write offset)
-  | .integerMath => integerMathInstruction environment site
   | .span => spanInstruction environment role raw site
   | .staticSpan => staticSpanInstruction site
   | .view =>

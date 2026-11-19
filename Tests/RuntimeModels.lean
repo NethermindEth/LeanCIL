@@ -333,10 +333,13 @@ example : ModelTable :=
   model_table% [ModelEntry.exact .call bigMul (bigMul.signature 0) (.memory (.bigMul64 false)),
     ModelEntry.exact .call bigMul (bigMul.signature 0) (.memory (.bigMul64 true))]
 
--- The runtime table models the exact `System.Object` constructor under `call` and nothing else.
+/-- A multiply member outside the runtime owner has no model. -/
+private def unknown := { bigMul with owner := .atom "Fixture" "System.Math" }
+
+-- The runtime table distinguishes the exact constructor and wide multiplication calls.
 example : runtimeModel {} .call objectConstructorMethod = some .objectConstructor := by
   decide +kernel
-example : runtimeModel {} .call bigMul = none := by decide +kernel
+example : runtimeModel {} .call bigMul = some (.memory (.bigMul64 false)) := by decide +kernel
 example : runtimeModel {} .newobj objectConstructorMethod = none := by decide +kernel
 example : runtimeModel {} .call
     { objectConstructorMethod with owner := .atom "Fixture" "System.Object" } = none := by
@@ -349,7 +352,10 @@ example : runtimeModel {} .call { objectConstructorMethod with hasThis := false 
   decide +kernel
 example : runtimeModel {} .call { objectConstructorMethod with parameters := [word] } = none := by
   decide +kernel
-example : RuntimeModelsAgree (method
+example : RuntimeModelsAgree (method (site unknown)) [true]
+    { body with code := [.call (Tests.callee 3) {}], links := [(0, .direct 7)] } := by
+  decide +kernel
+example : ¬ RuntimeModelsAgree (method
     (site bigMul)) [true]
     { body with code := [.call (Tests.callee 3) {}], links := [(0, .direct 7)] } := by
   decide +kernel
@@ -410,8 +416,8 @@ example : ¬ UnsafeCallsValid [] (method (site objectConstructorMethod)) [true] 
 example : UnsafeCallsValid [] (method ⟨0, 38, .none⟩) [true] [.pop] := by decide +kernel
 
 -- An external call the table does not model needs a link.
-example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site bigMul)) [true]
-    (emitting (.call bigMul {}) []) := by decide +kernel
+example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site unknown)) [true]
+    (emitting (.call unknown {}) []) := by decide +kernel
 
 -- The integer helpers of `System.Math` and of each integer type.
 private def int : TypeExpr := runtimeType "System.Int32"

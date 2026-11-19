@@ -23,7 +23,8 @@ theorem correctness (memory result : Memory) (reference : Reference) (left right
     (CIL.WideMultiply.signedHigh64 left right).toInt * 2 ^ 64 + ((left * right).toNat : Int) =
       left.toInt * right.toInt := by
   refine ⟨?_, CIL.WideMultiply.signedHigh64_decomposition left right⟩
-  cil_checked_steps [formed, step_bigMul64_signed_of_write stored]
+  cil_checked_steps [formed,
+    step_bigMul64_signed_of_write Extracted.method0_link3 Extracted.method0_model3 stored]
 
 #print axioms correctness
 end ExampleProof
