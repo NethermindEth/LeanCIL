@@ -698,7 +698,9 @@ Each transfer keeps its call. The decoder emits an opcode-tagged hole when the c
 open declaration, external target or element layout fails to resolve.
 The checked interpreter runs `Unsafe.As<TFrom,TTo>(ref TFrom)` and both `Unsafe.AsRef<T>`
 overloads as reference formation. They preserve the address, lifetime and access authority.
-`As` reads no size and excludes a byref, pointer or type variable as either type argument.
+`As` requires field or vector storage for both type arguments. The extractor rejects a span,
+array, class, byref, pointer or type variable as a type argument of `As` or `AsRef`, and the
+decoder emits the call hole for an `As` site whose arguments lack that storage.
 Both `AsRef` overloads keep their call. Each checks its own external target and open declaration
 and accepts field or vector storage for its element.
 

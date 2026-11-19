@@ -81,15 +81,7 @@ internal static class UnsafeModels
         RuntimeModels.ValidateSignature(reference, architecture);
         if (nullRef) return MemoryOperation.Other(".nullRef");
         if (isNullRef) return MemoryOperation.Other(".isNullRef");
-        var width = element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
-            ? vector.ElementType.FullName switch
-            {
-                "System.Runtime.Intrinsics.Vector128`1" => 16,
-                "System.Runtime.Intrinsics.Vector256`1" => 32,
-                "System.Runtime.Intrinsics.Vector512`1" => 64,
-                _ => throw new InvalidDataException($"Unsupported Unsafe element layout: {element.FullName}")
-            }
-            : MetadataValidation.FieldSize(element, reference.Module, architecture);
+        var width = ElementWidth(element, reference.Module, architecture);
 
         if (skipInit) return new StackOperation(StackOpcode.SkipInit);
         if (comparison) return reference.Name switch
@@ -106,6 +98,18 @@ internal static class UnsafeModels
         var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
         return MemoryOperation.Of(new AddOffset(stride, signed));
     }
+
+    // An element of field or vector storage has a width; any other element is unsupported.
+    static int ElementWidth(TypeReference element, ModuleDefinition module, string architecture) =>
+        element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
+            ? vector.ElementType.FullName switch
+            {
+                "System.Runtime.Intrinsics.Vector128`1" => 16,
+                "System.Runtime.Intrinsics.Vector256`1" => 32,
+                "System.Runtime.Intrinsics.Vector512`1" => 64,
+                _ => throw new InvalidDataException($"Unsupported Unsafe element layout: {element.FullName}")
+            }
+            : MetadataValidation.FieldSize(element, module, architecture);
 
     // A byref reinterpretation changes only its static type, never the allocation,
     // offset, initialized bytes or access bounds used by checked memory operations.
@@ -131,6 +135,8 @@ internal static class UnsafeModels
             if (type is ByReferenceType or PointerType or GenericParameter)
                 throw new InvalidDataException($"Unsupported Unsafe reference element: {type.FullName}");
             MetadataValidation.Type(type, reference.Module, architecture: architecture);
+            // A span, array or class reference is not the address of bytes the other type can name.
+            _ = ElementWidth(type, reference.Module, architecture);
         }
         RuntimeModels.ValidateSignature(reference, architecture);
         return MemoryOperation.Other(".asRef");

@@ -225,7 +225,9 @@ signature string keeps it. The extractor admits the modifier only directly on `S
 naming `System.Runtime.CompilerServices.IsExternalInit` from any assembly, as C# does; and the
 same twin rejection covers a method equal to the accessor once the modifier is erased.
 
-The model of `Unsafe.As` forms a reference and preserves its address without reading a layout.
+The model of `Unsafe.As` forms a reference and preserves its address between field or vector
+storage. A span, array or class reference is not the address of bytes the other type can name,
+so an `As` site naming one decodes to the call hole.
 Both `Unsafe.AsRef` overloads keep their call and form a reference for field or vector storage.
 The closed parameter selects the byref or void-pointer overload and its exact external target.
 `Unsafe.NullRef` and `Unsafe.IsNullRef` accept an indexed storage kind other than byref storage.

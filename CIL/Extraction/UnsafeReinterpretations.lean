@@ -3,7 +3,8 @@ import CIL.Extraction.TransferKinds
 
 /-! # Unsafe reference and value reinterpretations
 
-The closed member reference selects the overload. A byref cast preserves a formed address.
+The closed member reference selects the overload. A byref cast between field or vector storage
+preserves a formed address.
 A value cast moves a snapshot of equal width, or a byte into a Boolean.
 -/
 
@@ -16,16 +17,14 @@ private def unsafeTypePair (method : MethodRef) : Option (TypeExpr × TypeExpr) 
     | [source, target] => some (source, target)
     | _ => none
 
-/-- As excludes a byref, pointer or variable at the root of either type argument. -/
-private def asArgument : TypeExpr → Bool
-  | .byref _ | .pointer _ | .parameter _ | .ownerParameter _ => false
-  | _ => true
-
-/-- The reference cast between the two closed types. Its operation reads no storage. -/
-private def asOperation (method : MethodRef) : Option MemoryOp := do
+/-- The reference cast between two closed types of field or vector storage. A span, array,
+    class, byref, pointer or type variable has none, and its reference is not the address of
+    bytes the target can name, so such a site decodes to the hole of its opcode. -/
+private def asOperation (reader : CallLayouts) (method : MethodRef) : Option MemoryOp := do
   let (source, target) ← unsafeTypePair method
-  _root_.guard (asArgument source && asArgument target && method.parameters == [.byref source] &&
-    method.returnType == .byref target)
+  _root_.guard ([source, target].all (fun type =>
+      (reader.storage type).any StorageType.isFieldOrVector) &&
+    method.parameters == [.byref source] && method.returnType == .byref target)
   return .asRef
 
 /-- BitCast reinterprets equally wide snapshots or the byte representation of a Boolean. -/
@@ -50,7 +49,7 @@ def unsafeReinterpretEntries : List ModelEntry :=
   let target := TypeExpr.parameter 1
   [unsafeEntry name!"As" "As" "!!1&" "!!0&"
      (reinterpretDeclaration (.byref source) (.byref target))
-     (fun _ method => (asOperation method).map .memory),
+     (fun reader method => (asOperation reader method).map .memory),
    unsafeEntry name!"BitCast" "BitCast" "!!1" "!!0" (reinterpretDeclaration source target)
      (fun reader method => (bitCastOperation reader method).map .memory)]
 

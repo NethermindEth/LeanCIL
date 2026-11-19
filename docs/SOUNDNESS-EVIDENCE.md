@@ -273,7 +273,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   The entries for Unsafe.As and Unsafe.BitCast bind both method variables. Each resolving site
   must emit its call. The closed parameter of Unsafe.AsRef selects its byref or void-pointer
   declaration and external target. Unsafe.NullRef and Unsafe.IsNullRef each bind their single
-  declaration and target. All three names check element storage through the indexed layouts.
+  declaration and target. All four reference names check element storage through the indexed
+  layouts, and As and AsRef admit only field or vector storage.
 - The local variable types are checked against the standalone signature the body header names.
 - The method's own identity is checked against four columns of its `MethodDef` row. `Flags` and
   `ImplFlags` must equal the evidence's attributes and implementation flags. The `Signature` blob

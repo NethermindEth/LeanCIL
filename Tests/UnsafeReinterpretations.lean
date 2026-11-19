@@ -72,7 +72,8 @@ private def cast (source target : TypeExpr) :=
     [source, target] [source] target
     { convention := 16, parameters := [.parameter 0], returnType := .parameter 1 }
 
-/-- A span can be a target of As even when its element is a type variable. -/
+/-- A span over an element; As refuses it as either type argument, as it refuses an array or
+    class. -/
 private def span (element : TypeExpr) : TypeExpr :=
   .apply (.constructor runtimeScope "System.Span`1") element
 
@@ -107,11 +108,10 @@ private def values : List (CallSite × MemoryOp) :=
    (cast packet (vector 128), .bitcastValue (.aggregate 16) .vector128),
    (cast (vector 128) packet, .bitcastValue .vector128 (.aggregate 16))]
 
-/-- Scalar, vector and struct references as well as the unsized targets of As. -/
+/-- Scalar, vector and struct references, one for each storage As and AsRef admit, and the null
+    helpers at every storage they admit. -/
 private def references : List (CallSite × MemoryOp) :=
   [byteType, vector 128, packet].map (fun element => (asSite element byteType, .asRef)) ++
-  [span byteType, .array byteType, .object "Test" "Class", span (.parameter 0)].map
-    (fun target => (asSite byteType target, .asRef)) ++
   [false, true].flatMap (fun pointer => [byteType, vector 128, packet].map
     (fun element => (asRefSite element pointer, .asRef))) ++
   [false, true].flatMap (fun test => [byteType, vector 256, packet, span byteType,
@@ -124,11 +124,14 @@ theorem resolved : (references ++ values).all (fun (call, operation) =>
       !accepts call (.memory operation) && !accepts call .nop) := by decide +kernel
 #print axioms resolved
 
-/-- Both unsized As targets survive closing and decoding at a live site. -/
-theorem unsizedTargets : [span byteType, TypeExpr.array byteType].all (fun target =>
-    let call := asSite byteType target
-    decide (decoded call = some [.call call.method {}])) := by decide +kernel
-#print axioms unsizedTargets
+/-- A span, array or class on either side of As has no field or vector storage, so the live site
+    decodes to the call hole, and a span over a type variable resolves no model. -/
+theorem unsizedRefused : [span byteType, .apply (.constructor runtimeScope "System.ReadOnlySpan`1")
+    byteType, .array byteType, .object "Test" "Class"].all (fun arg =>
+      refuses (asSite byteType byteType) (asSite byteType arg) &&
+        refuses (asSite byteType byteType) (asSite arg byteType)) &&
+    (model (asSite byteType (span (.parameter 0)))).isNone := by decide +kernel
+#print axioms unsizedRefused
 
 /-- Both layouts compute successfully; BitCast reads their different snapshot sizes. -/
 theorem checkedSizes : LayoutsValid (environment 2).rawLayouts (environment 2).layouts ∧
@@ -137,7 +140,7 @@ theorem checkedSizes : LayoutsValid (environment 2).rawLayouts (environment 2).l
       some (.memory (.bitcastValue (.aggregate 32) (.aggregate 32))) := by decide +kernel
 #print axioms checkedSizes
 
-/-- Only a root byref, pointer or variable excludes an As argument on either side. -/
+/-- A root byref, pointer or variable excludes an As argument on either side. -/
 theorem asExclusions : [TypeExpr.byref byteType, .pointer byteType, .parameter 0,
     .ownerParameter 0].all (fun arg => (model (asSite arg byteType)).isNone &&
       (model (asSite byteType arg)).isNone &&
