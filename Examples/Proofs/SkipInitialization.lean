@@ -59,22 +59,34 @@ theorem skip_family :
 
 open CIL in
 cil_decoded_method skipWithLayout := Method.ofRaw? Extracted.profile Extracted.environment
-  Extracted.method0Links Extracted.method0Original Extracted.method0TypeArgumentsRaw
+  Extracted.method0Links Extracted.method0Reachable Extracted.method0Original
+  Extracted.method0TypeArgumentsRaw
 
 /-- The same decoding environment with no aggregate layouts. -/
 private def emptyLayouts : CIL.LayoutEnvironment := {}
 
 open CIL in
 cil_decoded_method skipWithoutLayout := Method.ofRaw? Extracted.profile emptyLayouts
-  Extracted.method0Links Extracted.method0Original Extracted.method0TypeArgumentsRaw
+  Extracted.method0Links Extracted.method0Reachable Extracted.method0Original
+  Extracted.method0TypeArgumentsRaw
 
-/-- The decoded helper consumes the reference when its value type has a checked layout. -/
+/-- The decoder retains the call with the method reference from the raw operand. -/
 theorem resolved_skip :
     let raw := Extracted.method0Closed.code[1]'(by decide)
-    let .call site := raw.operand | False
-    skipWithLayout.code[1]? = some (.call site.method {}) := by rfl
+    match raw.operand with
+    | .call site => skipWithLayout.code[1]? = some (.call site.method {})
+    | _ => False := by rfl
 
 #print axioms resolved_skip
+
+/-- The extracted instruction pops the caller's reference and preserves its uninitialized bytes. -/
+theorem compiled_step (args : List Value) (frame : Frame) (stack : List Value) :
+    step Extracted.method0 (Extracted.method0.code[1]'(by decide)) 1 args frame
+      (callerReference :: stack) uninitialized = .ok (.next 2 stack frame uninitialized) :=
+  step_preserves Extracted.method0 1 args frame uninitialized (prefixes := {})
+    rfl Extracted.method0_model1 rfl (.address ⟨0, 0⟩) stack ⟨_, rfl⟩
+
+#print axioms compiled_step
 
 /-- Omitting the value type's layout leaves a hole at the same raw call. -/
 theorem unresolved_skip : skipWithoutLayout.code[1]? = some (.unadmitted 40) := rfl
