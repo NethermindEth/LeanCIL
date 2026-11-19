@@ -69,8 +69,10 @@ internal static class SpanReferences
         if (Spans.AddressedType(reset.Previous) is not { } addressed ||
             StructuralSignatures.Current.Type(addressed) != StructuralSignatures.Current.Type(type) ||
             instructions.IsTarget(reset))
-            throw new InvalidDataException("Unsupported span reset: " + reset +
-                "\n  The span must be reset directly through its own local or parameter address.");
+            throw new InvalidDataException($"""
+                Unsupported span reset: {reset}
+                  The span must be reset directly through its own local or parameter address.
+                """);
     }
 
     static int ArgumentIndex(MethodDefinition method, Instruction load) => load.OpCode.Code switch

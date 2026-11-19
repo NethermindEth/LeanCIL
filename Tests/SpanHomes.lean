@@ -1,6 +1,7 @@
 import CIL.Extraction.Scalars
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.ValueRenaming
+import CIL.Safety.SpanHomeRenaming
 import Tests.Support
 
 /-! # Span locals read through their homes
@@ -179,16 +180,127 @@ private def passesHomeShifted : Method := {
   locals := [.nullRef, .nullRef], localKinds := [.span 4 true, .span 4 true]
   returnsValue := true, links := [(5, .direct 1)] }
 
-/-- The deletion map that skips target slot 0 sends the home of source slot 0 to target slot 1,
-    and the shifted program returns what `passesHome` returns through the linked call and the
-    model call. -/
-theorem shifted_home_renamed (mapping : AllocationRenaming) :
-    (LocalIndexMap.skip (.keep .nil)).value mapping (.spanHome 0) = .spanHome 1 ∧
+/-- The deletion map that skips target slot 0 and keeps the span local. -/
+private def shift : LocalIndexMap := .skip (.keep .nil)
+
+/-- The frame of `passesHome` once its span local holds the two-element view. -/
+private def sourceFrame : Frame :=
+  { activation := 0, locals := [.span 4 true (some ⟨.address ⟨0, 0⟩, 2, 4, true⟩)], owned := [] }
+
+/-- The frame of `passesHomeShifted` at the same point, with the dead slot first. -/
+private def targetFrame : Frame :=
+  { sourceFrame with locals := .span 4 true none :: sourceFrame.locals }
+
+/-- `shift` relates the two frames under the identity allocation map of `memory`. -/
+private theorem shiftedFrames :
+    Frame.Renamed shift (.identity memory.nextIdentity) Eq sourceFrame targetFrame :=
+  ⟨rfl, .skip _ (.keep ⟨fun _ held => by cases held; exact Nat.zero_lt_one, rfl⟩ .nil), .nil, rfl⟩
+
+/-- `Frame.Renamed.spanView` reads the home of source slot 0 and its relocation, the home of
+    target slot 1, as one renamed view; both reads give the view the slot holds, and the shifted
+    program returns what `passesHome` returns through the linked call and the model call. -/
+theorem shifted_home_renamed :
+    ResultRenamed (.identity memory.nextIdentity)
+      (fun left right => right = (AllocationRenaming.identity memory.nextIdentity).value left ∧
+        left.Below (AllocationRenaming.identity memory.nextIdentity).sourceLimit)
+      (spanView sourceFrame memory (.spanHome 0))
+      (spanView targetFrame memory (shift.value (.identity memory.nextIdentity) (.spanHome 0))) ∧
+    shift.value (.identity memory.nextIdentity) (.spanHome 0) = .spanHome 1 ∧
+    spanView targetFrame memory (.spanHome 1) = .ok (view 2) ∧
     (invoke [passesHomeShifted, reader] 32 0 [view 1, view 2] memory).map Prod.snd =
       .ok [.scalar (.i32 2)] ∧
     (invoke [passesHomeShifted, reader] 32 0 [view 2, view 1] memory).map Prod.snd =
-      .ok [.scalar (.i32 1)] := ⟨rfl, rfl, rfl⟩
+      .ok [.scalar (.i32 1)] :=
+  ⟨shiftedFrames.spanView (Memory.Renamed.refl memory Eq fun _ member => nomatch member)
+      (.spanHome 0) trivial, rfl, rfl, rfl, rfl⟩
 #print axioms shifted_home_renamed
+
+/-- `System.ReadOnlySpan<byte>`, whose pointer constructor views bytes. -/
+private def byteSpan : TypeExpr :=
+  .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.atom runtimeScope "System.Byte")
+
+/-- `ReadOnlySpan<byte>(void*, int)`. -/
+private def bytePointerConstructor : MethodRef := {
+  owner := byteSpan, name := name!".ctor", hasThis := true, genericArity := 0,
+  returnType := .void, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] }
+
+/-- `ReadOnlySpan<byte>.get_Length`. -/
+private def byteLength : MethodRef := {
+  owner := byteSpan, name := name!"get_Length", hasThis := true, genericArity := 0,
+  returnType := .atom runtimeScope "System.Int32", parameters := [] }
+
+/-- A method with one read-only byte span local. -/
+private def byteLocal (code : List Instruction) : Method := {
+  code, locals := [.nullRef], localKinds := [.span 1 false], returnsValue := true }
+
+/-- In place, `ReadOnlySpan<byte>(void*, int)` views the bytes the pointer names, in the caller's
+    storage or in `localloc` storage, and the length reads 3 or 8. `newobj` of the same
+    constructor views only extracted static data, so over caller storage it faults. -/
+theorem byte_pointer_constructor_in_place :
+    (invoke [byteLocal [.ldloca 0, .ldarg 0, .ldc_i4 3, .call bytePointerConstructor {},
+        .ldloca 0, .call byteLength {}, .ret]] 16 0 [element] memory).map Prod.snd =
+      .ok [.scalar (.i32 3)] ∧
+    (invoke [{ byteLocal [.ldc_i4 8, .localloc, .stloc 1, .ldloca 0, .ldloc 1, .ldc_i4 8,
+        .call bytePointerConstructor {}, .ldloca 0, .call byteLength {}, .ret] with
+        locals := [.nullRef, .nullRef], localKinds := [.span 1 false, .reference] }] 16 0 []
+        { memory with stackLimit := 64 }).map Prod.snd = .ok [.scalar (.i32 8)] ∧
+    (invoke [byteLocal [.ldarg 0, .ldc_i4 3, .newobj bytePointerConstructor, .stloc 0,
+        .ldloca 0, .call byteLength {}, .ret]] 16 0 [element] memory).map Prod.snd =
+      .error ⟨0, 2, .unsupported "Span pointer constructor outside extracted static data"⟩ :=
+  ⟨rfl, rfl, rfl⟩
+#print axioms byte_pointer_constructor_in_place
+
+/-- Whether a step succeeds. -/
+private def succeeds : ExecutionResult FrameAction → Bool
+  | .ok _ => true
+  | .error _ => false
+
+/-- The step itself refuses a constructor whose spans differ from the home's slot in width or
+    access, whatever admission decided: a byte or writable view into a read-only int32 slot. -/
+theorem in_place_constructor_matches_slot :
+    let frame : Frame := { activation := 0, locals := [.span 4 false none], owned := [] }
+    let arguments := [.scalar (.i32 4), element, .spanHome 0]
+    let mismatch : ExecutionResult FrameAction :=
+      .error (.unsupported "Span constructor does not build the span of its home")
+    spanInPlaceCall (.reference 1 false) 0 frame arguments memory = mismatch ∧
+    spanInPlaceCall (.reference 4 true) 0 frame arguments memory = mismatch ∧
+    succeeds (spanInPlaceCall (.reference 4 false) 0 frame arguments memory) := ⟨rfl, rfl, rfl⟩
+#print axioms in_place_constructor_matches_slot
+
+/-- `System.ReadOnlySpan<int>`. -/
+private def readOnlyIntSpan : TypeExpr :=
+  .apply (.constructor runtimeScope "System.ReadOnlySpan`1") (.atom runtimeScope "System.Int32")
+
+/-- `ReadOnlySpan<int>(in int)`, the read-only single-element constructor. -/
+private def readOnlySingleConstructor : MethodRef := {
+  owner := readOnlyIntSpan, name := name!".ctor", hasThis := true, genericArity := 0,
+  returnType := .void, parameters := [.byref (.atom runtimeScope "System.Int32")] }
+
+/-- `ReadOnlySpan<int>.get_Length`. -/
+private def readOnlyLength : MethodRef := { getLength with owner := readOnlyIntSpan }
+
+/-- A read-only int32 view of two elements at the start of allocation 0. -/
+private def readOnlyView : Safety.Value := .bufferSpan ⟨.address ⟨0, 0⟩, 2, 4, false⟩
+
+/-- An `in` or `ref readonly` span parameter arrives as the view, which names no slot, so a
+    constructor called on it faults. On the home of a homed read-only span parameter the
+    writable constructor faults at the step and the read-only one replaces the view. -/
+theorem constructor_on_read_only_parameter :
+    (invoke [{ reader with
+      code := [.ldarg 0, .ldarg 1, .call singleConstructor {}, .ldc_i4 0, .ret] }] 16 0
+      [view 2, element] memory).map Prod.snd = .error ⟨0, 2, .invalidState⟩ ∧
+    (invoke [{ homedParameter with
+      code := [.ldarga 0, .ldarg 1, .call singleConstructor {}, .ldc_i4 0, .ret],
+      parameterHomes := [(0, .span 4 false)] }] 16 0
+        [readOnlyView, element] memory).map Prod.snd =
+      .error ⟨0, 2, .unsupported "Span constructor does not build the span of its home"⟩ ∧
+    (invoke [{ homedParameter with
+      code := [.ldarga 0, .ldarg 1, .call readOnlySingleConstructor {}, .ldarga 0,
+        .call readOnlyLength {}, .ret],
+      parameterHomes := [(0, .span 4 false)] }] 16 0
+        [readOnlyView, element] memory).map Prod.snd = .ok [.scalar (.i32 1)] :=
+  ⟨rfl, rfl, rfl⟩
+#print axioms constructor_on_read_only_parameter
 
 /-- A method with one span parameter and one span local, in the raw form admission checks. -/
 private def spanRaw : RawMethod := {
@@ -217,10 +329,24 @@ private def copyTo : RawInstruction := ⟨0, 40, .call {
     "::System.Void System.Span`1<System.Int32>::CopyTo(System.Span`1<!0>)"),
   typeArguments := [], parameterCount := 1, returnsValue := false }⟩
 
+/-- An object type whose members take a span by value. -/
+private def holder : TypeExpr := .object "Fixture" "Fixture.Holder"
+
+/-- A managed instance call under `opcode` to `member` of `holder`, taking one `parameter`. -/
+private def instanceTakes (opcode : Nat) (member : MetadataName) (name : String)
+    (parameter : TypeExpr) : RawInstruction := ⟨0, opcode, .call {
+  declared := { convention := 0x20, parameters := [parameter] },
+  method := {
+    owner := holder, name := member, hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [parameter] },
+  name, target := .managed 2, typeArguments := [], parameterCount := 1,
+  returnsValue := false }⟩
+
 /-- `ldloca` and `ldarga` of a span leave an address, which admission accepts at a by-reference
     span parameter and refuses at a by-value one or as a value stored to a span local. A
     framework call is checked the same way: `CopyTo` takes its receiver by address and refuses
-    an address as its by-value destination. -/
+    an address as its by-value destination. `callvirt` and `newobj` refuse an address at a
+    by-value span parameter as `call` does. -/
 theorem home_refused_where_span_is_by_value :
     scalarTransfer spanRaw ⟨0, 18, .local 0⟩ [] = some [.reference] ∧
     scalarTransfer spanRaw ⟨0, 15, .argument 0⟩ [] = some [.reference] ∧
@@ -229,29 +355,38 @@ theorem home_refused_where_span_is_by_value :
     scalarTransfer spanRaw (takes intSpan) [scalarType intSpan] = some [] ∧
     scalarTransfer spanRaw (takes (.byref intSpan)) [.reference] = some [] ∧
     scalarTransfer spanRaw copyTo [scalarType intSpan, .reference] = some [] ∧
-    scalarTransfer spanRaw copyTo [.reference, .reference] = none := by decide +kernel
+    scalarTransfer spanRaw copyTo [.reference, .reference] = none ∧
+    scalarTransfer spanRaw (instanceTakes 111 name!"Use" "Use" intSpan) [scalarType intSpan,
+      scalarType holder] = some [] ∧
+    scalarTransfer spanRaw (instanceTakes 111 name!"Use" "Use" intSpan) [.reference,
+      scalarType holder] = none ∧
+    scalarTransfer spanRaw (instanceTakes 115 name!".ctor" ".ctor" intSpan) [scalarType intSpan] =
+      some [scalarType holder] ∧
+    scalarTransfer spanRaw (instanceTakes 115 name!".ctor" ".ctor" intSpan) [.reference] =
+      none := by
+  decide +kernel
 #print axioms home_refused_where_span_is_by_value
 
-/-- An address followed by `call Use(Span<int>)` and `ret`: the IL that would hand a home to a
-    by-value span parameter. -/
-private def byValueRaw (address : RawInstruction) : RawMethod :=
-  { spanRaw with returnType := .void, code := [address, takes intSpan, ⟨0, 42, .none⟩] }
+/-- An address followed by `call` and `ret`: the IL that would hand a home to a by-value span
+    parameter of `call`. -/
+private def byValueRaw (address call : RawInstruction) : RawMethod :=
+  { spanRaw with returnType := .void, code := [address, call, ⟨0, 42, .none⟩] }
 
-/-- No scalar certificate admits `byValueRaw address` when `address` pushes an address: pc 0
-    must hand pc 1 exactly that address, and the call refuses it at the by-value parameter. -/
-private theorem byValue_refused {address : RawInstruction}
-    (roles : foldRoles (byValueRaw address).code =
+/-- No scalar certificate admits `byValueRaw address call` when `address` pushes an address: pc 0
+    must hand pc 1 exactly that address, and `call` refuses it at the by-value parameter. -/
+private theorem byValue_refused {address call : RawInstruction}
+    (roles : foldRoles (byValueRaw address call).code =
       [none, none, none])
-    (pushes : scalarTransfer (byValueRaw address) address [] = some [.reference])
-    (calls : scalarTransfer (byValueRaw address) (takes intSpan) [.reference] = none)
+    (pushes : scalarTransfer (byValueRaw address call) address [] = some [.reference])
+    (calls : scalarTransfer (byValueRaw address call) call [.reference] = none)
     (successor : ∀ stack, featureSuccessors none 0 address stack = some [1])
     (notStore : ∀ stack emitted,
-      scalarStoreFault (byValueRaw address) address stack emitted = false)
+      scalarStoreFault (byValueRaw address call) address stack emitted = false)
     (callNotStore : ∀ stack emitted,
-      scalarStoreFault (byValueRaw address) (takes intSpan) stack emitted = false)
+      scalarStoreFault (byValueRaw address call) call stack emitted = false)
     (features : FeatureCertificate) (certificate : ScalarCertificate)
     (code : List Instruction) (decoded : Bool) :
-    ¬ ScalarFlowValid (byValueRaw address) features certificate code decoded := by
+    ¬ ScalarFlowValid (byValueRaw address call) features certificate code decoded := by
   intro valid
   have lengths := valid
   obtain ⟨featureLength, scalarLength, codeLength, entry, _⟩ := lengths
@@ -278,13 +413,21 @@ private theorem byValue_refused {address : RawInstruction}
   cases refused
 #print axioms byValue_refused
 
-/-- Admission refuses `ldloca` or `ldarga` of a span followed by a call that takes the span by
-    value, for every certificate, so a linked call never receives a home at such a position. -/
+/-- Admission refuses `ldloca` or `ldarga` of a span followed by a `call`, or `ldloca` followed by
+    a `newobj`, that takes the span by value, for every certificate, so a linked call or
+    construction never receives a home at such a position. -/
 theorem home_at_by_value_parameter_refused (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Instruction) (decoded : Bool) :
-    ¬ ScalarFlowValid (byValueRaw ⟨0, 18, .local 0⟩) features certificate code decoded ∧
-    ¬ ScalarFlowValid (byValueRaw ⟨0, 15, .argument 0⟩) features certificate code decoded :=
+    ¬ ScalarFlowValid (byValueRaw ⟨0, 18, .local 0⟩ (takes intSpan)) features certificate code
+      decoded ∧
+    ¬ ScalarFlowValid (byValueRaw ⟨0, 15, .argument 0⟩ (takes intSpan)) features certificate
+      code decoded ∧
+    ¬ ScalarFlowValid
+      (byValueRaw ⟨0, 18, .local 0⟩ (instanceTakes 115 name!".ctor" ".ctor" intSpan))
+      features certificate code decoded :=
   ⟨byValue_refused (by decide +kernel) (by decide +kernel) (by decide +kernel)
+      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code decoded,
+    byValue_refused (by decide +kernel) (by decide +kernel) (by decide +kernel)
       (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code decoded,
     byValue_refused (by decide +kernel) (by decide +kernel) (by decide +kernel)
       (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code decoded⟩

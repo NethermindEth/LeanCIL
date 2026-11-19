@@ -321,10 +321,12 @@ theorem spanInPlaceCall_appendLocals (constructor : CIL.SpanConstructor) (pc : N
         cases stored : storeLocal afterMemory (.span width writable view) value with
         | error fault =>
           simp only [Bind.bind, Except.bind, Functor.map, Except.map]
+          split <;> rfl
         | ok result =>
           simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Functor.map,
             Except.map, FrameAction.appendLocals, Frame.appendLocals,
             List.set_append_left _ _ bound]
+          split <;> rfl
       | _ => simp only [Frame.appendLocals_getElem? found]; rfl
   all_goals exact Or.inl rfl
 

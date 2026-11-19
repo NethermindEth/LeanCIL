@@ -120,6 +120,12 @@ def SpanConstructor.operation : SpanConstructor → MemoryOp
   | .singleReference width writable => .spanSingleReference width writable
   | .staticBytes => .spanCreate
 
+/-- The element width and writability of every span the constructor builds. -/
+def SpanConstructor.shape : SpanConstructor → Nat × Bool
+  | .array element writable _ => (element.width, writable)
+  | .reference width writable | .singleReference width writable => (width, writable)
+  | .staticBytes => (1, false)
+
 /-- Target of an overflow-checked conversion; `i` and `u` are native-sized. -/
 inductive ConvTarget where
   | i1 | u1 | i2 | u2 | i4 | u4 | i8 | u8 | i | u

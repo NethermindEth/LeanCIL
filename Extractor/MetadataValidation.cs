@@ -817,9 +817,10 @@ internal static class MetadataValidation
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
                             Spans.Is(reference.DeclaringType) &&
                             !Spans.ConstructorCalls(method).Contains(instruction))
-                            throw Call("Unsupported in-place span constructor", reference, method, instruction,
-                                "The receiver must be the address of a local or parameter of the constructed type, " +
-                                "followed by at most three simple argument pushes and no branch target.");
+                            throw Call("Unsupported in-place span constructor", reference, method, instruction, """
+                                The receiver must be the address of a local or parameter of the constructed type,
+                                  followed by at most three simple argument pushes and no branch target.
+                                """);
                         if (instruction.OpCode.Code == Code.Call &&
                             RuntimeModels.CallModel(reference, profile) is not null) return;
                         if (instruction.OpCode.Code == Code.Newobj &&

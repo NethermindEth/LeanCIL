@@ -411,14 +411,16 @@ def skipInitCall (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memor
   | _ => .error (.unsupported "Not a memory instruction")
 
 /-- A span constructor run in place: `constructor` builds the span from the arguments, and the
-    slot named by the home beneath them then holds it under the slot's width and access. A view or
-    any other receiver names no slot, so the call faults. -/
+    slot named by the home beneath them then holds it. The constructor must build spans of the
+    slot's width and access. A view or any other receiver names no slot, so the call faults. -/
 def spanInPlaceCall (constructor : CIL.SpanConstructor) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   let (memory, values) ← memoryInstruction constructor.operation stack memory
   match values with
   | value :: .spanHome index :: rest =>
     let some (.span width writable view) := frame.locals[index]? | .error .invalidState
+    if constructor.shape != (width, writable) then
+      .error (.unsupported "Span constructor does not build the span of its home") else pure ()
     let (slot, memory) ← storeLocal memory (.span width writable view) value
     return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
   | _ => .error .invalidState

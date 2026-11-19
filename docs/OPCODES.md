@@ -441,8 +441,11 @@ In-place construction of a span local or homed span parameter is a call on its h
 `ldarga` of a local or parameter of the constructed type, one local or argument load, `ldnull`
 or int32 constant per constructor parameter (at most three), and the exact constructor call,
 with no branch to an argument or the call. The call's runtime model builds the view as the
-overload's `newobj` model does and stores it in the slot the home names. The local may be
-reused or reinitialized; construction faults remain at the call instruction.
+overload's `newobj` model does and stores it in the slot the home names, except that
+`ReadOnlySpan<byte>(void*, int)` views any readable bytes the pointer names, where `newobj`
+requires extracted static data. The step faults unless the constructor builds spans of the
+slot's width and access. The local may be reused or reinitialized; construction faults remain
+at the call instruction.
 
 `Array.Fill<T>(T[], T)` and its `(T[], T, int startIndex, int count)` overload support primitive
 integers, Boolean, character and integer-backed enums. A null array throws

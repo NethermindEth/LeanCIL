@@ -356,12 +356,14 @@ theorem Memory.Equivalent.spanInPlaceCall {m n : Memory} (same : m.Equivalent n)
   dsimp only
   split
   · split
-    · apply ResultEquivalent.bind (equivalent.storeLocal _ _)
-      intro left right related
-      obtain ⟨slot, memory⟩ := left
-      obtain ⟨otherSlot, otherMemory⟩ := right
-      obtain ⟨rfl, stored⟩ := related
-      exact .ok (.next stored _ _ _)
+    · split
+      · exact .error _
+      · apply ResultEquivalent.bind (equivalent.storeLocal _ _)
+        intro left right related
+        obtain ⟨slot, memory⟩ := left
+        obtain ⟨otherSlot, otherMemory⟩ := right
+        obtain ⟨rfl, stored⟩ := related
+        exact .ok (.next stored _ _ _)
     · exact .error _
   · exact .error _
 #print axioms Memory.Equivalent.spanInPlaceCall

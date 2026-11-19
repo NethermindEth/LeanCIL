@@ -5,7 +5,8 @@ import CIL.Extraction.SpanModels
 
 Each overload binds an external MemberRef to the checked construction for its closed element.
 `newobj` pushes the constructed span; `call` on the home of a span local or homed parameter
-stores it in the slot the home names.
+stores it in the slot the home names. `newobj` of `ReadOnlySpan<byte>(void*, int)` views
+extracted static data, while the in-place call views any readable bytes, as a reference span.
 -/
 
 namespace CIL.Extraction
@@ -33,9 +34,10 @@ private def Source.operand (source : Source) : ModelOperand :=
       | .pointer => "System.Void*,System.Int32" | .reference => "!0&"
     return s!"{runtimeScope}::System.Void {owner}<{name}>::.ctor({parameters})"
 
-/-- Array views require admissible array storage. Aggregate widths use the checked layout. -/
-private def Source.constructor (source : Source) (writable : Bool) (reader : CallLayouts)
-    (method : MethodRef) : Option SpanConstructor := do
+/-- Array views require admissible array storage. Aggregate widths use the checked layout. With
+    `staticData` a read-only byte span over a pointer must lie in extracted static data. -/
+private def Source.constructor (source : Source) (writable staticData : Bool)
+    (reader : CallLayouts) (method : MethodRef) : Option SpanConstructor := do
   let .apply _ element := method.owner | none
   let _ ← spanElementName element
   let width ← match element with
@@ -44,7 +46,8 @@ private def Source.constructor (source : Source) (writable : Bool) (reader : Cal
   match source with
   | .reference => return .singleReference width writable
   | .pointer =>
-    if !writable && element == .atom runtimeScope "System.Byte" then return .staticBytes
+    if staticData && !writable && element == .atom runtimeScope "System.Byte" then
+      return .staticBytes
     return .reference width writable
   | .array | .range =>
     let _ ← reader.storage (.array element)
@@ -53,7 +56,7 @@ private def Source.constructor (source : Source) (writable : Bool) (reader : Cal
 
 /-- The closed instance constructor must agree with the declaration on its result and arguments;
     `model` says what the opcode does with the constructed span. -/
-private def Source.overload (source : Source) (writable : Bool)
+private def Source.overload (source : Source) (writable staticData : Bool)
     (model : SpanConstructor → RuntimeModel) : ModelOverload :=
   { operand := source.operand
     accepts := fun method => match method.owner with
@@ -61,7 +64,8 @@ private def Source.overload (source : Source) (writable : Bool)
           method.hasThis && method.genericArity == 0 && method.methodArguments.isEmpty &&
           method.signature 0x20 == source.signature element
       | _ => false
-    resolve := fun reader method => model <$> source.constructor writable reader method }
+    resolve := fun reader method =>
+      model <$> source.constructor writable staticData reader method }
 
 /-- The four overloads, in the order their rows are tried. -/
 private def sources : List Source := [.array, .range, .pointer, .reference]
@@ -69,10 +73,10 @@ private def sources : List Source := [.array, .range, .pointer, .reference]
 /-- Both span owners reserve their constructor name under `newobj` and under `call`. -/
 def spanConstructorEntries : List ModelEntry := [true, false].flatMap fun writable =>
   [{ opcode := .newobj, owner := spanHead writable, name := name!".ctor", ownsName := true,
-     overloads := sources.map (·.overload writable fun constructor =>
+     overloads := sources.map (·.overload writable true fun constructor =>
        .memory constructor.operation) },
    { opcode := .call, owner := spanHead writable, name := name!".ctor", ownsName := true,
-     overloads := sources.map (·.overload writable .spanInPlace) }]
+     overloads := sources.map (·.overload writable false .spanInPlace) }]
 
 /-- A resolved span constructor executes its checked memory operation, or runs in place. -/
 theorem spanConstructorEntries_yields {property : RuntimeModel → Prop}

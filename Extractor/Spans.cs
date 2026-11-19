@@ -68,8 +68,12 @@ internal static class Spans
     static bool OwnerElement(TypeReference type) =>
         type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 
-    /// <summary>The constructor consumes only its explicit arguments and produces a span value.</summary>
-    internal static MemoryOperation? ConstructorOperation(MethodReference method, string architecture)
+    /// <summary>
+    /// The constructor consumes only its explicit arguments and produces a span value. With
+    /// <paramref name="staticData"/> a read-only byte span over a pointer must lie in extracted static data.
+    /// </summary>
+    internal static MemoryOperation? ConstructorOperation(MethodReference method, string architecture,
+        bool staticData = true)
     {
         if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
             method is GenericInstanceMethod || method.CallingConvention != MethodCallingConvention.Default ||
@@ -87,7 +91,7 @@ internal static class Spans
                 new SpanSingleReference(width, writable),
             [{ ParameterType: PointerType { ElementType.MetadataType: MetadataType.Void } },
                 { ParameterType.MetadataType: MetadataType.Int32 }] =>
-                !writable && element.MetadataType == MetadataType.Byte
+                staticData && !writable && element.MetadataType == MetadataType.Byte
                     ? new SpanCreate() : new SpanFromReference(width, writable),
             _ when parameters.Count is 1 or 3 && parameters[0].ParameterType is ArrayType { IsVector: true } array &&
                 OwnerElement(array.ElementType) &&
@@ -170,7 +174,8 @@ internal static class Spans
 
     /// <summary>The model of a span constructor that a call runs on a span home; null for any other method.</summary>
     internal static Operation? InPlaceConstructor(MethodReference reference, string architecture) =>
-        ConstructorOperation(reference, architecture) is SpanSource source ? new SpanInPlace(source) : null;
+        ConstructorOperation(reference, architecture, staticData: false) is SpanSource source
+            ? new SpanInPlace(source) : null;
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, HashSet<Instruction>>
         windows = new();

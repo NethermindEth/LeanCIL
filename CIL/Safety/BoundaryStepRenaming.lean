@@ -530,6 +530,10 @@ theorem spanInPlace_stepRenamed (constructor : CIL.SpanConstructor) :
       rcases slots with ⟨bounded, rfl⟩
       cases slot with
       | span width writable view =>
+        by_cases shaped : (constructor.shape != (width, writable)) = true
+        · simp only [AllocationRenaming.localSlot, shaped, ite_true]
+          exact .error _
+        simp only [AllocationRenaming.localSlot, shaped, Bool.false_eq_true, ite_false]
         apply (memories.storeLocal (indices := indices) (.span width writable view) value bounded
           valueBound).bindWithSuccess
         intro result otherResult stored results

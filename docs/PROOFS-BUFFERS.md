@@ -191,7 +191,7 @@ Single-reference and pointer span constructors, empty getters and span resets us
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
 a null, zero-length view without changing memory. `initializeSpanHome` stores that view in the
 slot a span `initobj` addresses, and `spanInPlaceCall` stores the view a constructor builds in
-the slot its receiver home names.
+the slot its receiver home names once `SpanConstructor.shape` matches the slot's width and access.
 An `in` or `ref readonly` span parameter is passed as the `.bufferSpan` view the caller's home
 holds when the call runs, so a contract states the same view argument as a by-value span and reuses `SpanView.validate`,
 `Contents` and the span element lemmas, whether the caller passes a span local or a temporary.
