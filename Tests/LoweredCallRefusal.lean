@@ -296,6 +296,34 @@ theorem integerVectorTransfers :
 
 #print axioms integerVectorTransfers
 
+/-- A resolving unsigned DivRem overload binds the type of each field, packing and alignment. -/
+theorem divRemTupleLayout :
+    let pair := "System.ValueTuple`2<System.UInt64,System.UInt64>"
+    let identity := runtimeScope ++ "::" ++ pair
+    let word := TypeExpr.atom runtimeScope "System.UInt64"
+    let method : MethodRef := {
+      owner := .atom runtimeScope "System.Math", name := name!"DivRem",
+      genericArity := 0, hasThis := false, returnType := .aggregate identity 0,
+      parameters := [word, word] }
+    let site : CallSite := {
+      method, declared := method.signature 0, name := "DivRem",
+      target := .external (runtimeScope ++ "::" ++ pair ++ 
+        " System.Math::DivRem(System.UInt64,System.UInt64)"),
+      typeArguments := [], parameterCount := 2, returnsValue := true }
+    let row : RawLayout := {
+      identity, auto := true, explicit := false, declaredSize := 0,
+      packing := 0, fields := [⟨.unsigned64, none⟩, ⟨.unsigned64, none⟩] }
+    let resolve := fun raw alignment => integerMathInstruction
+      (LayoutEnvironment.callLayouts {
+        rawLayouts := [raw],
+        layouts := #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, alignment⟩] }) site
+    resolve row 8 = some (.intrinsic (.scalar (.divRem 64 false)) 2) ∧
+      resolve { row with fields := row.fields.set 0 ⟨.signed64, none⟩ } 8 = none ∧
+      resolve { row with fields := row.fields.set 1 ⟨.signed64, none⟩ } 8 = none ∧
+      resolve { row with packing := 1 } 8 = none ∧ resolve row 1 = none := by decide +kernel
+
+#print axioms divRemTupleLayout
+
 /-- The empty layout environment of the method with an unknown call. -/
 private def emptyEnvironment : LayoutEnvironment := {}
 

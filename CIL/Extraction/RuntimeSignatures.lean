@@ -74,9 +74,12 @@ def integerPairResult (environment : CallLayouts) (type : TypeExpr)
   match type with
   | .aggregate identity index =>
     let expected := runtimeScope ++ "::System.ValueTuple`2<" ++ name ++ "," ++ name ++ ">"
-    identity == expected && (environment.indexedRaw[index]?).any (·.identity == identity) &&
+    let validRaw := (environment.indexedRaw[index]?).any fun raw =>
+      raw.identity == identity && raw.packing <= 0 && (primitiveField name).any fun kind =>
+        raw.fields.map RawField.type == [kind, kind]
+    identity == expected && validRaw &&
       (environment.layouts[index]?).any fun entry =>
-        entry.layout.size == 2 * width && match entry.layout.fields with
+        entry.alignment == width && entry.layout.size == 2 * width && match entry.layout.fields with
         | [first, second] => first.offset == 0 && first.width == width &&
           second.offset == width && second.width == width && !first.aggregate && !second.aggregate
         | _ => false
