@@ -85,6 +85,15 @@ def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnviro
     (link : Option Link := none) (role : Option FoldRole := none) (live : Bool := false) : Bool :=
   catalog.agreesAt environment.callLayouts profile raw emitted link role live
 
+/-- A folded site emits its role, a live call satisfies its claim, and a dead call is a hole. -/
+def ModelCatalog.emissionAgrees (catalog : ModelCatalog) (layouts : CallLayouts)
+    (profile : FeatureProfile) (raw : RawInstruction) (emitted : Instruction)
+    (link : Option Link) (role : Option FoldRole) (live : Bool) : Bool :=
+  if live then
+    if foldOwnsSite role then decide (role.bind (Instruction.ofRole? · none raw) = some emitted)
+    else catalog.agreesAt layouts profile raw emitted link role true
+  else !methodTokenCall raw.opcode || decide (emitted = .unadmitted raw.opcode)
+
 /-- The instruction walk checks live claims and the representation of dead calls. -/
 private def modelSitesAgree (catalog : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (closed : RawMethod) (reachable : List Bool)
@@ -92,12 +101,7 @@ private def modelSitesAgree (catalog : ModelCatalog) (environment : LayoutEnviro
   let layouts := environment.callLayouts
   let roles := (foldRoles closed.locals closed.code).toArray
   all3 (fun (raw, pc) live emitted =>
-    if live then
-      let role := roles[pc]?.join
-      if foldOwnsSite role then
-        decide (role.bind (Instruction.ofRole? · none raw) = some emitted)
-      else catalog.agreesAt layouts profile raw emitted links[pc]?.join role true
-    else !methodTokenCall raw.opcode || decide (emitted = .unadmitted raw.opcode))
+    catalog.emissionAgrees layouts profile raw emitted links[pc]?.join (roles[pc]?.join) live)
     closed.code.zipIdx reachable code
 
 /-- Every live call fits its claim. Links and raw fold roles are indexed once per body. -/
@@ -158,7 +162,8 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
       method.linkAt pc := by simp [linkReads_eq, inCode, Method.linkAt]
   change siteClaim loweredCallFamily method.environment (method.linkAt pc) raw
     runtimeCatalog.table.claims = .refused at refused
-  simp [ordinary, ModelCatalog.agreesAt, token, linkAt, ModelCatalog.callRequirement, refused,
+  simp [ModelCatalog.emissionAgrees, ordinary, ModelCatalog.agreesAt, token, linkAt,
+    ModelCatalog.callRequirement, refused,
     CallRequirement.accepts] at checked
 
 #print axioms RuntimeModelsAgree.siteClaimTotal
@@ -248,5 +253,96 @@ theorem methodCode_eq (profile : FeatureProfile) (environment : LayoutEnvironmen
   · rfl
 
 #print axioms methodCode_eq
+
+/-- The occupied-pc index contains precisely the positions with a link. -/
+private theorem occupied_eq (links : List (Nat × Link)) (pc : Nat) :
+    (Std.TreeSet.ofList (links.map Prod.fst) compare).contains pc =
+      (linkLookup links pc).isSome := by
+  simp only [Std.TreeSet.contains_ofList, linkLookup]
+  induction links with
+  | nil => rfl
+  | cons entry rest ih =>
+    simp only [List.map_cons, List.contains_cons, List.find?_cons]
+    by_cases same : entry.1 = pc
+    · simp [same]
+    · simp only [beq_eq_false_iff_ne.mpr same, beq_eq_false_iff_ne.mpr (Ne.symm same),
+        Bool.false_or, ih]
+
+#print axioms occupied_eq
+
+/-- A method-token opcode with a different operand cannot decode as a linked instruction. -/
+private theorem malformedCall (previous : Option RawInstruction) (raw : RawInstruction)
+    (token : methodTokenCall raw.opcode = true) (missing : (raw.operand matches .call _) = false) :
+    Instruction.ofRaw previous raw = .unadmitted raw.opcode := by
+  obtain ⟨offset, opcode, operand⟩ := raw
+  simp only [methodTokenCall, Bool.or_eq_true, beq_iff_eq] at token
+  rcases token with (rfl | rfl) | rfl <;> cases operand <;> try contradiction
+  all_goals
+    unfold Instruction.ofRaw Instruction.ofRaw?
+    split <;> try rfl
+  all_goals
+    rename_i isStatic _
+    cases isStatic <;> simp [Instruction.instanceField?, FieldRef.ofOperand?, Option.bind]
+    all_goals repeat' split <;> rfl
+
+#print axioms malformedCall
+
+/-- The runtime agreement check holds at every decoded site except a live refused instruction. -/
+theorem RuntimeModelsAgree.of_decoded_site {profile : FeatureProfile}
+    {env : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {pc : Nat} {raw : RawInstruction} {live : Bool} {emitted : Instruction}
+    (found : closed.code[pc]? = some raw) (active : reachable[pc]? = some live)
+    (decoded : (methodCode profile env links reachable closed)[pc]? = some emitted)
+    (admitted : live = true → ∀ opcode, emitted ≠ .unadmitted opcode) :
+    runtimeCatalog.emissionAgrees env.callLayouts profile raw emitted (linkLookup links pc)
+      ((foldRoles closed.locals closed.code)[pc]?.join) live = true := by
+  rw [methodCode_eq, Instruction.ofRawCode_getElem? closed.code pc _, Instruction.ofRawAt,
+    found] at decoded
+  have same := Option.some.inj decoded
+  simp only [methodInstruction, Instruction.withSiteDecoder, indexedRead?_eq,
+    List.getElem?_toArray, active, Option.getD_some, occupied_eq] at same
+  cases live with
+  | false => simp_all [ModelCatalog.emissionAgrees]
+  | true =>
+    generalize (foldRoles closed.locals closed.code)[pc]?.join = role at *
+    simp only [Bool.not_true, Bool.false_eq_true, ite_false] at same
+    simp only [ModelCatalog.emissionAgrees, ite_true]
+    cases owned : foldOwnsSite role
+    · simp only [Bool.false_eq_true, ite_false, ModelCatalog.agreesAt]
+      cases token : methodTokenCall raw.opcode
+      · rfl
+      · simp only [ite_true]
+        simp only [boundSite, token, Bool.true_or, owned, Bool.not_false, Bool.and_true,
+          ite_true, Bool.not_true, Bool.false_eq_true, ite_false] at same
+        cases link : linkLookup links pc with
+        | none =>
+          simp only [link, Option.isSome_none, Bool.false_eq_true, ite_false] at same
+          split at same
+          · exact absurd same.symm (admitted rfl _)
+          · cases req : runtimeCatalog.callRequirement env.callLayouts profile none role raw <;>
+              simp_all [CallRequirement.decode, CallRequirement.accepts]
+            exact admitted _ same.symm
+        | some target =>
+          simp only [link, Option.isSome_some, ite_true] at same
+          cases operand : raw.operand with
+          | call site =>
+            simp only [ModelCatalog.callRequirement, siteClaim, token, operand, Bool.not_true,
+              Bool.false_eq_true, ite_false, Option.isSome_some, ite_true]
+            unfold ModelCatalog.linkedRequirement at same ⊢
+            rw [operand] at same ⊢
+            repeat' split at same
+            all_goals simp_all [CallRequirement.accepts, CallRequirement.decode]
+            exact admitted _ same.symm
+          | _ =>
+            have hole := malformedCall (rawBefore (closed.code[·]?) pc) raw token
+              (by simp [operand])
+            simp [ModelCatalog.linkedRequirement, operand, CallRequirement.decode, hole] at same
+            exact absurd same.symm (admitted rfl _)
+    · cases role with
+      | none => contradiction
+      | some part =>
+        cases part <;> simp_all [foldOwnsSite, Instruction.ofRole?]
+
+#print axioms RuntimeModelsAgree.of_decoded_site
 
 end CIL.Extraction

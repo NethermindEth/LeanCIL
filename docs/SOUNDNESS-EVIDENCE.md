@@ -37,6 +37,11 @@ the decoding of the closed body. At a reachable instruction outside a fold, the 
 uses this equality for value encodings when the decoder supplies an instruction. A decoded hole
 still needs the explicit site check, as do folded sites and methods emitted as literals.
 
+At each decoded position, `RuntimeModelsAgree.of_decoded_site` proves the runtime
+agreement check from the instruction lookup, the reachability bit and the absence of a
+live hole. The unsafe-call certificate also requires equal code and mask lengths. A span
+reset must have its matching local address for the decoder to produce an initialization.
+
 Exact scalar matching covers integer literals, wrapping/checked add/subtract/multiply, signed and
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
 integer conversions and all short/long compare-and-branch encodings. Literal ranges and

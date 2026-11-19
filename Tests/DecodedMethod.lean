@@ -53,6 +53,21 @@ theorem add_decodes :
   cil_kernel_rfl
 #print axioms add_decodes
 
+/-- The unsafe-call certificate requires a mask entry for every instruction. -/
+theorem decoded_missing_mask :
+    let source := { addRaw with code := [instr 0 0] }
+    ¬ UnsafeCallsValid source [] (methodCode .scalar {} [] [] source) := by decide +kernel
+#print axioms decoded_missing_mask
+
+/-- A span reset without its local address has no matching empty-span initialization. -/
+theorem decoded_unbound_span_reset :
+    let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") uint32
+    let source := { addRaw with code := [instr 0 0xfe15 (.type span)] }
+    let code := methodCode .scalar {} [] [true] source
+    code = [.unadmitted 0xfe15] ∧ objectSites source [true] (frame code) = none := by
+  exact ⟨rfl, rfl⟩
+#print axioms decoded_unbound_span_reset
+
 /-- The raw field load uses the owner, slot, held type and name encoded by its token. -/
 private def fieldSite (opcode : Nat) (field : FieldRef) : RawInstruction :=
   instr 0 opcode (.field field.owner field.index field.type field.name true)
