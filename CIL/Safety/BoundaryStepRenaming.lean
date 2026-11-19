@@ -414,6 +414,31 @@ theorem referenceCompare_stepRenamed (relation : CIL.ReferenceRelation) :
 
 #print axioms referenceCompare_stepRenamed
 
+/-- Reference subtraction preserves the mapped address and its readonly restriction. -/
+theorem referenceSubtract_stepRenamed : CIL.RuntimeModel.referenceSubtract.StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc
+    stack bounds _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel,
+    CIL.RuntimeModel.observerCount]
+  by_cases observed : unspecifiedOperands 2 stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  simp only [observed, Bool.false_eq_true, ite_false]
+  rcases stack with _ | ⟨offset, _ | ⟨reference, rest⟩⟩
+  · exact .error _
+  · cases offset <;> exact .error _
+  have bound := bounds reference (by simp)
+  cases offset <;> cases reference <;>
+    simp only [List.map_cons, AllocationRenaming.value, referenceSubtractCall] <;>
+    first
+    | exact .error _
+    | (apply (related.referenceSubtract _ bound _).bind
+       intro value other same
+       cases same
+       exact .ok (.next related frames))
+
+#print axioms referenceSubtract_stepRenamed
+
 /-- `SkipInit` forms its renamed out reference on both sides and writes nothing. -/
 theorem skipInit_stepRenamed : CIL.RuntimeModel.skipInit.StepRenamed := by
   intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc
