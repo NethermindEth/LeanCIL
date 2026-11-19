@@ -19,15 +19,11 @@ private def aggregateWidth (environment : CallLayouts) (type : TypeExpr) : Optio
 /-- A span call binds its element sizes and its local destination, when a fold supplies one. -/
 private def spanInstruction (environment : CallLayouts) (role : Option FoldRole)
     (raw : RawInstruction) (site : CallSite) : Option Instruction := do
-  let first := match site.declaringType with
-    | .apply _ element => element
-    | _ => site.typeArguments.headD .void
-  let source ← aggregateWidth environment first
-  if raw.opcode == 40 && site.name == ".ctor" then
-    let some (.spanConstructor index _) := role | none
-    return .initializeSpanLocal index (← spanLocalConstructor site source)
-  if byteSpanConstructor raw.opcode site then return .memory .spanCreate
-  return (← spanCall raw source).instruction
+  if raw.opcode != 40 || site.name != ".ctor" then none else pure ()
+  let some (.spanConstructor index _) := role | none
+  let .apply _ element := site.declaringType | none
+  let width ← aggregateWidth environment element
+  return .initializeSpanLocal index (← spanLocalConstructor site width)
 
 /-- The instruction of this raw member, or no instruction when its overload cannot resolve. -/
 def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)

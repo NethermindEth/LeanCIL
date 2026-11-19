@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -71,14 +72,17 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
 
     if (name == "fill")
     {
-        const string span = ".spanFromReference 4 true";
-        if (!source.Contains(span, StringComparison.Ordinal)) throw new Exception("Missing span constructor");
+        using var module = Mono.Cecil.ModuleDefinition.ReadModule(runtimeFixture.Assembly.Location);
+        var method = module.GetType("Examples.StackAllocation").Methods.Single(item => item.Name == "FillAndRead");
+        var instructions = method.Body.Instructions;
+        var constructorPc = instructions.IndexOf(instructions.Single(instruction =>
+            instruction.OpCode.Code == Mono.Cecil.Cil.Code.Newobj));
         foreach (var replacement in new[] { ".spanFromReference 8 true", ".spanFromReference 4 false" })
         {
             var forgedSpan = Path.Combine(root, "forged-span.lean");
-            File.WriteAllText(forgedSpan, source.Replace(span, replacement, StringComparison.Ordinal));
+            File.WriteAllText(forgedSpan, ForgeModelEmission(source, constructorPc, $".memory ({replacement})"));
             var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
-            if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("ScalarFlowValid", StringComparison.Ordinal))
+            if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("RuntimeModelsAgree", StringComparison.Ordinal))
                 throw new Exception("Forged span constructor was not rejected: " + rejectedSpan.Output);
             Console.WriteLine("PASS forged stack span rejected: " + replacement);
         }

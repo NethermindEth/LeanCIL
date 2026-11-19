@@ -16,14 +16,15 @@ import CIL.Extraction.UnsafeBlocks
 import CIL.Extraction.AsSpanModels
 import CIL.Extraction.StaticSpanModel
 import CIL.Extraction.SpanBulkModels
+import CIL.Extraction.SpanConstructorModels
 
 /-!
 # Runtime model resolution
 
-`runtimeModel` resolves a call through the table of every modelled runtime method. A call of a
-modelled method keeps its call and states no link (`callModelled`, which `ManagedCallsValid`
-reads), and the checked interpreter runs the model its operand names. At an unlinked
-method-token call, the raw selector gives a resolving model priority over a lowered family.
+`runtimeModel` resolves calls and constructors by opcode and method. A modelled site keeps
+its operand and has no link. The checked interpreter runs the model for that operand.
+At an unlinked method-token call, the raw selector gives a resolving model priority over a
+lowered family.
 -/
 
 namespace CIL.Extraction
@@ -51,6 +52,7 @@ def modelFamilies : List (List ModelEntry) := [
   asSpanEntries,
   [staticSpanEntry],
   spanBulkEntries,
+  spanConstructorEntries,
 ]
 
 /-- The runtime methods with a model. -/
@@ -94,10 +96,9 @@ def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
   live = true → methodTokenCall raw.opcode = true →
     siteClaim familyOf environment link raw ≠ .refused
 
-/-- Whether a runtime model stands for a `call` of `method` in `body`, which then states no
-    link. -/
-def callModelled (body : Method) (method : MethodRef) : Bool :=
-  (runtimeModel body.environment .call method).isSome
+/-- A modelled opcode and method use the body's runtime environment and require no link. -/
+def callModelled (body : Method) (site : CallOpcode × MethodRef) : Bool :=
+  (runtimeModel body.environment site.1 site.2).isSome
 
 open Lean Meta Elab Tactic in
 /-- Each literal table entry occurs at its recorded index in the registered list. -/

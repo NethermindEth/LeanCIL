@@ -203,17 +203,17 @@ internal sealed class LayoutEvidence
         {
             var instruction = method.Body.Instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
+            if (instruction.OpCode.Code == Code.Call &&
                 instruction.Operand is MethodReference arrayCall &&
                 arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType &&
                 arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan) &&
-                (instruction.OpCode.Code != Code.Call || arrayCall.Name != "op_Implicit"))
+                arrayCall.Name != "op_Implicit")
             {
                 var element = arraySpan.GenericArguments[0];
                 if (MetadataValidation.IsAggregate(element, method.Module))
                     uses.Add($".size {pc} {Index(element)} .arrayElement");
             }
-            if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
+            if (instruction.OpCode.Code == Code.Call &&
                 instruction.Operand is MethodReference spanCall)
             {
                 if (spanCall.DeclaringType is GenericInstanceType spanOwner &&

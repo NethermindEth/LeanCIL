@@ -630,8 +630,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 Code.Ldftn => operations[pc] is MethodAddress,
                 Code.Calli => operations[pc] is IndirectCall,
                 Code.Call when TailCalls.IsCall(instruction) => operations[pc] is Call { Kind: CallKind.Tail },
-                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
-                Code.Newobj => operations[pc] is Newobj or Memory { Operation: SpanCreate },
+                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or
+                    ModelCall { Constructs: false },
+                Code.Newobj => operations[pc] is Newobj or ModelCall { Constructs: true },
                 _ => true
             };
             if (!translated) return new(instruction.Offset, instruction.OpCode, RefusalKind.Translated);

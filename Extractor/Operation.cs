@@ -325,11 +325,17 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
 /// </summary>
 internal sealed record ModelCall(Operation Model) : Operation
 {
+    /// <summary>A constructor consumes its explicit arguments and pushes the constructed value.</summary>
+    internal bool Constructs { get; init; }
+
     /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
     internal MethodRef? Site { get; init; }
 
-    internal override string Render(Func<int, string> calleeName) =>
-        $".call ({Site?.ToLean() ?? throw new InvalidOperationException("A model call has no method operand.")}) {{}}";
+    internal override string Render(Func<int, string> calleeName)
+    {
+        var method = Site?.ToLean() ?? throw new InvalidOperationException("A model site has no method operand.");
+        return Constructs ? $".newobj ({method})" : $".call ({method}) {{}}";
+    }
 }
 
 /// <summary>What a <c>newobj</c> allocates, as its link states it.</summary>

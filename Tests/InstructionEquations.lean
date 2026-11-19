@@ -367,4 +367,31 @@ example (wide : 32 < 40) :
     ∃ op, (guardedBody wide).code[0]? = some op ∧ op = .ldc_i4 (BitVec.ofNat 32 40) :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
+/-- This instance constructor consumes an int32 array and produces a writable span. -/
+private def arrayConstructor : CIL.Extraction.MethodRef :=
+  let int := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  { owner := .apply (CIL.Extraction.spanHead true) int, name := name!".ctor",
+    genericArity := 0, hasThis := true, returnType := .void, parameters := [.array int] }
+
+/-- The body constructs an empty view from a null array without a managed constructor link. -/
+def arrayConstruction : CIL.Method :=
+  { code := [.newobj arrayConstructor], locals := [], returnsValue := true }
+
+cil_instruction_equations arrayConstruction
+cil_runtime_models arrayConstruction
+
+/-- The checked stepper uses the constructor's lookup fact to push the view. -/
+theorem step_array_constructor (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
+    CIL.Safety.step arrayConstruction (.newobj arrayConstructor) 0 [] frame [.object .null] memory =
+      .ok (.next 1 [.bufferSpan ⟨.null, 0, 4, true⟩] frame memory) := by
+  cil_checked_step []
+#print axioms step_array_constructor
+
+open Lean in
+run_meta do
+  let info ← getConstInfo ``step_array_constructor
+  let some proof := info.value? (allowOpaque := true) | throwError "Missing constructor proof"
+  unless proof.getUsedConstants.contains ``CIL.Safety.step_newobj_memory do
+    throwError "The stepper did not use the constructor's memory equation"
+
 end Tests.InstructionEquations

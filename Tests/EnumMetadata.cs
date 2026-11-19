@@ -21,7 +21,7 @@ var descriptor = arrays.GetMethod("Storage", flags)!;
 var runtime = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
 var span = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("Member", flags)!;
 var staticSpan = runtime.GetMethod("StaticSpanModel", flags)!;
-var spanOperations = runtime.GetMethod("BuildSpanOperations", flags)!;
+var constructor = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("ConstructorOperation", flags)!;
 using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
 var module = pinned.Module;
 var owner = module.GetType("Examples.EnumBuffers");
@@ -73,16 +73,21 @@ using (Scope())
     var words = module.GetType("Examples.SpanTables").Methods.Single(method => method.Name == "get_Words");
     var create = (GenericInstanceMethod)words.Body.Instructions.Single(instruction =>
         instruction.Operand is GenericInstanceMethod).Operand;
+    var arrayMethod = module.GetType("Examples.MemorySpans").Methods.Single(method => method.Name == "ArrayConstructor");
+    var arrayConstructor = arrayMethod.Body.Instructions.Select(instruction => instruction.Operand)
+        .OfType<MethodReference>().Single(reference => reference.Name == ".ctor");
     foreach (var (type, admitted) in new[]
         { (module.TypeSystem.Int32, true), ((TypeReference)element, true), (aggregate, false), (vector, false) })
     {
-        var operations = (System.Collections.IDictionary)spanOperations.Invoke(null, [type, "scalar"])!;
+        var spanOwner = new GenericInstanceType(((GenericInstanceType)arrayConstructor.DeclaringType).ElementType);
+        spanOwner.GenericArguments.Add(type);
+        var arrayCall = new MethodReference(".ctor", module.TypeSystem.Void, spanOwner) { HasThis = true };
+        arrayCall.Parameters.Add(new ParameterDefinition(arrayConstructor.Parameters[0].ParameterType));
         var call = new GenericInstanceMethod(create.ElementMethod);
         call.GenericArguments.Add(type);
         var createsStaticSpan = staticSpan.Invoke(null, [call, "scalar"]) is not null;
-        if (createsStaticSpan != admitted ||
-            !operations.Values.Cast<object>().Any(operation =>
-                operation.GetType().Name == "Memory" && MemoryCase(operation).GetType().Name == "ArraySpan"))
+        var createsArraySpan = constructor.Invoke(null, [arrayCall, "scalar"])?.GetType().Name == "ArraySpan";
+        if (createsStaticSpan != admitted || !createsArraySpan)
             throw new InvalidOperationException("Static and supplied array span admission were conflated: " + type.FullName);
     }
 }

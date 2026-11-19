@@ -74,13 +74,7 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
   let owner := site.declaringType
   let name := site.name
   if raw.opcode == 115 then
-    if name != ".ctor" then none
-    else if (exceptionOwner? owner).isSome then some .throwConstructor
-    else match owner with
-      | .apply (.constructor scope type) _ =>
-        if scope == runtimeScope && type ∈ ["System.Span`1", "System.ReadOnlySpan`1"]
-        then some .span else none
-      | _ => none
+    if name == ".ctor" && (exceptionOwner? owner).isSome then some .throwConstructor else none
   else if raw.opcode != 40 then none else
   match owner with
   | .apply (.constructor scope type) _ =>

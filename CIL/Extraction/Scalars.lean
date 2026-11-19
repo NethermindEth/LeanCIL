@@ -638,43 +638,6 @@ private def callResult (site : CallSite) : ScalarKind :=
     | .managed _ => scalarType site.returnType
     | .external identity => externalResult site identity
 
-/-- Exactly `newobj ReadOnlySpan<byte>(void*, int)`. -/
-def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
-  opcode == 115 && site.name == ".ctor" && site.hasThis && !site.returnsValue &&
-    site.typeArguments.isEmpty && site.parameterCount == 2 && site.returnType == .void &&
-    site.declaringType == .apply (.constructor runtimeScope "System.ReadOnlySpan`1")
-      (.atom runtimeScope "System.Byte") &&
-    site.parameterTypes == [.pointer .void, .atom runtimeScope "System.Int32"] &&
-    site.target == .external (runtimeScope ++
-      "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)")
-
-/-- Exact span pointer constructor, including owner scope and external signature. -/
-private def spanConstructor (opcode : Nat) (site : CallSite) : Option (Nat × Bool) := do
-  if opcode != 115 || site.name != ".ctor" || !site.hasThis || site.returnsValue ||
-      !site.typeArguments.isEmpty || site.parameterCount != 2 || site.returnType != .void ||
-      site.parameterTypes != [.pointer .void, .atom runtimeScope "System.Int32"] then none
-    else pure ()
-  let .apply (.constructor _ owner) elementType := site.declaringType | none
-  let element ← spanElementName elementType
-  let .span width writable ← spanStorage site.declaringType | none
-  if site.target != .external (runtimeScope ++ "::System.Void " ++ owner ++ "<" ++ element ++
-      ">::.ctor(System.Void*,System.Int32)") then none else some (width, writable)
-
-/-- Span constructors retain the exact element width and readonly capability. -/
-private def spanCreateMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
-  let modeled := match instruction.operand with
-    | .call site => byteSpanConstructor instruction.opcode site
-    | _ => false
-  if modeled then match emitted with | .memory .spanCreate => true | _ => false
-  else if let .call site := instruction.operand then
-    match spanConstructor instruction.opcode site with
-    | some (width, writable) => match emitted with
-      | .memory (.spanFromReference actual capability) =>
-        spanConstructorMatches (.reference width writable) (.reference actual capability)
-      | _ => false
-    | none => match emitted with | .memory .spanCreate => false | _ => true
-  else match emitted with | .memory .spanCreate => false | _ => true
-
 /-- What a scalar site reads about the body's local slots: the declared type of each slot, and
     whether a `calli` consumes the slot as a native method pointer. -/
 structure ScalarLocals where
@@ -911,7 +874,9 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
           site.method.owner == nullGuardEntry.owner && nullGuardEntry.bindsSite site
         then [.object, .object] else
       if opcode == 40 && pointerDisplacementSite site then [.word32, .reference] else
-      if (opcode == 115 || opcode == 40) && (spanConstructor 115 site).isSome
+      if (opcode == 115 || opcode == 40) && site.name == ".ctor" &&
+          site.parameterTypes.head? == some (.pointer .void) &&
+          (spanLocalConstructor site matches some (.reference ..))
       then [.word32, .reference] ++
         (if opcode == 40 then [scalarType (.byref site.declaringType)] else []) else
       site.parameterTypes.reverse.map scalarType ++
@@ -993,7 +958,7 @@ private def checkScalarSite (decoded : Bool) (raw : RawMethod)
         | some (.spanConstructor index constructor) => match emitted with
           | .initializeSpanLocal actual operation => index == actual && spanConstructorMatches constructor operation
           | _ => false
-        | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
+        | _ => spanEmissionAllowed emitted) &&
       indirectSiteWindow rawAt pc instruction emitted skipEncoding &&
       readOnlyPrefixMatches (rawAt (pc + 1)) instruction &&
       scalarEmissionMatches role (rawBefore rawAt pc) instruction stack emitted
@@ -1212,7 +1177,7 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
     {constants : Nat → Option W32} {linkAt : Nat → Option Link} {profile : FeatureProfile}
     {features : FeatureCertificate} {reachable : List Bool} {body : Method}
     {scalars : ScalarCertificate} {types : List DispatchType} {methods : List SpecializedMethod}
-    {imports : List ImportSlot} {modelled : MethodRef → Bool}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool}
     (prefixes : rawPrefixesValid raw.returnType raw.code = true)
     (featureFlow : FeatureFlowValid layouts constants linkAt raw profile features reachable
       body.code)

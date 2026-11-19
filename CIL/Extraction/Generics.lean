@@ -1,3 +1,4 @@
+import CIL.RuntimeModel
 import CIL.CallSite
 import CIL.Extraction.TypeStorage
 import CIL.Extraction.FlowIndex
@@ -689,12 +690,12 @@ private def operandLinkFits (emitted : Instruction) (link : Option Link) : Bool 
   | _, _ => link.isNone
 
 /-- The link kind permitted at an instruction other than a construction. -/
-def _root_.CIL.Instruction.linkFits (modelled : MethodRef → Bool) (emitted : Instruction)
-    (link : Option Link) : Bool :=
+def _root_.CIL.Instruction.linkFits (modelled : CallOpcode × MethodRef → Bool)
+    (emitted : Instruction) (link : Option Link) : Bool :=
   match emitted with
   | .call method _ => match link with
-    | some (.direct _) => !modelled method
-    | none => modelled method
+    | some (.direct _) => !modelled (.call, method)
+    | none => modelled (.call, method)
     | some _ => false
   | _ => operandLinkFits emitted link
 
@@ -707,29 +708,31 @@ def validateModelCall (raw : RawInstruction) (live : Bool) (emitted : Instructio
       prefixes.constrained.isNone
   | _, _, _ => false
 
-/-- Whether `raw` is a `call` of a method that `modelled` gives a runtime model. -/
-def modelledCallSite (modelled : MethodRef → Bool) (raw : RawInstruction) : Bool :=
+/-- A raw call or construction claims the runtime model registered for that opcode. -/
+def modelledCallSite (modelled : CallOpcode × MethodRef → Bool) (raw : RawInstruction) : Bool :=
   match raw.opcode, raw.operand with
-  | 40, .call site => modelled site.method
+  | 40, .call site => modelled (.call, site.method)
+  | 115, .call site => modelled (.newobj, site.method)
   | _, _ => false
 
-/-- `link` is what the method's link table gives this pc. A construction is checked with it by
-    `validateConstructionWith`. Any other instruction must fit it, live or not, so a key sits only
-    at a call-family pc, a call has one exactly when `modelled` gives its method no model,
-    and every other call-family pc has one. A call without a link must pass
-    `validateModelCall`, and any other instruction `validateManagedCallWith` with its link; a
-    live call of a modelled method emits nothing but its call. -/
-def validateLinkedCallWith (modelled : MethodRef → Bool) (methodCount : Nat)
+/-- A modelled site keeps its opcode and external method without a link. Live linked sites must
+    agree with the managed method or import selected by their link. -/
+def validateLinkedCallWith (modelled : CallOpcode × MethodRef → Bool) (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
   match emitted.constructor? with
-  | some constructor => validateConstructionWith methods raw live link constructor
+  | some constructor =>
+    if modelled (.newobj, constructor) then
+      link.isNone && (!live || (raw.opcode == 115 && match raw.operand with
+        | .call site => (site.target matches .external _) && site.method == constructor
+        | _ => false))
+    else validateConstructionWith methods raw live link constructor
   | none =>
     -- The arms decide `Instruction.linkFits` in the same match, since a second match on the
     -- instruction costs the kernel about 700 heartbeats at every pc.
     match emitted, link with
-    | .call method _, none => modelled method && validateModelCall raw live emitted
-    | .call method _, some (.direct _) => !modelled method &&
+    | .call method _, none => modelled (.call, method) && validateModelCall raw live emitted
+    | .call method _, some (.direct _) => !modelled (.call, method) &&
         ((!live || !modelledCallSite modelled raw) &&
           validateManagedCallWith methodCount methods imports raw live link emitted)
     | .call .., some _ => false
@@ -738,7 +741,8 @@ def validateLinkedCallWith (modelled : MethodRef → Bool) (methodCount : Nat)
           validateManagedCallWith methodCount methods imports raw live link emitted)
 
 /-- A pc other than a construction that passes the linked call rule fits its link. -/
-theorem validateLinkedCallWith_linkFits {modelled : MethodRef → Bool} {methodCount : Nat}
+theorem validateLinkedCallWith_linkFits {modelled : CallOpcode × MethodRef → Bool}
+    {methodCount : Nat}
     {methods : Nat → Option SpecializedMethod} {imports : Nat → Option ImportSlot}
     {raw : RawInstruction} {live : Bool} {link : Option Link} {emitted : Instruction}
     (unnamed : emitted.constructor? = none)
@@ -774,19 +778,17 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
 
 /-- The linked call rule stated against the original lists. -/
-def validateLinkedCall (modelled : MethodRef → Bool) (methods : List SpecializedMethod)
+def validateLinkedCall (modelled : CallOpcode × MethodRef → Bool) (methods : List SpecializedMethod)
     (imports : List ImportSlot) (raw : RawInstruction) (live : Bool) (link : Option Link)
     (emitted : Instruction) : Bool :=
   validateLinkedCallWith modelled methods.length (methods[·]?) (imports[·]?) raw live link
     emitted
 
-/-- The emitted links have ascending, in-range keys. Each live `ldftn` requires an `.address`
-    link binding its identity to its method. Each `calli` checks its indirect catalog, and
-    each live construction checks its constructor link. A modelled `call` keeps its external
-    operand and has no link. Other emitted calls bind to the method table or an import slot.
-    An external site may instead emit a non-call translation checked by other validators. -/
+/-- Each live managed transfer binds its operand to the indicated method, import or dispatch
+    table. Modelled calls and constructors keep their external operand and have no link. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
+    (modelled : CallOpcode × MethodRef → Bool) (raw : RawMethod) (reachable : List Bool)
+    (emitted : Method) :
     Prop :=
   keysAscend 0 emitted.links = true ∧
   emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
@@ -800,7 +802,7 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
     link a scan of the table gives each pc: indexed lookups and links read beside the code lose
     no evidence the scans accept and admit none they reject. -/
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
-    (imports : List ImportSlot) (modelled : MethodRef → Bool) (raw : RawMethod)
+    (imports : List ImportSlot) (modelled : CallOpcode × MethodRef → Bool) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
     ManagedCallsValid methods imports modelled raw reachable emitted ↔
       keysAscend 0 emitted.links = true ∧
@@ -835,7 +837,7 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     `call` and the link its program index implies elsewhere, so a step of such an instruction
     never takes the `unlinkedCall` branch for want of a link. -/
 theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
-    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports modelled raw reachable emitted) {pc : Nat}
     {op : Instruction} (found : emitted.code[pc]? = some op) (implied : op.constructs = false) :
@@ -860,7 +862,7 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
 /-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
     link enters has that token and the site's type arguments. Its operand passes the name check. -/
 theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
-    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
     {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
@@ -894,13 +896,15 @@ theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
 #print axioms ManagedCallsValid.direct_operand
 
 instance (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
+    (modelled : CallOpcode × MethodRef → Bool) (raw : RawMethod) (reachable : List Bool)
+    (emitted : Method) :
     Decidable (ManagedCallsValid methods imports modelled raw reachable emitted) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Every live pc passes the linked call rule with the link the table gives it. -/
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {modelled : MethodRef → Bool} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
+    {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod} {reachable : List Bool}
+    {emitted : Method}
     (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
     (pc : Fin raw.code.length) :
     validateLinkedCall modelled methods imports raw.code[pc] reachable[pc.val]!

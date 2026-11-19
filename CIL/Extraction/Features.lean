@@ -528,7 +528,8 @@ theorem argument_of_featureOpMatchesAt {layouts : Array RawLayout} {method : Raw
 /-- A live managed tail call has the method named by its raw operand, exactly the tail prefix,
     and a linked callee with that operand's token and type arguments. -/
 theorem ManagedCallsValid.tailCall_target {types : List DispatchType}
-    {methods : List SpecializedMethod} {imports : List ImportSlot} {modelled : MethodRef → Bool}
+    {methods : List SpecializedMethod} {imports : List ImportSlot}
+    {modelled : CallOpcode × MethodRef → Bool}
     {raw : RawMethod} {reachable : List Bool} {body : Method} {layouts : Array RawLayout}
     (calls : ManagedCallsValid methods imports modelled (lowerConstrainedRaw types raw)
       reachable body)

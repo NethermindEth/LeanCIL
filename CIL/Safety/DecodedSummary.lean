@@ -152,7 +152,7 @@ theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Inp
     {arguments : List TypeExpr}
     (summary : DecodedSummary program evidence profile environment index pin token arguments
       contract)
-    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {caller : CIL.Method}
     {pc siteToken : Nat} {method : MethodRef} {prefixes : CallPrefixes}
     {instruction : RawInstruction} {site : CallSite}

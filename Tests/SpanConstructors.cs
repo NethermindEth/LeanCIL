@@ -93,31 +93,45 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse42", "arm
 }
 queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (name, before, after, theorem, marker) in new[]
 {
-    ("DefaultReset", ".empty 4 true", ".empty 8 true",
-        "method0_features_validated", "FeatureFlowValid"),
-    ("Single", ".spanSingleReference 4 true", ".spanSingleReference 8 true",
-        "method0_scalars_validated", "ScalarFlowValid"),
-    ("ReadOnlySingle", ".spanSingleReference 4 false", ".spanSingleReference 4 true",
-        "method0_scalars_validated", "ScalarFlowValid"),
-    ("Aggregate", ".spanSingleReference 32 true", ".spanSingleReference 24 true",
-        "method0_layouts_validated", "MethodLayoutsValid"),
-    ("Pointer", ".spanFromReference 32 true", ".spanFromReference 16 true",
-        "method0_layouts_validated", "MethodLayoutsValid"),
-    ("LayoutLocal-x64-sse42", ".reference 64 true", ".reference 48 true",
-        "method0_layouts_validated", "MethodLayoutsValid"),
-    ("AggregateLocal", ".spanSingleReference 32 false", ".spanSingleReference 16 false",
-        "method0_layouts_validated", "MethodLayoutsValid"),
-    ("AggregateLocal", ".spanSingleReference 32 false", ".spanSingleReference 32 true",
-        "method0_scalars_validated", "ScalarFlowValid")
+    const string name = "DefaultReset";
+    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
+        "method0_features_validated");
+    var body = metadata.GetType("Examples.SpanConstructors").Methods.Single(method => method.Name == name).Body;
+    var pc = body.Instructions.IndexOf(body.Instructions.Single(instruction =>
+        instruction.OpCode.Code == Code.Initobj));
+    const string inputs = "method0Reachable method0.code";
+    var changed = source.Replace(inputs,
+        $"method0Reachable (method0.code.set {pc} (.initializeSpanLocal 0 (.empty 8 true)))", StringComparison.Ordinal);
+    if (changed == source) throw new InvalidOperationException("Missing feature validation inputs");
+    var path = Path.Combine(root, "DefaultResetRejected.lean");
+    File.WriteAllText(path, changed);
+    rejected.Add(path, "PASS folded reset width rejection", "FeatureFlowValid", "is false");
+}
+{
+    const string name = "LayoutLocal-x64-sse42";
+    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
+        "method0_layouts_validated");
+    var changed = source.Replace(".reference 64 true", ".reference 48 true", StringComparison.Ordinal);
+    if (changed == source) throw new InvalidOperationException("Missing folded pointer constructor");
+    var path = Path.Combine(root, "LayoutLocalRejected.lean");
+    File.WriteAllText(path, changed);
+    rejected.Add(path, "PASS folded constructor layout rejection", "MethodLayoutsValid", "is false");
+}
+foreach (var (name, pc, operation) in new[]
+{
+    ("Single", 1, ".spanSingleReference 8 true"),
+    ("ReadOnlySingle", 1, ".spanSingleReference 4 true"),
+    ("Aggregate", 1, ".spanSingleReference 24 true"),
+    ("Pointer", 2, ".spanFromReference 16 true"),
+    ("AggregateLocal", 1, ".spanSingleReference 16 false"),
+    ("AggregateLocal", 1, ".spanSingleReference 32 true")
 })
 {
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing constructor mutation: " + name);
-    var path = Path.Combine(root, name + theorem + "Rejected.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS constructor evidence rejection: " + name, marker, "is false");
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var path = Path.Combine(root, $"{name}-{operation}-rejected.lean");
+    File.WriteAllText(path, ForgeModelEmission(source, pc, $".memory ({operation})"));
+    rejected.Add(path, $"PASS forged span constructor refused: {name}", "RuntimeModelsAgree", "is false");
 }
 foreach (var (name, width, writable) in new[]
     { ("Empty", 8, "true"), ("ReadOnlyEmpty", 32, "true"), ("ReadOnlyEmpty", 24, "false") })

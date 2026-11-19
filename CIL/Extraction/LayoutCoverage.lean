@@ -48,12 +48,6 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       else return []
   -- `newobj` of a struct, then `Unsafe.Add<T>`.
   | 0x73, .call site =>
-    if let .apply (.constructor scope owner) (.aggregate _ index) := site.declaringType then
-      if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name == ".ctor" then
-        let access := match site.parameterTypes.head? with
-          | some (.array _) => SizeAccess.arrayElement | _ => .spanElement
-        return [.size pc index access]
     return (aggregateIndex (closeLayoutType layouts site.declaringType)).toList.map
       fun index => .size pc index .construct
   | 0x28, .call site =>

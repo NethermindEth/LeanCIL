@@ -227,8 +227,7 @@ internal static class RuntimeModels
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         Operation? op = scope switch
         {
-            "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture)
-                ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
+            "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
@@ -312,77 +311,6 @@ internal static class RuntimeModels
             calls.Add($"{result} {type}::{name}({parameters})", model);
         }
         return calls;
-    }
-
-    private static Operation? Runtime(string signature) => signature switch
-    {
-        "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" =>
-            MemoryOperation.Of(new SpanCreate()),
-        _ => Span(signature)
-    };
-
-    private static readonly Dictionary<string, Operation> SpanOperations = BuildSpanOperations();
-
-    // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
-    private static Operation? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
-
-    private sealed class ElementSpanOperations
-    {
-        internal readonly Dictionary<string, Dictionary<string, Operation>> Architectures =
-            new(StringComparer.Ordinal);
-    }
-
-    private static Operation? ElementSpan(MethodReference method, string architecture)
-    {
-        var element = method.DeclaringType is GenericInstanceType { GenericArguments.Count: 1 } owner
-            ? owner.GenericArguments[0]
-            : method is GenericInstanceMethod { GenericArguments.Count: 1 } generic
-                ? generic.GenericArguments[0] : null;
-        if (element is null || Arrays.Primitive(element) is not null ||
-            Spans.ElementWidth(element, architecture) is null) return null;
-        if (EnumTypes.IsEnum(element)) EnumTypes.Storage(element);
-        var architectures = EnumTypes.Cached(element, _ => new ElementSpanOperations()).Architectures;
-        if (!architectures.TryGetValue(architecture, out var operations))
-        {
-            operations = BuildSpanOperations(element, architecture);
-            architectures.Add(architecture, operations);
-        }
-        return operations.GetValueOrDefault(method.FullName);
-    }
-
-    private static Dictionary<string, Operation> BuildSpanOperations(
-        TypeReference? elementType = null, string architecture = "scalar")
-    {
-        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal);
-        var primitives = new[]
-        {
-            ("System.Byte", 1), ("System.SByte", 1), ("System.Int16", 2), ("System.UInt16", 2),
-            ("System.Int32", 4), ("System.UInt32", 4), ("System.Int64", 8), ("System.UInt64", 8),
-            ("System.IntPtr", 8), ("System.UIntPtr", 8), ("System.Char", 2), ("System.Boolean", 1)
-        };
-        foreach (var (element, width) in elementType is null ? primitives :
-            [(elementType.FullName, Spans.ElementWidth(elementType, architecture)!.Value)])
-        {
-            var arrayElement = elementType is null ? Arrays.Primitive(element) :
-                Arrays.Storage(elementType, architecture);
-            foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
-            {
-                var owner = $"{name}<{element}>";
-                var writable = name == "System.Span`1";
-                if (arrayElement is not null)
-                {
-                    var arrayWhole = MemoryOperation.Of(new ArraySpan(arrayElement, writable, ArrayRange.Whole));
-                    operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
-                    operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
-                        MemoryOperation.Of(new ArraySpan(arrayElement, writable, ArrayRange.Counted)));
-                }
-                operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
-                    MemoryOperation.Of(new SpanFromReference(width, writable)));
-                operations.Add($"System.Void {owner}::.ctor(!0&)",
-                    MemoryOperation.Of(new SpanSingleReference(width, writable)));
-            }
-        }
-        return operations;
     }
 
     private static readonly Dictionary<string, Operation> PortableVectorOperations = BuildPortableVectorOperations();

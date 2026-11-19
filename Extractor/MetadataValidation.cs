@@ -822,6 +822,10 @@ internal static class MetadataValidation
                                 "The receiver must be a local address followed by at most three simple argument pushes.");
                         if (instruction.OpCode.Code == Code.Call &&
                             RuntimeModels.CallModel(reference, profile) is not null) return;
+                        if (instruction.OpCode.Code == Code.Newobj &&
+                            Spans.ConstructorOperation(reference, profile.Architecture) is not null ||
+                            instruction.OpCode.Code == Code.Call && reference.Name == ".ctor" &&
+                            Spans.Analyze(method, profile).Constructors.ContainsKey(instruction)) return;
                         if (RuntimeModels.Translate(reference, profile) is null) CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);

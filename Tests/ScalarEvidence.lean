@@ -640,7 +640,8 @@ private def byteSpanSite : CallSite := {
 private def byteSpanRaw := { raw [i 2, i 31 (.integer 16), i 115 (.call byteSpanSite), i 42] [.byref word] with returnType := byteSpanType }
 private def byteSpanFeatures : FeatureCertificate := [unknown 0, unknown 1, state [some 16, none], unknown 1]
 private def byteSpanStates : ScalarCertificate := [some [], some [.reference], some [.word32, .reference], some [.other]]
-private def byteSpanCode : List Instruction := [.ldarg 0, .ldc_i4 16, .memory .spanCreate, .ret]
+private def byteSpanCode : List Instruction :=
+  [.ldarg 0, .ldc_i4 16, .newobj byteSpanSite.method, .ret]
 /-- Span construction checks its exact signature and managed backing reference. -/
 private theorem span_constructor_cases :
     (ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates byteSpanCode) ∧

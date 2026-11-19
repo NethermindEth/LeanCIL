@@ -127,6 +127,79 @@ theorem arraySpanStep (body : Method) (pc : Nat) (method : MethodRef) (range : A
   Safety.step_call_memory body pc args frame memory link found rfl stack
 #print axioms arraySpanStep
 
+/-- Each fixture pairs a constructor declaration with the operation it must execute. -/
+private def constructors (writable : Bool) (element : TypeExpr) (name : String) :
+    List (CallSite × MemoryOp) := Id.run do
+  let owner := if writable then "System.Span`1" else "System.ReadOnlySpan`1"
+  let array := fun type => [TypeExpr.array type]
+  let range := fun type => [TypeExpr.array type, intType, intType]
+  let pointer := fun (_ : TypeExpr) => [TypeExpr.pointer .void, intType]
+  let reference := fun type => [TypeExpr.byref type]
+  let forms : List ((TypeExpr → List TypeExpr) × String × MemoryOp) :=
+    [(array, "!0[]", .arraySpan .signed32 writable .whole),
+     (range, "!0[],System.Int32,System.Int32", .arraySpan .signed32 writable .counted),
+     (pointer, "System.Void*,System.Int32", .spanFromReference 4 writable),
+     (reference, "!0&", .spanSingleReference 4 writable)]
+  return forms.map fun (parameters, target, operation) =>
+    let method : MethodRef := {
+      owner := .apply (.constructor runtime owner) element, name := name!".ctor", hasThis := true,
+      genericArity := 0, returnType := .void, parameters := parameters element }
+    let site : CallSite := {
+      declared := ⟨0x20, .void, parameters (.ownerParameter 0)⟩, method, name := ".ctor"
+      target := .external s!"{runtime}::System.Void {owner}<{name}>::.ctor({target})"
+      typeArguments := [], parameterCount := (parameters element).length, returnsValue := false }
+    (site, operation)
+
+/-- The production decoder keeps a resolving constructor and records the newobj hole otherwise. -/
+private def decodeConstructor (site : CallSite) (layouts : LayoutEnvironment := {}) :=
+  (Method.ofRaw? .scalar layouts [] [true] (raw [] [i 115 (.call site)]) []).map Method.code
+
+/-- Both owners bind the eight declarations, the exact external target and the closed arguments. -/
+theorem constructor_models :
+    [true, false].all (fun writable =>
+      (constructors writable intType "System.Int32").all (fun (site, op) =>
+        let method := site.method
+        let otherHead := TypeExpr.constructor owner
+          (if writable then "System.Span`1" else "System.ReadOnlySpan`1")
+        let refused := [{ site with method.owner := .apply otherHead intType },
+          { site with name := "Other" }, { site with method.name := name!"Other" },
+          { site with method.genericArity := 1 }, { site with method.hasThis := false },
+          { site with parameterCount := 0 }, { site with returnsValue := true },
+          { site with method.returnType := intType }, { site with method.parameters := [intType] },
+          { site with declared.parameters := [] }, { site with declared.convention := 0 },
+          { site with target := .external "Other" }]
+        decide (decodeConstructor site = some [.newobj method]) &&
+          (runtimeModel {} .newobj method == some (.memory op)) &&
+          (method.parameters.length == op.argumentCount) &&
+          !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.memory op) none none true &&
+          refused.all (fun other => decide (decodeConstructor other = some [.unadmitted 115]))) &&
+      [(TypeExpr.atom runtime "System.Double", "System.Double"),
+       (.aggregate "Missing::Layout" 0, "Layout")].all (fun (element, name) =>
+        (constructors writable element name).all (fun (site, _) =>
+          decide (decodeConstructor site = some [.unadmitted 115])))) := by
+  decide +kernel
+#print axioms constructor_models
+
+/-- Both array overloads reject a byref-like element even when its aggregate layout has a size. -/
+theorem constructor_array_storage :
+    let element := TypeExpr.aggregate "Fixture::Words" 0
+    let rows : List RawLayout := [{
+      identity := "Fixture::Words", explicit := false, packing := 0, declaredSize := 0,
+      byRefLike := true, fields := [⟨.unsigned32, none⟩] }]
+    let env : LayoutEnvironment := { rawLayouts := rows, layouts := (computeLayouts rows).getD #[] }
+    [true, false].all (fun writable =>
+      ((constructors writable element "Words").take 2).all (fun (site, _) =>
+        decide (decodeConstructor site env = some [.unadmitted 115]))) := by
+  decide +kernel
+#print axioms constructor_array_storage
+
+/-- The readonly byte pointer overload uses the checked byte-span construction. -/
+theorem byte_pointer_constructor :
+    ((constructors false (.atom runtime "System.Byte") "System.Byte")[2]?).any (fun (site, _) =>
+      runtimeModel {} .newobj site.method == some (.memory .spanCreate)) := by
+  decide +kernel
+#print axioms byte_pointer_constructor
+
 -- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.i4; 6: ret
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 (.call getItem), i 74, i 42]
 private def itemStates : FeatureCertificate :=

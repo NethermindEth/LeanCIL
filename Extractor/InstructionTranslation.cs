@@ -171,6 +171,8 @@ internal static class InstructionTranslation
             var r = (MethodReference)i.Operand;
             if (i.OpCode.Code == Code.Call && RuntimeModels.CallModel(r, profile) is { } model)
                 return new ModelCall(model);
+            if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
+                return new ModelCall(MemoryOperation.Of(source)) { Constructs = true };
             if (RuntimeModels.Translate(r, profile) is { } modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);

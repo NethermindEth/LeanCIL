@@ -71,6 +71,38 @@ internal static class Spans
     static bool OwnerElement(TypeReference type) =>
         type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 
+    /// <summary>The constructor consumes only its explicit arguments and produces a span value.</summary>
+    internal static MemoryOperation? ConstructorOperation(MethodReference method, string architecture)
+    {
+        if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
+            method is GenericInstanceMethod || method.CallingConvention != MethodCallingConvention.Default ||
+            method.ReturnType.MetadataType != MetadataType.Void ||
+            method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
+            owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
+            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return null;
+        var element = owner.GenericArguments[0];
+        if (ElementWidth(element, architecture) is not int width) return null;
+        var writable = Writable(owner);
+        var parameters = method.Parameters;
+        MemoryOperation? operation = parameters switch
+        {
+            [{ ParameterType: ByReferenceType byref }] when OwnerElement(byref.ElementType) =>
+                new SpanSingleReference(width, writable),
+            [{ ParameterType: PointerType { ElementType.MetadataType: MetadataType.Void } },
+                { ParameterType.MetadataType: MetadataType.Int32 }] =>
+                !writable && element.MetadataType == MetadataType.Byte
+                    ? new SpanCreate() : new SpanFromReference(width, writable),
+            _ when parameters.Count is 1 or 3 && parameters[0].ParameterType is ArrayType { IsVector: true } array &&
+                OwnerElement(array.ElementType) &&
+                parameters.Skip(1).All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) &&
+                Arrays.Storage(element, architecture) is { } storage =>
+                new ArraySpan(storage, writable, parameters.Count == 1 ? ArrayRange.Whole : ArrayRange.Counted),
+            _ => null
+        };
+        if (operation is not null) RuntimeModels.ValidateSignature(method, architecture);
+        return operation;
+    }
+
     static bool DeclaredSpan(TypeReference type, string owner) =>
         type is GenericInstanceType { GenericArguments.Count: 1 } span &&
         span.ElementType.FullName == owner && OwnerElement(span.GenericArguments[0]);
@@ -210,12 +242,11 @@ internal static class Spans
             reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
             reference.Parameters.Count != count)
             return null;
-        return RuntimeModels.Translate(reference, profile) is Memory { Operation: var model }
-            ? model switch
+        return ConstructorOperation(reference, profile.Architecture) switch
         {
             SpanCreate => (call, new SpanFromReference(1, false)),
             SpanSource source => (call, source),
             _ => null
-        } : null;
+        };
     }
 }

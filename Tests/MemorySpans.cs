@@ -351,16 +351,18 @@ foreach (var (name, signature, element, width, writable, range) in new[]
             """);
     }
     spanProofs.Add(name, proof);
-    if (name == "ArrayReadOnly")
+    if (name is "ArrayReadOnly" or "ArrayConstructor" or "ArrayRange")
     {
+        var bounds = range == 2 ? ".counted" : ".whole";
+        var otherCapability = writable ? "false" : "true";
         foreach (var (mutation, operation) in new[]
         {
-            ("array-element", ".memory (.arraySpan .unsigned32 false .whole)"),
-            ("array-writability", ".memory (.arraySpan .signed32 true .whole)")
+            ("array-element", $".memory (.arraySpan .unsigned32 {capability} {bounds})"),
+            ("array-writability", $".memory (.arraySpan .{element} {otherCapability} {bounds})")
         })
         {
-            var forged = Path.Combine(root, $"Forged-{mutation}.lean");
-            File.WriteAllText(forged, ForgeModelEmission(source, 1, operation));
+            var forged = Path.Combine(root, $"Forged-{name}-{mutation}.lean");
+            File.WriteAllText(forged, ForgeModelEmission(source, range + 1, operation));
             rejected.Add(forged, $"PASS independent span call rejection: {mutation}", "RuntimeModelsAgree", "is false");
         }
     }
