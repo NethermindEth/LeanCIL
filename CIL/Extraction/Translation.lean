@@ -413,13 +413,22 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
   MethodEnvironmentValid rawLayouts layouts method ∧
-  DeclaredValid item.closed method
+  DeclaredValid item.closed method ∧ item.links = method.links
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧
+    _ ∧ _ ∧ _))
+
+/-- The record supplies exactly the executable links checked for its method. -/
+theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    item.links = method.links := by
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links⟩ := valid
+  exact links
+#print axioms MethodEvidenceValid.links_eq
 
 /-- A set decoded flag in a validated record binds every emitted instruction to its decoding. -/
 theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}

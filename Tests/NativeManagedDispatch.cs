@@ -78,6 +78,15 @@ private def nativeSignature : ManagedSignature :=
   ⟨Extracted.method1Closed.returnType, Extracted.method1Closed.parameters⟩
 private def nativeIdentity : ManagedIdentity :=
   ⟨Extracted.method1Closed.owner, Extracted.method1Closed.token, []⟩
+/-- The decoded calli accepts the handler's slot and refuses its identity paired with slot zero. -/
+theorem native_catalog_binding :
+    let records := Extracted.methodEvidence
+    let changed := records.modify 0 fun item => { item with links := item.links.map fun entry =>
+      if entry.1 == {{indirect.Pc}} then (entry.1, .indirect [⟨nativeIdentity, 0⟩]) else entry }
+    let decode := Extraction.decodedProgram? Extracted.profile Extracted.environment
+    decode records = some Extracted.program ∧ decode changed = none := by
+  constructor <;> cil_kernel_rfl
+#print axioms native_catalog_binding
 private def nativeMemory : CIL.Safety.Memory :=
   { allocations := fun index => if index == 0 then
       some { kind := .immutableStatic, layout := ⟨8, 8, []⟩ } else none

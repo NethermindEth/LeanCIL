@@ -64,6 +64,19 @@ theorem add_body_decodes :
   cil_kernel_rfl
 #print axioms add_body_decodes
 
+/-- An evidence-only change of a calli catalog from method 1 to 0 fails translation. -/
+theorem changed_indirect_index_refused {rawLayouts layouts pins all imports}
+    (record : MethodEvidence) (emitted : Method) (handler : ManagedIdentity)
+    (recorded : linkLookup record.links 18 = some (.indirect [⟨handler, 0⟩]))
+    (checked : emitted.linkAt 18 = some (.indirect [⟨handler, 1⟩])) :
+    ¬ MethodEvidenceValid rawLayouts layouts pins all imports record emitted := by
+  intro valid
+  rw [valid.links_eq] at recorded
+  change linkLookup emitted.links 18 = _ at checked
+  rw [checked] at recorded
+  cases recorded
+#print axioms changed_indirect_index_refused
+
 /-- A one-record program decodes record by record, so `decodedProgram?` gives it. -/
 theorem adder_program_decodes :
     decodedProgram? testProfile testEnvironment [addItem] = some [addMethod] :=

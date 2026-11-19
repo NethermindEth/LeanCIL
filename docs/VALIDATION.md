@@ -69,7 +69,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `templates` | shared profile templates, exact instruction equations and checked bindings |
 | `workspace` | per-method editor extractions, watch refresh and ordinary fresh certification |
 | `imports` | implementation-bound contract imports and conditional caller verification |
-| `closures` | summaries proved over a method's closure, applied in programs that hold the closure at other indices or its identical methods at one index, and refuted relocations onto other bytes or differing bodies |
+| `closures` | summaries at relocated indices, contract reuse for identical executable bodies, and rejection of decoded links to different method tokens |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
 | `evidence` | independent extraction certificates, malformed evidence rejection, the metadata decoder's method names against Cecil's and framework argument guards |

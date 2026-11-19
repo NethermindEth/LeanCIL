@@ -521,14 +521,16 @@ body. A summary also names the metadata method and the bytes.
 | Name | Use |
 | --- | --- |
 | `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
-| `decodedProgram?_eq_some` | Proves the decoded program from `programMasksValid evidence program = true` and `BodiesDecode` |
+| `decodedProgram?_eq_some` | Proves the decoded program from `programBindingsValid evidence program = true` and `BodiesDecode` |
 | `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
 | `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |
 
-Use `Extracted.translation_valid.programMasksValid` for the mask check. It binds each record's
-feature certificate to its pinned, instantiated body and the method's emitted code.
+Use `Extracted.translation_valid.programBindingsValid` for the mask and call checks. Each record's
+feature certificate describes its pinned, instantiated body. The decoder checks managed and
+constrained calls against the methods and links it returns. For a program with imports, pass
+`Extracted.imports` as the final argument to `decodedProgram?` and `programBindingsValid`.
 An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
 `(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
 for a method defined from its decoder, and `site` its `ManagedCallsValid` premise from

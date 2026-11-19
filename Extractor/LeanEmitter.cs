@@ -446,7 +446,7 @@ internal static class LeanEmitter
                 $"method{n}_intrinsics_validated, method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated⟩");
+            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated, rfl⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");

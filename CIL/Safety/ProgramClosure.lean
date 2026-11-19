@@ -272,15 +272,15 @@ theorem Program.closure_eq_closureWith {program : Program} {lookup : Nat → Opt
 
 #print axioms Program.closure_eq_closureWith
 
-/-- The records of the methods `Program.closure` takes out of `program`, in closure order, each
-    with its links renumbered and its feature certificate checked against the closure. -/
+/-- The closure records in method order, with their links renumbered and their feature
+    certificates and call bindings checked against the closure. -/
 def Program.closureEvidence (program : Program) (evidence : List MethodEvidence) (root : Nat) :
     Option (List MethodEvidence) :=
   let search := program.closureSearch root
   let visits := search.found.reverse
   (visits.mapM fun visited =>
     evidence[visited.1]?.map (MethodEvidence.relocateLinks search.position)).filter fun records =>
-      programMasksValid records (visits.map fun visit => visit.2.relocate search.position)
+      programBindingsValid records (visits.map fun visit => visit.2.relocate search.position)
 
 /-- Every method `search` visited is the method at its index of `program`. -/
 def ClosureSearch.Sound (program : Program) (search : ClosureSearch) : Prop :=

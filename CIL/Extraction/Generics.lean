@@ -707,7 +707,7 @@ def modelledCallSite (modelled : MethodRef → Bool) (raw : RawInstruction) : Bo
 
 /-- `link` is what the method's link table gives this pc. A construction is checked with it by
     `validateConstructionWith`. Any other instruction must fit it, live or not, so a key sits only
-    at a pc that reads a link, a call has one exactly when `modelled` gives its method no model,
+    at a call-family pc, a call has one exactly when `modelled` gives its method no model,
     and every other call-family pc has one. A call without a link must pass
     `validateModelCall`, and any other instruction `validateManagedCallWith` with its link; a
     live call of a modelled method emits nothing but its call. -/
@@ -772,15 +772,11 @@ def validateLinkedCall (modelled : MethodRef → Bool) (methods : List Specializ
   validateLinkedCallWith modelled methods.length (methods[·]?) (imports[·]?) raw live link
     emitted
 
-/-- The emitted link table's keys ascend and are pcs of the emitted code, and each pc is checked
-    with the link the table gives it, read by one walk beside the code; so the table gives every
-    `call` pc a `.direct` link, every live construction a link `validateConstructionWith`
-    accepts, every other call-family pc the link its instruction implies, and has no key at a pc
-    that reads none. A call has no link exactly when `modelled` gives its method a runtime model,
-    and then keeps its raw site's call of an external method. Every other call emitted at a live
-    call site of `raw` binds to the method table or an import slot, and no other instruction
-    emits a call. An external site may instead emit a non-call translation, which other validators
-    check. -/
+/-- The emitted links have ascending, in-range keys. Each live `ldftn` requires an `.address`
+    link binding its identity to its method. Each `calli` checks its indirect catalog, and
+    each live construction checks its constructor link. A modelled `call` keeps its external
+    operand and has no link. Other emitted calls bind to the method table or an import slot.
+    An external site may instead emit a non-call translation checked by other validators. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
     Prop :=

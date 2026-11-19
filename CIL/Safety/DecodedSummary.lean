@@ -8,7 +8,7 @@ A `DecodedSummary` is a method contract proved for one index of a program togeth
 evidence record that names the method there: the pinned assembly, the metadata token and the
 type arguments, and the body bytes, links and certified reachability mask used to decode it.
 `decodedProgram?_eq_some` combines each record's body equation in `BodiesDecode` with the
-program's feature checks to identify the program the summary ranges over. At a call
+program's mask and call-binding checks to identify the program the summary ranges over. At a call
 site, `DecodedSummary.site` shows that the summary at the index the call's link enters is
 for the method the site's metadata names.
 -/
@@ -30,15 +30,15 @@ inductive BodiesDecode (profile : FeatureProfile) (environment : LayoutEnvironme
       (rest : BodiesDecode profile environment items methods) :
       BodiesDecode profile environment (item :: items) (method :: methods)
 
-/-- Certified masks and per-record body equations identify the decoded program. -/
+/-- Certified masks, call bindings and per-record body equations identify the decoded program. -/
 theorem decodedProgram?_eq_some {profile : FeatureProfile} {environment : LayoutEnvironment}
     {evidence : List MethodEvidence} {program : CIL.Program}
-    (masks : programMasksValid evidence program = true)
+    {imports : List ImportSlot} (bindings : programBindingsValid evidence program imports = true)
     (bodies : BodiesDecode profile environment evidence program) :
-    decodedProgram? profile environment evidence = some program := by
+    decodedProgram? profile environment evidence imports = some program := by
   apply Option.filter_eq_some_iff.mpr
-  refine ⟨?_, masks⟩
-  clear masks
+  refine ⟨?_, bindings⟩
+  clear bindings
   induction bodies with
   | nil => rfl
   | cons decodes _ tail =>
@@ -74,7 +74,8 @@ private theorem bodyMap_getElem {profile : FeatureProfile} {environment : Layout
 /-- The method at a decoded index is the result of decoding its record's pinned body. -/
 theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : LayoutEnvironment}
     {evidence : List MethodEvidence} {program : CIL.Program} {index : Nat} {item : MethodEvidence}
-    (decoded : decodedProgram? profile environment evidence = some program)
+    {imports : List ImportSlot} (decoded : decodedProgram? profile environment evidence imports =
+      some program)
     (found : evidence[index]? = some item) :
     Method.ofBody? profile environment item.links item.reachable item.body item.original
       item.arguments = program[index]? :=
@@ -86,14 +87,16 @@ theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : Layout
 theorem decodedProgram?_maskValid {profile : FeatureProfile} {environment : LayoutEnvironment}
     {evidence : List MethodEvidence} {program : CIL.Program} {index : Nat}
     {item : MethodEvidence} {method : Method}
-    (decoded : decodedProgram? profile environment evidence = some program)
+    {imports : List ImportSlot} (decoded : decodedProgram? profile environment evidence imports =
+      some program)
     (found : evidence[index]? = some item) (present : program[index]? = some method) :
     item.MaskValid evidence method := by
   have paired : (item, method) ∈ evidence.zip program :=
     List.mem_of_getElem? (List.getElem?_zip_eq_some.mpr ⟨found, present⟩)
-  have masks : programMasksValid evidence program = true := (Option.filter_eq_some_iff.mp decoded).2
-  unfold programMasksValid at masks
-  exact of_decide_eq_true (List.all_eq_true.mp masks (item, method) paired)
+  have bindings : programBindingsValid evidence program imports = true :=
+    (Option.filter_eq_some_iff.mp decoded).2
+  unfold programBindingsValid at bindings
+  exact (of_decide_eq_true (List.all_eq_true.mp bindings (item, method) paired)).1
 
 #print axioms decodedProgram?_maskValid
 
@@ -128,7 +131,8 @@ structure DecodedSummary {Input Output : Type} (program : CIL.Program)
 theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {evidence : List MethodEvidence} {profile : FeatureProfile}
     {environment : LayoutEnvironment} {index : Nat} {item : MethodEvidence}
-    (decoded : decodedProgram? profile environment evidence = some program)
+    {imports : List ImportSlot} (decoded : decodedProgram? profile environment evidence imports =
+      some program)
     (found : evidence[index]? = some item)
     (instantiated :
       instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed)

@@ -9,8 +9,9 @@ import CIL.MethodIdentity
 `Closure::AddTwo` returns its argument plus two by calling `Bump` and `Nudge`, which have the
 same body. Its contract is stepped once in the extraction, carried to the closure of `AddTwo`,
 bound there to the closure's records, and carried from the closure back to the extraction, to a
-program that holds the closure at other indices, and to one that holds `Bump` and `Nudge` at one
-index; `Entry` applies it in all three. Relocations into a program with other bytes at an index
+program that holds the closure at other indices. The executable contract also holds when
+`Bump` and `Nudge` share an index, but their distinct tokens prevent decoding that binding.
+Relocations into a program with other bytes at an index
 `AddTwo` links to, and into one holding `AddTwo` and `Bump`, whose bodies differ, at one index,
 are refuted.
 -/
@@ -39,7 +40,7 @@ theorem addTwo_holds : addTwoContract.Holds Extracted.program addTwo := by
 theorem bodies_decode :
     decodedProgram? Extracted.profile Extracted.environment Extracted.methodEvidence =
       some Extracted.program :=
-  decodedProgram?_eq_some Extracted.translation_valid.programMasksValid
+  decodedProgram?_eq_some Extracted.translation_valid.programBindingsValid
     (.cons ((Method.ofBody?_of_decodes Extracted.method0_body_validated).trans
         Extracted.method0_decoded)
       (.cons ((Method.ofBody?_of_decodes Extracted.method1_body_validated).trans
@@ -195,7 +196,7 @@ theorem summary_elsewhere :
 #print axioms summary_elsewhere
 
 /-- In the second program, `Entry` returns its argument plus two and leaves memory as it was,
-    through the summary of `AddTwo` carried there from its closure. -/
+    through the contract of `AddTwo` carried there from its closure. -/
 theorem correctness_elsewhere (memory : Safety.Memory) (x : W64) :
     ∃ fuel, invoke elsewhereProgram fuel 1 [.scalar (.i64 x)] memory =
       .ok (memory, [.scalar (.i64 (x + 2))]) := by
@@ -226,50 +227,28 @@ def collapsedProgram : Program :=
   [Extracted.method3, { Extracted.method0 with links := [(1, .direct 2)] },
     { Extracted.method1 with links := [(1, .direct 0), (2, .direct 0)] }]
 
-/-- The third program's records decode to it. -/
-theorem collapsed_decodes :
-    decodedProgram? Extracted.profile Extracted.environment collapsedEvidence =
-      some collapsedProgram := by
+/-- Collapsing distinct metadata tokens onto one slot fails the decoded call check. -/
+theorem collapsed_bindings_refused :
+    decodedProgram? Extracted.profile Extracted.environment collapsedEvidence = none := by
   cil_kernel_rfl
-#print axioms collapsed_decodes
+#print axioms collapsed_bindings_refused
 
-/-- The third program holds both callees of `AddTwo` at index 0, which decodes to the method
-    each of them denotes. -/
-theorem collapsed_relocates : RelocatesInto closure.1 collapsedProgram collapse :=
-  RelocatesInto.of_decoded closure_decodes collapsed_decodes fun slot bound => by
-    rw [records_length] at bound
-    match slot, bound with
-    | 0, _ => exact ⟨addTwoRecord, addTwoRecord.relocateLinks collapse, first_record, rfl,
-        MethodEvidence.ofBody?_relocateLinks _ _ _ _⟩
-    | 1, bound => exact ⟨record _ bound, (record _ bound).relocateLinks collapse,
-        List.getElem?_eq_getElem _, rfl, MethodEvidence.ofBody?_relocateLinks _ _ _ _⟩
-    | 2, bound =>
-      refine ⟨record _ bound, (record 1 (by decide)).relocateLinks collapse,
-        List.getElem?_eq_getElem _, rfl, ?_⟩
-      have bump := decodedProgram?_getElem (index := 1) (item := record 1 (by decide))
-        closure_decodes (List.getElem?_eq_getElem _)
-      have nudge := decodedProgram?_getElem (index := 2) (item := record 2 bound)
-        closure_decodes (List.getElem?_eq_getElem _)
-      rw [MethodEvidence.ofBody?_relocateLinks, bump, nudge, callees_agree]
+/-- The two callees still have identical executable bodies after renumbering. -/
+theorem collapsed_relocates : RelocatesInto closure.1 collapsedProgram collapse := by
+  intro slot bound
+  have size : closure.1.length = 3 := by decide +kernel
+  rw [size] at bound
+  match slot, bound with
+  | 0, _ | 1, _ | 2, _ => rfl
 #print axioms collapsed_relocates
 
-/-- The summary of the closure is a summary of `AddTwo` at index 2 of the third program. -/
-theorem summary_collapsed :
-    DecodedSummary collapsedProgram collapsedEvidence Extracted.profile Extracted.environment
-      (collapse 0) addTwoRecord.assembly addTwoRecord.original.token addTwoRecord.arguments
-      addTwoContract :=
-  closure_summary.relocate (Program.closure_closed closure_found) collapsed_relocates
-    collapsed_decodes fun item found => by
-      obtain rfl := Option.some.inj (first_record.symm.trans found)
-      exact ⟨addTwoRecord.relocateLinks collapse, rfl, rfl, rfl, rfl, rfl⟩
-#print axioms summary_collapsed
-
 /-- In the third program, `Entry` returns its argument plus two and leaves memory as it was,
-    through the summary of `AddTwo` carried there from its closure. -/
+    through the contract of `AddTwo` carried there from its closure. -/
 theorem correctness_collapsed (memory : Safety.Memory) (x : W64) :
     ∃ fuel, invoke collapsedProgram fuel 1 [.scalar (.i64 x)] memory =
       .ok (memory, [.scalar (.i64 (x + 2))]) := by
-  have held : addTwoContract.Holds collapsedProgram 2 := summary_collapsed.holds
+  have held : addTwoContract.Holds collapsedProgram 2 :=
+    closure_holds.relocate (Program.closure_closed closure_found) collapsed_relocates
   refine (WP.exact_iff (execution := Execution fun fuel =>
     invoke collapsedProgram fuel 1 [.scalar (.i64 x)] memory)).mp ?_
   cil_contract_steps [held, addTwoContract] with final value added
@@ -285,16 +264,15 @@ def otherBytesEvidence : List MethodEvidence :=
     (record 2 (by decide)).relocateLinks elsewhere,
     addTwoRecord.relocateLinks elsewhere]
 
-/-- The fourth program, decoded from its records. -/
+/-- The fourth program with Entry's executable body in Bump's slot. -/
 def otherBytesProgram : Program :=
-  (decodedProgram? Extracted.profile Extracted.environment otherBytesEvidence).getD []
+  elsewhereProgram.set 0 { Extracted.method0 with links := [(1, .direct 3)] }
 
-/-- The fourth program's records decode to it. -/
-theorem other_bytes_decodes :
-    decodedProgram? Extracted.profile Extracted.environment otherBytesEvidence =
-      some otherBytesProgram := by
+/-- The call to Bump cannot bind to Entry's record. -/
+theorem other_bytes_bindings_refused :
+    decodedProgram? Extracted.profile Extracted.environment otherBytesEvidence = none := by
   cil_kernel_rfl
-#print axioms other_bytes_decodes
+#print axioms other_bytes_bindings_refused
 
 /-- No relocation into the fourth program sends `Bump` to index 0, whose bytes are `Entry`'s. -/
 theorem other_bytes_refused : ¬ RelocatesInto closure.1 otherBytesProgram elsewhere := by
@@ -314,16 +292,16 @@ def mergedEvidence : List MethodEvidence :=
     (Extracted.methodEvidence[0]'(by decide)).relocateLinks fun index => [1, 2, 2, 0].getD index 0,
     addTwoRecord.relocateLinks merge]
 
-/-- The fifth program, decoded from its records. -/
+/-- The fifth program, with AddTwo occupying the slot of its first callee. -/
 def mergedProgram : Program :=
-  (decodedProgram? Extracted.profile Extracted.environment mergedEvidence).getD []
+  [Extracted.method2, { Extracted.method0 with links := [(1, .direct 2)] },
+    { Extracted.method1 with links := [(1, .direct 2), (2, .direct 0)] }]
 
-/-- The fifth program's records decode to it. -/
-theorem merged_decodes :
-    decodedProgram? Extracted.profile Extracted.environment mergedEvidence =
-      some mergedProgram := by
+/-- The call to Bump cannot bind to AddTwo's record. -/
+theorem merged_bindings_refused :
+    decodedProgram? Extracted.profile Extracted.environment mergedEvidence = none := by
   cil_kernel_rfl
-#print axioms merged_decodes
+#print axioms merged_bindings_refused
 
 /-- No relocation sends `AddTwo` and `Bump` to one index, since their bodies differ. -/
 theorem differing_merge_refused : ¬ RelocatesInto closure.1 mergedProgram merge := by
@@ -340,8 +318,8 @@ run_cmd do
       ``records_found, ``records_length, ``closure_decodes, ``closure_holds, ``first_record,
       ``closure_summary, ``summary_here, ``correctness, ``elsewhere_decodes,
       ``elsewhere_relocates, ``summary_elsewhere, ``correctness_elsewhere, ``callees_agree,
-      ``collapsed_decodes, ``collapsed_relocates, ``summary_collapsed, ``correctness_collapsed,
-      ``other_bytes_decodes, ``other_bytes_refused, ``merged_decodes,
+      ``collapsed_bindings_refused, ``collapsed_relocates, ``correctness_collapsed,
+      ``other_bytes_bindings_refused, ``other_bytes_refused, ``merged_bindings_refused,
       ``differing_merge_refused] do
     if (← collectAxioms name).contains ``sorryAx then
       throwError "{name} depends on sorryAx"

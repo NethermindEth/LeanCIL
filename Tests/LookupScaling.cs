@@ -1305,7 +1305,7 @@ void DecodedProgramCosts()
             #command_cost "decoded program {{records}}"
               theorem decoded ({{items}} : MethodEvidence) ({{methods}} : CIL.Method)
             {{facts}}
-                  (masks : programMasksValid [{{items.Replace(" ", ", ")}}]
+                  (masks : programBindingsValid [{{items.Replace(" ", ", ")}}]
                     [{{methods.Replace(" ", ", ")}}] = true) :
                   decodedProgram? profile environment [{{items.Replace(" ", ", ")}}] =
                     some [{{methods.Replace(" ", ", ")}}] :=
