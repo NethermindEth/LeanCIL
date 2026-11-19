@@ -1456,7 +1456,8 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | _, _ => .error (.unsupported "Not a memory instruction")
 
 /-- Loads or stores a typed primitive, struct or vector using its checked storage shape.
-    Loading a span address leaves its view in place. -/
+    A span load accepts only a span value, which stays in place, since the address of a span home
+    is its view; a null reference faults as a null dereference and any other operand is invalid. -/
 def transferObject (shape : ValueShape) (store : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) :=
   match shape, store with
@@ -1470,7 +1471,11 @@ def transferObject (shape : ValueShape) (store : Bool) (stack : List Value) (mem
   | .vector 16, true => memoryInstruction .store128 stack memory
   | .vector 32, true => memoryInstruction .store256 stack memory
   | .vector 64, true => memoryInstruction .store512 stack memory
-  | .span, false => .ok (memory, stack)
+  | .span, false => match stack with
+    | .bufferSpan _ :: _ | .span .. :: _ => .ok (memory, stack)
+    | .reference .null :: _ | .readOnlyReference .null :: _ =>
+      .error (.memory .nullDereference .null 0)
+    | _ => .error .invalidState
   | .unsupported reason, _ => .error (.unsupported reason)
   | _, _ => .error (.unsupported "Object transfer shape")
 

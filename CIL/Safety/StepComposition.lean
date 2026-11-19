@@ -664,15 +664,65 @@ private theorem valueShape_span_test (type : Extraction.TypeExpr) :
   first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
 #print axioms step_ldobj_vector64
 
-/-- The decoded ldobj of span storage has the full result of its memory rule. -/
+/-- A decoded ldobj of span storage leaves a span view on the stack in place. -/
 @[cil_step] theorem step_ldobj_span {type : Extraction.TypeExpr}
-    (shape : body.valueShape type = .span) (stack : List Value) :
-    step body (.ldobj type) pc args frame stack memory =
-      step body .nop pc args frame stack memory := by
+    (shape : body.valueShape type = .span) (view : SpanView) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.bufferSpan view :: rest) memory =
+      step body .nop pc args frame (.bufferSpan view :: rest) memory := by
   simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
     pureArity, staticInstruction]
   rfl
 #print axioms step_ldobj_span
+
+/-- A decoded ldobj of span storage leaves a span value formed from a reference in place. -/
+@[cil_step] theorem step_ldobj_span_value {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .span) (reference : ManagedReference) (length : Nat)
+    (rest : List Value) :
+    step body (.ldobj type) pc args frame (.span reference length :: rest) memory =
+      step body .nop pc args frame (.span reference length :: rest) memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  rfl
+#print axioms step_ldobj_span_value
+
+/-- A decoded ldobj of span storage faults on a null reference, as a load through it does. -/
+theorem step_ldobj_span_null {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .span) {operand : Value}
+    (null : operand = .reference .null ∨ operand = .readOnlyReference .null) (rest : List Value) :
+    step body (.ldobj type) pc args frame (operand :: rest) memory =
+      .error (.memory .nullDereference .null 0) := by
+  rcases null with rfl | rfl <;>
+    simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+      pureArity, staticInstruction] <;> rfl
+#print axioms step_ldobj_span_null
+
+/-- A decoded ldobj of span storage faults on a plain address, which never names a span view. -/
+theorem step_ldobj_span_address {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .span) {operand : Value} {reference : Reference}
+    (address : operand = .reference (.address reference) ∨
+      operand = .readOnlyReference (.address reference)) (rest : List Value) :
+    step body (.ldobj type) pc args frame (operand :: rest) memory = .error .invalidState := by
+  rcases address with rfl | rfl <;>
+    simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+      pureArity, staticInstruction] <;> rfl
+#print axioms step_ldobj_span_address
+
+/-- A decoded ldobj of span storage forwards a span view or span value, faults on a null reference
+    as a null dereference, and raises an invalid state on any other stack. -/
+theorem step_ldobj_span_result {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .span) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory = match stack with
+      | .bufferSpan _ :: _ | .span .. :: _ => step body .nop pc args frame stack memory
+      | .reference .null :: _ | .readOnlyReference .null :: _ =>
+        .error (.memory .nullDereference .null 0)
+      | _ => .error .invalidState := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity]
+  cases stack with
+  | nil => rfl
+  | cons head rest =>
+    cases head <;> first | rfl | (rename_i reference; cases reference <;> rfl)
+#print axioms step_ldobj_span_result
 
 /-- The decoded stobj of primitive storage has the full result of its memory rule. -/
 @[cil_step] theorem step_stobj_primitive {type : Extraction.TypeExpr} {width : Nat} {signed : Bool}

@@ -726,7 +726,9 @@ supported integer element.
 
 Decoded and literal object instructions name the same `valueType{k}` constant. A primitive
 load or store steps through its width and signedness, a struct through its checked size, and
-an integer vector through its transfer width. A span load forwards its view.
+an integer vector through its transfer width. A span load forwards a span view and steps as
+`nop` when the stack's top is one; a null reference faults as a null dereference and any other
+operand as an invalid state.
 
 The first fact of an environment names suffixes of its layout lists,
 `Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`

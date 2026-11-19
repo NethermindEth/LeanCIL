@@ -272,4 +272,68 @@ theorem callSteps (call : CallSite) (operation : MemoryOp)
 
 #print axioms callSteps
 
+/-- Eight readable and writable caller bytes, all zero. -/
+private def callerMemory : CIL.Safety.Memory where
+  allocations := fun id => if id = 0 then some ⟨.callerStack, ⟨8, 1, []⟩, true, [8]⟩ else none
+  cells := fun _ _ => ⟨0, true⟩
+  views := [⟨0, 0, 8, true, true⟩]
+  nextIdentity := 1
+
+/-- Loads a span through its by-reference argument and returns it. -/
+private def spanLoader : Method :=
+  { code := [.ldarg 0, .ldobj (span byteType), .ret], locals := [], returnsValue := true,
+    environment := environment 2 }
+
+/-- The span load returns a view in place. An address, such as an As cast to a span type forms,
+    is invalid there, and a null reference, such as NullRef forms, faults as a null dereference. -/
+theorem spanLoads :
+    let view : SpanView := ⟨.address ⟨0, 0⟩, 8, 1, true⟩
+    let run := fun argument => (invoke [spanLoader] 4 0 [argument] callerMemory).map Prod.snd
+    run (.bufferSpan view) = .ok [.bufferSpan view] ∧
+      run (.reference (.address ⟨0, 0⟩)) = .error ⟨0, 1, .invalidState⟩ ∧
+      run (.readOnlyReference (.address ⟨0, 0⟩)) = .error ⟨0, 1, .invalidState⟩ ∧
+      run (.reference .null) = .error ⟨0, 1, .memory .nullDereference .null 0⟩ ∧
+      run (.readOnlyReference .null) = .error ⟨0, 1, .memory .nullDereference .null 0⟩ := by
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+#print axioms spanLoads
+
+/-- Whether a step or memory operation stops with a fault rather than returning. -/
+private def faults {α : Type} : ExecutionResult α → Bool
+  | .error _ => true
+  | .ok _ => false
+
+/-- The receivers and operands NullRef and a plain address give a span or object type. -/
+private def nullOrPlain : List CIL.Safety.Value :=
+  [.reference .null, .readOnlyReference .null, .reference (.address ⟨0, 0⟩)]
+
+/-- Every span member that takes its receiver by reference faults on a null or plain reference,
+    so NullRef of a span type never yields a span value. -/
+theorem spanReceiversFault : [(MemoryOp.spanLength, ([] : List CIL.Safety.Value)),
+    (.spanItem 1, [.scalar (.i32 0)]), (.spanSlice false, [.scalar (.i32 0)]),
+    (.spanSlice true, [.scalar (.i32 0), .scalar (.i32 0)]), (.observeView .spanEmpty, []),
+    (.observeView .spanPinnable, []), (.spanReadOnly, []), (.spanReference, []),
+    (.spanCopy 1 false, [.bufferSpan ⟨.address ⟨0, 0⟩, 8, 1, true⟩]),
+    (.spanCopy 1 true, [.bufferSpan ⟨.address ⟨0, 0⟩, 8, 1, true⟩]),
+    (.spanFill 1 false, [.scalar (.i32 0)]), (.spanFill 1 true, [])].all (fun (operation, above) =>
+      nullOrPlain.all fun receiver =>
+        faults (instruction (.memory operation) (above ++ [receiver]) callerMemory)) := by
+  decide +kernel
+#print axioms spanReceiversFault
+
+/-- Object instructions fault on a null or plain reference to span, array, class or
+    method-pointer storage, so a reference NullRef forms for them is never read as a value. -/
+theorem objectOperandsFault :
+    let body : Method :=
+      { code := [], locals := [], returnsValue := true, environment := environment 2 }
+    let frame : CIL.Safety.Frame := { activation := 0, locals := [], owned := [] }
+    [span byteType, .array byteType, .object "Test" "Class"].all (fun type =>
+      nullOrPlain.all fun target =>
+        [(Instruction.ldobj type, [target]), (.stobj type, [.scalar (.i32 0), target]),
+         (.cpobj type, [target, target]), (.initobj type, [target])].all fun (op, stack) =>
+          faults (step body op 0 [] frame stack callerMemory)) ∧
+    [CIL.Safety.Value.reference .null, .readOnlyReference .null].all (fun target =>
+      faults (instruction (.ldind .i) [target] callerMemory)) := by
+  decide +kernel
+#print axioms objectOperandsFault
+
 end Tests.UnsafeReinterpretations

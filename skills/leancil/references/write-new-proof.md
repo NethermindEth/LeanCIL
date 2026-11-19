@@ -30,7 +30,8 @@ unsupported state are never successes, so `Ensures` and `Holds` state total corr
 
 An extracted object instruction names its closed type as `Extracted.valueType{k}`.
 Use its `_shape` fact when a proof needs the byte width or signedness of a load, store,
-initialization, copy or size. A span load preserves the stack.
+initialization, copy or size. A span load preserves a stack whose top is a span view and faults
+on any other operand, so pass a span argument as `.bufferSpan` of its view.
 
 ## 2. Generate a starting proof
 

@@ -1269,7 +1269,7 @@ elab_rules : tactic
     if let some (_, step, result) := initial.eq? then
       if let some #[body, op, pc, args, frame, stack, memory] :=
           argumentsOf? step ``CIL.Safety.step 7 then
-        if let some (lowered, lowering) ← storageLowering? body op then
+        if let some (lowered, lowering) ← storageLowering? body op stack then
           let equation := (mkAppN lowering #[pc, args, frame, memory, stack]).headBeta
           let steppedLowered :=
             mkAppN step.getAppFn #[body, lowered, pc, args, frame, stack, memory]

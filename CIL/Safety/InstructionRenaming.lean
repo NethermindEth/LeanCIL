@@ -389,6 +389,10 @@ theorem Memory.Renamed.transferObjectResult {mapping : AllocationRenaming}
     | exact related.memoryInstructionResult _ formed _ bounds observable
     | exact .ok ⟨related, rfl⟩
     | cases observable
+    | (split at observable
+       all_goals first
+         | exact .ok ⟨related, rfl⟩
+         | cases observable)
 #print axioms Memory.Renamed.transferObjectResult
 
 end CIL.Safety

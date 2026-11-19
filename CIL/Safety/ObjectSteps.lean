@@ -792,8 +792,10 @@ def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
 open Lean Meta in
 /-- The lowered instruction a struct field or typed object access steps as, with a proof of
     `∀ pc args frame memory stack` that both step alike; `none` for any other instruction and for
-    a field whose shape no fact or evaluation shows to be a struct field. -/
-def storageLowering? (body op : Expr) : MetaM (Option (Expr × Expr)) := do
+    a field whose shape no fact or evaluation shows to be a struct field. A span load steps as
+    `nop` only on a span value, so it lowers only for a `stack` whose head is one. -/
+def storageLowering? (body op : Expr) (stack : Option Expr := none) :
+    MetaM (Option (Expr × Expr)) := do
   let (name, #[field]) := (← whnfR op).getAppFnArgs | return none
   let lowering (equation : Name) (lowered : Expr) (premises : Array Expr) := do
     let type ← inferType (mkApp (mkConst equation) body)
@@ -831,8 +833,23 @@ def storageLowering? (body op : Expr) : MetaM (Option (Expr × Expr)) := do
       return ← lowering equation (mkApp (mkConst ``CIL.Instruction.memory) (mkConst operation))
         #[proof]
     | (``CIL.ValueShape.span, #[]) =>
-      if load then return ← lowering ``step_ldobj_span (mkConst ``CIL.Instruction.nop) #[proof]
-      return none
+      let some stack := stack | return none
+      unless load do return none
+      let (``List.cons, #[_, head, rest]) := (← whnfR stack).getAppFnArgs | return none
+      let (equation, operands) := match (← whnfR head).getAppFnArgs with
+        | (``CIL.Safety.Value.bufferSpan, #[view]) => (``step_ldobj_span, #[view])
+        | (``CIL.Safety.Value.span, #[reference, length]) =>
+          (``step_ldobj_span_value, #[reference, length])
+        | _ => (Name.anonymous, #[])
+      if operands.isEmpty then return none
+      let some (lowered, proof) ← lowering equation (mkConst ``CIL.Instruction.nop)
+          (#[proof] ++ operands ++ #[rest]) | return none
+      -- The equation is stated at this stack; the caller still supplies one for every lowering.
+      let ignored ← forallBoundedTelescope (← inferType proof) (some 4) fun variables _ => do
+        withLocalDeclD `stack (mkApp (mkConst ``List [levelZero]) (mkConst ``CIL.Safety.Value))
+          fun unused => do
+            mkLambdaFVars (variables.push unused) (mkAppN proof variables).headBeta
+      return some (lowered, ignored)
     | _ => return none
   let accesses := [``CIL.Instruction.ldfld, ``CIL.Instruction.stfld, ``CIL.Instruction.ldflda]
   unless accesses.contains name do
