@@ -52,7 +52,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
       else if opcode = 0x70 then return [.size pc index .copy]
       else if opcode = 0xfe1c then return [.size pc index .sizeOf]
       else return []
-  -- `newobj` of a struct, then `Unsafe.SizeOf<T>` and `Unsafe.Add<T>`.
+  -- `newobj` of a struct, then `Unsafe.Add<T>`.
   | 0x73, .call site =>
     if let .apply (.constructor scope owner) (.aggregate _ index) := site.declaringType then
       if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
@@ -91,8 +91,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
         return [.size pc index .spanElement]
       else return []
     | .atom _ "System.Runtime.CompilerServices.Unsafe", [.aggregate _ index] =>
-      if site.name = "SizeOf" then return [.size pc index .sizeOf]
-      else if site.name = "Add" then return [.size pc index .referenceAdd]
+      if site.name = "Add" then return [.size pc index .referenceAdd]
       else if site.name = "Subtract" then return [.size pc index .referenceSubtract]
       else if site.name ∈ ["ReadUnaligned", "Read"] then return [.size pc index .load]
       else if site.name ∈ ["WriteUnaligned", "Write"] then return [.size pc index .store]

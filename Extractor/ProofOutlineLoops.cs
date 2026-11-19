@@ -37,12 +37,17 @@ internal static partial class ProofOutline
 
         internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
 
-        /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions and the
-        /// bit-count calls, which step as their total intrinsic.</summary>
+        /// <summary>The constant `operation` pushes: a literal, or a call whose runtime model is that constant.
+        /// </summary>
+        internal static Constant? ConstantOf(Operation operation) =>
+            operation as Constant ?? (operation as ModelCall)?.Model as Constant;
+
+        /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
+        /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
         internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
             operation is Return ? plainReturn : operation is Arg load ? MethodArguments.Plain(method, load.Index) :
-            operation is Constant { Width: 32 or 64 } or
-            ModelCall { Model: ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } } or
+            ConstantOf(operation) is { Width: 32 or 64 } ||
+            operation is ModelCall { Model: ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } } or
             StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
                 or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
                 StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 or StackOpcode.ConvU4 or

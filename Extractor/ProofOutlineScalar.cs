@@ -44,7 +44,7 @@ internal static partial class ProofOutline
                     var parameter = spec.Parameters[argument.Index];
                     stack = stack.Push(new(parameter.Name, 8 * parameter.Width));
                 }
-                else if (op is Constant constant)
+                else if (Body.ConstantOf(op) is { } constant)
                     stack = stack.Push(new(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
                         constant.Width == 32 ? 32 : 64, constant.Numeral ? constant.Value : null));
                 else if (op is StackOperation { IsArithmetic: true } arithmetic)
@@ -82,6 +82,14 @@ internal static partial class ProofOutline
                         stack = stack.Pop(out operands[position]);
                     if (operands.Any(operand => operand.Term is null || operand.Bits != operands[0].Bits))
                         return null;
+                    // A test of literals is decided here; a split on it leaves an infeasible side no step closes.
+                    if (operands.All(operand => operand.Numeral is not null))
+                    {
+                        decided = true;
+                        long[] literals = [.. operands.Select(operand => operand.Numeral!.Value)];
+                        if (Taken(jump.Kind, literals, operands[0].Bits)) pc = target - 1;
+                        continue;
+                    }
                     var (condition, takenWhenTrue) = Body.Test(jump, [.. operands.Select(operand =>
                         new Body.Operand(Operand(operand.Term!), operand.Numeral))], operands[0].Bits);
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
@@ -110,6 +118,30 @@ internal static partial class ProofOutline
         }
         var walked = Walk(0, ImmutableStack.Empty);
         return decided ? walked : null;
+    }
+
+    /// <summary>Whether a conditional branch of `kind` on literal operands, read at `bits` bits, is taken.
+    /// </summary>
+    static bool Taken(JumpKind kind, long[] values, int bits)
+    {
+        ulong Word(int index) => bits == 32 ? (uint)values[index] : (ulong)values[index];
+        long Signed(int index) => bits == 32 ? (int)values[index] : values[index];
+        return kind switch
+        {
+            JumpKind.IfZero => Word(0) == 0,
+            JumpKind.IfNonzero => Word(0) != 0,
+            JumpKind.Equal => Word(0) == Word(1),
+            JumpKind.NotEqual => Word(0) != Word(1),
+            JumpKind.Less => Signed(0) < Signed(1),
+            JumpKind.LessOrEqual => Signed(0) <= Signed(1),
+            JumpKind.Greater => Signed(0) > Signed(1),
+            JumpKind.GreaterOrEqual => Signed(0) >= Signed(1),
+            JumpKind.LessUnsigned => Word(0) < Word(1),
+            JumpKind.LessOrEqualUnsigned => Word(0) <= Word(1),
+            JumpKind.GreaterUnsigned => Word(0) > Word(1),
+            JumpKind.GreaterOrEqualUnsigned => Word(0) >= Word(1),
+            _ => throw new ArgumentException($"`{kind}` is not a conditional branch", nameof(kind))
+        };
     }
 
     static string Operand(string term) => Regex.IsMatch(term, @"\A[\w.]+\z") ? term : $"({term})";

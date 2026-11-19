@@ -49,9 +49,11 @@ void Prove(MethodDefinition method, List<string> claims, string definitions = ""
 foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Size", StringComparison.Ordinal)))
 {
     var size = (int)runtime.GetMethod(method.Name)!.Invoke(null, null)!;
-    Prove(method,
-        [$"(CIL.Safety.invoke Extracted.program 8 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-         $".ok [.scalar (.i32 {size})]"], term: "Tests.UnsafeWrappers.size_ok rfl _ _ _");
+    const string run = "(CIL.Safety.invoke Extracted.program 8 0 [] CIL.Safety.Memory.empty).map Prod.snd";
+    Prove(method, [$"""{run} = .ok [.scalar (.i32 {size})]"""], term: """
+        Tests.UnsafeWrappers.size_ok (declared := Extracted.method0.declared)
+            rfl Extracted.method0_model0 Extracted.profile CIL.Safety.Memory.empty
+        """);
 }
 
 // Runtime byte offsets and Lean references must agree for each element type and offset overload.

@@ -83,7 +83,12 @@ and states no link, and the checked interpreter runs the model when the pc has n
 `ManagedCallsValid` checks a retained call's link to another method. At a live unlinked modelled
 call, `RuntimeModelsAgree` requires the same method reference and an available model. Its entry
 also checks the member's calling-convention byte and its return and parameter types before
-generic substitution. The table holds
+generic substitution. The entries for `Unsafe.SizeOf`, `AreSame`, `IsAddressLessThan`,
+`IsAddressGreaterThan` and `SkipInit` claim their names on the exact runtime owner. Each checks
+its static generic declaration and closed operand. Each requires a sized element. For a struct,
+the raw layout at the stated index must name that struct and the computed layout must exist.
+`SizeOf` returns its checked byte size. The comparisons observe allocation-relative references,
+and `SkipInit` forms its reference without writing to it. The table also holds
 the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of
 `Vector128` and `Vector256`, and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and
 `Sign` of `System.Math` and of each integer type that declares them, the bit helpers of

@@ -48,6 +48,10 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("FillWordsDown", "Loops::FillWordsDown(ulong&,ulong,int)", "control"),
     ("CopyUntilZero", "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)", "control"),
     ("Choose", "Arithmetic::Choose(bool,ulong,ulong)", "control"),
+    // A SizeOf call steps as the constant of its element's size, alone and tested by a branch.
+    ("SizeOfInt", "UnsafeLayouts::Size6()", "control"),
+    ("SizeOfBranch", "Arithmetic::WordAdjusted(int)", "control"),
+    ("SizeOfEqual", "Arithmetic::WordSized(int)", "control"),
     ("Narrow", "Arguments::Narrow(byte)", "control"),
     ("ReverseI16", "Bits::ReverseI16(short)", "control"),
     ("PowerU32", "Bits::PowerU32(uint)", "control"),
@@ -251,6 +255,21 @@ if (Selected("PairLength"))
     Console.WriteLine("PASS a struct element wider than a line reads back as the extraction's element, and an " +
         "unstepped body over a value array leaves its footprint to the author");
 }
+
+string[] sizeCases = ["SizeOfInt", "SizeOfBranch", "SizeOfEqual"];
+foreach (var name in sizeCases.Where(Selected))
+{
+    // A SizeOf call runs as the constant of its element's size, so the outline steps through it as a literal.
+    var sizeOutline = File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"));
+    if (sizeOutline.Contains("-- not outlined:", StringComparison.Ordinal) ||
+        !sizeOutline.Contains("cil_checked_steps", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} outline does not step its SizeOf call:\n{sizeOutline}");
+    // A test of two literals is decided by the outline rather than split into an infeasible side.
+    if (name == "SizeOfEqual" && sizeOutline.Contains("by_cases", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} outline splits on a test of literals:\n{sizeOutline}");
+}
+if (sizeCases.Any(Selected))
+    Console.WriteLine("PASS an outline steps SizeOf as a constant, tested by an argument or decided on literals");
 
 if (Selected("DepositFrom"))
 {

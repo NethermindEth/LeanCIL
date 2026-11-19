@@ -638,7 +638,8 @@ elab_rules : command
 
 /-- Declares `body_model{pc} : ∀ xs, runtimeModel (body xs).environment .call method = some model`
     at each pc whose instruction is a call the runtime model table models, checked by the kernel,
-    and adds each to `cil_code`, so a step reads a call's model without evaluating the table. -/
+    and adds each to `cil_code`, so a step reads a call's model without evaluating the table. A
+    constant model states its value as a numeral, as `ldc.i4` does. -/
 syntax "cil_runtime_models " ident : command
 
 elab_rules : command
@@ -663,6 +664,15 @@ elab_rules : command
         let resolved ← withDefault <| whnf read
         let_expr Option.some _ model := resolved | continue
         let model ← withDefault <| reduce model
+        -- A constant is written as the numeral `ldc.i4` pushes, so a test of it simplifies alike.
+        let model ← match_expr model with
+          | CIL.RuntimeModel.constant value => do
+            let .lit (.natVal word) ← withDefault <| reduce
+                (mkApp2 (mkConst ``BitVec.toNat) (mkNatLit 32) value)
+              | throwError "cil_runtime_models: the constant at pc {pc} is not a literal"
+            let numeral ← mkNumeral (mkConst ``CIL.W32) word
+            pure (mkApp (mkConst ``CIL.RuntimeModel.constant) numeral)
+          | _ => pure model
         -- A window per fact, so the facts of many model sites do not exhaust the command's.
         withCurrHeartbeats do
           body.prove s!"_model{pc}" s!"The runtime model of the call at pc {pc} of `{name}`."

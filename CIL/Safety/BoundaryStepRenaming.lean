@@ -370,6 +370,73 @@ theorem memory_stepRenamed (operation : CIL.MemoryOp) :
 
 #print axioms memory_stepRenamed
 
+/-- A constant's model pushes the same scalar on both sides and touches no memory. -/
+theorem constant_stepRenamed (value : CIL.W32) :
+    (CIL.RuntimeModel.constant value).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc
+    stack _ _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel]
+  split
+  · exact .error _
+  exact .ok (.next related frames)
+
+#print axioms constant_stepRenamed
+
+/-- A reference comparison reads the renamed references of the same allocations, so both sides
+    fault alike or push the same flag. -/
+theorem referenceCompare_stepRenamed (relation : CIL.ReferenceRelation) :
+    (CIL.RuntimeModel.referenceCompare relation).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc
+    stack bounds _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel,
+    CIL.RuntimeModel.observerCount]
+  by_cases observed : unspecifiedOperands 2 stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  simp only [observed, Bool.false_eq_true, ite_false]
+  rcases stack with _ | ⟨right, _ | ⟨left, rest⟩⟩
+  · exact .error _
+  · cases right <;> exact .error _
+  have rightBound := bounds right (by simp)
+  have leftBound := bounds left (by simp)
+  cases right <;> cases left <;>
+    simp only [List.map_cons, AllocationRenaming.value, referenceCompareCall] <;>
+    first
+    | exact .error _
+    | (simp only [Value.Below] at rightBound leftBound
+       cases relation
+       · apply (related.referenceEqual _ _ leftBound rightBound).bind
+         intro holds other same; cases same; exact .ok (.next related frames)
+       · apply (related.referenceLess _ _ leftBound rightBound).bind
+         intro holds other same; cases same; exact .ok (.next related frames)
+       · apply (related.referenceLess _ _ rightBound leftBound).bind
+         intro holds other same; cases same; exact .ok (.next related frames))
+
+#print axioms referenceCompare_stepRenamed
+
+/-- `SkipInit` forms its renamed out reference on both sides and writes nothing. -/
+theorem skipInit_stepRenamed : CIL.RuntimeModel.skipInit.StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc
+    stack bounds _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel,
+    CIL.RuntimeModel.observerCount]
+  by_cases observed : unspecifiedOperands 1 stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  simp only [observed, Bool.false_eq_true, ite_false]
+  rcases stack with _ | ⟨top, rest⟩
+  · exact .error _
+  have bound := bounds top (by simp)
+  cases top <;> simp only [List.map_cons, AllocationRenaming.value, skipInitCall] <;>
+    first
+    | exact .error _
+    | (simp only [Value.Below] at bound
+       apply (related.formValue _ bound).bind
+       intro formed other same
+       exact .ok (.next related frames))
+
+#print axioms skipInit_stepRenamed
+
 /-- Every model of the runtime table transports under a renaming; an entry adds its model's
     case here. -/
 theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
@@ -380,11 +447,13 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     (by
       intro entry member
       simp only [CIL.Extraction.modelEntries, List.mem_append, List.mem_cons] at member
-      rcases member with ((rfl | member) | member) | member
+      rcases member with (((rfl | member) | member) | member) | member
       · exact CIL.Extraction.ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
       · exact CIL.Extraction.vectorEntries_yields intrinsic_stepRenamed entry member
       · exact CIL.Extraction.integerMathEntries_yields intrinsic_stepRenamed entry member
-      · exact CIL.Extraction.bitEntries_yields intrinsic_stepRenamed entry member) found
+      · exact CIL.Extraction.bitEntries_yields intrinsic_stepRenamed entry member
+      · exact CIL.Extraction.unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
+          skipInit_stepRenamed entry member) found
 
 #print axioms runtimeModel_stepRenamed
 

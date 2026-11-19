@@ -149,6 +149,7 @@ internal static class RuntimeModels
             return vector;
         }
         if (BitModels.Call(reference, profile) is { } bits) return bits;
+        if (UnsafeModels.CallModel(reference, profile.Architecture) is { } helper) return helper;
         if (reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
             reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||

@@ -103,6 +103,9 @@ name = "Tests.LoweredCallRefusal"
 name = "Tests.BitModels"
 
 [[lean_lib]]
+name = "Tests.UnsafeModels"
+
+[[lean_lib]]
 name = "Tests.ReturnOpcode"
 
 [[lean_lib]]

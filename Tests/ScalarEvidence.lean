@@ -1326,16 +1326,17 @@ private def vector128 : TypeExpr := .apply
     "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
     "System.Runtime.Intrinsics.Vector128`1") word
 private def packet : TypeExpr := .aggregate "Fixture::Packet" 0
-/-- Size instructions retain exact widths and reject unsupported pointer and void types. -/
+/-- `sizeof` retains exact widths and rejects unsupported pointer and void types; a call of
+    `Unsafe.SizeOf` keeps its call, so a constant emitted for it is refused at any width. -/
 private theorem size_instruction_cases :
     (sizeAt (i 65052 (.type intType)) 4 = true) ∧
     (sizeAt (i 65052 (.type nativeType)) 8 = true) ∧
     (sizeAt (i 65052 (.type packet)) 24 = true) ∧
     (sizeAt (i 65052 (.type intType)) 7 = false) ∧
     (sizeAt (i 65052 (.type (.pointer word))) 8 = false) ∧
-    (sizeAt (i 40 (.call (sizeOfSite intType))) 4 = true) ∧
-    (sizeAt (i 40 (.call (sizeOfSite vector128))) 16 = true) ∧
-    (sizeAt (i 40 (.call (sizeOfSite packet))) 24 = true) ∧
+    (sizeAt (i 40 (.call (sizeOfSite intType))) 4 = false) ∧
+    (sizeAt (i 40 (.call (sizeOfSite vector128))) 16 = false) ∧
+    (sizeAt (i 40 (.call (sizeOfSite packet))) 24 = false) ∧
     (sizeAt (i 40 (.call (sizeOfSite intType))) 5 = false) := by
   decide +kernel
 

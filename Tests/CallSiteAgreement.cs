@@ -32,13 +32,13 @@ CallWitness[] witnesses =
     new("bitCast", "ValueBitCasts::From128Byte(System.Runtime.Intrinsics.Vector128`1<System.Byte>)",
         0, 1, ".lowered .bitCast"),
     new("sizeOf", "UnsafeLayouts::Size0()",
-        0, 0, ".lowered .sizeOf"),
+        0, 0, ".model"),
     new("integerMath", "WideProduct::UnsignedBigMul32(System.UInt32,System.UInt32)",
         0, 2, ".lowered .integerMath"),
     new("spanReference", "StaticSpans::First()",
         0, 1, ".lowered .spanReference"),
     new("skipInit", "SkipInitialization::Skip(Examples.FourLimbs&)",
-        0, 1, ".lowered (.unsafeHelper .skipInit)"),
+        0, 1, ".model"),
     new("span", "MemorySpans::ArrayAsSpan(System.Boolean[])",
         0, 1, ".lowered .span"),
     new("objectModel", "VirtualCalls::DogLegs()",
@@ -67,7 +67,9 @@ CallWitness[] witnesses =
     new("vectorTransfer",
         "DivisionIntrinsics::SwapHalves(System.ReadOnlySpan`1<System.Byte>,System.Span`1<System.Byte>)",
         0, 6, ".lowered .vectorTransfer", "arm64-advsimd"),
-    new("unsafeReference", "UnsafeReferences::AreSame(System.Byte&,System.Byte&)",
+    new("areSame", "UnsafeReferences::AreSame(System.Byte&,System.Byte&)",
+        0, 2, ".model"),
+    new("unsafeReference", "UnsafeReferences::ByteOffset(System.Byte&,System.Byte&)",
         0, 2, ".lowered .unsafeReference"),
     new("nullRef", "NullReferences::IsNull()",
         0, 0, ".lowered (.unsafeHelper .nullRef)"),
@@ -104,8 +106,12 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
     public string Proof()
     {
         var method = $"method{Method}";
-        var change = Claim == ".model" ? "declared.convention := site.declared.convention + 1" :
-            "target := .external \"Another overload\"";
+        var change = Name switch
+        {
+            "areSame" => "method.owner := .atom \"Fixture\" \"System.Runtime.CompilerServices.Unsafe\"",
+            _ when Claim == ".model" => "declared.convention := site.declared.convention + 1",
+            _ => "target := .external \"Another overload\""
+        };
         return $$"""
             namespace Extracted.{{Name}}
             open CIL CIL.Extraction

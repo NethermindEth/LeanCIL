@@ -100,16 +100,43 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
       .error (.unsupported "Instruction observes unspecified vector bits") := by
   constructor <;> rfl
 
-/-- The complete checked constant-return wrapper, for every size and caller memory. -/
+/-- `Unsafe.SizeOf` as an extraction emits it: a call without a link, whose model the layouts
+    give. -/
+def sizeMethod (method : CIL.Extraction.MethodRef) (profile : CIL.FeatureProfile)
+    (declared : CIL.DeclaredSignature) (environment : CIL.LayoutEnvironment) : CIL.Method :=
+  { profile := profile, code := [.call method {}, .ret], locals := [], returnsValue := true,
+    declared := declared, environment := environment }
+
+/-- The complete checked wrapper of a call the layouts model as a constant, for every caller
+    memory. -/
 theorem size_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvironment}
+    {method : CIL.Extraction.MethodRef} {size : BitVec 32}
     (returnedType : declared.returnType = .atom CIL.Extraction.runtimeScope "System.Int32")
-    (size : BitVec 32) (profile : CIL.FeatureProfile) (memory : Memory) :
-    (invoke
-      [{ profile := profile, code := [.ldc_i4 size, .ret], locals := [], returnsValue := true,
-         declared := declared, environment := environment }]
-      8 0 [] memory).map Prod.snd = .ok [.scalar (.i32 size)] := by
-  rcases declared with ⟨receiver, parameters, returnType, initLocals⟩
-  cases returnedType
+    (found : CIL.Extraction.runtimeModel environment .call method = some (.constant size))
+    (profile : CIL.FeatureProfile) (memory : Memory) :
+    (invoke [sizeMethod method profile declared environment] 8 0 [] memory).map Prod.snd =
+      .ok [.scalar (.i32 size)] := by
+  let body := sizeMethod method profile declared environment
+  let frame : Frame := ⟨memory.nextIdentity, [], [], 0⟩
+  let values := [Value.scalar (.i32 size)]
+  have pushes : step body (.call method {}) 0 [] frame [] memory =
+      .ok (.next 1 values frame memory) :=
+    step_call_model (body := body) (pc := 0) (method := method) (prefixes := {})
+      (args := []) (frame := frame) (memory := memory) rfl found rfl []
+  have narrow : body.returnNarrow = none := by
+    simp only [body, sizeMethod, CIL.Method.returnNarrow, returnedType]
+    rfl
+  have returns : step body .ret 1 [] frame values memory = .ok (.returned values memory) := by
+    change returnFrom body.returnNarrow true values memory = _
+    rw [narrow]
+    rfl
+  have next := run_next (program := [body]) (fuel := 7) (method := 0) rfl rfl pushes
+  have done := run_return (program := [body]) (fuel := 6) (method := 0) rfl rfl returns
+    (by rfl)
+  have entered : enterFrame body [] memory = .ok (frame, memory) := rfl
+  change (invoke [body] 8 0 [] memory).map Prod.snd = _
+  simp only [invoke_eq, List.getElem?_cons_zero, List.mapM_nil, entered, Except.mapError,
+    Bind.bind, Except.bind, Pure.pure, Except.pure, next, done]
   rfl
 
 #print axioms add_ok
@@ -123,16 +150,23 @@ theorem size_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvi
 /-- A layout environment with one entry, as an extraction that reads a struct records. -/
 private def emittedEnvironment : CIL.LayoutEnvironment := { layouts := #[⟨⟨4, []⟩, 4⟩] }
 
+/-- `int Unsafe.SizeOf<int>()` as a call site instantiates it. -/
+private def sizeOfInt : CIL.Extraction.MethodRef :=
+  { owner := CIL.Extraction.unsafeOwner, name := name!"SizeOf", hasThis := false,
+    genericArity := 1, returnType := .atom CIL.Extraction.runtimeScope "System.Int32",
+    parameters := [], methodArguments := [.atom CIL.Extraction.runtimeScope "System.Int32"] }
+
 /-- `Unsafe.SizeOf` in the form an extraction emits. -/
 private def emittedSize : CIL.Method :=
   { profile := .scalar, returnsValue := true, locals := [], localKinds := [],
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared :=
       { parameters := [], returnType := .atom CIL.Extraction.runtimeScope "System.Int32" },
-    environment := emittedEnvironment, links := [], code := [.ldc_i4 4, .ret] }
+    environment := emittedEnvironment, links := [], code := [.call sizeOfInt {}, .ret] }
 
 example : (invoke [emittedSize] 8 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.i32 4)] := by
-  exact size_ok rfl _ _ _
+  exact size_ok (declared := emittedSize.declared) (method := sizeOfInt)
+    (environment := emittedEnvironment) (size := 4) rfl (by decide +kernel) .scalar Memory.empty
 
 /-- `Unsafe.Add` of a byte element in the form an extraction emits. -/
 private def emittedAdd : CIL.Method :=

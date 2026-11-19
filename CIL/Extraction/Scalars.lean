@@ -359,26 +359,12 @@ private def primitiveSize (type : TypeExpr) : Option Nat :=
   | some .vector512 => some 64
   | _ => none
 
-/-- Exactly `call Unsafe.SizeOf<T>()`. -/
-def unsafeSizeOf (site : CallSite) : Bool :=
-  site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
-    site.declared == { convention := 0x10, returnType := .atom runtimeScope "System.Int32" } &&
-    site.name == "SizeOf" && !site.hasThis && site.returnsValue && site.parameterCount == 0 &&
-    site.parameterTypes.isEmpty && site.returnType == .atom runtimeScope "System.Int32" &&
-    site.target == .external (runtimeScope ++
-      "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()")
-
-/-- A size constant has its primitive width; an aggregate size is bound by its layout use
-    instead. -/
+/-- A `sizeof` constant has its primitive width; an aggregate size is bound by its layout use
+    instead. `Unsafe.SizeOf` keeps its call, whose model reads the size from the layouts. -/
 private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
-  let sized : TypeExpr → Bool
-    | .aggregate .. => true
-    | type => primitiveSize type == some bits.toNat
   match instruction.opcode, instruction.operand with
-  | 65052, .type type => sized type
-  | 40, .call site => unsafeSizeOf site && match site.typeArguments with
-    | [type] => sized type
-    | _ => false
+  | 65052, .type (.aggregate ..) => true
+  | 65052, .type type => primitiveSize type == some bits.toNat
   | _, _ => false
 
 /-- An instance field instruction, or an emitted field instruction. -/

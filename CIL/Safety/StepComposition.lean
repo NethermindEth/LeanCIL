@@ -346,6 +346,21 @@ theorem step_call_memory {method : Extraction.MethodRef} {prefixes : CallPrefixe
 
 #print axioms step_call_memory
 
+/-- A call without a link whose method's model is `SkipInit` checks that its reference operand
+    forms and pops it, as the `skipInit` instruction does; nothing is written. -/
+theorem step_call_skipInit_reference {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method = some .skipInit)
+    (direct : prefixes.tail = false) (reference : ManagedReference) (rest : List Value) :
+    step body (.call method prefixes) pc args frame (.reference reference :: rest) memory = do
+      let _ ← formValue memory reference
+      return .next (pc + 1) rest frame memory := by
+  rw [step_call_model (link := link) (found := found) (direct := direct)]
+  simp only [modelStep, observedCall, runModel, skipInitCall, CIL.RuntimeModel.observerCount]
+  rfl
+
+#print axioms step_call_skipInit_reference
+
 /-- A call whose pc links `callee` directly enters it, as `callStep` says; the model it would
     run without a link is never read. Stepping selects it once the link fact is known. -/
 theorem step_call_direct {method : Extraction.MethodRef} {prefixes : CallPrefixes}

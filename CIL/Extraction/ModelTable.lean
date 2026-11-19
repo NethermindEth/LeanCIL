@@ -1,4 +1,5 @@
 import CIL.RuntimeModel
+import CIL.Resolution
 import CIL.Extraction.Generics
 import CIL.Extraction.Lockstep
 import CIL.Extraction.FlowIndex
@@ -30,7 +31,19 @@ structure ModelEntry where
   owner : TypeExpr
   name : MetadataName
   declares : OpenSignature → Bool
-  resolve : LayoutEnvironment → MethodRef → Option RuntimeModel
+  resolve : (TypeExpr → ValueShape) → MethodRef → Option RuntimeModel
+  /-- A family owned in full, including unresolved overloads, with its exact external operand. -/
+  familyTarget : Option (String × MethodId) := none
+
+/-- The declaration and the raw call fields agree with the selected member. -/
+def ModelEntry.bindsSite (entry : ModelEntry) (site : CallSite) : Bool :=
+  entry.declares site.declared && match entry.familyTarget with
+    | none => true
+    | some (name, target) =>
+      site.name == name && site.target == target && site.ownerArgumentCount == 0 &&
+        site.typeArguments == site.method.methodArguments &&
+        site.parameterCount == site.method.parameters.length &&
+        site.returnsValue == (site.returnType != .void)
 
 /-- An entry for one declaration and closed method reference under `opcode`. -/
 def ModelEntry.exact (opcode : CallOpcode) (method : MethodRef) (declared : OpenSignature)
@@ -54,13 +67,21 @@ def ModelTable.entry? (table : ModelTable) (opcode : CallOpcode) (method : Metho
     Option ModelEntry := do
   let entries ← table.find? method.name.code
   entries.find? fun entry =>
-    entry.name == method.name && entry.opcode == opcode && entry.owner == method.owner.genericHead
+    entry.name == method.name && entry.opcode == opcode &&
+      entry.owner == (if entry.familyTarget.isSome then method.owner else method.owner.genericHead)
 
 /-- The model of a call under `opcode` to the closed reference `method`. -/
 def ModelTable.find (table : ModelTable) (environment : LayoutEnvironment)
     (opcode : CallOpcode) (method : MethodRef) : Option RuntimeModel := do
   let entry ← table.entry? opcode method
-  entry.resolve environment method
+  entry.resolve environment.valueShape method
+
+/-- A family claims its name before overload resolution. Other entries share overlapping names
+    with lowerings and claim the closed overloads they resolve. -/
+def ModelTable.claims (table : ModelTable) (environment : LayoutEnvironment)
+    (opcode : CallOpcode) (method : MethodRef) : Bool :=
+  (table.entry? opcode method).any fun entry =>
+    entry.familyTarget.isSome || (entry.resolve environment.valueShape method).isSome
 
 /-- `groups` with `entry` added at the end of the group of its key. -/
 def ModelTable.insertGroup (entry : ModelEntry) :
@@ -152,7 +173,7 @@ def ModelEntry.Yields (entry : ModelEntry) (property : RuntimeModel → Prop) : 
     (ModelEntry.exact opcode method declared model).Yields property ↔ property model := by
   constructor
   · intro yields
-    exact yields {} method model (by simp [ModelEntry.exact])
+    exact yields (LayoutEnvironment.valueShape {}) method model (by simp [ModelEntry.exact])
   · intro holds environment reference resolved found
     simp only [ModelEntry.exact] at found
     split at found
@@ -172,7 +193,7 @@ theorem ModelTable.find_yields {table : ModelTable} {property : RuntimeModel →
   obtain ⟨entry, selected, resolved⟩ := Option.bind_eq_some_iff.mp found
   obtain ⟨entries, filed, member⟩ := Option.bind_eq_some_iff.mp selected
   exact every _ (SearchTree.find?_mem_toList _ _ _ filed) entry
-    (List.mem_of_find?_eq_some member) environment method model resolved
+    (List.mem_of_find?_eq_some member) environment.valueShape method model resolved
 
 #print axioms ModelTable.find_yields
 

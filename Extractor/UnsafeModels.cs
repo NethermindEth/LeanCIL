@@ -5,10 +5,19 @@ namespace Nethermind.LeanCIL;
 // Generic runtime helpers share the same validated managed layout as CIL storage.
 internal static class UnsafeModels
 {
-    internal static Operation? Translate(MethodReference reference, string architecture = "scalar")
+    internal static Operation? Translate(MethodReference reference, string architecture = "scalar") =>
+        Helper(reference, architecture, modelled: false);
+
+    // A modelled helper keeps its call and the Lean entry reads its element through the checked layouts; the
+    // operation returned here is only what the extractor's own analyses read in place of the call.
+    internal static Operation? CallModel(MethodReference reference, string architecture) =>
+        Helper(reference, architecture, modelled: true);
+
+    // Each helper is either modelled or translated, never both, so the two entry points partition the family.
+    static Operation? Helper(MethodReference reference, string architecture, bool modelled)
     {
-        if (MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
-        if (ReinterpretReference(reference, architecture) is { } cast) return cast;
+        if (!modelled && MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
+        if (!modelled && ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
@@ -23,30 +32,31 @@ internal static class UnsafeModels
         bool Reference(TypeReference type) => type is ByReferenceType byRef && Parameter(byRef.ElementType);
         bool Pointer(TypeReference type) => type is PointerType { ElementType.MetadataType: MetadataType.Void };
 
-        var sizeOf = reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
+        var sizeOf = modelled && reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
             reference.ReturnType.FullName == "System.Int32";
-        var elementOffset = reference.Parameters.Count == 2 &&
+        var elementOffset = !modelled && reference.Parameters.Count == 2 &&
             ((reference.Name is "Add" or "Subtract" && Reference(reference.ReturnType) &&
               Reference(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr") ||
              (reference.Name is "Add" or "Subtract" && Pointer(reference.ReturnType) &&
               Pointer(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName == "System.Int32"));
-        var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
+        var skipInit = modelled && reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
-        var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 && Reference(reference.ReturnType);
-        var isNullRef = reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
+        var nullRef = !modelled && reference.Name == "NullRef" && reference.Parameters.Count == 0 &&
+            Reference(reference.ReturnType);
+        var isNullRef = !modelled && reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
         var referencePair = reference.Parameters.Count == 2 &&
             Reference(reference.Parameters[0].ParameterType) && Reference(reference.Parameters[1].ParameterType);
-        var comparison = referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
+        var comparison = modelled && referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
             reference.Name is "AreSame" or "IsAddressLessThan" or "IsAddressGreaterThan";
-        var byteOffset = referencePair && reference.Name == "ByteOffset" &&
+        var byteOffset = !modelled && referencePair && reference.Name == "ByteOffset" &&
             reference.ReturnType.FullName == "System.IntPtr";
-        var addBytes = reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
+        var addBytes = !modelled && reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
-        var subtractBytes = reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
+        var subtractBytes = !modelled && reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
         if (!sizeOf && !elementOffset && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&
@@ -56,7 +66,6 @@ internal static class UnsafeModels
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
         MetadataValidation.Type(element, reference.Module, architecture: architecture);
         RuntimeModels.ValidateSignature(reference, architecture);
-        if (skipInit) return new StackOperation(StackOpcode.SkipInit);
         if (nullRef) return MemoryOperation.Other(".nullRef");
         if (isNullRef) return MemoryOperation.Other(".isNullRef");
         var width = element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
@@ -69,6 +78,7 @@ internal static class UnsafeModels
             }
             : MetadataValidation.FieldSize(element, reference.Module, architecture);
 
+        if (skipInit) return new StackOperation(StackOpcode.SkipInit);
         if (comparison) return reference.Name switch
         {
             "AreSame" => new StackOperation(StackOpcode.Ceq),

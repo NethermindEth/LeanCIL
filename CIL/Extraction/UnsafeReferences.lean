@@ -11,7 +11,7 @@ namespace CIL.Extraction
 
 /-- Reference helpers whose runtime signatures have checked allocation-relative meanings. -/
 inductive UnsafeReferenceHelper where
-  | areSame | less | greater | byteOffset | addBytes (signed : Bool) | subtractBytes | asRef
+  | byteOffset | addBytes (signed : Bool) | subtractBytes | asRef
   deriving DecidableEq, Repr
 
 /-- Exact runtime identity and closed types for a generic Unsafe reference helper. -/
@@ -30,22 +30,12 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
     let reference := TypeExpr.byref type
     let native := TypeExpr.atom runtimeScope "System.IntPtr"
     let unsigned := TypeExpr.atom runtimeScope "System.UIntPtr"
-    let boolean := TypeExpr.atom runtimeScope "System.Boolean"
     let pair := [reference, reference]
     if site.name == "AsRef" &&
         (referenceSignature site reference [.pointer .void]
           "!!0& System.Runtime.CompilerServices.Unsafe::AsRef(System.Void*)" ||
          referenceSignature site reference [reference]
           "!!0& System.Runtime.CompilerServices.Unsafe::AsRef(!!0&)") then some .asRef
-    else if site.name == "AreSame" && referenceSignature site boolean pair
-        "System.Boolean System.Runtime.CompilerServices.Unsafe::AreSame(!!0&,!!0&)" then
-      some .areSame
-    else if site.name == "IsAddressLessThan" && referenceSignature site boolean pair
-        "System.Boolean System.Runtime.CompilerServices.Unsafe::IsAddressLessThan(!!0&,!!0&)" then
-      some .less
-    else if site.name == "IsAddressGreaterThan" && referenceSignature site boolean pair
-        "System.Boolean System.Runtime.CompilerServices.Unsafe::IsAddressGreaterThan(!!0&,!!0&)" then
-      some .greater
     else if site.name == "ByteOffset" && referenceSignature site native pair
         "System.IntPtr System.Runtime.CompilerServices.Unsafe::ByteOffset(!!0&,!!0&)" then
       some .byteOffset
@@ -66,9 +56,6 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
 
 /-- The allocation-relative instruction for a resolved reference helper. -/
 def UnsafeReferenceHelper.instruction : UnsafeReferenceHelper → Instruction
-  | .areSame => .ceq
-  | .less => .clt_un
-  | .greater => .cgt_un
   | .byteOffset => .memory .byteOffset
   | .addBytes signed => .memory (.add 1 signed)
   | .subtractBytes => .sub
@@ -76,7 +63,7 @@ def UnsafeReferenceHelper.instruction : UnsafeReferenceHelper → Instruction
 
 /-- The exact existing operation implementing each reference helper. -/
 def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Instruction → Bool
-  | .areSame, .ceq | .less, .clt_un | .greater, .cgt_un | .byteOffset, .memory .byteOffset
+  | .byteOffset, .memory .byteOffset
   | .subtractBytes, .sub | .asRef, .memory .asRef => true
   | .addBytes expected, .memory (.add width signed) => width == 1 && signed == expected
   | _, _ => false
@@ -111,8 +98,8 @@ def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Instructio
     | 0x28, .call site =>
       (match site.declaringType with
         | .atom _ "System.Runtime.CompilerServices.Unsafe" => true
-        | _ => false) && site.name ∈ ["AreSame", "IsAddressLessThan", "IsAddressGreaterThan", "ByteOffset",
-        "AddByteOffset", "SubtractByteOffset", "AsRef"] ||
+        | _ => false) && site.name ∈
+          ["ByteOffset", "AddByteOffset", "SubtractByteOffset", "AsRef"] ||
         match emitted with | .memory (.add ..) => !unsafeElementOffset instruction | _ => false
     | _, _ => false
 

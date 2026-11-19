@@ -9,17 +9,17 @@ import CIL.Extraction.GuardCalls
 /-!
 # Unsafe helper calls
 
-`Unsafe.SkipInit`, `Unsafe.NullRef` and `Unsafe.IsNullRef` are translated to dedicated
-operations instead of calls. `UnsafeCallsValid` recognizes these calls from raw metadata
-alone and requires that each live one emits its operation and that no other instruction
-emits any of them.
+`Unsafe.NullRef` and `Unsafe.IsNullRef` are translated to dedicated operations instead of calls.
+`UnsafeCallsValid` recognizes these calls from raw metadata alone and requires that each live one
+emits its operation and that no other instruction emits any of them. `Unsafe.SkipInit` keeps its
+call and runs through the runtime model table.
 -/
 
 namespace CIL.Extraction
 
-/-- Unsafe helpers that translate to one dedicated emitted operation each. -/
+/-- Unsafe helpers that lower to dedicated instructions. -/
 inductive UnsafeHelper where
-  | skipInit | nullRef | isNullRef
+  | nullRef | isNullRef
   deriving DecidableEq, Repr
 
 /-- The external identity of an `Unsafe` method with the given signature. -/
@@ -71,14 +71,12 @@ def unsafeHelperFamily (instruction : RawInstruction) : Option UnsafeHelper := d
   let .call site := instruction.operand | none
   if site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" then none
     else match site.name with
-      | "SkipInit" => some .skipInit
       | "NullRef" => some .nullRef
       | "IsNullRef" => some .isNullRef
       | _ => none
 
 /-- The parameter count, return flag and external member signature of a lowered helper. -/
 private def UnsafeHelper.signature : UnsafeHelper → Nat × Bool × String
-  | .skipInit => (1, false, "System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(!!0&)")
   | .nullRef => (0, true, "!!0& System.Runtime.CompilerServices.Unsafe::NullRef()")
   | .isNullRef =>
     (1, true, "System.Boolean System.Runtime.CompilerServices.Unsafe::IsNullRef(!!0&)")
@@ -90,7 +88,6 @@ def UnsafeHelper.resolvesAt (helper : UnsafeHelper) (storage : TypeExpr → Opti
   let typed := match site.typeArguments with
     | [element] =>
       let result := match helper with
-        | .skipInit => TypeExpr.void
         | .nullRef => .byref element
         | .isNullRef => .atom runtimeScope "System.Boolean"
       site.returnType == result && site.parameterTypes ==
@@ -107,13 +104,11 @@ def UnsafeHelper.resolves (helper : UnsafeHelper) (layouts : List RawLayout)
 
 /-- The instruction a resolving runtime helper emits. -/
 def UnsafeHelper.instruction : UnsafeHelper → Instruction
-  | .skipInit => .skipInit
   | .nullRef => .memory .nullRef
   | .isNullRef => .memory .isNullRef
 
 /-- The helper an emitted operation implements, if any. -/
 def emittedUnsafeHelper : Instruction → Option UnsafeHelper
-  | .skipInit => some .skipInit
   | .memory .nullRef => some .nullRef
   | .memory .isNullRef => some .isNullRef
   | _ => none
@@ -131,7 +126,7 @@ def UnsafeHelper.decode (helper : UnsafeHelper) (layouts : List RawLayout)
 def unsafeHelperMatches (layouts : List RawLayout) (raw : RawInstruction)
     (emitted : Instruction) : Bool :=
   match unsafeHelperFamily raw with
-  | none => (emittedUnsafeHelper emitted).isNone
+  | none => !(emitted matches .skipInit) && (emittedUnsafeHelper emitted).isNone
   | some helper => match helper.decode layouts raw with
     | .unadmitted opcode => match emitted with
       | .unadmitted actual => actual == opcode

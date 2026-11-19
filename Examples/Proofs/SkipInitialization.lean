@@ -1,5 +1,6 @@
 import Extracted
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.StepComposition
 
 /-! Skipping initialization consumes a checked reference without initializing its storage. -/
 
@@ -28,14 +29,18 @@ theorem correctness :
     invoke Extracted.program 4 0 [callerReference] uninitialized = .ok (uninitialized, []) := by
   rfl
 
-/-- The checked instruction preserves every byte and initialization flag of caller memory. -/
-theorem step_preserves (body : CIL.Method) (pc : Nat) (args : List Value)
-    (frame : Frame) (memory : Memory) (reference : ManagedReference) (stack : List Value)
+/-- A `SkipInit` call the runtime table models preserves every byte and initialization flag of
+    caller memory. -/
+theorem step_preserves (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
+    (memory : Memory) {method : CIL.Extraction.MethodRef} {prefixes : CIL.CallPrefixes}
+    (link : body.linkAt pc = none)
+    (found : CIL.Extraction.runtimeModel body.environment .call method = some .skipInit)
+    (direct : prefixes.tail = false) (reference : ManagedReference) (stack : List Value)
     (valid : ∃ value, formValue memory reference = .ok value) :
-    step body .skipInit pc args frame (.reference reference :: stack) memory =
+    step body (.call method prefixes) pc args frame (.reference reference :: stack) memory =
       .ok (.next (pc + 1) stack frame memory) := by
   obtain ⟨value, valid⟩ := valid
-  rw [step_skipInit_reference_eq, valid]
+  rw [step_call_skipInit_reference (link := link) (found := found) (direct := direct), valid]
   rfl
 
 #print axioms correctness
@@ -44,10 +49,10 @@ theorem step_preserves (body : CIL.Method) (pc : Nat) (args : List Value)
 /-- Both environments assign the call to the SkipInit family before checking its layout. -/
 theorem skip_family :
     let raw := Extracted.method0Closed.code[1]'(by decide)
-    CIL.Extraction.siteClaim CIL.Extraction.unsafeHelperFamily Extracted.environment none raw =
-      .lowered .skipInit ∧
-    CIL.Extraction.siteClaim CIL.Extraction.unsafeHelperFamily {} none raw =
-      .lowered .skipInit := by
+    CIL.Extraction.siteClaim CIL.Extraction.loweredCallFamily Extracted.environment none raw =
+      .model ∧
+    CIL.Extraction.siteClaim CIL.Extraction.loweredCallFamily {} none raw =
+      .model := by
   decide +kernel
 
 #print axioms skip_family
@@ -64,7 +69,10 @@ cil_decoded_method skipWithoutLayout := Method.ofRaw? Extracted.profile emptyLay
   Extracted.method0Links Extracted.method0Original Extracted.method0TypeArgumentsRaw
 
 /-- The decoded helper consumes the reference when its value type has a checked layout. -/
-theorem resolved_skip : skipWithLayout.code[1]? = some .skipInit := rfl
+theorem resolved_skip :
+    let raw := Extracted.method0Closed.code[1]'(by decide)
+    let .call site := raw.operand | False
+    skipWithLayout.code[1]? = some (.call site.method {}) := by rfl
 
 #print axioms resolved_skip
 

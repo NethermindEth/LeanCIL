@@ -1,4 +1,6 @@
-import CIL.Extraction.CallAgreement
+import CIL.Extraction.DecodedMethod
+
+/-! Exact runtime operands, modelled SkipInit calls and lowered null-reference operations. -/
 
 open CIL CIL.Extraction
 
@@ -44,20 +46,26 @@ private def raw (site : CallSite) : RawMethod := {
   maxStack := 1, genericParameters := [], code := [⟨0, 0x28, .call site⟩] }
 private def nonCall : RawMethod := { raw call with code := [⟨0, 0x26, .none⟩] }
 
-example : UnsafeCallsValid [] (raw call) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw call) [true] [.pop] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with name := "Other" }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with target := .external "forged" }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with
-    method.owner := .atom "forged" "System.Runtime.CompilerServices.Unsafe" }) [true]
-    [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with method.hasThis := true }) [true] [.skipInit] := by
+/-- Changing a redundant call field or the typed reference cannot retain the SkipInit call. -/
+theorem skipInitOperand :
+    let decode := fun operand =>
+      (Method.ofRaw? .scalar {} [] [true] (raw operand) []).map Method.code
+    decode call = some [.call call.method {}] ∧
+      [{ call with name := "Other" }, { call with target := .external "forged" },
+       { call with method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
+       { call with method.hasThis := true }, { call with parameterCount := 2 },
+       { call with returnsValue := true }, { call with typeArguments := [.byref word] },
+       { call with typeArguments := [] }, { call with method.genericArity := 2 }].all
+        (fun changed => decide (decode changed = some [.unadmitted 40])) = true := by
   decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with parameterCount := 2 }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with returnsValue := true }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [.byref word] }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [] }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw call) [] [.skipInit] := by decide +kernel
+
+#print axioms skipInitOperand
+
+-- No live site emits the dedicated SkipInit instruction.
+example : UnsafeCallsValid [] (raw call) [true] [.call call.method {}] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw call) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] nonCall [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw call) [] [.call call.method {}] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide +kernel
 
 -- `NullRef` must push the null reference: no other operation with its stack effect.

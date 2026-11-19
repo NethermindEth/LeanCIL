@@ -264,7 +264,7 @@ example : catalog.table.find {} .call { spanLength word with hasThis := false } 
 theorem unclaimedLiveRefused (models : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (raw : RawInstruction) (emitted : CIL.Instruction)
     (called : methodTokenCall raw.opcode = true)
-    (missing : siteClaim loweredCallFamily environment none raw models.table.find = .refused) :
+    (missing : siteClaim loweredCallFamily environment none raw models.table.claims = .refused) :
     models.siteAgrees environment profile raw emitted none none true = false := by
   simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt,
     ModelCatalog.callRequirement, called, missing,
@@ -277,7 +277,7 @@ theorem retainedModelNamesMember (models : ModelCatalog) (environment : LayoutEn
     (profile : FeatureProfile) (raw : RawInstruction) (member : CallSite)
     (target : MethodRef) (prefixes : CallPrefixes)
     (called : raw.opcode = 40) (operand : raw.operand = .call member)
-    (model : siteClaim loweredCallFamily environment none raw models.table.find = .model)
+    (model : siteClaim loweredCallFamily environment none raw models.table.claims = .model)
     (accepted : models.siteAgrees environment profile raw (.call target prefixes) = true) :
     target = member.method := by
   simp only [ModelCatalog.siteAgrees, ModelCatalog.agreesAt,
@@ -791,10 +791,12 @@ theorem unknownVirtualRefused {Family : Type} (familyOf : RawInstruction → Opt
 theorem unclaimedSiteRefused {Family : Type} (familyOf : RawInstruction → Option Family)
     (environment : LayoutEnvironment) (raw : RawInstruction) (site : CallSite)
     (token : methodTokenCall raw.opcode = true) (operand : raw.operand = .call site)
-    (unmodelled : ((callOpcode? raw.opcode).bind
-      fun op => runtimeModel environment op site.method) = none) (unknown : familyOf raw = none) :
-    siteClaim familyOf environment none raw = .refused := by
-  simp [siteClaim, token, operand, unmodelled, unknown]
+    (claims : LayoutEnvironment → CallOpcode → MethodRef → Bool)
+    (unclaimed : (callOpcode? raw.opcode).any
+      (fun op => claims environment op site.method) = false)
+    (unknown : familyOf raw = none) :
+    siteClaim familyOf environment none raw claims = .refused := by
+  simp [siteClaim, token, operand, unclaimed, unknown]
 
 #print axioms unclaimedSiteRefused
 

@@ -3,6 +3,7 @@ import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.IntegerMath
 import CIL.Extraction.VectorModels
 import CIL.Extraction.BitModels
+import CIL.Extraction.UnsafeModels
 
 /-!
 # Runtime model resolution
@@ -17,7 +18,7 @@ namespace CIL.Extraction
 
 /-- The runtime methods with a model. -/
 def modelEntries : List ModelEntry :=
-  objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries
+  objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries ++ unsafeEntries
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -35,18 +36,17 @@ inductive SiteClaim (Family : Type) where
   | refused
   deriving DecidableEq, Repr
 
-/-- A link claims its pc first, then a resolving model, then a family named by the raw operand.
-    Family resolution and emission checking are separate obligations. -/
+/-- A link claims its pc first, followed by a model family or resolving overload, then a
+    lowered family named by the raw operand. -/
 def siteClaim {Family : Type} (familyOf : RawInstruction → Option Family)
     (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
-    (lookup : LayoutEnvironment → CallOpcode → MethodRef → Option RuntimeModel := runtimeModel) :
+    (claims : LayoutEnvironment → CallOpcode → MethodRef → Bool := runtimeModels.claims) :
     SiteClaim Family :=
   if !methodTokenCall raw.opcode then .refused else
   match raw.operand with
   | .call site =>
     if link.isSome then .link
-    else if ((callOpcode? raw.opcode).bind
-        fun op => lookup environment op site.method).isSome then .model
+    else if (callOpcode? raw.opcode).any (fun op => claims environment op site.method) then .model
     else (familyOf raw).elim .refused .lowered
   | _ => .refused
 
@@ -67,7 +67,7 @@ theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry �
     entry ∈ modelEntries := by
   simp [runtimeModels, SearchTree.toList, modelEntries, vectorEntries, integerMathEntries,
     bitEntries, bitHelpers, bitHelperModel,
-    mathOperations, mathIntegers, IntegerMath.signedOnly]
+    mathOperations, mathIntegers, IntegerMath.signedOnly, unsafeEntries]
 
 #print axioms runtimeModels_entries
 

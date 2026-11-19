@@ -20,13 +20,14 @@ inductive CallRequirement where
   | hole (opcode : Nat)
 
 /-- An occupied site preserves a resolving entry's declaration and profile requirements. -/
-def ModelCatalog.linkedRequirement (catalog : ModelCatalog) (environment : LayoutEnvironment)
+def ModelCatalog.linkedRequirement (catalog : ModelCatalog) (environment : CallLayouts)
     (profile : FeatureProfile) (raw : RawInstruction) : CallRequirement :=
   match raw.operand, callOpcode? raw.opcode with
   | .call site, some opcode =>
     if (catalog.table.entry? opcode site.method).any (fun entry =>
-        (entry.resolve environment site.method).any fun model =>
-          !entry.declares site.declared || !model.available profile) then
+        match entry.resolve environment.valueShape site.method with
+        | some model => !entry.bindsSite site || !model.available profile
+        | none => entry.familyTarget.isSome) then
       .hole raw.opcode
     else .linked
   | _, _ => .linked
@@ -37,8 +38,8 @@ def ModelCatalog.callRequirement (catalog : ModelCatalog) (environment : CallLay
     (raw : RawInstruction) : CallRequirement :=
   let missing := CallRequirement.hole raw.opcode
   let layouts := environment.toLayoutEnvironment
-  match siteClaim loweredCallFamily layouts link raw catalog.table.find with
-  | .link => catalog.linkedRequirement layouts profile raw
+  match siteClaim loweredCallFamily layouts link raw catalog.table.claims with
+  | .link => catalog.linkedRequirement environment profile raw
   | .refused => missing
   | .lowered family =>
     ((family.resolve environment profile role raw).map CallRequirement.instruction).getD missing
@@ -46,8 +47,8 @@ def ModelCatalog.callRequirement (catalog : ModelCatalog) (environment : CallLay
     match raw.operand, callOpcode? raw.opcode with
     | .call site, some opcode =>
       if (catalog.table.entry? opcode site.method).any (fun entry =>
-          entry.declares site.declared &&
-            (entry.resolve layouts site.method).any (·.available profile)) then
+          entry.bindsSite site &&
+            (entry.resolve environment.valueShape site.method).any (·.available profile)) then
         match opcode with
         | .call => .instruction (.call site.method {})
         | .newobj => .instruction (.newobj site.method)
@@ -140,7 +141,7 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
   have linkAt : (linkReads method.links (List.range method.code.length))[pc]?.join =
       method.linkAt pc := by simp [linkReads_eq, inCode, Method.linkAt]
   change siteClaim loweredCallFamily method.environment (method.linkAt pc) raw
-    runtimeCatalog.table.find = .refused at refused
+    runtimeCatalog.table.claims = .refused at refused
   simp [ModelCatalog.agreesAt, token, linkAt, ModelCatalog.callRequirement, refused,
     CallRequirement.accepts] at checked
 
@@ -155,7 +156,7 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
   let live := fun pc => reachable[pc]?.getD false
   Instruction.withCallDecoder roles live localKind fun pc previous raw =>
     if occupied.contains pc then
-      (runtimeCatalog.linkedRequirement environment.toLayoutEnvironment profile raw).decode
+      (runtimeCatalog.linkedRequirement environment profile raw).decode
         (fun _ => Instruction.ofRaw previous raw)
     else if previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
     else (runtimeCatalog.callRequirement environment profile none (roles[pc]?.join) raw).decode

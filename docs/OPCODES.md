@@ -182,7 +182,8 @@ as a managed pointer. `Unsafe.NullRef<T>` values are managed references and can 
 reference comparisons. Numeric zero never becomes a reference.
 
 The managed-reference overloads of `Unsafe.AreSame`, `IsAddressLessThan` and
-`IsAddressGreaterThan` use these checked comparisons. Ordering and
+`IsAddressGreaterThan` use these checked comparisons; a call keeps its `call`, which runs the
+comparison the runtime model table gives its exact closed reference. Ordering and
 `Unsafe.ByteOffset(origin, target)` require two live references in the same allocation;
 `Unsafe.ByteOffset` returns the native-width byte displacement from origin to target.
 `Unsafe.AddByteOffset` and `SubtractByteOffset` accept `nint` or `nuint` offsets.
@@ -632,12 +633,14 @@ by that size and wrap at the validated native width. Forming the resulting refer
 allocation identity, lifetime and bounds, including admitted one-past positions, and grants no
 read or write permission; an offset from a readonly reference stays readonly, so stores through
 it fault ([pointer element offsets](SOUNDNESS-RUNTIME.md#pointer-element-offsets)). Classes,
-pointer/byref type arguments and unsupported layouts fail extraction.
+pointer/byref type arguments and unsupported layouts fail extraction. A call of `Unsafe.SizeOf<T>()`
+keeps its `call`, which pushes the size the runtime model table reads from the element's checked
+shape, as `sizeof` does.
 
 `Unsafe.SkipInit<T>(out T)` admits the same storage types. It validates the managed reference
 and leaves memory, initialization flags and access permissions unchanged, so reads of the output
-still require initialized bytes. Extraction evidence checks the exact runtime call identity and
-its translation to `skipInit`.
+still require initialized bytes. A call keeps its `call`, which runs the model the runtime model
+table gives its exact closed reference.
 
 `Unsafe.NullRef<T>()` and `Unsafe.IsNullRef<T>(ref readonly T)` admit the same
 storage types. `NullRef` pushes the model's null managed reference, which a
@@ -647,7 +650,7 @@ Every load, store, copy, initialization or field access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
 operations access nothing. Extraction evidence binds each call to its operation in both
-directions, as for `SkipInit`.
+directions.
 
 Reference `add` admits either operand order, matching the
 [.NET 10 importer](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/importer.cpp#L5093-L5106);

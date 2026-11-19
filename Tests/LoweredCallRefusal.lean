@@ -170,7 +170,7 @@ theorem otherInstructionRefused (family : LoweredFamily) (environment : LayoutEn
     (resolved : family.resolve environment.callLayouts profile role raw = some expected)
     (other : emitted ≠ expected) :
     runtimeCatalog.siteAgrees environment profile raw emitted none role true = false := by
-  change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.find =
+  change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.claims =
     .lowered family at claimed
   simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, called,
     ModelCatalog.callRequirement, claimed, resolved,
@@ -187,7 +187,7 @@ theorem missingOverloadRefused (family : LoweredFamily) (environment : LayoutEnv
     runtimeCatalog.siteAgrees environment profile raw emitted none role true = false ∧
     (runtimeCatalog.siteAgrees environment profile raw emitted none role false = true ↔
       emitted = .unadmitted raw.opcode) := by
-  change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.find =
+  change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.claims =
     .lowered family at claimed
   simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, called,
     ModelCatalog.callRequirement, claimed, missing,

@@ -259,7 +259,7 @@ internal sealed class LayoutEvidence
             {
                 var access = generic.Name switch
                 {
-                    "SizeOf" => "sizeOf", "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
+                    "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
                     "ReadUnaligned" or "Read" or "TryRead" => "load",
                     "WriteUnaligned" or "Write" or "TryWrite" => "store",
                     "CreateSpan" or "CreateReadOnlySpan" => "spanElement", _ => null

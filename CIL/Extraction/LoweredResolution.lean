@@ -169,10 +169,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   | .unsafeBlock =>
     let (copy, alignment) ← unsafeBlockCall raw
     return .memory (if copy then .copyBlock alignment else .initBlock alignment)
-  | .sizeOf =>
-    _root_.guard (unsafeSizeOf site)
-    let [element] := site.typeArguments | none
-    return .ldc_i4 (BitVec.ofNat 32 (← (environment.valueShape element).size?))
   | .platform => return .ldc_i4 (← platformConstant site)
   | .referenceContent =>
     return .ldc_i4 (← referenceContentConstant environment.indexedRaw site)

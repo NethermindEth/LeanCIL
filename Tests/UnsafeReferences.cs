@@ -227,7 +227,6 @@ controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
 foreach (var (name, before, after) in new[]
 {
-    ("AreSame", ".ceq", ".clt_un"),
     ("ByteOffset", ".memory .byteOffset", ".sub"),
     ("AddSigned", ".memory (.add 1 true)", ".memory (.add 8 true)"),
     ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),
@@ -320,15 +319,6 @@ foreach (var (name, before, after) in new[]
     File.WriteAllText(path, byteOffsetSource.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, "PASS exact Unsafe identity rejection: " + name, "UnsafeCallsValid");
 }
-var renamedSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "AreSame", "Extracted.lean")),
-    "method0_scalars_validated")
-    .Replace("name := \"AreSame\"", "name := \"Other\"", StringComparison.Ordinal)
-    .Replace("name := name!\"AreSame\"", "name := name!\"Other\"", StringComparison.Ordinal)
-    .Replace("owner := .atom Extraction.runtimeScope \"System.Runtime.CompilerServices.Unsafe\"",
-        "owner := .atom \"Fixture\" \"Lookalike\"", StringComparison.Ordinal);
-var renamedPath = Path.Combine(root, "AreSame", "ForgedNameAndOwner.lean");
-File.WriteAllText(renamedPath, renamedSource);
-rejected.Add(renamedPath, "PASS forged name and owner cannot emit a scalar comparison", "ScalarFlowValid");
 rejected.Check();
 
 foreach (var mutation in new[] { "reference-field", "class", "pointer", "arity", "parameter", "return", "instance", "scope", "version" })
