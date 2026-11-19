@@ -1,5 +1,4 @@
-import CIL.Safety.StepComposition
-import CIL.Safety.GuardNormalization
+import CIL.Safety.ValueSteps
 
 /-!
 # Instruction step equations
@@ -336,16 +335,52 @@ theorem step_skipInit_reference_eq (reference : ManagedReference)
 
 /-- `initobj` zeroes `size` bytes behind a writable reference. -/
 @[cil_instruction_step high]
-theorem step_initAggregate_reference_eq (size : Nat)
+theorem step_initobj_reference_eq {type : Extraction.TypeExpr} {size : Nat}
+    (width : (body.valueShape type).size? = some size)
     (reference : ManagedReference) (rest : List Value) :
-    step body (.initAggregate size) pc args frame (.reference reference :: rest) memory = do
+    step body (.initobj type) pc args frame (.reference reference :: rest) memory = do
       let address ← referenceAt reference
       let stored ← checkedAt reference size
         (write memory address (List.replicate size 0) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored := by
-  instruction_step_proof step_initAggregate_eq
+  rw [step_initobj_eq body pc args frame memory width]
+  simp [initializeBytes, unspecifiedOperands, Value.hasUnspecified, bind_assoc]
 
 end InstructionEquations
+
+open Lean Meta in
+/-- The storage equation at a named operand whose checked shape supplies the byte width. -/
+private def objectSizeStep (expression : Expr) : SimpM Simp.Step := do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let (opcode, #[type]) := operation.getAppFnArgs | return .continue
+  let read := mkApp2 (mkConst ``CIL.Method.valueShape) body type
+  let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape read
+    | return .continue
+  let some proof := shared.proof? | return .continue
+  let size ← match shared.expr.getAppFnArgs with
+    | (``CIL.ValueShape.primitive, #[width, _]) | (``CIL.ValueShape.aggregate, #[width])
+    | (``CIL.ValueShape.vector, #[width]) => pure width
+    | _ => return .continue
+  let width ← mkCongrArg (mkConst ``CIL.ValueShape.size?) proof
+  let leading := #[body, pc, args, frame, memory, type, size, width]
+  if opcode == ``CIL.Instruction.initobj then
+    if let some (_, head, rest) := stack.app3? ``List.cons then
+      if let some reference := head.app1? ``Value.reference then
+        return ← equationStep (mkAppN (mkConst ``step_initobj_reference_eq)
+          (leading ++ #[reference, rest]))
+  let equation := if opcode == ``CIL.Instruction.initobj then ``step_initobj_eq
+    else if opcode == ``CIL.Instruction.cpobj then ``step_cpobj_eq else ``step_sizeof_eq
+  equationStep (mkAppN (mkConst equation) (leading.push stack))
+
+/-- A typed initialization steps at the byte width of its named operand. -/
+simproc [cil_instruction_step] reduceObjectInit (step _ (.initobj _) _ _ _ _ _) := objectSizeStep
+
+/-- A typed copy steps at the byte width of its named operand. -/
+simproc [cil_instruction_step] reduceObjectCopy (step _ (.cpobj _) _ _ _ _ _) := objectSizeStep
+
+/-- A size instruction pushes the byte width of its named operand. -/
+simproc [cil_instruction_step] reduceObjectSize (step _ (.sizeof _) _ _ _ _ _) := objectSizeStep
 
 #print axioms step_ldind_reference_eq
 #print axioms step_ldind_readOnlyReference_eq
@@ -374,6 +409,6 @@ end InstructionEquations
 #print axioms step_aggregateFieldAt_aggregate_eq
 #print axioms step_aggregateFieldAt_snapshot_eq
 #print axioms step_skipInit_reference_eq
-#print axioms step_initAggregate_reference_eq
+#print axioms step_initobj_reference_eq
 
 end CIL.Safety

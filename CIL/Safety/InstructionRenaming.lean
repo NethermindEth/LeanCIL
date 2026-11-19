@@ -231,26 +231,9 @@ theorem Memory.Renamed.elementAddressInstructionResult {mapping : AllocationRena
   | unsupported reason => exact .error _
 #print axioms Memory.Renamed.elementAddressInstructionResult
 
-set_option maxHeartbeats 600000 in
-/-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
-theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Instruction)
-    (formed : source.WellFormed)
-    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (instruction operation stack source)) :
-    ResultRenamed mapping
-      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
-      (instruction operation stack source)
-      (instruction operation (stack.map mapping.value) target) := by
-  unfold CIL.Safety.instruction at observable ⊢
-  rw [mapping.unspecifiedOperands]
-  split at observable
-  · cases observable
-  · rename_i guard
-    rw [ite_eq_right guard, ite_eq_right guard]
-    split at observable
+set_option hygiene false in
+/-- Moves checked memory accesses in a matched stack arm through the allocation map. -/
+local macro "rename_memory_arm" : tactic => `(tactic| (
     all_goals try simp (config := { singlePass := true }) only
       [List.map_cons, AllocationRenaming.value]
     all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
@@ -327,7 +310,85 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
       | dsimp +instances only [AllocationRenaming.reference]
       | simp only [mapping.isNull, imageEquality]
       | (split <;> try simp only [*, AllocationRenaming.managedReference,
-          Bind.bind, Except.bind])
+          Bind.bind, Except.bind])))
+
+set_option maxHeartbeats 600000 in
+/-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
+theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Instruction)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (instruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (instruction operation stack source)
+      (instruction operation (stack.map mapping.value) target) := by
+  unfold CIL.Safety.instruction at observable ⊢
+  rw [mapping.unspecifiedOperands]
+  split at observable
+  · cases observable
+  · rename_i guard
+    rw [ite_eq_right guard, ite_eq_right guard]
+    split at observable
+    rename_memory_arm
 #print axioms Memory.Renamed.instructionResult
+
+
+/-- Typed copying preserves the allocation map on every observable result. -/
+theorem Memory.Renamed.copyInitializedBytesResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (size : Nat)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (copyInitializedBytes size stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (copyInitializedBytes size stack source)
+      (copyInitializedBytes size (stack.map mapping.value) target) := by
+  unfold copyInitializedBytes at observable ⊢
+  split at observable
+  rename_memory_arm
+#print axioms Memory.Renamed.copyInitializedBytesResult
+
+/-- Zero initialization preserves the allocation map on every observable result. -/
+theorem Memory.Renamed.initializeBytesResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (size : Nat)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (initializeBytes size stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (initializeBytes size stack source)
+      (initializeBytes size (stack.map mapping.value) target) := by
+  unfold initializeBytes at observable ⊢
+  split at observable
+  rename_memory_arm
+#print axioms Memory.Renamed.initializeBytesResult
+
+/-- An object transfer preserves the allocation map on every observable result. -/
+theorem Memory.Renamed.transferObjectResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (shape : CIL.ValueShape) (store : Bool)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (transferObject shape store stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (transferObject shape store stack source)
+      (transferObject shape store (stack.map mapping.value) target) := by
+  unfold transferObject at observable ⊢
+  split at observable
+  all_goals first
+    | exact related.instructionResult _ formed _ bounds observable
+    | exact related.memoryInstructionResult _ formed _ bounds observable
+    | exact .ok ⟨related, rfl⟩
+    | cases observable
+#print axioms Memory.Renamed.transferObjectResult
 
 end CIL.Safety

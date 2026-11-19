@@ -470,50 +470,77 @@ example : ExactIntrinsicsValid (raw {
     (body [.intrinsic (.avx512DQ .moveMask64) 1]) := by decide +kernel
 
 
-private def initBody (type : TypeExpr) : RawMethod :=
-  { raw call0 with code := [⟨0, 65045, .type type⟩] }
+/-- A method using the specified type at its only instruction. -/
+private def objectBody (opcode : Nat) (type : TypeExpr) : RawMethod :=
+  { raw call0 with code := [⟨0, opcode, .type type⟩] }
 
-example : VectorInitializationsValid (initBody (vectorType "128")) [true]
-    (body [.initAggregate 16]) := by decide +kernel
-example : VectorInitializationsValid (initBody (vectorType "256")) [true]
-    (body [.initAggregate 32]) := by decide +kernel
-example : VectorInitializationsValid (initBody (vectorType "512")) [true]
-    (body [.initAggregate 64]) := by decide +kernel
-example : VectorInitializationsValid (initBody (vectorType "512")) [true]
-    { body [.initAggregate 64] with profile := .scalar } := by decide +kernel
-example : VectorInitializationsValid (initBody (vectorType "256")) [true]
-    { body [.initAggregate 32] with profile := { architecture := .arm64 } } := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
-    (body [.initAggregate 32]) := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "256")) [true]
-    (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "512")) [true]
-    (body [.initAggregate 32]) := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
-    (body [.nop]) := by decide +kernel
-example : ¬ VectorInitializationsValid
-    { initBody (vectorType "128") with code := [⟨0, 113, .type (vectorType "128")⟩] } [true]
-    (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (.atom runtimeScope "System.UInt64")) [true]
-    (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid
-    (initBody (.apply (.constructor "forged" "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")))
-    [true] (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid
-    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom "forged" "System.UInt64")))
-    [true] (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid
-    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int16")))
-    [true] (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid
-    (initBody (.apply (.constructor scope "System.Runtime.Intrinsics.Vector64`1") (.atom runtimeScope "System.UInt64")))
-    [true] (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
-    { body [.initAggregate 16] with profile := { nativeWidth := 32 } } := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "128")) []
-    (body [.initAggregate 16]) := by decide +kernel
-example : ¬ VectorInitializationsValid (initBody (vectorType "128")) [true]
-    (body []) := by decide +kernel
+/-- Object admission checks vector storage on each profile and refuses malformed evidence. -/
+theorem init_vector_admission :
+    let unsigned := vectorType "128"
+    let emitted := body [.initobj unsigned]
+    let valid := fun operand => decide (ObjectOperandsValid (objectBody 0xfe15 operand)
+      [true] emitted)
+    let malformed := fun head element => TypeExpr.apply head element
+    ["128", "256", "512"].all (fun width => valid (vectorType width)) &&
+      decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [true]
+        { emitted with profile := .scalar }) &&
+      decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [true]
+        { emitted with profile := { architecture := .arm64 } }) &&
+      !(valid (malformed (.constructor "forged" "System.Runtime.Intrinsics.Vector128`1")
+        (.atom runtimeScope "System.UInt64"))) &&
+      !(valid (malformed (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
+        (.atom "forged" "System.UInt64"))) &&
+      !(valid (malformed (.constructor scope "System.Runtime.Intrinsics.Vector128`1")
+        (.atom runtimeScope "System.Int16"))) &&
+      !(valid (vectorType "64")) &&
+      !decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [true]
+        { emitted with profile := { nativeWidth := 32 } }) &&
+      !decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [] emitted) &&
+      !decide (ObjectOperandsValid (objectBody 0xfe15 unsigned) [true] (body [])) := by
+  decide +kernel
+#print axioms init_vector_admission
+
+/-- An enum-span copy reads its own direct home and clears the reference flag on the value. -/
+theorem enum_span_copy :
+    let element := TypeExpr.enum "Signed8" (.atom runtimeScope "System.SByte")
+    let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") element
+    let load := RawInstruction.mk 0 2 .none
+    let copy := RawInstruction.mk 1 0x71 (.type span)
+    let input := { raw call0 with parameters := [.byref span], code := [load, copy] }
+    let emitted := body [.ldarg 0, .ldobj span]
+    let kind := ScalarKind.enumSpan (.enumeration "Signed8" .signed8) true
+    ObjectOperandsValid input [true, true] emitted ∧
+      scalarTransfer input copy [kind true] = some [kind false] ∧
+      scalarTransfer input copy [kind false] = none ∧
+      ¬ ObjectOperandsValid { input with parameters := [.byref (.apply
+        (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.Int32"))] }
+        [true, true] emitted ∧
+      ¬ ObjectOperandsValid { input with code := [load, ⟨1, 0, .none⟩, copy] }
+        [true, true, true] (body [.ldarg 0, .nop, .ldobj span]) ∧
+      ¬ ObjectOperandsValid { input with code := [load, copy, ⟨2, 43, .target 1⟩] }
+        [true, true, false] (body [.ldarg 0, .ldobj span, .unadmitted 43]) := by decide +kernel
+#print axioms enum_span_copy
+
+/-- A literal site binds both opcode and token, including between two supported vectors. -/
+theorem init_vector_binding :
+    let target := vectorType "128"
+    let raw := RawInstruction.mk 0 0xfe15 (.type target)
+    [Instruction.nop, .initobj (vectorType "256"), .initobj (vectorType "512"),
+      .initobj (.atom runtimeScope "System.UInt64"), .ldobj target].all fun emitted =>
+        !scalarEmissionMatches #[] none none raw [] emitted := by decide +kernel
+#print axioms init_vector_binding
+
+/-- Floating-point loads, class sizes and span stores fail admission. -/
+theorem object_shape_refusals :
+    let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1")
+      (.atom runtimeScope "System.Int32")
+    let double := TypeExpr.atom runtimeScope "System.Double"
+    let input := fun opcode type => objectBody opcode type
+    ¬ ObjectOperandsValid (input 0x71 double) [true] (body [.ldobj double]) ∧
+      ¬ ObjectOperandsValid (input 0xfe1c (.object runtimeScope "System.Object")) [true]
+        (body [.sizeof (.object runtimeScope "System.Object")]) ∧
+      ¬ ObjectOperandsValid (input 0x81 span) [true] (body [.stobj span]) := by decide +kernel
+#print axioms object_shape_refusals
 
 -- A default case yields a guarded equation, so a new op reading vector bits would pass as a
 -- forwarder. Every equation must be unconditional: one per constructor pattern.

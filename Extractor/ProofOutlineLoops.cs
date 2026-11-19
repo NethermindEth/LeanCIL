@@ -37,10 +37,16 @@ internal static partial class ProofOutline
 
         internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
 
-        /// <summary>The constant `operation` pushes: a literal, or a call whose runtime model is that constant.
+        /// <summary>The constant pushed by a literal, a modelled call or the size of a closed type.
         /// </summary>
-        internal static Constant? ConstantOf(Operation operation) =>
-            operation as Constant ?? (operation as ModelCall)?.Model as Constant;
+        internal static Constant? ConstantOf(Operation operation) => operation switch
+        {
+            Constant literal => literal,
+            ModelCall { Model: Constant model } => model,
+            ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Sizeof, ByteSize: int size } =>
+                new Constant(32, size, true),
+            _ => null
+        };
 
         /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
         /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
@@ -620,6 +626,7 @@ internal static partial class ProofOutline
         /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
         static bool ReadsWidth(Operation operation, int width) => operation switch
         {
+            ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Ldobj, Signed: false } load => load.ScalarWidth == width,
             LoadScalar { Signed: false } load => load.Width == width,
             IndirectAccess { Store: false, Signed: false } load => load.Width == width,
             _ => false
@@ -1517,7 +1524,7 @@ internal static partial class ProofOutline
             else if (op is LocalAddress addressed)
                 stack.Add(slots[addressed.Index].Components[0].Part == Part.Span
                     ? new LocalValue(addressed.Index) : new LocalAddressValue(addressed.Index));
-            else if (op is AggregateTransfer { Access: AggregateAccess.Initialize })
+            else if (op is ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj })
             {
                 if (Pop() is not LocalAddressValue address) return Stop("zeroing storage other than a struct local");
                 state.Moved = true;

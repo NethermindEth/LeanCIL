@@ -287,8 +287,12 @@ Reject(0, "swapped-signature-of-an-instance", SwapSignatures, "method1_body_vali
 // The callee is defined from its decoder, so the forged return flag is the value of a forged decoder.
 Reject(0, "wrong-emitted-return", source => ForgeDecodedMethod(source, 1, "returnsValue := false"),
     "method1_shape_validated");
-Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"), "method1_shape_validated");
-Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"), "method1_shape_validated");
+Reject(7, "wrong-local-initializer", source => ForgeDecodedMethod(source, 1, "locals := [.i32 1]"),
+    "method1_shape_validated");
+Reject(7, "wrong-initlocals-flag", source => ChangeDefinition(
+    ForgeDecodedMethod(source, 1, "locals := [.i32 0]"), "method1Closed",
+    line => line.Replace("initLocals := true", "initLocals := false", StringComparison.Ordinal)),
+    "method1_shape_validated");
 ReturnMutations();
 
 void ReturnMutations()

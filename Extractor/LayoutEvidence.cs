@@ -230,15 +230,6 @@ internal sealed class LayoutEvidence
                 instruction.Operand is GenericInstanceType span && Spans.Is(span) &&
                 MetadataValidation.IsAggregate(span.GenericArguments[0], method.Module))
                 uses.Add($".size {pc} {Index(span.GenericArguments[0])} .spanElement");
-            else if (instruction.Operand is TypeReference type && MetadataValidation.IsAggregate(type, method.Module))
-            {
-                var access = instruction.OpCode.Code switch
-                {
-                    Code.Ldobj => "load", Code.Stobj => "store", Code.Initobj => "initialize",
-                    Code.Cpobj => "copy", Code.Sizeof => "sizeOf", _ => null
-                };
-                if (access is not null) uses.Add($".size {pc} {Index(type)} .{access}");
-            }
             else if (instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
                 MetadataValidation.IsAggregate(constructor.DeclaringType, method.Module))
                 uses.Add($".size {pc} {Index(constructor is MethodDefinition closedConstructor

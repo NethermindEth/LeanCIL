@@ -231,8 +231,8 @@ public static class Loops
         }
     }
 
-    // Struct names that sort in the opposite order to the locals that hold them, so layout numbers follow
-    // the order the extraction emits them, not the order of their identities.
+    // The local order differs from identity order, so layout numbers follow emission order.
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     struct Zulu
     {
         public uint Count;

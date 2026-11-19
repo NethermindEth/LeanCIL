@@ -117,6 +117,24 @@ def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)
     (type : TypeExpr) : Option TypeExpr :=
   closeLayoutType layouts <$> substituteType arguments type
 
+/-- The closed type of an operand that names a runtime span also names a runtime span. -/
+theorem substituteStorageType_span {layouts : List RawLayout} {arguments : List TypeExpr}
+    {original closed : TypeExpr} (span : original.isRuntimeSpan = true)
+    (storage : substituteStorageType layouts arguments original = some closed) :
+    closed.isRuntimeSpan = true := by
+  cases original <;> try cases span
+  case apply owner element =>
+    change owner.isSpanHead = true at span
+    cases owner <;> try cases span
+    case constructor scope name =>
+      simp only [substituteStorageType, substituteType, Option.pure_def, Option.bind_some,
+        Option.map_eq_map, Option.bind_eq_bind] at storage
+      cases found : substituteType arguments element <;>
+        simp [found, closeLayoutType_span layouts scope name _ span] at storage
+      subst closed
+      exact span
+#print axioms substituteStorageType_span
+
 /-- Whether a type mentions a generic parameter of the method being instantiated. -/
 private def mentionsParameter : TypeExpr → Bool
   | .parameter _ => true

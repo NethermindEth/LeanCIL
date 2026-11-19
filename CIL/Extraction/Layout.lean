@@ -438,6 +438,7 @@ private def closeLayoutTypeKind (table : LayoutTable) : TypeExpr → TypeExpr ×
     let (closedOwner, classHead) := closeLayoutTypeKind table owner
     let type := .apply closedOwner (closeLayoutTypeKind table argument).1
     if classHead then (type, true) else
+    if closedOwner.isSpanHead then (type, false) else
     match table.owner type with
     | some index =>
       (.aggregate ((table.entry index).map RawLayout.identity |>.getD "") index, false)
@@ -452,6 +453,14 @@ def closeLayoutTypeWith (table : LayoutTable) (type : TypeExpr) : TypeExpr :=
 /-- `closeLayoutTypeWith` reading a raw layout list. -/
 def closeLayoutType (layouts : List RawLayout) : TypeExpr → TypeExpr :=
   closeLayoutTypeWith (.ofList layouts)
+
+/-- Closing layout indices inside a runtime span preserves its constructor. -/
+theorem closeLayoutType_span (layouts : List RawLayout) (scope name : String) (element : TypeExpr)
+    (span : (TypeExpr.constructor scope name).isSpanHead = true) :
+    closeLayoutType layouts (.apply (.constructor scope name) element) =
+      .apply (.constructor scope name) (closeLayoutType layouts element) := by
+  simp [closeLayoutType, closeLayoutTypeWith, closeLayoutTypeKind, span]
+#print axioms closeLayoutType_span
 
 /-- Field storage is derived from substituted metadata, including exact aggregate identities. -/
 private def genericFieldType (table : LayoutTable) (type : TypeExpr) : Option FieldType :=

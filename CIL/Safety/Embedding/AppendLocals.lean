@@ -315,18 +315,6 @@ theorem step_appendLocals_loadAggregate (size : Nat) :
 
 #print axioms step_appendLocals_loadAggregate
 
-/-- `copyObject` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_copyObject (size : Nat) :
-    StepAppendLocals (.copyObject size) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.copyObject size) pc stack frame extra memory
-
-#print axioms step_appendLocals_copyObject
-
 /-- `storeAggregate` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_storeAggregate (size : Nat) :
     StepAppendLocals (.storeAggregate size) := by
@@ -338,18 +326,6 @@ theorem step_appendLocals_storeAggregate (size : Nat) :
   exact fallback_appendLocals body.profile (.storeAggregate size) pc stack frame extra memory
 
 #print axioms step_appendLocals_storeAggregate
-
-/-- `initAggregate` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_initAggregate (size : Nat) :
-    StepAppendLocals (.initAggregate size) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.initAggregate size) pc stack frame extra memory
-
-#print axioms step_appendLocals_initAggregate
 
 /-- `loadScalar` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_loadScalar (width : Nat) (signed : Bool) :
@@ -1345,6 +1321,56 @@ theorem step_appendLocals_ldsflda (field : CIL.Extraction.FieldRef) :
 
 #print axioms step_appendLocals_ldsflda
 
+/-- A typed ldobj preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldobj (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.ldobj type) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+#print axioms step_appendLocals_ldobj
+
+/-- A typed stobj preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stobj (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.stobj type) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+#print axioms step_appendLocals_stobj
+
+/-- A typed initobj preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_initobj (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.initobj type) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+#print axioms step_appendLocals_initobj
+
+/-- A typed sizeof preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_sizeof (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.sizeof type) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+#print axioms step_appendLocals_sizeof
+
+/-- A typed cpobj preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_cpobj (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.cpobj type) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  frame_natural
+#print axioms step_appendLocals_cpobj
+
 /-- A typed `ldelem` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldelem_any (element : CIL.Extraction.TypeExpr) :
     StepAppendLocals (.ldelem_any element) := by
@@ -1481,6 +1507,11 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case localloc =>
       exact step_appendLocals_localloc
     case newarr element => exact step_appendLocals_newarr element
+    case ldobj type => exact step_appendLocals_ldobj type
+    case stobj type => exact step_appendLocals_stobj type
+    case initobj type => exact step_appendLocals_initobj type
+    case sizeof type => exact step_appendLocals_sizeof type
+    case cpobj type => exact step_appendLocals_cpobj type
     case ldelem_any element => exact step_appendLocals_ldelem_any element
     case stelem_any element => exact step_appendLocals_stelem_any element
     case ldelema element readOnly => exact step_appendLocals_ldelema element readOnly
@@ -1498,12 +1529,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ble_un target
     case loadAggregate size =>
       exact step_appendLocals_loadAggregate size
-    case copyObject size =>
-      exact step_appendLocals_copyObject size
     case storeAggregate size =>
       exact step_appendLocals_storeAggregate size
-    case initAggregate size =>
-      exact step_appendLocals_initAggregate size
     case loadScalar width signed =>
       exact step_appendLocals_loadScalar width signed
     case storeScalar width =>

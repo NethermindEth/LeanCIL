@@ -595,6 +595,24 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .newarr element, .scalar length :: rest =>
     let (array, memory) ← allocateElements (body.elementShape element) length m
     return .next (pc + 1) (array :: rest) frame memory
+  -- Object transfers use the checked shape of the instruction's closed type operand.
+  | .ldobj type, _ =>
+    let (memory, values) ← transferObject (body.valueShape type) false stack m
+    return .next (pc + 1) values frame memory
+  | .stobj type, _ =>
+    let (memory, values) ← transferObject (body.valueShape type) true stack m
+    return .next (pc + 1) values frame memory
+  | .cpobj type, _ =>
+    let some size := (body.valueShape type).size? | .error (.unsupported "Typed copy width")
+    let (memory, values) ← copyInitializedBytes size stack m
+    return .next (pc + 1) values frame memory
+  | .initobj type, _ =>
+    let some size := (body.valueShape type).size? | .error (.unsupported "Initialization width")
+    let (memory, values) ← initializeBytes size stack m
+    return .next (pc + 1) values frame memory
+  | .sizeof type, _ =>
+    let some size := (body.valueShape type).size? | .error (.unsupported "Object size")
+    return .next (pc + 1) (.scalar (.i32 (BitVec.ofNat 32 size)) :: stack) frame m
   -- Typed element accesses take the storage the layouts give their declared element type.
   | .ldelem_any element, _ =>
     let (memory, values) ← typedElementInstruction (body.elementShape element) false stack m

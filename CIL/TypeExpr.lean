@@ -71,6 +71,17 @@ inductive TypeExpr where
   | ownerParameter (index : Nat)
   deriving DecidableEq, Repr
 
+/-- The exact runtime value-type constructor of a mutable or read-only span. -/
+def TypeExpr.isSpanHead : TypeExpr → Bool
+  | .constructor scope name =>
+    scope == runtimeScope && (name == "System.Span`1" || name == "System.ReadOnlySpan`1")
+  | _ => false
+
+/-- A runtime span application retains its type when the element is specialized. -/
+def TypeExpr.isRuntimeSpan : TypeExpr → Bool
+  | .apply owner _ => owner.isSpanHead
+  | _ => false
+
 /-- Structural substitution includes nested type constructors, not just signature strings. -/
 def substituteType (arguments : List TypeExpr) : TypeExpr → Option TypeExpr
   | .parameter index => arguments[index]?

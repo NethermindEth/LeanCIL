@@ -333,45 +333,53 @@ def copyMemory : Memory := {
 def copyStack : List Value := [.reference (.address ⟨0, 0⟩), .reference (.address ⟨1, 0⟩)]
 
 theorem copy_uninitialized :
-    (instruction (.copyObject 8) copyStack { copyMemory with cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =
+    (copyInitializedBytes 8 copyStack { copyMemory with
+      cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =
       .error (.memory .uninitialized (.address ⟨0, 0⟩) 8) := rfl
 
 theorem copy_unreadable :
-    (instruction (.copyObject 8) copyStack { copyMemory with views := [⟨1, 0, 12, true, true⟩] }).map Prod.snd =
+    (copyInitializedBytes 8 copyStack { copyMemory with
+      views := [⟨1, 0, 12, true, true⟩] }).map Prod.snd =
       .error (.memory .unreadable (.address ⟨0, 0⟩) 8) := rfl
 
 theorem copy_unwritable :
-    (instruction (.copyObject 8) copyStack { copyMemory with views := [⟨0, 0, 12, true, true⟩] }).map Prod.snd =
+    (copyInitializedBytes 8 copyStack { copyMemory with
+      views := [⟨0, 0, 12, true, true⟩] }).map Prod.snd =
       .error (.memory .unwritable (.address ⟨1, 0⟩) 8) := rfl
 
 theorem copy_expired :
-    (instruction (.copyObject 8) copyStack { copyMemory with
+    (copyInitializedBytes 8 copyStack { copyMemory with
       allocations := fun _ => some ⟨.callerStack, ⟨12, 1, []⟩, false, []⟩ }).map Prod.snd =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 8) := rfl
 
 theorem copy_gc_slot :
-    (instruction (.copyObject 8) copyStack { copyMemory with
+    (copyInitializedBytes 8 copyStack { copyMemory with
       allocations := fun _ => some ⟨.callerStack, ⟨12, 1, [(0, 8)]⟩, true, []⟩ }).map Prod.snd =
       .error (.memory .unsupportedLayout (.address ⟨0, 0⟩) 8) := rfl
 
 theorem copy_source_bounds :
-    (instruction (.copyObject 8) [.reference (.address ⟨0, 12⟩), .reference (.address ⟨1, 0⟩)] copyMemory).map Prod.snd =
+    (copyInitializedBytes 8 [.reference (.address ⟨0, 12⟩), .reference (.address ⟨1, 0⟩)]
+      copyMemory).map Prod.snd =
       .error (.memory .outsideAllocation (.address ⟨0, 12⟩) 8) := rfl
 
 theorem copy_destination_bounds :
-    (instruction (.copyObject 8) [.reference (.address ⟨0, 0⟩), .reference (.address ⟨1, 12⟩)] copyMemory).map Prod.snd =
+    (copyInitializedBytes 8 [.reference (.address ⟨0, 0⟩), .reference (.address ⟨1, 12⟩)]
+      copyMemory).map Prod.snd =
       .error (.memory .outsideAllocation (.address ⟨1, 12⟩) 8) := rfl
 
 theorem copy_null_source :
-    (instruction (.copyObject 8) [.reference .null, .reference (.address ⟨1, 0⟩)] copyMemory).map Prod.snd =
+    (copyInitializedBytes 8 [.reference .null, .reference (.address ⟨1, 0⟩)]
+      copyMemory).map Prod.snd =
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem copy_null_destination :
-    (instruction (.copyObject 8) [.reference (.address ⟨0, 0⟩), .reference .null] copyMemory).map Prod.snd =
+    (copyInitializedBytes 8 [.reference (.address ⟨0, 0⟩), .reference .null]
+      copyMemory).map Prod.snd =
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem copy_partial_overlap :
-    (instruction (.copyObject 8) [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 4⟩)] copyMemory).map Prod.snd =
+    (copyInitializedBytes 8 [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 4⟩)]
+      copyMemory).map Prod.snd =
       .error (.unsupported "Partially overlapping typed copy") := rfl
 
 theorem scalar_helper_wrong_width :
@@ -464,7 +472,9 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .loadAggregate 32] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧
-    instructions [.memory .nullRef, .initAggregate 32] [] Memory.empty =
+    (do
+      let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty
+      initializeBytes 32 stack memory) =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .memory .load256] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧

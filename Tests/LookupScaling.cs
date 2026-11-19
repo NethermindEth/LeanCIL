@@ -635,26 +635,35 @@ void ShapeResolutionCosts()
     const double AllowedShapeGrowth = 1.35;
     var resolutionDirectory = At("artifacts/LookupScaling/ShapeResolution");
     Directory.CreateDirectory(resolutionDirectory);
-    (string Name, string Label, int[] Sizes, bool Spread, bool Value)[] rows =
+    (string Name, string Label, int[] Sizes, bool Spread, bool Value, bool Repeated)[] rows =
     [
-        ("Struct", "field shape {0} with every field in one struct", [8, 32, 128], false, false),
-        ("Spread", "field shape {0} with each field in its own struct", [8, 32, 128, 512], true, false),
-        ("Value", "value shape {0} with each type a struct of its own", [8, 32, 128, 512], true, true),
+        ("Struct", "field shape {0} with every field in one struct", [8, 32, 128], false, false, false),
+        ("Spread", "field shape {0} with each field in its own struct", [8, 32, 128, 512], true, false, false),
+        ("Value", "value shape {0} with each type a struct of its own", [8, 32, 128, 512], true, true, false),
+        ("RepeatedValue", "value shape {0} at repeated sites of one struct", [8, 32, 128], true, true, true),
     ];
     var failures = new List<string>();
     foreach (var row in rows)
     {
         var samples = new List<(int Size, long Facts, long Reads)>();
+        var admission = new List<(int Sites, double Cost)>();
         foreach (var size in row.Sizes)
         {
-            var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value);
+            var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value, row.Repeated);
             var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
-            if (costs.Length != size + 1)
+            var measureAdmission = row.Name == "Value" && size <= 128;
+            if (costs.Length != (row.Repeated ? 1 : size) + 1 + (measureAdmission ? 1 : 0))
                 throw new InvalidOperationException("Missing shape resolution costs: " + output);
             long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
                 .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
             samples.Add((size, Sum("fact"), Sum("simplifier")));
+            if (measureAdmission) admission.Add((size, (double)Sum("objects") / size));
         }
+        foreach (var (previous, current) in admission.Zip(admission.Skip(1)))
+            if (previous.Cost <= 0 || current.Cost <= 0 || current.Cost > previous.Cost * AllowedGrowth)
+                failures.Add($"Object admission grew from {previous.Cost:F0} to {current.Cost:F0} heartbeats/site.");
+        foreach (var sample in admission)
+            Console.WriteLine($"Object admission at {sample.Sites} distinct layouts: {sample.Cost:F0} heartbeats/site");
         foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
             { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
         {
@@ -749,9 +758,10 @@ string RunLineageFixture(string directory, int bases)
 }
 
 // Declares one shape fact per operand over size structs, or over one struct of size fields, and reads every fact.
-string RunShapeFixture(string directory, string name, int size, bool spread, bool value)
+string RunShapeFixture(string directory, string name, int size, bool spread, bool value, bool repeated)
 {
-    var structs = spread ? size : 1;
+    var operandCount = repeated ? 1 : size;
+    var structs = spread ? operandCount : 1;
     var fieldsPerStruct = spread ? 1 : size;
     var structFields = string.Join(", ", Enumerable.Repeat("{ type := .signed32 }", fieldsPerStruct));
     var raw = string.Join(",\n  ", Enumerable.Range(0, structs).Select(index =>
@@ -763,7 +773,7 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
         $"⟨{{ size := {4 * fieldsPerStruct}, fields := [{offsets}] }}, 4⟩", structs));
     var operands = new StringBuilder();
     var facts = new StringBuilder();
-    for (var operand = 0; operand < size; operand++)
+    for (var operand = 0; operand < operandCount; operand++)
     {
         var owner = spread ? operand : 0;
         operands.AppendLine(value
@@ -775,12 +785,32 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
             $"operand{operand}");
     }
     var reads = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
-        $"body.{(value ? "valueShape" : "fieldShape")} operand{operand}"));
+        $"body.{(value ? "valueShape" : "fieldShape")} operand{(repeated ? 0 : operand)}"));
     var shapes = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
         value ? ".aggregate 4" : $".value {(spread ? 0 : 4 * operand)} 4 false"));
     var shapeType = value ? "ValueShape" : "FieldShape";
+    var admission = "";
+    if (name == "Value" && size <= 128)
+    {
+        var indices = Enumerable.Range(0, size);
+        var sites = string.Join(", ", indices.Select(index =>
+            $"RawInstruction.mk {index} 0xfe1c (.type operand{index})"));
+        var code = string.Join(", ", indices.Select(index => $".sizeof operand{index}"));
+        admission = $$"""
+            def raw : RawMethod := {
+              token := 1, owner := "Scaling", hasThis := false, explicitThis := false, callingConvention := 0,
+              attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+              initLocals := false, maxStack := {{size}}, genericParameters := [], code := [{{sites}}] }
+            def emitted : Method := { body with code := [{{code}}] }
+            #resolution_cost "objects" in
+            theorem objects_checked : ObjectOperandsValid raw (List.replicate {{size}} true) emitted := by
+              decide +kernel
+            #print axioms objects_checked
+            """;
+    }
     var source = $$"""
         import CIL.Safety.ResolutionFacts
+        import CIL.Extraction.ObjectOperands
         open CIL CIL.Extraction Lean Elab Command
         set_option maxRecDepth 8192
         /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
@@ -799,9 +829,10 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
           { code := List.replicate 512 .nop, locals := [], returnsValue := false, environment }
         {{operands}}
         {{facts}}
+        {{admission}}
         #resolution_cost "simplifier" in
         theorem body_reads : ([{{reads}}] : List {{shapeType}}) = [{{shapes}}] := by simp only [cil_code]
-        #print axioms operand{{size - 1}}_shape
+        #print axioms operand{{operandCount - 1}}_shape
         #print axioms body_reads
         """ + "\n";
     var path = Path.Combine(directory, $"{name}{size}.lean");
@@ -3360,7 +3391,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"closed arguments [0-9]+ [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex ClosedArguments { get; }
 
-    [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
+    [GeneratedRegex(@"resolution (fact|simplifier|objects) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution { get; }
 
     [GeneratedRegex(@"static identities ([0-9]+) heartbeats")]

@@ -19,7 +19,7 @@ inductive FieldAccess where
 
 /-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
 inductive SizeAccess where
-  | load | store | initialize | copy | sizeOf | construct | referenceAdd | referenceSubtract
+  | load | store | sizeOf | construct | referenceAdd | referenceSubtract
   | spanElement
   | arrayElement
   deriving DecidableEq, Repr
@@ -67,8 +67,7 @@ private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bo
     width == size && actual == alignment
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
   | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
-  | .load, .loadAggregate width | .store, .storeAggregate width
-  | .initialize, .initAggregate width | .copy, .copyObject width => width == size
+  | .load, .loadAggregate width | .store, .storeAggregate width => width == size
   | .sizeOf, .ldc_i4 bits => bits.toNat == size
   | .spanElement, .memory (.spanEmpty width _)
   | .spanElement, .initializeSpanLocal _ (.empty width _)

@@ -566,7 +566,7 @@ internal static partial class ProofOutline
     {
         Local load => !NarrowLocal(method, load.Index),
         SetLocal store => !NarrowLocal(method, store.Index),
-        _ => op is LocalAddress or AggregateTransfer { Access: AggregateAccess.Initialize } or
+        _ => op is LocalAddress or ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj } or
             StackOperation { Kind: StackOpcode.Dup } or
             StructField { Access: FieldAccess.Address or FieldAccess.Store or FieldAccess.LoadAggregate or
                 FieldAccess.StoreAggregate } or StructField { Access: FieldAccess.Load, Signed: false }

@@ -515,6 +515,9 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | solve |
         apply StepContract.instruction
         first
+          | (apply copyInitializedBytes_contract; assumption)
+          | (apply initializeBytes_contract; assumption)
+          | (apply transferObject_contract; assumption)
           | (apply fieldLoad_contract; assumption)
           | (apply fieldStore_contract; assumption)
           | (apply fieldReference_contract; assumption)

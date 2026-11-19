@@ -726,8 +726,12 @@ checked layout entry when the operand holds the field's declared tag. For an enu
 `System.SByte`, `System.Byte`, `System.Int16`, `System.UInt16`, `System.Int32`, `System.UInt32`,
 `System.Int64` or `System.UInt64`. The enum has that integer's field kind. Other struct fields
 must match their primitive kind, struct index, or vector width and element lane. A class instance
-field resolves to the model slot of its index. `valueShape` gives each vector its width, including
-floating-point vectors.
+field resolves to the model slot of its index. `valueShape` gives the admitted integer vectors
+their widths. Floating-point vector operands have unsupported object storage.
+
+Decoded and literal object instructions name the same `valueType{k}` constant. A primitive
+load or store steps through its width and signedness, a struct through its checked size, and
+an integer vector through its transfer width. A span load forwards its view.
 
 The first fact of an environment names suffixes of its layout lists,
 `Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`
@@ -759,12 +763,11 @@ decoder, the `declared` field and the `Extracted.method0_declared` fact use the 
 constructor with the closed method's parameter and return type expressions. The extraction derives
 `Extracted.method0_decoded` from the closed equation and the validated specialization.
 It states that decoding the original method at its type arguments gives the same method.
-A decoder with a hole, a
-decoder that gives `none`, and a value the kernel does not reduce to the evaluated method are
-errors, so a file builds only when the kernel confirms what compiled code computed. The form
-`cil_decoded_method name [field, ...] := decoder` also writes each field operand equal to a listed
-`FieldRef` constant as that constant, so the facts `cil_field_shape` states about the constant
-apply to the method; a listed constant that names no field operand is an error.
+The command requires a successful decoder result and kernel confirmation that it reduces to the
+evaluated method. Admission checks the instructions at live positions. The form
+`cil_decoded_method name [operand, ...] := decoder` writes each matching field or closed type
+operand as its listed constant. The method can then use the facts from `cil_field_shape` or
+`cil_value_shape`. The command rejects a listed constant that names no operand.
 
 The extractor defines a method this way when every live instruction decodes and each live call
 or construction has the operation its decoder gives. A constrained prefix decodes with its
@@ -783,9 +786,9 @@ cil_decoded_method method0 := Method.ofClosed? profile environment method0Links 
   method0Closed method0RawArguments
 ```
 
-in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when
-the method accesses instance fields of a struct or class. The list names the field operands
-used by the decoded instructions. The extractor follows the definition with
+in place of a `def method0 : Method` literal. The optional list before `:=` names the operands
+used by the decoded instructions, for example `[fieldRef0, valueType0]` for a field access
+and an object instruction. The extractor follows the definition with
 `cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
 its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.program_method{n}`
 equations.

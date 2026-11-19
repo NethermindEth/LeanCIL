@@ -587,10 +587,11 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     return match argumentOperation instruction, emitted with
       | some (.store index), .starg actual => index == actual
       | _, _ => false
-  -- A span address on the stack is already the view it names, so copying the span emits nothing.
-  if instruction.opcode == 113 then
+  -- A span load forwards its view and retains the raw span operand.
+  if instruction.opcode == 0x71 then
     if let .type type := instruction.operand then
-      if spanLocal type then return match emitted with | .nop => true | _ => false
+      if spanLocal type then
+        return match emitted with | .ldobj operand => operand == type | _ => false
   return match instruction.opcode, instruction.operand, emitted with
     -- Stack duplication, bitwise operations and exact comparison signedness.
     | 37, _, .dup | 95, _, .and | 96, _, .or | 97, _, .xor | 65025, _, .ceq => true

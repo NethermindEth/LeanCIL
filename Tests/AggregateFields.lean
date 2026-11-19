@@ -139,7 +139,12 @@ theorem store_unavailable {entered memory : Memory} {boundary : Nat} {kinds slot
 
 /-- Zero a struct local, store its int field, then store and reload a word local. -/
 @[cil_code] def structAndWord : CIL.Method := {
-  code := [.ldloca 0, .initAggregate 12, .ldloca 0, .ldarg 0, .setFieldAt 8 4,
+  environment := {
+    rawLayouts := [{
+      identity := "Packet", explicit := false, packing := 4, declaredSize := 12
+      fields := [⟨.unsigned64, none⟩, ⟨.signed32, none⟩] }]
+    layouts := #[⟨packet, 4⟩] }
+  code := [.ldloca 0, .initobj (.aggregate "Packet" 0), .ldloca 0, .ldarg 0, .setFieldAt 8 4,
     .ldarg 1, .stloc 1, .ldloc 0, .ret]
   locals := [.aggregate zeros, .i64 0], localKinds := [.aggregate 12, .word64],
   returnsValue := true }
@@ -163,9 +168,10 @@ theorem struct_beside_word {entered memory : Memory} {frame : Frame} {boundary :
       packet_checked.2 rfl rfl (fieldIndex := 1) rfl (.i32 bits) rfl
   have wordTagged := snapshot_access_after_write
     (snapshot_access_after_write wordReady zeroWrite) tagWrite
-  cil_checked_steps (snapshots := tagSnapshots) [structSlot, wordSlot, tagFormed, zeroStep,
-    tagStep, access_reference_valid _ _ _ _ _ structReady, zeroForm, wordTagged, zeros,
-    localAddress]
+  cil_checked_steps (snapshots := tagSnapshots)
+    [structSlot, access_reference_valid _ _ _ _ _ structReady,
+      zeroStep structAndWord (.aggregate "Packet" 0) rfl, wordSlot, tagFormed,
+      tagStep, zeroForm, wordTagged, zeros, localAddress]
 
 #print axioms struct_beside_word
 

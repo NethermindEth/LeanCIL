@@ -550,26 +550,27 @@ theorem step_aggregateFieldAt_home {memory : Memory} {home : Reference}
 
 /-- `initobj` on a writable home zeroes its `size` bytes, which then read back. The step holds
     in any method and frame. -/
-theorem step_initAggregate_home {memory : Memory} {home : Reference} {size : Nat}
+theorem step_initobj_home {memory : Memory} {home : Reference} {size : Nat}
     (writable : access memory home size 1 true = .ok ()) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.initAggregate size) pc args frame (.reference (.address home) :: rest)
-          memory = .ok (.next (pc + 1) rest frame after)) ∧
+      (∀ (body : Method) (type : Extraction.TypeExpr), (body.valueShape type).size? = some size →
+        ∀ pc args frame rest,
+          step body (.initobj type) pc args frame (.reference (.address home) :: rest) memory =
+            .ok (.next (pc + 1) rest frame after)) ∧
       write memory home (List.replicate size 0) 1 = .ok after ∧
       read after home size 1 = .ok (List.replicate size 0) := by
   obtain ⟨after, written⟩ := write_succeeds (bytes := List.replicate size 0) (alignment := 1)
     (by simpa using writable)
   refine ⟨after, ?_, written, by simpa using write_readback _ _ _ _ _ written⟩
-  intro body pc args frame rest
-  rw [step_initAggregate_reference_eq]
+  intro body type shape pc args frame rest
+  rw [step_initobj_reference_eq _ _ _ _ _ shape]
   simp only [referenceAt, ordinaryAccessAlignment, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_fieldAt_home
 #print axioms step_fieldAt_signed_home
 #print axioms step_aggregateFieldAt_home
-#print axioms step_initAggregate_home
+#print axioms step_initobj_home
 
 /-- A remembered aggregate local reads as exactly its remembered bytes, which fill its home. -/
 theorem LocalSnapshots.aggregate {memory : Memory} {slots : List LocalSlot}
@@ -606,16 +607,17 @@ theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat}
     (slot : slots[index]? = some (.bytes (.aggregate ⟨width, bounded⟩) home))
     (writable : access memory home width 1 true = .ok ()) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.initAggregate width) pc args frame (.reference (.address home) :: rest)
-          memory = .ok (.next (pc + 1) rest frame after)) ∧
+      (∀ (body : Method) (type : Extraction.TypeExpr), (body.valueShape type).size? = some width →
+        ∀ pc args frame rest,
+          step body (.initobj type) pc args frame (.reference (.address home) :: rest) memory =
+            .ok (.next (pc + 1) rest frame after)) ∧
       LocalSnapshots after slots
         (rememberLocal known index (.aggregate (List.replicate width 0))) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
       access after home width 1 true = .ok () ∧ form after home = .ok home ∧
       write memory home (List.replicate width 0) 1 = .ok after := by
   let size : Fin (2^64) := ⟨width, bounded⟩
-  obtain ⟨after, stepped, written, _⟩ := step_initAggregate_home writable
+  obtain ⟨after, stepped, written, _⟩ := step_initobj_home writable
   obtain ⟨_, ready⟩ := access_requirements writable
   have encoded : localNumber (.aggregate size) (.aggregate (List.replicate size 0)) =
       .ok (byteNumber (List.replicate size 0)) := by

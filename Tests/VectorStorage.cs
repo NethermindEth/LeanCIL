@@ -263,28 +263,52 @@ foreach (var item in portableCases)
 pending.Flush();
 
 var baseline = File.ReadAllText(Path.Combine(root, "Roundtrip128uint/Extracted.lean"));
-const string obligation = "method0_vector_initializations_validated";
+const string shapes = "method0_object_operands_validated";
+const string scalars = "method0_scalars_validated";
 var controlPath = Path.Combine(root, "Roundtrip128uint/Control.lean");
-File.WriteAllText(controlPath, baseline +
-    CheckedEvidenceControl(baseline, NarrowEvidence(baseline, obligation), [obligation], 0));
+File.WriteAllText(controlPath, $"""
+    {baseline}
+    {CheckedEvidenceControl(baseline, NarrowEvidence(baseline, shapes), [shapes], 0)}
+    """);
 Run(["lake", "env", "lean", controlPath], cwd: verification.CheckoutPackage());
+var literalControl = Path.Combine(root, "Roundtrip128uint/LiteralControl.lean");
+File.WriteAllText(literalControl, LiteralScalars(baseline));
+Run(["lake", "env", "lean", literalControl], cwd: verification.CheckoutPackage());
 var rejected = new RejectedEvidence(root);
-foreach (var (name, changed) in new[]
+const string widerFamily = ".constructor Extraction.intrinsicsScope \"System.Runtime.Intrinsics.Vector256`1\"";
+const string wordElement = ".atom Extraction.runtimeScope \"System.UInt32\"";
+foreach (var (name, changed, obligation, marker) in new[]
 {
-    ("store-width", baseline.Replace(".memory .store128", ".memory .store256")),
-    ("load-width", baseline.Replace(".memory .load128", ".memory .load256")),
-    ("init-width", baseline.Replace(".initAggregate 16", ".initAggregate 32")),
-    ("init-missing", baseline.Replace(".initAggregate 16", ".nop")),
-    ("element-token", baseline.Replace("\"System.UInt32\"", "\"System.Int16\"")),
-    ("vector-token", baseline.Replace("Vector128\\u00601", "Vector256\\u00601"))
+    ("float-element", baseline.Replace("\"System.UInt32\"", "\"System.Double\""), shapes, "ObjectOperandsValid"),
+    ("element-token", baseline.Replace("\"System.UInt32\"", "\"System.Int16\""), shapes, "ObjectOperandsValid"),
+    ("vector-token", ForgeTransfer("ldobj", $""".ldobj (.apply ({widerFamily}) ({wordElement}))"""),
+        scalars, "ScalarFlowValid"),
+    ("store-width", ForgeTransfer("stobj", ".stobj (.atom Extraction.runtimeScope \"System.UInt64\")"),
+        scalars, "ScalarFlowValid"),
+    ("load-width", ForgeTransfer("ldobj", ".ldobj (.atom Extraction.runtimeScope \"System.Int32\")"),
+        scalars, "ScalarFlowValid"),
+    ("init-width", ForgeTransfer("initobj", ".initobj (.atom Extraction.runtimeScope \"System.Byte\")"),
+        scalars, "ScalarFlowValid"),
+    ("init-missing", ForgeTransfer("initobj", ".nop"), scalars, "ScalarFlowValid")
 })
 {
-    if (changed == baseline) throw new InvalidOperationException("Ineffective vector mutation: " + name);
-    var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(changed, obligation));
-    rejected.Add(path, "PASS independently rejected vector evidence: " + name,
-        "Extraction.VectorInitializationsValid method0Closed", "is false");
+    if (changed == baseline) throw new InvalidOperationException($"Ineffective vector mutation: {name}");
+    var path = Path.Combine(root, $"{name}.lean");
+    File.WriteAllText(path, obligation == scalars ? LiteralScalars(changed) : NarrowEvidence(changed, obligation));
+    rejected.Add(path, $"PASS independently rejected vector evidence: {name}", marker, "is false");
 }
+
+string LiteralScalars(string source)
+{
+    var narrowed = NarrowEvidence(source, scalars);
+    const string decoded = "method0.code true) (true = true ->";
+    if (!narrowed.Contains(decoded, StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing decoded scalar obligation");
+    return narrowed.Replace(decoded, "method0.code false) (false = true ->", StringComparison.Ordinal);
+}
+
+string ForgeTransfer(string opcode, string replacement) => ForgeDecodedMethod(baseline, 0,
+    $"""code := method.code.map fun op => match op with | .{opcode} _ => {replacement} | _ => op""");
 var portableBaseline = File.ReadAllText(Path.Combine(root, "PortableCall128/Extracted.lean"))
     .Replace("method0", "method1", StringComparison.Ordinal);
 string RawOnly(string text, Func<string, string> change) => Regex.Replace(text,

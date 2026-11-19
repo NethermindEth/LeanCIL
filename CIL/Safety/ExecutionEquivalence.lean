@@ -440,7 +440,11 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherMemory, otherValues⟩ := right
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
-    | (apply ResultEquivalent.bind (same.typedElementInstruction _ _ _)
+    | (first
+         | apply ResultEquivalent.bind (same.copyInitializedBytes _ _)
+         | apply ResultEquivalent.bind (same.initializeBytes _ _)
+         | apply ResultEquivalent.bind (same.transferObject _ _ _)
+         | apply ResultEquivalent.bind (same.typedElementInstruction _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
        obtain ⟨otherMemory, otherValues⟩ := right

@@ -571,27 +571,172 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
   let (memory, values) ← instruction op stack memory
   return .next (pc + 1) values frame memory
 
+/-- The span shape resolves exactly the span loads that forward their operand. -/
+private theorem valueShape_span_test (type : Extraction.TypeExpr) :
+    Extraction.spanLocal type = (body.valueShape type matches .span) := by
+  generalize resolved : body.valueShape type = shape
+  unfold Method.valueShape LayoutEnvironment.valueShape valueShapeAt at resolved
+  cases span : Extraction.spanLocal type <;> simp only [span, Bool.false_eq_true, ite_false,
+    ite_true] at resolved
+  all_goals repeat' split at resolved
+  all_goals subst shape <;> rfl
+#print axioms valueShape_span_test
+
+/-- The decoded ldobj of primitive storage has the full result of its memory rule. -/
+@[cil_step] theorem step_ldobj_primitive {type : Extraction.TypeExpr} {width : Nat} {signed : Bool}
+    (shape : body.valueShape type = .primitive width signed) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory =
+      step body (.loadScalar width signed) pc args frame stack memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
+#print axioms step_ldobj_primitive
+
+/-- The decoded ldobj of aggregate storage has the full result of its memory rule. -/
+@[cil_step] theorem step_ldobj_aggregate {type : Extraction.TypeExpr} {size : Nat}
+    (shape : body.valueShape type = .aggregate size) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory =
+      step body (.loadAggregate size) pc args frame stack memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
+#print axioms step_ldobj_aggregate
+
+/-- The decoded ldobj of vector storage has the full result of its memory rule. -/
+@[cil_step] theorem step_ldobj_vector16 {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .vector 16) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory =
+      step body (.memory .load128) pc args frame stack memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
+#print axioms step_ldobj_vector16
+
+/-- The decoded ldobj of vector storage has the full result of its memory rule. -/
+@[cil_step] theorem step_ldobj_vector32 {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .vector 32) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory =
+      step body (.memory .load256) pc args frame stack memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
+#print axioms step_ldobj_vector32
+
+/-- The decoded ldobj of vector storage has the full result of its memory rule. -/
+@[cil_step] theorem step_ldobj_vector64 {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .vector 64) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory =
+      step body (.memory .load512) pc args frame stack memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
+#print axioms step_ldobj_vector64
+
+/-- The decoded ldobj of span storage has the full result of its memory rule. -/
+@[cil_step] theorem step_ldobj_span {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .span) (stack : List Value) :
+    step body (.ldobj type) pc args frame stack memory =
+      step body .nop pc args frame stack memory := by
+  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+    pureArity, staticInstruction]
+  rfl
+#print axioms step_ldobj_span
+
+/-- The decoded stobj of primitive storage has the full result of its memory rule. -/
+@[cil_step] theorem step_stobj_primitive {type : Extraction.TypeExpr} {width : Nat} {signed : Bool}
+    (shape : body.valueShape type = .primitive width signed) (stack : List Value) :
+    step body (.stobj type) pc args frame stack memory =
+      step body (.storeScalar width) pc args frame stack memory := by
+  simp only [step, observerCount, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+#print axioms step_stobj_primitive
+
+/-- The decoded stobj of aggregate storage has the full result of its memory rule. -/
+@[cil_step] theorem step_stobj_aggregate {type : Extraction.TypeExpr} {size : Nat}
+    (shape : body.valueShape type = .aggregate size) (stack : List Value) :
+    step body (.stobj type) pc args frame stack memory =
+      step body (.storeAggregate size) pc args frame stack memory := by
+  simp only [step, observerCount, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+#print axioms step_stobj_aggregate
+
+/-- The decoded stobj of vector storage has the full result of its memory rule. -/
+@[cil_step] theorem step_stobj_vector16 {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .vector 16) (stack : List Value) :
+    step body (.stobj type) pc args frame stack memory =
+      step body (.memory .store128) pc args frame stack memory := by
+  simp only [step, observerCount, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+#print axioms step_stobj_vector16
+
+/-- The decoded stobj of vector storage has the full result of its memory rule. -/
+@[cil_step] theorem step_stobj_vector32 {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .vector 32) (stack : List Value) :
+    step body (.stobj type) pc args frame stack memory =
+      step body (.memory .store256) pc args frame stack memory := by
+  simp only [step, observerCount, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+#print axioms step_stobj_vector32
+
+/-- The decoded stobj of vector storage has the full result of its memory rule. -/
+@[cil_step] theorem step_stobj_vector64 {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .vector 64) (stack : List Value) :
+    step body (.stobj type) pc args frame stack memory =
+      step body (.memory .store512) pc args frame stack memory := by
+  simp only [step, observerCount, shape, transferObject,
+    pureArity, staticInstruction]
+  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+#print axioms step_stobj_vector64
+
+/-- initobj checks its operands before accessing the resolved number of bytes. -/
+@[cil_step] theorem step_initobj_eq {type : Extraction.TypeExpr} {size : Nat}
+    (width : (body.valueShape type).size? = some size) (stack : List Value) :
+    step body (.initobj type) pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (updated, values) ← initializeBytes size stack memory
+        return .next (pc + 1) values frame updated := by
+  simp only [step, observerCount, width]
+#print axioms step_initobj_eq
+
+/-- cpobj checks its operands before accessing the resolved number of bytes. -/
+@[cil_step] theorem step_cpobj_eq {type : Extraction.TypeExpr} {size : Nat}
+    (width : (body.valueShape type).size? = some size) (stack : List Value) :
+    step body (.cpobj type) pc args frame stack memory =
+      if unspecifiedOperands 2 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (updated, values) ← copyInitializedBytes size stack memory
+        return .next (pc + 1) values frame updated := by
+  simp only [step, observerCount, width]
+#print axioms step_cpobj_eq
+
+/-- The size of an admitted type pushes its resolved byte width as an i32. -/
+@[cil_step] theorem step_sizeof_eq {type : Extraction.TypeExpr} {size : Nat}
+    (width : (body.valueShape type).size? = some size) (stack : List Value) :
+    step body (.sizeof type) pc args frame stack memory =
+      step body (.ldc_i4 (BitVec.ofNat 32 size)) pc args frame stack memory := by
+  simp only [step, observerCount, width, unspecifiedOperands, List.take_zero, List.any_nil,
+    pureArity, instruction]
+  rfl
+#print axioms step_sizeof_eq
+
 -- One equation per op, so simp selects it by constructor without a side condition.
 @[cil_step] theorem step_loadAggregate_eq {size} (stack : List Value) :
     step body (.loadAggregate size) pc args frame stack memory =
       instructionStep (.loadAggregate size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_copyObject_eq {size} (stack : List Value) :
-    step body (.copyObject size) pc args frame stack memory =
-      instructionStep (.copyObject size) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_storeAggregate_eq {size} (stack : List Value) :
     step body (.storeAggregate size) pc args frame stack memory =
       instructionStep (.storeAggregate size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
-@[cil_step] theorem step_initAggregate_eq {size} (stack : List Value) :
-    step body (.initAggregate size) pc args frame stack memory =
-      instructionStep (.initAggregate size) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_loadScalar_eq {width signed} (stack : List Value) :
     step body (.loadScalar width signed) pc args frame stack memory =
       instructionStep (.loadScalar width signed) pc frame stack memory := by

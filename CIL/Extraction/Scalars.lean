@@ -350,23 +350,6 @@ private def scalarEmission : Instruction → Bool
   | .ble_un _ | .blt_un _ => true
   | _ => false
 
-/-- Byte width of a non-aggregate `sizeof` operand on the admitted 64-bit target. -/
-private def primitiveSize (type : TypeExpr) : Option Nat :=
-  match typeStorage [] type with
-  | some (.field kind) => primitiveFieldWidth kind
-  | some .vector128 => some 16
-  | some .vector256 => some 32
-  | some .vector512 => some 64
-  | _ => none
-
-/-- A `sizeof` constant has its primitive width; an aggregate size is bound by its layout use
-    instead. `Unsafe.SizeOf` keeps its call, whose model reads the size from the layouts. -/
-private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
-  match instruction.opcode, instruction.operand with
-  | 65052, .type (.aggregate ..) => true
-  | 65052, .type type => primitiveSize type == some bits.toNat
-  | _, _ => false
-
 /-- An instance field instruction, or an emitted field instruction. -/
 private def instanceFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
@@ -436,13 +419,18 @@ def readOnlyDecodedMatches (previous : Option RawInstruction) (instruction : Raw
 
 /-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
     `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
-    word, a size constant or an exact runtime query may emit a scalar operation. `previous` is
+    word or an exact runtime query may emit a scalar operation. `previous` is
     the raw instruction before `instruction`, `none` at the first pc. A `no.` prefix has no
     scalar emission, and `readonly.` must agree with the decoded address. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (previous : Option RawInstruction) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) (skipEncoding := false) : Bool :=
   if instruction.opcode == 0xFE19 || invalidPredecessor previous instruction then false
+  else if (emitted matches .ldobj _ | .stobj _ | .initobj _ | .cpobj _ | .sizeof _) ||
+      instruction.opcode ∈ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c] then
+    match role, emitted with
+    | some (.spanConstructor ..), .initializeSpanLocal .. => true
+    | _, _ => skipEncoding || valueEncodingMatches previous instruction emitted
   else if !readOnlyDecodedMatches previous instruction emitted skipEncoding then false
   else if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
@@ -486,8 +474,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if scalarCovered instruction.opcode then
     scalarOpMatches previous instruction stack emitted skipEncoding
   else !scalarEmission emitted || match role, emitted with
-    | _, .ldc_i4 bits => sizeConstant instruction bits ||
-        platformField instruction == some bits ||
+    | _, .ldc_i4 bits => platformField instruction == some bits ||
         (instruction.opcode == 40 && match instruction.operand with
           | .call site => platformConstant site == some bits
           | _ => false)
@@ -776,15 +763,12 @@ private def pushedKind (raw : RawMethod)
           return scalarType (.byref type)
       | _ => none
     else if instruction.opcode ∈ [124, 127] then some .reference
-    -- `ldfld` and `ldsfld`, then `ldobj`.
+    -- `ldfld` and `ldsfld`.
     else if instruction.opcode == 123 || instruction.opcode == 126 then
       let .field owner _ type _ static := instruction.operand | none
       if instruction.opcode == 123 && !static && owner matches .object .. &&
           opaqueFieldType type then
         return .opaque
-      return scalarType type
-    else if instruction.opcode == 113 then
-      let .type type := instruction.operand | none
       return scalarType type
     -- `ldind.i`, `ldind.i8`, then `ldind.i1` through `ldind.u4` and `sizeof`.
     else if instruction.opcode == 77 then some .native
@@ -805,6 +789,16 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   if role matches some (.result _) then
     let _ :: _ :: tail := stack | none
     return .word32 :: tail
+  if opcode == 0x71 || opcode == 0x81 then
+    let .type type := instruction.operand | none
+    let home := scalarType (.byref type)
+    let value := scalarType type
+    if opcode == 0x71 then
+      let address :: rest := stack | none
+      if address == home then return value :: rest else none
+    else
+      let stored :: address :: rest := stack | none
+      if address == home && storageCompatible stored value then return rest else none
   -- A literal outside a folded throw is an object; a folded throw's message is never a value.
   if opcode == 114 && role == none then
     let .text _ := instruction.operand | none

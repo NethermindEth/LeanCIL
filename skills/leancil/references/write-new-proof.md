@@ -28,6 +28,10 @@ index. Arguments are `CIL.Safety.Value`s such as `.scalar (.i32 x)` and `.scalar
 `x : CIL.W32` (`BitVec 32`) or `CIL.W64` (`BitVec 64`). Fuel exhaustion, a fault and an
 unsupported state are never successes, so `Ensures` and `Holds` state total correctness.
 
+An extracted object instruction names its closed type as `Extracted.valueType{k}`.
+Use its `_shape` fact when a proof needs the byte width or signedness of a load, store,
+initialization, copy or size. A span load preserves the stack.
+
 ## 2. Generate a starting proof
 
 ```sh

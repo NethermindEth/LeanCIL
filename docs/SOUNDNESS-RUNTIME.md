@@ -177,9 +177,9 @@ is sound only because the home cannot change during the call: the extractor reje
 reset, `ref` and `out` span parameters, and span references in locals, returns and fields, so no
 admitted code can rebind, address or overwrite a span home. The parameter's readonly attributes,
 which a generic specialization copies from its definition, and these rejections are trusted
-extractor decisions; the Lean validators still bind the raw argument to
-a managed reference, reject its address and accept an empty emission for `ldobj` only at a span
-type. Loads, stores and comparisons that expect a byte reference fault on a view rather than
+extractor decisions. Lean binds the raw argument to a managed reference and rejects its address.
+A decoded span `ldobj` forwards the stack. Its preceding instruction must load or address that
+exact span home, and the copy must have no incoming branch. Loads, stores and comparisons that expect a byte reference fault on a view rather than
 reading it as an address.
 
 An `in` parameter of a virtual member carries `modreq(InAttribute)` on its reference. The
@@ -616,7 +616,7 @@ assumptions; [tuple tests](../Tests/TupleDivision.cs) probe both admitted and re
 
 ## Typed copies
 
-`copyObject_writes_snapshot` proves destination bytes equal the source snapshot and are initialized,
+`cpobj_writes_snapshot` proves destination bytes equal the source snapshot and are initialized,
 including padding. Access and initialization premises remain mandatory. References have provenance
 and offsets, not nominal CLR type tags: relating `cpobj` to the runtime additionally assumes both
 storage regions are compatible with its validated type token. Runtime tests are not a JIT proof.

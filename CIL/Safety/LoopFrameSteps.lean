@@ -328,8 +328,17 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let value ← Term.exprToSyntax payload
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.store_field
         $frame $(quote index) $valid $(quote field) $value)
-    else if op.isAppOfArity ``CIL.Instruction.initAggregate 1 then do
-      let some widthTerm := lastArgument? op | return false
+    else if op.isAppOfArity ``CIL.Instruction.initobj 1 then do
+      let some operand := lastArgument? op | return false
+      let some (_, _, result) := (← instantiateMVars (← inferType found)).consumeMData.eq?
+        | return false
+      let some body := lastArgument? result | return false
+      let shape := mkApp2 (mkConst ``CIL.Method.valueShape) body operand
+      let resolved ← match ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape shape with
+        | some (.done result) => pure result.expr
+        | _ => whnfD shape
+      let widthTerm := mkApp (mkConst ``CIL.ValueShape.size?) resolved
+      let .app (.app (.const ``Option.some _) _) widthTerm ← whnfD widthTerm | return false
       let some width ← literalNat? widthTerm | return false
       let some (_, top) := stack[0]? | return false
       let some home ← loopAddressOf? top | return false
@@ -391,7 +400,10 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       | some lowering => do
         let lowering ← Term.exprToSyntax lowering
         `(Eq.trans ($lowering _ _ _ _ _) ($stepped _ _ _ _ _))
-      | none => `($stepped _ _ _ _ _)
+      | none =>
+        if op.isAppOfArity ``CIL.Instruction.initobj 1 then
+          `($stepped _ _ (by first | rfl | simp only [cil_code, CIL.ValueShape.size?]) _ _ _ _)
+        else `($stepped _ _ _ _ _)
     Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
       refine CIL.Safety.loop_terminates_next $found $instruction $storing ?_))
   catch _ => taken.restore

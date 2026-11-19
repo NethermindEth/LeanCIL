@@ -1076,7 +1076,8 @@ def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray
   let proof ← match result.proof? with
     | some eq => mkEqMP eq proof
     | none => mkExpectedTypeHint proof result.expr
-  let goals ← withTransparency .instances <| (← getMainGoal).apply proof
+  -- Lookup may also unfold a supplied definition inside the body, such as a local initializer.
+  let goals ← withDefault <| (← getMainGoal).apply proof
   unless goals.isEmpty do throwError "The step fact left goals"
   replaceMainGoal []
 
@@ -1231,7 +1232,7 @@ elab_rules : tactic
     if let some (_, step, result) := initial.eq? then
       if let some #[body, op, pc, args, frame, stack, memory] :=
           argumentsOf? step ``CIL.Safety.step 7 then
-        if let some (lowered, lowering) ← structFieldLowering? body op then
+        if let some (lowered, lowering) ← storageLowering? body op then
           let equation := (mkAppN lowering #[pc, args, frame, memory, stack]).headBeta
           let steppedLowered :=
             mkAppN step.getAppFn #[body, lowered, pc, args, frame, stack, memory]
@@ -1792,7 +1793,7 @@ open Lean Meta in
     of its shape, read from the method `lookup` (`body.code[pc]? = some op`) names; else `op`. -/
 def cilSteppedOp (lookup op : Expr) : MetaM Expr := do
   let some code := lookup.find? (·.isAppOfArity ``CIL.Method.code 1) | return op
-  let some (lowered, _) ← structFieldLowering? code.appArg! op | return op
+  let some (lowered, _) ← storageLowering? code.appArg! op | return op
   return lowered
 
 open Lean Elab Tactic Meta in

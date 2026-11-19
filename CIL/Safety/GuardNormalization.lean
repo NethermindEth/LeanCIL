@@ -148,9 +148,26 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
     observerCount (.loadAggregate size) = 1 := rfl
 @[cil_guard] theorem guard_storeAggregate (size : Nat) :
     observerCount (.storeAggregate size) = 2 := rfl
-@[cil_guard] theorem guard_copyObject (size : Nat) : observerCount (.copyObject size) = 2 := rfl
-@[cil_guard] theorem guard_initAggregate (size : Nat) :
-    observerCount (.initAggregate size) = 1 := rfl
+/-- The cpobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_cpobj (type : Extraction.TypeExpr) :
+    observerCount (.cpobj type) = 2 := rfl
+#print axioms guard_cpobj
+/-- The initobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_initobj (type : Extraction.TypeExpr) :
+    observerCount (.initobj type) = 1 := rfl
+#print axioms guard_initobj
+/-- The ldobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_ldobj (type : Extraction.TypeExpr) :
+    observerCount (.ldobj type) = (if Extraction.spanLocal type then 0 else 1) := rfl
+#print axioms guard_ldobj
+/-- The stobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_stobj (type : Extraction.TypeExpr) :
+    observerCount (.stobj type) = 2 := rfl
+#print axioms guard_stobj
+/-- The sizeof guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_sizeof (type : Extraction.TypeExpr) :
+    observerCount (.sizeof type) = 0 := rfl
+#print axioms guard_sizeof
 @[cil_guard] theorem guard_loadScalar (width : Nat) (signed : Bool) :
     observerCount (.loadScalar width signed) = 1 := rfl
 @[cil_guard] theorem guard_storeScalar (width : Nat) : observerCount (.storeScalar width) = 2 := rfl

@@ -1214,6 +1214,51 @@ theorem instruction_contract (operation : CIL.Instruction) (stack values : List 
     | cases h
     | split at h
 
+/-- A successful typed copy preserves the checked memory and stack invariants. -/
+theorem copyInitializedBytes_contract (size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : copyInitializedBytes size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold copyInitializedBytes at executed
+  split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  all_goals repeat' first
+    | solve | apply instruction_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms copyInitializedBytes_contract
+
+/-- A successful initialization preserves the checked memory and stack invariants. -/
+theorem initializeBytes_contract (size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : initializeBytes size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold initializeBytes at executed
+  split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  all_goals repeat' first
+    | solve | apply instruction_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms initializeBytes_contract
+
+/-- A successful object transfer preserves the checked memory and stack invariants. -/
+theorem transferObject_contract (shape : ValueShape) (store : Bool) (stack values : List Value)
+    (memory result : Memory)
+    (executed : transferObject shape store stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold transferObject at executed
+  split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  all_goals repeat' first
+    | solve | apply instruction_contract; assumption
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms transferObject_contract
+
 theorem memoryInstruction_effect (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
     InstructionEffect m result := (memoryInstruction_contract _ _ _ _ _ h).effect

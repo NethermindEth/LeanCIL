@@ -115,14 +115,14 @@ open Extraction
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
   opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 || opcode == 40 ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
-    (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 111) ||
-    (114 <= opcode && opcode <= 117) || (123 <= opcode && opcode <= 125) ||
-    (130 <= opcode && opcode <= 139) ||
+    (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 117) ||
+    (123 <= opcode && opcode <= 125) || (129 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
     opcode == 224 || (65025 <= opcode && opcode <= 65029) ||
-    (65033 <= opcode && opcode <= 65039) || opcode == 65046 || opcode == 65054
+    (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
+    opcode == 0xfe1c || opcode == 0xfe1e
 
 /-- `ldelema` (143) of the element type `type` after `previous`: a read-only address after
     `readonly.`, which it takes, and nothing after any other prefix. -/
@@ -132,27 +132,35 @@ def Instruction.ldelemaAfter? (previous : Option RawInstruction) (type : TypeExp
   else if previous.any fun before => isPrefixOpcode before.opcode then none
   else some (.ldelema type false)
 
-/-- The instruction `opcode` denotes on the type operand `type` after `previous`: the class
-    type test `castclass` (116) or `isinst` (117), or the array instruction `newarr` (141),
-    `ldelem` (163), `stelem` (164) or `ldelema` (143), or the `constrained.` prefix. -/
+/-- The object, class or array operation a type operand denotes after its prefix. A span reset
+    needs the local address from its folded predecessor. -/
 def Instruction.ofType? (previous : Option RawInstruction) (opcode : Nat) (type : TypeExpr) :
     Option Instruction :=
-  if opcode == 116 then some (.castclass type) else if opcode == 117 then some (.isinst type)
-  else if opcode == 141 then some (.newarr type) else if opcode == 163 then some (.ldelem_any type)
-  else if opcode == 164 then some (.stelem_any type)
-  else if opcode == 143 then Instruction.ldelemaAfter? previous type
-  else if opcode == 0xFE16 then some .nop else none
+  match opcode with
+  | 0x70 => some (.cpobj type)
+  | 0x71 => some (.ldobj type)
+  | 0x74 => some (.castclass type)
+  | 0x75 => some (.isinst type)
+  | 0x81 => some (.stobj type)
+  | 0x8d => some (.newarr type)
+  | 0x8f => Instruction.ldelemaAfter? previous type
+  | 0xa3 => some (.ldelem_any type)
+  | 0xa4 => some (.stelem_any type)
+  | 0xfe15 => if type.isRuntimeSpan then none else some (.initobj type)
+  | 0xfe16 => some .nop
+  | 0xfe1c => some (.sizeof type)
+  | _ => none
 
-/-- Only `castclass` (116), `isinst` (117), `newarr` (141), `ldelem` (163), `stelem` (164)
-    `ldelema` (143) and `constrained.` (0xFE16) denote an instruction on a type operand. -/
+/-- Every successful type-operand decoding names one of the supported opcodes. -/
 theorem Instruction.ofType?_opcode {previous : Option RawInstruction} {opcode : Nat}
     {type : TypeExpr} {instruction : Instruction}
     (named : Instruction.ofType? previous opcode type = some instruction) :
     opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 ∨
-      opcode = 143 ∨ opcode = 0xFE16 := by
+      opcode = 143 ∨ opcode = 0x70 ∨ opcode = 0x71 ∨ opcode = 0x81 ∨
+      opcode = 0xFE15 ∨ opcode = 0xFE1C ∨ opcode = 0xFE16 := by
   unfold Instruction.ofType? at named
   repeat' split at named
-  all_goals first | contradiction | simp_all
+  all_goals first | contradiction | simp
 
 #print axioms Instruction.ofType?_opcode
 
@@ -292,6 +300,12 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .cgt_un => (emitted matches .cgt_un)
   | .clt => (emitted matches .clt)
   | .clt_un => (emitted matches .clt_un)
+  -- Each object instruction names its closed storage type.
+  | .ldobj expected => match emitted with | .ldobj actual => expected == actual | _ => false
+  | .stobj expected => match emitted with | .stobj actual => expected == actual | _ => false
+  | .cpobj expected => match emitted with | .cpobj actual => expected == actual | _ => false
+  | .initobj expected => match emitted with | .initobj actual => expected == actual | _ => false
+  | .sizeof expected => match emitted with | .sizeof actual => expected == actual | _ => false
   -- Type tests compare the class they test.
   | .castclass expected =>
     match emitted with | .castclass actual => expected == actual | _ => false
@@ -480,7 +494,8 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
     · cases found
     · split at found
       · rcases Instruction.ofType?_opcode found
-          with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+          with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs |
+          opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
       · split at found
         · cases found
@@ -517,7 +532,8 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
   · cases found
   · split at found
     · rcases Instruction.ofType?_opcode found
-        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+        with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs |
+          opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
     · split at found
       · cases found
@@ -760,6 +776,10 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
   case type before =>
     cases operand
     case type type =>
+      have staysSpan (span : before.isRuntimeSpan = true) : type.isRuntimeSpan = true := by
+        obtain ⟨closed, storage, same⟩ := Option.map_eq_some_iff.mp substituted
+        cases same
+        exact substituteStorageType_span span storage
       show Option.filter _ (if _ then none else Instruction.ofType? previous opcode type) =
         (Option.filter _ (if _ then none else Instruction.ofType? previous opcode before)).bind
           fun _ => Instruction.ofType? previous opcode type
@@ -767,7 +787,8 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
       split
       · rfl
       · unfold Instruction.ofType? Instruction.ldelemaAfter?
-        repeat' first | rfl | split
+        split <;> repeat' first | rfl | split
+        all_goals exact False.elim (by solve | simp_all)
     all_goals exact absurd sameType Bool.false_ne_true
   case call before =>
     cases operand

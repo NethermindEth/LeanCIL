@@ -200,13 +200,14 @@ var forged = Path.Combine(root, "Forged-argument.lean");
 File.WriteAllText(forged, source.Replace(argumentEvidence, "arguments := [.span 1 false]", StringComparison.Ordinal));
 rejected.Add(forged, "PASS span reference argument evidence rejection",
     "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments");
-// A span copy may emit only the empty operation; any load would reinterpret the view as bytes.
-var copy = NarrowEvidence(File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean")),
-    "method0_features_validated");
-const string copied = "  .ldarg 0,\n  .nop,";
-if (!copy.Contains(copied, StringComparison.Ordinal)) throw new InvalidOperationException("Missing span copy");
+// Replacing the decoded span load by a byte load must fail feature validation.
+var copy = File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean"));
+var forgedCopy = IsDecodedMethod(copy, 0)
+    ? ForgeDecodedMethod(copy, 0, "code := method.code.set 1 (.loadScalar 8 false)")
+    : copy.Replace("  .ldobj (valueType0),", "  .loadScalar 8 false,", StringComparison.Ordinal);
+if (copy == forgedCopy) throw new InvalidOperationException("Missing span copy");
 var loaded = Path.Combine(root, "Forged-copy.lean");
-File.WriteAllText(loaded, copy.Replace(copied, "  .ldarg 0,\n  .loadScalar 8,", StringComparison.Ordinal));
+File.WriteAllText(loaded, NarrowEvidence(forgedCopy, "method0_features_validated"));
 rejected.Add(loaded, "PASS span copy evidence rejection", "FeatureFlowValid", "is false");
 rejected.Check();
 

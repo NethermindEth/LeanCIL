@@ -3,7 +3,7 @@ import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.ExactIntrinsics
 import CIL.Extraction.CallAgreement
-import CIL.Extraction.VectorInitialization
+import CIL.Extraction.ObjectOperands
 import CIL.Extraction.StaticValues
 import CIL.Extraction.StaticIdentities
 import CIL.Extraction.ImportLayouts
@@ -404,7 +404,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ExactIntrinsicsValid item.closed item.reachable method ∧
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
-  VectorInitializationsValid item.closed item.reachable method ∧
+  ObjectOperandsValid item.closed item.reachable method ∧
   (ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates
     method.code item.decoded ∧
     (item.decoded = true → method.code =

@@ -4,10 +4,9 @@ import CIL.Extraction.Generics
 # Layout coverage
 
 `MethodLayoutsValid` checks only the layout uses it is given. `LayoutUsesComplete` closes
-that gap: it derives every layout-dependent site from the raw body (field accesses, struct
-loads, stores, copies, initializations, sizes, constructions and Unsafe element offsets), plus every
-struct-typed local and homed parameter, and requires the extractor's list to be exactly
-that list.
+that gap by deriving the rows for model calls, folded span resets, constructions,
+struct-typed locals and homed parameters. Typed object instructions resolve their operands
+through the method's checked layout environment.
 -/
 
 namespace CIL.Extraction
@@ -35,22 +34,17 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     let metadata ← layouts[parent]?
     let field ← metadata.fields[index]?
     if fieldKind? layouts type != some field.type then none else return []
-  -- `ldobj`, `stobj`, `initobj`, `cpobj` and `sizeof` of a struct.
+  -- A folded span reset records its element stride.
   | 0xfe15, .type (.apply (.constructor scope owner) (.aggregate identity index)) =>
     if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] then
       if typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
         none else return [.size pc index .spanElement]
     else return []
-  | opcode, .type type =>
+  | _, .type type =>
     match aggregateIndex type with
     | none => return []
     | some index =>
       if typeStorage layouts type ≠ some (.field (.aggregate index)) then none
-      else if opcode = 0x71 then return [.size pc index .load]
-      else if opcode = 0x81 then return [.size pc index .store]
-      else if opcode = 0xfe15 then return [.size pc index .initialize]
-      else if opcode = 0x70 then return [.size pc index .copy]
-      else if opcode = 0xfe1c then return [.size pc index .sizeOf]
       else return []
   -- `newobj` of a struct, then `Unsafe.Add<T>`.
   | 0x73, .call site =>

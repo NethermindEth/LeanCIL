@@ -543,6 +543,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref, Code.Newarr, Code.Ldelem_Any, Code.Stelem_Any,
         Code.Ldelema, Code.Readonly,
         // Class type tests and instance fields, direct and constrained calls, and constructions.
+        Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
         Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
         Code.Call, Code.Constrained, Code.Callvirt, Code.Newobj,
         // Branches.

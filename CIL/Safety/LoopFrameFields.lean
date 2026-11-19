@@ -33,9 +33,11 @@ theorem LoopFrame.zero_aggregate {values : List (Option CIL.Value)}
     {stored : List (Option CIL.Value)}
     (listed : values.set index (some (.aggregate (layout.encode fields))) = stored :=
       by cil_listed_locals) :
-    ∃ after, (∀ body pc args stacked rest,
-        step body (.initAggregate width) pc args stacked (.reference (.address home) :: rest)
-          current = .ok (.next (pc + 1) rest stacked after)) ∧
+    ∃ after, (∀ (body : Method) (type : Extraction.TypeExpr),
+        (body.valueShape type).size? = some width →
+        ∀ pc args stacked rest,
+          step body (.initobj type) pc args stacked (.reference (.address home) :: rest) current =
+            .ok (.next (pc + 1) rest stacked after)) ∧
       LoopFrame footprint caller after kinds slots (knownLocals stored) ∧
       MemoryBelow caller.nextIdentity current after := by
   subst listed

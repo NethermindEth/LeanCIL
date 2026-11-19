@@ -52,6 +52,38 @@ theorem stepTransport : StepTransport := by
     case newobj.refl constructor =>
       exact memories.stepNewobj frames sourceFormed targetFormed staticBounds sourceBody
         targetBody constructor pc (metadata.linkAt pc) arguments stack bounds observable
+    case ldobj.refl | stobj.refl | cpobj.refl | initobj.refl | sizeof.refl =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      simp only [LocalIndexMap.operation, step, observerCount, mapping.unspecifiedOperands,
+        Method.valueShape, metadata.environment] at observable ⊢
+      rename_i type
+      first
+        | (let count := if Extraction.spanLocal type then 0 else 1
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+        | (let count := 2
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+        | (let count := 1
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+        | (let count := 0
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+      by_cases observed : unspecifiedOperands count stack = true <;>
+        simp only [count] at observed observable <;>
+        simp only [observed, Bool.false_eq_true, ite_true, ite_false] at observable ⊢
+      all_goals try exact .error _
+      all_goals try cases width : (sourceBody.environment.valueShape type).size? <;>
+        simp only [width] at observable ⊢
+      all_goals try exact .error _
+      all_goals first
+        | exact .ok (.next memories frames)
+        | (first
+            | apply (memories.copyInitializedBytesResult _ sourceFormed stack bounds
+                observable.bind_left).bind
+            | apply (memories.initializeBytesResult _ sourceFormed stack bounds
+                observable.bind_left).bind
+            | apply (memories.transferObjectResult _ _ sourceFormed stack bounds
+                observable.bind_left).bind
+           rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
+           exact .ok (.next related frames))
     case ldelem_any.refl element =>
       exact ⟨mapping, .refl mapping, memories.stepLdelemAny frames sourceFormed sourceBody
         targetBody metadata element pc arguments stack bounds observable⟩

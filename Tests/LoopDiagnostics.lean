@@ -15,13 +15,24 @@ open CIL (W32)
 /-- A struct of two 32-bit fields: `count` at offset 0 and `sum` at offset 4. -/
 def layout : CIL.AggregateLayout := ⟨8, [⟨0, 4, false⟩, ⟨4, 4, false⟩]⟩
 
+/-- The type token for the two-field loop counter. -/
+def tallyType : CIL.Extraction.TypeExpr := .aggregate "Tally" 0
+
+/-- The storage metadata for the counter's two words. -/
+private def tallyEnvironment : CIL.LayoutEnvironment := {
+  rawLayouts := [{
+    identity := "Tally", explicit := false, packing := 0, declaredSize := 0
+    fields := [⟨.unsigned32, none⟩, ⟨.unsigned32, none⟩] }]
+  layouts := #[⟨layout, 4⟩] }
+
 /-- The layout's fields are in bounds and apart. -/
 theorem layout_valid : layout.Valid := by decide +kernel
 
 /-- `for (t = default; t.count != value; t.count++) t.sum = addTwo(t.sum); return t.sum;` -/
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
-  code := [.ldloca 0, .initAggregate 8, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
+  environment := tallyEnvironment
+  code := [.ldloca 0, .initobj tallyType, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
     .call (Tests.callee 1) {}, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
     .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .ldarg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret]
   links := [(6, .direct 1)] }
@@ -75,6 +86,7 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
     (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
   · obtain ⟨zeroed, zeroing, frame, -⟩ :=
       (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+    have zeroTally := zeroing tally tallyType rfl
     exact loop_reaches_terminates (target := header memory value home ⟨(0, 0), zeroed, frame⟩)
       (by cil_loop_steps) (start _ rfl)
   rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
@@ -241,6 +253,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) 
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
   obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
   obtain ⟨zeroed, zeroing, frame, -⟩ := (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  have zeroTally := zeroing tally tallyType rfl
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory (value + 1) home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -275,6 +288,20 @@ example := step_fieldAt_encode layout_valid 0 [.i64 0, .i32 0]
 def mixed : CIL.AggregateLayout :=
   ⟨16, [⟨0, 1, false⟩, ⟨2, 2, false⟩, ⟨4, 4, false⟩, ⟨8, 8, true⟩]⟩
 
+/-- The storage metadata for the mixed local and its nested counter. -/
+private def mixedEnvironment : CIL.LayoutEnvironment := {
+  rawLayouts := tallyEnvironment.rawLayouts ++ [{
+    identity := "Mixed", explicit := false, packing := 0, declaredSize := 0
+    fields := [⟨.unsigned8, none⟩, ⟨.signed16, none⟩, ⟨.unsigned32, none⟩, ⟨.aggregate 0, none⟩] }]
+  layouts := tallyEnvironment.layouts.push ⟨mixed, 4⟩ }
+
+/-- Both fixtures use the recomputed layouts of the local and its nested fields. -/
+theorem loop_layouts_valid :
+    CIL.Extraction.LayoutsValid tallyEnvironment.rawLayouts tallyEnvironment.layouts ∧
+    CIL.Extraction.LayoutsValid mixedEnvironment.rawLayouts mixedEnvironment.layouts := by
+  decide +kernel
+#print axioms loop_layouts_valid
+
 /-- The layout's fields are in bounds and apart. -/
 theorem mixed_valid : mixed.Valid := by decide +kernel
 
@@ -286,8 +313,9 @@ example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)
     the signed `count` through the struct's address. -/
 @[cil_code] def flagged : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.ldloca 0, .initAggregate 16, .br 6, .ldloca 0, .ldc_i4 1, .setFieldAt 0 1,
-    .ldloc 0, .fieldAt 0 1, .brfalse 3, .ldloca 0, .fieldAt 2 2 true, .ret] }
+  environment := mixedEnvironment
+  code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 6, .ldloca 0, .ldc_i4 1,
+    .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .brfalse 3, .ldloca 0, .fieldAt 2 2 true, .ret] }
 
 /-- The program of `flagged` alone. -/
 @[cil_code] def flaggedProgram : CIL.Program := [flagged]
@@ -371,7 +399,8 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memo
     flag byte on the exit path. -/
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.ldloca 0, .initAggregate 16, .br 9, .ldloca 0, .ldloc 0, .fieldAt 4 4,
+  environment := mixedEnvironment
+  code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 9, .ldloca 0, .ldloc 0, .fieldAt 4 4,
     .ldc_i4 1, .add, .setFieldAt 4 4, .ldloc 0, .fieldAt 4 4, .ldarg 0, .bne_un 3, .ldloca 0,
     .ldc_i4 1, .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .ret] }
 
@@ -842,6 +871,7 @@ macro "walk_to_head" : tactic => `(tactic| (
   obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
   obtain ⟨zeroed, zeroing, frame, -⟩ :=
     (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  have zeroTally := zeroing tally tallyType rfl
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -852,11 +882,11 @@ macro "walk_to_head" : tactic => `(tactic| (
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
   walk_to_head
 
--- A step names each hypothesis its step proof used: the zeroing fact steps `initAggregate`.
-/-- [CIL.step] pc 1: CIL.Instruction.initAggregate (8 % 2 ^ 64)
+-- A step names each hypothesis its step proof used: the zeroing fact steps `initobj`.
+/-- [CIL.step] pc 1: CIL.Instruction.initobj tallyType
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
-  used zeroing : -/
+  used zeroTally : -/
 #guard_msgs (whitespace := lax, substring := true) in
 set_option trace.CIL.step true in
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by

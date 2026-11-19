@@ -135,6 +135,7 @@ inductive FixedStepFamily where
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newarr _
+  | .ldobj _ | .stobj _ | .cpobj _ | .initobj _ | .sizeof _
   | .ldelem_any _ | .stelem_any _ | .ldelema ..
   | .newobj _ | .memory _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded
   | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
@@ -278,8 +279,9 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
       rename_i loadsField addressesField storesField addressHome localAllocation loadsStatic
-        addressesStatic tokensStatic storesStatic loadsTyped storesTyped addressesTyped calls
-        constructs unadmitted offsetBeforeTable
+        addressesStatic tokensStatic storesStatic loadsObject storesObject copiesObject
+        resetsObject objectSize loadsTyped storesTyped addressesTyped calls constructs
+        unadmitted offsetBeforeTable
         tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
         convOvf convOvfUn
         objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse
@@ -318,7 +320,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
         objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
         localAllocation loadsField addressesField storesField loadsStatic addressesStatic
-        tokensStatic storesStatic loadsTyped storesTyped addressesTyped constructs
+        tokensStatic storesStatic loadsObject storesObject copiesObject resetsObject objectSize
+        loadsTyped storesTyped addressesTyped constructs
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

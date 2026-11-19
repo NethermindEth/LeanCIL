@@ -134,16 +134,31 @@ internal static class InstructionTranslation
                 EnumTypes.Storage(fieldType).FullName is "System.SByte" or "System.Int16";
             return new StructField(access, offset, width, signed);
         }
-        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj && i.Operand is TypeReference operandType)
-            RuntimeModels.ValidateTypeIdentity(operandType, m.Module, profile.Architecture);
-        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj &&
-            i.Operand is TypeReference spanType && Spans.Is(spanType))
+        if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj &&
+            i.Operand is TypeReference operand)
         {
-            // A span address on the stack is the view itself, so a copy leaves it in place.
-            if (i.OpCode.Code != Code.Ldobj)
-                throw new InvalidDataException($"Unsupported store to a span home: {i}");
-            SpanReferences.ValidateCopy(m, i, instructions);
-            return StackOperation.Nop;
+            RuntimeModels.ValidateTypeIdentity(operand, m.Module, profile.Architecture);
+            if (Spans.Is(operand))
+            {
+                if (i.OpCode.Code != Code.Ldobj)
+                    throw new InvalidDataException($"Unsupported store to a span home: {i}");
+                SpanReferences.ValidateCopy(m, i, instructions);
+            }
+            else if (i.OpCode.Code == Code.Sizeof)
+            {
+                var size = MetadataValidation.IsAggregate(operand, m.Module)
+                    ? layouts?.Size(operand) ?? MetadataValidation.Layout(operand, m.Module, profile.Architecture)
+                    : MetadataValidation.IntegerVectorWidth(operand) ?? MetadataValidation.PrimitiveWidth(operand);
+                return new ObjectInstruction(Code.Sizeof, ByteSize: size);
+            }
+            else if (!MetadataValidation.IsAggregate(operand, m.Module) &&
+                MetadataValidation.IntegerVectorWidth(operand) is null)
+            {
+                var width = MetadataValidation.PrimitiveWidth(operand);
+                var signed = EnumTypes.Storage(operand).MetadataType is MetadataType.SByte or MetadataType.Int16;
+                return new ObjectInstruction(i.OpCode.Code, ScalarWidth: width, Signed: signed);
+            }
+            return new ObjectInstruction(i.OpCode.Code);
         }
         if (VirtualDispatch.Is(i))
         {
@@ -227,10 +242,6 @@ internal static class InstructionTranslation
             Code.Rem => new Divide(true, true),
             Code.Rem_Un => new Divide(false, true),
             Code.Switch => new Switch(((Instruction[])i.Operand).Select(instructions.Position).ToArray()),
-            Code.Sizeof => new Constant(32,
-                TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts), true),
-            Code.Cpobj => new AggregateTransfer(AggregateAccess.Copy,
-                TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)),
             Code.Ldind_I1 => new IndirectAccess(NumericKind.I1, false),
             Code.Ldind_U1 => new IndirectAccess(NumericKind.U1, false),
             Code.Ldind_I2 => new IndirectAccess(NumericKind.I2, false),
@@ -258,22 +269,6 @@ internal static class InstructionTranslation
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
             Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
                 StaticDataAccess(i, m.Module),
-            Code.Ldobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
-                new AggregateTransfer(AggregateAccess.Load, Layout((TypeReference)i.Operand)),
-            Code.Initobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
-                new AggregateTransfer(AggregateAccess.Initialize, Layout((TypeReference)i.Operand)),
-            Code.Stobj when MetadataValidation.IsAggregate((TypeReference)i.Operand, m.Module) =>
-                new AggregateTransfer(AggregateAccess.Store, Layout((TypeReference)i.Operand)),
-            Code.Ldobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
-                MemoryOperation.Other($".load{width * 8}"),
-            Code.Stobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
-                MemoryOperation.Other($".store{width * 8}"),
-            Code.Initobj when MetadataValidation.IntegerVectorWidth((TypeReference)i.Operand) is int width =>
-                new AggregateTransfer(AggregateAccess.Initialize, width),
-            Code.Ldobj => ScalarLoad((TypeReference)i.Operand),
-            Code.Stobj => new StoreScalar(MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
-            Code.Initobj => new AggregateTransfer(AggregateAccess.Initialize,
-                MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
             Code.Ldarg_0 => new Arg(0),
             Code.Ldarg_1 => new Arg(1),
             Code.Ldarg_2 => new Arg(2),
@@ -362,19 +357,6 @@ internal static class InstructionTranslation
         return new StaticFieldInstruction(
             i.OpCode.Code == Code.Ldtoken ? StaticFieldOpcode.Ldtoken : StaticFieldOpcode.Ldsflda, null);
     }
-
-    // An enumeration loads through its storage type, which is signed for the two narrow signed integers.
-    static Operation ScalarLoad(TypeReference type)
-    {
-        var width = MetadataValidation.PrimitiveWidth(type);
-        var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
-        return new LoadScalar(width, signed);
-    }
-
-    static int TypeWidth(TypeReference type, ModuleDefinition module, string architecture,
-        MetadataValidation.LayoutContext? layouts) => MetadataValidation.IsAggregate(type, module)
-        ? layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)
-        : MetadataValidation.IntegerVectorWidth(type) ?? MetadataValidation.PrimitiveWidth(type);
 
     // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.
     static Operation StringOperation(string text)

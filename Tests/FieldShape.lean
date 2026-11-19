@@ -1,3 +1,5 @@
+import CIL.Extraction.ObjectOperands
+import CIL.Extraction.Scalars
 import CIL.Safety.ResolutionFacts
 import CIL.Safety.ObjectSteps
 import CIL.Safety.FuelLemmas
@@ -72,6 +74,24 @@ private def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
 private def inner : TypeExpr := .aggregate "T::Inner" 0
 private def pair : TypeExpr := .aggregate "T::Pair" 1
 private def node : TypeExpr := .object scope "Node"
+
+/-- A raw size site cannot substitute the layout index, the computed size or the literal token. -/
+theorem sizeof_forgeries :
+    let site := RawInstruction.mk 0 0xfe1c (.type inner)
+    let forged := TypeExpr.aggregate "T::Inner" 1
+    let body : Method := {
+      environment, code := [.sizeof forged], locals := [], returnsValue := true }
+    let raw : RawMethod := {
+      token := 0, owner := "T", hasThis := false, explicitThis := false, callingConvention := 0
+      attributes := 0, implementation := 0, returnType := int16, parameters := [], locals := []
+      initLocals := false, maxStack := 1, genericParameters := []
+      code := [{ site with operand := .type forged }] }
+    ¬ ObjectOperandsValid raw [true] body ∧
+      ¬ LayoutsValid rawLayouts (computedLayouts.set! 0 ⟨⟨12, [⟨0, 4, false⟩]⟩, 4⟩) .x64 ∧
+      scalarEmissionMatches #[] none none site [] (.sizeof inner) = true ∧
+      scalarEmissionMatches #[] none none site [] (.sizeof pair) = false := by
+  decide +kernel
+#print axioms sizeof_forgeries
 
 /-- `Pair.low`, the `int16` at offset 0. -/
 def lowField : FieldRef := { owner := pair, index := 0, type := int16, name := name!"low" }
@@ -215,6 +235,19 @@ def shortType : TypeExpr := int16
 cil_value_shape environment pairType
 cil_value_shape environment shortType
 
+open CIL.Safety in
+/-- A named type operand lets a symbolic initialization step use its checked width. -/
+theorem init_named_pair (body : Method) (shared : body.environment = environment)
+    (pc : Nat) (args rest : List Safety.Value) (frame : Frame) (memory : Safety.Memory)
+    (reference : ManagedReference) :
+    Safety.step body (.initobj pairType) pc args frame (.reference reference :: rest) memory = (do
+      let address ← referenceAt reference
+      let stored ← checkedAt reference 12
+        (write memory address (List.replicate 12 0) ordinaryAccessAlignment)
+      return .next (pc + 1) rest frame stored) := by
+  simp only [cil_instruction_step]
+#print axioms init_named_pair
+
 theorem pair_value_size (body : Method) (shared : body.environment = environment) :
     body.valueShape pairType = .aggregate 12 := pairType_shape shared
 #print axioms pair_value_size
@@ -232,13 +265,12 @@ theorem value_kinds :
   by decide +kernel
 #print axioms value_kinds
 
--- A floating-point vector has its size, so `sizeof` keeps admitting it; `ldobj` and `stobj`
--- refuse it in their own rule.
-theorem double_vector_size :
+/-- Object instructions admit only vectors of the supported integer elements. -/
+theorem double_vector_unsupported :
     (environment.valueShape (.apply (.constructor intrinsicsScope
         "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double"))).size? =
-      some 16 := by decide +kernel
-#print axioms double_vector_size
+      none := by decide +kernel
+#print axioms double_vector_unsupported
 
 -- The kernel checks each generated fact, which rests on no axiom beyond `propext`.
 /-- info: 'Tests.FieldShape.lowField_shape' depends on axioms: [propext] -/

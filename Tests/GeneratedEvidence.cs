@@ -125,7 +125,7 @@ partial class Program
         return instructions;
     }
 
-    // An extraction's definition of method `method` from its decoder, with the field operand definitions it names.
+    // An extraction's definition of method `method` from its decoder, with the field and type operands it names.
     static Match DecodedDefinition(string source, int method) => DecodedMethod.Matches(source)
         .FirstOrDefault(match => match.Groups["number"].Value == $"{method}") ?? Match.Empty;
 
@@ -268,8 +268,9 @@ partial class Program
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
                 found++;
-                // Isolated layout and scalar checks decide all claims against the fixture's definitions.
+                // Isolated layout, object and scalar checks decide the fixture's complete obligation.
                 if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
+                    match.Value.Contains(" : Extraction.ObjectOperandsValid ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : And (Extraction.ScalarFlowValid ", StringComparison.Ordinal))
                     return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
                 return InstructionCheckProjection.Replace(match.Value, " := by decide +kernel");

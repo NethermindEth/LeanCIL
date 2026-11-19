@@ -190,7 +190,7 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
   let instruction ← instantiateMVars instructionLookup
   let op ← lastArgument "loopFetch" op
   let lowered ← match fetched.find? (·.isAppOfArity ``CIL.Method.code 1) with
-    | some code => structFieldLowering? code.appArg! op
+    | some code => storageLowering? code.appArg! op
     | none => pure none
   let .mvar step := stepPremise
     | throwError "loopFetch: expected a step premise, but found{indentExpr stepPremise}"
@@ -203,7 +203,7 @@ def loopMovesOnly : List Lean.Name :=
     ``CIL.Instruction.ldarga, ``CIL.Instruction.ldloc, ``CIL.Instruction.ldloca,
     ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.skipInit,
-    ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
+    ``CIL.Instruction.initobj, ``CIL.Instruction.fieldAddress]
 
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/
@@ -344,7 +344,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
     let some slot ← loopLocalAt locals index | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
   else unless
-      op.isAppOf ``CIL.Instruction.setFieldAt || op.isAppOf ``CIL.Instruction.initAggregate do
+      op.isAppOf ``CIL.Instruction.setFieldAt || op.isAppOf ``CIL.Instruction.initobj do
     return true
   let heads := [``storeLocal, ``storeValue, ``CIL.Safety.step]
   let states (type : Expr) : Bool := (type.find? fun part =>
@@ -488,10 +488,10 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     | .finish => (· == ``CIL.Instruction.ret)
     | .advance => fun op => callsCallee op || op == ``CIL.Instruction.ret
     | .resume _ => fun op =>
-      op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate
+      op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initobj
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
-    (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate ||
+    (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initobj ||
       op == ``CIL.Instruction.stloc || op == ``CIL.Instruction.starg))
   let mut taken := 0
   let mut localIndex : LoopLocalIndex := {}
@@ -522,7 +522,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
       let fetched? ← observing? do
         let fetched ← loopFetch core
         let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.starg,
-          ``CIL.Instruction.setFieldAt, ``CIL.Instruction.initAggregate]
+          ``CIL.Instruction.setFieldAt, ``CIL.Instruction.initobj]
         let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
           let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
               pure !(← loopStoreKnown fetched.op fetched.step facts.known)

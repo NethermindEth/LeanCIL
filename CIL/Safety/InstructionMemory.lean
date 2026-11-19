@@ -96,13 +96,15 @@ def observerCount : CIL.Instruction → Nat
   | .stfld _ => 2
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
-  | .ldind _ | .skipInit | .initAggregate _ => 1
+  | .ldind _ | .skipInit | .initobj _ => 1
+  | .ldobj type => if Extraction.spanLocal type then 0 else 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
-  | .stind _ | .copyObject _ => 2
+  | .stind _ | .cpobj _ | .stobj _ => 2
   | .ldlen => 1
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
   | .stelem _ | .stelem_ref | .stelem_any _ => 3
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
+  | .sizeof _ => 0
   | .stsfld _ => 1
   -- Method boundaries
   | .ret => 1
@@ -1255,6 +1257,31 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     comparisonGuardInstruction guard width signed stack memory
   | _ => otherMemoryInstruction operation stack memory
 
+/-- Copies initialized bytes between writable-reference stack operands without partial overlap. -/
+def copyInitializedBytes (size : Nat) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match stack with
+  | .reference source :: .reference destination :: rest =>
+    let src ← referenceAt source
+    let dst ← referenceAt destination
+    if src.allocation = dst.allocation && src.offset != dst.offset &&
+        src.offset < dst.offset + size && dst.offset < src.offset + size then
+      .error (.unsupported "Partially overlapping typed copy")
+    else
+      let bytes ← checkedAt source size (read memory src size ordinaryAccessAlignment)
+      return (← checkedAt destination size (write memory dst bytes ordinaryAccessAlignment), rest)
+  | _ => .error (.unsupported "Not a memory instruction")
+
+/-- Writes initialized zeros through the reference on top of the stack. -/
+def initializeBytes (size : Nat) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match stack with
+  | .reference r :: rest =>
+    let address ← referenceAt r
+    return (← checkedAt r size
+      (write memory address (List.replicate size 0) ordinaryAccessAlignment), rest)
+  | _ => .error (.unsupported "Not a memory instruction")
+
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
@@ -1265,15 +1292,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
   -- Typed copies and scalar and aggregate memory
-  | .copyObject size, .reference source :: .reference destination :: rest =>
-    let src ← referenceAt source
-    let dst ← referenceAt destination
-    if src.allocation = dst.allocation && src.offset != dst.offset &&
-        src.offset < dst.offset + size && dst.offset < src.offset + size then
-      .error (.unsupported "Partially overlapping typed copy")
-    else
-      let bytes ← checkedAt source size (read m src size ordinaryAccessAlignment)
-      return (← checkedAt destination size (write m dst bytes ordinaryAccessAlignment), rest)
   | .loadScalar width signed, .reference r :: rest
   | .loadScalar width signed, .readOnlyReference r :: rest =>
     if width = 1 || width = 2 || width = 4 || width = 8 then
@@ -1302,10 +1320,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     if bytes.length != size || width != size then .error .invalidState else
       let address ← referenceAt r
       return (← checkedAt r size (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
-  | .initAggregate size, .reference r :: rest =>
-    let address ← referenceAt r
-    return (← checkedAt r size
-      (write m address (List.replicate size 0) ordinaryAccessAlignment), rest)
   -- Fields
   | .fieldAddress offset, .reference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
@@ -1440,6 +1454,25 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .dup, value :: rest => return (m, value :: value :: rest)
   | .pop, _ :: rest => return (m, rest)
   | _, _ => .error (.unsupported "Not a memory instruction")
+
+/-- Loads or stores a typed primitive, struct or vector using its checked storage shape.
+    Loading a span address leaves its view in place. -/
+def transferObject (shape : ValueShape) (store : Bool) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) :=
+  match shape, store with
+  | .primitive width signed, false => instruction (.loadScalar width signed) stack memory
+  | .primitive width _, true => instruction (.storeScalar width) stack memory
+  | .aggregate size, false => instruction (.loadAggregate size) stack memory
+  | .aggregate size, true => instruction (.storeAggregate size) stack memory
+  | .vector 16, false => memoryInstruction .load128 stack memory
+  | .vector 32, false => memoryInstruction .load256 stack memory
+  | .vector 64, false => memoryInstruction .load512 stack memory
+  | .vector 16, true => memoryInstruction .store128 stack memory
+  | .vector 32, true => memoryInstruction .store256 stack memory
+  | .vector 64, true => memoryInstruction .store512 stack memory
+  | .span, false => .ok (memory, stack)
+  | .unsupported reason, _ => .error (.unsupported reason)
+  | _, _ => .error (.unsupported "Object transfer shape")
 
 /-- Runs `ops` in order with `instruction`, stopping at the first fault. For straight-line
     examples only: it has no branches, calls or frames, which `run` handles. -/

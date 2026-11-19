@@ -471,17 +471,23 @@ internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Ref
     public override int GetHashCode() => HashCode.Combine(Field.Store, Reference);
 }
 
-internal enum AggregateAccess { Load, Store, Initialize, Copy }
+/// <summary>An object instruction names the closed type whose shape determines its memory access.</summary>
+internal sealed record ObjectInstruction(Code Opcode, string? Operand = null, int? ScalarWidth = null,
+    bool Signed = false, int? ByteSize = null) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) =>
+        $".{Opcode.ToString().ToLowerInvariant()} ({Operand ?? throw new InvalidOperationException("Missing type")})";
+}
 
-/// <summary>A load, store, initialisation or object copy of an aggregate of <paramref name="Size"/> bytes.</summary>
+internal enum AggregateAccess { Load, Store }
+
+/// <summary>A load or store of an aggregate of <paramref name="Size"/> bytes.</summary>
 internal sealed record AggregateTransfer(AggregateAccess Access, int Size) : Operation
 {
     internal override string Render(Func<int, string> calleeName) => Access switch
     {
         AggregateAccess.Load => $".loadAggregate {Size}",
-        AggregateAccess.Store => $".storeAggregate {Size}",
-        AggregateAccess.Initialize => $".initAggregate {Size}",
-        _ => $".copyObject {Size}"
+        _ => $".storeAggregate {Size}"
     };
 }
 

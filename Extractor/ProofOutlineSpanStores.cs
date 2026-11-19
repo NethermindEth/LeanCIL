@@ -26,6 +26,7 @@ internal static partial class ProofOutline
     /// <summary>The bytes a scalar store through a reference writes, or null for any other operation.</summary>
     static int? StoredWidth(Operation op) => op switch
     {
+        ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Stobj } store => store.ScalarWidth,
         StoreScalar store => store.Width,
         IndirectAccess { Store: true } access => access.Width,
         _ => null
@@ -42,7 +43,8 @@ internal static partial class ProofOutline
         IndirectAccess { Kind: NumericKind.I8 } => "step_stind_i8_of_write",
         IndirectAccess { Kind: NumericKind.I } => "step_stind_i_of_write",
         IndirectAccess access => $"step_stind_narrow_of_write {access.KindTerm}",
-        StoreScalar { Width: 8 } => "step_storeScalar_i64_of_write",
+        ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Stobj, ScalarWidth: 8 } or
+            StoreScalar { Width: 8 } => "step_storeScalar_i64_of_write",
         _ => "step_storeScalar_of_write"
     };
 

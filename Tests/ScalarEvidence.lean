@@ -725,7 +725,7 @@ private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intT
 private theorem span_signature_cases :
     (ScalarFlowValid #[] spanRaw [unknown 0, unknown 1, unknown 2, unknown 1, unknown 1] [some [],
       some [.reference], some [.word32, .reference], some [.reference], some [.word32]] [.ldarg 0,
-      .ldarg 1, .memory (.spanItem 4), .loadScalar 4, .ret]) ∧
+      .ldarg 1, .memory (.spanItem 4), .ldobj intType, .ret]) ∧
     (scalarTransfer spanRaw (i 40 (.call { spanSite with
         method.parameters := [word] })) [.word64, .reference] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
@@ -889,10 +889,26 @@ private def IndirectCase.method (access : IndirectCase) : Method :=
     code := access.code }
 /-- Whether the feature and scalar checks accept the claimed emission. -/
 private def IndirectCase.flows (access : IndirectCase) : Bool :=
-  decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) access.rawMethod .scalar
+  let (method, code, states) := match access.access.operand with
+    | .type type =>
+      let store := access.pops == 2
+      let before := if store then [scalarType type, .reference] else [.reference]
+      let inputs := if store then [i 2, i 3] else [i 2]
+      let loads := if store then [Instruction.ldarg 0, .ldarg 1] else [.ldarg 0]
+      let method := { access.rawMethod with
+        parameters := [.byref type, type, word]
+        code := inputs ++ access.middle ++ List.replicate access.pushes (i 38) ++ [i 4, i 42] }
+      let code := loads ++ access.prefixes.map (fun _ => .nop) ++ [access.emitted] ++
+        List.replicate access.pushes .pop ++ [.ldarg 2, .ret]
+      let states := [some []] ++ (if store then [some [.reference]] else []) ++
+        access.middle.map (fun _ => some before) ++ access.pushed.toList.map (fun k => some [k]) ++
+        [some [], some [.word64]]
+      (method, code, states)
+    | _ => (access.rawMethod, access.code, access.states)
+  decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) method .scalar
     access.features
-      access.reachable access.code) &&
-    decide (ScalarFlowValid #[] access.rawMethod access.features access.states access.code)
+      access.reachable code) &&
+    decide (ScalarFlowValid #[] method access.features states code)
 /-- Whether the indirect access rule accepts the emission at the access itself. -/
 private def IndirectCase.window (access : IndirectCase) : Bool :=
   indirectSiteWindow (access.rawMethod.code[·]?) (access.pops + access.prefixes.length)
@@ -952,13 +968,11 @@ private def indirectEmitted : List IndirectCase := [
 /-- `ldobj` and `stobj` of primitive, aggregate, enum and vector types, whose type tokens the
     test encoder cannot write. -/
 private def objectEmitted : List IndirectCase := [
-  load 113 (.loadScalar 4 false) (operand := .type intType),
-  load 113 (.loadScalar 1 true) (operand := .type sbyteType),
-  load 113 (.loadScalar 8 false) .word64 (operand := .type word),
-  store 129 (.storeScalar 4) (operand := .type intType),
-  store 129 (.storeScalar 1) (operand := .type sbyteType),
-  typed 113 aggregateType (.loadAggregate 8), typed 129 aggregateType (.storeAggregate 8),
-  typed 113 enumType (.loadScalar 2 true), typed 113 vectorType (.memory .load128)]
+  typed 113 intType (.ldobj intType), typed 113 sbyteType (.ldobj sbyteType),
+  typed 113 word (.ldobj word), typed 129 intType (.stobj intType),
+  typed 129 sbyteType (.stobj sbyteType), typed 113 aggregateType (.ldobj aggregateType),
+  typed 129 aggregateType (.stobj aggregateType), typed 113 enumType (.ldobj enumType),
+  typed 113 vectorType (.ldobj vectorType)]
 
 /-- Each emits other than the decoded instruction: a wrong width, sign, alignment or operation,
     a runtime-model load or store, a kind or prefix extraction refuses, and an access form at an
@@ -1305,12 +1319,38 @@ example : guardOperand 64 true (.i32 0#32) = none := by decide
 example : guardOperand 32 true (.i64 0#64) = none := by decide
 example : (guardOperand 64 false (.i64 0xFFFFFFFFFFFFFFFF#64)).map ZeroGuard.negative.throws =
     some false := by decide
--- Size constants are the only uncovered literal producers; primitive widths are bound here.
+-- A typed size instruction and a retained SizeOf call have different literal encodings.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]
 private def sizeCode (bits : W32) : List Instruction := [.ldc_i4 bits, .pop, .ldarg 0, .ret]
 private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
   decide (ScalarFlowValid #[] (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
+/-- A typed size site must bind the operand and resolve to the stated byte width. -/
+private def typedSizeAt (type emitted : TypeExpr) (bits : Nat) : Bool :=
+  let environment : LayoutEnvironment := {
+    rawLayouts := [{ identity := "Fixture::Packet", explicit := false, packing := 0,
+                      declaredSize := 24, fields := [] }]
+    layouts := #[⟨⟨24, []⟩, 1⟩] }
+  decide (ScalarFlowValid #[] (sizeRaw (i 65052 (.type type))) pushHoleFeatures sizeStates
+    [.sizeof emitted, .pop, .ldarg 0, .ret]) && (environment.valueShape type).size? == some bits
+
+/-- Equal layout sizes cannot justify replacing a literal sizeof operand with another struct. -/
+private theorem sizeof_equal_layouts :
+    let a := TypeExpr.aggregate "Fixture::A" 0
+    let b := TypeExpr.aggregate "Fixture::B" 1
+    let row : RawLayout := {
+      identity := "Fixture::A", explicit := false, packing := 0, declaredSize := 0
+      fields := [{ type := .signed32 }] }
+    let layout : ComputedLayout := ⟨⟨4, [⟨0, 4, false⟩]⟩, 4⟩
+    let rows := [row, { row with identity := "Fixture::B" }]
+    let environment : LayoutEnvironment := { rawLayouts := rows, layouts := #[layout, layout] }
+    let input := sizeRaw (i 65052 (.type a))
+    let valid := fun type => ScalarFlowValid rows.toArray input pushHoleFeatures sizeStates
+      [.sizeof type, .pop, .ldarg 0, .ret] false
+    LayoutsValid rows environment.layouts .x64 ∧ environment.valueShape a = .aggregate 4 ∧
+      environment.valueShape b = .aggregate 4 ∧ valid a ∧ ¬ valid b := by decide +kernel
+#print axioms sizeof_equal_layouts
+
 private def sizeOfSite (type : TypeExpr) : CallSite := {
   declared := { convention := 0x10, returnType := intType },
   method := {
@@ -1329,11 +1369,11 @@ private def packet : TypeExpr := .aggregate "Fixture::Packet" 0
 /-- `sizeof` retains exact widths and rejects unsupported pointer and void types; a call of
     `Unsafe.SizeOf` keeps its call, so a constant emitted for it is refused at any width. -/
 private theorem size_instruction_cases :
-    (sizeAt (i 65052 (.type intType)) 4 = true) ∧
-    (sizeAt (i 65052 (.type nativeType)) 8 = true) ∧
-    (sizeAt (i 65052 (.type packet)) 24 = true) ∧
-    (sizeAt (i 65052 (.type intType)) 7 = false) ∧
-    (sizeAt (i 65052 (.type (.pointer word))) 8 = false) ∧
+    (typedSizeAt intType intType 4 = true) ∧
+    (typedSizeAt nativeType nativeType 8 = true) ∧
+    (typedSizeAt packet packet 24 = true) ∧
+    (typedSizeAt intType intType 7 = false) ∧
+    (typedSizeAt (.pointer word) (.pointer word) 8 = false) ∧
     (sizeAt (i 40 (.call (sizeOfSite intType))) 4 = false) ∧
     (sizeAt (i 40 (.call (sizeOfSite vector128))) 16 = false) ∧
     (sizeAt (i 40 (.call (sizeOfSite packet))) 24 = false) ∧

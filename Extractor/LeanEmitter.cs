@@ -228,6 +228,7 @@ internal static class LeanEmitter
                 // An allocation and a field access name the element or field their raw operand names.
                 return operation switch
                 {
+                    ObjectInstruction access => access with { Operand = genericEvidence.TypeOperandOf(m, i) },
                     NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
                     TypedElementAccess access => access with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ElementAddress address => address with { Element = genericEvidence.ArrayElementOf(m, i) },
@@ -296,15 +297,19 @@ internal static class LeanEmitter
                 };
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
+            var objectProof = operandShapes.AdmissionProof(m, n, ops);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);
             var decoded = refusals[n] is null;
             if (decoded)
             {
                 // The decoder's raw definition is the method's only source; the command states its field facts and
                 // writes each field operand as the definition the literal form names.
-                var naming = string.Join(", ", ops.OfType<INamedField>().Select(access =>
-                    operandShapes.FieldName(access.Reference ?? throw new InvalidOperationException(
-                        "A field access has no field operand."))).Distinct());
+                var naming = string.Join(", ", ops.Select(op => op switch
+                {
+                    INamedField { Reference: { } field } => operandShapes.FieldName(field),
+                    ObjectInstruction { Operand: { } type } => operandShapes.TypeName(type),
+                    _ => null
+                }).OfType<string>().Distinct(StringComparer.Ordinal));
                 var fields = naming.Length == 0 ? "" : $"[{naming}] ";
                 var method = $"method{n}";
                 var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable} {method}Reachable";
@@ -329,8 +334,13 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
                     $"links := {linkTable}, code := [");
                 lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
-                    (op is INamedField { Reference: { } field } access
-                        ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
+                    (op switch
+                    {
+                        INamedField { Reference: { } field } access => access.Naming(operandShapes.FieldName(field)),
+                        ObjectInstruction { Operand: { } type } access =>
+                            (access with { Operand = operandShapes.TypeName(type) }).ToLean(),
+                        _ => op.ToLean()
+                    }))) + "] }");
             }
             // Both selected forms use these operations, including the raw opcode hole at every dead pc.
             if (collectTemplates)
@@ -344,7 +354,7 @@ internal static class LeanEmitter
             if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
                     $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
-            ScalarEvidence.Emit(lean, m, n, scalarCertificate, decoded);
+            ScalarEvidence.Emit(lean, m, n, scalarCertificate, decoded, objectProof);
             if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
                     $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
@@ -413,7 +423,6 @@ internal static class LeanEmitter
                 $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
 
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
                 $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
             lean.AppendLine($"theorem method{n}_declared_validated : " +
@@ -424,7 +433,7 @@ internal static class LeanEmitter
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
                 $"method{n}_intrinsics_validated, method{n}_models_validated, method{n}_opaque_validated, " +
-                $"method{n}_vector_initializations_validated, method{n}_scalars_validated, " +
+                $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
             lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated⟩");
         }
@@ -513,6 +522,32 @@ internal static class LeanEmitter
 
         /// <summary>The definition that names the recorded field operand <paramref name="field"/>.</summary>
         internal string FieldName(FieldRef field) => $"fieldRef{fields[field]}";
+
+        /// <summary>The checked live operand list and the shared shape facts for its types.</summary>
+        internal string? AdmissionProof(MethodDefinition method, int index, IReadOnlyList<Operation> operations)
+        {
+            var operands = new List<(int Opcode, string Type)>();
+            var needsLayout = false;
+            for (var pc = 0; pc < operations.Count; pc++)
+            {
+                if (operations[pc] is not ObjectInstruction { Operand: { } type }) continue;
+                var instruction = method.Body.Instructions[pc];
+                var operand = (TypeReference)instruction.Operand;
+                needsLayout |= !Spans.Is(operand) && MetadataValidation.IsAggregate(operand, method.Module);
+                operands.Add((Unadmitted.RawOpcode(instruction), TypeName(type)));
+            }
+            // A struct shape fact reuses its checked layout entry. Other shapes reduce directly.
+            if (!needsLayout) return null;
+            var pairs = operands.Distinct().Reverse().ToArray();
+            var sites = string.Join(", ", pairs.Select(pair => $"({pair.Opcode}, {pair.Type})"));
+            var facts = string.Join(", ", pairs.Select(pair => pair.Type).Distinct(StringComparer.Ordinal)
+                .Select(type => $"{type}_shape (body := method{index}) rfl"));
+            var shapeProof = $"by simp only [List.all_cons, List.all_nil, {facts}] <;> decide +kernel";
+            return $"Extraction.ObjectOperandsValid.of_sites [{sites}] rfl ({Decide}) ({shapeProof})";
+        }
+
+        /// <summary>The definition of a recorded closed type operand.</summary>
+        internal string TypeName(string type) => $"valueType{types[type]}";
 
         /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
         internal string Lean() => text.ToString();

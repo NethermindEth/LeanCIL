@@ -59,10 +59,10 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .localloc | .newarr _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .ldc_i4 _ | .ldc_i8 _ | .ldnull | .ldarg _ | .ldloc .. => some (0, 1)
+  | .sizeof _ | .ldc_i4 _ | .ldc_i8 _ | .ldnull | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
-  | .loadAggregate _ | .loadScalar .. | .ldind _ | .fieldAt .. | .fieldAddress _
+  | .ldobj _ | .loadAggregate _ | .loadScalar .. | .ldind _ | .fieldAt .. | .fieldAddress _
   | .aggregateFieldAt .. | .castclass _ | .isinst _ | .ldfld _ | .ldflda _ | .ldlen => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
@@ -72,9 +72,9 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => some (2, 1)
   | .stelem _ | .stelem_ref | .stelem_any _ => some (3, 0)
   -- Stores and initialization through a reference, `pop` and `dup`.
-  | .storeAggregate _ | .storeScalar _ | .stind _ | .copyObject _
+  | .storeAggregate _ | .storeScalar _ | .stind _ | .cpobj _ | .stobj _
   | .setFieldAt .. | .setAggregateFieldAt .. | .stfld _ => some (2, 0)
-  | .initAggregate _ | .skipInit | .pop => some (1, 0)
+  | .initobj _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
   | .call method _ => some (method.argumentCount, if returnsValue then 1 else 0)

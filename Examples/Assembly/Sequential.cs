@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Examples;
 
+[StructLayout(LayoutKind.Sequential)]
 internal struct Record
 {
     public byte Tag;

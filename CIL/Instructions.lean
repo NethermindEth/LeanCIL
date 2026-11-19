@@ -170,9 +170,17 @@ inductive Instruction where
   | ble_un (target : Nat)
   -- Value-type aggregates and fields, by byte offset and width.
   | loadAggregate (size : Nat)
-  | copyObject (size : Nat)
   | storeAggregate (size : Nat)
-  | initAggregate (size : Nat)
+  /-- Read the value of the addressed type. -/
+  | ldobj (type : Extraction.TypeExpr)
+  /-- Store a value of the addressed type. -/
+  | stobj (type : Extraction.TypeExpr)
+  /-- Zero the storage of the addressed type. -/
+  | initobj (type : Extraction.TypeExpr)
+  /-- Push the storage width of the type in bytes. -/
+  | sizeof (type : Extraction.TypeExpr)
+  /-- Copy the initialized bytes of the type from source to destination. -/
+  | cpobj (type : Extraction.TypeExpr)
   | loadScalar (width : Nat) (signed : Bool := false)
   | storeScalar (width : Nat)
   /-- `ldind` of `kind`: a load through a reference, or of the entry a native method table

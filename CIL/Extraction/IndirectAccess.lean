@@ -4,12 +4,10 @@ import CIL.Extraction.ValueDecoding
 /-!
 # Indirect accesses
 
-A raw integer `ldind` or `stind` emits the instruction `Instruction.ofRaw?` decodes from it, a raw
-`ldobj` or `stobj` decides the width and sign extension of the load or store extraction emits for
-it, and a raw `cpblk` or `initblk` decides the alignment of its block operation, which an
-`unaligned.` prefix lowers. `indirectAccessMatches` gives that one emission from the opcode, the
-operand type and the instruction before it, and reserves the emitted loads, stores and block
-operations for these opcodes and for calls, which `UnsafeCallsValid` binds.
+`Instruction.ofRaw?` decodes integer `ldind` and `stind`. A raw `cpblk` or `initblk` determines
+its block alignment, which an `unaligned.` prefix lowers. `indirectAccessMatches` checks the
+emitted instruction against the opcode, operand type and preceding instruction. It reserves
+those memory operations for these opcodes and for calls, which `UnsafeCallsValid` binds.
 `FeatureFlowValid` and `ScalarFlowValid` apply `indirectSiteWindow` at every reachable pc,
 reading the neighbouring raw instructions through an index of the body built once.
 -/
@@ -49,37 +47,23 @@ def indirectEmission : Instruction → Bool
   | .memory .store128 | .memory .store256 | .memory .store512 => true
   | _ => false
 
-/-- Every `ldind` and `stind` kind, `ldobj`, `stobj`, `cpblk` and `initblk`. -/
+/-- The indirect load and store opcodes and the block memory operations. -/
 def indirectOpcode (opcode : Nat) : Bool :=
-  (70 ≤ opcode && opcode ≤ 87) || opcode ∈ [223, 113, 129, 65047, 65048]
-
-/-- Whether `typedTransferMatches` fixes the emission for `type` without a layout table: an
-    integer vector, or a primitive or enum type. -/
-private def layoutFreeTransfer (type : TypeExpr) : Bool :=
-  (integerVectorWidth type).isSome || match typeStorage [] type with
-    | some (.field kind) => (primitiveFieldWidth kind).isSome
-    | _ => false
+  (70 ≤ opcode && opcode ≤ 87) || opcode ∈ [223, 65047, 65048]
 
 /-- An indirect access after `previous` emits exactly the instruction its opcode, operand type
-    and prefix give; an aggregate `ldobj` or `stobj` emits its aggregate transfer, whose width
-    the layout use binds; a span `ldobj` emits `.nop`, and `ldobj` or `stobj` of any other
-    operand type is refused; an integer `ldind` or `stind` emits its decoded instruction. Any other
+    and prefix give. Integer indirect loads and stores retain their decoded kinds. Any other
     instruction emits none of the forms `indirectEmission` names, except a call, which
     `UnsafeCallsValid` binds and which never emits an `ldind` or `stind`. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (emitted : Instruction) (skipEncoding := false) : Bool :=
-  if !indirectOpcode instruction.opcode then
+  if instruction.opcode == 0x71 then emitted matches .ldobj _
+  else if instruction.opcode == 0x81 then emitted matches .stobj _
+  else if !indirectOpcode instruction.opcode then
     if instruction.opcode == 40 then !(emitted matches .ldind _ | .stind _)
     else !indirectEmission emitted
   else match accessAlignment previous, instruction.opcode, instruction.operand with
     | none, _, _ => false
-    | some _, 113, .type (.aggregate ..) => (emitted matches .loadAggregate _)
-    | some _, 129, .type (.aggregate ..) => (emitted matches .storeAggregate _)
-    | some _, 113, .type type | some _, 129, .type type =>
-      if layoutFreeTransfer type then
-        typedTransferMatches [] type (instruction.opcode == 113) emitted
-      -- A span `ldobj` copies nothing; extraction refuses every other operand type.
-      else instruction.opcode == 113 && spanLocal type && (emitted matches .nop)
     | some alignment, opcode, .none =>
       skipEncoding || valueEncodingMatches previous instruction emitted ||
         (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)

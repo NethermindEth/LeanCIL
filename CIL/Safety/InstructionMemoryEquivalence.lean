@@ -604,4 +604,61 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
 #print axioms Memory.Equivalent.loadValue
 #print axioms Memory.Equivalent.storeValue
 
+/-- Equivalent memories give equivalent results for a typed copy. -/
+theorem Memory.Equivalent.copyInitializedBytes {m n : Memory} (same : m.Equivalent n)
+    (size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (copyInitializedBytes size stack m)
+      (copyInitializedBytes size stack n) := by
+  unfold CIL.Safety.copyInitializedBytes
+  split <;> try simp only [same.read]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact same.instruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.copyInitializedBytes
+
+/-- Equivalent memories give equivalent results for a zero initialization. -/
+theorem Memory.Equivalent.initializeBytes {m n : Memory} (same : m.Equivalent n)
+    (size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (initializeBytes size stack m)
+      (initializeBytes size stack n) := by
+  unfold CIL.Safety.initializeBytes
+  split <;> try simp only [same.read]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact same.instruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.initializeBytes
+
+/-- Equivalent memories give equivalent results for a typed object transfer. -/
+theorem Memory.Equivalent.transferObject {m n : Memory} (same : m.Equivalent n)
+    (shape : ValueShape) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (transferObject shape store stack m)
+      (transferObject shape store stack n) := by
+  unfold CIL.Safety.transferObject
+  split <;> try simp only [same.read]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact same.instruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.transferObject
+
 end CIL.Safety

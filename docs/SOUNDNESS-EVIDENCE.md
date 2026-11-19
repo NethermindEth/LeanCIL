@@ -39,9 +39,9 @@ Exact scalar matching covers integer literals, wrapping/checked add/subtract/mul
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
 integer conversions and all short/long compare-and-branch encodings. Literal ranges and
 high-bit-set int64 values, conversion width/signedness/checkedness and exact branch targets cannot
-pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar operations, except
-feature-bound type-test words and size constants bound to exact primitive/vector widths or
-validated layouts.
+pass by stack effect alone. Type-test folds and runtime queries can emit scalar constants when their site checks pass.
+A `sizeof` instruction pushes the width of its closed operand. An `Unsafe.SizeOf` call retains
+its call instruction and obtains its result from its runtime model.
 
 Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
 `ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes, and so must
@@ -51,14 +51,13 @@ access or element address takes its element's width from the element shape of th
 layouts. An `ldelema` decodes read-only exactly when `readonly.` precedes it, and `readonly.`
 decodes to `nop`; no instruction but `ldelema` decodes after `readonly.`, and the scalar check
 requires the raw instruction after each reachable `readonly.` to be `ldelema`, which also holds a
-translated instruction to the rule (`readOnlyPrefixMatches`). Each `ldobj`
-and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
-the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
-without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
-emits its aggregate transfer, whose width its layout use binds. A span `ldobj` emits nothing, and
-`ldobj` or `stobj` of any other type, such as a floating-point or pointer type, is rejected. No
-other raw opcode may emit one
-of these forms, except a call, whose Unsafe and runtime-model checks bind it. `volatile.`, an
+translated instruction to the rule (`readOnlyPrefixMatches`). Object loads, stores, initializations, copies
+and sizes decode with their type tokens.
+`ObjectOperandsValid` checks the storage shape for each distinct live opcode and operand.
+The scalar validator binds each literal opcode and type to its site. Only a proved decoding
+can skip that comparison. A span load requires a direct source of the same span type. A span
+reset uses the checked local fold. Block copies and initializations retain the alignment of
+their prefix, with an alignment of eight for an unprefixed operation. `volatile.`, an
 `unaligned.` alignment other than 1, 2 or 4, and `unaligned.` before an instruction that does
 not take it are rejected.
 

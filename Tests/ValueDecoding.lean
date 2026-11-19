@@ -1,4 +1,5 @@
-import CIL
+import CIL.Extraction.Scalars
+import CIL.Extraction.DecodedDefinition
 
 /-!
 # Value decoding coverage
@@ -51,6 +52,16 @@ theorem span_reset_inputs :
         (Instruction.ofRaw? none ⟨0, 0xfe15, .type span⟩).isNone) = true := by
   decide +kernel
 #print axioms span_reset_inputs
+
+/-- Specializing a span reset over a matching generic layout preserves its operand and hole. -/
+theorem span_reset_substitution :
+    ["System.Span`1", "System.ReadOnlySpan`1"].all (fun name =>
+      let span := TypeExpr.apply (.constructor runtimeScope name) int32
+      let closed := substituteOperand [] [spanLayout name] 0 (.type span)
+      closed == some (.type span) &&
+        (closed.bind fun operand => Instruction.ofRaw? none ⟨0, 0xfe15, operand⟩).isNone) =
+      true := by decide +kernel
+#print axioms span_reset_substitution
 
 /-- A static call site of `T.Account::Deposit(int32)`. -/
 private def callSite : CallSite := {
@@ -172,6 +183,10 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 125, classOperand⟩, .stfld classField),
   (⟨0, 123, structOperand⟩, .ldfld structField), (⟨0, 124, structOperand⟩, .ldflda structField),
   (⟨0, 125, structOperand⟩, .stfld structField),
+  -- Typed object operations.
+  (⟨0, 0x70, .type int32⟩, .cpobj int32), (⟨0, 0x71, .type int32⟩, .ldobj int32),
+  (⟨0, 0x81, .type int32⟩, .stobj int32), (⟨0, 0xfe15, .type int32⟩, .initobj int32),
+  (⟨0, 0xfe1c, .type int32⟩, .sizeof int32),
   -- Dynamic frame storage.
   (⟨0, 65039, .none⟩, .localloc),
   -- Class type tests.
@@ -189,8 +204,8 @@ def named : List (RawInstruction × Instruction) := [
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
-  ``Instruction.loadAggregate, ``Instruction.copyObject, ``Instruction.storeAggregate,
-  ``Instruction.initAggregate, ``Instruction.loadScalar, ``Instruction.storeScalar,
+  ``Instruction.loadAggregate, ``Instruction.storeAggregate,
+  ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
   ``Instruction.initializeSpanLocal, ``Instruction.managed, ``Instruction.callInstance,
@@ -291,6 +306,31 @@ theorem unaligned_indirect_unchanged :
       Instruction.ofRaw? (some ⟨0, 65042, .integer alignment⟩) raw == some decoded) = true := by
   decide +kernel
 #print axioms unaligned_indirect_unchanged
+
+/-- Only a valid unaligned prefix before an object load or store preserves its decoding. -/
+theorem object_prefixes :
+    let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") int32
+    let pair := TypeExpr.aggregate "Pair" 0
+    let types := [int32, .enum "Signed8" (.atom runtimeScope "System.SByte"), pair, span] ++
+      [128, 256, 512].map (fun bits =>
+        .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{bits}`1") int32)
+    let check := fun (operand : RawOperand) (type : TypeExpr) =>
+      let rows : List (Nat × Option Instruction) := [(0x70, some (.cpobj type)),
+        (0x71, some (.ldobj type)), (0x81, some (.stobj type)),
+        (0xfe15, if type == span then none else some (.initobj type)),
+        (0xfe1c, some (.sizeof type))]
+      rows.all fun (opcode, expected) =>
+      let raw : RawInstruction := ⟨3, opcode, operand⟩
+      Instruction.ofRaw? none raw == expected && alignments.all (fun alignment =>
+        Instruction.ofRaw? (some ⟨0, 0xfe12, .integer alignment⟩) raw ==
+          (if opcode ∈ [0x71, 0x81] then expected else none)) &&
+        ([⟨0, 0xfe12, .integer 8⟩, ⟨0, 0xfe13, .none⟩, ⟨0, 0xfe14, .none⟩,
+          ⟨0, 0xfe16, .type type⟩, ⟨0, 0xfe19, .integer 1⟩, ⟨0, 0xfe1e, .none⟩]
+          : List RawInstruction).all (fun modifier =>
+            (Instruction.ofRaw? (some modifier) raw).isNone)
+    types.all (fun type => check (.type type) type) &&
+      (substituteOperand [pair] [] 1 (.type (.parameter 0))).any (check · pair) := by decide +kernel
+#print axioms object_prefixes
 
 /-- A direct call retains the tail transfer or the static dispatch receiver named by its prefix. -/
 theorem direct_call_prefixes :
@@ -615,7 +655,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 85, undecoded 24 of 109 constructors -/
+/-- info: decoded 90, undecoded 22 of 112 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

@@ -900,6 +900,10 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
+  case ldobj | stobj | cpobj | initobj | sizeof =>
+    plain_cases
+    simp only [Method.valueShape, context.environment] at h ⊢
+    first | lockstep | lookup_lockstep
   case ldelem_any element => exact step_relabel_ldelem_any element
   case stelem_any element => exact step_relabel_stelem_any element
   case ldelema element readOnly => exact step_relabel_ldelema element readOnly
@@ -930,7 +934,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
-  case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
+  case loadAggregate | storeAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
     | pop | skipInit =>
@@ -945,10 +949,7 @@ theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := step_rela
 theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := step_relabel _
 theorem step_relabel_loadAggregate (size : Nat) : StepRelabel (.loadAggregate size) :=
   step_relabel _
-theorem step_relabel_copyObject (size : Nat) : StepRelabel (.copyObject size) := step_relabel _
 theorem step_relabel_storeAggregate (size : Nat) : StepRelabel (.storeAggregate size) :=
-  step_relabel _
-theorem step_relabel_initAggregate (size : Nat) : StepRelabel (.initAggregate size) :=
   step_relabel _
 theorem step_relabel_loadScalar (width : Nat) (signed : Bool) :
     StepRelabel (.loadScalar width signed) := step_relabel _
@@ -1558,6 +1559,10 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticAddress_congr context.statics]
     raise_lockstep
+  case ldobj | stobj | cpobj | initobj | sizeof =>
+    plain_cases
+    simp only [Method.valueShape, context.environment] at h ⊢
+    first | solve | raise_lockstep | lookup_raise
   case ldelem_any | stelem_any | ldelema =>
     plain_cases
     simp only [CIL.Method.elementShape, context.environment] at h ⊢
@@ -1600,7 +1605,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
-  case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
+  case loadAggregate | storeAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
     | pop | skipInit =>
