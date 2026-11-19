@@ -203,18 +203,37 @@ foreach (var (name, native, pointer) in additions)
         """);
     if (name == "Offset32Reference")
     {
-        var narrowed = NarrowEvidence(source, "method0_scalars_validated");
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
+        File.AppendAllText(proof, """
+
+            namespace Extracted
+            /-- The scalar checker validates emitted instructions against the commuted operands. -/
+            private abbrev scalarFits (code : List CIL.Instruction) :=
+              CIL.Extraction.ScalarFlowValid rawLayouts.toArray method0Closed method0FeatureStates
+                method0ScalarStates code false
+
+            /-- The unchanged commuted addition satisfies the explicit scalar encoding. -/
+            theorem original_add_valid : scalarFits method0.code := by decide +kernel
+            #print axioms original_add_valid
+            end Extracted
+
+            """);
         foreach (var (mutation, replacement) in new[]
         {
             ("lowered", ".memory (.add 1 true)"), ("subtract", ".sub"),
             ("stride", ".memory (.add 2 true)"), ("unsigned", ".memory (.add 1 false)")
         })
         {
-            var forged = Path.Combine(root, $"ForgedAdd-{mutation}.lean");
-            var update = $$"""code := method.code.map fun op => match op with | .add => {{replacement}} | _ => op""";
-            File.WriteAllText(forged, ForgeDecodedMethod(narrowed, 0, update));
-            rejected.Add(forged, $"PASS independent forged commuted addition: {mutation}", "ScalarFlowValid");
+            File.AppendAllText(proof, $$"""
+
+                namespace Extracted
+                /-- The scalar operands exclude the substituted instruction. -/
+                theorem forged_{{mutation}}_rejected :
+                    Not (scalarFits (method0.code.map fun op => match op with
+                      | .add => {{replacement}} | _ => op)) := by decide +kernel
+                #print axioms forged_{{mutation}}_rejected
+                end Extracted
+
+                """);
         }
     }
     evidence.Add(proof, "PASS runtime, certificate and commuted reference addition: " + name);
