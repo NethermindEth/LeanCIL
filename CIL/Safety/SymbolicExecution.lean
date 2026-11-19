@@ -1065,6 +1065,21 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   return matching
 
 open Lean Elab Tactic Meta in
+/-- The checked shape of a named type operand proves its byte width at a typed step. -/
+elab "cil_step_value_size" : tactic => withMainContext do
+  let target := (← instantiateMVars (← getMainTarget)).consumeMData
+  let some (_, lhs, _) := target.eq? | throwError "Expected an object size equation"
+  let some shape := lhs.app1? ``CIL.ValueShape.size? | throwError "Expected a value shape size"
+  let some (.done resolved) ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape shape
+    | throwError "No checked shape for the step operand"
+  let some proof := resolved.proof? | throwError "Missing value shape proof"
+  let sized ← mkCongrArg (mkConst ``CIL.ValueShape.size?) proof
+  unless ← withDefault (isDefEq (← inferType sized) target) do
+    throwError "The checked shape has a different size"
+  (← getMainGoal).assign sized
+  replaceMainGoal []
+
+open Lean Elab Tactic Meta in
 /-- Close the goal with `fact` after unfolding the named bodies in its type.
     Fails when the supplied normalization does not change the type. -/
 def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray) (fact : Term) :
@@ -1078,7 +1093,9 @@ def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray
     | none => mkExpectedTypeHint proof result.expr
   -- Lookup may also unfold a supplied definition inside the body, such as a local initializer.
   let goals ← withDefault <| (← getMainGoal).apply proof
-  unless goals.isEmpty do throwError "The step fact left goals"
+  for goal in goals do
+    let remaining ← Tactic.run goal <| evalTactic (← `(tactic| cil_step_value_size))
+    unless remaining.isEmpty do throwError "The step fact left a premise"
   replaceMainGoal []
 
 open Lean Elab Tactic Meta in
@@ -1204,7 +1221,8 @@ private def applyCheckedStepFact (facts : Array Term) : TacticM Bool := do
   for fact in candidates do
     let saved ← saveState
     try
-      evalTactic (← `(tactic| cil_strict ((with_reducible_and_instances apply $fact); done)))
+      evalTactic (← `(tactic| cil_strict
+        ((with_reducible_and_instances apply $fact) <;> cil_step_value_size)))
       return true
     catch _ => saved.restore
   if !candidates.isEmpty then

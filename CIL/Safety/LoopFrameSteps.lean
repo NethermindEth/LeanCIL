@@ -402,7 +402,11 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
         `(Eq.trans ($lowering _ _ _ _ _) ($stepped _ _ _ _ _))
       | none =>
         if op.isAppOfArity ``CIL.Instruction.initobj 1 then
-          `($stepped _ _ (by first | rfl | simp only [cil_code, CIL.ValueShape.size?]) _ _ _ _)
+          `($stepped _ _ (by
+              first
+              | cil_step_value_size
+              | rfl
+              | simp only [cil_code, CIL.ValueShape.size?]) _ _ _ _)
         else `($stepped _ _ _ _ _)
     Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
       refine CIL.Safety.loop_terminates_next $found $instruction $storing ?_))

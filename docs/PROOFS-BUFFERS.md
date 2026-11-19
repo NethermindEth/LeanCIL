@@ -242,7 +242,10 @@ check, so these laws do not apply to it and its proofs stay at the byte level.
 
 A struct local is tracked in the same `LocalSnapshots` set as numeric locals, remembered as its
 bytes. `LocalSnapshots.zero_aggregate` returns the step equation for `initobj` through the local's
-address. `store_field` and `load_field` cover int, word and 16- or 32-byte vector fields,
+address. Pass that equation to `cil_checked_steps` or `cil_contract_steps`. The stepper uses the
+generated operand shape to prove that the byte width of `initobj` equals the size of the home.
+The loop frame stepper uses the same fact. `store_field` and `load_field` cover int, word and
+16- or 32-byte vector fields,
 `load_signed_field` sign extends a 1- or 2-byte field as `signedOfWidth`, and
 `store_aggregate_field` and `load_aggregate_field` cover a nested struct field, whose value is the
 number of its bytes. Zeroing and stores also return the updated snapshots, well-formedness,
