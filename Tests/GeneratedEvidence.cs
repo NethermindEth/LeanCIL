@@ -46,6 +46,9 @@ partial class Program
     [GeneratedRegex(@"(?m)^def method(\d+)Original : Extraction\.RawMethod := [^\r\n]*")]
     private static partial Regex RawDefinition { get; }
 
+    [GeneratedRegex(@"(?m)^def method(\d+)Closed : Extraction\.RawMethod := (?<body>[^\r\n]+)")]
+    internal static partial Regex ClosedDefinition { get; }
+
     [GeneratedRegex(@"(?m)^def method(?<number>\d+)Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ")]
     private static partial Regex ClosedReturnType { get; }
 
@@ -142,16 +145,21 @@ partial class Program
     static string ForgeDecodedInstruction(string source, int method, int pc, string change) =>
         ForgeDecodedMethod(source, method, $"code := method.code.modify {pc} ({change})");
 
-    // Change the feature check's raw input while the method still decodes from the original bytes.
-    static string ForgeFeatureCode(string source, int method, string code)
+    // The decoder keeps the genuine closed body. Every obligation reads the changed evidence record.
+    static string ForgeClosedCode(string source, int method, string code)
     {
         var closed = $"method{method}Closed";
-        var suffix = $" profile method{method}FeatureStates";
-        var input = $"{closed}{suffix}";
-        if (!source.Contains(input, StringComparison.Ordinal))
-            throw new InvalidOperationException($"Missing feature input for method{method}");
-        return source.Replace(input, $$"""({ {{closed}} with code := {{closed}}.code.{{code}} }){{suffix}}""",
-            StringComparison.Ordinal);
+        var input = $"method{method}DecoderInput";
+        var definition = ClosedDefinition.Matches(source).Single(match => match.Groups[1].Value == $"{method}");
+        var decoder = DecodedDefinition(source, method);
+        if (!decoder.Success) throw new InvalidOperationException($"Missing decoder for method{method}");
+        var declarations = $$"""
+            def {{input}} : Extraction.RawMethod := {{definition.Groups["body"].Value}}
+            def {{closed}} : Extraction.RawMethod := { {{input}} with code := {{input}}.code.{{code}} }
+            """;
+        return source.Replace(definition.Value, declarations, StringComparison.Ordinal)
+            .Replace(decoder.Value, decoder.Value.Replace(closed, input, StringComparison.Ordinal),
+                StringComparison.Ordinal);
     }
 
     /// <summary>

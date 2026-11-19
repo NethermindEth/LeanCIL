@@ -65,7 +65,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
                 throw new InvalidOperationException("Missing null-throw operand: " + opcode);
             var forgedOperand = Path.Combine(folder, $"Operand-{opcode}.lean");
             var rawPc = opcode == 122 ? pc : pc - 1;
-            File.WriteAllText(forgedOperand, ForgeFeatureCode(source, method,
+            File.WriteAllText(forgedOperand, ForgeClosedCode(source, method,
                 $$"""modify {{rawPc}} (fun raw => { raw with operand := .integer 0 })"""));
             rejected.Add(forgedOperand, "PASS null-throw operand forgery rejected: " + opcode,
                 "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
@@ -118,7 +118,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             map (fun raw => if raw.opcode == 20 then
               { raw with opcode := 114, operand := .text "not null" } else raw)
             """.ReplaceLineEndings(" ");
-        File.WriteAllText(nonNull, ForgeFeatureCode(source, method, changed));
+        File.WriteAllText(nonNull, ForgeClosedCode(source, method, changed));
         rejected.Add(nonNull, $"PASS {name}: non-null constructor operand rejected",
             "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
     }

@@ -92,14 +92,19 @@ partial class Program
                     """);
             evidence.Add(proof, "PASS compiled tail transfer and lifetime: " + name);
             if (name != "Forward") continue;
+            const string feature = "method0_features_validated";
+            var featureSource = NarrowEvidence(source, feature);
+            var control = Path.Combine(root, "Tail-prefix-control.lean");
+            File.WriteAllText(control, featureSource);
+            evidence.Add(control, "PASS the raw tail prefix agrees with the decoded call", feature);
             const string withoutTail = "fun op => match op with | .call target _ => .call target {} | _ => op";
             foreach (var (mutation, changed, markers) in new[]
             {
                 ("dropped", ForgeDecodedInstruction(source, 0, pc, withoutTail),
                     new[] { "Extraction.FeatureFlowValid", FeatureObligation(0) }),
-                ("prefix", ForgeFeatureCode(source, 0,
+                ("prefix", ForgeClosedCode(featureSource, 0,
                     $$"""modify {{pc - 1}} (fun raw => { raw with opcode := 0 })"""),
-                    ["Extraction.FeatureFlowValid", FeatureObligation(0)]),
+                    ["Extraction.FeatureFlowValid", FeatureObligation(0), "is false"]),
                 ("target", ForgeLink(source, 0, pc, ".direct 0"), ["Extraction.ManagedCallsValid"])
             })
             {
