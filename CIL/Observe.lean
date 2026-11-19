@@ -154,6 +154,13 @@ def residualOf (step : MVarId) : MetaM (Option (Array Expr)) := step.withContext
     result.set (← stepResidual step (← facts.mapM fun fact => Term.exprToSyntax fact))
   result.get
 
+/-- The step goal `step` of a call that runs its runtime model, rewritten to that model's step;
+    nothing for a call that enters a callee. -/
+def modelledStepOf (step : MVarId) : MetaM (Option MVarId) := step.withContext do
+  let result ← IO.mkRef none
+  discard <| Term.TermElabM.run' <| Tactic.run step do result.set (← modelledCallStep? step)
+  result.get
+
 /-! ## Failure records -/
 
 /-- The non-null object references among the literal arguments `args`. -/
@@ -238,25 +245,32 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
   -- A receiver-checked call crosses into its callee as a direct call does.
   let isCall := (← whnfR op).isAppOf ``CIL.Instruction.call ||
     (← whnfR op).isAppOf ``CIL.Instruction.callvirt
-  if isCall && !calling then
-    return { record with
-      missing := some "calleeContract",
-      suggestions := #[m!"cross the call with the call tactic of its stepping family and the \
-        callee's contract"] }
   if calling && !isCall then
     return { record with
       missing := some "callSite",
       suggestions := #[m!"step to the call first"] }
-  let some frame := stepping.parts.find? (·.1 == "frame") | return record
-  let some stack := stepping.parts.find? (·.1 == "stack") | return record
-  let some memory := stepping.parts.find? (·.1 == "memory") | return record
+  let callee := { record with
+    missing := some "calleeContract",
+    suggestions := #[m!"cross the call with the call tactic of its stepping family and the \
+      callee's contract"] }
+  let entersCallee := isCall && !calling
+  let unread := if entersCallee then callee else record
+  let some frame := stepping.parts.find? (·.1 == "frame") | return unread
+  let some stack := stepping.parts.find? (·.1 == "stack") | return unread
+  let some memory := stepping.parts.find? (·.1 == "memory") | return unread
   let stepTerm ← mkAppM `CIL.Safety.step #[body, op, pcTerm, stepping.args, frame.2, stack.2,
     memory.2]
   let resultType ← inferType stepTerm
   let step ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar resultType))
   let .mvar stepGoal := step
     | throwError "analyze: expected a fresh metavariable, but found{indentExpr step}"
-  let residual := (← residualOf stepGoal).getD #[← instantiateMVars (← inferType step)]
+  -- A call without a link runs its runtime model in this method, so its residual is the model's.
+  let stepGoal ← if entersCallee then
+      match ← modelledStepOf stepGoal with
+      | some modelled => pure modelled
+      | none => return callee
+    else pure stepGoal
+  let residual := (← residualOf stepGoal).getD #[← instantiateMVars (← stepGoal.getType)]
   let missing := missingFactOf residual
   return { record with
     missing := missing.name, residual,

@@ -146,6 +146,31 @@ def missingFactHint (residual : Array Expr) : MessageData := Id.run do
       return m!"{fact.hint}. The unresolved operation is{indentExpr operation}"
   return fact.hint
 
+open Lean Elab Tactic Meta in
+/-- The step goal `step` of a `call` whose pc has no link, rewritten to the step of its method's
+    runtime model, as a memory operation where the model is one, so its residual shows what the
+    model reads. Nothing when the call is linked or no fact decides its link or model. -/
+def modelledCallStep? (step : MVarId) : TacticM (Option MVarId) := do
+  let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | return none
+  let some #[body, op, pc, _, _, _, _] := argumentsOf? action ``CIL.Safety.step 7 | return none
+  let some #[method, _] := argumentsOf? op ``CIL.Instruction.call 2 | return none
+  let some link ← stepLinkFact? body pc | return none
+  unless ((← inferType link).eq?.map (·.2.2.isAppOf ``Option.none)).getD false do return none
+  let some model ← stepModelFact? body method | return none
+  let saved ← saveState
+  try
+    let remaining ← step.withContext do
+      let link ← Term.exprToSyntax link
+      let model ← Term.exprToSyntax model
+      Tactic.run step <| evalTactic (← `(tactic| first
+        | rewrite [CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl]
+        | rewrite [CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl]))
+    let [goal] := remaining | saved.restore; return none
+    return some goal
+  catch _ =>
+    saved.restore
+    return none
+
 set_option hygiene false in
 open Lean Elab Tactic Meta in
 /-- The step goal `step` rewritten as far as the step equations and `prepared` go: the goals left,

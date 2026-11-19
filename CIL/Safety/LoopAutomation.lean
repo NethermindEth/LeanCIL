@@ -379,7 +379,8 @@ def loopMissingHint (residual : Array Lean.Expr) : Lean.MetaM Lean.MessageData :
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, naming why the loop goal cannot be stepped: an undecided branch, an
-    instruction that cannot be fetched, a call, or the residual of the step at its pc. Returns
+    instruction that cannot be fetched, a call into a callee, or the residual of the step at its
+    pc, which for a call without a link is the step of its runtime model. Returns
     instead when `stops` accepts the fetched opcode, as a call or return a later tactic takes. -/
 def loopStuck (tactic : String) (facts prepared : Array Term)
     (stops : Lean.Name → Bool) : TacticM Unit := withMainContext do
@@ -396,10 +397,14 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     saved.restore
     throwError "{tactic}: cannot fetch the instruction at pc {position}: {error.toMessageData}"
   let op := fetched.op
-  let stepGoal := fetched.step
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
   if !fetched.unlinkedCall && stops opName then saved.restore; return
-  if !fetched.unlinkedCall && callsCallee opName then
+  -- A call without a link runs its model in this method, so its step is shown like any other.
+  let modelled ← if opName == ``CIL.Instruction.call then
+      modelledCallStep? fetched.step
+    else pure none
+  let stepGoal := modelled.getD fetched.step
+  if !fetched.unlinkedCall && callsCallee opName && modelled.isNone then
     saved.restore
     throwError "{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and the \
       callee's contract"
