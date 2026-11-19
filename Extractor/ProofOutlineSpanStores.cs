@@ -17,14 +17,14 @@ internal static partial class ProofOutline
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
         if (ops is not [LocalAddress { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
-                ModelCall { Model: Memory { Operation: SpanItem item } }, Arg { Index: 1 }, var store,
+                Memory { Operation: SpanItem item }, Arg { Index: 1 }, var store,
                 Return] || item.Width != width || !MethodArguments.Plain(method, 1))
             return null;
         return width is 4 or 8 && StoredWidth(store) == width ? (width, store) : null;
     }
 
     /// <summary>The bytes a scalar store through a reference writes, or null for any other operation.</summary>
-    static int? StoredWidth(Operation op) => ((op as ModelCall)?.Model ?? op) switch
+    static int? StoredWidth(Operation op) => op switch
     {
         ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Stobj } store => store.ScalarWidth,
         StoreScalar store => store.Width,
@@ -38,7 +38,7 @@ internal static partial class ProofOutline
             ? ElementWidth(span.GenericArguments[0]) : null;
 
     /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
-    static string StoreLemma(Operation op) => ((op as ModelCall)?.Model ?? op) switch
+    static string StoreLemma(Operation op) => op switch
     {
         IndirectAccess { Kind: NumericKind.I8 } => "step_stind_i8_of_write",
         IndirectAccess { Kind: NumericKind.I } => "step_stind_i_of_write",

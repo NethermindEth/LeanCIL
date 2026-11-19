@@ -77,7 +77,7 @@ input and `site` a `bind_call` name.
 | A `Raises` goal | `cil_raise_steps [facts]` | [Outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 | A call whose callee has an `OutcomeContract` | `cil_outcome_call`, `cil_formed_outcome_call`, `cil_outcome_raise` | [Outcomes](PROOFS-CONTRACTS.md#name-exceptional-outcomes) |
 | A loop path to the next head | `cil_loop_recurse hypothesis values [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
-| A loop path to a call or return | `cil_loop_advance [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
+| A loop path to a linked call or return | `cil_loop_advance [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
 | A call inside a loop | `cil_loop_call holds input at site [facts]` | [Loops](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop) |
 | A loop exit and its postcondition | `cil_loop_finish [facts]` | [Loops](PROOFS-STEPPING.md#step-loops) |
 | The progress goal of a loop verification condition | `cil_loop_continue next [facts]`, `cil_loop_finish [facts]` | [Loop VCs](PROOFS-STEPPING.md#loop-verification-conditions) |

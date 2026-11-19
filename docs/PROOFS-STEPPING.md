@@ -552,8 +552,9 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 `CIL.Safety.LoopScaffold` imports, walk these goals while keeping the loop's `LoopFrame` current.
 All gather facts as the other loop tactics do, so their lists are optional:
 
-- `cil_loop_advance [facts]` steps to a call or return and `cil_loop_finish [facts]` through a
-  return to its postcondition. Each takes a struct zeroing, field store or numeric local store on
+- `cil_loop_advance [facts]` steps through runtime-model calls and stops at a linked call or
+  return. `cil_loop_finish [facts]` steps through a return to its postcondition.
+  Each takes a struct zeroing, field store or numeric local store on
   the way as `cil_loop_recurse` does and fails as `cil_loop_steps` does on anything else. At the
   return `cil_loop_finish` names what leaving the frame keeps, `exitConfined` and `exitBelow`
   (`LoopFrame.leave`), carries the caller-buffer facts to the exit memory, and closes each
@@ -561,7 +562,7 @@ All gather facts as the other loop tactics do, so their lists are optional:
   facts prove; the rest are left as goals, tagged by their place among the conjuncts (see
   [obligation tags](#obligation-tags)), with those facts in context.
 - `cil_loop_call holds input at site [facts]` applies the contract (`loop_terminates_call`) at
-  the `bind_call` site or, without `at site`, at the fetched call. It leaves the precondition,
+  the `bind_call` site or, without `at site`, at the fetched linked call. It leaves the precondition,
   tagged `precondition.<callee>`, unless `trivial` or a hypothesis proves it, then continues with
   these names in context: the returned memory `called`, the typed output `output` and, from the
   call's `CallResult`, its invocation `invoked`, footprint fact `confined` and postcondition

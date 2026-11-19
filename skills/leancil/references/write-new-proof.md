@@ -120,7 +120,7 @@ and the snapshot forms need it, written `[]` when empty.
 | The same, and the path stores or loads numeric locals over symbolic caller memory | `cil_contract_steps (snapshots := snapshots) [facts]` or `cil_checked_steps (snapshots := snapshots) [facts]`, with `snapshots : LocalSnapshots memory frame.locals known` ([snapshot walks](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots)) |
 | One call, keeping its precondition as a goal | `cil_contract_call holds input at site [facts]` |
 | A loop path to the next loop head | `cil_loop_recurse hypothesis values [facts]`, leaving `case invariant` and `case measure` |
-| A loop path to a call, then the call | `cil_loop_advance [facts]`, then `cil_loop_call holds input at site [facts]` |
+| A loop path through runtime models to a linked call | `cil_loop_advance [facts]`, then `cil_loop_call holds input at site [facts]` |
 | A loop exit and its postcondition | `cil_loop_finish [facts]`, leaving `case postcondition` |
 | An element write's authority, bound and footprint membership | `cil_loop_obligation [definitions]` |
 | A `Raises` goal | `cil_raise_steps [facts]` |

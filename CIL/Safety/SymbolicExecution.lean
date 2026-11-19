@@ -2040,6 +2040,12 @@ def callsCallee (operation : Lean.Name) : Bool :=
   operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.callvirt
 
 open Lean Elab Tactic Meta in
+/-- The link lookup for this instruction proves that it has no callee. -/
+def unlinkedPc (body pc : Expr) : TacticM Bool := withMainContext do
+  let some fact ← stepLinkFact? body pc | return false
+  return ((← inferType fact).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
+
+open Lean Elab Tactic Meta in
 /-- Whether the `run` goal's pc has no link in the body `methodFound` fetched, so a `call` there
     runs its runtime model and continues in the same method. -/
 def unlinkedRunPc (methodFound : Term) (target : Expr) : TacticM Bool := withMainContext do
@@ -2048,8 +2054,7 @@ def unlinkedRunPc (methodFound : Term) (target : Expr) : TacticM Bool := withMai
   let found ← instantiateMVars (← inferType (← Term.elabTerm methodFound none))
   let some (_, _, fetched) := found.consumeMData.eq? | return false
   let some #[_, body] := argumentsOf? fetched ``Option.some 2 | return false
-  let some fact ← stepLinkFact? body pc | return false
-  return ((← inferType fact).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
+  unlinkedPc body pc
 
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the

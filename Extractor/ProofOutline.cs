@@ -42,9 +42,8 @@ internal static partial class ProofOutline
             ? $"Extracted.method{index}_elementShape{shape}" : null;
     }
 
-    /// <summary>The emitted operations as the outline reads them, over frame slots: a homed argument's load, store and
-    /// address are those of its home's slot, which follows the declared locals, as the step equations state. Each
-    /// such operation still renders as the argument instruction the body holds.</summary>
+    /// <summary>The outline reads homed arguments through their frame slots and modelled calls through
+    /// their runtime operations. Each entry retains its instruction's program counter.</summary>
     internal static Operation[] SlotOperations(TemplateEmitter.Method emitted)
     {
         var frame = emitted.Frame;
@@ -58,6 +57,7 @@ internal static partial class ProofOutline
             Arg load when slots.ContainsKey(load.Index) => new Local(Home(load.Index)) { Argument = load },
             Starg store => new SetLocal(Home(store.Index)) { Argument = store },
             Ldarga address => new LocalAddress(Home(address.Index)) { Argument = address },
+            ModelCall call => call.Model,
             _ => operation
         })];
     }

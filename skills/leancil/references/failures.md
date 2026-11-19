@@ -112,7 +112,7 @@ and [traces](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#trac
 | Lean error | Meaning | Next action |
 | --- | --- | --- |
 | `cannot step pc N (op) at memory M` | A loop tactic lacks a fact for that instruction; the message's last line, `Supply ...`, names it | Prove that fact and pass it in the tactic's fact list |
-| `pc N is a call (op); cross it with cil_loop_call` | `cil_loop_steps` or `cil_loop_finish` reached a call | Use `cil_loop_advance`, then `cil_loop_call holds input at site` |
+| `pc N is a call (op); cross it with cil_loop_call` | `cil_loop_steps` or `cil_loop_finish` reached a linked call | Use `cil_loop_advance`, then `cil_loop_call holds input at site` |
 | `target state not matched at pc N` | The path reached the target pc with another frame, stack or memory | State the fact or the target in the reached form the message shows |
 | A stopped walk with `if c then target else next` as the pc, or `cil_lookup: undecided branch` | No fact decides the branch condition | Pass `c = 0` or its negation, or `split` and resume in each case |
 | `Snapshot stepping took no step; justify the local premises` | The snapshot form found no home, write access or `WellFormed` fact for the first local store | Put those premises in context ([snapshot walks](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots)) |

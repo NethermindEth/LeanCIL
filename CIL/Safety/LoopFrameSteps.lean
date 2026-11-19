@@ -8,7 +8,7 @@ import CIL.TermAccess
 # Loop tactics that carry frame facts
 
 The tactics that walk a loop's `LoopTerminates` goals while keeping its `LoopFrame` current:
-`cil_loop_advance` steps to a call or return, `cil_loop_finish` through a return,
+`cil_loop_advance` steps to a linked call or return, `cil_loop_finish` through a return,
 `cil_loop_call` crosses a call through the callee's contract and continues with the frame after
 it, and `cil_loop_recurse` steps to a loop head and applies the head's hypothesis there. Each walk
 takes the struct zeroings, field stores and numeric local stores on its way through the frame's
@@ -589,7 +589,7 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
 def noFootprint : MetaM Expr := do
   mkAppOptM ``List.nil #[← mkAppM ``Prod #[mkConst ``Reference, mkConst ``Nat]]
 
-/-- Step a `LoopTerminates` goal through fetched instructions up to the next call or return,
+/-- Step a `LoopTerminates` goal through fetched instructions up to the next linked call or return,
     with the optional facts and those `gatherLoopFacts` finds, taking each struct zeroing, field
     store and numeric local store on the way through the frame lemmas. Any other instruction it
     cannot step fails, naming the pc, the instruction, the residual step and the fact missing. -/
@@ -728,9 +728,12 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
   let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
     (#[← `(CIL.truth)] ++ facts)
   let fetched ← observing? (loopFetch facts)
-  let some { op, step, .. } := fetched
+  let some { op, unlinkedCall, step, .. } := fetched
     | saved.restore
       throwError "cil_loop_call: cannot fetch the instruction at pc {position}"
+  if unlinkedCall then
+    saved.restore
+    throwError "cil_loop_call: pc {position} has no callee link; step it with `cil_loop_advance`"
   unless ((← whnfR op).getAppFn.constName?.map callsCallee).getD false do
     saved.restore
     throwError "cil_loop_call: pc {position} is {op}, not a call; step to the call first with \

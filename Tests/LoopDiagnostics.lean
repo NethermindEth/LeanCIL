@@ -512,6 +512,27 @@ private def stampOffset : CIL.Extraction.MethodRef :=
 
 cil_runtime_models stamps
 
+/-- Both calls name the native word size getter. Only the second site has a link. -/
+@[cil_code] private def sizeCalls : CIL.Method :=
+  let getter : CIL.Extraction.MethodRef := {
+    owner := .atom CIL.Extraction.runtimeScope "System.IntPtr", name := name!"get_Size",
+    hasThis := false, genericArity := 0, parameters := [],
+    returnType := .atom CIL.Extraction.runtimeScope "System.Int32" }
+  { returnsValue := true, locals := [], code := [.call getter {}, .call getter {}, .ret],
+    links := [(1, .direct 1)] }
+
+cil_runtime_models sizeCalls
+
+/-- The model leaves its result on the stack at the linked call and preserves frame and memory. -/
+theorem advance_size_call (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop)
+    (linked : LoopTerminates [sizeCalls, sizeCalls] 0 [] post
+      ⟨1, frame, [.scalar (.i32 8)], memory⟩) :
+    LoopTerminates [sizeCalls, sizeCalls] 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_advance
+  exact linked
+
+#print axioms advance_size_call
+
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
   returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .storeScalar 4, .ret] }
@@ -658,7 +679,7 @@ theorem stamps_keep_caller_facts (stored : Memory) (count : W32) (buffer : Refer
 #print axioms stamps_keep_caller_facts
 
 -- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
-/-- error: cil_loop_advance: cannot step pc 5 (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) -/
+/-- error: cil_loop_advance: cannot step pc 5 (CIL.Instruction.call stampOffset) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)

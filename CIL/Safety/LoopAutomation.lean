@@ -86,7 +86,7 @@ theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : L
 #print axioms loop_reaches_terminates
 
 /-- Where a loop stepping tactic takes its goal: to the target state of a `LoopReaches`, or along
-    a `LoopTerminates` through its return, only up to a call or return, or up to the pc `target`
+    a `LoopTerminates` through its return, up to a linked call or return, or up to the pc `target`
     and any struct store before it. -/
 inductive LoopStepping where
   | reach
@@ -151,35 +151,19 @@ def loopStateParts? (state : Expr) : MetaM (Option (Array Expr)) := do
 /-- The instruction a loop goal's source state fetches, the proofs of its method and
     instruction lookups, and the step obligation taking it leaves. -/
 structure LoopFetched where
-  /-- The instruction used to select loop facts, including the operation of an offset call. -/
+  /-- The instruction used to select loop facts. -/
   op : Lean.Expr
+  /-- An unlinked call runs its model or faults in the current frame. -/
+  unlinkedCall : Bool
   /-- For a struct field access, a proof that the fetched and lowered instructions step alike,
       over `pc args frame memory stack`. -/
   lowering : Option Lean.Expr
   /-- A proof that the program holds the goal's method. -/
   found : Lean.Expr
-  /-- A proof that the method's code holds `op` at the goal's pc. -/
+  /-- A proof of the original instruction lookup at the goal's pc. -/
   instruction : Lean.Expr
   /-- The obligation that `op` steps to a next state. -/
   step : Lean.MVarId
-
-open Lean Elab Tactic Meta in
-/-- A direct unlinked offset call reads the loop's address facts and continues at the next pc. -/
-private def loopOffsetOperation? (instruction stepPremise : Expr) : TacticM (Option Expr) := do
-  let_expr CIL.Instruction.call method prefixes := ← whnfR instruction | return none
-  let tail ← whnfD (mkApp (mkConst ``CIL.CallPrefixes.tail) prefixes)
-  unless tail.isConstOf ``Bool.false do return none
-  let some (_, action, _) := (← instantiateMVars (← inferType stepPremise)).eq? | return none
-  let some #[body, _, pc, _, _, _, _] := argumentsOf? action ``CIL.Safety.step 7 | return none
-  let some link ← stepLinkFact? body pc | return none
-  let some (_, _, target) := (← inferType link).eq? | return none
-  unless target.isAppOf ``Option.none do return none
-  let some model ← stepModelFact? body method | return none
-  let some (_, _, resolved) := (← inferType model).eq? | return none
-  let_expr Option.some _ operation := resolved | return none
-  let_expr CIL.RuntimeModel.memory memoryOp := ← whnfR operation | return none
-  unless (← whnfR memoryOp).isAppOf ``CIL.MemoryOp.add do return none
-  return some (mkApp (mkConst ``CIL.Instruction.memory) memoryOp)
 
 open Lean Elab Tactic Meta in
 /-- The instruction a loop goal's source state fetches, with the lookups closed by
@@ -212,10 +196,12 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
   let .mvar step := stepPremise
     | throwError "loopFetch: expected a step premise, but found{indentExpr stepPremise}"
   let lowering := lowered.map (·.2)
-  let operation ← match lowered with
-    | some (operation, _) => pure operation
-    | none => pure ((← loopOffsetOperation? op stepPremise).getD op)
-  return { op := operation, lowering, found, instruction, step }
+  let unlinkedCall ← if (← whnfR op).isAppOf ``CIL.Instruction.call then do
+      let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | pure false
+      let some #[body, _, pc, _, _, _, _] := argumentsOf? action ``CIL.Safety.step 7 | pure false
+      unlinkedPc body pc
+    else pure false
+  return { op := lowered.map (·.1) |>.getD op, unlinkedCall, lowering, found, instruction, step }
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
@@ -412,8 +398,8 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
   let op := fetched.op
   let stepGoal := fetched.step
   let opName := ((← whnfR op).getAppFn.constName?).getD Name.anonymous
-  if stops opName then saved.restore; return
-  if callsCallee opName then
+  if !fetched.unlinkedCall && stops opName then saved.restore; return
+  if !fetched.unlinkedCall && callsCallee opName then
     saved.restore
     throwError "{tactic}: pc {position} is a call ({op}); cross it with `cil_loop_call` and the \
       callee's contract"
@@ -560,7 +546,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     -- A call or return ends an advance before any step; a resumed walk tries the store first,
     -- since a store fact the frame lemmas just produced may step it.
     let resuming := match mode with | .resume _ => true | _ => false
-    if stops op && !finishing && !resuming then return some op
+    if !fetched.unlinkedCall && stops op && !finishing && !resuming then return some op
     -- A store no fact states steps only through the frame lemmas.
     if mode != .reach && unknownStore then return some op
     -- The groups this instruction reads, normalised in the goal the first time one is read.
@@ -603,7 +589,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     if ← withNormalNodes reading (attempt next) then
       taken := taken + 1
       continue
-    if yields op then return some op
+    if !fetched.unlinkedCall && yields op then return some op
     loopStuck tactic facts.all reading yields
     return none
   return none

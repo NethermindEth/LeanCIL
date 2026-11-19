@@ -380,8 +380,7 @@ internal static partial class ProofOutline
                     if (stack.Count == 0) return Stop("a duplicate of an empty stack");
                     stack.Add(stack[^1]);
                 }
-                else if (op is StackOperation { Kind: StackOpcode.Pop } or
-                    ModelCall { Model: StackOperation { Kind: StackOpcode.Pop } })
+                else if (op is StackOperation { Kind: StackOpcode.Pop })
                 {
                     if (Pop() is null) return Stop("a pop of an empty stack");
                 }
