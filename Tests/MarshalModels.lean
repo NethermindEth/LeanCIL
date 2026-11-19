@@ -1,6 +1,7 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Extraction.BitModels
 import CIL.Safety.StepComposition
+import Tests.MetadataWorld
 
 /-! Call-site checks for the MemoryMarshal overloads in the example assembly. -/
 
@@ -158,17 +159,61 @@ theorem cast_result_identity :
 
 #print axioms cast_result_identity
 
-/-- A refused method-token operand decodes to its opcode's hole, which must be dead. -/
-private def refused (raw : RawInstruction) (alternative : Instruction) : Bool :=
-  let source : RawMethod := {
-    token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
+/-- The token instantiates one Cast declaration with Int32 and Int16. -/
+private def castToken (span : String) : MetadataSlice × Nat := open Tests.MetadataBuilder in
+  build (do
+    let _ ← Tests.MetadataWorld.ownWorld
+    let owner ← row Table.typeRef
+      [6, ← string "MemoryMarshal", ← string "System.Runtime.InteropServices"]
+    let viewType ← row Table.typeRef [6, ← string span, ← string "System"]
+    let viewOf := fun index => [0x15, 0x11, tokenRow viewType * 4 + 1, 1, 0x1e, index]
+    let signature ← blob ([0x10, 2, 1] ++ viewOf 1 ++ viewOf 0)
+    let member ← row Table.memberRef [tokenRow owner * 8 + 1, ← string "Cast", signature]
+    row Table.methodSpec [tokenRow member * 2 + 1, ← blob [0x0a, 2, 0x08, 0x06]])
+    (bytesOf "T") Tests.MetadataWorld.ownIdentity
+
+/-- The token, external target and open declaration all name the same Cast overload. -/
+private def castBinding (writable : Bool) : Bool := Id.run do
+  let span := if writable then "Span`1" else "ReadOnlySpan`1"
+  let (metadata, token) := castToken span
+  let .ok index := metadata.index | return false
+  let env := MetadataEnv.ofSlices [index]
+  let .ok frame := env.frame 0 0 | return false
+  let findCast := fun capability => scalarSites.find? fun (fixture, _) =>
+    fixture.name == "Cast" && fixture.parameters == [view capability int32Type]
+  let some (matching, declared) := findCast writable | return false
+  let some (opposite, _) := findCast (!writable) | return false
+  let owner := "System.Runtime.InteropServices.MemoryMarshal"
+  let target := s!"{runtimeScope}::System.{span}<!!1> {owner}::Cast(System.{span}<!!0>)"
+  let .call original := (matching.raw declared).operand | return false
+  let control := { original with target := .external target }
+  let crossed := { control with method := opposite.method }
+  return (checkCallOperand env frame token control).isOk &&
+    runtimeCatalog.siteAgrees {} .scalar ⟨0, 40, .call crossed⟩ (.call crossed.method {})
+      none none true &&
+    (match checkCallOperand env frame token crossed with
+     | .error (.operandMismatch found) => found == token
+     | _ => false)
+
+/-- The model row accepts either crossed Cast, but BodyDecodes refuses its closed reference
+    through checkCallOperand for the token of the declared overload. -/
+theorem crossed_cast_overloads : castBinding true ∧ castBinding false := by decide +kernel
+
+#print axioms crossed_cast_overloads
+
+/-- The caller contains one marshal call at pc zero. -/
+private def marshalCaller (raw : RawInstruction) : RawMethod :=
+  { token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
     callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
     parameters := [], locals := [],
     initLocals := false, maxStack := 0, genericParameters := [], code := [raw] }
+
+/-- A refused method-token operand decodes to its opcode's hole, which must be dead. -/
+private def refused (raw : RawInstruction) (alternative : Instruction) : Bool :=
   let required := runtimeCatalog.callRequirement (LayoutEnvironment.callLayouts {})
     .scalar none none raw
   siteClaim loweredCallFamily {} none raw == .refused &&
-    decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
+    decide ((Method.ofRaw? .scalar {} [] [true] (marshalCaller raw) []).map Method.code =
       none) &&
     required.accepts false (.unadmitted 40) && !required.accepts true (.unadmitted 40) &&
     !required.accepts true alternative && !required.accepts false alternative
@@ -197,6 +242,33 @@ theorem unresolved_marshal_sites :
         true := by decide +kernel
 
 #print axioms unresolved_marshal_sites
+
+/-- ManagedCallsValid refuses a linked Write<Double> through import admission even when the
+    slot has the exact signature and the decoder retains the call. -/
+theorem linked_write_import_refused :
+    let double := TypeExpr.atom runtimeScope "System.Double"
+    let bytes := view true (.atom runtimeScope "System.Byte")
+    let owner := "System.Runtime.InteropServices.MemoryMarshal"
+    let target := s!"{runtimeScope}::System.Void {owner}::Write(System.Span`1<System.Byte>,!!0&)"
+    let method : MethodRef := {
+      owner := .atom runtimeScope owner, name := name!"Write", hasThis := false, genericArity := 1,
+      methodArguments := [double], returnType := .void, parameters := [bytes, .byref double] }
+    let site : CallSite := {
+      method, name := "Write", target := .external target, typeArguments := [double],
+      declared := { convention := 0x10, parameters := [bytes, .byref (.parameter 0)] },
+      parameterCount := 2, returnsValue := false }
+    let source := marshalCaller ⟨0, 40, .call site⟩
+    let slot : ImportSlot := {
+      identity := target, closureDigest := "digest", parameterCount := 2, hasThis := false,
+      returnsValue := false, signature := some ⟨method.owner, site.name, site.typeArguments,
+        method.returnType, method.parameters⟩ }
+    (Method.ofRaw? .scalar {} [(0, .direct 0)] [true] source []).any (fun emitted =>
+      decide (emitted.code = [.call method {}] ∧ emitted.links = [(0, .direct 0)] ∧
+        runtimeModel {} .call method = none ∧ importSignatureMatches slot site = false ∧
+        ¬ ManagedCallsValid [] [slot] (callModelled emitted) source [true] emitted)) = true := by
+  decide +kernel
+
+#print axioms linked_write_import_refused
 
 /-- A live marshal site keeps the genuine call and requires its open declaration. -/
 theorem marshal_site_emissions :
