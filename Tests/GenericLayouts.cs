@@ -150,7 +150,7 @@ foreach (var (name, signature) in new[]
             theorem generic_size_{{name}} :
                 (CIL.Safety.invoke Extracted.program 8 0 []
                   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                    views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 32)] := rfl
+                    views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 32)] := by cil_kernel_rfl
             #print axioms generic_size_{{name}}
             """;
     }
@@ -252,7 +252,7 @@ foreach (var closedInterface in new[] { false, true })
         theorem interface_owner_size :
             (CIL.Safety.invoke Extracted.program 8 0 []
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := by cil_kernel_rfl
         #print axioms interface_owner_size
         """);
     evidence.Add(path, "PASS generic owner with direct interface constraint: " + name, "layouts_validated");
