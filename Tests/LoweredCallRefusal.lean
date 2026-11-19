@@ -16,8 +16,8 @@ private def body (opcode : Nat) (owner : TypeExpr) (member : MetadataName) (name
     method := {
       owner, name := member, hasThis := opcode != 40, genericArity := 0,
       returnType := .void, parameters := [] },
-    declared := { convention := if opcode == 40 then 0 else 0x20 }, name, target := .managed 2, typeArguments := [],
-    parameterCount := 0, returnsValue := false }⟩] }
+    declared := { convention := if opcode == 40 then 0 else 0x20 }, name, target := .managed 2,
+    typeArguments := [], parameterCount := 0, returnsValue := false }⟩] }
 
 /-- Removing a managed member's direct link leaves a hole tagged with its own opcode. -/
 private def withoutLink (opcode : Nat) (member : MetadataName) (name : String) : Bool := Id.run do
@@ -64,7 +64,7 @@ private def vectorSite (read : Bool) (element : String) : RawInstruction := Id.r
       convention := 0x10, returnType := .parameter (if read then 0 else 1),
       parameters := [if read then byteRef else .parameter 0] }
     name := if read then "ReadUnaligned" else "BitCast", typeArguments := arguments,
-    target := .external (runtimeScope ++ "::" ++ signature), parameterCount := 1,
+    target := .external s!"{runtimeScope}::{signature}", parameterCount := 1,
     returnsValue := true }⟩
 
 /-- A change of vector element alone is sufficient to refuse either transfer. -/
@@ -82,7 +82,7 @@ theorem integerVectorTransfers :
 /-- A resolving unsigned DivRem overload binds the type of each field, packing and alignment. -/
 theorem divRemTupleLayout :
     let pair := "System.ValueTuple`2<System.UInt64,System.UInt64>"
-    let identity := runtimeScope ++ "::" ++ pair
+    let identity := s!"{runtimeScope}::{pair}"
     let word := TypeExpr.atom runtimeScope "System.UInt64"
     let method : MethodRef := {
       owner := .atom runtimeScope "System.Math", name := name!"DivRem",
@@ -90,8 +90,7 @@ theorem divRemTupleLayout :
       parameters := [word, word] }
     let site : CallSite := {
       method, declared := method.signature 0, name := "DivRem",
-      target := .external (runtimeScope ++ "::" ++ pair ++ 
-        " System.Math::DivRem(System.UInt64,System.UInt64)"),
+      target := .external s!"{identity} System.Math::DivRem(System.UInt64,System.UInt64)",
       typeArguments := [], parameterCount := 2, returnsValue := true }
     let row : RawLayout := {
       identity, auto := true, explicit := false, declaredSize := 0,
@@ -121,8 +120,7 @@ theorem sumDeclaration :
       name := "Sum", parameterCount := 1, returnsValue := true, typeArguments := [word],
       declared := {
         convention := 0x10, returnType := .parameter 0, parameters := [vector (.parameter 0)] }
-      target := .external (intrinsicsScope ++ "::!!0 System.Runtime.Intrinsics.Vector128::" ++
-        "Sum(System.Runtime.Intrinsics.Vector128`1<!!0>)") }
+      target := .external s!"{intrinsicsScope}::!!0 {owner}::Sum({owner}`1<!!0>)" }
     let resolve := fun operand => LoweredFamily.hardware.resolve
       (LayoutEnvironment.callLayouts {}) .scalar none ⟨0, 40, .call operand⟩
     resolve site = some (.intrinsic (.vector (.sum64 128)) 1) ∧

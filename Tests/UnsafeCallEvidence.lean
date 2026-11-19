@@ -31,7 +31,8 @@ private def testCall : CallSite := {
     parameters := [.byref (.parameter 0)] },
   method := {
     owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
-    returnType := .atom scope "System.Boolean", parameters := [.byref word], methodArguments := [word] },
+    returnType := .atom scope "System.Boolean", parameters := [.byref word],
+    methodArguments := [word] },
   name := "IsNullRef",
   target := .external (scope ++ "::System.Boolean System.Runtime.CompilerServices.Unsafe::\
     IsNullRef(!!0&)"),

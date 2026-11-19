@@ -15,20 +15,22 @@ private def getter : CallSite := {
     name := name!"get_IsSupported", hasThis := false, genericArity := 0,
     returnType := .atom runtimeScope "System.Boolean",
     parameters := [] },
-  name := "get_IsSupported", target := .external "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
-    PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
-    System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()", typeArguments := [],
+  name := "get_IsSupported", target := .external
+    s!"{intrinsicsScope}::System.Boolean System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()",
+  typeArguments := [],
   parameterCount := 0, returnsValue := true }
 private def intrinsic (owner name : String) : CallSite :=
   { getter with
     method.owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner)
     method.name := (MetadataName.ofBytes? (name.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩
-    name, target := .external (intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++
-      owner ++ "::" ++ name ++ "()") }
+    name, target := .external s!"{intrinsicsScope}::System.Boolean System.Runtime.Intrinsics.\
+      {owner}::{name}()" }
 
 -- Each getter binds to its own flag; Vector128 has no IsSupported.
-example : featureGetter (intrinsic "X86.X86Base/X64" "get_IsSupported") = some .x86Base64 := by decide +kernel
-example : featureGetter (intrinsic "Vector128" "get_IsHardwareAccelerated") = some .vector128Accelerated := by decide +kernel
+example : featureGetter (intrinsic "X86.X86Base/X64" "get_IsSupported") = some .x86Base64 := by
+  decide +kernel
+example : featureGetter (intrinsic "Vector128" "get_IsHardwareAccelerated") =
+    some .vector128Accelerated := by decide +kernel
 example : featureGetter (intrinsic "Vector128" "get_IsSupported") = none := by decide +kernel
 -- Every x86 ISA class derives from X86Base, and X86Base.X64 exists only on x64.
 example : ¬ ({ architecture := .x64, bmi2 := true } : FeatureProfile).Valid := by decide
