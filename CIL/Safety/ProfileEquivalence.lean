@@ -18,16 +18,16 @@ theorem enterFrame_profile (body : CIL.Method) (profile : CIL.FeatureProfile)
 
 /-- A call without a link runs the same under two profiles that agree on the query of the
     model its method has, if any. -/
-theorem modelStep_profile_eq (body : CIL.Method) (method : Extraction.MethodRef)
+theorem modelStep_profile_eq {opcode : CIL.CallOpcode} (body : CIL.Method) (method : Extraction.MethodRef)
     (p q : CIL.FeatureProfile)
-    (agreement : ∀ model, Extraction.runtimeModel body.environment .call method = some model →
+    (agreement : ∀ model, Extraction.runtimeModel body.environment opcode method = some model →
       model.ProfileAgreement p q)
     (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
-    modelStep (Extraction.runtimeModel body.environment .call method) { body with profile := p }
+    modelStep (Extraction.runtimeModel body.environment opcode method) { body with profile := p }
         pc frame stack memory =
-      modelStep (Extraction.runtimeModel body.environment .call method)
+      modelStep (Extraction.runtimeModel body.environment opcode method)
         { body with profile := q } pc frame stack memory := by
-  cases found : Extraction.runtimeModel body.environment .call method with
+  cases found : Extraction.runtimeModel body.environment opcode method with
   | none => rfl
   | some model =>
     have agrees := agreement model found
@@ -44,10 +44,18 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
       step { body with profile := q } op pc args frame stack memory := by
   have reprofiled : ∀ profile, ({ body with profile } : CIL.Method).linkAt pc = body.linkAt pc :=
     fun _ => rfl
+  have construction (constructor : Extraction.MethodRef)
+      (agrees : (CIL.Instruction.newobj constructor).ProfileAgreement body.environment p q) :
+      newobjStep (body.linkAt pc) constructor { body with profile := p } pc frame stack memory =
+        newobjStep (body.linkAt pc) constructor { body with profile := q } pc frame stack memory := by
+    cases body.linkAt pc with
+    | none => exact modelStep_profile_eq (opcode := .newobj) body constructor p q agrees ..
+    | some link => cases link <;> rfl
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   simp only [reprofiled]
   split <;> try rfl
   all_goals split <;> try rfl
+  all_goals try exact construction _ agreement
   all_goals split <;> try rfl
   all_goals try exact modelStep_profile_eq _ _ _ _ agreement ..
   all_goals try (split <;> first | rfl | exact modelStep_profile_eq _ _ _ _ agreement ..)

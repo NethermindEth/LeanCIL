@@ -1216,9 +1216,10 @@ open Lean Elab Tactic Meta in
 /-- The runtime model of a call of `method` in `body` as a fact: the `cil_runtime_models` fact
     of a named body, or the table's evaluation for a literal one, which may give no model. Nothing
     when neither decides it. -/
-def stepModelFact? (body method : Expr) : TacticM (Option Expr) := withMainContext do
+def stepModelFact? (body method : Expr) (opcode := ``CIL.CallOpcode.call) :
+    TacticM (Option Expr) := withMainContext do
   let read := mkApp3 (mkConst ``CIL.Extraction.runtimeModel)
-    (mkApp (mkConst ``CIL.Method.environment) body) (mkConst ``CIL.CallOpcode.call) method
+    (mkApp (mkConst ``CIL.Method.environment) body) (mkConst opcode) method
   let normalize ← `(tactic| simp only [cil_code, CIL.Safety.reduceRuntimeModel])
   let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
   let (result, _) ← simp read ctx simprocs
@@ -1441,12 +1442,13 @@ elab_rules : tactic
           let linkFact ← goal.withContext (Term.exprToSyntax (mkFVar link))
           -- A call whose pc states no link runs its method's model, which a fact states.
           let unlinked := ((← inferType proof).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
-          let model ← match argumentsOf? args[1]! ``CIL.Instruction.call 2 with
-            | some #[method, _] =>
-              if unlinked then
-                stepModelFact? (← entryAt "cil_checked_step_normalized" args 0) method
-              else pure none
-            | _ => pure none
+          let body ← entryAt "cil_checked_step_normalized" args 0
+          let model ← if !unlinked then pure none else
+            match argumentsOf? args[1]! ``CIL.Instruction.call 2,
+                argumentsOf? args[1]! ``CIL.Instruction.newobj 1 with
+            | some #[method, _], _ => stepModelFact? body method
+            | _, some #[method] => stepModelFact? body method ``CIL.CallOpcode.newobj
+            | _, _ => pure none
           match model with
           | none => pure #[linkFact]
           | some model =>
@@ -1492,6 +1494,11 @@ elab_rules : tactic
           | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
              simp only [CIL.Safety.typedTransferInstruction]
              cil_checked_step_normalized [$facts:term,*])
+          | (refine Eq.trans (CIL.Safety.step_newobj_memory _ _ _ _ _ $link $model rfl _) ?_
+             first
+             | cil_checked_memory_from_fact [$facts:term,*]
+             | cil_checked_step_normalized [$facts:term,*]
+             | cil_checked_memory_by_equations [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl _) ?_
              first
              | cil_checked_memory_from_fact [$facts:term,*]
@@ -2082,14 +2089,14 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
   -- the caller; under an `.aggregate` link it steps on as any other instruction does.
   let constructs := operation == ``CIL.Instruction.newobj
   -- A `call` at a pc without a link runs its runtime model and steps on in the same method.
-  let modelled ← if operation == ``CIL.Instruction.call then unlinkedRunPc methodSyntax target
-    else pure false
+  let modelled ← if constructs || operation == ``CIL.Instruction.call then
+      unlinkedRunPc methodSyntax target else pure false
   -- These fault before their callee runs: a call site the link table omits, a short heap
   -- budget, a null receiver, or a receiver whose class a dispatch table omits.
   let faultsFirst := constructs || callsCallee operation
   evalTactic (← if operation == ``CIL.Instruction.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
-    else if (callsCallee operation && !modelled) || constructs then
+    else if (callsCallee operation || constructs) && !modelled then
       let call ← if constructs then
           `(tactic| first
             | cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*]

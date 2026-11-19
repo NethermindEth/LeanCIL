@@ -35,6 +35,8 @@ def Instruction.ProfileAgreement (environment : LayoutEnvironment) (op : Instruc
   | .intrinsic operation _ => operation.available p = operation.available q
   | .call method _ => ∀ model, Extraction.runtimeModel environment .call method = some model →
       model.ProfileAgreement p q
+  | .newobj method => ∀ model, Extraction.runtimeModel environment .newobj method = some model →
+      model.ProfileAgreement p q
   | _ => True
 
 /-- `p` and `q` agree on every instruction of every method, in that method's environment. -/
@@ -153,14 +155,14 @@ theorem Instruction.ProfileAgreement.symm (environment : LayoutEnvironment) (op 
     (p q : FeatureProfile) (h : op.ProfileAgreement environment p q) :
     op.ProfileAgreement environment q p := by
   cases op <;> try trivial
-  case call => exact fun model found => (h model found).symm
+  case call | newobj => exact fun model found => (h model found).symm
   all_goals exact Eq.symm h
 
 theorem Instruction.ProfileAgreement.trans (environment : LayoutEnvironment) (op : Instruction)
     (p q r : FeatureProfile) (hpq : op.ProfileAgreement environment p q)
     (hqr : op.ProfileAgreement environment q r) : op.ProfileAgreement environment p r := by
   cases op <;> try trivial
-  case call => exact fun model found => (hpq model found).trans _ _ _ _ (hqr model found)
+  case call | newobj => exact fun model found => (hpq model found).trans _ _ _ _ (hqr model found)
   all_goals exact Eq.trans hpq hqr
 
 /-- An intrinsic's availability is fixed by the features it needs: two profiles that agree on
@@ -189,6 +191,8 @@ def Instruction.profileReads (environment : LayoutEnvironment) : Instruction →
   | .intrinsic operation _ => operation.requiredFeatures
   | .call method _ =>
     ((Extraction.runtimeModel environment .call method).map RuntimeModel.profileReads).getD []
+  | .newobj method =>
+    ((Extraction.runtimeModel environment .newobj method).map RuntimeModel.profileReads).getD []
   -- A new profile-reading op breaks `step_profile_eq`; covering it in `ProfileAgreement`
   -- then breaks `ProfileAgreement.of_flags` until it is listed here.
   | _ => []
@@ -220,7 +224,7 @@ theorem Program.ProfileAgreement.of_flags (program : Program) (p q : FeatureProf
   cases op with
   | feature featureId => exact reads featureId (List.mem_singleton_self featureId)
   | intrinsic operation _ => exact Intrinsic.available_eq_of_required operation p q reads
-  | call method _ =>
+  | call method _ | newobj method =>
     intro model found
     exact RuntimeModel.ProfileAgreement.of_flags model p q fun featureId read =>
       reads featureId (by simp [Instruction.profileReads, found, read])

@@ -1,3 +1,4 @@
+import CIL.Safety.BoundaryStepRenaming
 import CIL.Safety.StepTransport
 import CIL.Safety.CheckedValueRenaming
 import CIL.Safety.CheckedReferenceBounds
@@ -92,8 +93,8 @@ theorem Memory.Renamed.constructAggregate {indices : LocalIndexMap} {mapping : A
           (kind := .aggregate size) memories owned freshBound)
 #print axioms Memory.Renamed.constructAggregate
 
-/-- `newobj` transports the construction its link states, which both bodies read alike:
-    caller-owned storage for a value type, a fresh instance for a class. -/
+/-- Related bodies construct with the same link or runtime model. Only a linked construction
+    can extend the allocation renaming. -/
 theorem Memory.Renamed.stepNewobj {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
@@ -102,7 +103,7 @@ theorem Memory.Renamed.stepNewobj {indices : LocalIndexMap} {mapping : Allocatio
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
     (sourceBody targetBody : CIL.Method) (constructor : CIL.Extraction.MethodRef) (pc : Nat)
-    (linked : targetBody.linkAt pc = sourceBody.linkAt pc) (arguments stack : List Value)
+    (metadata : StepMetadata sourceBody targetBody) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
       (step sourceBody (.newobj constructor) pc arguments sourceFrame stack source)) :
@@ -111,14 +112,22 @@ theorem Memory.Renamed.stepNewobj {indices : LocalIndexMap} {mapping : Allocatio
         (step sourceBody (.newobj constructor) pc arguments sourceFrame stack source)
         (step targetBody (.newobj constructor) pc (arguments.map mapping.value) targetFrame
           (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, linked] at observable ⊢
+  simp only [step, mapping.unspecifiedOperands, metadata.linkAt pc] at observable ⊢
   by_cases guard : unspecifiedOperands (observerCount (.newobj constructor)) stack = true
   · simp only [guard, ite_true, SuccessOrThrow] at observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     unfold newobjStep at observable ⊢
     generalize sourceBody.linkAt pc = link at observable ⊢
     rcases link with _ | link
-    · exact ⟨mapping, .refl mapping, .error _⟩
+    · dsimp only at observable ⊢
+      rw [metadata.environment]
+      refine ⟨mapping, .refl mapping, ?_⟩
+      cases found : CIL.Extraction.runtimeModel sourceBody.environment .newobj constructor with
+      | none => exact .error _
+      | some model =>
+        rw [found] at observable
+        exact runtimeModel_stepRenamed found related frames sourceFormed sourceBody targetBody
+          metadata pc stack bounds observable
     cases link <;> try exact ⟨mapping, .refl mapping, .error _⟩
     · exact related.constructAggregate frames sourceFormed targetFormed staticBounds _ _ _ stack
         bounds

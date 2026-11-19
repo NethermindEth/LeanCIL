@@ -455,6 +455,34 @@ theorem fieldReference_contract (body : CIL.Method) (field : CIL.Extraction.Fiel
   · cases executed
 #print axioms fieldReference_contract
 
+/-- A runtime model preserves the caller's frame and has the checked effect of its operation. -/
+theorem modelStep_contract {body : CIL.Method} {model : Option CIL.RuntimeModel}
+    {pc : Nat} {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction}
+    {operation : CIL.Instruction}
+    (executed : modelStep model body pc frame stack memory = .ok action) :
+    StepContract body pc operation frame stack memory action := by
+  unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
+    referenceSubtractCall typedTransferCall skipInitCall at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first | split at executed | cases executed
+  all_goals first
+    | exact StepContract.instruction (memoryInstruction_contract _ _ _ _ _ (by assumption))
+    | exact StepContract.instruction (instruction_contract _ _ _ _ _ (by assumption))
+    | refine StepContract.of_effect (.memory (.ordinary (.unchanged _))) ?_
+  all_goals
+    intro formed extended retained
+    first
+    | exact retained.tail
+    | apply ValuesValid.cons
+      · first
+        | trivial
+        | exact (checkedValue_valid _ _ _ (by assumption)).2
+        | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1
+        | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
+      · first | exact retained | exact retained.tail.tail | exact retained.drop _
+
+#print axioms modelStep_contract
+
 -- The walk splits every arm of both dispatcher matches, argument homes included.
 set_option maxHeartbeats 400000 in
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
@@ -464,10 +492,10 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     StepContract body pc operation frame stack m action := by
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
-    constructAggregate constructObject modelStep observedCall runModel featureCall
-    typedTransferCall skipInitCall at h
+    constructAggregate constructObject observedCall at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
+    | solve | exact modelStep_contract (by assumption)
     | solve | apply managedStep_contract; assumption
     | solve | exact StepContract.storeArgument (by assumption)
     | unfold returnFrom at h

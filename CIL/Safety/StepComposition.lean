@@ -358,6 +358,32 @@ theorem step_call_memory {method : Extraction.MethodRef} {prefixes : CallPrefixe
 
 #print axioms step_call_memory
 
+/-- An unlinked constructor dispatches its model after checking the explicit arguments. -/
+theorem step_newobj_model {method : Extraction.MethodRef} {model : CIL.RuntimeModel}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .newobj method = some model)
+    (stack : List Value) :
+    step body (.newobj method) pc args frame stack memory =
+      if unspecifiedOperands method.parameters.length stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else modelStep (some model) body pc frame stack memory := by
+  simp only [step, observerCount, newobjStep, link, found]
+
+#print axioms step_newobj_model
+
+/-- A memory constructor observes its explicit operands and pushes the operation's result. -/
+theorem step_newobj_memory {method : Extraction.MethodRef} {operation : CIL.MemoryOp}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .newobj method = some (.memory operation))
+    (count : method.parameters.length = operation.argumentCount) (stack : List Value) :
+    step body (.newobj method) pc args frame stack memory =
+      step body (.memory operation) pc args frame stack memory := by
+  rw [step_newobj_model (link := link) (found := found), modelStep_memory (args := args), count]
+  by_cases observed : unspecifiedOperands operation.argumentCount stack = true <;>
+    simp only [step, observerCount, observed, Bool.false_eq_true, ite_true, ite_false]
+
+#print axioms step_newobj_memory
+
 /-- A call without a link whose method's model is `SkipInit` checks that its reference operand
     forms and pops it, as the `skipInit` instruction does; nothing is written. -/
 theorem step_call_skipInit_reference {method : Extraction.MethodRef} {prefixes : CallPrefixes}

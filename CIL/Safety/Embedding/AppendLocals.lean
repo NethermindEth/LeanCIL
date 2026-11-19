@@ -1237,7 +1237,9 @@ theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step newobjStep constructAggregate constructObject
+  unfold step newobjStep constructAggregate constructObject modelStep observedCall runModel
+    intrinsicCall referenceCompareCall referenceSubtractCall featureCall typedTransferCall
+    skipInitCall
   frame_natural
 
 #print axioms step_appendLocals_newobj

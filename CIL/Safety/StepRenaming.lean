@@ -51,7 +51,7 @@ theorem stepTransport : StepTransport := by
         sourceBody targetBody metadata element pc arguments stack bounds observable
     case newobj.refl constructor =>
       exact memories.stepNewobj frames sourceFormed targetFormed staticBounds sourceBody
-        targetBody constructor pc (metadata.linkAt pc) arguments stack bounds observable
+        targetBody constructor pc metadata arguments stack bounds observable
     case ldobj.refl | stobj.refl | cpobj.refl | initobj.refl | sizeof.refl =>
       refine ⟨mapping, .refl mapping, ?_⟩
       simp only [LocalIndexMap.operation, step, observerCount, mapping.unspecifiedOperands,

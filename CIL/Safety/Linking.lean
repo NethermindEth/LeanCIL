@@ -274,6 +274,7 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
       rcases body.linkAt pc with _ | link
       · first
         | rfl
+        | exact modelStep_relocate ..
         | (dsimp only
            rw [apply_ite (Except.map (FrameAction.relocate f))]
            exact ite_congr rfl (fun _ => rfl) (fun _ => modelStep_relocate ..))

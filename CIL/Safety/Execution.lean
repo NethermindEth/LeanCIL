@@ -467,15 +467,18 @@ def constructObject (constructor argc : Nat) (type : RuntimeType) (size : Nat)
     let created := Value.object (.address object)
     return .call constructor (created :: arguments) (created :: stack.drop argc) memory
 
-/-- `newobj` of a constructor of `owner` taking `argc` arguments, as its `link` states: a
-    value-type temporary for `.aggregate`, a class instance with the link's bases for
-    `.object`. Any other link, or none, faults with `unlinkedCall`. -/
-def newobjStep (link : Option CIL.Link) (owner : CIL.Extraction.TypeExpr) (argc : Nat)
-    (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction :=
+/-- Construction uses the linked body or the runtime model for the explicit arguments. -/
+def newobjStep (link : Option CIL.Link) (method : CIL.Extraction.MethodRef)
+    (body : CIL.Method) (pc : Nat) (frame : Frame) (stack : List Value) (m : Memory) :
+    ExecutionResult FrameAction :=
+  let argc := method.parameters.length
+  let owner := method.owner
   match link with
   | some (.aggregate callee size) => constructAggregate callee argc size frame stack m
   | some (.object constructor bases size) =>
     constructObject constructor argc ⟨owner, bases⟩ size stack m
+  | none => modelStep (CIL.Extraction.runtimeModel body.environment .newobj method) body pc
+      frame stack m
   | _ => .error unlinkedCall
 
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
@@ -644,7 +647,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       | _ => .error unlinkedCall
   -- A construction allocates what the link at its pc states and enters the constructor it names.
   | .newobj constructor, _ =>
-    newobjStep (body.linkAt pc) constructor.owner constructor.parameters.length frame stack m
+    newobjStep (body.linkAt pc) constructor body pc frame stack m
   -- A hole faults on every stack.
   | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>

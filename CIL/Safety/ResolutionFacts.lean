@@ -636,10 +636,7 @@ elab_rules : command
 
 /-! ## Runtime models -/
 
-/-- Declares `body_model{pc} : ∀ xs, runtimeModel (body xs).environment .call method = some model`
-    at each pc whose instruction is a call the runtime model table models, checked by the kernel,
-    and adds each to `cil_code`, so a step reads a call's model without evaluating the table. A
-    constant model states its value as a numeral, as `ldc.i4` does. -/
+/-- Each modelled call or constructor has a lookup fact for its opcode, method and environment. -/
 syntax "cil_runtime_models " ident : command
 
 elab_rules : command
@@ -658,9 +655,12 @@ elab_rules : command
       let ops ← instructions name (mkApp (mkConst ``CIL.Method.code) method)
       for h : pc in [0:ops.size] do
         let op ← whnfR ops[pc]
-        let_expr CIL.Instruction.call target _ := op | continue
+        let some (opcode, target) := (match_expr op with
+          | CIL.Instruction.call target _ => some (``CIL.CallOpcode.call, target)
+          | CIL.Instruction.newobj target => some (``CIL.CallOpcode.newobj, target)
+          | _ => none) | continue
         let read := mkApp3 (mkConst ``CIL.Extraction.runtimeModel) environment
-          (mkConst ``CIL.CallOpcode.call) target
+          (mkConst opcode) target
         let resolved ← withDefault <| whnf read
         let_expr Option.some _ model := resolved | continue
         let model ← withDefault <| reduce model

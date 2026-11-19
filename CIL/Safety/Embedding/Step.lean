@@ -465,7 +465,7 @@ theorem step_relabel_callvirt (method : CIL.Extraction.MethodRef) :
 
 #print axioms step_relabel_callvirt
 
-/-- A construction relocates no pc; both steps read the same link and allocate alike. -/
+/-- Both constructions enter the same linked body or continue after the same runtime model. -/
 theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
     StepRelabel (.newobj constructor) := by
 
@@ -474,7 +474,11 @@ theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
   rw [context.link]
   rcases linked : expected.linkAt pc with _ | link
   · simp only [linked] at h
-    first | cases h | (simp [unlinkedCall] at h)
+    rw [context.environment]
+    obtain ⟨values, final, rfl⟩ := modelStep_next h
+    simp only [FrameAction.relabel]
+    rw [context.next (by simp [CIL.Instruction.continues])]
+    exact modelStep_move context.profile h
   simp only [linked] at h ⊢
   cases link
   case aggregate callee size =>
@@ -1197,7 +1201,7 @@ theorem step_raise_callvirt (method : CIL.Extraction.MethodRef) :
 
 #print axioms step_raise_callvirt
 
-/-- A construction's faults keep their location; both steps read the same link. -/
+/-- Relocation preserves the fault from a constructor body or its runtime model. -/
 theorem step_raise_newobj (constructor : Extraction.MethodRef) :
     StepRaise (.newobj constructor) := by
 
@@ -1206,7 +1210,8 @@ theorem step_raise_newobj (constructor : Extraction.MethodRef) :
   rw [context.link]
   rcases linked : expected.linkAt pc with _ | link
   · simp only [linked] at h
-    first | cases h | (simp [unlinkedCall] at h)
+    rw [context.environment]
+    exact modelStep_move_error context.profile h
   simp only [linked] at h ⊢
   cases link
   case aggregate callee size =>

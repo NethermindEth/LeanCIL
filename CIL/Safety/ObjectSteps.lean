@@ -72,7 +72,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- `newobj` checks its constructor's arguments for unspecified bits and then builds what the
     link at its pc states: a zeroed value-type temporary owned by the frame and passed by address,
     or an instance of the constructor's class with the link's bases, passed as the receiver and
-    left under the rest of the stack. Any other link faults before anything is allocated. -/
+    left under the rest of the stack. An unlinked constructor runs its runtime model. -/
 @[cil_step] theorem step_newobj_eq (constructor : CIL.Extraction.MethodRef)
     (stack : List Value) :
     step body (.newobj constructor) pc args frame stack memory =
@@ -99,6 +99,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
             let (object, allocated) ← allocateObject memory ⟨constructor.owner, bases⟩ size
             return FrameAction.call callee (.object (.address object) :: arguments)
               (.object (.address object) :: stack.drop constructor.parameters.length) allocated
+        | none => modelStep (CIL.Extraction.runtimeModel body.environment .newobj constructor)
+            body pc frame stack memory
         | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
