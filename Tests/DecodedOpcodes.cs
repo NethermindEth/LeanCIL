@@ -222,6 +222,7 @@ foreach (var (name, selector, method, code) in new[]
     CheckLean(pathToSource);
 }
 
+CheckClassAddress(directory);
 CheckReceiverMethods(directory);
 
 var frameOutput = Path.Combine(deadDirectory, "Frame");
@@ -304,6 +305,48 @@ static void CheckLean(string path)
 static void RequireDecoded(string source, string name, int number = 0)
 {
     if (!IsDecodedMethod(source, number)) throw new InvalidOperationException($"{name} must decode.");
+}
+
+static void CheckClassAddress(string directory)
+{
+    var bytes = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
+    var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+    using var pinned = new PinnedAssemblies(bytes, hash, []);
+    var module = pinned.Selected;
+    var definition = new MethodDefinition("M", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+    module.GetType("Examples.Objects").Methods.Add(definition);
+    definition.GenericParameters.Add(new GenericParameter("T", definition));
+    definition.Body.GetILProcessor().Emit(OpCodes.Ret);
+    var address = new GenericInstanceMethod(definition);
+    address.GenericArguments.Add(module.GetType("Examples.Account"));
+    var target = new MethodSpecialization(module).Instantiate(address);
+    var classAddress = Path.Combine(directory, "ClassAddress.lean");
+    File.WriteAllText(classAddress, $$"""
+        import CIL.Extraction.ValueDecoding
+
+        /-! The literal and decoded identities of a static method specialized at a class. -/
+        open CIL CIL.Extraction
+
+        /-- Both paths retain the class argument, excluding the same name encoded as an atom. -/
+        theorem class_address_identity :
+            let scope := {{System.Text.Json.JsonSerializer.Serialize(module.Assembly.Name.FullName)}}
+            let account := TypeExpr.object scope "Examples.Account"
+            let site : CallSite := {
+              declared := { convention := 0x10 }, name := "M", typeArguments := [account],
+              target := .managed {{target.MetadataToken.ToUInt32()}}, parameterCount := 0, returnsValue := false,
+              method := {
+                owner := .object scope "Examples.Objects", name := name!"M", hasThis := false,
+                genericArity := 1, returnType := .void, parameters := [] } }
+            let literal : ManagedIdentity := {{ManagedPointers.IdentityEvidence(target)}}
+            Instruction.ofRaw? none ⟨0, 0xfe06, .call site⟩ =
+                some (.managed (.address literal ⟨.void, []⟩)) ∧
+              literal.arguments ≠ [.atom scope "Examples.Account"] := by
+              constructor
+              · rfl
+              · decide +kernel
+        #print axioms class_address_identity
+        """);
+    CheckLean(classAddress);
 }
 
 static void CheckReceiverMethods(string directory)

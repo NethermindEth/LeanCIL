@@ -93,7 +93,8 @@ internal static class ManagedPointers
     internal static string IdentityEvidence(MethodDefinition method)
     {
         var owner = IdentityText.Quote(LayoutEvidence.Identity(method.DeclaringType));
-        var arguments = string.Join(", ", MethodSpecialization.Arguments(method).Select(TypeEvidence));
+        var arguments = string.Join(", ",
+            MethodSpecialization.Arguments(method).Select(GenericEvidence.CallableArgument));
         var token = method.MetadataToken.ToUInt32();
         return $$"""{ owner := {{owner}}, token := {{token}}, arguments := [{{arguments}}] }""";
     }

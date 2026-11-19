@@ -54,8 +54,24 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         InitAccessors.Return(CallReturnType.Resolve(reference));
 
     string Type(TypeReference type, bool preserveGeneric, bool declared = false)
+        => RenderType(type, preserveGeneric, declared, methodParameterCount, layouts);
+
+    // Callable identities name closed aggregates independently of any extraction's layout-table order.
+    internal static string CallableArgument(TypeReference type) => RenderType(type, false, false, 0, null);
+
+    static string RenderType(TypeReference type, bool preserveGeneric, bool declared, int methodParameterCount,
+        LayoutEvidence? layouts)
     {
-        string Nested(TypeReference element) => Type(element, false, declared);
+        string Nested(TypeReference element) => RenderType(element, false, declared, methodParameterCount, layouts);
+        string? Aggregate(bool localOnly = false)
+        {
+            if (layouts is null)
+                return MetadataValidation.IsAggregate(type, type.Module)
+                    ? $".aggregate {Quote(LayoutEvidence.Identity(type))} 0" : null;
+            var index = layouts.Index(type);
+            return index >= 0 && (!localOnly || !layouts.Metadata.IsImported(type))
+                ? $".aggregate {layouts.IdentityTerm(index)} {index}" : null;
+        }
         if (declared && type is IModifierType modifier)
         {
             var required = Bool(type is RequiredModifierType);
@@ -87,12 +103,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             return $".array ({element})";
         }
         if (type is PointerType pointer) return $".pointer ({Nested(pointer.ElementType)})";
-        if (ValueTuples.Is(type) && layouts.Index(type) is >= 0 and var tuple)
-            return $".aggregate {layouts.IdentityTerm(tuple)} {tuple}";
+        if (ValueTuples.Is(type) && Aggregate() is { } tuple) return tuple;
         if (type is GenericInstanceType generic)
         {
-            if (!preserveGeneric && GenericStructs.Is(type) && layouts.Index(type) is >= 0 and var aggregate)
-                return $".aggregate {layouts.IdentityTerm(aggregate)} {aggregate}";
+            if (!preserveGeneric && GenericStructs.Is(type) && Aggregate() is { } aggregate) return aggregate;
             var result = $"{Head(generic)} {Scope(generic.ElementType)} {Quote(generic.ElementType.FullName)}";
             foreach (var argument in generic.GenericArguments) result = $".apply ({result}) ({Nested(argument)})";
             return result;
@@ -101,13 +115,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         if (EnumTypes.IsEnum(type))
         {
             var underlying = type.Resolve().Fields.Single(field => !field.IsStatic).FieldType;
-            return $".enum {Quote(LayoutEvidence.Identity(type))} ({Type(underlying)})";
+            return $".enum {Quote(LayoutEvidence.Identity(type))} ({Nested(underlying)})";
         }
         if (ObjectTypes.Reference(type)) return ObjectType(type);
-        var index = layouts.Index(type);
-        if (index >= 0 && !layouts.Metadata.IsImported(type))
-            return $".aggregate {layouts.IdentityTerm(index)} {index}";
-        return $".atom {Scope(type)} {Quote(type.FullName)}";
+        return Aggregate(localOnly: true) ?? $".atom {Scope(type)} {Quote(type.FullName)}";
     }
 
     // The head says whether the instances are values or references, as the signature's marker does.
