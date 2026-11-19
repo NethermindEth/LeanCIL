@@ -340,7 +340,7 @@ Flush();
 var rejectedShuffles = new RejectedEvidence(Path.Combine(root, "RejectedShuffles"));
 foreach ((string name, string theorem, string before, string after, string validator) in new[]
 {
-    ("Shuffle256", "method0_unsafe_validated", ".snapshot .vector256", ".snapshot .vector128", "UnsafeCallsValid"),
+    ("Shuffle256", "method0_models_validated", ".snapshot .vector256", ".snapshot .vector128", "RuntimeModelsAgree"),
     ("Shuffle256", "method0_intrinsics_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "ExactIntrinsicsValid"),
     ("Shuffle128", "method0_intrinsics_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
         "ExactIntrinsicsValid")
