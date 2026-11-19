@@ -134,7 +134,7 @@ def unsafeTransferMatches (layouts : List RawLayout) (raw : RawInstruction)
     | _, _ => true
 
 /-- Whether `Vector128.LoadUnsafe` or `StoreUnsafe` is named, whatever the remaining metadata. -/
-private def vector128UnsafeFamily (site : CallSite) : Bool :=
+def vector128UnsafeFamily (site : CallSite) : Bool :=
   (site.name == "LoadUnsafe" || site.name == "StoreUnsafe") &&
     match site.declaringType with
     | .atom _ owner => owner == "System.Runtime.Intrinsics.Vector128"

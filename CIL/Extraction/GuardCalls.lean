@@ -75,6 +75,25 @@ private def guardCall (raw : RawInstruction) : Option Guard := do
         then some (.comparison guard width signed) else none
   else none
 
+/-- The runtime owner and member name of an argument guard, including unresolved overloads. -/
+def guardCallFamily (raw : RawInstruction) : Bool :=
+  match raw.opcode, raw.operand with
+  | 40, .call site =>
+    match site.declaringType with
+    | .atom scope "System.ArgumentNullException" =>
+      scope == runtimeScope && site.name == "ThrowIfNull"
+    | .atom scope "System.ArgumentOutOfRangeException" => scope == runtimeScope &&
+      (zeroGuards.any (·.1 == site.name) || comparisonGuards.any (·.1 == site.name))
+    | _ => false
+  | _, _ => false
+
+/-- The checked guard operation, with width and signedness from its exact overload. -/
+def guardInstruction (raw : RawInstruction) : Option Instruction := do
+  match ← guardCall raw with
+  | .null => return .memory .throwIfNull
+  | .zero guard width signed => return .memory (.zeroGuard guard width signed)
+  | .comparison guard width signed => return .memory (.comparisonGuard guard width signed)
+
 /-- A call to `ArgumentNullException.ThrowIfNull(object, string)`, whose `object` parameter takes
     any object reference. -/
 def nullGuardCall (raw : RawInstruction) : Bool :=

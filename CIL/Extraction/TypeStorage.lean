@@ -1,4 +1,5 @@
 import CIL.Extraction.Parameters
+import CIL.Extraction.MetadataText
 
 /-!
 # Storage from metadata types
@@ -10,7 +11,8 @@ namespace CIL.Extraction
 
 /-- The exact `System.Runtime.Intrinsics` assembly identity; `runtimeScope` is in `TypeExpr`. -/
 def intrinsicsScope : String :=
-  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  metadata_text%
+    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
 def integerVectorWidth : TypeExpr → Option Nat
@@ -106,35 +108,39 @@ def managedSignature : TypeExpr → Option ManagedSignature
   | _ => none
 
 /-- Raw callable types must bind every aggregate index before their identity is canonicalized. -/
-def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
-  | .aggregate identity index => (layouts[index]?).any (·.identity == identity)
-  | .byref element => callableLayoutsValid layouts element
+def callableLayoutsAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Bool
+  | .aggregate identity index => (layoutAt index).any (·.identity == identity)
+  | .byref element => callableLayoutsAt layoutAt element
   | .functionPointer result parameters _ _ _ =>
-    callableLayoutsValid layouts result && callableLayoutsValid layouts parameters
+    callableLayoutsAt layoutAt result && callableLayoutsAt layoutAt parameters
   | .signatureParameter head tail =>
-    callableLayoutsValid layouts head && callableLayoutsValid layouts tail
+    callableLayoutsAt layoutAt head && callableLayoutsAt layoutAt tail
   | _ => true
 
+/-- Callable metadata binds every aggregate index in the declared layout list. -/
+def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool :=
+  callableLayoutsAt (layouts[·]?)
+
 /-- Decode storage independently from the exact metadata type identity. -/
-def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
+def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
   | .object _ _ => some .object
   | .aggregate identity index => do
-    let metadata ← layouts[index]?
+    let metadata ← layoutAt index
     if metadata.identity = identity then return .field (.aggregate index) else none
   | .enum _ underlying => StorageType.field <$> enumUnderlyingField underlying
   | .byref _ => some .reference
   -- An array of class references is itself an object on the heap.
   | .array (.object _ _) => some .object
   | .array (.aggregate identity index) => do
-    let metadata ← layouts[index]?
+    let metadata ← layoutAt index
     if metadata.identity == identity && !metadata.byRefLike then
       some (.aggregateArray identity index) else none
   | .array element => match managedSignature element with
-    | some signature => if callableLayoutsValid layouts element then some (.methodTable signature)
+    | some signature => if callableLayoutsAt layoutAt element then some (.methodTable signature)
       else none
     | none => StorageType.array <$> arrayElementType element
-  | type@(.functionPointer ..) => if callableLayoutsValid layouts type then
+  | type@(.functionPointer ..) => if callableLayoutsAt layoutAt type then
       StorageType.methodPointer <$> managedSignature type else none
   | .pointer (.atom scope name) =>
     if scope == runtimeScope && name ∈ ["System.SByte", "System.Byte", "System.Int16",
@@ -143,13 +149,13 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .pointer (.enum _ underlying) =>
     if (enumUnderlyingField underlying).isSome then some .reference else none
   | .pointer (.aggregate identity index) => do
-    let metadata ← layouts[index]?
+    let metadata ← layoutAt index
     if metadata.identity == identity then some .reference else none
   | .pointer type => if (integerVectorWidth type).isSome then some .reference else none
   | type@(.apply (.constructor scope name) elementType) => do
     if let some storage := spanStorage type then
       if let .aggregate identity index := elementType then
-        let metadata ← layouts[index]?
+        let metadata ← layoutAt index
         if metadata.identity != identity then none else
           return .aggregateSpan index (name == "System.Span`1")
       else return storage
@@ -161,6 +167,10 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
+
+/-- Storage of a type under the supplied raw metadata. -/
+def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType :=
+  typeStorageAt (layouts[·]?)
 
 /-- The struct field tag a field holding `type` is declared with: a primitive's kind, an enum's
     underlying kind, a checked struct's index, or an integer vector's width and element lane. -/

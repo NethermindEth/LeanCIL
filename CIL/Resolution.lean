@@ -120,7 +120,7 @@ theorem typeStorage_narrow_of_not_candidate (layouts : List RawLayout) (type : T
   | atom => simp [TypeExpr.narrowCandidate] at shape
   | enum => simp [TypeExpr.narrowCandidate] at shape
   | aggregate identity index =>
-    simp only [typeStorage] at stored
+    simp only [typeStorage, typeStorageAt] at stored
     revert stored
     simp only [Option.bind_eq_bind, Option.bind_eq_some_iff]
     rintro ⟨metadata, -, chosen⟩
@@ -129,18 +129,20 @@ theorem typeStorage_narrow_of_not_candidate (layouts : List RawLayout) (type : T
       exact ⟨index, chosen.symm⟩
     · cases chosen
   | array element =>
-    cases element <;> simp only [typeStorage] at stored <;> revert stored <;> (repeat' split) <;>
+    cases element <;> simp only [typeStorage, typeStorageAt] at stored <;> revert stored <;>
+      (repeat' split) <;>
       simp_all [Option.map_eq_map, Option.bind_eq_bind, Option.bind_eq_some_iff]
   | pointer element =>
-    cases element <;> simp only [typeStorage] at stored <;> revert stored <;> (repeat' split) <;>
+    cases element <;> simp only [typeStorage, typeStorageAt] at stored <;> revert stored <;>
+      (repeat' split) <;>
       simp_all [Option.bind_eq_bind, Option.bind_eq_some_iff]
   | apply constructor argument =>
-    cases constructor <;> simp only [typeStorage] at stored <;> revert stored <;>
+    cases constructor <;> simp only [typeStorage, typeStorageAt] at stored <;> revert stored <;>
       (repeat' split) <;> simp_all [Option.bind_eq_bind, Option.bind_eq_some_iff]
     -- A span: its storage is the one `spanStorage` gives.
     rintro rfl
     exact absurd ‹spanStorage _ _ = _› (spanStorage_ne_field _ _ _)
-  | _ => simp [typeStorage] at stored
+  | _ => simp [typeStorage, typeStorageAt] at stored
 
 #print axioms typeStorage_narrow_of_not_candidate
 
@@ -181,14 +183,16 @@ theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : Strin
     by_cases runtime : scope = runtimeScope
     . subst scope
       by_cases longName : name.utf8ByteSize > "System.UInt64".utf8ByteSize
-      . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, enumUnderlyingField, longName]
+      . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
+          enumUnderlyingField, longName]
       . cases stored : primitiveField name with
-        | none => simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, enumUnderlyingField,
-            longName, stored]
+        | none => simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
+            enumUnderlyingField, longName, stored]
         | some kind =>
           cases kind <;> simp_all [declaredNarrow, TypeExpr.narrowCandidate, typeStorage,
-            enumUnderlyingField, StorageType.narrow]
-    . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, enumUnderlyingField, runtime]
+            typeStorageAt, enumUnderlyingField, StorageType.narrow]
+    . simp [declaredNarrow, TypeExpr.narrowCandidate, typeStorage, typeStorageAt,
+        enumUnderlyingField, runtime]
 
 #print axioms declaredNarrow_enum_of_none
 
@@ -779,13 +783,14 @@ inductive ValueShape where
 
 /-- How a value of `type` reaches memory: as a span, a vector of its width, a struct sized by its
     checked layout or a primitive of its width. -/
-def LayoutEnvironment.valueShape (environment : LayoutEnvironment)
+def valueShapeAt (layouts : Array Extraction.ComputedLayout)
+    (storage : Extraction.TypeExpr → Option Extraction.StorageType)
     (type : Extraction.TypeExpr) : ValueShape :=
   if Extraction.spanLocal type then .span else
   match Extraction.integerVectorWidth type with
   | some width => .vector width
-  | none => match Extraction.typeStorage environment.rawLayouts type with
-    | some (.field (.aggregate index)) => match environment.layouts[index]? with
+  | none => match storage type with
+    | some (.field (.aggregate index)) => match layouts[index]? with
       | some layout => .aggregate layout.layout.size
       | none => .unsupported "Value type outside the checked layouts"
     | some (.field kind) => match Extraction.primitiveFieldWidth kind with
@@ -795,6 +800,11 @@ def LayoutEnvironment.valueShape (environment : LayoutEnvironment)
     | some .vector256 => .vector 32
     | some .vector512 => .vector 64
     | _ => .unsupported "Not a value type"
+
+/-- The value representation given by the method's checked layout environment. -/
+def LayoutEnvironment.valueShape (environment : LayoutEnvironment)
+    (type : Extraction.TypeExpr) : ValueShape :=
+  valueShapeAt environment.layouts (Extraction.typeStorage environment.rawLayouts) type
 
 /-- The bytes a value of the shape occupies; `none` for a span and an unsupported type. -/
 def ValueShape.size? : ValueShape → Option Nat
@@ -852,7 +862,8 @@ theorem LayoutEnvironment.fieldShape_struct {environment : LayoutEnvironment}
     environment.fieldShape field = FieldShape.ofLayout computed signed := by
   unfold LayoutEnvironment.fieldShape
   split
-  · next scope name owned => simp [owned, Extraction.typeStorage] at owner
+  · next scope name owned =>
+      simp [owned, Extraction.typeStorage, Extraction.typeStorageAt] at owner
   · simp [owner, found]
 
 #print axioms LayoutEnvironment.fieldShape_struct
@@ -885,7 +896,7 @@ theorem Extraction.typeStorage_aggregate {layouts : List Extraction.RawLayout}
     (found : layouts[index]? = some metadata) (named : metadata.identity = identity) :
     Extraction.typeStorage layouts (.aggregate identity index) =
       some (.field (.aggregate index)) := by
-  simp only [Extraction.typeStorage]
+  simp only [Extraction.typeStorage, Extraction.typeStorageAt]
   rw [found]
   dsimp only [bind, Option.bind]
   simp only [named, ite_true, eq_self, pure]
@@ -911,7 +922,7 @@ theorem Extraction.typeStorage_aggregateArray {layouts : List Extraction.RawLayo
     (admitted : (metadata.identity == identity && !metadata.byRefLike) = true) :
     Extraction.typeStorage layouts (.array (.aggregate identity index)) =
       some (.aggregateArray identity index) := by
-  simp only [Extraction.typeStorage]
+  simp only [Extraction.typeStorage, Extraction.typeStorageAt]
   rw [found]
   dsimp only [bind, Option.bind]
   simp only [admitted, ite_true]
@@ -972,7 +983,7 @@ theorem LayoutEnvironment.valueShape_aggregate {environment : LayoutEnvironment}
     (checked : environment.layouts.toList[index]? = some layout) :
     environment.valueShape type = .aggregate layout.layout.size := by
   rw [Array.getElem?_toList] at checked
-  simp [LayoutEnvironment.valueShape, notSpan, notVector, storage, checked]
+  simp [LayoutEnvironment.valueShape, valueShapeAt, notSpan, notVector, storage, checked]
 
 #print axioms LayoutEnvironment.valueShape_aggregate
 

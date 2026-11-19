@@ -80,12 +80,10 @@ See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory]
 model entries, searched by method name; at the leaf the entry's name, opcode and owner head are
 compared and the entry resolves the whole reference. A `call` the table models keeps its call
 and states no link, and the checked interpreter runs the model when the pc has no link;
-`ManagedCallsValid` requires every other `call` to state a `.direct` link and rejects an
-unlinked call the table does not model. At each live modelled call, the entry must accept the
-member's calling-convention byte and its return and parameter types before generic substitution.
-`RuntimeModelsAgree` requires each live call site that
-emits a model in place of its call to emit exactly the model the table gives its reference, and a
-site the table does not model to emit none of the models the table accounts for. The table holds
+`ManagedCallsValid` checks a retained call's link to another method. At a live unlinked modelled
+call, `RuntimeModelsAgree` requires the same method reference and an available model. Its entry
+also checks the member's calling-convention byte and its return and parameter types before
+generic substitution. The table holds
 the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of
 `Vector128` and `Vector256`, and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and
 `Sign` of `System.Math` and of each integer type that declares them, the bit helpers of
@@ -99,10 +97,14 @@ available in the method's profile, and `Instruction.ProfileAgreement` reads a ca
 model its method has; `ManagedCallsValid` requires a live call of a modelled method to keep its call, and
 `UnsafeCallsValid` rejects `pop` at every `call`, `calli`, `callvirt` or `newobj` site, where it
 would drop the call. A proof about the models the table gives (`Extraction.runtimeModel_yields`)
-holds for each entry's models, so an entry adds one case to it. The per-family
-certificates tie most model emissions to their call; `bigMul64`, `divRemOut`, `bitcastByteBool`,
-`bitcastValue`, `createSpan`, `spanReference` and the intrinsics outside the exact intrinsic
-certificate are tied to their call by stack effect only.
+holds for each entry's models.
+
+At an unlinked site outside the model table, `loweredCallFamily` selects a family by raw
+opcode, owner and member name. The family resolves the overload using the raw operands,
+the method's layout environment, its profile and its role in a fold of the raw instructions.
+The decoder emits the resolved instruction or a hole tagged with the raw opcode. A validated
+literal method must contain the same instruction at each live site. An unknown member or
+unsupported overload therefore cannot occur at a live site.
 
 ### Arrays, views and bulk memory
 

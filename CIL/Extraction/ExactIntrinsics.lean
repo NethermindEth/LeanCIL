@@ -352,7 +352,7 @@ private def portableVectorFamily (instruction : RawInstruction) : Bool :=
 
 /-- A call that resembles an admitted entry by identity, or by owner and name; such a call
     must then match an entry exactly. -/
-private def exactCallFamily (instruction : RawInstruction) : Bool :=
+def exactCallFamily (instruction : RawInstruction) : Bool :=
   portableVectorFamily instruction || match instruction.operand with
   | .call site => match intrinsicSignature site.target with
     | none => exactSignatures.any fun (owner, name, _, _, _) =>

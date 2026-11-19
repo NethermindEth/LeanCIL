@@ -106,4 +106,27 @@ theorem local_reference_helper_name :
   decide +kernel
 #print axioms local_reference_helper_name
 
+/-- A helper which resolves to a hole accepts exactly the hole with that raw opcode. -/
+theorem unresolvedHelperOnlyHole (layouts : List RawLayout) (raw : RawInstruction)
+    (helper : UnsafeHelper) (emitted : CIL.Instruction)
+    (family : unsafeHelperFamily raw = some helper)
+    (unresolved : helper.decode layouts raw = .unadmitted raw.opcode) :
+    unsafeHelperMatches layouts raw emitted = true ↔ emitted = .unadmitted raw.opcode := by
+  simp only [unsafeHelperMatches, family, unresolved]
+  cases emitted <;> simp
+
+#print axioms unresolvedHelperOnlyHole
+
+/-- A resolving helper accepts only its own operation. -/
+theorem resolvedHelperOnlyOperation (layouts : List RawLayout) (raw : RawInstruction)
+    (helper : UnsafeHelper) (emitted : CIL.Instruction)
+    (family : unsafeHelperFamily raw = some helper)
+    (resolved : helper.decode layouts raw = helper.instruction) :
+    unsafeHelperMatches layouts raw emitted = true ↔ emitted = helper.instruction := by
+  simp only [unsafeHelperMatches, family, resolved]
+  cases helper <;> cases emitted <;> simp [UnsafeHelper.instruction, emittedUnsafeHelper] <;>
+    rename_i operation <;> cases operation <;> simp
+
+#print axioms resolvedHelperOnlyOperation
+
 end Tests.UnsafeCallEvidence

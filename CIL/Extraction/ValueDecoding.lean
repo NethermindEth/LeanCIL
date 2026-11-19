@@ -620,35 +620,46 @@ theorem Instruction.ofRaw_of_not_valueOpcode {previous : Option RawInstruction}
 def rawBefore (rawAt : Nat → Option RawInstruction) (pc : Nat) : Option RawInstruction :=
   if pc == 0 then none else rawAt (pc - 1)
 
-/-- The instruction at `pc` of raw code as `Instruction.ofRaw` decodes it after the instruction
-    before it; `none` past the end of the code. -/
-def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat) : Option Instruction :=
-  code[pc]?.map (Instruction.ofRaw (rawBefore (code[·]?) pc))
+/-- The decoder at a method-token call can use its enclosing method's binding information. -/
+abbrev CallDecoder := Nat → Option RawInstruction → RawInstruction → Instruction
 
-/-- Raw code as `Instruction.ofRaw` decodes each instruction after the one before it, `previous`
-    before the first; one pass over the code. -/
-def Instruction.ofRawCode : Option RawInstruction → List RawInstruction → List Instruction
-  | _, [] => []
-  | previous, raw :: rest =>
-    Instruction.ofRaw previous raw :: Instruction.ofRawCode (some raw) rest
+/-- Ordinary instructions use their value encoding. Method-token calls use the supplied decoder. -/
+def Instruction.withCallDecoder (decodeCall : CallDecoder) : CallDecoder := fun pc previous raw =>
+  if methodTokenCall raw.opcode then decodeCall pc previous raw else Instruction.ofRaw previous raw
 
-/-- Decoding code in one pass gives at each pc what `Instruction.ofRawAt` decodes there. -/
-theorem Instruction.ofRawCode_getElem? (code : List RawInstruction) (pc : Nat) :
-    (Instruction.ofRawCode none code)[pc]? = Instruction.ofRawAt code pc := by
-  suffices walked : ∀ (code : List RawInstruction) (previous : Option RawInstruction) (pc : Nat),
-      (Instruction.ofRawCode previous code)[pc]? =
-        code[pc]?.map (Instruction.ofRaw (if pc == 0 then previous else code[pc - 1]?)) by
-    rw [walked]
-    rfl
+/-- The instruction at `pc`, with the preceding raw instruction available for prefixes. -/
+def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat)
+    (decode : Nat → Option RawInstruction → RawInstruction → Instruction :=
+      fun _ => Instruction.ofRaw) : Option Instruction :=
+  code[pc]?.map (decode pc (rawBefore (code[·]?) pc))
+
+/-- Decode each instruction at its pc, carrying the raw predecessor for prefix checks. -/
+def Instruction.ofRawCode (previous : Option RawInstruction) (code : List RawInstruction)
+    (decode : Nat → Option RawInstruction → RawInstruction → Instruction :=
+      fun _ => Instruction.ofRaw) (start : Nat := 0) : List Instruction :=
+  match code with
+  | [] => []
+  | raw :: rest => decode start previous raw :: ofRawCode (some raw) rest decode (start + 1)
+
+/-- The sequential decoder and indexed decoder see the same pc and raw predecessor. -/
+theorem Instruction.ofRawCode_getElem? (code : List RawInstruction) (pc : Nat)
+    (decode : Nat → Option RawInstruction → RawInstruction → Instruction :=
+      fun _ => Instruction.ofRaw) :
+    (Instruction.ofRawCode none code decode)[pc]? = Instruction.ofRawAt code pc decode := by
+  suffices walked : ∀ (code : List RawInstruction) (previous : Option RawInstruction)
+      (start pc : Nat), (Instruction.ofRawCode previous code decode start)[pc]? =
+        code[pc]?.map (decode (start + pc) (if pc == 0 then previous else code[pc - 1]?)) by
+    simpa [Instruction.ofRawAt, rawBefore] using walked code none 0 pc
   intro code
   induction code with
-  | nil => intro previous pc; rfl
+  | nil => intro previous start pc; simp [Instruction.ofRawCode]
   | cons raw rest walkedRest =>
-    intro previous pc
+    intro previous start pc
     cases pc with
-    | zero => rfl
+    | zero => simp [Instruction.ofRawCode]
     | succ pc =>
       rw [Instruction.ofRawCode, List.getElem?_cons_succ, walkedRest, List.getElem?_cons_succ]
+      rw [Nat.add_right_comm start 1 pc]
       cases pc <;> rfl
 
 #print axioms Instruction.ofRawCode_getElem?

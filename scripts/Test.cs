@@ -120,7 +120,7 @@ if (suite is "all" or "evidence")
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs"]);
+        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs", "Tests/CallSiteAgreement.cs"]);
 if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
 if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
 if (suite is "all" or "blockers") projects.AddRange(["Tests/SelfAdmission.cs", "Tests/CanonicalMethods.cs"]);

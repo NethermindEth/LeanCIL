@@ -15,17 +15,14 @@ private inductive BinaryTransfer where
   | write (width : Nat) (bigEndian trying : Bool)
   deriving DecidableEq
 
-/-- Decode a bounded overload family, retaining its complete raw signature. -/
-private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
-  if raw.opcode != 40 then none else pure ()
-  let .call site := raw.operand | none
-  if site.hasThis || !site.typeArguments.isEmpty || site.declaringType !=
-      .atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives" then none else pure ()
+/-- The transfer family is determined by its metadata name, including width and byte order. -/
+private def binaryMember (member : String) :
+    Option (Bool × Bool × Bool × String × Nat × Bool) := do
   let (read, trying, suffix) ←
-    if site.name.startsWith "TryRead" then some (true, true, site.name.drop 7 |>.toString)
-    else if site.name.startsWith "TryWrite" then some (false, true, site.name.drop 8 |>.toString)
-    else if site.name.startsWith "Read" then some (true, false, site.name.drop 4 |>.toString)
-    else if site.name.startsWith "Write" then some (false, false, site.name.drop 5 |>.toString)
+    if member.startsWith "TryRead" then some (true, true, member.drop 7 |>.toString)
+    else if member.startsWith "TryWrite" then some (false, true, member.drop 8 |>.toString)
+    else if member.startsWith "Read" then some (true, false, member.drop 4 |>.toString)
+    else if member.startsWith "Write" then some (false, false, member.drop 5 |>.toString)
     else none
   let bigEndian := suffix.endsWith "BigEndian"
   let endian := if bigEndian then "BigEndian" else "LittleEndian"
@@ -34,6 +31,22 @@ private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
       ("UInt32", 4, false), ("Int64", 8, true), ("UInt64", 8, false),
       ("IntPtr", 8, true), ("UIntPtr", 8, false)].find?
       (fun (name, _, _) => suffix == name ++ endian)
+  return (read, trying, bigEndian, name, width, signed)
+
+/-- An endian transfer name in BinaryPrimitives reserves all its overloads. -/
+def binaryTransferFamily (raw : RawInstruction) : Bool :=
+  match raw.opcode, raw.operand with
+  | 40, .call site => site.declaringType == .atom spanMemoryScope
+      "System.Buffers.Binary.BinaryPrimitives" && (binaryMember site.name).isSome
+  | _, _ => false
+
+/-- Decode a bounded overload family, retaining its complete raw signature. -/
+private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
+  if raw.opcode != 40 then none else pure ()
+  let .call site := raw.operand | none
+  if site.hasThis || !site.typeArguments.isEmpty || site.declaringType !=
+      .atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives" then none else pure ()
+  let (read, trying, bigEndian, name, width, signed) ← binaryMember site.name
   let integer := TypeExpr.atom runtimeScope ("System." ++ name)
   let spanName := if read then "System.ReadOnlySpan`1" else "System.Span`1"
   let span := TypeExpr.apply (.constructor runtimeScope spanName) (.atom runtimeScope "System.Byte")
@@ -52,6 +65,12 @@ private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
     then none
   else if read then some (.read width signed bigEndian trying)
     else some (.write width bigEndian trying)
+
+/-- The instruction of an exactly resolved binary transfer. -/
+def binaryInstruction (raw : RawInstruction) : Option Instruction := do
+  match ← binaryCall raw with
+  | .read width signed big trying => return .memory (.binaryRead width signed big trying)
+  | .write width big trying => return .memory (.binaryWrite width big trying)
 
 /-- Covered transfers cannot be forged from another call with the same stack effect. -/
 def binaryTransferMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=

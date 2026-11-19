@@ -1,11 +1,12 @@
 import CIL.Safety.Execution
 import CIL.Safety.StepComposition
 import CIL.Safety.BoundaryStepRenaming
-import CIL.Extraction.RuntimeModels
+import CIL.Extraction.CallAgreement
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
 import CIL.ProfileEquivalence
 import Tests.Support
+import Tests.LoweredCallRefusal
 
 /-!
 # Runtime model tests
@@ -231,11 +232,6 @@ private def entries : List ModelEntry :=
 /-- The table of `entries`, accounting for the wide arithmetic and span length emissions. -/
 private def catalog : ModelCatalog where
   table := model_table% entries
-  lowered
-    | .memory (.bigMul64 signed) => some (.memory (.bigMul64 signed))
-    | .memory (.divRemOut width) => some (.memory (.divRemOut width))
-    | .memory .spanLength => some (.memory .spanLength)
-    | _ => none
 
 /-- A call or `newobj` of `method`. -/
 private def site (method : MethodRef) (opcode : Nat := 40)
@@ -247,8 +243,8 @@ private def site (method : MethodRef) (opcode : Nat := 40)
 -- The literal table is the balanced table of its entries.
 example : catalog.table = ModelTable.ofEntries entries := rfl
 
--- A modelled call agrees only with its own model: BigMul emitted as DivRem is refused.
-example : catalog.siteAgrees {} {} (site bigMul) (.memory (.bigMul64 false)) = true := by
+-- A modelled call keeps its method, including when a memory operation implements its semantics.
+example : catalog.siteAgrees {} {} (site bigMul) (.memory (.bigMul64 false)) = false := by
   decide +kernel
 example : catalog.siteAgrees {} {} (site bigMul) (.memory (.divRemOut 64)) = false := by
   decide +kernel
@@ -264,6 +260,33 @@ example : catalog.siteAgrees {} {} (site signedBigMul) (.memory (.bigMul64 false
 example : catalog.table.find {} .call { spanLength word with hasThis := false } = none := by
   decide +kernel
 
+/-- A missing raw claim rejects every live emission. -/
+theorem unclaimedLiveRefused (models : ModelCatalog) (environment : LayoutEnvironment)
+    (profile : FeatureProfile) (raw : RawInstruction) (emitted : CIL.Instruction)
+    (called : methodTokenCall raw.opcode = true)
+    (missing : siteClaim loweredCallFamily environment none raw models.table.find = .refused) :
+    models.siteAgrees environment profile raw emitted none none true = false := by
+  simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt,
+    ModelCatalog.callRequirement, called, missing,
+    CallRequirement.accepts]
+
+#print axioms unclaimedLiveRefused
+
+/-- A retained modelled direct call names the member of its raw operand. -/
+theorem retainedModelNamesMember (models : ModelCatalog) (environment : LayoutEnvironment)
+    (profile : FeatureProfile) (raw : RawInstruction) (member : CallSite)
+    (target : MethodRef) (prefixes : CallPrefixes)
+    (called : raw.opcode = 40) (operand : raw.operand = .call member)
+    (model : siteClaim loweredCallFamily environment none raw models.table.find = .model)
+    (accepted : models.siteAgrees environment profile raw (.call target prefixes) = true) :
+    target = member.method := by
+  simp only [ModelCatalog.siteAgrees, ModelCatalog.agreesAt,
+    ModelCatalog.callRequirement, callLayouts_environment, model, operand, called,
+    methodTokenCall, callOpcode?, Bool.true_or, beq_self_eq_true, ite_true] at accepted
+  split at accepted <;> simp_all [CallRequirement.accepts]
+
+#print axioms retainedModelNamesMember
+
 -- An entry filed under another name's key is not selected for that name.
 /-- A tree that files the span length entry under the key of `get_IsEmpty`. -/
 private def misfiled : ModelTable := .node .leaf (name!"get_IsEmpty").code [spanLengthEntry] .leaf
@@ -271,8 +294,8 @@ private def spanIsEmpty : MethodRef :=
   { spanLength word with name := name!"get_IsEmpty", returnType := runtimeType "System.Boolean" }
 example : misfiled.find {} .call spanIsEmpty = none := by decide +kernel
 
--- A call the table does not model keeps its call and may emit no model.
-example : catalog.siteAgrees {} {} (site divRem) (.call divRem) = true := by decide +kernel
+-- An unlinked call without a named family has no resolved instruction.
+example : catalog.siteAgrees {} {} (site divRem) (.call divRem) = false := by decide +kernel
 example : catalog.siteAgrees {} {} (site divRem) (.memory (.divRemOut 64)) = false := by
   decide +kernel
 
@@ -280,12 +303,12 @@ example : catalog.siteAgrees {} {} (site divRem) (.memory (.divRemOut 64)) = fal
 example : catalog.table.find {} .newobj bigMul = none := by decide +kernel
 example : catalog.table.find {} .call { bigMul with owner := runtimeType "System.Maths" } =
     none := by decide +kernel
-example : catalog.siteAgrees {} {} (site (spanLength word)) (.memory .spanLength) = true := by
+example : catalog.siteAgrees {} {} (site (spanLength word)) (.memory .spanLength) = false := by
   decide +kernel
 example : catalog.table.find {} .call
     { spanLength word with owner := runtimeType "System.String" } = none := by decide +kernel
 example : catalog.siteAgrees {} {} (site (spanLength (runtimeType "System.Byte")))
-    (.memory .spanLength) = true := by decide +kernel
+    (.memory .spanLength) = false := by decide +kernel
 example : catalog.siteAgrees {} {} (site bigMul 115) (.memory (.bigMul64 false)) = false := by
   decide +kernel
 
@@ -295,8 +318,10 @@ private def method (instruction : RawInstruction) : RawMethod :=
     attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
     initLocals := true, maxStack := 3, genericParameters := [], code := [instruction] }
 
--- Only live sites are checked.
-example : ModelsAgree catalog {} {} (method (site bigMul)) [false] [.memory (.divRemOut 64)] := by
+-- A dead method-token call carries the raw opcode in its hole.
+example : ModelsAgree catalog {} {} (method (site bigMul)) [false] [.unadmitted 40] := by
+  decide +kernel
+example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [false] [.unadmitted 115] := by
   decide +kernel
 example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [true] [.memory (.divRemOut 64)] := by
   decide +kernel
@@ -469,7 +494,7 @@ example : ¬ RuntimeModelsAgree (method (site mathMax)) [true] (emitting maxLowe
   decide +kernel
 example : ¬ RuntimeModelsAgree (method (site mathMin)) [true] (emitting maxLowered []) := by
   decide +kernel
-example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+example : ¬ ModelsAgree { table := model_table% [objectConstructorEntry] }
     {} {} (method (site mathMin)) [true] [maxLowered] := by decide +kernel
 example : ManagedCallsValid [] [] (callModelled body) (method (site mathMin)) [true]
     (emitting (.call mathMin {}) []) := by decide +kernel
@@ -486,12 +511,18 @@ private def avx2And : MethodRef :=
     hasThis := false, genericArity := 0, returnType := word, parameters := [word, word] }
 private def avx2Catalog : ModelCatalog :=
   { table := model_table% [ModelEntry.exact .call avx2And (avx2And.signature 0)
-      (.intrinsic (.avx2 .band) 2)],
-    lowered := fun _ => none }
+      (.intrinsic (.avx2 .band) 2)] }
 example : avx2Catalog.siteAgrees {} {} (site avx2And) (.call avx2And {}) = false := by
   decide +kernel
 example : avx2Catalog.siteAgrees {} { avx2 := true } (site avx2And) (.call avx2And {}) = true := by
   decide +kernel
+
+/-- A linked pc must also satisfy the profile requirements of its resolved model. -/
+theorem linkedProfileRequired :
+    avx2Catalog.siteAgrees {} {} (site avx2And) (.call avx2And {}) (some (.direct 0))
+      none true = false := by decide +kernel
+
+#print axioms linkedProfileRequired
 
 -- The profile query of a call is its model's: the helpers read no flag, so every two profiles
 -- agree on a program that calls one.
@@ -590,11 +621,11 @@ example : RuntimeModelsAgree (method laneSite) [true]
     (emitting (.call getElement128Method {}) []) := by decide +kernel
 example : ¬ RuntimeModelsAgree (method laneSite) [true]
     (emitting extractLowered []) := by decide +kernel
-example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+example : ¬ ModelsAgree { table := model_table% [objectConstructorEntry] }
     {} {} (method laneSite) [true] [extractLowered] := by decide +kernel
 example : ¬ RuntimeModelsAgree (method (site createScalarUnsafeMethod)) [true]
     (emitting createLowered []) := by decide +kernel
-example : ModelsAgree { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+example : ¬ ModelsAgree { table := model_table% [objectConstructorEntry] }
     {} {} (method (site createScalarUnsafeMethod)) [true] [createLowered] := by decide +kernel
 /-- Keeping a valid 256-bit call still requires its own generic member declaration. -/
 example : ¬ RuntimeModelsAgree (method (site getElement256Method 40
@@ -732,5 +763,39 @@ info: 'Tests.RuntimeModels.memoryEntries_stepRenamed' depends on axioms: [propex
 #print axioms memoryEntries_stepRenamed
 
 end
+
+open CIL CIL.Extraction
+
+/-- A virtual call with a link belongs to the totality obligation and satisfies it. -/
+theorem linkedVirtualClaim {Family : Type} (familyOf : RawInstruction → Option Family)
+    (environment : LayoutEnvironment) (link : Link) (offset : Nat) (site : CallSite) :
+    SiteClaimTotal familyOf environment (some link) ⟨offset, 111, .call site⟩ true ∧
+      siteClaim familyOf environment (some link) ⟨offset, 111, .call site⟩ = .link := by
+  constructor
+  · intro _ _
+    simp [siteClaim, methodTokenCall]
+  · rfl
+
+#print axioms linkedVirtualClaim
+
+/-- A live, unlinked virtual call outside the named families has no claim. -/
+theorem unknownVirtualRefused {Family : Type} (familyOf : RawInstruction → Option Family)
+    (environment : LayoutEnvironment) (offset : Nat) (site : CallSite)
+    (unknown : familyOf ⟨offset, 111, .call site⟩ = none) :
+    ¬ SiteClaimTotal familyOf environment none ⟨offset, 111, .call site⟩ true := by
+  simp [SiteClaimTotal, siteClaim, methodTokenCall, callOpcode?, unknown]
+
+#print axioms unknownVirtualRefused
+
+/-- An unlinked method-token site that neither the table nor a raw family claims is refused. -/
+theorem unclaimedSiteRefused {Family : Type} (familyOf : RawInstruction → Option Family)
+    (environment : LayoutEnvironment) (raw : RawInstruction) (site : CallSite)
+    (token : methodTokenCall raw.opcode = true) (operand : raw.operand = .call site)
+    (unmodelled : ((callOpcode? raw.opcode).bind
+      fun op => runtimeModel environment op site.method) = none) (unknown : familyOf raw = none) :
+    siteClaim familyOf environment none raw = .refused := by
+  simp [siteClaim, token, operand, unmodelled, unknown]
+
+#print axioms unclaimedSiteRefused
 
 end Tests.RuntimeModels

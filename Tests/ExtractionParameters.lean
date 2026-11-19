@@ -138,7 +138,7 @@ private theorem typeStorage_apply_span {layouts : List RawLayout} {scope name : 
   unfold spanLocal
   cases spanned : spanStorage (.apply (.constructor scope name) element) with
   | none =>
-    simp only [typeStorage, spanned] at stored
+    simp only [typeStorage, typeStorageAt, spanned] at stored
     simp only [Option.isSome_none]
     revert stored
     cases storage <;> simp only [spanStored] <;> (repeat' split) <;> simp
@@ -153,7 +153,7 @@ private theorem typeStorage_apply_span {layouts : List RawLayout} {scope name : 
         simp only [pure, Option.some.injEq] at found
         subst found
         rfl
-    simp only [typeStorage, spanned] at stored
+    simp only [typeStorage, typeStorageAt, spanned] at stored
     simp only [Option.isSome_some]
     cases element
     case aggregate identity index =>
@@ -179,8 +179,8 @@ private theorem typeStorage_span {layouts : List RawLayout} {type : TypeExpr}
   case apply constructor element =>
     cases constructor
     case constructor scope name => exact typeStorage_apply_span stored
-    all_goals simp [typeStorage] at stored
-  all_goals unfold typeStorage at stored
+    all_goals simp [typeStorage, typeStorageAt] at stored
+  all_goals unfold typeStorage typeStorageAt at stored
   all_goals (try split at stored) <;> cases storage <;>
     simp_all [spanStored, spanLocal, spanStorage, bind, Option.bind_eq_some_iff]
   all_goals

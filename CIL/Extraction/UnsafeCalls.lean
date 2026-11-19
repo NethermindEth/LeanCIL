@@ -27,8 +27,8 @@ private def unsafeTarget (signature : String) : MethodId :=
   .external (runtimeScope ++ "::" ++ signature)
 
 /-- One admitted non-reference type argument. -/
-private def admittedArgument (layouts : List RawLayout) : List TypeExpr → Bool
-  | [type] => match typeStorage layouts type with
+private def admittedArgument (storage : TypeExpr → Option StorageType) : List TypeExpr → Bool
+  | [type] => match storage type with
     | some .reference | none => false
     | some _ => true
   | _ => false
@@ -65,29 +65,41 @@ def unsafeElementOffsetMatches (layouts : List RawLayout) (raw : RawInstruction)
       | _, _ => false
   | _, _ => true
 
-/-- `helper` when the call has its exact target and an admitted type argument. -/
-private def bound (layouts : List RawLayout) (site : CallSite) (signature : String)
-    (helper : UnsafeHelper) : Option UnsafeHelper :=
-  if site.target == unsafeTarget signature && admittedArgument layouts site.typeArguments then
-    some helper
-  else none
+/-- The runtime helper named by the opcode and owner, before resolving its signature or layout. -/
+def unsafeHelperFamily (instruction : RawInstruction) : Option UnsafeHelper := do
+  if instruction.opcode != 40 then none else pure ()
+  let .call site := instruction.operand | none
+  if site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" then none
+    else match site.name with
+      | "SkipInit" => some .skipInit
+      | "NullRef" => some .nullRef
+      | "IsNullRef" => some .isNullRef
+      | _ => none
 
-/-- Recognize the external helper from raw metadata, independently of translation. -/
-def unsafeHelper (layouts : List RawLayout) (instruction : RawInstruction) : Option UnsafeHelper :=
-  match instruction.opcode, instruction.operand with
-  | 0x28, .call site =>
-    if !(site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
-        !site.hasThis) then none
-    else if site.name == "SkipInit" && site.parameterCount == 1 && !site.returnsValue then
-      bound layouts site "System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(!!0&)"
-        .skipInit
-    else if site.name == "NullRef" && site.parameterCount == 0 && site.returnsValue then
-      bound layouts site "!!0& System.Runtime.CompilerServices.Unsafe::NullRef()" .nullRef
-    else if site.name == "IsNullRef" && site.parameterCount == 1 && site.returnsValue then
-      bound layouts site
-        "System.Boolean System.Runtime.CompilerServices.Unsafe::IsNullRef(!!0&)" .isNullRef
-    else none
-  | _, _ => none
+/-- The parameter count, return flag and external member signature of a lowered helper. -/
+private def UnsafeHelper.signature : UnsafeHelper → Nat × Bool × String
+  | .skipInit => (1, false, "System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(!!0&)")
+  | .nullRef => (0, true, "!!0& System.Runtime.CompilerServices.Unsafe::NullRef()")
+  | .isNullRef =>
+    (1, true, "System.Boolean System.Runtime.CompilerServices.Unsafe::IsNullRef(!!0&)")
+
+/-- A family member resolves exactly when its call shape, target and stored type agree. -/
+def UnsafeHelper.resolvesAt (helper : UnsafeHelper) (storage : TypeExpr → Option StorageType)
+    (site : CallSite) : Bool :=
+  let (count, returnsValue, signature) := helper.signature
+  !site.hasThis && site.parameterCount == count && site.returnsValue == returnsValue &&
+    site.target == unsafeTarget signature && admittedArgument storage site.typeArguments
+
+/-- Whether a helper resolves under the method's raw layouts. -/
+def UnsafeHelper.resolves (helper : UnsafeHelper) (layouts : List RawLayout)
+    (site : CallSite) : Bool :=
+  helper.resolvesAt (typeStorage layouts) site
+
+/-- The instruction a resolving runtime helper emits. -/
+def UnsafeHelper.instruction : UnsafeHelper → Instruction
+  | .skipInit => .skipInit
+  | .nullRef => .memory .nullRef
+  | .isNullRef => .memory .isNullRef
 
 /-- The helper an emitted operation implements, if any. -/
 def emittedUnsafeHelper : Instruction → Option UnsafeHelper
@@ -95,6 +107,26 @@ def emittedUnsafeHelper : Instruction → Option UnsafeHelper
   | .memory .nullRef => some .nullRef
   | .memory .isNullRef => some .isNullRef
   | _ => none
+
+/-- A member of the helper family decodes to its operation or an opcode-tagged hole. -/
+def UnsafeHelper.decode (helper : UnsafeHelper) (layouts : List RawLayout)
+    (raw : RawInstruction) : Instruction :=
+  match raw.operand with
+  | .call site =>
+    if helper.resolves layouts site then helper.instruction else .unadmitted raw.opcode
+  | _ => .unadmitted raw.opcode
+
+/-- A family member emits its resolved operation or its own hole. Other sites cannot emit
+    helper operations. -/
+def unsafeHelperMatches (layouts : List RawLayout) (raw : RawInstruction)
+    (emitted : Instruction) : Bool :=
+  match unsafeHelperFamily raw with
+  | none => (emittedUnsafeHelper emitted).isNone
+  | some helper => match helper.decode layouts raw with
+    | .unadmitted opcode => match emitted with
+      | .unadmitted actual => actual == opcode
+      | _ => false
+    | _ => emittedUnsafeHelper emitted == some helper
 
 /-- A recognized call emits exactly its helper operation, which no other instruction may emit. -/
 def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
@@ -117,7 +149,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
         | _, _ => false
       else if instruction.opcode == 20 && instruction.operand == .none &&
           emittedUnsafeHelper emitted == some .nullRef then true
-      else unsafeHelper layouts instruction == emittedUnsafeHelper emitted)
+      else unsafeHelperMatches layouts instruction emitted)
     closed.code reachable code = true
 
 instance (layouts : List RawLayout) (closed : RawMethod)

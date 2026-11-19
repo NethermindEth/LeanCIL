@@ -9,9 +9,9 @@ import CIL.Extraction.Prefixes
 instruction of the instantiated definition as `Instruction.ofRaw` decodes it after the
 instruction before it, a hole where no family admits the opcode yet, a type test naming the
 type argument, a field access naming the
-instantiated field, a call or construction naming the instantiated method, the frame, homes and
-signature from the same definition, and the link table the extraction states, which the call
-check ties to each raw site.
+instantiated field, and the frame, homes and signature from the same definition.
+An unlinked call resolves against the runtime catalog or its named lowering family. The
+resolver uses the method's layouts, profile and raw fold role. A missing overload is a hole.
 `Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
 and `decodedProgram?` applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
@@ -27,7 +27,7 @@ namespace CIL.Extraction
 def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (closed : RawMethod) (storage : RawArguments) :
     Option Method := do
-  let code := Instruction.ofRawCode none closed.code
+  let code := methodCode profile environment links closed
   let localKinds ← storage.locals.mapM (storageKind environment.layouts)
   let reachable := storage.code.map fun _ => true
   let parameterHomes ← expectedHomes environment.layouts storage reachable
@@ -150,7 +150,7 @@ theorem _root_.CIL.Method.ofClosed?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {links : List (Nat × Link)} {closed : RawMethod}
     {storage : RawArguments} {method : Method}
     (decoded : Method.ofClosed? profile environment links closed storage = some method) :
-    method.code = Instruction.ofRawCode none closed.code := by
+    method.code = methodCode profile environment links closed := by
   unfold Method.ofClosed? at decoded
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
   obtain ⟨_, _, _, _, built⟩ := decoded
@@ -169,12 +169,15 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     {arguments : List TypeExpr} {method : Method}
     (decoded : Method.ofRaw? profile environment links source arguments = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
-      ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
+      ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc
+        (methodInstruction profile environment.callLayouts
+          (Std.TreeSet.ofList (links.map Prod.fst))
+          (foldRoles closed.locals closed.code).toArray) := by
   unfold Method.ofRaw? at decoded
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
   obtain ⟨closed, instantiated, _, _, built⟩ := decoded
   refine ⟨closed, instantiated, fun pc => ?_⟩
-  rw [Method.ofClosed?_code built, Instruction.ofRawCode_getElem?]
+  rw [Method.ofClosed?_code built, methodCode, Instruction.ofRawCode_getElem? closed.code pc _]
 
 #print axioms Method.ofRaw?_code
 

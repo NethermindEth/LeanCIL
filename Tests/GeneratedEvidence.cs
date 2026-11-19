@@ -62,6 +62,9 @@ partial class Program
     [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n")]
     private static partial Regex GeneratedTheorem { get; }
 
+    [GeneratedRegex(@" := method\d+_instruction_checks(?:\.[12])+(?=\r?$)", RegexOptions.Multiline)]
+    private static partial Regex InstructionCheckProjection { get; }
+
     [GeneratedRegex(@"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z")]
     private static partial Regex IdentityWitnessName { get; }
 
@@ -248,7 +251,7 @@ partial class Program
                 if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : And (Extraction.ScalarFlowValid ", StringComparison.Ordinal))
                     return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
-                return match.Value;
+                return InstructionCheckProjection.Replace(match.Value, " := by decide +kernel");
             });
         if (found != 1) throw new InvalidOperationException("Missing unique evidence obligation: " + theorem);
         result = ResolutionFactsCommand.Replace(result, "");

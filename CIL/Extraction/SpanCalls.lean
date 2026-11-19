@@ -13,7 +13,8 @@ namespace CIL.Extraction
 
 /-- The exact assembly defining the supported array extension methods. -/
 def spanMemoryScope : String :=
-  "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  metadata_text%
+    "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
@@ -27,6 +28,21 @@ inductive SpanCall where
   | item (width : Nat) | length | slice (counted : Bool) | readOnly
   | array (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   deriving DecidableEq, Repr
+
+/-- The memory instruction for a resolved span signature. -/
+def SpanCall.instruction : SpanCall → Instruction
+  | .empty width writable => .memory (.spanEmpty width writable)
+  | .reinterpret source target writable => .memory (.spanReinterpret source target writable)
+  | .copy width trying => .memory (.spanCopy width trying)
+  | .reference width writable => .memory (.spanFromReference width writable)
+  | .singleReference width writable => .memory (.spanSingleReference width writable)
+  | .fill width clear => .memory (.spanFill width clear)
+  | .arrayFill element counted => .memory (.arrayFill element counted)
+  | .item width => .memory (.spanItem width)
+  | .length => .memory .spanLength
+  | .slice counted => .memory (.spanSlice counted)
+  | .readOnly => .memory .spanReadOnly
+  | .array element writable range => .memory (.arraySpan element writable range)
 
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
 private def emittedSpanCall : Instruction → Option SpanCall
@@ -248,6 +264,15 @@ def spanCallReturnsReference (site : CallSite) : Bool :=
     | .item _ => true
     | _ => false
 
+/-- The span member or factory at a raw site, with aggregate widths from layout evidence. -/
+def spanCall (instruction : RawInstruction) (sourceWidth targetWidth : Nat := 0) :
+    Option SpanCall := do
+  let .call site := instruction.operand | none
+  let opcode := instruction.opcode
+  arrayFillCall opcode site <|> spanMemberCall opcode site sourceWidth <|>
+    arrayExtensionCall opcode site sourceWidth <|> referenceFactory opcode site sourceWidth <|>
+    reinterpretCall opcode site sourceWidth targetWidth
+
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
@@ -258,13 +283,6 @@ def spanCallMatches (instruction : RawInstruction) (emitted : Instruction) : Boo
       | some (.empty width _) => (width, width)
       | some (.array element _ _) => (element.width, element.width)
       | _ => (0, 0)
-    let expected := match instruction.operand with
-      | .call site => (arrayFillCall instruction.opcode site).orElse (fun _ =>
-          (spanMemberCall instruction.opcode site sourceWidth).orElse
-          (fun _ => (arrayExtensionCall instruction.opcode site sourceWidth).orElse
-            (fun _ => (referenceFactory instruction.opcode site sourceWidth).orElse
-              (fun _ => reinterpretCall instruction.opcode site sourceWidth targetWidth))))
-      | _ => none
-    expected == emittedSpanCall emitted
+    spanCall instruction sourceWidth targetWidth == emittedSpanCall emitted
 
 end CIL.Extraction

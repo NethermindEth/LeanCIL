@@ -1,6 +1,6 @@
 import CIL.Safety.Execution
 import CIL.Safety.StepComposition
-import CIL.Extraction.RuntimeModels
+import CIL.Extraction.CallAgreement
 import CIL.Extraction.KernelEquation
 import CIL.ProfileEquivalence
 import Tests.Support
@@ -164,26 +164,35 @@ example : [popCount, reverseUlong].all (fun method =>
       !runtimeCatalog.siteAgrees {} {} ⟨0, 40, .call operand⟩ (.call method {})) := by
   decide +kernel
 
+/-- A link does not excuse a mismatched model declaration at an occupied pc. -/
+theorem linkedDeclarationRequired :
+    let operand : CallSite := {
+      method := popCount, declared := popCount.signature 0x40,
+      target := .external "", typeArguments := [], parameterCount := 1, returnsValue := true }
+    runtimeCatalog.siteAgrees {} {} ⟨0, 40, .call operand⟩ (.call popCount {})
+      (some (.direct 0)) none true = false := by decide +kernel
+
+#print axioms linkedDeclarationRequired
+
 /-- A method with no code, on the scalar profile. -/
 private def body : CIL.Method := { code := [], locals := [], returnsValue := false }
 
 /-- A body whose only instruction is `emitted`, with no link. -/
 private def emitting (emitted : CIL.Instruction) : CIL.Method := { body with code := [emitted] }
 
-/-- The table before the bit helpers, which accepted any emission at their sites. -/
-private def withoutHelpers : ModelCatalog :=
-  { table := model_table% [objectConstructorEntry], lowered := fun _ => none }
+/-- Each helper family has model ownership at its raw site. -/
+theorem bitClaims :
+    siteClaim loweredCallFamily {} none (site popCount) = .model ∧
+    siteClaim loweredCallFamily {} none (site ulongPopCount) = .model ∧
+    siteClaim loweredCallFamily {} none (site reverseUlong) = .model := by decide +kernel
 
--- A helper site keeps its call. Each group's mutation, another helper's intrinsic, a count's
--- other result word or another width, is refused at the site, which a table without the helpers
--- accepted, and so is a call of another helper.
+#print axioms bitClaims
+
 private def leadingLowered : CIL.Instruction :=
   .intrinsic (.scalar (.leadingZeroCount 64 .word32)) 1
 example : RuntimeModelsAgree (method (site popCount)) [true] (emitting (.call popCount {})) := by
   decide +kernel
 example : ¬ RuntimeModelsAgree (method (site popCount)) [true] (emitting leadingLowered) := by
-  decide +kernel
-example : ModelsAgree withoutHelpers {} {} (method (site popCount)) [true] [leadingLowered] := by
   decide +kernel
 example : ManagedCallsValid [] [] (callModelled body) (method (site popCount)) [true]
     (emitting (.call popCount {})) := by decide +kernel
@@ -192,12 +201,8 @@ example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site popCount)
 private def narrowCount : CIL.Instruction := .intrinsic (.scalar (.popCount 64 .word32)) 1
 example : ¬ RuntimeModelsAgree (method (site ulongPopCount)) [true] (emitting narrowCount) := by
   decide +kernel
-example : ModelsAgree withoutHelpers {} {} (method (site ulongPopCount)) [true] [narrowCount] := by
-  decide +kernel
 private def reverse32 : CIL.Instruction := .intrinsic (.scalar (.reverseEndianness 32 false)) 1
 example : ¬ RuntimeModelsAgree (method (site reverseUlong)) [true] (emitting reverse32) := by
-  decide +kernel
-example : ModelsAgree withoutHelpers {} {} (method (site reverseUlong)) [true] [reverse32] := by
   decide +kernel
 
 -- The helpers read no profile flag: a helper site agrees under the scalar and the AVX2 profile,

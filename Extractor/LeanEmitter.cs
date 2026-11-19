@@ -317,7 +317,7 @@ internal static class LeanEmitter
                 var evidence = $"{method}_specialization_validated profile {linkTable}";
                 var proof = $"Eq.trans ({equality} {environment} {evidence}) {method}_decoder_eq";
                 var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
-                var code = $"Instruction.ofRawCode none {method}Closed.code";
+                var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
                 var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
                 lean.AppendLine($"""
                     cil_decoded_method {method} {fields}:= {closedDecoder}
@@ -410,10 +410,7 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_constrained_validated : Extraction.ConstrainedCallsValid method{n}DispatchTypes specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_shape_validated : " +
                 $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
-            lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_models_validated : " +
-                $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := {Decide}");
+
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +

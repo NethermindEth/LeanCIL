@@ -1389,7 +1389,8 @@ private theorem branch_encoding_cases :
 
 example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
     scalarEmissionMatches #[] none none (i 88) [.word64, .word64] .add = true :=
-  valid.instruction_checked (pc := 2) (by decide) rfl rfl rfl rfl rfl
+  valid.instruction_checked (decodeCall := fun _ => Instruction.ofRaw) (pc := 2)
+    (by decide) rfl rfl rfl rfl rfl
 
 #print axioms external_call_validated
 
@@ -1503,6 +1504,15 @@ theorem flagged_addition_valid :
     MethodEvidenceValid [] #[] [] [item] [] item addMethod := by decide +kernel
 #print axioms flagged_addition_valid
 
+/-- The call-aware method binding restores the explicit encoding checks at every scalar site. -/
+theorem checked_method_encodings (method : Method) (item : MethodEvidence)
+    (valid : ScalarFlowValid #[] item.closed item.featureStates item.scalarStates method.code true)
+    (binding : method.code = methodCode method.profile method.environment method.links item.closed) :
+    ScalarFlowValid #[] item.closed item.featureStates item.scalarStates method.code false :=
+  valid.of_decoded binding
+
+#print axioms checked_method_encodings
+
 /-- A literal load with a different owner layout cannot use decoded evidence. -/
 theorem wrong_decoded_owner_refused (item : MethodEvidence) :
     let owner := TypeExpr.aggregate "Fixture" 0
@@ -1512,7 +1522,8 @@ theorem wrong_decoded_owner_refused (item : MethodEvidence) :
     ¬ MethodEvidenceValid [] #[] [] [evidence] [] evidence
       { addMethod with code := [.ldfld field] } := by
   intro owner source evidence field valid
-  have different : [Instruction.ldfld field] ≠ Instruction.ofRawCode none source.code := by
+  have different : [Instruction.ldfld field] ≠
+      methodCode addMethod.profile addMethod.environment addMethod.links source := by
     decide +kernel
   exact different (valid.decoded_code rfl)
 #print axioms wrong_decoded_owner_refused

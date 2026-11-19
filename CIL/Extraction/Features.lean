@@ -107,6 +107,13 @@ private def featureNames : List (String × Feature) := [
   ("X86.Bmi1", .bmi1), ("X86.Bmi2/X64", .bmi2), ("X86.X86Base/X64", .x86Base64),
   ("Vector128", .vector128Accelerated), ("Vector256", .vector256Accelerated)]
 
+/-- A platform intrinsic owner reserves its declared feature getter at every signature. -/
+def featureGetterFamily (owner member : String) : Bool :=
+  featureNames.any fun (name, feature) =>
+    member == (if feature == .vector128Accelerated || feature == .vector256Accelerated then
+      "get_IsHardwareAccelerated" else "get_IsSupported") &&
+      owner == "System.Runtime.Intrinsics." ++ name
+
 /-- The exact assembly, return type and namespace shared by feature getters. -/
 private def featurePrefix := intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics."
 

@@ -11,10 +11,8 @@ A model table gives the runtime model a `call` or `newobj` of a typed `MethodRef
 from model entries searched by the method's name code. At the leaf the entry's name, opcode and
 owner head are compared, and the entry resolves the whole reference.
 `model_table%` writes a table as a literal balanced tree, so a lookup costs the depth of the tree
-and the comparison of one reference, never the size of the table. `ModelsAgree` requires that
-each live call site that does not keep its call emits the model a catalog's table gives it.
-Modules that define entries import this one; `CIL.Extraction.RuntimeModels` gathers them into the
-runtime table.
+and the comparison of one reference. Modules that define entries import this one.
+`CIL.Extraction.RuntimeModels` gathers the entries into the runtime table.
 -/
 
 namespace CIL.Extraction
@@ -178,54 +176,14 @@ theorem ModelTable.find_yields {table : ModelTable} {property : RuntimeModel →
 
 #print axioms ModelTable.find_yields
 
-/-- A table with the emissions it accounts for: `lowered` gives the model an instruction emitted
-    at a call stands for, for every model the table can give, and `none` for other emissions. -/
+/-- The table of runtime models checked at call sites. -/
 structure ModelCatalog where
   table : ModelTable
-  lowered : Instruction → Option RuntimeModel
 
 /-- The call opcodes a model can stand for, by raw opcode. -/
 def callOpcode? : Nat → Option CallOpcode
   | 40 => some .call
   | 115 => some .newobj
   | _ => none
-
-/-- A raw instruction and its emission agree with `catalog`: at a `call` or `newobj` an
-    emission other than a call stands for exactly the model the table gives the site's method. A
-    call keeps its operand, and `ManagedCallsValid` decides whether a model or a link enters it;
-    the entry must accept its declaration and its model must be available in `profile`. -/
-def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnvironment)
-    (profile : FeatureProfile) (raw : RawInstruction) (emitted : Instruction) : Bool :=
-  match callOpcode? raw.opcode, raw.operand with
-  | some opcode, .call site =>
-    let entry := catalog.table.entry? opcode site.method
-    let model := entry.bind (fun candidate => candidate.resolve environment site.method)
-    (model.isNone || entry.any (fun candidate => candidate.declares site.declared)) &&
-      match emitted with
-      | .call .. => model.all (·.available profile)
-      | _ => model == catalog.lowered emitted
-  | _, _ => true
-
-/-- Every live call site of `closed` emits in `code` the model `catalog` gives it, so a model
-    emission is tied to the method it stands for and not only to its stack effect, and a kept call
-    of a modelled method is available in `profile`. -/
-def ModelsAgree (catalog : ModelCatalog) (environment : LayoutEnvironment)
-    (profile : FeatureProfile) (closed : RawMethod) (reachable : List Bool)
-    (code : List Instruction) : Prop :=
-  closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
-  all3 (fun raw live emitted => !live || catalog.siteAgrees environment profile raw emitted)
-    closed.code reachable code = true
-
-instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (profile : FeatureProfile)
-    (closed : RawMethod) (reachable : List Bool) (code : List Instruction) :
-    Decidable (ModelsAgree catalog environment profile closed reachable code) :=
-  decidable_of_iff (all3 (fun raw live emitted =>
-      !live || catalog.siteAgrees environment profile raw emitted)
-      closed.code reachable code = true) <| by
-    constructor
-    · intro checked
-      have lengths := all3_lengths checked
-      exact ⟨lengths.1, lengths.2, checked⟩
-    · exact fun agreed => agreed.2.2
 
 end CIL.Extraction

@@ -69,6 +69,10 @@ structure RawInstruction where
   operand : RawOperand
   deriving DecidableEq, Repr
 
+/-- Direct calls, virtual calls and constructions take a method token. -/
+def methodTokenCall (opcode : Nat) : Bool :=
+  opcode == 40 || opcode == 111 || opcode == 115
+
 /-- A generic parameter's attribute flags and constraint types. -/
 structure GenericConstraint where
   flags : Nat

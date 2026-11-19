@@ -64,6 +64,16 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
       some .subtractBytes
     else none
 
+/-- The allocation-relative instruction for a resolved reference helper. -/
+def UnsafeReferenceHelper.instruction : UnsafeReferenceHelper → Instruction
+  | .areSame => .ceq
+  | .less => .clt_un
+  | .greater => .cgt_un
+  | .byteOffset => .memory .byteOffset
+  | .addBytes signed => .memory (.add 1 signed)
+  | .subtractBytes => .sub
+  | .asRef => .memory .asRef
+
 /-- The exact existing operation implementing each reference helper. -/
 def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Instruction → Bool
   | .areSame, .ceq | .less, .clt_un | .greater, .cgt_un | .byteOffset, .memory .byteOffset

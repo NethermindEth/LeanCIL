@@ -50,21 +50,23 @@ private def typeHandle : RawInstruction → Option TypeExpr
     `methodName` is the metadata name spelling `name`. -/
 private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
     (parameters : Nat) : CallSite :=
+  let type := TypeExpr.atom runtimeScope (metadata_text% "System.Type")
+  let fromHandle := methodName == name!"GetTypeFromHandle"
   let method : MethodRef := {
-    owner := .atom runtimeScope "System.Type", name := methodName, hasThis := false,
+    owner := type, name := methodName, hasThis := false,
     genericArity := 0,
-    returnType := .atom runtimeScope
-      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
-    parameters := if name == "GetTypeFromHandle" then
-        [.atom runtimeScope "System.RuntimeTypeHandle"]
-      else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
+    returnType := if fromHandle then type else
+      .atom runtimeScope (metadata_text% "System.Boolean"),
+    parameters := if fromHandle then
+        [.atom runtimeScope (metadata_text% "System.RuntimeTypeHandle")]
+      else [type, type] }
   { method, declared := method.signature 0, name,
     target := .external (runtimeScope ++ "::" ++ signature), typeArguments := [],
     parameterCount := parameters, returnsValue := true }
 
 private def getTypeFromHandle : CallSite :=
-  typeMethod "GetTypeFromHandle" name!"GetTypeFromHandle"
-    "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
+  typeMethod (metadata_text% "GetTypeFromHandle") name!"GetTypeFromHandle"
+    (metadata_text% "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)") 1
 
 /-- Exactly `call Type.GetTypeFromHandle`. -/
 private def typeFromHandle (instruction : RawInstruction) : Bool :=
@@ -79,10 +81,14 @@ private def typeComparison (instruction : RawInstruction) : Option Bool :=
     | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
     | _ => none
   else if instruction.opcode != 40 then none
-  else if instruction.operand == .call (typeMethod "op_Equality" name!"op_Equality"
-      "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
-  else if instruction.operand == .call (typeMethod "op_Inequality" name!"op_Inequality"
-      "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2) then some false
+  else if instruction.operand == .call (typeMethod
+      (metadata_text% "op_Equality") name!"op_Equality"
+      (metadata_text% "System.Boolean System.Type::op_Equality(System.Type,System.Type)") 2) then
+    some true
+  else if instruction.operand == .call (typeMethod
+      (metadata_text% "op_Inequality") name!"op_Inequality"
+      (metadata_text% "System.Boolean System.Type::op_Inequality(System.Type,System.Type)") 2) then
+    some false
   else none
 
 /-- The exact `typeof(A) == typeof(B)` encoding and its decided result. -/

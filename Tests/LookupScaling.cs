@@ -1994,23 +1994,30 @@ void ModelTableCosts()
             some (.memory (.divRemOut {{Queried(position, size)}})))
         """;
     string Emitted(int index) => $".memory (.divRemOut {index})";
+    string Call(int index) => $$""".call (method name!"Model{{index:D4}}") {}""";
     string Site(int index) => $$"""
         ⟨{{index}}, 40, .call { method := method name!"Model{{index:D4}}", declared := { convention := 0 },
-          target := .external "", typeArguments := [], parameterCount := 0, returnsValue := true }⟩
+          target := .external "", typeArguments := [], parameterCount := 0, returnsValue := false }⟩
         """.ReplaceLineEndings(" ");
     string Sites(int count) => $$"""
         /-- {{count}} live calls of distinct modelled methods, the call at index i to method i. -/
         def raw{{count}} : RawMethod := { shell with code := [
           {{string.Join(",\n  ", Enumerable.Range(0, count).Select(Site))}}] }
-        /-- The model each call emits. -/
+        /-- An unrelated emission at each modelled call. -/
         def code{{count}} : List Instruction :=
           [{{string.Join(", ", Enumerable.Range(0, count).Select(Emitted))}}]
+        /-- The same sites keeping the calls to their own methods. -/
+        def calls{{count}} : List Instruction :=
+          [{{string.Join(", ", Enumerable.Range(0, count).Select(Call))}}]
+        #kernel_cost "model calls {{count}}"
+          (ModelsAgree catalog {} .scalar raw{{count}} (List.replicate {{count}} true) calls{{count}})
         #kernel_cost "model agreement {{count}}"
-          (ModelsAgree catalog {} .scalar raw{{count}} (List.replicate {{count}} true) code{{count}})
+          (all3 (fun raw live emitted => !live || !catalog.siteAgrees {} .scalar raw emitted)
+            raw{{count}}.code (List.replicate {{count}} true) code{{count}} = true)
         """;
     var path = Path.Combine(tableDirectory, "ModelTables.lean");
     File.WriteAllText(path, $$"""
-        import CIL.Extraction.RuntimeModels
+        import CIL.Extraction.CallAgreement
         open CIL CIL.Extraction Lean Elab Command
         {{KernelCostCommand}}
         /-- A static method of no parameters named `name`. -/
@@ -2018,12 +2025,9 @@ void ModelTableCosts()
           { owner := .atom "Tests" "Models", name, hasThis := false, genericArity := 0, returnType := .void,
             parameters := [] }
         {{string.Join("\n", tableSizes.Select(Table))}}
-        /-- The larger table, accounting for every `divRemOut` emission. -/
+        /-- The larger table of modelled calls. -/
         def catalog : ModelCatalog where
           table := table256
-          lowered
-            | .memory (.divRemOut width) => some (.memory (.divRemOut width))
-            | _ => none
         /-- A method shell whose code each fixture supplies. -/
         def shell : RawMethod :=
           { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
@@ -2035,7 +2039,7 @@ void ModelTableCosts()
     var costs = LookupPatterns.ModelTableCost.Matches(output).ToDictionary(
         match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != positions.Length * tableSizes.Length + siteCounts.Length ||
+    if (costs.Count != positions.Length * tableSizes.Length + 2 * siteCounts.Length ||
         costs.Values.Min() < KernelDecisionFloor)
         throw new InvalidOperationException("Missing model table costs:\n" + output);
     foreach (var position in positions)
@@ -2057,6 +2061,13 @@ void ModelTableCosts()
             $"The model agreement check costs {agreementMeasure} heartbeats; per site, the limit is {AllowedGrowth} " +
             $"times the cost at the smaller count."));
     Console.WriteLine($"PASS the model agreement check costs {agreementMeasure} heartbeats");
+    var callCosts = siteCounts.Select(count => (Count: count, Total: costs[("calls", count)])).ToArray();
+    var callMeasure = string.Join(", ", callCosts.Select(sample =>
+        FormattableString.Invariant($"{sample.Total} at {sample.Count} calls")));
+    if (callCosts.Zip(callCosts.Skip(1)).Any(pair =>
+        pair.Second.Total * pair.First.Count > pair.First.Total * pair.Second.Count))
+        throw new InvalidOperationException($"Modelled call heartbeats per site increased ({callMeasure}).");
+    Console.WriteLine($"PASS modelled call heartbeats per site are nonincreasing ({callMeasure})");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -3322,7 +3333,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\bname spells ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost { get; }
 
-    [GeneratedRegex(@"\bmodel (lookup first|lookup middle|lookup last|agreement) ([0-9]+) (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"\bmodel (lookup (?:first|middle|last)|agreement|calls) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ModelTableCost { get; }
 
     [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]

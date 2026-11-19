@@ -9,10 +9,8 @@ import CIL.Extraction.BitModels
 
 `runtimeModel` resolves a call through the table of every modelled runtime method. A call of a
 modelled method keeps its call and states no link (`callModelled`, which `ManagedCallsValid`
-reads), and the checked interpreter runs the model its operand names. `RuntimeModelsAgree`,
-part of `MethodEvidenceValid`, requires every other emission at a live call site to be the model
-its method reference stands for. A runtime method enters `modelEntries` together with the
-emissions its model stands for in `runtimeCatalog`.
+reads), and the checked interpreter runs the model its operand names. At an unlinked
+method-token call, the raw selector gives a resolving model priority over a lowered family.
 -/
 
 namespace CIL.Extraction
@@ -28,6 +26,36 @@ def runtimeModels : ModelTable := model_table% modelEntries
 def runtimeModel (environment : LayoutEnvironment) (opcode : CallOpcode) (method : MethodRef) :
     Option RuntimeModel :=
   runtimeModels.find environment opcode method
+
+/-- The mechanism responsible for a method-token call site. -/
+inductive SiteClaim (Family : Type) where
+  | link
+  | model
+  | lowered (family : Family)
+  | refused
+  deriving DecidableEq, Repr
+
+/-- A link claims its pc first, then a resolving model, then a family named by the raw operand.
+    Family resolution and emission checking are separate obligations. -/
+def siteClaim {Family : Type} (familyOf : RawInstruction → Option Family)
+    (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
+    (lookup : LayoutEnvironment → CallOpcode → MethodRef → Option RuntimeModel := runtimeModel) :
+    SiteClaim Family :=
+  if !methodTokenCall raw.opcode then .refused else
+  match raw.operand with
+  | .call site =>
+    if link.isSome then .link
+    else if ((callOpcode? raw.opcode).bind
+        fun op => lookup environment op site.method).isSome then .model
+    else (familyOf raw).elim .refused .lowered
+  | _ => .refused
+
+/-- Every live direct call, virtual call or construction has a claim. -/
+def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
+    (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
+    (live : Bool) : Prop :=
+  live = true → methodTokenCall raw.opcode = true →
+    siteClaim familyOf environment link raw ≠ .refused
 
 /-- Whether a runtime model stands for a `call` of `method` in `body`, which then states no
     link. -/
@@ -54,19 +82,7 @@ theorem runtimeModel_yields {property : RuntimeModel → Prop}
 
 #print axioms runtimeModel_yields
 
-/-- The runtime models with the emissions they account for: none, since a call of a modelled
-    method keeps its call. -/
-def runtimeCatalog : ModelCatalog where
-  table := runtimeModels
-  lowered _ := none
-
-/-- Each live call site of a method keeps its call or emits the runtime model its method
-    reference stands for. -/
-def RuntimeModelsAgree (closed : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
-  ModelsAgree runtimeCatalog method.environment method.profile closed reachable method.code
-
-instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
-    Decidable (RuntimeModelsAgree closed reachable method) :=
-  inferInstanceAs (Decidable (ModelsAgree _ _ _ _ _ _))
+/-- The catalog used by extracted methods and the checked interpreter. -/
+def runtimeCatalog : ModelCatalog := ⟨runtimeModels⟩
 
 end CIL.Extraction

@@ -24,13 +24,33 @@ internal static class ScalarEvidence
             certificate.Incoming.TryGetValue(instruction, out NativeOperands.StackType[]? stack)
                 ? $"some [{string.Join(", ", stack.Reverse().Select(Kind))}]" : "none");
         lean.AppendLine($"def method{number}ScalarStates : Extraction.ScalarCertificate := [{string.Join(", ", states)}]");
-        var name = $"method{number}";
-        var statesArgs = $"{name}Closed {name}FeatureStates {name}ScalarStates";
+        EmitInstructionChecks(lean, number, decoded);
+    }
+
+    // The checks share the closed operands. Decoded methods already prove their code equality.
+    static void EmitInstructionChecks(StringBuilder lean, int number, bool decoded)
+    {
+        var method = $"method{number}";
         var flag = LeanText.Bool(decoded);
-        var check = $"Extraction.ScalarFlowValid rawLayouts.toArray {statesArgs} {name}.code {flag}";
-        var binding = $"{flag} = true -> {name}.code = Instruction.ofRawCode none {name}Closed.code";
-        var witness = decoded ? $"fun _ => {name}_decoded_code" : "fun h => False.elim (Bool.false_ne_true h)";
-        var proof = $"And.intro ({LeanEmitter.Decide}) ({witness})";
-        lean.AppendLine($"""theorem {name}_scalars_validated : And ({check}) ({binding}) := {proof}""");
+        var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code {flag}";
+        var scalar = $"Extraction.ScalarFlowValid rawLayouts.toArray {flow}";
+        var code = $"Extraction.methodCode {method}.profile {method}.environment {method}.links {method}Closed";
+        var binding = $"{flag} = true -> {method}.code = {code}";
+        var witness = decoded ? $"fun _ => {method}_decoded_code" : "fun h => False.elim (Bool.false_ne_true h)";
+        var scalarEvidence = $"And ({scalar}) ({binding})";
+        var unsafeCalls = $"Extraction.UnsafeCallsValid rawLayouts {method}Closed {method}Reachable {method}.code";
+        var intrinsics = $"Extraction.ExactIntrinsicsValid {method}Closed {method}Reachable {method}";
+        var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";
+        lean.AppendLine($"""
+            theorem {method}_instruction_checks : {scalarEvidence} ∧
+                {unsafeCalls} ∧ {intrinsics} ∧ {models} := by
+              have checks : {scalar} ∧ {unsafeCalls} ∧ {intrinsics} ∧ {models} := {LeanEmitter.Decide}
+              exact ⟨⟨checks.1, {witness}⟩, checks.2⟩
+            #print axioms {method}_instruction_checks
+            theorem {method}_scalars_validated : {scalarEvidence} := {method}_instruction_checks.1
+            theorem {method}_unsafe_validated : {unsafeCalls} := {method}_instruction_checks.2.1
+            theorem {method}_intrinsics_validated : {intrinsics} := {method}_instruction_checks.2.2.1
+            theorem {method}_models_validated : {models} := {method}_instruction_checks.2.2.2
+            """);
     }
 }

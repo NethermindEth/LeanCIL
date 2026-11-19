@@ -360,7 +360,7 @@ private def primitiveSize (type : TypeExpr) : Option Nat :=
   | _ => none
 
 /-- Exactly `call Unsafe.SizeOf<T>()`. -/
-private def unsafeSizeOf (site : CallSite) : Bool :=
+def unsafeSizeOf (site : CallSite) : Bool :=
   site.declaringType == .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" &&
     site.declared == { convention := 0x10, returnType := .atom runtimeScope "System.Int32" } &&
     site.name == "SizeOf" && !site.hasThis && site.returnsValue && site.parameterCount == 0 &&
@@ -678,7 +678,7 @@ private def callResult (site : CallSite) : ScalarKind :=
     | .external identity => externalResult site identity
 
 /-- Exactly `newobj ReadOnlySpan<byte>(void*, int)`. -/
-private def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
+def byteSpanConstructor (opcode : Nat) (site : CallSite) : Bool :=
   opcode == 115 && site.name == ".ctor" && site.hasThis && !site.returnsValue &&
     site.typeArguments.isEmpty && site.parameterCount == 2 && site.returnType == .void &&
     site.declaringType == .apply (.constructor runtimeScope "System.ReadOnlySpan`1")
@@ -989,9 +989,10 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
 def readOnlyPrefixMatches (next : Option RawInstruction) (instruction : RawInstruction) : Bool :=
   instruction.opcode != 65054 || next.any (prefixTakes instruction)
 
-/-- A reachable ordinary site may reuse the decoder's comparison when it emits a value. -/
-private def decodedValueSite (role : Option FoldRole) (emitted : Instruction) : Bool :=
-  role.isNone && !(emitted matches .unadmitted _)
+/-- Only ordinary, unfolded, non-hole sites can reuse the raw value decoder's comparison. -/
+private def decodedValueSite (raw : RawInstruction) (role : Option FoldRole)
+    (emitted : Instruction) : Bool :=
+  !methodTokenCall raw.opcode && role.isNone && !(emitted matches .unadmitted _)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, satisfy the indirect access rule and the `readonly.` rule
@@ -1005,7 +1006,7 @@ private def checkScalarSite (decoded : Bool) (layouts : Array RawLayout) (raw : 
       Instruction → Bool
   | _, none, none, .unadmitted _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
-    let skipEncoding := decoded && decodedValueSite role emitted
+    let skipEncoding := decoded && decodedValueSite instruction role emitted
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with
         | some (.spanConstructor index constructor) => match emitted with
@@ -1109,15 +1110,19 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
     (successor : List ScalarKind → Nat → Bool) (instruction : RawInstruction)
     (role : Option FoldRole) (pc : Nat) (feature : Option FeatureState)
     (stack : Option (List ScalarKind)) (emitted : Instruction)
-    (same : emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction) :
+    (same : methodTokenCall instruction.opcode = false →
+      emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction) :
     checkScalarSite true layouts raw context locals rawAt successor ((instruction, role), pc)
         feature stack emitted =
       checkScalarSite false layouts raw context locals rawAt successor ((instruction, role), pc)
         feature stack emitted := by
   have redundant :
-      (decodedValueSite role emitted ||
+      (decodedValueSite instruction role emitted ||
         valueEncodingMatches (rawBefore rawAt pc) instruction emitted) =
           valueEncodingMatches (rawBefore rawAt pc) instruction emitted := by
+    by_cases called : methodTokenCall instruction.opcode = true
+    · simp [decodedValueSite, called]
+    have same := same (Bool.eq_false_iff.mpr called)
     cases partialDecode : Instruction.ofRaw? (rawBefore rawAt pc) instruction with
     | none =>
       simp [Instruction.ofRaw, partialDecode] at same
@@ -1141,7 +1146,8 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
 /-- A certificate checked against the decoded code also passes every explicit encoding check. -/
 theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
     {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
-    (same : code = Instruction.ofRawCode none raw.code)
+    {decodeCall : CallDecoder}
+    (same : code = Instruction.ofRawCode none raw.code (Instruction.withCallDecoder decodeCall))
     (valid : ScalarFlowValid layouts raw features certificate code true) :
     ScalarFlowValid layouts raw features certificate code false := by
   dsimp only [ScalarFlowValid] at valid ⊢
@@ -1154,10 +1160,13 @@ theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
   obtain ⟨pair, entry, found⟩ := site
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj found
   have rawAt := (List.getElem?_zip_eq_some.mp entry).1
-  rw [same, Instruction.ofRawCode_getElem?, Instruction.ofRawAt, rawAt] at emittedAt
+  rw [same, Instruction.ofRawCode_getElem? raw.code pc _, Instruction.ofRawAt, rawAt]
+    at emittedAt
   apply Eq.symm
   apply decodedSite_eq
-  simpa only [rawBefore, FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
+  intro ordinary
+  simpa only [Instruction.withCallDecoder, ordinary, Bool.false_eq_true, ite_false, rawBefore,
+    FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
 
 #print axioms ScalarFlowValid.of_decoded
 
@@ -1167,7 +1176,9 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Instruction}
     {decoded : Bool} (valid : ScalarFlowValid layouts raw features certificate code decoded)
-    (codeDecodes : decoded = true → code = Instruction.ofRawCode none raw.code)
+    {decodeCall : CallDecoder}
+    (codeDecodes : decoded = true → code =
+      Instruction.ofRawCode none raw.code (Instruction.withCallDecoder decodeCall))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)

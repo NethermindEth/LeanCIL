@@ -112,13 +112,17 @@ The suite also measures `decide +kernel` on runtime model lookups of the first, 
 entry of a table of 16 and of 256 entries, less the same statements closed with `sorry`.
 `model_table%` writes the table as a literal balanced tree keyed by method name code, so a lookup
 walks at most four more levels in the larger table and compares one method reference at the leaf:
-about 67,100 and 69,000 heartbeats for the first entry, 65,400 at both sizes for the middle entry,
-which is the root, and 67,000 and 69,200 for the last. A scan of the entries would make the last
-entry cost more. The suite fails when any position costs more than 1.05 times as much at 256
-entries as at 16. The same file measures `ModelsAgree` over methods of 8, 32 and 128 live call
-sites, each calling a distinct modelled method: about 212,000, 687,100 and 2,593,900 heartbeats, or
-26,500, 21,500 and 20,300 per site. The suite fails when the cost per site grows more than 1.15
-times from one count to the next. Run these rows alone with
+66,022 and 67,956 heartbeats for the first entry, 64,351 and 64,358 for the middle entry (the
+root), and 65,977 and 68,136 for the last. The suite fails when any position costs more than
+1.05 times as much at 256 entries as at 16.
+
+The same file measures 8, 32 and 128 live sites, each calling a distinct modelled method.
+Checking rejection at every site costs 168,000, 517,603 and 1,922,476 heartbeats.
+The suite permits up to 1.15 times the previous rejection cost per site.
+Checking the complete body with `ModelsAgree` costs 249,615, 826,541 and 3,140,958 heartbeats
+when every site retains its call. The cost per retained call must stay flat or decrease.
+It falls from 31,202 to 25,829 to 24,539 heartbeats.
+Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
 
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a

@@ -40,4 +40,37 @@ theorem step_preserves (body : CIL.Method) (pc : Nat) (args : List Value)
 
 #print axioms correctness
 #print axioms step_preserves
+
+/-- Both environments assign the call to the SkipInit family before checking its layout. -/
+theorem skip_family :
+    let raw := Extracted.method0Closed.code[1]'(by decide)
+    CIL.Extraction.siteClaim CIL.Extraction.unsafeHelperFamily Extracted.environment none raw =
+      .lowered .skipInit ∧
+    CIL.Extraction.siteClaim CIL.Extraction.unsafeHelperFamily {} none raw =
+      .lowered .skipInit := by
+  decide +kernel
+
+#print axioms skip_family
+
+open CIL in
+cil_decoded_method skipWithLayout := Method.ofRaw? Extracted.profile Extracted.environment
+  Extracted.method0Links Extracted.method0Original Extracted.method0TypeArgumentsRaw
+
+/-- The same decoding environment with no aggregate layouts. -/
+private def emptyLayouts : CIL.LayoutEnvironment := {}
+
+open CIL in
+cil_decoded_method skipWithoutLayout := Method.ofRaw? Extracted.profile emptyLayouts
+  Extracted.method0Links Extracted.method0Original Extracted.method0TypeArgumentsRaw
+
+/-- The decoded helper consumes the reference when its value type has a checked layout. -/
+theorem resolved_skip : skipWithLayout.code[1]? = some .skipInit := rfl
+
+#print axioms resolved_skip
+
+/-- Omitting the value type's layout leaves a hole at the same raw call. -/
+theorem unresolved_skip : skipWithoutLayout.code[1]? = some (.unadmitted 40) := rfl
+
+#print axioms unresolved_skip
+
 end ExampleProof

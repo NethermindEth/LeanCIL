@@ -2,7 +2,7 @@ import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.ExactIntrinsics
-import CIL.Extraction.RuntimeModels
+import CIL.Extraction.CallAgreement
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.StaticIdentities
@@ -206,7 +206,7 @@ theorem returnNarrow_of_shape {rawLayouts : List RawLayout}
   change method.declared = _ at declared
   change method.environment = _ at environment
   by_cases void : closed.returnType = .void
-  · simp [Method.returnNarrow, returns, void, declaredNarrow, typeStorage]
+  · simp [Method.returnNarrow, returns, void, declaredNarrow, typeStorage, typeStorageAt]
   · simp [Method.returnNarrow, returns, void, declared, DeclaredSignature.ofRaw, environment]
 
 #print axioms returnNarrow_of_shape
@@ -407,7 +407,8 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   VectorInitializationsValid item.closed item.reachable method ∧
   (ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates
     method.code item.decoded ∧
-    (item.decoded = true → method.code = Instruction.ofRawCode none item.closed.code)) ∧
+    (item.decoded = true → method.code =
+      methodCode method.profile method.environment method.links item.closed)) ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
@@ -425,11 +426,25 @@ theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
-    (flag : item.decoded = true) : method.code = Instruction.ofRawCode none item.closed.code := by
+    (flag : item.decoded = true) : method.code =
+      methodCode method.profile method.environment method.links item.closed := by
   obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
   exact same flag
 
 #print axioms MethodEvidenceValid.decoded_code
+
+/-- Every reachable method-token call in validated method evidence has a raw claim. -/
+theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    {pc : Nat} {raw : RawInstruction} (atRaw : item.closed.code[pc]? = some raw)
+    (atLive : item.reachable[pc]? = some true) :
+    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true := by
+  obtain ⟨-, -, -, -, -, -, -, -, -, agree, -⟩ := valid
+  exact agree.siteClaimTotal atRaw atLive
+
+#print axioms MethodEvidenceValid.siteClaimTotal
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

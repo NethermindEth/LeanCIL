@@ -80,13 +80,20 @@ theorem Method.callees_relocate (f : Nat → Nat) (body : Method) :
 
 #print axioms Method.callees_relocate
 
-/-- The method of a raw definition with link table `links` is its method with no links, given
-    `links`; the table is stored and never read. -/
-theorem Method.ofRaw?_links (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (links : List (Nat × Link)) (source : RawMethod) (arguments : List TypeExpr) :
-    Method.ofRaw? profile environment links source arguments =
-      (Method.ofRaw? profile environment [] source arguments).map
-        fun method => { method with links := links } := by
+/-- Relocating the links preserves their occupied pcs, so raw decoding relocates the method. -/
+theorem Method.ofRaw?_relocate (f : Nat → Nat) (profile : FeatureProfile)
+    (environment : LayoutEnvironment) (links : List (Nat × Link)) (source : RawMethod)
+    (arguments : List TypeExpr) :
+    Method.ofRaw? profile environment (links.map fun entry => (entry.1, entry.2.relocate f))
+        source arguments =
+      (Method.ofRaw? profile environment links source arguments).map (Method.relocate f) := by
+  have occupied : ((links.map fun entry => (entry.1, entry.2.relocate f)).map Prod.fst) =
+      links.map Prod.fst := by simp [List.map_map, Function.comp_def]
+  have sameCode (closed : RawMethod) :
+      methodCode profile environment (links.map fun e => (e.1, e.2.relocate f)) closed =
+        methodCode profile environment links closed := by
+    unfold methodCode
+    rw [occupied]
   simp only [Method.ofRaw?, Method.ofClosed?, bind, pure, Option.map_bind]
   refine congrArg _ (funext fun closed => ?_)
   simp only [Function.comp_apply, Option.map_bind]
@@ -96,9 +103,14 @@ theorem Method.ofRaw?_links (profile : FeatureProfile) (environment : LayoutEnvi
   simp only [Function.comp_apply, Option.map_bind]
   refine congrArg _ (funext fun homes => ?_)
   simp only [Function.comp_apply]
-  split <;> rfl
+  rw [sameCode]
+  generalize (rawPrefixesValid closed.returnType closed.code &&
+    argumentInstructionsValid storage
+      (requiredHomeIndices storage (storage.code.map fun _ => true))
+      (storage.code.map fun _ => true) (methodCode profile environment links closed)) = valid
+  cases valid <;> rfl
 
-#print axioms Method.ofRaw?_links
+#print axioms Method.ofRaw?_relocate
 
 /-- Bytes decoded with a relocated link table give the relocated method. -/
 theorem Method.ofBody?_relocate (f : Nat → Nat) (profile : FeatureProfile)
@@ -113,8 +125,7 @@ theorem Method.ofBody?_relocate (f : Nat → Nat) (profile : FeatureProfile)
   | none => rfl
   | some decoded =>
     simp only [Option.bind_some]
-    rw [Method.ofRaw?_links, Method.ofRaw?_links (links := links), Option.map_map]
-    rfl
+    exact Method.ofRaw?_relocate f profile environment links _ arguments
 
 #print axioms Method.ofBody?_relocate
 
