@@ -35,6 +35,23 @@ private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
 /-- The element type `System.Int32`. -/
 private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
 
+/-- A one-field generic layout whose owner is the runtime span named by `name`. -/
+private def spanLayout (name : String) : RawLayout :=
+  let owner := TypeExpr.constructor runtimeScope name
+  { identity := (genericOwnerIdentity owner [int32]).getD ""
+    explicit := false, packing := 0, declaredSize := 0, byRefLike := true
+    fields := [⟨.signed32, none⟩]
+    generic := some ⟨owner, 1, [int32], [.parameter 0], [(0, [])]⟩ }
+
+/-- The span reset fixture has a valid four-byte layout row and a raw decoder hole. -/
+theorem span_reset_inputs :
+    ["System.Span`1", "System.ReadOnlySpan`1"].all (fun name =>
+      let span := TypeExpr.apply (.constructor runtimeScope name) int32
+      decide (LayoutsValid [spanLayout name] #[⟨⟨4, [⟨0, 4, false⟩]⟩, 4⟩]) &&
+        (Instruction.ofRaw? none ⟨0, 0xfe15, .type span⟩).isNone) = true := by
+  decide +kernel
+#print axioms span_reset_inputs
+
 /-- A static call site of `T.Account::Deposit(int32)`. -/
 private def callSite : CallSite := {
   declared := { convention := 0, parameters := [.atom runtimeScope "System.Int32"] },
