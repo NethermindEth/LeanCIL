@@ -72,9 +72,13 @@ private def vectorSite (read : Bool) (element : String) : RawInstruction := Id.r
 theorem integerVectorTransfers :
     let resolve := fun family raw => LoweredFamily.resolve family
       (LayoutEnvironment.callLayouts {}) .scalar none raw
-    resolve .bitCast (vectorSite false "System.Byte") =
-        some (.memory (.bitcastValue .vector128 .vector128)) ∧
-      resolve .bitCast (vectorSite false "System.Double") = none ∧
+    let decode := fun raw => methodCode .scalar {} [] [true]
+      { body 40 .void name!"Run" "Run" with code := [raw] }
+    let control := vectorSite false "System.Byte"
+    (match control.operand with
+      | .call site => decide (decode control = [.call site.method {}])
+      | _ => false) = true ∧
+      decode (vectorSite false "System.Double") = [.unadmitted 40] ∧
       resolve .unsafeTransfer (vectorSite true "System.Byte") = some (.memory .load128) ∧
       resolve .unsafeTransfer (vectorSite true "System.Double") = none := by decide +kernel
 

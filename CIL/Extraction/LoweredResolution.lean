@@ -46,32 +46,9 @@ private def unalignedTransfer (kind : TransferKind) (read : Bool) : Instruction 
 /-- A closed generic helper with one of the admitted value storage representations. -/
 private def unsafeReferenceInstruction (environment : CallLayouts) (raw : RawInstruction)
     (site : CallSite) : Option Instruction := do
-  if site.name == "As" then
-    let [source, target] := site.typeArguments | none
-    _root_.guard ((environment.valueShape source).size?.isSome &&
-      (environment.valueShape target).size?.isSome)
-    _root_.guard (staticRuntimeCall site runtimeScope
-      "!!1& System.Runtime.CompilerServices.Unsafe::As(!!0&)" (.byref target)
-      [.byref source] [source, target])
-    return .memory .asRef
   let [element] := site.typeArguments | none
   _root_.guard ((environment.valueShape element).size?.isSome)
   return (← unsafeReferenceHelper raw).instruction
-
-/-- Value bit casts bind both the represented shapes and their common size. -/
-private def bitCastInstruction (environment : CallLayouts) (site : CallSite) :
-    Option Instruction := do
-  let [source, target] := site.typeArguments | none
-  _root_.guard (staticRuntimeCall site runtimeScope
-    (metadata_text% "!!1 System.Runtime.CompilerServices.Unsafe::BitCast(!!0)")
-    target [source] [source, target])
-  if source == .atom runtimeScope "System.Byte" &&
-      target == .atom runtimeScope "System.Boolean" then
-    return .memory .bitcastByteBool
-  let (.snapshot fromShape, _) ← transferOf environment source | none
-  let (.snapshot toShape, _) ← transferOf environment target | none
-  _root_.guard (fromShape.width == toShape.width)
-  return .memory (.bitcastValue fromShape toShape)
 
 /-- Only a nominal aggregate needs a layout-table width in the span signature matchers. -/
 private def aggregateWidth (environment : CallLayouts) (type : TypeExpr) : Option Nat :=
@@ -141,7 +118,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     return if aligned then .memory (.pointerTransfer kind alignment (!read))
       else unalignedTransfer kind read
   | .unsafeReference => unsafeReferenceInstruction environment raw site
-  | .bitCast => bitCastInstruction environment site
   | .unsafeOffset =>
     _root_.guard (unsafeElementOffset raw)
     let [element] := site.typeArguments | none

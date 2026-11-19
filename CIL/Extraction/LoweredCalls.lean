@@ -16,7 +16,7 @@ namespace CIL.Extraction
 inductive LoweredFamily where
   | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
   | unsafeHelper (helper : UnsafeHelper)
-  | unsafeReference | unsafeOffset | unsafeTransfer | unsafeBlock | bitCast
+  | unsafeReference | unsafeOffset | unsafeTransfer | unsafeBlock
   | integerMath | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
@@ -77,9 +77,8 @@ private def unsafeFamily (raw : RawInstruction) (name : String) : Option Lowered
   match name with
   | "Read" | "ReadUnaligned" | "Write" | "WriteUnaligned" => some .unsafeTransfer
   | "InitBlock" | "InitBlockUnaligned" | "CopyBlock" | "CopyBlockUnaligned" => some .unsafeBlock
-  | "ByteOffset" | "AddByteOffset" | "SubtractByteOffset" | "As" | "AsRef" => some .unsafeReference
+  | "ByteOffset" | "AddByteOffset" | "SubtractByteOffset" | "AsRef" => some .unsafeReference
   | "Add" | "Subtract" => some .unsafeOffset
-  | "BitCast" => some .bitCast
   | _ => LoweredFamily.unsafeHelper <$> unsafeHelperFamily raw
 
 /-- The family of a method-token call before inspecting its overload, layouts or fold role. -/
