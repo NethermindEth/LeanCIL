@@ -195,6 +195,9 @@ signature string keeps it. The extractor admits the modifier only directly on `S
 naming `System.Runtime.CompilerServices.IsExternalInit` from any assembly, as C# does; and the
 same twin rejection covers a method equal to the accessor once the modifier is erased.
 
+The model of `Unsafe.As` forms a reference and preserves its address without reading a layout.
+The extractor lowers both `Unsafe.AsRef` overloads to reference formation for stored field or
+vector elements.
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.

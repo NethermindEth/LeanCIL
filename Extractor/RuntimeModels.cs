@@ -178,7 +178,6 @@ internal static class RuntimeModels
         Operation? op = scope switch
         {
             "System.Runtime" => Scalar(reference)
-                ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
             "System.Memory" => BinaryTransfers.Translate(reference) ??
@@ -298,7 +297,6 @@ internal static class RuntimeModels
         $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
         $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
             MemoryOperation.Other("(.initBlock 1)"),
-        $"!!1 {Unsafe}::BitCast<System.Byte,System.Boolean>(!!0)" => MemoryOperation.Other(".bitcastByteBool"),
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" =>
             MemoryOperation.Of(new SpanCreate()),
         _ => ArgumentGuards.Translate(signature) ?? Span(signature)

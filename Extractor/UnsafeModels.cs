@@ -5,11 +5,13 @@ namespace Nethermind.LeanCIL;
 // Generic runtime helpers share the same validated managed layout as CIL storage.
 internal static class UnsafeModels
 {
+    static readonly TypeLevel Owner = new(MetadataName.OfText("System.Runtime.CompilerServices"),
+        MetadataName.OfText("Unsafe"));
+
     internal static Operation? Translate(MethodReference reference, string architecture = "scalar") =>
         Helper(reference, architecture, modelled: false);
 
-    // A modelled helper keeps its call and the Lean entry reads its element through the checked layouts; the
-    // operation returned here is only what the extractor's own analyses read in place of the call.
+    // A modelled helper keeps its call. Extractor analyses read the operation selected for that call.
     internal static Operation? CallModel(MethodReference reference, string architecture) =>
         Helper(reference, architecture, modelled: true);
 
@@ -17,7 +19,14 @@ internal static class UnsafeModels
     static Operation? Helper(MethodReference reference, string architecture, bool modelled)
     {
         if (!modelled && MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
-        if (!modelled && ReinterpretReference(reference, architecture) is { } cast) return cast;
+        if ((modelled && reference.Name is "As" or "BitCast") || (!modelled && reference.Name == "AsRef"))
+        {
+            if (reference.DeclaringType is TypeSpecification ||
+                !IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime))
+                return null;
+            return reference.Name == "BitCast" ? ValueBitCasts.CallModel(reference, architecture) :
+                ReinterpretReference(reference, architecture);
+        }
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
@@ -98,9 +107,7 @@ internal static class UnsafeModels
     // offset, initialized bytes or access bounds used by checked memory operations.
     private static Operation? ReinterpretReference(MethodReference reference, string architecture)
     {
-        if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
-            reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
+        if (reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             return null;
         var definition = generic.ElementMethod;
@@ -123,5 +130,50 @@ internal static class UnsafeModels
         }
         RuntimeModels.ValidateSignature(reference, architecture);
         return MemoryOperation.Other(".asRef");
+    }
+}
+
+// A value cast reads the closed pair's representations and preserves the snapshot's initialization flags.
+internal static class ValueBitCasts
+{
+    internal static Operation? CallModel(MethodReference reference, string architecture)
+    {
+        if (reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 2 ||
+            generic.ElementMethod.GenericParameters.Count != 2 || reference.HasThis || reference.ExplicitThis ||
+            generic.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
+            reference.Parameters.Count != 1) return null;
+
+        bool Parameter(TypeReference type, int position) => type is GenericParameter parameter &&
+            parameter.Type == GenericParameterType.Method && parameter.Position == position &&
+            parameter.Owner == generic.ElementMethod;
+        if (!Parameter(reference.Parameters[0].ParameterType, 0) || !Parameter(reference.ReturnType, 1)) return null;
+
+        var source = generic.GenericArguments[0];
+        var target = generic.GenericArguments[1];
+        if (source.MetadataType == MetadataType.Byte && target.MetadataType == MetadataType.Boolean)
+        {
+            RuntimeModels.ValidateSignature(reference, architecture);
+            return MemoryOperation.Other(".bitcastByteBool");
+        }
+        if (!generic.GenericArguments.Any(type => MetadataValidation.IsAggregate(type, reference.Module) ||
+            type is GenericInstanceType)) return null;
+        var fromShape = Snapshot(source, reference.Module, architecture);
+        var toShape = Snapshot(target, reference.Module, architecture);
+        if (fromShape is null || toShape is null || fromShape.Value.Width != toShape.Value.Width)
+            throw new InvalidDataException($"Unsupported Unsafe.BitCast value layouts: {reference.FullName}");
+        RuntimeModels.ValidateSignature(reference, architecture);
+        return MemoryOperation.Other($"(.bitcastValue {fromShape.Value.Shape} {toShape.Value.Shape})");
+    }
+
+    static (string Shape, int Width)? Snapshot(TypeReference type, ModuleDefinition module, string architecture)
+    {
+        MetadataValidation.Type(type, module, architecture: architecture);
+        RuntimeModels.ValidateTypeIdentity(type, module, architecture);
+        if (MetadataValidation.IsAggregate(type, module))
+        {
+            int width = MetadataValidation.Layout(type, module, architecture);
+            return ($"(.aggregate {width})", width);
+        }
+        return MetadataValidation.IntegerVectorWidth(type) is int bytes ? ($".vector{bytes * 8}", bytes) : null;
     }
 }

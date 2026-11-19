@@ -447,14 +447,15 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     (by
       intro entry member
       simp only [CIL.Extraction.modelEntries, List.mem_append, List.mem_cons] at member
-      rcases member with ((((rfl | member) | member) | member) | member) | member
+      rcases member with (((((rfl | member) | member) | member) | member) | member) | member
       · exact CIL.Extraction.ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
       · exact CIL.Extraction.vectorEntries_yields intrinsic_stepRenamed entry member
       · exact CIL.Extraction.integerMathEntries_yields intrinsic_stepRenamed entry member
       · exact CIL.Extraction.bitEntries_yields intrinsic_stepRenamed entry member
       · exact CIL.Extraction.unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
           skipInit_stepRenamed entry member
-      · exact CIL.Extraction.marshalEntries_yields memory_stepRenamed entry member) found
+      · exact CIL.Extraction.marshalEntries_yields memory_stepRenamed entry member
+      · exact CIL.Extraction.unsafeReinterpretEntries_yields memory_stepRenamed entry member) found
 
 #print axioms runtimeModel_stepRenamed
 

@@ -33,6 +33,17 @@ void Prove(string name, string selector, string claim)
     var proof = Path.Combine(output, "Proof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" + memory +
         "\ntheorem correctness : " + claim + " := by rfl\n#print axioms correctness\nend ExampleProof\n");
+    if (name is "Word" or "Half" or "Vector")
+        File.AppendAllText(proof, """
+
+            /-- The compiled reinterpretation keeps its call and resolves to reference formation. -/
+            theorem ExampleProof.cast_call :
+                (Extracted.method0.code[1]?).bind (fun
+                  | .call method _ => CIL.Extraction.runtimeModel Extracted.environment .call method
+                  | _ => none) = some (.memory .asRef) := by decide +kernel
+            #print axioms ExampleProof.cast_call
+
+            """);
     queue.Add(new(selector, proof, output),
         () => Console.WriteLine("PASS checked byref reinterpretation: " + name));
 }

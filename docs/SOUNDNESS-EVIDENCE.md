@@ -260,6 +260,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   At each live modelled call, the runtime model entry also checks the member's open declaration.
   An open declaration distinguishes an owner's `!0` from a method's `!!0` even when both
   instantiate to the same type. The generic vector lane reader must return its method parameter.
+  The entries for Unsafe.As and Unsafe.BitCast bind both method variables. Each resolving site
+  must emit its call.
 - The local variable types are checked against the standalone signature the body header names.
 - The method's own identity is checked against four columns of its `MethodDef` row. `Flags` and
   `ImplFlags` must equal the evidence's attributes and implementation flags. The `Signature` blob

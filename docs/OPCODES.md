@@ -676,12 +676,15 @@ check. Primitive integers require their storage width; aggregates require their 
 alignment, including packing. Integer vectors conservatively require alignment to their full byte
 width. This subset can reject vector addresses that a particular runtime accepts; the unaligned
 overloads remain available. Alignment checks do not repeat the per-byte authority scan.
-`Unsafe.AsRef<T>(void*)` preserves that provenance and forms a live reference without reading or
-initializing bytes or granting access authority. Reference-bearing value types are unsupported.
+The checked interpreter runs `Unsafe.As<TFrom,TTo>(ref TFrom)` and both `Unsafe.AsRef<T>`
+overloads as reference formation. They preserve the address, lifetime and access authority.
+`As` reads no size and excludes a byref, pointer or type variable as either type argument.
+`AsRef` accepts stored field and vector types for its byref and void-pointer overloads.
 
 `Unsafe.BitCast<TFrom,TTo>` is admitted between equal-size validated unmanaged aggregates and
 `Vector128`/`Vector256`/`Vector512` values with `byte`, `int`, `uint`, `long` or `ulong`
-elements, in both directions and under the scalar profile. Byte snapshots keep their
+elements, including struct/struct and vector/vector pairs of equal size under any profile.
+The Byte-to-Boolean overload accepts 0 and 1 and rejects other representations. Snapshots keep their
 initialization flags through the cast
 ([arrays, views and bulk memory](SOUNDNESS-RUNTIME.md#arrays-views-and-bulk-memory)), so numeric
 reads and vector arithmetic cannot consume unknown bytes of a partially initialized result.
