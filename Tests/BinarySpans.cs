@@ -80,7 +80,7 @@ foreach (var method in methods)
           views := [⟨0, 0, 48, true, false⟩] }
         /-- All admitted integer overloads agree with runtime results, including short try operations. -/
         """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := by\n  repeat' apply And.intro\n  all_goals cil_kernel_rfl\n" +
+        " := by\n  repeat' apply And.intro\n  all_goals rfl\n" +
         "#print axioms correctness\nend ExampleProof\n");
     ModelOperandChecks.Append(proof, method, EndianModel);
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS endian transfers: " + name));

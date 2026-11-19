@@ -172,7 +172,7 @@ static void WriteResultProof(string path, int value) =>
         namespace ExampleProof
         theorem correctness :
             (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
-              .ok [.scalar (.i32 {{value}})] := by cil_kernel_rfl
+              .ok [.scalar (.i32 {{value}})] := by rfl
         #print axioms correctness
         end ExampleProof
 

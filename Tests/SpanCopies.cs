@@ -34,7 +34,6 @@ foreach (var method in methods.Where(method => method.IsPublic))
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "Proof.lean");
     var claims = new List<string>();
-    var proofs = new List<string>();
     string Run(int source, int length, int target, int capacity, string memory = "memory",
         bool destinationWritable = true) =>
         "CIL.Safety.invoke Extracted.program 32 0 [" +
@@ -50,7 +49,6 @@ foreach (var method in methods.Where(method => method.IsPublic))
         claims.Add($"({Run(source, length, target, capacity)}).map (fun result => " +
             $"(result.2, (CIL.Safety.read result.1 ⟨0, 0⟩ 32 1).toOption)) = " +
             $".ok ({returned}, some [{string.Join(", ", bytes)}])");
-        proofs.Add("by apply result_of_toOption; decide +kernel");
     }
     Success(0, 2, 16, 2);
     if (name == "TryCopyReadOnly")
@@ -63,34 +61,23 @@ foreach (var method in methods.Where(method => method.IsPublic))
         claims.Add("(CIL.Safety.invoke Extracted.program 32 0 " +
             "[.bufferSpan ⟨.null, 0, 1, false⟩, .bufferSpan ⟨.null, 0, 1, true⟩] memory).map Prod.snd = " +
             ".ok [.scalar (.i32 1)]");
-        proofs.Add("by apply result_of_toOption; decide +kernel");
         claims.Add($"({Run(2, 5, 20, 3, "uninitialized")}).map Prod.snd = .ok [.scalar (.i32 0)]");
-        proofs.Add("by apply result_of_toOption; decide +kernel");
         claims.Add($"({Run(2, 5, 20, 5, "uninitialized")}).map Prod.snd = " +
             ".error ⟨0, 2, .memory .uninitialized (.address ⟨0, 2⟩) 5⟩");
-        proofs.Add("by cil_kernel_rfl");
         claims.Add($"({Run(2, 5, 20, 5, "readOnlyMemory")}).map Prod.snd = " +
             ".error ⟨0, 2, .memory .unwritable (.address ⟨0, 20⟩) 5⟩");
-        proofs.Add("by cil_kernel_rfl");
         claims.Add($"({Run(2, 5, 20, 5, destinationWritable: false)}).map Prod.snd = " +
             ".error ⟨0, 2, .invalidState⟩");
-        proofs.Add("by cil_kernel_rfl");
     }
     if (name == "CopyReadOnly")
     {
         claims.Add($"({Run(2, 5, 20, 3, "uninitialized")}).map Prod.snd = " +
             ".error ⟨0, 2, .thrown .argument⟩");
-        proofs.Add("by cil_kernel_rfl");
     }
-    File.WriteAllText(proof, """
+File.WriteAllText(proof, $$"""
         import Extracted
         import CIL.Safety.StepComposition
         namespace ExampleProof
-        /-- Successful observations identify the checked execution result. -/
-        private theorem result_of_toOption {error value : Type} {result : Except error value}
-            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
-          cases result <;> simp_all [Except.toOption]
-        #print axioms result_of_toOption
         /-- One allocation exposes overlapping and disjoint slices plus neighboring bytes. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
@@ -104,9 +91,11 @@ foreach (var method in methods.Where(method => method.IsPublic))
         /-- A writable view value never creates write authority. -/
         def readOnlyMemory : CIL.Safety.Memory := { memory with views := [⟨0, 0, 32, true, false⟩] }
         /-- Copying preserves exact snapshot bytes, surrounding storage, and failure behavior. -/
-        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact " +
-        (claims.Count == 1 ? proofs[0] : "⟨" + string.Join(", ", proofs) + "⟩") +
-        "\n#print axioms correctness\nend ExampleProof\n");
+        theorem correctness :
+        {{string.Join(" \u2227\n", claims)}} := by and_intros <;> rfl
+        #print axioms correctness
+        end ExampleProof
+        """);
     var mode = trying ? "true" : "false";
     File.AppendAllText(proof, BulkCallEvidence(0, 2, $".spanCopy {width} {mode}"));
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS checked span copy: " + name));

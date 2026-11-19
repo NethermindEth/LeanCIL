@@ -66,8 +66,8 @@ foreach (var method in methods.Where(method => method.IsPublic))
           nextIdentity := 1 }
         /-- Empty, truncated, overflow and unreadable views retain their exact runtime behavior. -/
         """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := " + (claims.Count == 1 ? "by cil_kernel_rfl" :
-            $"by exact ⟨{string.Join(", ", claims.Select(_ => "by cil_kernel_rfl"))}⟩") +
+        " := " + (claims.Count == 1 ? "by rfl" :
+            $"by exact ⟨{string.Join(", ", claims.Select(_ => "by rfl"))}⟩") +
         "\n#print axioms correctness\nend ExampleProof\n");
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS reinterpreted span: " + name));
 }

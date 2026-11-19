@@ -68,6 +68,42 @@ string LeanValue(object value) => value switch
     _ => throw new InvalidOperationException("Unexpected value: " + value)
 };
 
+// Each group proves its comparisons at the default limits and preserves the remaining conjunction.
+static string BoundaryProof(List<string> claims)
+{
+    const int comparisonsPerGroup = 16;
+    const string conjunction = " \u2227\n";
+    var groups = claims.SkipLast(1).Chunk(comparisonsPerGroup).ToArray();
+    var declarations = groups.Select((group, index) =>
+    {
+        var witnesses = string.Join(", ", Enumerable.Repeat("rfl", group.Length).Append("rest"));
+        var tuple = $"\u27e8{witnesses}\u27e9";
+        return $$"""
+            /-- These boundary comparisons hold for any proved continuation. -/
+            private theorem boundary{{index}} {tail : Prop} (rest : tail) :
+            {{string.Join(conjunction, group.Append("tail"))}} := {{tuple}}
+            #print axioms boundary{{index}}
+            """;
+    });
+    var names = groups.Select((_, index) => $"boundary{index}").Append("lastBoundary");
+    var witness = $"{string.Join(" (", names)}{new string(')', groups.Length)}";
+    return $"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        {string.Join("\n\n", declarations)}
+        /-- The final input gives the runtime result. -/
+        private theorem lastBoundary : {claims[^1]} := rfl
+        #print axioms lastBoundary
+        /-- Each compiled call returns the value obtained from the runtime. -/
+        theorem correctness :
+        {string.Join(conjunction, claims)} := {witness}
+        #print axioms correctness
+        end ExampleProof
+
+        """;
+}
+
 // Every supported overload is extracted from compiled C#, then compared with .NET.
 foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Static)
     .Where(m => !m.Name.Contains("RoundTrip") && !m.Name.StartsWith("Wrong", StringComparison.Ordinal)))
@@ -111,18 +147,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
             """);
     }
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, $"""
-        import Extracted
-        import CIL.Safety.Execution
-        set_option maxRecDepth 8192
-        namespace ExampleProof
-        theorem correctness :
-        {string.Join(" ∧\n", claims)} := by
-          exact ⟨{string.Join(", ", claims.Select(_ => "rfl"))}⟩
-        #print axioms correctness
-        end ExampleProof
-
-        """);
+    File.WriteAllText(proof, BoundaryProof(claims));
     var selector = $"Bits::{method.Name}({string.Join(",", parameters.Select(p => p.ParameterType.FullName))})";
     var comparisons = claims.Count;
     queue.Add(new(selector, proof, output), () =>

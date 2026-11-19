@@ -57,7 +57,7 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
 
         theorem correctness :
             {{string.Join(" ∧\n", claims)}} := by
-          exact ⟨{{string.Join(", ", claims.Select(_ => "by cil_kernel_rfl"))}}⟩
+          exact ⟨{{string.Join(", ", claims.Select(_ => "by rfl"))}}⟩
         #print axioms correctness
         end ExampleProof
 

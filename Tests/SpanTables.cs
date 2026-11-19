@@ -46,7 +46,7 @@ void Prove(string dll, string selector, string folder, IReadOnlyList<string> cla
         namespace ExampleProof
         theorem correctness :
         {{claimsText}} := by
-          and_intros <;> cil_kernel_rfl
+          and_intros <;> rfl
         #print axioms correctness
         end ExampleProof
         {{control}}

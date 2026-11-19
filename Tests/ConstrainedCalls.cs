@@ -90,7 +90,7 @@ foreach (var (name, type, expected) in new[]
           nextIdentity := 1 }
         theorem constrained_result :
             (CIL.Safety.invoke Extracted.program 32 0 [.reference (.address ⟨0, 0⟩)]
-              inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := by cil_kernel_rfl
+              inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := by rfl
         #print axioms constrained_result
         """);
 
@@ -145,7 +145,7 @@ File.WriteAllText(twoOwnerProof, File.ReadAllText(Path.Combine(twoOwners, "Extra
     theorem distinct_owner_results :
         (CIL.Safety.invoke Extracted.program 64 0
           [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 8⟩)]
-          twoOwnerMemory).map Prod.snd = .ok [.scalar (.i32 84)] := by cil_kernel_rfl
+          twoOwnerMemory).map Prod.snd = .ok [.scalar (.i32 84)] := by rfl
     #print axioms distinct_owner_results
     """);
 evidence.Add(twoOwnerProof, "PASS distinct constrained owner specializations");

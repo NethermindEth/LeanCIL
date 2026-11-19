@@ -73,7 +73,7 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
     };
     var contents = extra is null ? "" : $$"""
         /-- Stores and overlapping copies preserve neighbouring bytes. -/
-        theorem contents : {{extra}} := by cil_kernel_rfl
+        theorem contents : {{extra}} := by rfl
         #print axioms contents
         """;
     File.WriteAllText(proof, $$"""
@@ -90,7 +90,7 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
         /-- Compiled span operations retain aggregate and vector storage identities. -/
         theorem correctness :
             (CIL.Safety.invoke Extracted.program 64 0 [{{arguments}}] memory).map Prod.snd =
-              .ok [{{expected}}] := by cil_kernel_rfl
+              .ok [{{expected}}] := by rfl
         #print axioms correctness
         {{contents}}
         end ExampleProof

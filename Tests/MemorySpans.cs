@@ -120,7 +120,7 @@ foreach (var (name, signature, arguments, expected) in new[]
 
         theorem compiled_span_result :
             (CIL.Safety.invoke Extracted.program 64 0 {{arguments}} spanMemory).map Prod.snd =
-              .ok [.scalar (.i32 {{expected}})] := by cil_kernel_rfl
+              .ok [.scalar (.i32 {{expected}})] := by rfl
         #print axioms compiled_span_result
         """);
     spanProofs.Add(name, proof);
@@ -197,7 +197,7 @@ foreach (var (name, signature, width, arguments, bytes) in new[]
                 let contents := CIL.Safety.read memory ⟨0, {{width + start}}⟩ {{2 * width}} 1
                 pure (contents, memory.cells 0 {{width + start - 1}},
                   memory.cells 0 {{width + start + 2 * width}}, result)) =
-              .ok (.ok ({{bytes}}), ⟨99, false⟩, ⟨99, false⟩, []) := by cil_kernel_rfl
+              .ok (.ok ({{bytes}}), ⟨99, false⟩, ⟨99, false⟩, []) := by rfl
         #print axioms compiled_fill_contents
         """);
     var pc = name switch { "ClearBytes" => 1, "FillLongSlice" => 7, _ => 2 };
@@ -236,7 +236,7 @@ foreach (var (name, signature, width, arguments, expected) in new[]
 
         theorem compiled_primitive_span_result :
             (CIL.Safety.invoke Extracted.program 64 0 {{arguments}} primitiveMemory).map Prod.snd =
-              .ok [.scalar ({{expected}})] := by cil_kernel_rfl
+              .ok [.scalar ({{expected}})] := by rfl
         #print axioms compiled_primitive_span_result
         """);
     if (name == "BooleanWrite")
