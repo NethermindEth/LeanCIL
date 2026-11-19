@@ -287,6 +287,15 @@ theorem callable_substitution :
   decide +kernel
 #print axioms callable_substitution
 
+/-- Taking an instance method's address cannot produce a static parameterless pointer. -/
+theorem instance_address_refused :
+    let site := { callSite with
+      declared := { convention := 0x20 },
+      method := { callSite.method with name := name!"M", hasThis := true, parameters := [] },
+      name := "M", parameterCount := 0 }
+    Instruction.ofRaw? none ⟨0, 0xfe06, .call site⟩ = none := by decide +kernel
+#print axioms instance_address_refused
+
 /-- A reachable folded argument load names a declared argument and emits its encoded index. -/
 theorem folded_argument_index (localCount index : Nat) (argumentAt : Nat → Option StorageType)
     (homeAt : Nat → Option Nat) (emitted : Instruction) :

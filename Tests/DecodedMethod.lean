@@ -324,6 +324,32 @@ def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
     parameterInput := ⟨[], [], []⟩, reachable := allLive original, featureStates := [],
     scalarStates := [], layoutUses := [] }
 
+/-- The receiver method named by its own address operand. -/
+private def instanceAddressSite : CallSite := {
+  method := {
+    owner := .object ownIdentity "Program", name := name!"M", hasThis := true,
+    genericArity := 0, returnType := .void, parameters := [] },
+  declared := { convention := 0x20 }, target := .managed 0x06000001, name := "M",
+  typeArguments := [], parameterCount := 0, returnsValue := false }
+
+/-- A parameterless instance method that takes its own address, pops it and returns. -/
+private def instanceAddressRaw : RawMethod :=
+  { method 8 false [] [instr 0 0xFE06 (.call instanceAddressSite), instr 6 0x26, instr 7 0x2A]
+    with hasThis := true, attributes := 0x86, objectReceiver := true }
+
+/-- The bytes match the instance method, but its address cannot bind to a static signature. -/
+theorem instance_address_program_refused :
+    (do
+      let (slice, _) ← methodMetadata pin instanceAddressRaw
+      let body := evidenceOf [0x22, 0xFE, 0x06, 1, 0, 0, 6, 0x26, 0x2A]
+        [(0x06000001, .call instanceAddressSite)] { own := slice } instanceAddressRaw
+      let evidence := { item instanceAddressRaw body with
+        links := [(0, .address 0)],
+        featureStates := [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[], []⟩] }
+      pure (bodyMatches body instanceAddressRaw [], (decodedProgram? .scalar {} [evidence]).isNone))
+      = some (true, true) := by decide +kernel
+#print axioms instance_address_program_refused
+
 /-- The adder's certificate records the stack depth before each instruction. -/
 def addFeatureStates : FeatureCertificate :=
   [0, 1, 2, 1].map fun depth => some ⟨List.replicate depth none, []⟩

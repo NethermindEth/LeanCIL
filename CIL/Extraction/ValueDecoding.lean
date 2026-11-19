@@ -188,6 +188,7 @@ def Instruction.ofCallSite? (previous : Option RawInstruction) (opcode : Nat)
   else if opcode == 111 && site.hasThis && !(previous.any (isPrefixOpcode ·.opcode)) then
     some (.callvirt site.method)
   else if opcode == 65030 then
+    if site.hasThis then none else
     match site.target, managedOwner site.declaringType with
     | .managed token, some (owner, _) =>
       some (.managed (.address ⟨owner, token, site.typeArguments.map callableType⟩
@@ -869,8 +870,8 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
         split
         · rfl
         · unfold Instruction.ofCallSite?
-          simp only [Nat.reduceBEq, Bool.false_and, Bool.false_eq_true, ↓reduceIte]
-          split <;> rfl
+          simp only [Nat.reduceBEq, Bool.false_and, Bool.false_eq_true, ↓reduceIte, receiver]
+          repeat' first | rfl | split
       · simp only [beq_iff_eq, address, ↓reduceIte]
         split
         · rfl
