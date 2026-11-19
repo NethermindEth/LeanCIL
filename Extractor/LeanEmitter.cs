@@ -230,9 +230,6 @@ internal static class LeanEmitter
                 ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? InitialValue.NullRef :
                     Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext)
                 : InitialValue.Unmodeled)];
-            HashSet<int> addressedLocals = m.Body.Instructions
-                .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
-                .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
             Operation Translated(Instruction i, int pc)
             {
                 var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
@@ -257,18 +254,15 @@ internal static class LeanEmitter
                 ops.Add(reachable.Contains(i) ? Translated(i, ops.Count) : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
-            var needsOpaqueLocals = ops.Any(op => op is ModelCall { Model: VectorCreateScalarUnsafe64 });
-            int[] opaqueLocals = needsOpaqueLocals ? [.. m.Body.Variables
-                .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
-                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)] : [];
             LocalKind[] kinds =
                 [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
                 .Select(s => SiteOf(s.i, s.pc, genericEvidence.FieldReferenceOf(m, s.pc), m, methodIndices,
                     profile))];
-            var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, opaqueLocals, homes, sites,
+            var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, [], homes, sites,
                 genericEvidence.Declared(m));
+            var opaqueLocals = $"Extraction.rawOpaqueLocals method{n}Closed method{n}Reachable";
             // The table is derived from the operations, so it needs no renumbering beside the code.
             List<(int Pc, string Link)> linkEntries = [.. ops.Select((op, pc) =>
                 (Pc: pc, Link: op.Link(LeanText.MethodNumber))).Where(entry => entry.Link is not null)
@@ -360,8 +354,10 @@ internal static class LeanEmitter
             else
             {
                 // Links stay out of the frame: templates share it across profiles, but call indices differ.
-                lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
-                    $"links := {linkTable}, code := [");
+                var fields = frame.ToLean(LeanText.MethodNumber, opaqueLocals);
+                lean.AppendLine($$"""
+                    def method{{n}} : Method := { profile := profile, {{fields}}, links := {{linkTable}}, code := [
+                    """);
                 lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
                     (op switch
                     {
@@ -381,8 +377,10 @@ internal static class LeanEmitter
                 $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
             if (!decoded)
-                lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
-                    $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
+            {
+                var field = $"method{n}.opaqueVectorLocals";
+                lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : {field} = {opaqueLocals} := rfl");
+            }
             ScalarEvidence.Emit(lean, m, n, scalarCertificate, decoded, objectProof);
             if (!decoded)
                 lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +

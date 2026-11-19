@@ -515,6 +515,21 @@ theorem opaqueLocalIndices_eq_scan (closed : RawMethod) :
   rfl
 
 #print axioms opaqueLocalIndices_eq_scan
+
+/-- A live direct call to the exact scalar-unsafe creator needs whole-vector local storage. -/
+private def hasRawScalarUnsafe : List RawInstruction → List Bool → Bool
+  | raw :: rest, live :: mask =>
+    (live && raw.opcode == 40 && (match raw.operand with
+      | .call site => site.method == createScalarUnsafeMethod &&
+          site.declared == createScalarUnsafeMethod.signature 0
+      | _ => false)) || hasRawScalarUnsafe rest mask
+  | _, _ => false
+
+/-- The closed body and its live mask determine the opaque vector slots in its frame. -/
+def rawOpaqueLocals (closed : RawMethod) (reachable : List Bool) : List Nat :=
+  if closed.locals.any (fun type => opaqueLocalType (some type)) &&
+      hasRawScalarUnsafe closed.code reachable then opaqueLocalIndices closed else []
+
 /-- Every claimed opaque local has the emitted whole-vector slot kind. -/
 private def opaqueKindsValid (method : Method) : Bool :=
   let kinds := FlowIndex.ofList method.localKinds

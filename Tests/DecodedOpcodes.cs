@@ -261,6 +261,11 @@ var liveOutput = Path.Combine(deadDirectory, "LiveVector");
 Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::LiveVector()", liveOutput]);
 var livePath = Path.Combine(liveOutput, "Extracted.lean");
 RequireDecoded(File.ReadAllText(livePath), "UnreachableTail::LiveVector");
+var vectorTemplate = Path.Combine(deadDirectory, "VectorTemplate");
+Run(["dotnet", ExtractorPath, "templates", vectorTemplate, liveOutput]);
+if (!File.ReadAllText(Path.Combine(vectorTemplate, "Templates.lean"))
+        .Contains("opaqueVectorLocals := [0],", StringComparison.Ordinal))
+    throw new InvalidOperationException("The live creator's template lost opaque local 0.");
 File.AppendAllText(livePath, """
 
     namespace Extracted

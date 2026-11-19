@@ -44,6 +44,12 @@ agreement check from the instruction lookup, the reachability bit and the absenc
 live hole. The unsafe-call certificate also requires equal code and mask lengths. A span
 reset must have its matching local address for the decoder to produce an initialization.
 
+Lean derives opaque vector locals from the closed raw body and the reachability mask.
+A live call to the exact `Vector128.CreateScalarUnsafe(ulong)` overload selects
+unaddressed `Vector128<ulong>` slots in declaration order. Even a dead address
+instruction excludes its slot. Literal and decoded frames use the same rule, and
+`OpaqueLocalsValid` independently checks the result against the emitted code and slot kinds.
+
 Exact scalar matching covers integer literals, wrapping/checked add/subtract/multiply, signed and
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
 integer conversions and all short/long compare-and-branch encodings. Literal ranges and

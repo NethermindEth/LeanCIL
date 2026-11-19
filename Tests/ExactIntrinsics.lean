@@ -330,6 +330,14 @@ private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.I
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
 private def createsBody : Method := body [.call createScalarUnsafeMethod {}]
 
+/-- Masking the creator removes the opaque local from the decoded frame. -/
+theorem decoded_opaque_mask :
+    let source := { raw call10 with locals := [vector128] }
+    let slots := fun live => (Method.ofRaw? profile {} [] [live] source []).map
+      Method.opaqueVectorLocals
+    slots true = some [0] ∧ slots false = some [] := by
+  exact ⟨rfl, rfl⟩
+#print axioms decoded_opaque_mask
 private def localBody : Method :=
   { createsBody with
       locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0] }

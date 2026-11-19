@@ -498,7 +498,11 @@ internal static partial class Program
             foreach (var name in opaqueStaticValues)
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
-            checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
+            if (checkedTemplate is not null)
+            {
+                var frames = global::Program.TemplateVectorFrames(source, emitted.Templates);
+                checkedTemplate(new(output, assemblyHash, profile, frames));
+            }
             definitions?.Invoke(new(methods, emitted.Refusals));
             if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Templates, emitted.Views,

@@ -52,7 +52,7 @@ def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : Layout
     .ok {
       profile := profile, code := code, localKinds := localKinds,
       locals := localKinds.map (LocalKind.initialValue closed.initLocals),
-      opaqueVectorLocals := expectedOpaqueLocals environment closed code,
+      opaqueVectorLocals := rawOpaqueLocals closed reachable,
       parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
       environment := environment, links := links,
       staticSites := closed.rvaSites.map fun (pc, field) => (pc, field.descriptor),

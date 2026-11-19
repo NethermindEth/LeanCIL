@@ -102,8 +102,6 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
 
     internal string LocalKindsLean => string.Join(", ", LocalKinds.Select(kind => kind.ToLean()));
 
-    internal string OpaqueVectorLocalsLean => string.Join(", ", OpaqueVectorLocals);
-
     internal string ParameterHomesLean => string.Join(", ", ParameterHomes.Select(home => home.ToLean()));
 
     internal string StaticSitesLean => StaticSitesLeanWith(LeanText.MethodNumber);
@@ -117,15 +115,13 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
         StaticSites = [.. StaticSites.Select(site => site.Renumber(map))]
     };
 
-    /// <summary>The frame fields of a Lean <c>Method</c> structure.</summary>
-    internal string ToLean() => ToLean(LeanText.MethodNumber);
-
     /// <summary>The frame fields, with each initializer written as <paramref name="calleeName"/> of it.</summary>
-    internal string ToLean(Func<int, string> calleeName) =>
-        $"returnsValue := {ReturnsValueLean}, locals := [{LocalsLean}], localKinds := [{LocalKindsLean}], " +
-        $"opaqueVectorLocals := [{OpaqueVectorLocalsLean}], parameterHomes := [{ParameterHomesLean}], " +
-        $"staticSites := [{StaticSitesLeanWith(calleeName)}], declared := {Declared}, " +
-        $"environment := {EnvironmentLean}";
+    internal string ToLean(Func<int, string> calleeName, string opaqueLocals) =>
+        $"""
+        returnsValue := {ReturnsValueLean}, locals := [{LocalsLean}], localKinds := [{LocalKindsLean}],
+        opaqueVectorLocals := {opaqueLocals}, parameterHomes := [{ParameterHomesLean}],
+        staticSites := [{StaticSitesLeanWith(calleeName)}], declared := {Declared}, environment := {EnvironmentLean}
+        """.ReplaceLineEndings(" ");
 
     string StaticSitesLeanWith(Func<int, string> calleeName) =>
         string.Join(", ", StaticSites.Select(site => site.ToLean(calleeName)));

@@ -639,6 +639,9 @@ Static descriptors are retained when their complete metadata agrees across the s
 including field identities, bytes, initializer indices and arguments. Different static metadata is
 rejected rather than remapped. Imported callee slots are not supported in template generation.
 
+For inputs with 128-bit vector locals, the templates command reads the opaque slot lists
+from Lean before comparing the profiles' frames.
+
 ### Instruction equations for parametric bodies
 
 A body written once for every profile takes its feature flags and callee indices as parameters and

@@ -252,8 +252,9 @@ internal static partial class TemplateEmitter
                 $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, " +
-                $"links := {LinkTable(template)}, code := [");
+            var opaqueLocals = $"[{string.Join(", ", template.Frame.OpaqueVectorLocals)}]";
+            var frame = template.Frame.ToLean(Callee, opaqueLocals);
+            Line($$""" : Method := { profile, {{frame}}, links := {{LinkTable(template)}}, code := [""");
             Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
                 .Select(pc => "  " + Instruction(template, template.Rows, pc).Text)) + "] }");
             if (!omitEquations)
