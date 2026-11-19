@@ -25,9 +25,6 @@ partial class Program
     [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
     private static partial Regex ResolutionFactsCommand { get; }
 
-    [GeneratedRegex(@"\Adef method(\d+) : Method := .* code := \[\r?\z")]
-    private static partial Regex LiteralMethodHeader { get; }
-
     const string LiteralMethodDefinition = """def method(?<number>\d+) : Method""";
     const string DecodedMethodDefinition = """cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?""";
 
@@ -102,31 +99,6 @@ partial class Program
 
     [GeneratedRegex(@"^import[ \t]+([A-Za-z_][A-Za-z0-9_.]*)[ \t]*\r?$", RegexOptions.Multiline)]
     private static partial Regex ImportedModule { get; }
-
-    /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
-    sealed record ExtractedInstruction(int Method, int Pc, string Op);
-
-    // `cil_instruction_equations` states each lookup equation from the definition, which lists one op per line.
-    static List<ExtractedInstruction> ExtractedInstructions(string source)
-    {
-        var instructions = new List<ExtractedInstruction>();
-        var lines = source.Split('\n');
-        for (var line = 0; line < lines.Length; line++)
-        {
-            var header = LiteralMethodHeader.Match(lines[line]);
-            if (!header.Success) continue;
-            var method = int.Parse(header.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            // The line that closes the code list ends the definition, whatever follows it.
-            for (var (pc, last) = (0, false); !last && ++line < lines.Length; pc++)
-            {
-                var op = lines[line].Trim();
-                last = op.EndsWith("] }", StringComparison.Ordinal);
-                if (op == "] }") break;
-                instructions.Add(new(method, pc, last ? op[..^3] : op[..^1]));
-            }
-        }
-        return instructions;
-    }
 
     // An extraction's definition of method `method` from its decoder, with the field and type operands it names.
     static Match DecodedDefinition(string source, int method) => DecodedMethod.Matches(source)

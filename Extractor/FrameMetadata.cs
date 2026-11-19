@@ -41,21 +41,38 @@ internal sealed record StaticSite(int Pc, StaticIdentityRecord Identity, FieldRe
             ? this with { Detail = value with { Initializer = map(method) } } : this;
 
     /// <summary>The Lean site term, with the initializer written as <paramref name="calleeName"/> of it.</summary>
-    internal string ToLean(Func<int, string> calleeName)
+    internal string ToLean(Func<int, string> calleeName) =>
+        $"({Pc}, {DescriptorLean(calleeName)})";
+
+    /// <summary>The field identity, storage and origin of the descriptor at this site.</summary>
+    internal string DescriptorLean(Func<int, string> calleeName)
     {
-        var header = $"({Pc}, {{ identity := {Identity.Identity}, field := {Field.ToLean()}, " +
-            $"bytes := {StaticData.LeanBytes(Bytes)}, ";
-        return Detail switch
+        var bytes = StaticData.LeanBytes(Bytes);
+        string detail;
+        switch (Detail)
         {
-            OpaqueStaticValue opaque => header + $"scalar := {Scalar(opaque.Signed)}, opaqueValue := true }})",
-            InitializedStaticValue value => header + $"scalar := {Scalar(value.Signed)}, " +
-                $"initializer := some {{ method := {(value.Initializer is { } method ? calleeName(method) : "0")}, " +
-                $"arguments := [{string.Join(", ", value.Arguments)}]" +
-                (value.Literal is null ? "" : $", literal := some ({value.Literal})") +
-                (value.Construct ? ", construct := true" : "") + " } })",
-            StaticDataBlock block => header + $"alignment := {block.Alignment} }})",
-            _ => throw new InvalidOperationException("Unknown static site detail")
-        };
+            case StaticDataBlock block:
+                detail = $"alignment := {block.Alignment}";
+                break;
+            case OpaqueStaticValue opaque:
+                detail = $"scalar := {Scalar(opaque.Signed)}, opaqueValue := true";
+                break;
+            case InitializedStaticValue value:
+                var method = value.Initializer is { } index ? calleeName(index) : "0";
+                var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
+                var construct = value.Construct ? ", construct := true" : "";
+                detail = $$"""
+                    scalar := {{Scalar(value.Signed)}}, initializer := some { method := {{method}},
+                    arguments := [{{string.Join(", ", value.Arguments)}}]{{literal}}{{construct}} }
+                    """.ReplaceLineEndings(" ");
+                break;
+            default:
+                throw new InvalidOperationException("Unknown static site detail");
+        }
+        return
+            $$"""
+            { identity := {{Identity.Identity}}, field := {{Field.ToLean()}}, bytes := {{bytes}}, {{detail}} }
+            """;
     }
 
     static string Scalar(bool? signed) => signed is { } value ? "some " + LeanText.Bool(value) : "none";

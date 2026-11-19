@@ -1,5 +1,6 @@
 import CIL.Extraction.LoweredResolution
 import CIL.Extraction.LinkIndex
+import CIL.EntryIndex
 
 /-!
 # Call-site agreement
@@ -150,15 +151,36 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
 
 #print axioms RuntimeModelsAgree.siteClaimTotal
 
+/-- A static data instruction names the field of the descriptor at its pc and its full blob. -/
+private def staticInstruction (profile : FeatureProfile) (site : Option RvaField)
+    (raw : RawInstruction) : Option Instruction := do
+  if let some word := platformField raw then
+    guard (profile.littleEndian && site.isNone)
+    return .ldc_i4 word
+  let data ← site
+  let field := data.descriptor.field
+  guard (raw.operand == .field field.owner field.index field.type field.name true)
+  guard (data.declaredSize > 0 && data.descriptor.bytes.length == data.declaredSize &&
+    data.descriptor.alignment ∈ [1, 2, 4, 8] && data.descriptor.initializer.isNone &&
+    data.descriptor.scalar.isNone && !data.descriptor.opaqueValue)
+  match raw.opcode with
+  | 127 => return .ldsflda field
+  | 208 => return .ldtoken (.field field)
+  | _ => none
+
 /-- A call's raw claim determines its required instruction. Occupied pcs keep the linked
     prefixes for the managed-call checks. An unlinked lowering cannot discard a prefix. -/
 def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
-    (occupied : Std.TreeSet Nat) (roles : Array (Option FoldRole)) (reachable : Array Bool) :
-    CallDecoder :=
+    (statics : Std.TreeMap Nat RvaField) (occupied : Std.TreeSet Nat)
+    (roles : Array (Option FoldRole)) (reachable : Array Bool) :
+    SiteDecoder :=
   let localKind := fun type => (environment.storage type).bind (storageKind environment.layouts)
   let live := fun pc => (indexedRead? reachable pc).getD false
-  Instruction.withCallDecoder roles live localKind fun pc previous raw =>
-    if occupied.contains pc then
+  Instruction.withSiteDecoder roles live localKind fun pc previous raw =>
+    if !methodTokenCall raw.opcode then
+      if occupied.contains pc || previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
+      else (staticInstruction profile statics[pc]? raw).getD (.unadmitted raw.opcode)
+    else if occupied.contains pc then
       (runtimeCatalog.linkedRequirement environment profile raw).decode
         (fun _ => Instruction.ofRaw previous raw)
     else if previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
@@ -190,14 +212,14 @@ def methodCode (profile : FeatureProfile) (environment : LayoutEnvironment)
     let occupied := Std.TreeSet.ofList (links.map Prod.fst) compare
     let roles := (foldRoles closed.locals closed.code).toArray
     Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
-      occupied roles reachable.toArray)
+      (firstEntryIndex closed.rvaSites) occupied roles reachable.toArray)
 
 /-- Both decoding paths implement the same reachability, link and fold rule at every pc. -/
 theorem methodCode_eq (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod) :
     methodCode profile environment links reachable closed =
       Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
-        (Std.TreeSet.ofList (links.map Prod.fst) compare)
+        (firstEntryIndex closed.rvaSites) (Std.TreeSet.ofList (links.map Prod.fst) compare)
         (foldRoles closed.locals closed.code).toArray reachable.toArray) := by
   unfold methodCode
   split
@@ -210,7 +232,7 @@ theorem methodCode_eq (profile : FeatureProfile) (environment : LayoutEnvironmen
     | none => rfl
     | some raw =>
       obtain ⟨live, ordinary, role⟩ := plainBody_at (closed := closed) plain found
-      simp [methodInstruction, Instruction.withCallDecoder, live, ordinary, role]
+      simp [methodInstruction, Instruction.withSiteDecoder, live, ordinary, role]
   · rfl
 
 #print axioms methodCode_eq

@@ -83,6 +83,12 @@ structure GenericConstraint where
   interfaces : List TypeExpr := []
   deriving DecidableEq, Repr
 
+/-- The declared class size and extracted storage of an RVA field come from separate PE data. -/
+structure RvaField where
+  declaredSize : Nat
+  descriptor : StaticDescriptor
+  deriving DecidableEq, Repr
+
 /-- A method definition as read from metadata: signature, locals and body. -/
 structure RawMethod where
   token : Nat
@@ -110,6 +116,8 @@ structure RawMethod where
   objectFieldCount : Nat := 0
   /-- The admitted base classes of a class declaring type, nearest first. -/
   objectBases : List TypeExpr := []
+  /-- Each RVA access carries its field, immutable bytes and declared packing at its pc. -/
+  rvaSites : List (Nat × RvaField) := []
   deriving DecidableEq, Repr
 
 /-- Close metadata storage after substitution without changing callable owner expressions. -/

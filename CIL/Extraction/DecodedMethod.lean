@@ -37,7 +37,9 @@ def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : Layout
     locals := localKinds.map (LocalKind.initialValue closed.initLocals),
     opaqueVectorLocals := expectedOpaqueLocals environment closed code,
     parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
-    environment := environment, links := links, returnsValue := closed.returnType != .void }
+    environment := environment, links := links,
+    staticSites := closed.rvaSites.map fun (pc, field) => (pc, field.descriptor),
+    returnsValue := closed.returnType != .void }
 
 /-- The method a raw definition denotes at its type arguments, with the supplied link table. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
@@ -208,7 +210,7 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     (decoded : Method.ofRaw? profile environment links reachable source arguments = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc
-        (methodInstruction profile environment.callLayouts
+        (methodInstruction profile environment.callLayouts (firstEntryIndex closed.rvaSites)
           (Std.TreeSet.ofList (links.map Prod.fst))
           (foldRoles closed.locals closed.code).toArray reachable.toArray) := by
   unfold Method.ofRaw? at decoded

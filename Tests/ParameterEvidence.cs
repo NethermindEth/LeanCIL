@@ -22,7 +22,7 @@ RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.
 RequireLeanFixtures("Tests.ExtractionParameters");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string instanceParameter = "Counter::Parameter(byte)";
-var literalControl = Path.Combine(output, "StaticFieldLoad");
+var instanceControl = Path.Combine(output, "StaticFieldLoad");
 var samples = new[]
 {
     "Arguments::Overwrite(uint,uint)", "Arguments::Alias(uint)", "Arguments::Address(uint)",
@@ -53,7 +53,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             else if (instruction.OpCode.Code == Code.Starg_S) instruction.OpCode = OpCodes.Starg;
             else if (instruction.OpCode.Code == Code.Ldarga_S) instruction.OpCode = OpCodes.Ldarga;
         }
-    // The platform field is admitted as a constant but its ldsfld keeps the method literal.
+    // The decoded instance method homes argument 1 after the platform field load.
     var counter = module.GetType("Examples.Counter").Methods.Single(method => method.Name == "Parameter");
     var processor = counter.Body.GetILProcessor();
     var entry = counter.Body.Instructions[0];
@@ -65,7 +65,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     module.Write(longAssembly);
     ExtractBatch("extract", "Examples", samples.Take(3).Select((selector, index) =>
         new GeneratedExtraction(longAssembly, selector, Path.Combine(output, "Long" + index)))
-        .Append(new GeneratedExtraction(longAssembly, instanceParameter, literalControl)));
+        .Append(new GeneratedExtraction(longAssembly, instanceParameter, instanceControl)));
     foreach (var selector in samples.Take(3))
     {
         var folder = Path.Combine(output, "Long" + Array.IndexOf(samples, selector));
@@ -73,33 +73,34 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     }
 }
 
-evidence.Add(Path.Combine(literalControl, "Extracted.lean"), "PASS literal instance parameter after a field load");
+evidence.Add(Path.Combine(instanceControl, "Extracted.lean"), "PASS decoded instance parameter after a field load");
 evidence.Check();
 var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
-var baseline = File.ReadAllText(Path.Combine(literalControl, "Extracted.lean"));
-if (!IsDecodedMethod(decoded, 0) || IsDecodedMethod(baseline, 0) || !DefinedMethods(baseline).Contains(0))
-    throw new InvalidOperationException(
-        "Overwrite must decode and the instance method with a static field load must have a literal body");
-void Reject(string name, string mutated, string? source = null)
+var baseline = File.ReadAllText(Path.Combine(instanceControl, "Extracted.lean"));
+if (!IsDecodedMethod(decoded, 0) || !IsDecodedMethod(baseline, 0))
+    throw new InvalidOperationException("Both parameter controls must decode.");
+
+const string obligation = "method0_parameters_validated";
+void Reject(string name, string source, string before, string after)
 {
-    if (mutated == (source ?? baseline))
-        throw new InvalidOperationException("Mutation did not change generated source: " + name);
+    var control = NarrowEvidence(source, obligation);
+    var mutated = control.Replace(before, after, StringComparison.Ordinal);
+    if (mutated == control)
+        throw new InvalidOperationException($"Missing parameter obligation for {name}");
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, mutated);
-    rejected.Add(path, "PASS parameter evidence rejects " + name, "decide");
+    rejected.Add(path, $"PASS parameter evidence rejects {name}", "ParameterHomesValid");
 }
 
-// Argument 1 is the homed byte and argument 0 the receiver. Mutate lookup lemmas along with code so their rfl
-// proofs cannot cause the rejection.
-const string home = "[(1, .narrow .unsigned8)]";
-Reject("omitted-home", baseline.Replace(home, "[]"));
-Reject("wrong-argument", baseline.Replace(".starg 1", ".starg 0"));
-// The home slot follows the declared locals, so naming it as a local is refused for a store and a load.
-Reject("home-slot-store", baseline.Replace(".starg 1", ".stloc 0"));
-Reject("home-slot-load", baseline.Replace(".ldarg 1", ".ldloc 0"));
-Reject("wrong-home-type", baseline.Replace(home, "[(1, .word32)]"));
-// The homes the decoder computes are checked against the raw argument sites as a literal's are.
-Reject("omitted-raw-site",
-    decoded.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"), decoded);
+// Argument 1 is the homed byte and argument 0 is the receiver.
+void RejectMethod(string name, string update) =>
+    Reject(name, baseline, "method0Reachable method0 :=", $$"""method0Reachable { method0 with {{update}} } :=""");
+RejectMethod("omitted-home", "parameterHomes := []");
+RejectMethod("wrong-home-type", "parameterHomes := [(1, .word32)]");
+RejectMethod("wrong-argument", "code := method0.code.set 6 (.starg 0)");
+RejectMethod("home-slot-store", "code := method0.code.set 6 (.stloc 0)");
+RejectMethod("home-slot-load", "code := method0.code.set 2 (.ldloc 0)");
+Reject("omitted-raw-site", decoded, "computedLayouts method0RawArguments method0Reachable",
+    "computedLayouts { method0RawArguments with code := method0RawArguments.code.set 1 .other } method0Reachable");
 rejected.Check();
 Console.WriteLine("PASS complete parameter-home mapping, argument types, instance indices and long/short encodings");

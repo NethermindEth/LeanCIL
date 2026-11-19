@@ -44,6 +44,15 @@ internal static class StaticData
         }
     }
 
+    /// <summary>Each static site binds a validated readonly field or an immutable RVA block.</summary>
+    internal static FieldDefinition FieldOf(Mono.Cecil.Cil.Instruction instruction, ModuleDefinition module,
+        string architecture)
+    {
+        var field = (FieldReference)instruction.Operand;
+        return StaticValues.IsLoad(instruction) ? StaticValues.Resolve(field, module, architecture).Field :
+            Validate(field, module);
+    }
+
     internal static FieldDefinition Validate(FieldReference reference, ModuleDefinition module)
     {
         FieldDefinition field = reference.Resolve() ?? throw new InvalidDataException($"Unresolved static data: {reference.FullName}");

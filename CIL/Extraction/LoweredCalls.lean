@@ -14,7 +14,6 @@ namespace CIL.Extraction
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
   | hardware | span
-  | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
 
@@ -93,8 +92,6 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
   | .atom scope type =>
     if scope == runtimeScope then
       match type with
-      | "System.Runtime.CompilerServices.RuntimeHelpers" =>
-        if name == "CreateSpan" then some .staticSpan else none
       | "System.Type" => if typeTestInstruction raw then some .typeTest else none
       | "System.Array" => if name == "Fill" then some .span else none
       | _ => none

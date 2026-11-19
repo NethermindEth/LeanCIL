@@ -1438,7 +1438,7 @@ private theorem branch_encoding_cases :
 example (valid : ScalarFlowValid addRaw addFeatures addStates addCode) :
     scalarEmissionMatches none none (i 88) [.word64, .word64] .add = true :=
   valid.instruction_checked (live := fun _ => true) (localKind := fun _ => none)
-    (decodeCall := fun _ => Instruction.ofRaw) (pc := 2) (by decide) rfl rfl rfl rfl rfl
+    (decodeSite := fun _ => Instruction.ofRaw) (pc := 2) (by decide) rfl rfl rfl rfl rfl
 
 #print axioms external_call_validated
 

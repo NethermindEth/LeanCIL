@@ -148,9 +148,14 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         return pointerSize ? 8 : 1;
     }
 
+    private static readonly TypeLevel BitConverterOwner =
+        new(MetadataName.OfText("System"), MetadataName.OfText("BitConverter"));
+    private static readonly MetadataName EndianName = MetadataName.OfText("IsLittleEndian");
+
     /// <summary>Whether a field load is named <c>BitConverter.IsLittleEndian</c>, before identity checks.</summary>
     internal static bool PlatformFieldQuery(FieldReference reference) =>
-        reference.Name == "IsLittleEndian" && reference.DeclaringType.FullName == "System.BitConverter";
+        reference.Name == "IsLittleEndian" && reference.DeclaringType is
+            { Namespace: "System", Name: "BitConverter", DeclaringType: null };
 
     /// <summary>
     /// The value of the exact System.Runtime <c>BitConverter.IsLittleEndian</c> field;
@@ -159,14 +164,16 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     internal static int? PlatformField(FieldReference reference)
     {
         if (!PlatformFieldQuery(reference)) return null;
-        const string identity = "System.Boolean System.BitConverter::IsLittleEndian";
         var exactReference = reference.DeclaringType is not TypeSpecification &&
-            RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) &&
-            RuntimeModels.ExactScope(reference.FieldType, PlatformAssemblies.SystemRuntime) &&
-            reference.FullName == identity;
+            IdentityRows.TopLevelMatches(reference.DeclaringType, BitConverterOwner,
+                PlatformAssemblies.SystemRuntime) &&
+            MetadataName.OfText(reference.Name) == EndianName &&
+            reference.FieldType.MetadataType == MetadataType.Boolean &&
+            RuntimeModels.ExactScope(reference.FieldType, PlatformAssemblies.SystemRuntime);
         // Resolve only exact references: a forged assembly scope must not reach the resolver.
         var field = exactReference ? reference.Resolve() : null;
-        if (field is null || field.FullName != identity ||
+        if (field is null || MetadataName.OfText(field.Name) != EndianName ||
+            field.FieldType.MetadataType != MetadataType.Boolean ||
             !field.IsStatic || !field.IsInitOnly || !field.IsPublic || field.HasConstant ||
             (field.Attributes & FieldAttributes.HasFieldRVA) != 0)
             throw new InvalidDataException($"Unsupported static field load: {reference.FullName} " +

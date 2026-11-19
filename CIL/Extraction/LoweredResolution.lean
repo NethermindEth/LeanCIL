@@ -29,16 +29,6 @@ private def spanInstruction (environment : CallLayouts) (role : Option FoldRole)
   if byteSpanConstructor raw.opcode site then return .memory .spanCreate
   return (← spanCall raw source).instruction
 
-/-- A runtime field handle produces a read-only span of an admitted scalar element width. -/
-private def staticSpanInstruction (site : CallSite) : Option Instruction := do
-  let [element] := site.typeArguments | none
-  let .primitive width _ := LayoutEnvironment.valueShape {} element | none
-  let result := TypeExpr.apply (.constructor runtimeScope "System.ReadOnlySpan`1") element
-  _root_.guard (staticRuntimeCall site runtimeScope ("System.ReadOnlySpan`1<!!0> " ++
-    "System.Runtime.CompilerServices.RuntimeHelpers::CreateSpan(System.RuntimeFieldHandle)")
-    result [.atom runtimeScope "System.RuntimeFieldHandle"] [element])
-  return .memory (.createSpan width)
-
 /-- The instruction of this raw member, or no instruction when its overload cannot resolve. -/
 def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     (profile : FeatureProfile) (role : Option FoldRole) (raw : RawInstruction) :
@@ -47,7 +37,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   match family with
   | .hardware => hardwareInstruction environment profile raw site
   | .span => spanInstruction environment role raw site
-  | .staticSpan => staticSpanInstruction site
   | .typeTest => match role with
     | some .interior => some .nop
     | some (.result value) => some (.ldc_i4 (if value then 1 else 0))

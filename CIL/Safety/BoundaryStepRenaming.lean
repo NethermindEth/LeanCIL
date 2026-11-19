@@ -486,6 +486,8 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | contradiction
     | obtain rfl := List.mem_singleton.mp member
       exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
+    | obtain rfl := List.mem_singleton.mp member
+      exact staticSpanEntry_yields memory_stepRenamed
     | exact platformEntries_yields feature_stepRenamed constant_stepRenamed entry member
     | exact referenceContentEntries_yields constant_stepRenamed entry member
     | exact guardEntries_yields memory_stepRenamed entry member

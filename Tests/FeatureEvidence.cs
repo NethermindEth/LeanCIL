@@ -164,6 +164,20 @@ if (unsupported.Code == 0 || !unsupported.Output.Contains("Unsupported instructi
     throw new InvalidOperationException("Enabled feature failed to expose unsupported array code: " + unsupported.Output);
 // X86Base.X64 and Vector128 getters decide their branches from the profile alone.
 var capabilitiesQueue = new GeneratedQueue(verification, assembly);
+
+static void WriteResultProof(string path, int value) =>
+    File.WriteAllText(path, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        theorem correctness :
+            (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
+              .ok [.scalar (.i32 {{value}})] := by cil_kernel_rfl
+        #print axioms correctness
+        end ExampleProof
+
+        """);
+
 var platformResult = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Capabilities")!
     .GetMethod("Platform")!.Invoke(null, []);
 if (!Equals(platformResult, 17)) throw new InvalidOperationException("Platform comparison requires a 64-bit process");
@@ -172,29 +186,22 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
     var capabilities = Path.Combine(output, "Capabilities-" + profile);
     Directory.CreateDirectory(capabilities);
     var proof = Path.Combine(capabilities, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
-        $"  (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 {flags})] := rfl\nend ExampleProof\n");
+    WriteResultProof(proof, flags);
     capabilitiesQueue.Add(new("Capabilities::Flags()", proof, Path.Combine(capabilities, "Verified"), Profile: profile),
         () => Console.WriteLine($"PASS Capabilities::Flags under {profile} returns {flags}"));
     var platform = Path.Combine(capabilities, "Platform.lean");
-    File.WriteAllText(platform, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-        ".ok [.scalar (.i32 17)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    WriteResultProof(platform, 17);
     capabilitiesQueue.Add(new("Capabilities::Platform()", platform, Path.Combine(capabilities, "Platform"), Profile: profile),
         () => Console.WriteLine($"PASS platform constants and pruned unsupported branch under {profile}"));
     // AdvSimd.Arm64 and AdvSimd share one answer, so ArmFlags is 0 or 3 and never 1 or 2.
     var armFlags = profile == "arm64-advsimd" ? 3 : 0;
     var armProof = Path.Combine(capabilities, "ArmFlags.lean");
-    File.WriteAllText(armProof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-        $".ok [.scalar (.i32 {armFlags})] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    WriteResultProof(armProof, armFlags);
     capabilitiesQueue.Add(
         new("Capabilities::ArmFlags()", armProof, Path.Combine(capabilities, "ArmFlags"), Profile: profile),
         () => Console.WriteLine($"PASS AdvSimd.Arm64 follows AdvSimd under {profile}: {armFlags}"));
     var endianProof = Path.Combine(capabilities, "Endian.lean");
-    File.WriteAllText(endianProof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-        ".ok [.scalar (.i32 1)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    WriteResultProof(endianProof, 1);
     capabilitiesQueue.Add(
         new("Capabilities::Endian()", endianProof, Path.Combine(capabilities, "Endian"), Profile: profile),
         () => Console.WriteLine($"PASS BitConverter.IsLittleEndian prunes the big-endian branch under {profile}"));
@@ -214,16 +221,7 @@ foreach (var (profile, label, vbmiFlags) in new[]
     var vbmiFolder = Path.Combine(output, $"Vbmi-{label}");
     Directory.CreateDirectory(vbmiFolder);
     var vbmiProof = Path.Combine(vbmiFolder, "VbmiFlags.lean");
-    File.WriteAllText(vbmiProof, $$"""
-        import Extracted
-        import CIL.Safety.Execution
-        namespace ExampleProof
-        theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
-            .ok [.scalar (.i32 {{vbmiFlags}})] := rfl
-        #print axioms correctness
-        end ExampleProof
-
-        """);
+    WriteResultProof(vbmiProof, vbmiFlags);
     capabilitiesQueue.Add(
         new("Capabilities::VbmiFlags()", vbmiProof, Path.Combine(vbmiFolder, "VbmiFlags"), Profile: profile),
         () => Console.WriteLine($"PASS Avx512Vbmi.VL follows Avx512Vbmi under {label}: {vbmiFlags}"));
@@ -267,16 +265,7 @@ foreach (var (profile, label, aesFlags) in new[]
     var aesFolder = Path.Combine(output, $"Aes-{label}");
     Directory.CreateDirectory(aesFolder);
     var aesProof = Path.Combine(aesFolder, "AesFlags.lean");
-    File.WriteAllText(aesProof, $$"""
-        import Extracted
-        import CIL.Safety.Execution
-        namespace ExampleProof
-        theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
-            .ok [.scalar (.i32 {{aesFlags}})] := rfl
-        #print axioms correctness
-        end ExampleProof
-
-        """);
+    WriteResultProof(aesProof, aesFlags);
     capabilitiesQueue.Add(
         new("Capabilities::AesFlags()", aesProof, Path.Combine(aesFolder, "AesFlags"), Profile: profile),
         () => Console.WriteLine($"PASS Aes getters follow their architecture's flag under {label}: {aesFlags}"));
@@ -316,9 +305,7 @@ var referenceQueryProof = Path.Combine(referenceQueryFolder, "Proof.lean");
 var referenceResult = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Capabilities")!
     .GetMethod("ReferenceFree")!.Invoke(null, null);
 if (!Equals(referenceResult, 73)) throw new InvalidOperationException("Unexpected CLR reference-content result");
-File.WriteAllText(referenceQueryProof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-    "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-    ".ok [.scalar (.i32 73)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+WriteResultProof(referenceQueryProof, 73);
 capabilitiesQueue.Add(new("Capabilities::ReferenceFree()", referenceQueryProof,
     Path.Combine(referenceQueryFolder, "Verified")),
     () => Console.WriteLine("PASS validated reference-free queries and pruned unsupported branch"));
@@ -495,18 +482,16 @@ foreach (var (obligation, diagnostic) in new[]
     var controlPath = Path.Combine(output, obligation + "-endian.lean");
     File.WriteAllText(controlPath, narrowed);
     endianControls.Add(controlPath, "PASS exact endianness constant control: " + diagnostic, obligation);
-    const string literal = ".ldc_i4 1";
-    var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
-    if (position < 0) throw new InvalidOperationException("Missing endianness constant");
+    var changedValue = ForgeDecodedInstruction(endianSource, 0, 0, "fun _ => .ldc_i4 0");
     var forgedValue = Path.Combine(output, obligation + "-wrong-endian.lean");
-    File.WriteAllText(forgedValue, narrowed[..position] + ".ldc_i4 0" + narrowed[(position + literal.Length)..]);
+    File.WriteAllText(forgedValue, NarrowEvidence(changedValue, obligation));
     rejected.Add(forgedValue, "PASS endianness constant value rejection: " + diagnostic, diagnostic);
     const string owner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
     if (!narrowed.Contains(owner, StringComparison.Ordinal))
         throw new InvalidOperationException("Missing endianness owner");
     var forgedOwner = Path.Combine(output, obligation + "-forged-endian-owner.lean");
-    File.WriteAllText(forgedOwner,
-        narrowed.Replace(owner, ".atom \"forged\" \"System.BitConverter\"", StringComparison.Ordinal));
+    var changedOwner = ForgeDecodedOriginal(endianSource, 0, owner, ".atom \"forged\" \"System.BitConverter\"");
+    File.WriteAllText(forgedOwner, NarrowEvidence(changedOwner, obligation));
     rejected.Add(forgedOwner, "PASS endianness owner forgery rejection: " + diagnostic, diagnostic);
 }
 endianControls.Check(replay: false);

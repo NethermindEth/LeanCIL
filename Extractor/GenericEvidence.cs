@@ -428,7 +428,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
 
     string Method(MethodDefinition method, MethodDefinition original, MethodDefinition admitted,
-        IReadOnlySet<Instruction> reachable)
+        IReadOnlySet<Instruction> reachable, string rvaInput)
     {
         methodParameterCount = method.GenericParameters.Count;
         var instructions = new InstructionIndex(method);
@@ -468,7 +468,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             returnType := {{returnType}}, parameters := {{parameters}},
             locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
             maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
-            code := {{List(code)}} }
+            {{rvaInput}}code := {{List(code)}} }
             """.ReplaceLineEndings(" ");
     }
 
@@ -497,14 +497,14 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
-        IReadOnlySet<Instruction> reachable)
+        IReadOnlySet<Instruction> reachable, string rvaInput)
     {
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
-        var originalEvidence = Method(original, original, method, reachable);
+        var originalEvidence = Method(original, original, method, reachable, rvaInput);
         // Token operands are spelled in the original's generic context, as its code is.
         var body = Body(original, method, reachable, number);
         closedOperands = [];
-        var closedEvidence = Method(method, original, method, reachable);
+        var closedEvidence = Method(method, original, method, reachable, rvaInput);
         closedCalls = closedOperands;
         closedOperands = null;
         externalIdentities.Emit(lean);
@@ -613,6 +613,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 continue;
             if (instruction.OpCode.Code == Code.Tail && instruction.Next?.OpCode.Code is Code.Call or Code.Calli)
                 continue;
+            if (instruction.OpCode.Code == Code.Ldsfld && operations[pc] is Constant ||
+                instruction.OpCode.Code is Code.Ldsflda or Code.Ldtoken &&
+                operations[pc] is StaticFieldInstruction && !StaticValues.IsLoad(instruction))
+                continue;
             var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
             if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
@@ -625,7 +629,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 Code.Calli => operations[pc] is IndirectCall,
                 Code.Call when TailCalls.IsCall(instruction) => operations[pc] is Call { Kind: CallKind.Tail },
                 Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
-                Code.Newobj => operations[pc] is Newobj,
+                Code.Newobj => operations[pc] is Newobj or Memory { Operation: SpanCreate },
                 _ => true
             };
             if (!translated) return new(instruction.Offset, instruction.OpCode, RefusalKind.Translated);

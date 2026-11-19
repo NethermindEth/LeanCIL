@@ -478,7 +478,9 @@ A collection-expression property such as `static ReadOnlySpan<uint> Table => [..
 `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda`
 rules, packing 1, 2, 4 or 8, with an RVA that is a multiple of the packing, inside one section's
 raw data, in a section whose virtual address and file offset agree modulo 8 so that flat and
-mapped loads keep the alignment). The span covers the whole field and has `size / sizeof(T)`
+mapped loads keep the alignment). The method decoder preserves the RVA field token or address.
+The runtime model binds the open field-handle declaration and the closed element type of
+`RuntimeHelpers.CreateSpan<T>`. The span covers the whole field and has `size / sizeof(T)`
 elements, for any primitive integer `T`. As in CoreCLR, which throws `ArgumentException` for data
 misaligned for `T`, `sizeof(T)` must divide the field's packing; otherwise the call is an
 `unsupported` fault. Roslyn emits each such field with packing `sizeof(T)` at an 8-byte-aligned
@@ -720,7 +722,8 @@ Execution that reaches a placeholder fails.
 Hardware feature getters keep their call and read the selected profile through a runtime model.
 The calls to `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` run constant
 models returning `8`, `8` and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
-`ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
+The decoder emits the word 1 for the exact System.Runtime Boolean field
+`BitConverter.IsLittleEndian` when the profile is little-endian. Every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is
 `static readonly`, and rejects same-named types and fields from other assemblies and other
 `BitConverter` fields. A getter binds its open declaration, closed signature and external target.

@@ -3,6 +3,7 @@ import CIL.InstructionEquations
 import CIL.Safety.ResolutionFacts
 import CIL.Safety.SymbolicExecution
 import Tests.BodyDecoding
+import Tests.Support.ModelOperands
 
 /-!
 # Decoded method tests
@@ -51,6 +52,73 @@ theorem add_decodes :
     decoded (encodeBody pin addRaw) addRaw = some (frame [.ldc_i4 1, .ldc_i4 2, .add, .ret]) := by
   cil_kernel_rfl
 #print axioms add_decodes
+
+/-- The raw field load uses the owner, slot, held type and name encoded by its token. -/
+private def fieldSite (opcode : Nat) (field : FieldRef) : RawInstruction :=
+  instr 0 opcode (.field field.owner field.index field.type field.name true)
+
+/-- The decoder binds a single field instruction under its profile and RVA evidence. -/
+private def fieldCode (opcode : Nat) (field : FieldRef) (sites : List (Nat × RvaField) := [])
+    (profile := FeatureProfile.scalar) : Option (List Instruction) :=
+  let source := { addRaw with code := [fieldSite opcode field], rvaSites := sites }
+  (Method.ofRaw? profile {} [] [true] source []).map Method.code
+
+/-- The constant requires the exact runtime field and a little-endian profile. -/
+theorem endianFieldDecodes :
+    let field := littleEndianField
+    let wrong := [{ field with owner := .atom "Foreign" "System.BitConverter" },
+      { field with owner := .atom runtimeScope "System.Other" },
+      { field with name := name!"Other" }, { field with type := int32 }]
+    fieldCode 126 field = some [.ldc_i4 1] ∧
+      wrong.all (fun other => decide (fieldCode 126 other = some [.unadmitted 126])) ∧
+      fieldCode 126 field [] { littleEndian := false } = some [.unadmitted 126] := by
+  decide +kernel
+
+#print axioms endianFieldDecodes
+
+/-- Both RVA opcodes bind the descriptor's field and require its complete declared storage. -/
+theorem rvaFieldsDecode :
+    let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data", name!"Words"⟩
+    let data : RvaField := ⟨4, { identity := 3, field, bytes := [1, 2, 3, 4], alignment := 4 }⟩
+    [(127, Instruction.ldsflda field), (208, .ldtoken (.field field))].all (fun (opcode, op) =>
+      let sites := [(0, data)]
+      let wrong := [{ field with owner := .object "Other" "Tables" },
+        { field with owner := .object "Fixture" "Other" }, { field with name := name!"Other" },
+        { field with type := int32 }, { field with index := 0 }]
+      decide (fieldCode opcode field sites = some [op]) &&
+      wrong.all (fun other => decide (fieldCode opcode other sites = some [.unadmitted opcode])) &&
+      decide (fieldCode opcode field [] = some [.unadmitted opcode]) &&
+      decide (fieldCode opcode field [(0, { data with declaredSize := 3 })] =
+        some [.unadmitted opcode])) = true := by
+  decide +kernel
+
+#print axioms rvaFieldsDecode
+
+/-- A field handle produces a span only at the open declaration and the matching closed width. -/
+theorem staticSpanDecodes :
+    let owner := "System.Runtime.CompilerServices.RuntimeHelpers"
+    let name := "CreateSpan"
+    let handle := "System.RuntimeFieldHandle"
+    let span := TypeExpr.apply (.constructor runtimeScope "System.ReadOnlySpan`1")
+    let site : CallSite := {
+      method := {
+        owner := .atom runtimeScope owner, name := name!"CreateSpan", hasThis := false,
+        genericArity := 1, returnType := span int32, parameters := [.atom runtimeScope handle],
+        methodArguments := [int32] },
+      name, typeArguments := [int32], parameterCount := 1, returnsValue := true,
+      declared := {
+        convention := 16, returnType := span (.parameter 0),
+        parameters := [.atom runtimeScope handle] },
+      target := .external
+        s!"{runtimeScope}::System.ReadOnlySpan`1<!!0> {owner}::{name}({handle})" }
+    let wide := TypeExpr.atom runtimeScope "System.UInt64"
+    Tests.ModelOperands.checks site ∧
+      runtimeModel {} .call site.method = some (.memory (.createSpan 4)) ∧
+      Tests.ModelOperands.decoded { site with method.methodArguments := [wide] } =
+        some [.unadmitted 40] := by
+  decide +kernel
+
+#print axioms staticSpanDecodes
 
 /-- The argument check requires one mask entry for every raw instruction. -/
 theorem mismatched_mask_refused :

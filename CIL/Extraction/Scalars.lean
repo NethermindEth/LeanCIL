@@ -973,7 +973,7 @@ def readOnlyPrefixMatches (next : Option RawInstruction) (instruction : RawInstr
 /-- Only ordinary, unfolded, non-hole sites can reuse the raw value decoder's comparison. -/
 private def decodedValueSite (raw : RawInstruction) (role : Option FoldRole)
     (emitted : Instruction) : Bool :=
-  !methodTokenCall raw.opcode && role.isNone && !(emitted matches .unadmitted _)
+  !boundSite raw && role.isNone && !(emitted matches .unadmitted _)
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, satisfy the indirect access rule and the `readonly.` rule
@@ -1091,7 +1091,7 @@ private theorem decodedSite_eq (raw : RawMethod)
     (successor : List ScalarKind → Nat → Bool) (instruction : RawInstruction)
     (role : Option FoldRole) (pc : Nat) (feature : Option FeatureState)
     (stack : Option (List ScalarKind)) (emitted : Instruction)
-    (same : methodTokenCall instruction.opcode = false → role = none →
+    (same : boundSite instruction = false → role = none →
       emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction ∨
         emitted = .unadmitted instruction.opcode) :
     checkScalarSite true raw context locals rawAt successor ((instruction, role), pc)
@@ -1102,7 +1102,7 @@ private theorem decodedSite_eq (raw : RawMethod)
       (decodedValueSite instruction role emitted ||
         valueEncodingMatches (rawBefore rawAt pc) instruction emitted) =
           valueEncodingMatches (rawBefore rawAt pc) instruction emitted := by
-    by_cases called : methodTokenCall instruction.opcode = true
+    by_cases called : boundSite instruction = true
     · simp [decodedValueSite, called]
     by_cases unfolded : role = none
     case neg => cases role <;> simp_all [decodedValueSite]
@@ -1131,10 +1131,10 @@ private theorem decodedSite_eq (raw : RawMethod)
 /-- A certificate checked against the decoded code also passes every explicit encoding check. -/
 theorem ScalarFlowValid.of_decoded {raw : RawMethod}
     {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
-    {live : Nat → Bool} {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
+    {live : Nat → Bool} {localKind : TypeExpr → Option LocalKind} {decodeSite : SiteDecoder}
     (same : code = Instruction.ofRawCode none raw.code
-        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray
-          live localKind decodeCall))
+        (Instruction.withSiteDecoder (foldRoles raw.locals raw.code).toArray
+          live localKind decodeSite))
     (valid : ScalarFlowValid raw features certificate code true) :
     ScalarFlowValid raw features certificate code false := by
   dsimp only [ScalarFlowValid] at valid ⊢
@@ -1156,12 +1156,12 @@ theorem ScalarFlowValid.of_decoded {raw : RawMethod}
   rw [unfolded] at roleAt
   cases active : live pc with
   | false =>
-    exact Or.inr (by simpa [Instruction.withCallDecoder, active] using
+    exact Or.inr (by simpa [Instruction.withSiteDecoder, active] using
       (Option.some.inj emittedAt).symm)
   | true =>
     have closed : emitted = Instruction.ofClosedValue
         (rawBefore (FlowIndex.ofList raw.code).get? pc) instruction := by
-      simpa [Instruction.withCallDecoder, active, ordinary, roleAt, rawBefore,
+      simpa [Instruction.withSiteDecoder, active, ordinary, roleAt, rawBefore,
         FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
     unfold Instruction.ofClosedValue at closed
     repeat' split at closed
@@ -1175,11 +1175,11 @@ theorem ScalarFlowValid.instruction_checked {raw : RawMethod}
     {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Instruction}
     {decoded : Bool} (valid : ScalarFlowValid raw features certificate code decoded)
-    {live : Nat → Bool} {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
+    {live : Nat → Bool} {localKind : TypeExpr → Option LocalKind} {decodeSite : SiteDecoder}
     (codeDecodes : decoded = true → code =
       Instruction.ofRawCode none raw.code
-        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray
-          live localKind decodeCall))
+        (Instruction.withSiteDecoder (foldRoles raw.locals raw.code).toArray
+          live localKind decodeSite))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
@@ -1241,7 +1241,7 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
         scalarEmissionMatches (some role) previous instruction stack decoded = true := by
   have feature := featureFlow.instruction_checked rawAt roleAt featureAt codeAt
   have scalar := scalarFlow.instruction_checked (live := fun _ => true)
-    (localKind := fun _ => none) (decodeCall := fun _ _ raw => .unadmitted raw.opcode)
+    (localKind := fun _ => none) (decodeSite := fun _ _ raw => .unadmitted raw.opcode)
     (by intro impossible; contradiction) rawAt roleAt featureAt stackAt codeAt
   have bound : Instruction.ofRole? role (rawBefore (raw.code[·]?) pc) instruction =
       some emitted := by

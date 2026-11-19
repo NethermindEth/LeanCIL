@@ -258,11 +258,9 @@ internal static class InstructionTranslation
             Code.Ble_Un or Code.Ble_Un_S => JumpTo(JumpKind.LessOrEqualUnsigned),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
-            Code.Ldsfld or Code.Ldsflda when StaticValues.IsLoad(i) =>
-                StaticLoad(i, m.Module, profile.Architecture),
+            Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
+                StaticField(i, m.Module, profile.Architecture),
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
-            Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
-                StaticDataAccess(i, m.Module),
             Code.Ldarg_0 => new Arg(0),
             Code.Ldarg_1 => new Arg(1),
             Code.Ldarg_2 => new Arg(2),
@@ -336,20 +334,17 @@ internal static class InstructionTranslation
         };
     }
 
-    // Resolving the value rejects a field whose value extraction does not compute.
-    static Operation StaticLoad(Instruction i, ModuleDefinition module, string architecture)
+    // Literal methods and profile templates render the same validated field operand as the decoder.
+    static Operation StaticField(Instruction instruction, ModuleDefinition module, string architecture)
     {
-        StaticValues.Resolve((FieldReference)i.Operand, module, architecture);
-        return new StaticFieldInstruction(
-            i.OpCode.Code == Code.Ldsfld ? StaticFieldOpcode.Ldsfld : StaticFieldOpcode.Ldsflda, null);
-    }
-
-    // Validation rejects a field that is not a read-only data block with an initial value.
-    static Operation StaticDataAccess(Instruction i, ModuleDefinition module)
-    {
-        StaticData.Validate((FieldReference)i.Operand, module);
-        return new StaticFieldInstruction(
-            i.OpCode.Code == Code.Ldtoken ? StaticFieldOpcode.Ldtoken : StaticFieldOpcode.Ldsflda, null);
+        StaticData.FieldOf(instruction, module, architecture);
+        var opcode = instruction.OpCode.Code switch
+        {
+            Code.Ldsfld => StaticFieldOpcode.Ldsfld,
+            Code.Ldsflda => StaticFieldOpcode.Ldsflda,
+            _ => StaticFieldOpcode.Ldtoken
+        };
+        return new StaticFieldInstruction(opcode, null);
     }
 
     // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.

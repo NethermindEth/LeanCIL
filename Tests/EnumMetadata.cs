@@ -20,6 +20,7 @@ var arrays = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!;
 var descriptor = arrays.GetMethod("Storage", flags)!;
 var runtime = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
 var span = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("CoreMember", flags)!;
+var staticSpan = runtime.GetMethod("StaticSpanModel", flags)!;
 var spanOperations = runtime.GetMethod("BuildSpanOperations", flags)!;
 using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
 var module = pinned.Module;
@@ -69,12 +70,16 @@ using (Scope())
     var aggregate = module.GetType("Examples.AggregateArrays").NestedTypes.Single(type => type.Name == "Pair");
     var vector = ((ArrayType)module.GetType("Examples.AggregateArrays").Methods
         .Single(method => method.Name == "ReadVector").Parameters[0].ParameterType).ElementType;
+    var words = module.GetType("Examples.SpanTables").Methods.Single(method => method.Name == "get_Words");
+    var create = (GenericInstanceMethod)words.Body.Instructions.Single(instruction =>
+        instruction.Operand is GenericInstanceMethod).Operand;
     foreach (var (type, admitted) in new[]
         { (module.TypeSystem.Int32, true), ((TypeReference)element, true), (aggregate, false), (vector, false) })
     {
         var operations = (System.Collections.IDictionary)spanOperations.Invoke(null, [type, "scalar"])!;
-        var createsStaticSpan = operations.Keys.Cast<string>().Any(name =>
-            name.Contains("System.Runtime.CompilerServices.RuntimeHelpers::CreateSpan<", StringComparison.Ordinal));
+        var call = new GenericInstanceMethod(create.ElementMethod);
+        call.GenericArguments.Add(type);
+        var createsStaticSpan = staticSpan.Invoke(null, [call, "scalar"]) is not null;
         if (createsStaticSpan != admitted ||
             !operations.Values.Cast<object>().Any(operation =>
                 operation.GetType().Name == "Memory" && MemoryCase(operation).GetType().Name == "ArraySpan"))

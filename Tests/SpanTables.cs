@@ -39,8 +39,18 @@ void Prove(string dll, string selector, string folder, IReadOnlyList<string> cla
     string control = "")
 {
     var proof = Path.Combine(root, folder + ".lean");
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
-        string.Join(" ∧\n", claims) + " := by\n  and_intros <;> rfl\nend ExampleProof\n" + control);
+    var claimsText = string.Join(" \u2227\n", claims);
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        theorem correctness :
+        {{claimsText}} := by
+          and_intros <;> cil_kernel_rfl
+        #print axioms correctness
+        end ExampleProof
+        {{control}}
+        """);
     queue.Add(new(selector, proof, Path.Combine(root, folder), Assembly: dll), passed);
 }
 
@@ -70,7 +80,7 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     }).ToList();
     // The RVA descriptor carries the declared packing Roslyn aligned the table to.
     var packing = name is "Word" or "Count" ? 4 : 8;
-    if (!source.Contains($"alignment := {packing} }})", StringComparison.Ordinal))
+    if (!source.Contains($"alignment := {packing} }}", StringComparison.Ordinal))
         throw new InvalidOperationException($"{name}: missing static data alignment {packing}");
     var store = code.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Stloc_0);
     if (name != "First" && store?.Next.OpCode.Code != Code.Ldloca_S)
@@ -166,13 +176,16 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 Run(Extract("extract", narrowDll, "Examples", "SpanTables::Word(int)", narrowFolder));
 var narrowSource = File.ReadAllText(Path.Combine(narrowFolder, "Extracted.lean"));
-var createSite = ExtractedInstructions(narrowSource)
-    .FirstOrDefault(instruction => instruction.Op == ".memory (.createSpan 4)");
-if (createSite is null || !narrowSource.Contains("alignment := 2 })", StringComparison.Ordinal))
-    throw new InvalidOperationException("Narrow packing did not reach the extracted CreateSpan site");
+var getterIndex = DirectLinks(narrowSource, 1).Single();
+var getterCode = metadata.GetType("Examples.SpanTables").Methods.Single(method => method.Name == "get_Words")
+    .Body.Instructions;
+var createPc = getterCode.IndexOf(getterCode.Single(instruction =>
+    instruction.Operand is GenericInstanceMethod { Name: "CreateSpan" }));
+if (getterIndex.Method != 0 || !IsDecodedMethod(narrowSource, 1) ||
+    !narrowSource.Contains("alignment := 2 }", StringComparison.Ordinal))
+    throw new InvalidOperationException("Narrow packing did not reach the decoded span getter");
 Prove(narrowDll, "SpanTables::Word(int)", "Narrow-packing-Verified",
-    [Claim(narrowDll, "Word", [0], $".error ⟨{createSite.Method}, {createSite.Pc}, " +
-        $".unsupported \"{misalignedSpan}\"⟩")],
+    [Claim(narrowDll, "Word", [0], $".error \u27e81, {createPc}, .unsupported \"{misalignedSpan}\"\u27e9")],
     () => Console.WriteLine("PASS CreateSpan over a narrower packing is unsupported, never a success"));
 
 // An RVA off its declared packing is rejected before extraction; Cecil re-aligns, so patch the table.

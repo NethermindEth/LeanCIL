@@ -116,7 +116,7 @@ CallWitness[] witnesses =
     new("referenceContent", "Capabilities::ReferenceFree()",
         0, 0, ".model"),
     new("staticSpan", "SpanTables::First()",
-        1, 1, ".lowered .staticSpan"),
+        1, 1, ".model"),
     new("initBlockUnaligned", "Blocks::Fill(System.Byte&,System.Byte,System.UInt32)", 0, 3, ".model"),
     new("initBlock", "Blocks::FillPointerAligned(System.Byte*,System.Byte,System.UInt32)", 0, 3, ".model"),
     new("copyBlockUnaligned", "Blocks::CopyPointer(System.Byte*,System.Byte*,System.UInt32)", 0, 3, ".model"),

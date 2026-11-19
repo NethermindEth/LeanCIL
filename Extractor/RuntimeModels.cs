@@ -148,6 +148,7 @@ internal static class RuntimeModels
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
         if (Spans.ArrayExtension(reference, profile.Architecture) is { } arrayView) return arrayView;
         if (Spans.CoreMember(reference, profile.Architecture) is { } span) return span;
+        if (StaticSpanModel(reference, profile.Architecture) is { } staticSpan) return staticSpan;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
@@ -183,6 +184,34 @@ internal static class RuntimeModels
         if (ValueTuples.Is(reference.ReturnType))
             ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
         return model;
+    }
+
+    private static readonly TypeLevel RuntimeHelpers = new(MetadataName.OfText("System.Runtime.CompilerServices"),
+        MetadataName.OfText("RuntimeHelpers"));
+    private static readonly TypeLevel ReadOnlySpan =
+        new(MetadataName.OfText("System"), MetadataName.OfText("ReadOnlySpan`1"));
+    private static readonly TypeLevel FieldHandle =
+        new(MetadataName.OfText("System"), MetadataName.OfText("RuntimeFieldHandle"));
+
+    /// <summary>The runtime field handle supplies a readonly span over primitive or enum storage.</summary>
+    internal static Operation? StaticSpanModel(MethodReference reference, string architecture)
+    {
+        if (reference is not GenericInstanceMethod { Name: "CreateSpan", GenericArguments.Count: 1 } method ||
+            method.HasThis || method.ExplicitThis || method.ElementMethod.GenericParameters.Count != 1 ||
+            method.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
+            method.DeclaringType is TypeSpecification || method.Parameters.Count != 1 ||
+            method.ReturnType is not GenericInstanceType { GenericArguments.Count: 1 } result ||
+            result.GenericArguments[0] != method.ElementMethod.GenericParameters[0]) return null;
+        var runtime = PlatformAssemblies.SystemRuntime;
+        var handle = method.Parameters[0].ParameterType;
+        if (handle is TypeSpecification || !IdentityRows.TopLevelMatches(handle, FieldHandle, runtime) ||
+            !IdentityRows.TopLevelMatches(method.DeclaringType, RuntimeHelpers, runtime) ||
+            !IdentityRows.TopLevelMatches(result.ElementType, ReadOnlySpan, runtime)) return null;
+        var element = method.GenericArguments[0];
+        if (Arrays.Primitive(element) is null && !EnumTypes.IsEnum(element)) return null;
+        ValidateSignature(reference, architecture);
+        return Spans.ElementWidth(element, architecture) is { } width
+            ? MemoryOperation.Other($"(.createSpan {width})") : null;
     }
 
     internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
@@ -346,8 +375,6 @@ internal static class RuntimeModels
                 operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0,System.Int32,System.Int32)",
                     MemoryOperation.Other($"(.arrayFill {arrayElement.Expression} true)"));
             }
-            if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
-                $"CreateSpan<{element}>(System.RuntimeFieldHandle)", MemoryOperation.Other($"(.createSpan {width})"));
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";

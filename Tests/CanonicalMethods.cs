@@ -136,9 +136,15 @@ if (ExtractorHash() != extractorHash)
 
 string Refusal(JsonElement refusal) =>
     $"{refusal.GetProperty("ilOffset").GetInt32()} {refusal.GetProperty("opcode").GetString()} {Reason(refusal)}";
-// The span table needs the static data site of its field token.
-const string literalExample = "System.ReadOnlySpan`1<System.UInt32> Examples.SpanTables::get_Words()";
-const string indirectExample = "System.Void Examples.Arithmetic::Mutate(System.UInt64&)";
+string[] decodedExamples =
+[
+    "System.Void Examples.Arithmetic::Mutate(System.UInt64&)",
+    "System.Int32 Examples.Capabilities::Endian()",
+    "System.ReadOnlySpan`1<System.Byte> Examples.StaticSpans::get_Lookup()",
+    "System.ReadOnlySpan`1<System.UInt32> Examples.SpanTables::get_Words()",
+    "System.ReadOnlySpan`1<System.UInt64> Examples.SpanTables::get_Powers()"
+];
+const string literalExample = "System.UInt64 Examples.DivisionIntrinsics::And(System.UInt64,System.UInt64)";
 var examplesDecoded = new List<string>();
 foreach (var (profile, path) in reports)
 {
@@ -147,15 +153,16 @@ foreach (var (profile, path) in reports)
     examplesDecoded.AddRange(names.Select(name => profile + " " + StableNames.Of(name)));
     Console.WriteLine($"{profile}: {names.Count} of the {names.Count + kept.Count} methods extracted for the " +
         $"{methods.Length} methods of the examples assembly are defined from their decoder.");
-    if (profile != "scalar") continue;
-    if (!names.Contains(indirectExample))
-        throw new InvalidOperationException($"{indirectExample} is not defined from its decoder in {path}.");
+    foreach (var example in decodedExamples)
+        if (!names.Contains(example))
+            throw new InvalidOperationException($"{example} is not defined from its decoder in {path}.");
+    if (profile != "x64-v3") continue;
     var stated = kept.TryGetValue(literalExample, out var refusal) ? Refusal(refusal) : "no refusal";
-    if (stated != "0 ldtoken hole: tokens")
+    if (stated != "12 call translated call or construction")
         throw new InvalidOperationException(
-            $"{literalExample} must keep its literal for the field token at IL_0000, found {stated}.");
+            $"{literalExample} must report the translated Avx2.And call at IL_000c, found {stated}.");
 }
-Console.WriteLine("PASS the example kept as a literal reports its first hole, and Mutate decodes");
+Console.WriteLine("PASS field sites and Mutate decode across profiles and Avx2.And reports its first refusal");
 var examples = examplesDecoded.Order(StringComparer.Ordinal).ToArray();
 var (examplesLost, examplesAdded) = Compare(examplesListPath, examples);
 foreach (var method in examplesAdded) Console.WriteLine("  added: " + method);

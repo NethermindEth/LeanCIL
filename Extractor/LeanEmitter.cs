@@ -82,11 +82,10 @@ internal static class LeanEmitter
 
     static bool IsStaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
         (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
-    static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => StaticValues.IsLoad(i)
-        ? StaticValues.Resolve((FieldReference)i.Operand, module, architecture).Field : StaticData.Validate((FieldReference)i.Operand, module);
     internal static StaticIdentityRecord[] StaticIdentities(MethodDefinition[] methods, FeatureProfile profile) =>
         methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(IsStaticSite)
-            .Select(instruction => StaticIdentity.Of(StaticField(instruction, methods[0].Module, profile.Architecture)))
+            .Select(instruction => StaticIdentity.Of(
+                StaticData.FieldOf(instruction, methods[0].Module, profile.Architecture)))
             .Distinct().OrderBy(identity => identity.Identity, StringComparer.Ordinal).ToArray();
     internal static InitialValue Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
         MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts).Initial();
@@ -290,7 +289,22 @@ internal static class LeanEmitter
                 linkEntries.Select(entry => $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
-            genericEvidence.EmitMethod(lean, m, n, reachable);
+            var rvaSites = sites.Where(site => site.Detail is StaticDataBlock).Select(site =>
+            {
+                var field = (FieldReference)m.Body.Instructions[site.Pc].Operand;
+                var size = field.FieldType.Resolve().ClassSize;
+                var descriptor = site.DescriptorLean(LeanText.MethodNumber);
+                return $"({site.Pc}, {{ declaredSize := {size}, descriptor := {descriptor} }})";
+            }).ToArray();
+            var rvaInput = "";
+            if (rvaSites.Length != 0)
+            {
+                var table = $"method{n}RvaSites";
+                var entries = string.Join(", ", rvaSites);
+                lean.AppendLine($"def {table} : List (Prod Nat Extraction.RvaField) := [{entries}]");
+                rvaInput = $"rvaSites := {table}, ";
+            }
+            genericEvidence.EmitMethod(lean, m, n, reachable, rvaInput);
             // A call names the method its raw operand names; a constrained one also the type the definition just
             // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)

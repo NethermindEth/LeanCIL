@@ -692,8 +692,8 @@ theorem Instruction.ofRaw_of_not_valueOpcode {previous : Option RawInstruction}
 def rawBefore (rawAt : Nat → Option RawInstruction) (pc : Nat) : Option RawInstruction :=
   if pc == 0 then none else rawAt (pc - 1)
 
-/-- The decoder at a method-token call can use its enclosing method's binding information. -/
-abbrev CallDecoder := Nat → Option RawInstruction → RawInstruction → Instruction
+/-- A site can consult its enclosing method's bindings and profile. -/
+abbrev SiteDecoder := Nat → Option RawInstruction → RawInstruction → Instruction
 
 /-- The instruction at `pc`, with the preceding raw instruction available for prefixes. -/
 def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat)

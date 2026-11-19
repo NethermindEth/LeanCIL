@@ -279,12 +279,17 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
       else none
   | .spanConstructor .. | .blocked => none
 
-/-- Calls use their site requirement. Other instructions in a fold emit their raw role. -/
-def Instruction.withCallDecoder (roles : Array (Option FoldRole))
-    (live : Nat → Bool) (localKind : TypeExpr → Option LocalKind) (decodeCall : CallDecoder) :
-    CallDecoder := fun pc previous raw =>
+/-- Calls and static field operands need the method's bindings or profile to decode. -/
+def boundSite (raw : RawInstruction) : Bool :=
+  methodTokenCall raw.opcode || raw.opcode == 126 || raw.opcode == 127 ||
+    raw.opcode == 208 && (raw.operand matches .field ..)
+
+/-- Bound operands use their site decoder. Type tokens keep their roles in folded type tests. -/
+def Instruction.withSiteDecoder (roles : Array (Option FoldRole))
+    (live : Nat → Bool) (localKind : TypeExpr → Option LocalKind) (decodeSite : SiteDecoder) :
+    SiteDecoder := fun pc previous raw =>
   if !live pc then .unadmitted raw.opcode
-  else if methodTokenCall raw.opcode then decodeCall pc previous raw
+  else if boundSite raw then decodeSite pc previous raw
   else match (indexedRead? roles pc).join with
     | none | some .blocked => Instruction.ofClosedValue previous raw
     | some (.spanConstructor index (.empty ..)) =>
@@ -387,20 +392,20 @@ def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Opti
 def plainBody : List RawInstruction → List Bool → Bool
   | [], _ => true
   | first :: rest, true :: live =>
-    !methodTokenCall first.opcode && (foldHead? first.opcode).isNone && plainBody rest live
+    !boundSite first && (foldHead? first.opcode).isNone && plainBody rest live
   | _, _ => false
 
 /-- At each plain site the mask is live, the role is absent, and no call claim applies. -/
 theorem plainBody_at {closed : RawMethod} {reachable : List Bool}
     (plain : plainBody closed.code reachable)
     {pc : Nat} {raw : RawInstruction} (found : closed.code[pc]? = some raw) :
-    reachable[pc]? = some true ∧ methodTokenCall raw.opcode = false ∧
+    reachable[pc]? = some true ∧ boundSite raw = false ∧
       (foldRoles closed.locals closed.code)[pc]? = some none := by
   let localAt := (FlowIndex.ofList closed.locals).get?
   let targeted := (Std.TreeSet.ofList (branchTargets closed.code) compare).contains
   suffices walk : ∀ (code : List RawInstruction) (mask : List Bool) (start index : Nat),
       plainBody code mask = true → code[index]? = some raw →
-        mask[index]? = some true ∧ methodTokenCall raw.opcode = false ∧
+        mask[index]? = some true ∧ boundSite raw = false ∧
           (foldRolesFrom localAt targeted start [] code)[index]? = some none by
     exact walk closed.code reachable 0 pc plain found
   intro code

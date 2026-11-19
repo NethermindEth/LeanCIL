@@ -272,6 +272,12 @@ collisions, and composed full verification proves `linkChecked`, which compares 
 descriptors and fails with the first `StaticCollision`. Raw `link` alone supplies no collision
 guarantee.
 
+At a live RVA field token or address, the decoder compares the operand's owner, index, type and
+name with the descriptor at that instruction. It checks that the blob has the declared nonzero
+size. The extractor supplies the PE bytes, class size and packing. The runtime model for
+`RuntimeHelpers.CreateSpan<T>` checks the generic declaration and selects the element width
+from the closed scalar type. Execution checks the storage alignment before constructing the view.
+
 An RVA field's descriptor alignment is its packing. The extractor checks the RVA, and that its
 section's virtual address and file offset agree modulo 8; the runtime premise is that CoreCLR
 places the image at an 8-byte-aligned base. Its loader maps or copies images to page-aligned
