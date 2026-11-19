@@ -343,8 +343,10 @@ internal static partial class Program
             using ImportResolution imports = new(importSources);
             using var enumMetadata = EnumTypes.BeginScope();
             stage = "metadata and CIL validation";
-            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports,
-                typeArguments: entryTypeArguments.ToArray(), importedByref: type => imports.ValidateByref(type, profile));
+            var callSites = new ResolvedCallSites();
+            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity,
+                entry, profile, initializedTypes, imports: imports, typeArguments: entryTypeArguments.ToArray(),
+                importedByref: type => imports.ValidateByref(type, profile), callSites: callSites);
             foreach (var node in imports.Nodes)
                 if (pinned.References.Any(reference => reference.Pin.Identity == node.AssemblyIdentity))
                     throw new InvalidDataException(
@@ -362,7 +364,7 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, imports,
+            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, callSites, imports,
                 staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)

@@ -449,7 +449,7 @@ internal static class MetadataValidation
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
         IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null,
         string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null,
-        List<(Instruction Instruction, object Operand)>? rewrites = null)
+        List<(Instruction Instruction, object Operand)>? rewrites = null, ResolvedCallSites? callSites = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -662,6 +662,7 @@ internal static class MetadataValidation
                             throw Call("Unsupported virtual call", reference, method, instruction, error.Message,
                                 error);
                         }
+                        callSites?.AddVirtual(instruction, table);
                         foreach (var body in table.Select(entry => entry.Body).Distinct())
                             Enter(body, reference, instruction);
                         return;
@@ -673,7 +674,9 @@ internal static class MetadataValidation
                     if (VirtualDispatch.Unresolvable(instruction) is { } reason)
                         throw Call("Unsupported virtual call", reference, method, instruction, reason);
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
-                    Enter(ConstrainedCalls.Specialize(resolved, specializations), reference, instruction);
+                    var implementation = ConstrainedCalls.Specialize(resolved, specializations);
+                    callSites?.Add(instruction, implementation);
+                    Enter(implementation, reference, instruction);
                     return;
                 }
                 var pinnedCallee = reference.DeclaringType.Scope is AssemblyNameReference &&
@@ -709,6 +712,7 @@ internal static class MetadataValidation
                         throw Call("Unsupported generic newobj constructor", reference, method, instruction);
                     rewrites?.Add((instruction, instruction.Operand));
                     instruction.Operand = specialized;
+                    callSites?.Add(instruction, specialized);
                     Enter(specialized, reference, instruction);
                     return;
                 }
@@ -734,6 +738,7 @@ internal static class MetadataValidation
                         !IsAggregate(callee.DeclaringType, module) && !ObjectTypes.Candidate(callee.DeclaringType)))
                     throw Call("Unsupported newobj constructor", reference, method, instruction,
                         "newobj must construct a reference-free struct or a class of a pinned assembly");
+                callSites?.Add(instruction, callee);
                 Enter(callee, reference, instruction);
             }
             void StaticLoad(Instruction instruction, FieldReference loaded)

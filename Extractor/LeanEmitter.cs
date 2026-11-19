@@ -160,7 +160,7 @@ internal static class LeanEmitter
         Math.Max(BaseHeartbeats, HeartbeatsPerInstruction * instructions + HeartbeatsPerCall * calls);
 
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
-        ImportResolution? importResolution = null,
+        ResolvedCallSites callSites, ImportResolution? importResolution = null,
         StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
     {
         var methodIndices = methods.Select((method, index) => (method, index))
@@ -263,10 +263,7 @@ internal static class LeanEmitter
             var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, [], homes, sites,
                 genericEvidence.Declared(m));
             var opaqueLocals = $"Extraction.rawOpaqueLocals method{n}Closed method{n}Reachable";
-            // The table is derived from the operations, so it needs no renumbering beside the code.
-            List<(int Pc, string Link)> linkEntries = [.. ops.Select((op, pc) =>
-                (Pc: pc, Link: op.Link(LeanText.MethodNumber))).Where(entry => entry.Link is not null)
-                .Select(entry => (entry.Pc, entry.Link!))];
+            var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution, layoutContext);
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {

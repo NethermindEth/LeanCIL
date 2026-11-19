@@ -174,20 +174,16 @@ internal static class ObjectTypes
         LeanText.ClassList(Bases(type).Select(GenericEvidence.ObjectType));
 
     /// <summary>
-    /// The checked operation for <c>newobj</c> of an admitted class: a fresh instance of its runtime type, with
-    /// one 8-byte slot per instance field including its bases', passed to <paramref name="constructor"/> at
-    /// method index <paramref name="index"/>; the extraction names the constructor. An abstract class has no instances
-    /// of its own.
+    /// A concrete class allocation includes its base classes and one slot per inherited or declared instance field.
     /// </summary>
-    internal static Operation Construction(MethodDefinition constructor, int index)
+    internal static Allocation.Instance AllocationOf(MethodDefinition constructor)
     {
         var owner = Validate(constructor.DeclaringType);
         if (owner.IsAbstract)
             throw new InvalidDataException("Unsupported construction of an abstract class: " + owner.FullName +
                 "\n  newobj of an abstract class fails at run time; only its derived classes have instances.");
         var size = FieldSlot * Fields(owner).Length;
-        return new Newobj(index, new Allocation.Instance([.. Bases(owner).Select(GenericEvidence.ObjectType)], size),
-            null);
+        return new([.. Bases(owner).Select(GenericEvidence.ObjectType)], size);
     }
 
     /// <summary>

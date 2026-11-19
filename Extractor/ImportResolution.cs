@@ -408,6 +408,8 @@ internal sealed class ImportResolution : IDisposable
         return $$"""{ {{metadata}}, {{arity}}, {{result}}{{typed}} }""";
     }
 
+    internal int? Slot(Instruction instruction) => sites.TryGetValue(instruction, out var slot) ? slot : null;
+
     internal bool TryTranslate(Instruction instruction, int methodCount, [NotNullWhen(true)] out Operation? translated)
     {
         if (sites.TryGetValue(instruction, out int slot))
