@@ -21,11 +21,13 @@ var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringCo
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 RequireLeanFixtures("Tests.ExtractionParameters");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
+const string instanceParameter = "Counter::Parameter(byte)";
+var literalControl = Path.Combine(output, "UnreachableReturn");
 var samples = new[]
 {
     "Arguments::Overwrite(uint,uint)", "Arguments::Alias(uint)", "Arguments::Address(uint)",
     "Arguments::Native(nint)", "Arguments::Narrow(byte)",
-    "Arguments::ReassignReference(uint&,uint&)", "Arguments::Struct(Examples.Packet)", "Counter::Parameter(byte)"
+    "Arguments::ReassignReference(uint&,uint&)", "Arguments::Struct(Examples.Packet)", instanceParameter
 };
 ExtractBatch("extract", "Examples", samples.Select((selector, index) =>
     new GeneratedExtraction(assembly, selector, Path.Combine(output, index.ToString()))));
@@ -51,10 +53,15 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             else if (instruction.OpCode.Code == Code.Starg_S) instruction.OpCode = OpCodes.Starg;
             else if (instruction.OpCode.Code == Code.Ldarga_S) instruction.OpCode = OpCodes.Ldarga;
         }
+    // The return after the real return is unreachable, so this body needs a literal with a hole at its dead pc.
+    var counter = module.GetType("Examples.Counter").Methods.Single(method => method.Name == "Parameter");
+    counter.Body.GetILProcessor().Emit(OpCodes.Ldc_I4_0);
+    counter.Body.GetILProcessor().Emit(OpCodes.Ret);
     var longAssembly = Path.Combine(output, "LongArguments.dll");
     module.Write(longAssembly);
     ExtractBatch("extract", "Examples", samples.Take(3).Select((selector, index) =>
-        new GeneratedExtraction(longAssembly, selector, Path.Combine(output, "Long" + index))));
+        new GeneratedExtraction(longAssembly, selector, Path.Combine(output, "Long" + index)))
+        .Append(new GeneratedExtraction(longAssembly, instanceParameter, literalControl)));
     foreach (var selector in samples.Take(3))
     {
         var folder = Path.Combine(output, "Long" + Array.IndexOf(samples, selector));
@@ -62,14 +69,13 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     }
 }
 
+evidence.Add(Path.Combine(literalControl, "Extracted.lean"), "PASS literal instance parameter with a dead return");
 evidence.Check();
-// Overwrite decodes in full, so its code and homes come from its decoder. Counter::Parameter calls a method and
-// writes a field, which the decoder leaves holes, so its extraction writes the literal the code mutations edit.
 var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
-var baseline = File.ReadAllText(Path.Combine(output, "7", "Extracted.lean"));
+var baseline = File.ReadAllText(Path.Combine(literalControl, "Extracted.lean"));
 if (!IsDecodedMethod(decoded, 0) || IsDecodedMethod(baseline, 0) || !DefinedMethods(baseline).Contains(0))
     throw new InvalidOperationException(
-        "Overwrite must be defined from its decoder and Counter::Parameter by its literal");
+        "Overwrite must decode and the instance method with a dead return must have a literal body");
 void Reject(string name, string mutated, string? source = null)
 {
     if (mutated == (source ?? baseline))
