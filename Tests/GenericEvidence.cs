@@ -413,20 +413,22 @@ void CheckExternalCallTargets()
     var positive = Path.Combine(folder, "Checked.lean");
     File.WriteAllText(positive, baseline + "\n" + CheckedEvidenceControl(baseline, control, [theorem], 0));
     evidence.Add(positive, "PASS complete materialized external call certificate and mutation control");
-    foreach (var (name, source) in new[]
+    foreach (var (name, source, obligation, markers) in new (string, string, string, string[])[]
     {
+        // CreateScalarUnsafe keeps its call and runs its model, so the body evidence, which binds each raw call
+        // target to its metadata row, refuses another target.
         ("wrong-raw-target", baseline.Replace("target := .external externalIdentity0",
-            "target := .external externalIdentity1", StringComparison.Ordinal)),
-        // CreateScalarUnsafe is a modelled call; the comparison is the lowered intrinsic this body still emits.
-        ("wrong-emitted-intrinsic", baseline.Replace(".vector (.equalsAll 128)",
-            ".avx2 .band", StringComparison.Ordinal))
+            "target := .external externalIdentity1", StringComparison.Ordinal), bodyTheorem, [bodyDecisionFailed]),
+        // The body keeps every vector call, so an admitted intrinsic emitted at the op_Equality call at pc 4 has
+        // no exact raw call to match.
+        ("wrong-emitted-intrinsic", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .intrinsic (.avx2 .band) 2"),
+            theorem, ["Extraction.ExactIntrinsicsValid", "is false"])
     })
     {
         if (source == baseline) throw new InvalidOperationException("Call mutation was not applied: " + name);
         var rejectedPath = Path.Combine(folder, name + ".lean");
-        File.WriteAllText(rejectedPath, NarrowEvidence(source, theorem));
-        rejected.Add(rejectedPath, "PASS materialized external call rejects " + name,
-            "Extraction.ExactIntrinsicsValid", "is false");
+        File.WriteAllText(rejectedPath, NarrowEvidence(source, obligation));
+        rejected.Add(rejectedPath, "PASS materialized external call rejects " + name, markers);
     }
 }
 
