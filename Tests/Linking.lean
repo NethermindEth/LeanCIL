@@ -1,4 +1,4 @@
-import CIL.Safety.Linking
+import CIL.Safety.ProgramClosure
 import Tests.Imports
 import Tests.Support
 
@@ -182,6 +182,14 @@ example (identity : ManagedIdentity) :
 
 /-- The code, operands included, is unchanged, since a call reads its target from the table. -/
 example : (body.relocate (· + 10)).code = body.code := rfl
+
+/-- An address that the root discards reaches no callee, even when the target has a body. -/
+theorem discarded_address_closure :
+    let root : Method :=
+      { code := [.managed (.address ⟨⟨"T", 1, []⟩, 1⟩ ⟨.void, []⟩), .pop, .ret],
+        locals := [], returnsValue := false }
+    (Program.closure [root, body] 0).map Prod.snd = some [0] := rfl
+#print axioms discarded_address_closure
 
 end Tests.Linking.Links
 

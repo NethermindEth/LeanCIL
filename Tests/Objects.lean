@@ -28,6 +28,22 @@ private def frame : Frame := { activation := 0, locals := [], owned := [] }
 private def body : CIL.Method := { returnsValue := true, locals := [], code := [] }
 private def live : ManagedReference := .address ⟨0, 0⟩
 
+/-- Receiver calls reject partial operands before link lookup and check null after lookup. -/
+theorem receiver_call_fault_order :
+    let direct := Instruction.callInstance 1 2
+    let slot := Instruction.callVirtual [(account.identity, 2)] 2
+    let runCall := fun operation (link : List (Nat × Link)) stack =>
+      step { body with links := link } operation 0 [] frame stack memory
+    let defined := CIL.Safety.Value.scalar (.i32 0)
+    runCall direct [] [.scalar (.v128Low64 0), .object .null] =
+        .error (.unsupported "Instruction observes unspecified vector bits") ∧
+      runCall direct [] [defined, .object .null] = .error unlinkedCall ∧
+      runCall direct [(0, .direct 1)] [defined, .object .null] = .error (.thrown .nullReference) ∧
+      runCall slot [(0, .virtual [(account.identity, 2)])] [defined, .object live] =
+        .ok (.call 2 [.object live, defined] [] memory) := by
+  exact ⟨rfl, rfl, rfl, rfl⟩
+#print axioms receiver_call_fault_order
+
 /-- A live object allocation at offset 0 forms as itself. -/
 theorem live_object_forms : formObject memory live = .ok (.object live) := rfl
 #print axioms live_object_forms
