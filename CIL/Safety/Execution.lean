@@ -456,21 +456,60 @@ def modelStep (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc : Nat) (
     observedCall model.observerCount stack fun _ => runModel body model pc frame stack memory
   | none => .error unlinkedCall
 
+/-- A store into a span slot leaves a span slot of the same width and access. -/
+theorem storeLocal_span_slot {memory after : Memory} {width : Nat} {writable : Bool}
+    {view : Option SpanView} {value : Value} {slot : LocalSlot}
+    (stored : storeLocal memory (.span width writable view) value = .ok (slot, after)) :
+    ∃ newView, slot = .span width writable (some newView) := by
+  unfold storeLocal at stored
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at stored
+  repeat' (first | contradiction | split at stored)
+  all_goals (cases stored; simp_all)
+
+#print axioms storeLocal_span_slot
+
+/-- A span constructor run in place continues at the next pc with only the span slot its home
+    names changed, to a span of the slot's width and access, which the constructor builds. -/
+theorem spanInPlaceCall_frame {constructor : CIL.SpanConstructor} {pc : Nat} {frame : Frame}
+    {stack : List Value} {memory : Memory} {action : FrameAction}
+    (executed : spanInPlaceCall constructor pc frame stack memory = .ok action) :
+    ∃ values final index width writable view newView,
+      constructor.shape = (width, writable) ∧
+      frame.locals[index]? = some (.span width writable view) ∧
+      action = .next (pc + 1) values
+        { frame with locals := frame.locals.set index (.span width writable (some newView)) }
+        final := by
+  unfold spanInPlaceCall at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' (first | contradiction | split at executed)
+  all_goals
+    cases executed
+    obtain ⟨newView, slotIs⟩ := storeLocal_span_slot ‹storeLocal _ _ _ = _›
+    rw [slotIs]
+    refine ⟨_, _, _, _, _, _, newView, ?_, ‹frame.locals[_]? = some _›, rfl⟩
+    simp_all
+
+#print axioms spanInPlaceCall_frame
+
 /-- A call's runtime model continues at the next pc. The frame stays the same, except that a span
-    constructor run in place sets the span slot its home names. -/
+    constructor run in place sets the span slot its home names to a span of the slot's width and
+    access, which the constructor builds. -/
 theorem modelStep_frame {model : Option CIL.RuntimeModel} {body : CIL.Method} {pc : Nat}
     {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction}
     (executed : modelStep model body pc frame stack memory = .ok action) :
     ∃ values final changed, action = .next (pc + 1) values changed final ∧
-      (changed = frame ∨ ∃ index width writable view slot,
+      (changed = frame ∨ ∃ constructor index width writable view newView,
+        model = some (.spanInPlace constructor) ∧ constructor.shape = (width, writable) ∧
         frame.locals[index]? = some (.span width writable view) ∧
-        changed = { frame with locals := frame.locals.set index slot }) := by
+        changed = { frame with
+          locals := frame.locals.set index (.span width writable (some newView)) }) := by
   unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
-    referenceSubtractCall typedTransferCall skipInitCall spanInPlaceCall at executed
+    referenceSubtractCall typedTransferCall skipInitCall at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | exact ⟨_, _, _, (Except.ok.inj executed).symm, .inl rfl⟩
-    | exact ⟨_, _, _, (Except.ok.inj executed).symm, .inr ⟨_, _, _, _, _, by assumption, rfl⟩⟩
+    | (obtain ⟨_, _, _, _, _, _, _, shaped, held, rfl⟩ := spanInPlaceCall_frame executed
+       exact ⟨_, _, _, rfl, .inr ⟨_, _, _, _, _, _, by first | rfl | simp_all, shaped, held, rfl⟩⟩)
     | cases executed
     | split at executed
 

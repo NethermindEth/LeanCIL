@@ -824,10 +824,10 @@ authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and
 `step_newobj_aggregate_action`, which takes the `.aggregate` link of a `newobj`, separate a call from a
 construction; `step_call_action` also gives a call whose pc states no link, whose runtime model
-continues at `pc + 1` in the same frame, or with one span slot set when the model runs a span
-constructor in place (`modelStep_frame`). The module imports only the step
-simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
-layers.
+continues at `pc + 1` in the same frame, or, when the model runs a span constructor in place, with
+the span slot its home names set to a span of the slot's width and access (`modelStep_frame`).
+The module imports only the step simulation, so a consumer reasoning about reachable pcs does
+not compile the import and linking layers.
 
 ## Proof cost
 

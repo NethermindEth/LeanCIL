@@ -132,7 +132,7 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
 /-- A `call` only ever enters the method its link names, never as a construction: under a `tail.`
     prefix it retires the frame, and otherwise it calls and continues. A call whose pc states no
     link runs its runtime model, which continues at the next pc; only a span constructor run in
-    place changes the frame. -/
+    place changes the frame, and only in the span slot its home names. -/
 theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
     {prefixes : CIL.CallPrefixes} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
@@ -141,16 +141,23 @@ theorem step_call_action {body : CIL.Method} {method : CIL.Extraction.MethodRef}
       if prefixes.tail then ∃ arguments updated, action = .tailCall callee arguments updated
       else ∃ arguments rest m', action = .call callee arguments rest m') ∨
     (body.linkAt pc = none ∧ prefixes.tail = false ∧
-      ∃ values final changed, action = .next (pc + 1) values changed final) := by
+      ∃ values final changed, action = .next (pc + 1) values changed final ∧
+        (changed = frame ∨ ∃ constructor index width writable view newView,
+          Extraction.runtimeModel body.environment .call method =
+            some (.spanInPlace constructor) ∧
+          constructor.shape = (width, writable) ∧
+          frame.locals[index]? = some (.span width writable view) ∧
+          changed = { frame with
+            locals := frame.locals.set index (.span width writable (some newView)) })) := by
   unfold step observedCall at h
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   repeat' (first | contradiction | split at h)
   all_goals first
     | (cases h; exact .inl ⟨_, by assumption, by simp_all⟩)
-    | (obtain ⟨_, _, _, rfl, _⟩ := modelStep_frame (model := Extraction.runtimeModel
+    | (obtain ⟨_, _, _, rfl, framed⟩ := modelStep_frame (model := Extraction.runtimeModel
           body.environment .call method) (body := body) (pc := pc) (frame := frame)
           (stack := stack) (memory := m) h
-       exact .inr ⟨by assumption, by simp_all, _, _, _, rfl⟩)
+       exact .inr ⟨by assumption, by simp_all, _, _, _, rfl, framed⟩)
 #print axioms step_call_action
 
 /-- A construction under an `.aggregate` link enters the constructor the link names with a

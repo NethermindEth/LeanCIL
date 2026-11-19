@@ -94,7 +94,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           have resume := continues (Instruction.continues_of_linked linked (by
             intro method prefixes equal
             subst op
-            rcases step_call_action hs with ⟨_, _, chosen⟩ | ⟨_, _, _, _, _, impossible⟩
+            rcases step_call_action hs with ⟨_, _, chosen⟩ | ⟨_, _, _, _, _, impossible, _⟩
             · cases tail : prefixes.tail
               · rfl
               · simp only [tail, ite_true] at chosen
@@ -142,7 +142,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
           have resume := continues (Instruction.continues_of_linked linked (by
             intro method prefixes equal
             subst op
-            rcases step_call_action hs with ⟨_, _, chosen⟩ | ⟨_, _, _, _, _, impossible⟩
+            rcases step_call_action hs with ⟨_, _, chosen⟩ | ⟨_, _, _, _, _, impossible, _⟩
             · cases tail : prefixes.tail
               · rfl
               · simp only [tail, ite_true] at chosen

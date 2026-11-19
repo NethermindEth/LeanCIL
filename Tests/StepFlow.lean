@@ -42,7 +42,7 @@ example {r : Reference}
     (h : step body (.call (Tests.callee 1)) pc args frame stack m =
       .ok (.construct 2 args stack frame' r .word64 m')) :
     False := by
-  rcases step_call_action h with ⟨_, _, plain⟩ | ⟨_, _, _, _, _, contradiction⟩
+  rcases step_call_action h with ⟨_, _, plain⟩ | ⟨_, _, _, _, _, contradiction, _⟩
   · rw [if_neg (by decide)] at plain
     obtain ⟨_, _, _, contradiction⟩ := plain
     cases contradiction
