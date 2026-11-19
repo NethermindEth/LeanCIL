@@ -633,7 +633,7 @@ def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : I
 def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     (role : Option FoldRole)
     (instruction : RawInstruction) (emitted : Instruction)
-    (previous : Unit → Option RawInstruction := fun _ => none) : Bool :=
+    (previous : Option RawInstruction := none) : Bool :=
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
@@ -649,7 +649,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     signature.result == callableType raw.returnType &&
       featureOpMatches layouts raw instruction
         (.managed (.call signature false))
-  | some .argument, _ => valueEncodingMatches (previous ()) instruction emitted &&
+  | some .argument, _ => valueEncodingMatches previous instruction emitted &&
       featureOpMatches layouts raw instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction &&
@@ -662,7 +662,7 @@ theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
     (emitted : Instruction)
     (fixed : match role with
       | .head | .interior | .result _ | .typeBranch _ | .raise _ => True | _ => False) :
-    featureOpMatchesAt layouts method (some role) raw emitted (fun _ => previous) = true ↔
+    featureOpMatchesAt layouts method (some role) raw emitted previous = true ↔
       Instruction.ofRole? role previous raw = some emitted := by
   cases role with
   | typeBranch taken =>
@@ -680,9 +680,9 @@ theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
 
 /-- An accepted fold argument has the value and index of its encoded push or return. -/
 theorem argument_of_featureOpMatchesAt {layouts : Array RawLayout} {method : RawMethod}
-    {raw : RawInstruction} {emitted : Instruction} {previous : Unit → Option RawInstruction}
+    {raw : RawInstruction} {emitted : Instruction} {previous : Option RawInstruction}
     (checked : featureOpMatchesAt layouts method (some .argument) raw emitted previous = true) :
-    Instruction.ofRole? .argument (previous ()) raw = some emitted := by
+    Instruction.ofRole? .argument previous raw = some emitted := by
   exact valueEncodingMatches_sound (Bool.and_eq_true_iff.mp checked).1
 
 #print axioms argument_of_featureOpMatchesAt
@@ -719,6 +719,47 @@ theorem ManagedCallsValid.tailCall_target {methods : List SpecializedMethod}
 
 #print axioms ManagedCallsValid.tailCall_target
 
+/-- The feature check reads a raw instruction together with its predecessor and closed role. -/
+private structure FeatureSite where
+  pc : Nat
+  previous : Option RawInstruction
+  instruction : RawInstruction
+  role : Option FoldRole
+
+/-- Pair each raw site with the modifier immediately before it, including across dead sites. -/
+private def featureSites (pc : Nat) (previous : Option RawInstruction) :
+    List RawInstruction → List (Option FoldRole) → List FeatureSite
+  | instruction :: code, role :: roles =>
+    ⟨pc, previous, instruction, role⟩ :: featureSites (pc + 1) (some instruction) code roles
+  | _, _ => []
+
+/-- The streamed site at a pc has exactly the raw predecessor specified by that pc. -/
+private theorem featureSites_at {code : List RawInstruction} {roles : List (Option FoldRole)}
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole}
+    (rawAt : code[pc]? = some instruction) (roleAt : roles[pc]? = some role) :
+    (featureSites 0 none code roles)[pc]? =
+      some ⟨pc, rawBefore (code[·]?) pc, instruction, role⟩ := by
+  have walk (start : Nat) (previous : Option RawInstruction) :
+      (featureSites start previous code roles)[pc]? =
+        some ⟨start + pc, (if pc == 0 then previous else code[pc - 1]?), instruction, role⟩ := by
+    induction pc generalizing start previous code roles with
+    | zero =>
+      cases code <;> cases roles <;> simp_all [featureSites]
+    | succ index ih =>
+      cases code with
+      | nil => simp at rawAt
+      | cons head tail =>
+        cases roles with
+        | nil => simp at roleAt
+        | cons first rest =>
+          have checked := ih (by simpa using rawAt) (by simpa using roleAt)
+            (start + 1) (some head)
+          cases index <;> simpa [featureSites, Nat.add_assoc, Nat.add_comm, Nat.add_left_comm]
+            using checked
+  simpa [rawBefore] using walk 0 none
+
+#print axioms featureSites_at
+
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     be well shaped, match its emitted instruction, including the indirect access rule over the
     raw instructions `rawAt` gives, and flow into a weaker state at every recomputed
@@ -729,12 +770,12 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
     (roles : Nat → Option (Option FoldRole)) (rawAt : Nat → Option RawInstruction) :
-    (RawInstruction × Option FoldRole) × Nat → Option (FeatureFacts Locals) → Instruction → Bool
+    FeatureSite → Option (FeatureFacts Locals) → Instruction → Bool
   | _, none, .unadmitted _ => true
-  | ((instruction, role), pc), some state, emitted =>
+  | ⟨pc, previous, instruction, role⟩, some state, emitted =>
     wellShaped raw facts state &&
-      (featureOpMatchesAt layouts raw role instruction emitted (fun _ => rawBefore rawAt pc) &&
-        indirectSiteWindow rawAt pc instruction emitted false) &&
+      (featureOpMatchesAt layouts raw role instruction emitted previous &&
+        indirectSiteWindow rawAt pc instruction emitted false previous) &&
       match featureTransferAtWith layouts raw facts profile
           (calleeConstant constants (linkAt pc) emitted)
           role instruction state,
@@ -767,7 +808,7 @@ def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32
    all3Flow (fun lookup => checkFeatureSiteWith layouts constants linkAt raw facts profile lookup
       (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? (FlowIndex.ofList raw.code).get?)
     (.ofList certificate) 0
-    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code) = true
+    (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code) = true
 
 instance (layouts : Array RawLayout) (constants : Nat → Option W32)
     (linkAt : Nat → Option Link) (raw : RawMethod) (profile : FeatureProfile)
@@ -791,7 +832,7 @@ def FeatureListValid (layouts : Array RawLayout) (constants : Nat → Option W32
       (fun target => certificate[target]?)
       (fun target => (foldRoles raw.locals raw.code)[target]?)
       (fun target => raw.code[target]?))
-    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true
+    (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code = true
 
 /-- Streaming validation has exactly the same entry, mask, shape and successor checks
     as indexing the complete certificate and fold-role lists at every site. -/
@@ -807,7 +848,7 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
           (fun target => certificate[target]?)
           (fun target => (foldRoles raw.locals raw.code)[target]?)
           (fun target => raw.code[target]?))
-        (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true := by
+        (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code = true := by
   unfold FeatureFlowValid
   have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
     funext index fact
@@ -837,10 +878,8 @@ theorem FeatureFlowValid.instruction_checked {layouts : Array RawLayout} {raw : 
     (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
     (stateAt : certificate[pc]? = some (some state)) (codeAt : code[pc]? = some emitted) :
     featureOpMatchesAt layouts raw role instruction emitted
-      (fun _ => rawBefore (raw.code[·]?) pc) = true := by
-  have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
-      some ((instruction, role), pc) := by
-    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
+      (rawBefore (raw.code[·]?) pc) = true := by
+  have pairAt := featureSites_at rawAt roleAt
   have sites := ((FeatureFlowValid_iff_indexed _ _ _ _ _ _ _ _).mp valid).2.2.2.2
   have checked := all3_at sites pairAt stateAt codeAt
   simp only [checkFeatureSiteWith, Bool.and_eq_true] at checked
@@ -982,7 +1021,7 @@ private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
     (profile : FeatureProfile)
     (certificate : FeatureCertificate) (roles : Nat → Option (Option FoldRole))
     (rawAt : Nat → Option RawInstruction) (allKnown : AllKnown raw certificate)
-    (site : (RawInstruction × Option FoldRole) × Nat) (state : Option FeatureState)
+    (site : FeatureSite) (state : Option FeatureState)
     (emitted : Instruction) (member : state ∈ certificate) :
     checkFeatureSiteWith layouts constants linkAt raw (knownLocals raw) profile
         (fun target => certificate[target]?) roles rawAt site state emitted =
@@ -994,7 +1033,7 @@ private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
   | none => cases emitted <;> rfl
   | some state =>
     have known := allKnown state member
-    obtain ⟨⟨instruction, role⟩, pc⟩ := site
+    obtain ⟨pc, previous, instruction, role⟩ := site
     have transfer := featureTransferAtWith_expand layouts raw raw.locals.length
       (featureLocalEligible raw) profile (calleeConstant constants (linkAt pc) emitted) role
       instruction state known
@@ -1047,7 +1086,7 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
   unfold FeatureListValid
   have sitesEqual (allKnown : AllKnown raw certificate) := all3_map
     (Option.map (FeatureState.expand raw.locals.length))
-    (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code
+    (featureSites 0 none raw.code (foldRoles raw.locals raw.code)) certificate code
     fun site state emitted member =>
       checkFeatureSiteWith_known_eq_list layouts constants linkAt raw profile certificate
         (fun target => (foldRoles raw.locals raw.code)[target]?)
@@ -1056,7 +1095,7 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
   · rintro ⟨length, codeLength, mask, entry, sites⟩
     have allKnown : AllKnown raw certificate := by
       intro state member
-      obtain ⟨⟨⟨instruction, role⟩, pc⟩, emitted, checked⟩ := all3_mem sites member
+      obtain ⟨⟨pc, previous, instruction, role⟩, emitted, checked⟩ := all3_mem sites member
       simp only [checkFeatureSiteWith, knownLocals, Bool.and_eq_true,
         wellShaped_expand (featureLocalEligible_none raw)] at checked
       exact checked.1.1.1
@@ -1112,7 +1151,7 @@ private theorem FeatureListValid.lengths {layouts : Array RawLayout}
     (valid : FeatureListValid layouts constants linkAt raw profile certificate reachable code)
     {state : FeatureListState} (member : some state ∈ certificate) :
     state.locals.length = raw.locals.length := by
-  obtain ⟨⟨⟨instruction, role⟩, pc⟩, emitted, checked⟩ := all3_mem valid.2.2.2.2 member
+  obtain ⟨⟨pc, previous, instruction, role⟩, emitted, checked⟩ := all3_mem valid.2.2.2.2 member
   simp only [checkFeatureSiteWith, wellShaped, LocalFacts.list, Bool.and_eq_true,
     beq_iff_eq] at checked
   exact checked.1.1.1.1
@@ -1263,9 +1302,8 @@ theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
     ∃ incoming, certificate[target]? = some (some incoming) := by
   obtain ⟨instruction, role, state, emitted, after, successors, rawAt, stateAt, codeAt,
     transferred, successorsAt, member⟩ := edge
-  have indexed : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
-      some ((instruction, role), pc) := by
-    simp [List.getElem?_zipIdx, rawAt]
+  obtain ⟨instructionAt, roleAt⟩ := List.getElem?_zip_eq_some.mp rawAt
+  have indexed := featureSites_at instructionAt roleAt
   have sites := valid.2.2.2.2
   have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
     funext index fact

@@ -75,11 +75,12 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
     nothing; `volatile.` is refused; every other instruction meets `indirectAccessMatches` with
     the instruction before it. -/
 def indirectSiteWindow (rawAt : Nat → Option RawInstruction) (pc : Nat)
-    (instruction : RawInstruction) (emitted : Instruction) (skipEncoding := false) : Bool :=
+    (instruction : RawInstruction) (emitted : Instruction) (skipEncoding := false)
+    (previous := rawBefore rawAt pc) : Bool :=
   match instruction.opcode with
   | 65042 =>
     (rawAt (pc + 1)).any (prefixTakes instruction) && (emitted matches .nop)
   | 65043 => false
-  | _ => indirectAccessMatches (rawBefore rawAt pc) instruction emitted skipEncoding
+  | _ => indirectAccessMatches previous instruction emitted skipEncoding
 
 end CIL.Extraction

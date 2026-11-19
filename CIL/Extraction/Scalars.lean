@@ -1242,7 +1242,7 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
     invalidPredecessor previous instruction = false ∧
       Instruction.ofRole? role previous instruction = some emitted ∧
       ∀ decoded, Instruction.ofRole? role previous instruction = some decoded →
-        featureOpMatchesAt layouts raw (some role) instruction decoded (fun _ => previous) = true ∧
+        featureOpMatchesAt layouts raw (some role) instruction decoded previous = true ∧
         scalarEmissionMatches layouts (some role) previous instruction stack decoded = true := by
   have feature := featureFlow.instruction_checked rawAt roleAt featureAt codeAt
   have scalar := scalarFlow.instruction_checked (live := fun _ => true)
