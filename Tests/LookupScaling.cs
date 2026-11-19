@@ -2033,9 +2033,35 @@ void ModelTableCosts()
           { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
             attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
             initLocals := true, maxStack := 1, genericParameters := [], code := [] }
+        /-- Decide the production relation on the supplied body. -/
+        @[noinline] def liveNops (raw : RawMethod) (reachable : List Bool) (body : Method) : Bool :=
+          decide (RuntimeModelsAgree raw reachable body)
+        /-- Median elapsed time with all three input lists allocated before timing. -/
+        def timeNops (count : Nat) : IO Nat := do
+          let raw := { shell with code := List.replicate count (.mk 0 0 .none) }
+          let body : Method := { code := List.replicate count .nop, locals := [], returnsValue := false }
+          let reachable := List.replicate count true
+          let mut samples := #[]
+          for trial in [:9] do
+            let start <- IO.monoNanosNow
+            unless liveNops { raw with token := trial } reachable body do
+              throw (IO.userError "RuntimeModelsAgree refused live nops")
+            let finish <- IO.monoNanosNow
+            samples := samples.push (finish - start)
+          return samples.qsortOrd[4]!
+        #eval show IO Unit from do
+          let mut previous := 0
+          for count in [512, 1024, 2048] do
+            let elapsed <- timeNops count
+            IO.println s!"RuntimeModelsAgree {count} live nops: {elapsed} ns"
+            if elapsed == 0 || (previous != 0 && elapsed * 100 > previous * 230) then
+              throw (IO.userError "RuntimeModelsAgree exceeded 1.15 times the cost per instruction")
+            previous := elapsed
         {{string.Join("\n", siteCounts.Select(Sites))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    foreach (var line in output.Split('\n').Where(line => line.StartsWith("RuntimeModelsAgree ", StringComparison.Ordinal)))
+        Console.WriteLine(line.TrimEnd());
     var costs = LookupPatterns.ModelTableCost.Matches(output).ToDictionary(
         match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));

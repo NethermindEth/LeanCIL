@@ -112,16 +112,20 @@ The suite also measures `decide +kernel` on runtime model lookups of the first, 
 entry of a table of 16 and of 256 entries, less the same statements closed with `sorry`.
 `model_table%` writes the table as a literal balanced tree keyed by method name code, so a lookup
 walks at most four more levels in the larger table and compares one method reference at the leaf:
-66,022 and 67,956 heartbeats for the first entry, 64,351 and 64,358 for the middle entry (the
-root), and 65,977 and 68,136 for the last. The suite fails when any position costs more than
+66,364 and 68,298 heartbeats for the first entry, 64,693 and 64,700 for the middle entry (the
+root), and 66,319 and 68,478 for the last. The suite fails when any position costs more than
 1.05 times as much at 256 entries as at 16.
 
 The same file measures 8, 32 and 128 live sites, each calling a distinct modelled method.
-Checking rejection at every site costs 168,000, 517,603 and 1,922,476 heartbeats.
+Checking rejection at every site costs 169,254, 521,797 and 1,938,700 heartbeats.
 The suite permits up to 1.15 times the previous rejection cost per site.
-Checking the complete body with `ModelsAgree` costs 249,615, 826,541 and 3,140,958 heartbeats
+Checking the complete body with `ModelsAgree` costs 253,780, 840,810 and 3,195,523 heartbeats
 when every site retains its call. The cost per retained call must stay flat or decrease.
-It falls from 31,202 to 25,829 to 24,539 heartbeats.
+It falls from 31,723 to 26,275 to 24,965 heartbeats.
+
+The compiled `RuntimeModelsAgree` check walks bodies of 512, 1,024 and 2,048 live nops.
+The median of nine walks took 1.53, 2.92 and 6.13 ms respectively on the integration machine.
+Each doubling permits at most 1.15 times the preceding median cost per instruction.
 Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
 

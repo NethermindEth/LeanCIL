@@ -83,27 +83,27 @@ def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnviro
 /-- The instruction walk checks live claims and the representation of dead calls. -/
 private def modelSitesAgree (catalog : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (closed : RawMethod) (reachable : List Bool)
-    (code : List Instruction) (linkAt : Nat → Option Link) : Bool :=
+    (code : List Instruction) (links : Array (Option Link)) : Bool :=
   let layouts := environment.callLayouts
   let roles := (foldRoles closed.locals closed.code).toArray
   all3 (fun (raw, pc) live emitted =>
     if live then
-      catalog.agreesAt layouts profile raw emitted (linkAt pc) (roles[pc]?.join) true
+      catalog.agreesAt layouts profile raw emitted links[pc]?.join (roles[pc]?.join) true
     else !methodTokenCall raw.opcode || decide (emitted = .unadmitted raw.opcode))
     closed.code.zipIdx reachable code
 
 /-- Every live call fits its claim. Links and raw fold roles are indexed once per body. -/
 def ModelsAgree (catalog : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (closed : RawMethod) (reachable : List Bool)
-    (code : List Instruction) (linkAt : Nat → Option Link := fun _ => none) : Prop :=
+    (code : List Instruction) (links : Array (Option Link) := #[]) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
-    modelSitesAgree catalog environment profile closed reachable code linkAt = true
+    modelSitesAgree catalog environment profile closed reachable code links = true
 
 instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (profile : FeatureProfile)
     (closed : RawMethod) (reachable : List Bool) (code : List Instruction)
-    (linkAt : Nat → Option Link) : Decidable (ModelsAgree catalog environment profile closed
-      reachable code linkAt) :=
-  decidable_of_iff (modelSitesAgree catalog environment profile closed reachable code linkAt =
+    (links : Array (Option Link)) : Decidable (ModelsAgree catalog environment profile closed
+      reachable code links) :=
+  decidable_of_iff (modelSitesAgree catalog environment profile closed reachable code links =
     true) <| by
     constructor
     · intro checked
@@ -115,7 +115,7 @@ instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (profile : F
 /-- Every live method-token call satisfies the runtime catalog or its linked-call obligation. -/
 def RuntimeModelsAgree (closed : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
   ModelsAgree runtimeCatalog method.environment method.profile closed reachable method.code
-    (linkIndex method)
+    (linkReads method.links (List.range method.code.length)).toArray
 
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (RuntimeModelsAgree closed reachable method) :=
@@ -134,10 +134,11 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
   have zipped : closed.code.zipIdx[pc]? = some (raw, pc) := by
     simp [List.getElem?_zipIdx, atRaw]
   have checked := all3_at checks zipped atLive (List.getElem?_eq_getElem inCode)
-  rw [← linkIndex_eq method] at refused
-  change siteClaim loweredCallFamily method.environment (linkIndex method pc) raw
+  have linkAt : (linkReads method.links (List.range method.code.length))[pc]?.join =
+      method.linkAt pc := by simp [linkReads_eq, inCode, Method.linkAt]
+  change siteClaim loweredCallFamily method.environment (method.linkAt pc) raw
     runtimeCatalog.table.find = .refused at refused
-  simp [ModelCatalog.agreesAt, token, ModelCatalog.callRequirement, refused,
+  simp [ModelCatalog.agreesAt, token, linkAt, ModelCatalog.callRequirement, refused,
     CallRequirement.accepts] at checked
 
 #print axioms RuntimeModelsAgree.siteClaimTotal
