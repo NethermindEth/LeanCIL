@@ -104,6 +104,8 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
     public string Proof()
     {
         var method = $"method{Method}";
+        var change = Claim == ".model" ? "declared.convention := site.declared.convention + 1" :
+            "target := .external \"Another overload\"";
         return $$"""
             namespace Extracted.{{Name}}
             open CIL CIL.Extraction
@@ -124,6 +126,16 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                 simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, token, resolved,
                   CallRequirement.accepts]
             #print axioms exactEmission
+            /-- Changing one part of the resolving operand leaves an opcode-tagged hole. -/
+            theorem unresolvedOverload :
+                let changed := match raw.operand with
+                  | .call site => { raw with operand := .call { site with {{change}} } }
+                  | _ => raw
+                let code := {{method}}Closed.code.set {{Pc}} changed
+                let changedRole := (foldRoles {{method}}Closed.locals code)[{{Pc}}]?.join
+                runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =
+                  .hole raw.opcode := by cil_kernel_rfl
+            #print axioms unresolvedOverload
             end Extracted.{{Name}}
             """;
     }

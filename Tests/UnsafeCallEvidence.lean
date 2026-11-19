@@ -1,4 +1,4 @@
-import CIL.Extraction.UnsafeCalls
+import CIL.Extraction.CallAgreement
 
 open CIL CIL.Extraction
 
@@ -105,12 +105,31 @@ namespace Tests.UnsafeCallEvidence
 /-- A type of the fixture's own assembly with the runtime `Unsafe` class's name. -/
 private def localUnsafe : TypeExpr := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe"
 
-/-- A genuine managed call to a local lookalike is not reserved as a lowered runtime helper. -/
+/-- A managed generic AreSame method in the fixture's assembly. -/
+private def localAreSame : CallSite := {
+  declared := {
+    convention := 0x10, returnType := .atom runtimeScope "System.Boolean",
+    parameters := [.byref (.parameter 0), .byref (.parameter 0)] }
+  method := {
+    owner := localUnsafe, name := name!"AreSame", hasThis := false, genericArity := 1,
+    methodArguments := [word], returnType := .atom runtimeScope "System.Boolean",
+    parameters := [.byref word, .byref word] }
+  name := "AreSame", target := .managed 23, typeArguments := [word],
+  parameterCount := 2, returnsValue := true }
+
+/-- A managed lookalike retains its operand and the direct link to its instantiated method. -/
 theorem local_reference_helper_name :
-    UnsafeCallsValid [] (raw { call with
-      method.owner := localUnsafe,
-      name := "AreSame", parameterCount := 2, returnsValue := true }) [true]
-      [.call { call.method with owner := localUnsafe }] := by
+    let instruction := RawInstruction.mk 0 40 (.call localAreSame)
+    let emitted := Instruction.call localAreSame.method {}
+    let callee : SpecializedMethod := {
+      arguments := [word], closed := { raw localAreSame with
+        token := 23, owner := "Fixture::System.Runtime.CompilerServices.Unsafe",
+        parameters := localAreSame.parameterTypes, returnType := localAreSame.returnType } }
+    let check := validateManagedCallWith 1 (fun i => if i == 0 then some callee else none)
+      (fun _ => none) instruction true
+    UnsafeCallsValid [] (raw localAreSame) [true] [emitted] ∧
+      siteClaim loweredCallFamily {} (some (.direct 0)) instruction = .link ∧
+      check (some (.direct 0)) emitted = true ∧ check (some (.direct 1)) emitted = false := by
   decide +kernel
 #print axioms local_reference_helper_name
 
