@@ -261,6 +261,20 @@ inductive FoldRole where
   | tailCall
   deriving DecidableEq, Repr
 
+/-- Calls use their site requirement. Other instructions in a fold emit their raw role. -/
+def Instruction.withCallDecoder (roles : Array (Option FoldRole)) (decodeCall : CallDecoder) :
+    CallDecoder := fun pc previous raw =>
+  if methodTokenCall raw.opcode then decodeCall pc previous raw
+  else match roles[pc]?.join with
+    | some .head | some .interior => .nop
+    | some (.result value) => .ldc_i4 (if value then 1 else 0)
+    | some (.typeBranch taken) => match raw.operand with
+      | .target target => if taken then .br target else .nop
+      | _ => .unadmitted raw.opcode
+    | some (.raise exception) => .throw exception
+    | some (.spanConstructor index constructor) => .initializeSpanLocal index constructor
+    | _ => Instruction.ofRaw previous raw
+
 /-- Resetting a span local binds its exact type and never exposes its storage address. -/
 private def spanDefaultFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
     (tail : List RawInstruction) : Option (List (Option FoldRole)) := do

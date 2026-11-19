@@ -623,10 +623,6 @@ def rawBefore (rawAt : Nat → Option RawInstruction) (pc : Nat) : Option RawIns
 /-- The decoder at a method-token call can use its enclosing method's binding information. -/
 abbrev CallDecoder := Nat → Option RawInstruction → RawInstruction → Instruction
 
-/-- Ordinary instructions use their value encoding. Method-token calls use the supplied decoder. -/
-def Instruction.withCallDecoder (decodeCall : CallDecoder) : CallDecoder := fun pc previous raw =>
-  if methodTokenCall raw.opcode then decodeCall pc previous raw else Instruction.ofRaw previous raw
-
 /-- The instruction at `pc`, with the preceding raw instruction available for prefixes. -/
 def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat)
     (decode : Nat → Option RawInstruction → RawInstruction → Instruction :=

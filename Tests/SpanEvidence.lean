@@ -1,5 +1,6 @@
 import CIL.Extraction.Features
-import CIL.Extraction.SpanCalls
+import CIL.Extraction.DecodedMethod
+import CIL.Safety.Execution
 
 set_option maxRecDepth 4096
 
@@ -189,6 +190,29 @@ theorem constructor_fold : foldRoles [words] constructorCode =
     [some .head, some .argument, some (.spanConstructor 0 (.array .unsigned32 false .whole)),
       none] := by decide +kernel
 #print axioms constructor_fold
+
+/-- The folded byte-span constructor consumes its argument and returns with an empty stack. -/
+theorem decoded_span_constructor_returns :
+    let byte := TypeExpr.atom runtimeScope "System.Byte"
+    let bytes := TypeExpr.apply (.constructor runtimeScope "System.Span`1") byte
+    let ctor := { localConstructor with
+      method.owner := bytes,
+      method.parameters := [.byref byte], declared.parameters := [.byref (.ownerParameter 0)],
+      target := .external (runtimeScope ++ "::System.Void System.Span`1<System.Byte>::.ctor(!0&)") }
+    let source := { raw [bytes] [i 18 (.local 0), i 2, i 40 (.call ctor), i 42] with
+      parameters := [.byref byte], returnType := .void }
+    let method := Method.ofRaw? .scalar {} [] source []
+    let memory : Safety.Memory := { Safety.Memory.empty with
+      allocations := fun id => if id == 0 then
+        some ⟨.callerStack, ⟨1, 1, []⟩, true, []⟩ else none,
+      views := [⟨0, 0, 1, true, true⟩], nextIdentity := 1 }
+    method.map Method.code = some [.nop, .ldarg 0, .initializeSpanLocal 0
+      (.singleReference 1 true), .ret] ∧
+      (method.bind fun body => (Safety.invoke [body] 5 0 [.reference (.address ⟨0, 0⟩)]
+        memory).toOption.map (·.2)) = some [] := by
+  exact ⟨rfl, rfl⟩
+
+#print axioms decoded_span_constructor_returns
 
 /-- Constructor arguments and the constructor itself cannot be external branch targets. -/
 theorem constructor_no_interior_entry :

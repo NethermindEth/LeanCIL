@@ -146,7 +146,7 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
     prefixes for the managed-call checks. An unlinked lowering cannot discard a prefix. -/
 def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
     (occupied : Std.TreeSet Nat) (roles : Array (Option FoldRole)) : CallDecoder :=
-  Instruction.withCallDecoder fun pc previous raw =>
+  Instruction.withCallDecoder roles fun pc previous raw =>
     if occupied.contains pc then
       (runtimeCatalog.linkedRequirement environment.toLayoutEnvironment profile raw).decode
         (fun _ => Instruction.ofRaw previous raw)

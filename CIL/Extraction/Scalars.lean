@@ -1110,7 +1110,7 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
     (successor : List ScalarKind → Nat → Bool) (instruction : RawInstruction)
     (role : Option FoldRole) (pc : Nat) (feature : Option FeatureState)
     (stack : Option (List ScalarKind)) (emitted : Instruction)
-    (same : methodTokenCall instruction.opcode = false →
+    (same : methodTokenCall instruction.opcode = false → role = none →
       emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction) :
     checkScalarSite true layouts raw context locals rawAt successor ((instruction, role), pc)
         feature stack emitted =
@@ -1122,7 +1122,9 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
           valueEncodingMatches (rawBefore rawAt pc) instruction emitted := by
     by_cases called : methodTokenCall instruction.opcode = true
     · simp [decodedValueSite, called]
-    have same := same (Bool.eq_false_iff.mpr called)
+    by_cases unfolded : role = none
+    case neg => cases role <;> simp_all [decodedValueSite]
+    have same := same (Bool.eq_false_iff.mpr called) unfolded
     cases partialDecode : Instruction.ofRaw? (rawBefore rawAt pc) instruction with
     | none =>
       simp [Instruction.ofRaw, partialDecode] at same
@@ -1147,7 +1149,8 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
 theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
     {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
     {decodeCall : CallDecoder}
-    (same : code = Instruction.ofRawCode none raw.code (Instruction.withCallDecoder decodeCall))
+    (same : code = Instruction.ofRawCode none raw.code
+        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray decodeCall))
     (valid : ScalarFlowValid layouts raw features certificate code true) :
     ScalarFlowValid layouts raw features certificate code false := by
   dsimp only [ScalarFlowValid] at valid ⊢
@@ -1164,8 +1167,11 @@ theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
     at emittedAt
   apply Eq.symm
   apply decodedSite_eq
-  intro ordinary
-  simpa only [Instruction.withCallDecoder, ordinary, Bool.false_eq_true, ite_false, rawBefore,
+  intro ordinary unfolded
+  have roleAt := (List.getElem?_zip_eq_some.mp entry).2
+  rw [unfolded] at roleAt
+  simpa only [Instruction.withCallDecoder, ordinary, Bool.false_eq_true, ite_false,
+    List.getElem?_toArray, roleAt, Option.join, Option.bind_some, id, rawBefore,
     FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
 
 #print axioms ScalarFlowValid.of_decoded
@@ -1178,7 +1184,8 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     {decoded : Bool} (valid : ScalarFlowValid layouts raw features certificate code decoded)
     {decodeCall : CallDecoder}
     (codeDecodes : decoded = true → code =
-      Instruction.ofRawCode none raw.code (Instruction.withCallDecoder decodeCall))
+      Instruction.ofRawCode none raw.code
+        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray decodeCall))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
