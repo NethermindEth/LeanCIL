@@ -2,6 +2,7 @@ import CIL.Safety.Execution
 import CIL.Safety.StepComposition
 import CIL.Safety.BoundaryStepRenaming
 import CIL.Extraction.CallAgreement
+import CIL.Extraction.DecodedDefinition
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.KernelEquation
 import CIL.ProfileEquivalence
@@ -652,7 +653,7 @@ private def receiver : Value := .object (.address ⟨0, 0⟩)
 example : step { body with code := [.call CIL.Extraction.objectConstructorMethod {}] }
     (.call CIL.Extraction.objectConstructorMethod {}) 0 [] frame [receiver] heapMemory =
       step body .pop 0 [] frame [receiver] heapMemory := by
-  cil_kernel_rfl
+  rfl
 
 /-- The method loads its arguments, executes one unlinked runtime call and returns. -/
 private def invokeCall (method : CIL.Extraction.MethodRef) (args : List Value)
@@ -686,6 +687,213 @@ private def nullGuard : CIL.Extraction.MethodRef :=
 example : invokeCall nullGuard [.object .null, .object .null] false =
     .error ⟨0, 2, .thrown .argumentNull⟩ := by rfl
 
+namespace ClosedMembers
+open CIL CIL.Extraction
+
+/-- The fixture has no aggregate layout rows. -/
+private def layouts : LayoutEnvironment := {}
+
+/-- Each wrapper loads the member's arguments, calls it without a link, and returns its result. -/
+private def wrapper (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (member : MethodRef) : Option Method :=
+  let count := member.parameters.length + member.hasThis.toNat
+  let code := (List.range count).map Instruction.ldarg ++ [.call member {}, .ret]
+  let returnsValue := member.returnType != .void
+  some { body with profile, environment, code, returnsValue }
+
+/-- The scalar invocation exposes either the returned values or the located fault. -/
+private def run (method : Method) (args : List Safety.Value) (memory := Tests.caller) :=
+  (Safety.invoke [method] 8 0 args memory).map Prod.snd
+
+/-- The closed signature supplies the static member's parameters and method type arguments. -/
+private def member (owner : TypeExpr) (name : MetadataName) (result : TypeExpr)
+    (parameters : List TypeExpr := []) (arguments : List TypeExpr := []) : MethodRef :=
+  { owner, name, hasThis := false, genericArity := arguments.length,
+    returnType := result, parameters, methodArguments := arguments }
+
+/-- The scalar element in the generic memory helpers is a runtime byte. -/
+private def byte := TypeExpr.atom runtimeScope "System.Byte"
+
+/-- The byte spans carry the closed element type in their return or parameter signature. -/
+private def span (writable : Bool) := TypeExpr.apply (spanHead writable) byte
+
+/-- The runtime helpers share the same static owner. -/
+private def helpers := TypeExpr.atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers"
+
+cil_decoded_method platformBody := wrapper FeatureProfile.scalar layouts
+  (member (.atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2") name!"get_IsSupported"
+    booleanType)
+
+/-- The scalar profile reports AVX2 as unavailable. -/
+theorem platform_result : run platformBody [] =
+    .ok [.scalar (.i32 0)] := rfl
+
+#print axioms platform_result
+
+cil_decoded_method binaryReadBody := wrapper FeatureProfile.scalar layouts
+  (member (.atom spanMemoryScope "System.Buffers.Binary.BinaryPrimitives")
+    name!"ReadInt16BigEndian" (.atom runtimeScope "System.Int16") [span false])
+
+/-- Reading the two static bytes as a big-endian Int16 gives 0x0707. -/
+theorem binaryRead_result :
+    run binaryReadBody [.bufferSpan ⟨.address ⟨0, 0⟩, 2, 1, false⟩] staticMemory =
+    .ok [.scalar (.i32 1799)] := rfl
+
+#print axioms binaryRead_result
+
+cil_decoded_method vectorLaneBody := wrapper FeatureProfile.scalar layouts
+  getElement128Method
+
+/-- The vector helper reads the initialized low lane. -/
+theorem vectorLane_result : run vectorLaneBody [.scalar (.v128Low64 7), .scalar (.i32 0)] =
+    .ok [.scalar (.i64 7)] := rfl
+
+#print axioms vectorLane_result
+
+cil_decoded_method vectorBroadcastBody := wrapper FeatureProfile.scalar layouts
+  broadcast256Method
+
+/-- Broadcasting the word places it in all four lanes. -/
+theorem vectorBroadcast_result : run vectorBroadcastBody [.scalar (.i64 3)] =
+    .ok [.scalar (.v256 (CIL.Vector.pack256 3 3 3 3))] := rfl
+
+#print axioms vectorBroadcast_result
+
+cil_decoded_method populationBody := wrapper FeatureProfile.scalar layouts
+  (member (.atom runtimeScope "System.Numerics.BitOperations") name!"PopCount" int32Type
+    [Table.word])
+
+/-- The population count of seven is three. -/
+theorem population_result : run populationBody [.scalar (.i64 7)] =
+    .ok [.scalar (.i32 3)] := rfl
+
+#print axioms population_result
+
+cil_decoded_method asSpanBody := wrapper FeatureProfile.scalar layouts
+  (member (.atom spanMemoryScope "System.MemoryExtensions") name!"AsSpan" (span true)
+    [.array byte] [byte])
+
+/-- The whole-array extension returns an empty writable span for a null array. -/
+theorem asSpan_result : run asSpanBody [.object .null] =
+    .ok [.bufferSpan ⟨.null, 0, 1, true⟩] := rfl
+
+#print axioms asSpan_result
+
+cil_decoded_method fillArrayBody := wrapper FeatureProfile.scalar layouts
+  (member (.atom runtimeScope "System.Array") name!"Fill" .void [.array byte, byte] [byte])
+
+/-- Filling a null array faults at the call. -/
+theorem fillArray_result : run fillArrayBody [.object .null, .scalar (.i32 7)] =
+    .error ⟨0, 2, .thrown .argumentNull⟩ := rfl
+
+#print axioms fillArray_result
+
+cil_decoded_method staticSpanBody := wrapper FeatureProfile.scalar layouts
+  (member helpers name!"CreateSpan" (span false) [.atom runtimeScope "System.RuntimeFieldHandle"]
+    [byte])
+
+/-- The field handle exposes sixteen static bytes. -/
+theorem staticSpan_result : run staticSpanBody [Tests.reference] staticMemory =
+    .ok [.span (.address ⟨0, 0⟩) 16] := rfl
+
+#print axioms staticSpan_result
+
+cil_decoded_method guardNullBody := wrapper FeatureProfile.scalar layouts
+  nullGuard
+
+/-- The decoded guard reports the null argument at the call. -/
+theorem guardNull_result : run guardNullBody [.object .null, .object .null] =
+    .error ⟨0, 2, .thrown .argumentNull⟩ := rfl
+
+#print axioms guardNull_result
+
+cil_decoded_method spanLengthBody := wrapper FeatureProfile.scalar layouts
+  (Table.spanLength Table.word)
+
+/-- The span getter returns the element count. -/
+theorem spanLength_result : run spanLengthBody [.span (.address ⟨0, 0⟩) 2] =
+    .ok [.scalar (.i32 2)] := rfl
+
+#print axioms spanLength_result
+
+cil_decoded_method referenceContentBody := wrapper FeatureProfile.scalar layouts
+  (member helpers name!"IsReferenceOrContainsReferences" booleanType [] [byte])
+
+/-- A byte contains no managed references. -/
+theorem referenceContent_result : run referenceContentBody [] =
+    .ok [.scalar (.i32 0)] := rfl
+
+#print axioms referenceContent_result
+
+cil_decoded_method marshalReferenceBody := wrapper FeatureProfile.scalar layouts
+  (member (.atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal") name!"GetReference"
+    (.byref byte) [span true] [byte])
+
+/-- The marshal helper returns the start of the span. -/
+theorem marshalReference_result :
+    run marshalReferenceBody [.bufferSpan ⟨.address ⟨0, 0⟩, 1, 1, true⟩] =
+    .ok [Tests.reference] := rfl
+
+#print axioms marshalReference_result
+
+cil_decoded_method sizeOfBody := wrapper FeatureProfile.scalar layouts
+  (member unsafeOwner name!"SizeOf" int32Type [] [byte])
+
+/-- A byte occupies one byte. -/
+theorem sizeOf_result : run sizeOfBody [] =
+    .ok [.scalar (.i32 1)] := rfl
+
+#print axioms sizeOf_result
+
+cil_decoded_method reinterpretBody := wrapper FeatureProfile.scalar layouts
+  (member unsafeOwner name!"As" (.byref byte) [.byref byte] [byte, byte])
+
+/-- Reinterpreting a byte reference preserves its address. -/
+theorem reinterpret_result : run reinterpretBody [Tests.reference] =
+    .ok [Tests.reference] := rfl
+
+#print axioms reinterpret_result
+
+cil_decoded_method nullRefBody := wrapper FeatureProfile.scalar layouts
+  (member unsafeOwner name!"NullRef" (.byref byte) [] [byte])
+
+/-- The null reference helper returns a null managed reference. -/
+theorem nullRef_result : run nullRefBody [] =
+    .ok [.reference .null] := rfl
+
+#print axioms nullRef_result
+
+cil_decoded_method offsetBody := wrapper FeatureProfile.scalar layouts
+  (member unsafeOwner name!"ByteOffset" (.atom runtimeScope "System.IntPtr")
+    [.byref byte, .byref byte] [byte])
+
+/-- The two references differ by four bytes. -/
+theorem offset_result : run offsetBody [start, fourth] =
+    .ok [.scalar (.i64 4)] := rfl
+
+#print axioms offset_result
+
+cil_decoded_method loadByteBody := wrapper FeatureProfile.scalar layouts
+  (member unsafeOwner name!"ReadUnaligned" byte [.byref byte] [byte])
+
+/-- The unaligned transfer reads the initialized static byte. -/
+theorem loadByte_result : run loadByteBody [Tests.reference] staticMemory =
+    .ok [.scalar (.i32 7)] := rfl
+
+#print axioms loadByte_result
+
+cil_decoded_method blockInitBody := wrapper FeatureProfile.scalar layouts
+  (member unsafeOwner name!"InitBlockUnaligned" .void
+    [.byref byte, byte, .atom runtimeScope "System.UInt32"])
+
+/-- A one-byte block initialization succeeds in writable caller memory. -/
+theorem blockInit_result :
+    run blockInitBody [Tests.reference, .scalar (.i32 9), .scalar (.i32 1)] = .ok [] := rfl
+
+#print axioms blockInit_result
+
+end ClosedMembers
+
 -- Each helper call steps as the scalar intrinsic it was lowered to, faults included.
 /-- A body whose only instruction is a call of `method`, with no link. -/
 private def calling (method : CIL.Extraction.MethodRef) : CIL.Method :=
@@ -694,41 +902,41 @@ private def int32 (value : Int) : Value := .scalar (.i32 (BitVec.ofInt 32 value)
 example : step (calling Table.mathMin) (.call Table.mathMin {}) 0 [] frame [int32 3, int32 (-2)]
       heapMemory =
     step body (.intrinsic (.scalar (.math .min 32 true)) 2) 0 [] frame [int32 3, int32 (-2)]
-      heapMemory := by cil_kernel_rfl
+      heapMemory := by rfl
 example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame [int32 3, int32 (-2)]
       heapMemory =
     step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame [int32 3, int32 (-2)]
-      heapMemory := by cil_kernel_rfl
+      heapMemory := by rfl
 example : step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
       [int32 9, int32 1, int32 5] heapMemory =
     step body (.intrinsic (.scalar (.math .clamp 32 true)) 3) 0 [] frame
-      [int32 9, int32 1, int32 5] heapMemory := by cil_kernel_rfl
+      [int32 9, int32 1, int32 5] heapMemory := by rfl
 example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame [int32 (-7)]
       heapMemory =
     step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-7)]
-      heapMemory := by cil_kernel_rfl
+      heapMemory := by rfl
 example : step (calling Table.mathSign) (.call Table.mathSign {}) 0 [] frame
       [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory =
     step body (.intrinsic (.scalar (.math .sign 64 true)) 1) 0 [] frame
-      [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory := by cil_kernel_rfl
+      [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory := by rfl
 example : (step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
-    [int32 3, int32 (-2)] heapMemory).toBool := by cil_kernel_rfl
+    [int32 3, int32 (-2)] heapMemory).toBool := by rfl
 -- Bounds out of order and the most negative `Abs` fault as the intrinsic does.
 example : step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
       [int32 1, int32 5, int32 9] heapMemory =
     step body (.intrinsic (.scalar (.math .clamp 32 true)) 3) 0 [] frame
-      [int32 1, int32 5, int32 9] heapMemory := by cil_kernel_rfl
+      [int32 1, int32 5, int32 9] heapMemory := by rfl
 example : (step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
-    [int32 1, int32 5, int32 9] heapMemory).toBool = false := by cil_kernel_rfl
+    [int32 1, int32 5, int32 9] heapMemory).toBool = false := by rfl
 example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame
       [int32 (-2147483648)] heapMemory =
     step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-2147483648)]
-      heapMemory := by cil_kernel_rfl
+      heapMemory := by rfl
 -- A modelled call leaves unspecified operands to its model, so it faults as the intrinsic does.
 example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
       [.scalar (.v128Low64 7), int32 1] heapMemory =
     step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame
-      [.scalar (.v128Low64 7), int32 1] heapMemory := by cil_kernel_rfl
+      [.scalar (.v128Low64 7), int32 1] heapMemory := by rfl
 
 section
 open CIL.Extraction (createScalarUnsafeMethod getElement128Method getElement256Method)
@@ -738,31 +946,31 @@ open CIL.Extraction (createScalarUnsafeMethod getElement128Method getElement256M
 example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
       [int32 0, .scalar (.v128Low64 7)] heapMemory =
     step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
-      [int32 0, .scalar (.v128Low64 7)] heapMemory := by cil_kernel_rfl
+      [int32 0, .scalar (.v128Low64 7)] heapMemory := by rfl
 example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
       [int32 0, .scalar (.v128Low64 7)] heapMemory =
-    .ok (.next 1 [.scalar (.i64 7)] frame heapMemory) := by cil_kernel_rfl
+    .ok (.next 1 [.scalar (.i64 7)] frame heapMemory) := by rfl
 example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
       [int32 1, .scalar (.v128Low64 7)] heapMemory =
     step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
-      [int32 1, .scalar (.v128Low64 7)] heapMemory := by cil_kernel_rfl
+      [int32 1, .scalar (.v128Low64 7)] heapMemory := by rfl
 /-- A 256-bit vector whose four 64-bit lanes hold 1, 2, 3 and 4, lowest first. -/
 private def lanes : BitVec 256 := CIL.Vector.pack256 1 2 3 4
 example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
       [int32 2, .scalar (.v256 lanes)] heapMemory =
     step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
-      [int32 2, .scalar (.v256 lanes)] heapMemory := by cil_kernel_rfl
+      [int32 2, .scalar (.v256 lanes)] heapMemory := by rfl
 example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
       [int32 2, .scalar (.v256 lanes)] heapMemory =
-    .ok (.next 1 [.scalar (.i64 3)] frame heapMemory) := by cil_kernel_rfl
+    .ok (.next 1 [.scalar (.i64 3)] frame heapMemory) := by rfl
 example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
       [int32 4, .scalar (.v256 lanes)] heapMemory =
     step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
-      [int32 4, .scalar (.v256 lanes)] heapMemory := by cil_kernel_rfl
+      [int32 4, .scalar (.v256 lanes)] heapMemory := by rfl
 example : step (calling createScalarUnsafeMethod) (.call createScalarUnsafeMethod {}) 0 [] frame
       [.scalar (.i64 7)] heapMemory =
     step body (.intrinsic (.vector .createScalarUnsafe64) 1) 0 [] frame [.scalar (.i64 7)]
-      heapMemory := by cil_kernel_rfl
+      heapMemory := by rfl
 
 /-- `GetElement(CreateScalarUnsafe(value), 0)` as two calls, as an extraction emits it. -/
 private def unsafeLow : CIL.Program :=
@@ -771,7 +979,7 @@ private def unsafeLow : CIL.Program :=
         .call getElement128Method {}, .ret],
       returnsValue := true }]
 example : (invoke unsafeLow 8 0 [.scalar (.i64 7)] Memory.empty).map Prod.snd =
-    .ok [.scalar (.i64 7)] := by cil_kernel_rfl
+    .ok [.scalar (.i64 7)] := by rfl
 
 end
 

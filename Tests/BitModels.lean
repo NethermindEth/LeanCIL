@@ -231,55 +231,55 @@ private def i64 (bits : Nat) : CIL.Safety.Value := .scalar (.i64 (BitVec.ofNat 6
 -- model states: an int from `BitOperations.PopCount`, a long from `UInt64.PopCount`.
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i64 7] Memory.empty =
     step body (.intrinsic (.scalar (.popCount 64 .word32)) 1) 0 [] frame [i64 7]
-      Memory.empty := by cil_kernel_rfl
+      Memory.empty := by rfl
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i64 7] Memory.empty =
-    .ok (.next 1 [i32 3] frame Memory.empty) := by cil_kernel_rfl
+    .ok (.next 1 [i32 3] frame Memory.empty) := by rfl
 example : step (calling ulongPopCount) (.call ulongPopCount {}) 0 [] frame [i64 7] Memory.empty =
-    .ok (.next 1 [i64 3] frame Memory.empty) := by cil_kernel_rfl
+    .ok (.next 1 [i64 3] frame Memory.empty) := by rfl
 example : step (calling bytePopCount) (.call bytePopCount {}) 0 [] frame [i32 0x1FF]
-    Memory.empty = .ok (.next 1 [i32 8] frame Memory.empty) := by cil_kernel_rfl
+    Memory.empty = .ok (.next 1 [i32 8] frame Memory.empty) := by rfl
 example : step (calling rotateLeft) (.call rotateLeft {}) 0 [] frame [i64 1, i32 65]
       Memory.empty =
     step body (.intrinsic (.scalar (.rotateLeft 64)) 2) 0 [] frame [i64 1, i32 65]
-      Memory.empty := by cil_kernel_rfl
+      Memory.empty := by rfl
 example : step (calling isPow2) (.call isPow2 {}) 0 [] frame [i64 (2 ^ 63)] Memory.empty =
-    .ok (.next 1 [i32 0] frame Memory.empty) := by cil_kernel_rfl
+    .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 
 -- The counts and `Log2` of zero, `RoundUpToPowerOf2` past the largest power, and the byte
 -- reversal of a sign-extended narrow value step as their intrinsics.
 example : step (calling log2) (.call log2 {}) 0 [] frame [i64 0] Memory.empty =
     step body (.intrinsic (.scalar (.log2 64 .word32)) 1) 0 [] frame [i64 0] Memory.empty := by
-  cil_kernel_rfl
+  rfl
 example : step (calling log2) (.call log2 {}) 0 [] frame [i64 0] Memory.empty =
-    .ok (.next 1 [i32 0] frame Memory.empty) := by cil_kernel_rfl
+    .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 example : step (calling leadingZeroCount) (.call leadingZeroCount {}) 0 [] frame [i32 0]
       Memory.empty =
     step body (.intrinsic (.scalar (.leadingZeroCount 32 .word32)) 1) 0 [] frame [i32 0]
-      Memory.empty := by cil_kernel_rfl
+      Memory.empty := by rfl
 example : step (calling leadingZeroCount) (.call leadingZeroCount {}) 0 [] frame [i32 0]
-    Memory.empty = .ok (.next 1 [i32 32] frame Memory.empty) := by cil_kernel_rfl
+    Memory.empty = .ok (.next 1 [i32 32] frame Memory.empty) := by rfl
 example : step (calling trailingZeroCount) (.call trailingZeroCount {}) 0 [] frame [i64 0]
-    Memory.empty = .ok (.next 1 [i32 64] frame Memory.empty) := by cil_kernel_rfl
+    Memory.empty = .ok (.next 1 [i32 64] frame Memory.empty) := by rfl
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i64 0] Memory.empty =
-    .ok (.next 1 [i32 0] frame Memory.empty) := by cil_kernel_rfl
+    .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 example : step (calling roundUp) (.call roundUp {}) 0 [] frame [i32 0x80000001] Memory.empty =
     step body (.intrinsic (.scalar (.roundUpToPowerOf2 32)) 1) 0 [] frame [i32 0x80000001]
-      Memory.empty := by cil_kernel_rfl
+      Memory.empty := by rfl
 example : step (calling roundUp) (.call roundUp {}) 0 [] frame [i32 0x80000001] Memory.empty =
-    .ok (.next 1 [i32 0] frame Memory.empty) := by cil_kernel_rfl
+    .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 example : step (calling reverseShort) (.call reverseShort {}) 0 [] frame [i32 0xFFFFFF80]
       Memory.empty =
     step body (.intrinsic (.scalar (.reverseEndianness 16 true)) 1) 0 [] frame [i32 0xFFFFFF80]
-      Memory.empty := by cil_kernel_rfl
+      Memory.empty := by rfl
 example : step (calling reverseShort) (.call reverseShort {}) 0 [] frame [i32 0xFFFFFF80]
-    Memory.empty = .ok (.next 1 [i32 0xFFFF80FF] frame Memory.empty) := by cil_kernel_rfl
+    Memory.empty = .ok (.next 1 [i32 0xFFFF80FF] frame Memory.empty) := by rfl
 example : step (calling reverseSbyte) (.call reverseSbyte {}) 0 [] frame [i32 0xFFFFFF80]
-    Memory.empty = .ok (.next 1 [i32 0xFFFFFF80] frame Memory.empty) := by cil_kernel_rfl
+    Memory.empty = .ok (.next 1 [i32 0xFFFFFF80] frame Memory.empty) := by rfl
 -- A call faults where its intrinsic does: a 64-bit helper given a 32-bit word.
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i32 7] Memory.empty =
     step body (.intrinsic (.scalar (.popCount 64 .word32)) 1) 0 [] frame [i32 7]
-      Memory.empty := by cil_kernel_rfl
+      Memory.empty := by rfl
 example : (step (calling popCount) (.call popCount {}) 0 [] frame [i32 7] Memory.empty).toBool =
-    false := by cil_kernel_rfl
+    false := by rfl
 
 end Tests.BitModels

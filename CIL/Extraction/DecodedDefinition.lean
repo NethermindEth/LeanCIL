@@ -90,11 +90,14 @@ partial def literal (named : Expr → Option Expr) (type term : Expr) : MetaM Ex
       remaining := body.instantiate1 field
     return mkAppN value.getAppFn written
 
-/-- Writes the runtime scope as its named constant, as an extraction writes it, so fact commands
-    that match the scope by name read a decoded method as they read an extracted one. -/
+/-- Decoded assembly scopes share the runtime table's byte-backed identities, including
+    member owners and signature types with no layout row. -/
 local instance : ToExpr String where
   toExpr text :=
-    if text == Extraction.runtimeScope then mkConst ``Extraction.runtimeScope else mkStrLit text
+    if text == runtimeScope then mkConst ``runtimeScope
+    else if text == intrinsicsScope then mkConst ``intrinsicsScope
+    else if text == spanMemoryScope then mkConst ``spanMemoryScope
+    else mkStrLit text
   toTypeExpr := mkConst ``String
 
 deriving instance ToExpr for ComparisonGuard

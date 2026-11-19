@@ -713,9 +713,11 @@ those of that lowered step.
 
 For a closed generic struct, including a runtime value tuple, `Extracted.layoutIdentity{k}`
 stores the checked UTF-8 bytes of its fully scoped name at layout index `k`. The layout row
-and decoded operands, including call signatures, share that definition. Closed execution proofs
-can use `rfl` to compare these names. After projecting the returned values or another decidable
-result from `CIL.Safety.invoke`, `decide` also compares the result or the located fault.
+and decoded operands, including call signatures, share that definition. Decoded owners and
+signature types also share the runtime, intrinsics and memory assembly scopes with the model table,
+including types with no layout row. Closed execution proofs can use `rfl` for these comparisons.
+After projecting the returned values or another decidable result from `CIL.Safety.invoke`,
+`decide` also compares the result or the located fault.
 
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared tag. For an enum,
