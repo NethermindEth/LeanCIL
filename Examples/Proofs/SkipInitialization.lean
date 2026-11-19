@@ -65,11 +65,6 @@ cil_decoded_method skipWithLayout := Method.ofRaw? Extracted.profile Extracted.e
 /-- The same decoding environment with no aggregate layouts. -/
 private def emptyLayouts : CIL.LayoutEnvironment := {}
 
-open CIL in
-cil_decoded_method skipWithoutLayout := Method.ofRaw? Extracted.profile emptyLayouts
-  Extracted.method0Links Extracted.method0Reachable Extracted.method0Original
-  Extracted.method0TypeArgumentsRaw
-
 /-- The decoder retains the call with the method reference from the raw operand. -/
 theorem resolved_skip :
     let raw := Extracted.method0Closed.code[1]'(by decide)
@@ -88,8 +83,12 @@ theorem compiled_step (args : List Value) (frame : Frame) (stack : List Value) :
 
 #print axioms compiled_step
 
-/-- Omitting the value type's layout leaves a hole at the same raw call. -/
-theorem unresolved_skip : skipWithoutLayout.code[1]? = some (.unadmitted 40) := rfl
+/-- Without the value type's layout the call has no model, so the decoder refuses the method. -/
+theorem unresolved_skip :
+    (CIL.Method.ofRaw? Extracted.profile emptyLayouts Extracted.method0Links
+      Extracted.method0Reachable Extracted.method0Original
+      Extracted.method0TypeArgumentsRaw).isNone = true := by
+  decide +kernel
 
 #print axioms unresolved_skip
 
