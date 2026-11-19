@@ -16,8 +16,7 @@ if (args.Contains("--declared-only", StringComparer.Ordinal)) return;
 
 BuildLeanTestLibraries("Generic owner index scaling library", "Tests.GenericOwnerScaling");
 
-// Real compiled C# call graph: each method fits the ordinary budget, while one monolithic elaborator `decide`
-// over the whole certificate is refused at once, since only the kernel may evaluate the body and metadata check.
+// Each method fits the default budget. Elaborator reduction of the entire six-method certificate fails.
 var directory = At("artifacts/TranslationScaling");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
@@ -42,11 +41,16 @@ var end = extracted.IndexOf("def programLength", start, StringComparison.Ordinal
 var monolithicSource = extracted[..start] +
     "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
     "methodEvidence imports program := by decide\n" + extracted[end..];
-void RequireElaboratorRefusal(int code, string diagnostic)
+void RequireElaboratorRefusal(string path, int code, string diagnostic)
 {
+    var theoremLine = File.ReadLines(path).TakeWhile(line =>
+        !line.StartsWith("theorem translation_valid :", StringComparison.Ordinal)).Count() + 1;
     var errors = diagnostic.Split('\n').Where(line => line.Contains(": error:", StringComparison.Ordinal)).ToArray();
+    const string timeout = "(deterministic) timeout at `whnf`, maximum number of heartbeats (200000)";
     if (code == 0 || errors.Length != 1 ||
-        !errors[0].Contains("failed to reduce", StringComparison.Ordinal))
+        !errors[0].Contains($"{Path.GetFileName(path)}:{theoremLine}:", StringComparison.Ordinal) ||
+        !(errors[0].Contains("Tactic `decide` failed to reduce", StringComparison.Ordinal) ||
+          errors[0].Contains(timeout, StringComparison.Ordinal)))
         throw new InvalidOperationException(
             "Fixture no longer demonstrates the elaborator refusing the monolithic certificate: " + diagnostic);
 }
@@ -61,7 +65,7 @@ if (args.Contains("--measure", StringComparer.Ordinal))
     File.WriteAllText(original, monolithicSource);
     var result = Execute(["lake", "env", "lean", "-DElab.async=false", original], cwd: FixturePackage(),
         progress: "Baseline complete monolithic refusal");
-    RequireElaboratorRefusal(result.Code, result.Output);
+    RequireElaboratorRefusal(original, result.Code, result.Output);
 }
 var old = Path.Combine(directory, "Monolithic.lean");
 // The monolithic decision uses the raw definitions, not the already-proved component lemmas.
@@ -69,7 +73,7 @@ var old = Path.Combine(directory, "Monolithic.lean");
 File.WriteAllText(old, NarrowEvidence(monolithicSource, "translation_valid"));
 var monolithic = Execute(["lake", "env", "lean", "-DElab.async=false", old], cwd: FixturePackage(),
     progress: "Checking monolithic certificate refusal");
-RequireElaboratorRefusal(monolithic.Code, monolithic.Output);
+RequireElaboratorRefusal(old, monolithic.Code, monolithic.Output);
 Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the monolithic certificate");
 
 // The kernel decides the monolithic certificate. Its heartbeats and peak memory per added method of the call graph

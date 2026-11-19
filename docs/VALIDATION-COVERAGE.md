@@ -371,9 +371,9 @@ performance fixture is never supplied to a verifier as a certified library.
   checked module.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
-- `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
-  compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
-  since only the kernel may evaluate the body and metadata check. `--measure` also
+- `Tests/TranslationScaling.cs` requires the elaborator's `decide` to fail on the six-method
+  monolithic certificate, either at a reduction it cannot perform or at the default heartbeat
+  limit while reducing to weak head normal form. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
   The kernel decides the monolithic certificate of call graphs of 2, 4 and 8 methods, and the
   heartbeats and peak memory of a method added from 4 to 8 may be at most 1.2 times those of one
