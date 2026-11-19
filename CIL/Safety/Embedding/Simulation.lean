@@ -187,7 +187,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
         | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   case managed operation =>
     cases operation <;> try rfl
-    rename_i signature catalog tail
+    rename_i signature tail
     cases tail
     · rfl
     · simp only [step, managedStep] at h

@@ -639,7 +639,7 @@ internal static partial class ProofOutline
                             return Stop("`ldlen` of an array the outline cannot name");
                     }
                 }
-                else if (op is Call { Kind: CallKind.Static or CallKind.Instance } invocation)
+                else if (op is Call { ReturnsToCaller: true } invocation)
                 {
                     var index = invocation.Method;
                     // A contract read whole from the callee's body comes first, then a stub over words.

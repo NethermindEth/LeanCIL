@@ -62,8 +62,10 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
       | none => false
     -- Unprefixed, only a receiver-checked call, whose target the managed-call rule binds, or a
     -- virtual call whose table re-resolves against the catalog.
-    | _, some (.callInstance ..) => site.hasThis
-    | _, some (.callVirtual targets count) => site.hasThis && virtualValid site targets count
+    | _, some (.callvirt method) => site.hasThis && method == site.method && match link with
+      | some (.direct _) => true
+      | some (.virtual targets) => virtualValid site targets method.argumentCount
+      | _ => false
     | _, _ => false
   | some ⟨_, 40, .call site⟩ =>
     match previous with

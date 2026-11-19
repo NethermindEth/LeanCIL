@@ -163,7 +163,7 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // from element facts, its shape from the literal body's layouts; the generated shape facts are in scope
 // but leave the cost unchanged. The typed steps body is the same body stepped by one fact per access.
 // The instance body makes one receiver-checked instance call on its object argument per cycle, into a
-// method that returns at once, through the link its instruction implies. The virtual body makes
+// method that returns at once, through its direct link. The virtual body makes
 // `VirtualSites` virtual calls on it through a named dispatch table whose size is the row's size, with
 // the receiver's class last, so each call reads one runtime type fact and looks its class up in the table.
 // The intrinsic calls body computes `Math.Max` of its two int64 arguments and pops it per cycle, so each
@@ -196,8 +196,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "objects" => ([], [".ldarg 0", ".ldfld counter", ".pop"], [".ldc_i4 0", ".ret"]),
     "objectconstructors" => ([], [".ldarg 0", ".call CIL.Extraction.objectConstructorMethod {}"],
         [".ldc_i4 0", ".ret"]),
-    "instance" => ([], [".ldarg 0", ".callInstance 1 1"], [".ldc_i4 0", ".ret"]),
-    "virtual" => ([], [".ldarg 0", ".callVirtual dispatch 1"], [".ldc_i4 0", ".ret"]),
+    "instance" or "virtual" => ([], [".ldarg 0", ".callvirt (.arity 0)"], [".ldc_i4 0", ".ret"]),
     "intrinsiccalls" => ([], [".ldarg 0", ".ldarg 1", ".call maxMethod {}", ".pop"], [".ldarg 0", ".ret"]),
     "elements" => ([], [".ldarg 0", ".ldarg 1", ".ldelem .i4", ".pop", ".ldarg 0", ".ldarg 1",
         ".ldarg 1", ".stelem .i4"], [".ldc_i4 0", ".ret"]),
@@ -322,8 +321,11 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             .Select(entry => $"({entry.pc}, staticValue)")) + "],"
         : "";
     var linkTable = "[" + string.Join(", ", Enumerable.Range(1, cycles).Select(pc => $"({pc}, .direct 1)")) + "]";
+    var receiverLink = workload == "instance" ? ".direct 1" : ".virtual dispatch";
     var linksField = workload switch
     {
+        "instance" or "virtual" => $""" links := [{string.Join(", ", Enumerable.Range(0, cycles)
+            .Select(cycle => $"({2 * cycle + 1}, {receiverLink})"))}],""",
         "tablecalls" => $" links := {linkTable},",
         "calls" => " links := callLinks,",
         "constructions" => " links := [" +

@@ -162,7 +162,7 @@ namespace Tests.Linking.Links
 open CIL
 
 def body : Method := {
-  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callVirtual [(.void, 2)] 1,
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callvirt (.arity 0),
     .newobj (.arity 0), .ret]
   links := [(1, .direct 1), (3, .virtual [(.void, 2)]), (4, .aggregate 3 8)]
   locals := [], returnsValue := false }
@@ -186,8 +186,8 @@ example : (body.relocate (· + 10)).code = body.code := rfl
 /-- An address that the root discards reaches no callee, even when the target has a body. -/
 theorem discarded_address_closure :
     let root : Method :=
-      { code := [.managed (.address ⟨⟨"T", 1, []⟩, 1⟩ ⟨.void, []⟩), .pop, .ret],
-        locals := [], returnsValue := false }
+      { code := [.managed (.address ⟨"T", 1, []⟩ ⟨.void, []⟩), .pop, .ret],
+        links := [(0, .address 1)], locals := [], returnsValue := false }
     (Program.closure [root, body] 0).map Prod.snd = some [0] := rfl
 #print axioms discarded_address_closure
 
@@ -230,23 +230,16 @@ def literal : Method := {
   code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .ret], links := [(1, .direct 3)],
   locals := [], returnsValue := false }
 
-/-- A literal body whose code implies its table: a virtual call at pc 1. -/
-def implied : Method :=
-  { code := [.ldarg 0, .callVirtual [(.void, 3)] 1, .pop, .ret], locals := [],
-    returnsValue := false }
+/-- Link facts for a literal virtual call come from the explicit table. -/
+def virtualBody : Method :=
+  { code := [.ldarg 0, .callvirt (.arity 0), .pop, .ret], locals := [],
+    links := [(1, .virtual [(.void, 3)])], returnsValue := false }
 
-/-- The instruction fact of the virtual call, as `cil_instruction_equations` states it. -/
-theorem implied_at1 : implied.code[1]? = some (.callVirtual [(.void, 3)] 1) := rfl
+cil_instruction_equations virtualBody
 
-/-- The instruction fact of a pc without a call. -/
-theorem implied_at0 : implied.code[0]? = some (.ldarg 0) := rfl
+example : virtualBody.linkAt 1 = some (.virtual [(.void, 3)]) := virtualBody_link1
 
-/-- A body whose table is implied reads each link in one step from an instruction fact. -/
-example : implied.linkAt 1 = some (.virtual [(.void, 3)]) := by
-  rw [Method.linkAt_of_instruction rfl implied_at1]; rfl
-
-example : implied.linkAt 0 = none := by
-  rw [Method.linkAt_of_instruction rfl implied_at0]; rfl
+example : virtualBody.linkAt 0 = none := rfl
 
 /-- A literal table is read by evaluation. -/
 example : literal.linkAt 1 = some (.direct 3) := rfl
@@ -264,7 +257,7 @@ example (profile : FeatureProfile) (callee : Nat) :
 example (profile : FeatureProfile) (callee : Nat) : (template profile callee).linkAt 2 = none :=
   Method.linkAt_of_unlisted (by simp [template])
 
-/-- A body built with `withCode` keeps only the links its new code implies, none for a call. -/
+/-- A body built with `withCode` clears all pc-indexed links. -/
 example : (literal.withCode [.call (Tests.callee 0), .ret]).linkAt 0 = none := rfl
 
 end Tests.Linking.Resolution

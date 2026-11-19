@@ -107,31 +107,13 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 /-- The call a receiver-checked `callvirt` makes with checked `arguments`, receiver first: a null
     receiver throws `NullReferenceException`, and a receiver that is no object reference is
-    ill-typed. This is the `callInstance` arm of `step` after its argument checks. -/
+    ill-typed. -/
 def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) :
     ExecutionResult FrameAction :=
   match arguments with
   | .object (.address _) :: _ => .ok (.call callee arguments rest memory)
   | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
-
-/-- `callvirt` of a non-virtual method checks its `argc` arguments and calls the method its link
-    names with a live receiver; a null receiver throws `NullReferenceException` before the call. -/
-@[cil_step] theorem step_callInstance_eq (target argc : Nat) (stack : List Value) :
-    step body (.callInstance target argc) pc args frame stack memory =
-      if unspecifiedOperands argc stack then
-        .error (.unsupported "Instruction observes unspecified vector bits")
-      else match body.linkAt pc with
-        | some (.direct callee) =>
-          if stack.length < argc then .error .invalidState
-          else (do
-            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-            receiverCall callee arguments (stack.drop argc) memory)
-        | _ => .error unlinkedCall := by
-  simp only [step, observerCount]
-  rfl
-
-#print axioms step_callInstance_eq
 
 /-- A live receiver makes the call with the checked arguments as they stand. -/
 @[cil_checked] theorem receiverCall_address (callee : Nat) (receiver : Reference)
@@ -150,7 +132,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
 
 /-- The call a virtual `callvirt` makes with checked `arguments`, receiver first: into the body
     `targets` lists for a live receiver's runtime class, `NullReferenceException` for a null
-    receiver. This is the `callVirtual` arm of `step` after its argument checks. -/
+    receiver. -/
 def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments rest : List Value)
     (memory : Memory) : ExecutionResult FrameAction :=
   match arguments with
@@ -159,15 +141,18 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
   | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
-/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its link's
-    table selects for the receiver; a null receiver throws `NullReferenceException` before the
-    call. -/
-@[cil_step] theorem step_callVirtual_eq (stated : List (CIL.Extraction.TypeExpr × Nat))
-    (argc : Nat) (stack : List Value) :
-    step body (.callVirtual stated argc) pc args frame stack memory =
+/-- Receiver calls check their operands before reading the direct body or dispatch table. -/
+@[cil_step] theorem step_callvirt_eq (method : CIL.Extraction.MethodRef) (stack : List Value) :
+    step body (.callvirt method) pc args frame stack memory =
+      let argc := method.argumentCount
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else match body.linkAt pc with
+        | some (.direct callee) =>
+          if stack.length < argc then .error .invalidState
+          else (do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            receiverCall callee arguments (stack.drop argc) memory)
         | some (.virtual targets) =>
           if stack.length < argc then .error .invalidState
           else (do
@@ -177,7 +162,7 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
   simp only [step, observerCount]
   rfl
 
-#print axioms step_callVirtual_eq
+#print axioms step_callvirt_eq
 
 /-- A live receiver enters the body the table lists for its runtime class; a step fact for
     `runtimeTypeOf` then decides the lookup. -/

@@ -1219,27 +1219,16 @@ theorem step_appendLocals_call (method : CIL.Extraction.MethodRef) (prefixes : C
 
 #print axioms step_appendLocals_call
 
-/-- `callInstance` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_callInstance (method : Nat) (argc : Nat) :
-    StepAppendLocals (.callInstance method argc) := by
+/-- Receiver calls preserve outcomes under trailing local slots. -/
+theorem step_appendLocals_callvirt (method : CIL.Extraction.MethodRef) :
+    StepAppendLocals (.callvirt method) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   frame_natural
 
-#print axioms step_appendLocals_callInstance
-
-/-- `callVirtual` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat))
-    (argc : Nat) : StepAppendLocals (.callVirtual targets argc) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
-
-#print axioms step_appendLocals_callVirtual
+#print axioms step_appendLocals_callvirt
 
 /-- `newobj` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
@@ -1662,10 +1651,7 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_bne_un target
     case call method prefixes =>
       exact step_appendLocals_call method prefixes
-    case callInstance method argc =>
-      exact step_appendLocals_callInstance method argc
-    case callVirtual targets argc =>
-      exact step_appendLocals_callVirtual targets argc
+    case callvirt method => exact step_appendLocals_callvirt method
     case newobj constructor =>
       exact step_appendLocals_newobj constructor
     case skipInit =>

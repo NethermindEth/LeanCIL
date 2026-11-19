@@ -113,14 +113,15 @@ open Extraction
 
 /-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
-  opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 || opcode == 40 ||
+  opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
+    (40 <= opcode && opcode <= 41) ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
     (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 117) ||
     (123 <= opcode && opcode <= 125) || (129 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
-    opcode == 224 || (65025 <= opcode && opcode <= 65029) ||
+    opcode == 224 || (65025 <= opcode && opcode <= 65030) ||
     (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
     opcode == 0xfe1c || opcode == 0xfe1e
 
@@ -170,20 +171,32 @@ private def callPrefixes : Option RawInstruction → CallPrefixes
   | some ⟨_, 0xFE16, .type receiver⟩ => { constrained := some receiver }
   | _ => {}
 
-/-- A direct call names its method and carries its prefix. A construction names its constructor. -/
+/-- The closed signature shared by a managed address and an indirect call. -/
+def ManagedSignature.ofTypes (result : TypeExpr) (parameters : List TypeExpr) : ManagedSignature :=
+  ⟨callableType result, parameters.map callableType⟩
+
+/-- A method-token instruction names its raw site and carries its supported prefix. -/
 def Instruction.ofCallSite? (previous : Option RawInstruction) (opcode : Nat)
     (site : CallSite) : Option Instruction :=
   if opcode == 40 then some (.call site.method (callPrefixes previous))
   else if opcode == 115 then some (.newobj site.method)
   else if opcode == 111 && (callPrefixes previous).constrained.isSome then
     some (.call site.method (callPrefixes previous))
+  else if opcode == 111 && site.hasThis && !(previous.any (isPrefixOpcode ·.opcode)) then
+    some (.callvirt site.method)
+  else if opcode == 65030 then
+    match site.target, managedOwner site.declaringType with
+    | .managed token, some (owner, _) =>
+      some (.managed (.address ⟨owner, token, site.typeArguments.map callableType⟩
+        (ManagedSignature.ofTypes site.returnType site.parameterTypes)))
+    | _, _ => none
   else none
 
-/-- Call sites decode at `call` (40), constrained `callvirt` (111), and `newobj` (115). -/
+/-- Call sites decode at `call` (40), `callvirt` (111), `newobj` (115) and `ldftn` (65030). -/
 theorem Instruction.ofCallSite?_opcode {previous : Option RawInstruction} {opcode : Nat}
     {site : CallSite} {instruction : Instruction}
     (named : Instruction.ofCallSite? previous opcode site = some instruction) :
-    opcode = 40 ∨ opcode = 115 ∨ opcode = 111 := by
+    opcode = 40 ∨ opcode = 115 ∨ opcode = 111 ∨ opcode = 65030 := by
   unfold Instruction.ofCallSite? at named
   repeat' split at named
   all_goals first | contradiction | simp_all
@@ -324,6 +337,12 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldflda expected => match emitted with | .ldflda actual => expected == actual | _ => false
   | .stfld expected => match emitted with | .stfld actual => expected == actual | _ => false
   -- A call compares the method it names and its prefixes, a construction its constructor.
+  | .callvirt expected => match emitted with
+    | .callvirt actual => expected == actual
+    | _ => false
+  | .managed expected => match emitted with
+    | .managed actual => decide (expected = actual)
+    | _ => false
   | .call expected prefixes => match emitted with
     | .call actual actualPrefixes => expected == actual && prefixes == actualPrefixes
     | _ => false
@@ -480,6 +499,11 @@ def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction)
     if owner.objectApplication then none else
       (FieldRef.ofOperand? raw.operand).bind (Instruction.instanceField? raw.opcode)
   | .call site => Instruction.ofCallSite? previous raw.opcode site
+  | .indirectCall result parameters hasThis explicitThis convention =>
+    if raw.opcode == 41 && !hasThis && !explicitThis && convention == 0 then
+      some (.managed (.call (ManagedSignature.ofTypes result parameters)
+        (callPrefixes previous).tail))
+    else none
   | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   (plainValue? previous raw).map Subtype.val
@@ -502,8 +526,12 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
         obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
         rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
-      · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
+      · rcases Instruction.ofCallSite?_opcode found with
+          opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
+      · split at found
+        · simp_all [Instruction.valueOpcode]
+        · cases found
       · rw [opcodeValue, Bool.not_false, Bool.or_true,
           ite_eq_left_of_eq_true _ _ (eq_true rfl)] at found
         cases found
@@ -540,8 +568,10 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
       obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
       rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
-    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
+    · rcases Instruction.ofCallSite?_opcode found with
+        opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
+    · cases found
     · cases operand
       case none =>
         change (if previous.any (fun before => isPrefixOpcode before.opcode) then none
@@ -585,8 +615,10 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
       obtain ⟨_, _, accessed⟩ := Option.bind_eq_some_iff.mp found
       rcases Instruction.instanceField?_opcode accessed with opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
-    · rcases Instruction.ofCallSite?_opcode found with opcodeIs | opcodeIs | opcodeIs <;>
+    · rcases Instruction.ofCallSite?_opcode found with
+        opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
+    · cases found
     · cases operand <;> cases found
 
 #print axioms Instruction.ofRaw?_ldelema
@@ -713,6 +745,7 @@ theorem Instruction.sameValue_self_of_ofRaw? {previous : Option RawInstruction}
     · unfold Instruction.ofCallSite? at found
       repeat' split at found
       all_goals cases found <;> simp [Instruction.sameValue]
+    · split at found <;> cases found <;> simp [Instruction.sameValue]
     · split at found
       · cases found
       · obtain ⟨value, _, rfl⟩ := Option.map_eq_some_iff.mp found
@@ -752,8 +785,8 @@ private theorem invalidPredecessor_substitute {previous : Option RawInstruction}
     all_goals split <;> first | rfl | (split <;> simp_all <;> subst_vars <;> rfl)
 #print axioms invalidPredecessor_substitute
 
-/-- Substitution preserves refusal of a non-field operand and decodes an admitted type or call
-    operand at the same opcode over its instantiated type or call site. -/
+/-- Substitution decodes managed addresses and indirect signatures from their closed operands.
+    Other non-field instructions preserve admission and instantiate their type or method. -/
 theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : RawInstruction}
     {operand : RawOperand} {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
@@ -764,8 +797,17 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
         (Instruction.ofRaw? previous raw).bind fun _ =>
           Instruction.ofType? previous raw.opcode type
       | .call _, .call site =>
-        (Instruction.ofRaw? previous raw).bind fun _ =>
+        if raw.opcode == 65030 then
+          if invalidPredecessor previous raw then none else
+            Instruction.ofCallSite? previous raw.opcode site
+        else (Instruction.ofRaw? previous raw).bind fun _ =>
           Instruction.ofCallSite? previous raw.opcode site
+      | .indirectCall .., .indirectCall result parameters hasThis explicitThis convention =>
+        if !invalidPredecessor previous raw && raw.opcode == 41 && !hasThis &&
+            !explicitThis && convention == 0 then
+          some (.managed (.call (ManagedSignature.ofTypes result parameters)
+            (callPrefixes previous).tail))
+        else none
       | _, _ => Instruction.ofRaw? previous raw := by
   have sameGuard := invalidPredecessor_substitute (previous := previous) (raw := raw) substituted
   obtain ⟨sameKind, sameType, sameCall, sameField, unchanged⟩ :=
@@ -793,24 +835,36 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
   case call before =>
     cases operand
     case call site =>
-      show Option.filter _ (if _ then none else Instruction.ofCallSite? previous opcode site) =
-        (Option.filter _ (if _ then none else Instruction.ofCallSite? previous opcode before)).bind
-          fun _ => Instruction.ofCallSite? previous opcode site
-      rw [sameGuard]
-      split
-      · rfl
-      · unfold Instruction.ofCallSite?
-        repeat' first | rfl | split
+      have receiver : site.hasThis = before.hasThis := by
+        simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure]
+          at substituted
+        obtain ⟨_, _, substituted⟩ := substituted
+        split at substituted <;>
+          simp only [Option.bind_eq_some_iff, Option.some.injEq, RawOperand.call.injEq]
+            at substituted <;>
+          obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := substituted <;> rfl
+      simp only [Instruction.ofRaw?, sameGuard]
+      by_cases address : opcode = 65030
+      · subst opcode
+        simp only [beq_self_eq_true, ↓reduceIte]
+        split
+        · rfl
+        · unfold Instruction.ofCallSite?
+          simp only [Nat.reduceBEq, Bool.false_and, Bool.false_eq_true, ↓reduceIte]
+          split <;> rfl
+      · simp only [beq_iff_eq, address, ↓reduceIte]
+        split
+        · rfl
+        · unfold Instruction.ofCallSite?
+          simp only [receiver, beq_iff_eq, address, ↓reduceIte]
+          repeat' first | rfl | split
     all_goals exact absurd sameCall Bool.false_ne_true
   case indirectCall =>
-    cases operand <;> try exact absurd sameKind Bool.false_ne_true
-    all_goals first
-      | exact absurd sameType.symm Bool.false_ne_true
-      | exact absurd sameCall.symm Bool.false_ne_true
-      | exact absurd sameField.symm Bool.false_ne_true
-      | (change Option.filter _ (if _ then none else (none : Option Instruction)) =
-            Option.filter _ (if _ then none else (none : Option Instruction))
-         simp only [ite_self] <;> rfl)
+    simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
+      Option.some.injEq] at substituted
+    obtain ⟨_, _, _, _, rfl⟩ := substituted
+    simp only [Instruction.ofRaw?, sameGuard]
+    repeat' split <;> simp_all
   -- Any other original either is unchanged or, like its substitute, is refused by the guard.
   all_goals first
     | (cases unchanged rfl <;> rfl)

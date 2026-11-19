@@ -60,8 +60,8 @@ structure MethodTable where
 
 /-- Managed pointer operations preserve metadata provenance instead of encoding addresses. -/
 inductive ManagedOp where
-  | address (target : ManagedTarget) (signature : ManagedSignature)
-  | call (signature : ManagedSignature) (catalog : List ManagedTarget) (tail : Bool)
+  | address (identity : ManagedIdentity) (signature : ManagedSignature)
+  | call (signature : ManagedSignature) (tail : Bool)
   deriving DecidableEq, Repr
 
 end CIL

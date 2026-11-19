@@ -510,23 +510,17 @@ open CIL
 
 /-- Calls method 1 at pc 1 and enters a virtual table at pc 3. -/
 def caller : Method := {
-  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callVirtual [(.void, 2)] 1, .ret]
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callvirt (.arity 0), .ret]
   links := [(1, .direct 1), (3, .virtual [(.void, 2)])]
   locals := [], returnsValue := false }
 
 /-- The pc map of a body onto itself. -/
 private def identityMap : List Nat := [0, 1, 2, 3, 4]
 
-/-- The code implies the virtual table's link but not the call's, which only the table states. -/
-theorem caller_links :
-    linksOfCode caller.code = [(3, .virtual [(.void, 2)])] := rfl
+/-- The body states both the direct body and the virtual table. -/
+theorem caller_links : caller.links = [(1, .direct 1), (3, .virtual [(.void, 2)])] := rfl
 
 #print axioms caller_links
-
-/-- Only instructions that imply a link have entries, keyed by their pc; a call's and a
-    construction's links are stated by their table, not implied by their operands. -/
-example : linksOfCode [.nop, .call (Tests.callee 2), .newobj (.arity 0), .callInstance 4 1, .ret] =
-    [(3, .direct 4)] := rfl
 
 /-- A table written out in a literal wins over the default. -/
 example : ({ caller with links := [] } : Method).linkAt 1 = none := rfl

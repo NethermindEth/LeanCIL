@@ -95,7 +95,7 @@ if (templates.Split("@[cil_code] def method").Length != 4 ||
 // Each body that enters a method names its links, so the table never depends on a default.
 foreach (var body in templates.Split("@[cil_code] def method").Skip(1))
 {
-    string[] callForms = [".call ", ".callInstance ", ".callVirtual ", ".newobj ", ".managed (.call "];
+    string[] callForms = [".call ", ".callvirt ", ".newobj ", ".managed (.call "];
     var emptyLinks = body.Contains("links := [],", StringComparison.Ordinal);
     if (callForms.Any(form => body.Contains(form, StringComparison.Ordinal)) &&
         (emptyLinks || !body.Contains("links := ", StringComparison.Ordinal)))
@@ -186,8 +186,8 @@ run_cmd do
 // methods by the template's callee parameters, which must elaborate and bind to each profile's own indices.
 var kinds = new (string Name, string Selector, string Spelling)[]
 {
-    ("Virtual", "Kinds::Virtual(Slot)", ".callVirtual [("),
-    ("Address", "Kinds::Address(uint)", ".managed (.address { identity := "),
+    ("Virtual", "Kinds::Virtual(Slot)", ".virtual [("),
+    ("Address", "Kinds::Address(uint)", ".address callee"),
     ("Indirect", "Kinds::Indirect(method System.UInt32 *(System.UInt32)[],System.Int32,System.UInt32)",
         ".managed (.call "),
     ("Initial", "Kinds::Initial()", "initializer := some { method := callee1")

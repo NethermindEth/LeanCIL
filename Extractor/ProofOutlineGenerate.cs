@@ -823,7 +823,7 @@ internal static partial class ProofOutline
         var pc = Array.FindIndex(ops, op => !Body.Pure(op, method, plainReturn));
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
-        return ops[pc] is Call { Kind: CallKind.Static or CallKind.Instance } call
+        return ops[pc] is Call { ReturnsToCaller: true } call
             ? $"`{ops[pc].ToLean()}` at {Location(method, pc)} calls method {call.Method}, which " +
                 "`cil_contract_steps` composes through a `MethodContract` you write and prove with " +
                 $"`Holds Extracted.program {call.Method}`"

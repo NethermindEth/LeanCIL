@@ -52,7 +52,7 @@ partial class Program
     [GeneratedRegex(@"(?m)^def method(?<number>\d+)Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ")]
     private static partial Regex ClosedReturnType { get; }
 
-    [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := [^\r\n]*")]
+    [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := (?<link>[^\r\n]*)")]
     private static partial Regex MethodLink { get; }
 
     [GeneratedRegex(@"(?m)^@\[cil_code\] def method(\d+)Link(\d+) : Link := \.direct (\d+)\r?$")]
@@ -251,6 +251,15 @@ partial class Program
     /// </summary>
     static string FeatureObligation(object method) =>
         $"method{method}Closed profile method{method}FeatureStates method{method}Reachable";
+
+    /// <summary>The single binding of this kind in a fixture method.</summary>
+    static (int Pc, string Link) SingleLink(string source, int method, string constructor)
+    {
+        var binding = MethodLink.Matches(source).Single(match => match.Groups[1].Value == $"{method}" &&
+            match.Groups["link"].Value.StartsWith(constructor, StringComparison.Ordinal));
+        return (int.Parse(binding.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture),
+            binding.Groups["link"].Value);
+    }
 
     /// <summary>The method and pc of each call whose link in `source` is the direct link to method `callee`.</summary>
     static (int Method, int Pc)[] DirectLinks(string source, int callee) => [.. DirectLink.Matches(source)

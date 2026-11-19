@@ -127,6 +127,11 @@ own pointer type; each entry has one
 exact signature and must name a non-null catalog target. A null table raises
 `NullReferenceException`, and an invalid index raises `IndexOutOfRangeException`.
 
+An `ldftn` instruction carries the metadata identity and signature. Its address link records
+where the extractor checked that identity. Taking an address adds no callee to program closure.
+A `calli` instruction carries its signature and tail flag. Its indirect link supplies the catalog.
+Relocation updates the indices of callable targets and preserves the address link's extraction index.
+
 The catalog holds closed same-assembly `ldftn` targets and already extracted methods with
 matching signatures. An open address such as `&Algo<TGas>.Run` in a generic body is catalogued
 only through a specialized body that takes it, so a supplied table can reach a generic target

@@ -264,8 +264,7 @@ inductive FoldRole where
   | blocked
   deriving DecidableEq, Repr
 
-/-- The instruction fixed by a fold role. Constructors also need their checked layout, and
-    an indirect tail transfer needs its catalog. -/
+/-- The instruction fixed by a fold role. Constructors also need their checked layout. -/
 def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
     (raw : RawInstruction) : Option Instruction :=
   match role with
@@ -276,7 +275,8 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
     | _ => none
   | .raise exception => some (.throw exception)
   | .argument => Instruction.ofRaw? previous raw
-  | .tailCall => if raw.opcode == 40 then Instruction.ofRaw? previous raw else none
+  | .tailCall => if raw.opcode == 40 || raw.opcode == 41 then Instruction.ofRaw? previous raw
+      else none
   | .spanConstructor .. | .blocked => none
 
 /-- Calls use their site requirement. Other instructions in a fold emit their raw role. -/

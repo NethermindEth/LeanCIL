@@ -55,63 +55,6 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
         (exfalso; solve_by_elim)
 #print axioms Memory.Renamed.managedStep
 
-/-- A receiver-checked call transports as a call: renaming keeps a receiver null exactly when it
-    was, so both runs throw at the `callvirt` or both enter the callee. -/
-private theorem Memory.Renamed.stepCallInstance {indices : LocalIndexMap}
-    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
-    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
-    (formed : source.WellFormed) (sourceBody targetBody : CIL.Method) (callee argc pc : Nat)
-    (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
-    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
-    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.callInstance callee argc) pc arguments sourceFrame stack source)
-      (step targetBody (.callInstance callee argc) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, List.length_map, linked,
-    ← List.map_take, ← List.map_drop, ← List.map_reverse]
-  by_cases guard : unspecifiedOperands (observerCount (.callInstance callee argc)) stack = true
-  · simp only [guard, ite_true]
-    exact .error _
-  · simp only [guard, Bool.false_eq_true, ite_false]
-    generalize sourceBody.linkAt pc = link
-    rcases link with _ | link
-    · exact .error _
-    cases link <;> try exact .error _
-    rename_i callee
-    try dsimp only
-    by_cases short : stack.length < argc
-    · simp only [short, ite_true]
-      exact .error _
-    · simp only [short, ite_false]
-      have checks := related.checkedValues (stack.take argc).reverse (by
-        intro value member
-        exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
-      cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
-      | error fault =>
-        rw [checked] at checks
-        generalize ((stack.take argc).reverse.map mapping.value).mapM
-          (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
-        cases checks
-        exact .error fault
-      | ok operands =>
-        rw [checked] at checks
-        obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
-        simp only [targetChecked, Bind.bind, Except.bind]
-        have called : ∀ receiver tail, ResultRenamed mapping
-            (FrameAction.Renamed indices mapping scopes)
-            (.ok (.call callee (.object (.address receiver) :: tail) (stack.drop argc) source))
-            (.ok (.call callee ((Value.object (.address receiver) :: tail).map mapping.value)
-              ((stack.drop argc).map mapping.value) target)) := fun receiver tail =>
-          .ok (FrameAction.Renamed.call related)
-        match operands with
-        | [] => exact .error _
-        | .object (.address receiver) :: tail => exact called receiver tail
-        | .object .null :: _ => exact .error _
-        | .scalar _ :: _ | .methodPointer _ :: _ | .methodTable _ :: _ | .reference _ :: _
-        | .readOnlyReference _ :: _ | .span .. :: _ | .bufferSpan _ :: _ | .array _ :: _ =>
-          exact .error _
-#print axioms Memory.Renamed.stepCallInstance
-
 /-- Renaming keeps a live object's runtime type, and maps the fault of any other reference. -/
 private theorem Memory.Renamed.runtimeTypeOf {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -235,65 +178,100 @@ private theorem Memory.Renamed.stepTypeTest {indices : LocalIndexMap}
 
 /-- A virtual call transports as a call: renaming keeps a receiver null exactly when it was and
     keeps a live receiver's class, so both runs throw, fault alike or enter the same body. -/
-private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
+private theorem Memory.Renamed.stepCallvirt {indices : LocalIndexMap}
     {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
     {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
-    (sourceBody targetBody : CIL.Method) (targets : List (CIL.Extraction.TypeExpr × Nat))
-    (argc pc : Nat) (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
+    (sourceBody targetBody : CIL.Method) (method : CIL.Extraction.MethodRef) (pc : Nat)
+    (linked : targetBody.linkAt pc = sourceBody.linkAt pc)
     (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.callVirtual targets argc) pc arguments sourceFrame stack source)
-      (step targetBody (.callVirtual targets argc) pc (arguments.map mapping.value)
+      (step sourceBody (.callvirt method) pc arguments sourceFrame stack source)
+      (step targetBody (.callvirt method) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
   simp only [step, mapping.unspecifiedOperands, List.length_map, linked,
     ← List.map_take, ← List.map_drop, ← List.map_reverse]
-  by_cases guard : unspecifiedOperands (observerCount (.callVirtual targets argc)) stack = true
+  by_cases guard : unspecifiedOperands (observerCount (.callvirt method)) stack = true
   · simp only [guard, ite_true]
     exact .error _
   · simp only [guard, Bool.false_eq_true, ite_false]
     -- The dispatch table is the link's; both bodies read the same one.
+    generalize method.argumentCount = argc
     generalize sourceBody.linkAt pc = link
     rcases link with _ | link
     · exact .error _
     cases link <;> try exact .error _
-    rename_i targets
-    try dsimp only
-    by_cases short : stack.length < argc
-    · simp only [short, ite_true]
-      exact .error _
-    · simp only [short, ite_false]
-      have checks := related.checkedValues (stack.take argc).reverse (by
-        intro value member
-        exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
-      cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
-      | error fault =>
-        rw [checked] at checks
-        generalize ((stack.take argc).reverse.map mapping.value).mapM
-          (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
-        cases checks
-        exact .error fault
-      | ok operands =>
-        rw [checked] at checks
-        obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
-        have unchanged := (checkedValues_valid _ _ _ checked).1
-        simp only [targetChecked, Bind.bind, Except.bind]
-        match operands, unchanged with
-        | [], _ => exact .error _
-        | .object (.address receiver) :: tail, unchanged =>
-          have below := bounds _ (List.mem_of_mem_take (List.mem_reverse.mp
-            (unchanged ▸ List.mem_cons_self ..)))
-          simp only [Value.Below, ManagedReference.Below] at below
-          simp only [List.map_cons, AllocationRenaming.value, AllocationRenaming.managedReference]
-          refine (related.virtualTarget receiver below targets).bind _ _ ?_
-          intro left right same
-          subst same
-          exact .ok (FrameAction.Renamed.call related)
-        | .object .null :: _, _ => exact .error _
-        | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
-        | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
-        | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
-          exact .error _
-#print axioms Memory.Renamed.stepCallVirtual
+    case direct callee =>
+      try dsimp only
+      by_cases short : stack.length < argc
+      · simp only [short, ite_true]
+        exact .error _
+      · simp only [short, ite_false]
+        have checks := related.checkedValues (stack.take argc).reverse (by
+          intro value member
+          exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
+        cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
+        | error fault =>
+          rw [checked] at checks
+          generalize ((stack.take argc).reverse.map mapping.value).mapM
+            (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
+          cases checks
+          exact .error fault
+        | ok operands =>
+          rw [checked] at checks
+          obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
+          simp only [targetChecked, Bind.bind, Except.bind]
+          have called : ∀ receiver tail, ResultRenamed mapping
+              (FrameAction.Renamed indices mapping scopes)
+              (.ok (.call callee (.object (.address receiver) :: tail) (stack.drop argc) source))
+              (.ok (.call callee ((Value.object (.address receiver) :: tail).map mapping.value)
+                ((stack.drop argc).map mapping.value) target)) := fun receiver tail =>
+            .ok (FrameAction.Renamed.call related)
+          match operands with
+          | [] => exact .error _
+          | .object (.address receiver) :: tail => exact called receiver tail
+          | .object .null :: _ => exact .error _
+          | .scalar _ :: _ | .methodPointer _ :: _ | .methodTable _ :: _ | .reference _ :: _
+          | .readOnlyReference _ :: _ | .span .. :: _ | .bufferSpan _ :: _ | .array _ :: _ =>
+            exact .error _
+    case virtual targets =>
+      try dsimp only
+      by_cases short : stack.length < argc
+      · simp only [short, ite_true]
+        exact .error _
+      · simp only [short, ite_false]
+        have checks := related.checkedValues (stack.take argc).reverse (by
+          intro value member
+          exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
+        cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
+        | error fault =>
+          rw [checked] at checks
+          generalize ((stack.take argc).reverse.map mapping.value).mapM
+            (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
+          cases checks
+          exact .error fault
+        | ok operands =>
+          rw [checked] at checks
+          obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
+          have unchanged := (checkedValues_valid _ _ _ checked).1
+          simp only [targetChecked, Bind.bind, Except.bind]
+          match operands, unchanged with
+          | [], _ => exact .error _
+          | .object (.address receiver) :: tail, unchanged =>
+            have below := bounds _ (List.mem_of_mem_take (List.mem_reverse.mp
+              (unchanged ▸ List.mem_cons_self ..)))
+            simp only [Value.Below, ManagedReference.Below] at below
+            simp only [List.map_cons, AllocationRenaming.value,
+              AllocationRenaming.managedReference]
+            refine (related.virtualTarget receiver below targets).bind _ _ ?_
+            intro left right same
+            subst same
+            exact .ok (FrameAction.Renamed.call related)
+          | .object .null :: _, _ => exact .error _
+          | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
+          | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+          | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
+            exact .error _
+#print axioms Memory.Renamed.stepCallvirt
 
 /-- Running `model` for a call without a link transports under every allocation renaming:
     related bodies, well-formed source memories, frames and stacks whose source run succeeds or
@@ -656,13 +634,9 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   · rcases direct with ⟨method, prefixes, rfl⟩
     exact related.stepCall frames formed sourceBody targetBody method prefixes pc metadata
       arguments stack bounds observable
-  by_cases receiverChecked : ∃ callee argc, operation = .callInstance callee argc
-  · rcases receiverChecked with ⟨callee, argc, rfl⟩
-    exact related.stepCallInstance formed sourceBody targetBody callee argc pc
-      (metadata.linkAt pc) arguments stack bounds
-  by_cases dispatched : ∃ targets argc, operation = .callVirtual targets argc
-  · rcases dispatched with ⟨targets, argc, rfl⟩
-    exact related.stepCallVirtual sourceBody targetBody targets argc pc (metadata.linkAt pc)
+  by_cases receiverChecked : ∃ method, operation = .callvirt method
+  · rcases receiverChecked with ⟨method, rfl⟩
+    exact related.stepCallvirt sourceBody targetBody method pc (metadata.linkAt pc)
       arguments stack bounds
   by_cases casting : ∃ type, operation = .castclass type
   · rcases casting with ⟨type, rfl⟩
@@ -677,8 +651,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
       | exact False.elim (direct ⟨_, _, rfl⟩)
-      | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
-      | exact False.elim (dispatched ⟨_, _, rfl⟩)
+      | exact False.elim (receiverChecked ⟨_, rfl⟩)
       | exact False.elim (casting ⟨_, rfl⟩)
       | exact False.elim (testing ⟨_, rfl⟩)
       -- Both bodies read every argument without a home, so a store or an address faults alike.

@@ -286,12 +286,13 @@ internal static class LeanEmitter
             for (var pc = 0; pc < ops.Count; pc++)
                 ops[pc] = ops[pc] switch
                 {
-                    Call { Kind: not CallKind.Instance } call => call with
+                    Call call => call with
                     {
                         Site = genericEvidence.MethodReferenceOf(m, pc),
                         ConstrainedType = call.Constrained
                             ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
                     },
+                    CallVirtual slot => slot with { Site = genericEvidence.MethodReferenceOf(m, pc) },
                     ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
                     var operation => operation
                 };

@@ -51,12 +51,13 @@ File.WriteAllText(path, $$"""
       decide +kernel
     #print axioms table_is_valueOpcode
 
-    /-- A folded prefix emits nop for either transfer, and an indirect tail call needs a catalog. -/
+    /-- A folded prefix emits nop and the indirect call carries the tail transfer. -/
     theorem tail_opcodes :
         let tailPrefix := RawInstruction.mk 0 {{(ushort)OpCodes.Tail.Value}} .none
         let indirect := RawInstruction.mk 2 {{OpCodes.Calli.Value}} (.indirectCall .void [] false false 0)
         (Instruction.ofRole? .head none tailPrefix matches some .nop) &&
-          (Instruction.ofRole? .tailCall (some tailPrefix) indirect).isNone := by decide +kernel
+          (Instruction.ofRole? .tailCall (some tailPrefix) indirect matches
+            some (.managed (.call _ true))) := by decide +kernel
     #print axioms tail_opcodes
 
     /-- Folded type handles erase their operands and a throw retains its exception kind. -/
@@ -178,6 +179,8 @@ foreach (var (name, selector, method, code) in new[]
     Run(["lake", "env", "lean", pathToSource], cwd: FixturePackage());
 }
 
+CheckReceiverMethods(directory);
+
 var frameOutput = Path.Combine(deadDirectory, "Frame");
 Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::Frame(int[])", frameOutput]);
 var framePath = Path.Combine(frameOutput, "Extracted.lean");
@@ -233,6 +236,41 @@ Console.WriteLine("PASS get_Both binds to its template and TraceGated's frame ch
 static void RequireDecoded(string source, string name, int number = 0)
 {
     if (!IsDecodedMethod(source, number)) throw new InvalidOperationException($"{name} must decode.");
+}
+
+static void CheckReceiverMethods(string directory)
+{
+    var assembly = At("Examples/Assembly/bin/Examples.dll");
+    using var module = ModuleDefinition.ReadModule(assembly);
+    (string Owner, string[] Names)[] families =
+    [
+        ("Objects", ["DepositBoth", "DepositFrom", "DepositTimes"]),
+        ("SampleArrays", ["CountAfterDeposit"]),
+        ("VirtualCalls", ["DogLegs", "LegsOf", "LoudnessOf"]),
+        ("ItemPool", ["Rent"]),
+        ("IndirectValues", ["Generic", "Record", "Reference", "Vector"]),
+        ("GenericOwners", ["Address"]),
+        ("ManagedDispatch", ["LocalEscape"])
+    ];
+    foreach (var profile in new[] { "scalar", "x64-v3", "arm64-advsimd" })
+    {
+        var requests = families.SelectMany(family => family.Names.Select(name =>
+        {
+            var owner = module.GetType($"Examples.{family.Owner}");
+            var method = owner.Methods.Single(candidate => candidate.Name == name);
+            var output = Path.Combine(directory, profile, family.Owner, name);
+            return new GeneratedExtraction(assembly, method.FullName, output, profile);
+        })).ToArray();
+        ExtractBatch("extract", null, requests);
+        foreach (var request in requests)
+        {
+            var path = Path.Combine(request.Output, "Extracted.lean");
+            RequireDecoded(File.ReadAllText(path), request.Entry);
+            var evidence = Run(["lake", "env", "lean", path], cwd: FixturePackage());
+            if (evidence.Contains("sorryAx", StringComparison.Ordinal))
+                throw new InvalidOperationException($"Unchecked evidence for {request.Entry} under {profile}");
+        }
+    }
 }
 
 static void CheckPrefixes()

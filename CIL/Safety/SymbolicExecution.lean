@@ -1192,7 +1192,7 @@ def stepModelFact? (body method : Expr) : TacticM (Option Expr) := withMainConte
 
 /-- Opcodes whose step reads the body's link at the step's pc. -/
 def linkedOpcodes : List Lean.Name :=
-  [``CIL.Instruction.call, ``CIL.Instruction.callInstance, ``CIL.Instruction.callVirtual,
+  [``CIL.Instruction.call, ``CIL.Instruction.callvirt,
     ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
 
 open Lean Elab Tactic Meta in
@@ -1992,8 +1992,7 @@ elab_rules : tactic
 /-- Whether an opcode steps to a call action: `call` without `tail.`, or `callvirt` with a
     non-null receiver. The driver has no tail-transfer step, so a tail call fails here. -/
 def callsCallee (operation : Lean.Name) : Bool :=
-  operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.callInstance ||
-    operation == ``CIL.Instruction.callVirtual
+  operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.callvirt
 
 open Lean Elab Tactic Meta in
 /-- Whether the `run` goal's pc has no link in the body `methodFound` fetched, so a `call` there

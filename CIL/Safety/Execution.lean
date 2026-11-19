@@ -169,9 +169,9 @@ theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CI
 def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
   match operation, stack with
-  | .address target signature, _ =>
-    return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
-  | .call signature _ tail, .methodPointer pointer :: values =>
+  | .address identity signature, _ =>
+    return .next (pc + 1) (.methodPointer ⟨signature, some identity⟩ :: stack) frame memory
+  | .call signature tail, .methodPointer pointer :: values =>
     let some (.indirect catalog) := link | .error unlinkedCall
     let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
@@ -743,24 +743,26 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (slot, memory) ← storeLocal memory slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
   -- Each receiver call and construction reads the method it enters from the link of its pc.
-  | .callInstance _ argc, _ =>
-    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
-    if stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      -- The receiver is the deepest argument; anything but an object reference is ill-typed.
-      match arguments with
-      | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
-      | .object .null :: _ => .error (.thrown .nullReference)
-      | _ => .error .invalidState
-  | .callVirtual _ argc, _ =>
-    let some (.virtual targets) := body.linkAt pc | .error unlinkedCall
-    if stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      match arguments with
-      | .object (.address receiver) :: _ =>
-        return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
-      | .object .null :: _ => .error (.thrown .nullReference)
-      | _ => .error .invalidState
+  | .callvirt method, _ =>
+    let argc := method.argumentCount
+    match body.linkAt pc with
+    | some (.direct callee) =>
+      if stack.length < argc then .error .invalidState else
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+        -- The receiver is the deepest argument; anything but an object reference is ill-typed.
+        match arguments with
+        | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
+        | .object .null :: _ => .error (.thrown .nullReference)
+        | _ => .error .invalidState
+    | some (.virtual targets) =>
+      if stack.length < argc then .error .invalidState else
+        let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+        match arguments with
+        | .object (.address receiver) :: _ =>
+          return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
+        | .object .null :: _ => .error (.thrown .nullReference)
+        | _ => .error .invalidState
+    | _ => .error unlinkedCall
   | .memory operation, _ =>
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory

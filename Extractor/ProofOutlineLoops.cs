@@ -381,7 +381,7 @@ internal static partial class ProofOutline
         void Callees()
         {
             foreach (var op in body.Operations)
-                if (op is Call { Kind: CallKind.Static or CallKind.Instance } call)
+                if (op is Call { ReturnsToCaller: true } call)
                 {
                     var index = call.Method;
                     if (callees.ContainsKey(index)) continue;
@@ -1646,7 +1646,7 @@ internal static partial class ProofOutline
                 return Event.Continue;
             }
             else if (op is Jump) return Event.Branch;
-            else if (op is Call { Kind: CallKind.Static or CallKind.Instance }) return Event.Call;
+            else if (op is Call { ReturnsToCaller: true }) return Event.Call;
             else if (op is Return) return Event.Return;
             else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })

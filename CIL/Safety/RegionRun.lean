@@ -32,10 +32,9 @@ def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Pro
 theorem Instruction.continues_of_linked {op : CIL.Instruction}
     (linked : op.readsLink = true)
     (notTail : ∀ method prefixes, op = .call method prefixes → prefixes.tail = false)
-    (notManagedTail : ∀ signature catalog, op ≠ .managed (.call signature catalog true)) :
+    (notManagedTail : ∀ signature, op ≠ .managed (.call signature true)) :
     op.continues = true := by
-  cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.link?,
-    CIL.Instruction.statesLink, CIL.Instruction.continues]
+  cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.continues]
 
 #print axioms Instruction.continues_of_linked
 
@@ -102,7 +101,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
                 obtain ⟨_, _, impossible⟩ := chosen
                 cases impossible
             · cases impossible) (by
-            intro signature catalog equal
+            intro signature equal
             subst op
             obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs
             cases impossible))
@@ -150,7 +149,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
                 obtain ⟨_, _, impossible⟩ := chosen
                 cases impossible
             · cases impossible) (by
-            intro signature catalog equal
+            intro signature equal
             subst op
             obtain ⟨_, _, _, impossible⟩ := step_managed_tail_action hs
             cases impossible))

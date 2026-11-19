@@ -48,7 +48,24 @@ var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (DefinedMethods(source).Length != 2)
     throw new InvalidOperationException("Native dispatch did not retain a bounded cyclic catalog");
 var scalar = NarrowEvidence(source, "method0_scalars_validated");
-var proof = source + "\n" + CheckedEvidenceControl(source, scalar, ["method0_scalars_validated"], 0) + "\n" + """
+var indirect = SingleLink(source, 0, ".indirect ");
+var decode = $$"""
+
+    open CIL CIL.Extraction in
+    example :
+        let code := Extracted.method0Closed.code
+        let pc := {{indirect.Pc}}
+        let before := rawBefore (fun index => code[index]?) pc
+        ((code[pc]?).bind (Instruction.ofRaw? before) matches
+          some (.managed (.call _ true))) = true := by decide +kernel
+
+    """;
+var control = CheckedEvidenceControl(source, scalar, ["method0_scalars_validated"], 0);
+var proof = $$"""
+{{source}}
+{{decode}}
+{{control}}
+
 open CIL CIL.Safety
 private def nativeSignature : ManagedSignature :=
   ⟨Extracted.method1Closed.returnType, Extracted.method1Closed.parameters⟩
@@ -137,11 +154,10 @@ foreach (var (name, mutated) in new[]
 // No emitted instruction carries the table's signature; the call-site check binds the calli signature to the raw
 // operand, so a changed signature is rejected there.
 var calls = NarrowEvidence(source, "method0_calls_validated");
-var nativeCall = calls.Split('\n')
-    .First(line => line.TrimStart().StartsWith(".managed (.call ", StringComparison.Ordinal));
+var nativeCall = ExtractedInstructions(calls).Single(op => op.Method == 0 && op.Pc == indirect.Pc).Op;
 var changedCall = nativeCall.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal);
-var changedCalls = calls.Replace(nativeCall, changedCall, StringComparison.Ordinal);
-if (changedCalls == calls) throw new InvalidOperationException("Ineffective native call signature mutation");
+if (nativeCall == changedCall) throw new InvalidOperationException("Missing native call signature");
+var changedCalls = ReplaceExactly(calls, nativeCall, changedCall, 1);
 var signaturePath = Path.Combine(root, "Rejected-call-signature.lean");
 File.WriteAllText(signaturePath, changedCalls);
 rejected.Add(signaturePath, "PASS independently rejected native dispatch evidence: call-signature",

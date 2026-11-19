@@ -119,45 +119,45 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         "\n#print axioms managed_dispatch_result\n");
     evidence.Add(proof, "PASS compiled typed indirect dispatch: " + name);
     if (name != "Address") continue;
-    var call = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.call ",
-        StringComparison.Ordinal));
-    var address = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.address ",
-        StringComparison.Ordinal));
-    var changedTarget = ManagedPatterns.LinkTarget.Replace(call, "method := 999999");
-    // The link definition repeats the catalog, so these two mutations change it too and only the binding can
-    // reject. A change that matched no definition would leave the links check as the only rejection.
-    string Linked(string text, Func<string, string> change)
+    var call = SingleLink(source, 0, ".indirect ");
+    var address = SingleLink(source, 0, ".address ");
+    const string changeSignature = """
+        fun op => match op with
+          | .managed (.call signature tail) => .managed (.call { signature with result := .void } tail)
+          | _ => op
+        """;
+    const string dropTail = "fun op => match op with | .managed (.call s _) => .managed (.call s false) | _ => op";
+    const string callCheck = "method0_calls_validated";
+    const string flowCheck = "method0_features_validated";
+    var signatureChange = changeSignature.ReplaceLineEndings(" ");
+    var calls = NarrowEvidence(source, callCheck);
+    var flow = NarrowEvidence(source, flowCheck);
+    var badIndex = ManagedPatterns.LinkTarget.Replace(call.Link, "method := 999999");
+    var badOwner = call.Link.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch", StringComparison.Ordinal);
+    const string checkedRaw = "method0Closed) method0Reachable method0";
+    var convention = $$"""
+        { method0Closed with code := method0Closed.code.modify {{call.Pc}} fun raw =>
+            { raw with operand := match raw.operand with
+              | .indirectCall result args hasThis explicitThis _ => .indirectCall result args hasThis explicitThis 1
+              | operand => operand } }) method0Reachable method0
+        """;
+    var badConvention = calls.Replace(checkedRaw, convention, StringComparison.Ordinal);
+    if (badIndex == call.Link || badOwner == call.Link || badConvention == calls)
+        throw new InvalidOperationException("Missing managed target, owner or convention in Address");
+    foreach (var (mutation, mutated, marker) in new[]
     {
-        var linked = ManagedPatterns.LinkDefinition.Replace(text, match => change(match.Value));
-        return linked == text ? throw new Exception("Mutation did not change a link definition") : linked;
-    }
-    foreach (var (mutation, theorem, before, after, marker) in new[]
-    {
-        ("target", "method0_calls_validated", call, changedTarget, "ManagedCallsValid"),
-        ("identity", "method0_calls_validated", call,
-            call.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch", StringComparison.Ordinal),
-            "ManagedCallsValid"),
-        ("signature", "method0_calls_validated", call,
-            call.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal), "ManagedCallsValid"),
-        ("numeric-pointer", "method0_calls_validated", address, "  .ldc_i8 0,", "ManagedCallsValid"),
-        ("convention", "method0_calls_validated", "] false false 0 },", "] false false 1 },",
-            "ManagedCallsValid"),
-        ("tail", "method0_features_validated", call,
-            call.Replace("] true)", "] false)", StringComparison.Ordinal), "FeatureFlowValid")
+        ("target", ForgeLink(calls, 0, call.Pc, badIndex), "ManagedCallsValid"),
+        ("identity", ForgeLink(calls, 0, call.Pc, badOwner), "ManagedCallsValid"),
+        ("address-target", ForgeLink(calls, 0, address.Pc, ".address 0"), "ManagedCallsValid"),
+        ("signature", ForgeDecodedInstruction(calls, 0, call.Pc, signatureChange), "ManagedCallsValid"),
+        ("numeric-pointer", ForgeDecodedInstruction(calls, 0, address.Pc, "fun _ => .ldc_i8 0"), "ManagedCallsValid"),
+        ("convention", badConvention, "ManagedCallsValid"),
+        ("tail", ForgeDecodedInstruction(flow, 0, call.Pc, dropTail), "FeatureFlowValid")
     })
     {
-        var narrowed = NarrowEvidence(source, theorem);
-        if (before == after || !narrowed.Contains(before, StringComparison.Ordinal))
-            throw new Exception("Missing managed mutation: " + mutation);
-        var path = Path.Combine(root, "Rejected-" + mutation + ".lean");
-        var mutated = narrowed.Replace(before, after, StringComparison.Ordinal);
-        if (mutation == "target")
-            mutated = Linked(mutated, link => ManagedPatterns.LinkTarget.Replace(link, "method := 999999"));
-        if (mutation == "identity")
-            mutated = Linked(mutated, link => link.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch",
-                StringComparison.Ordinal));
+        var path = Path.Combine(root, $"Rejected-{mutation}.lean");
         File.WriteAllText(path, mutated);
-        rejected.Add(path, "PASS exact managed dispatch evidence rejection: " + mutation, marker);
+        rejected.Add(path, $"PASS exact managed dispatch evidence rejection: {mutation}", marker);
     }
 }
 foreach (var mutation in new[] { "convention", "prefix-entry" })
@@ -231,25 +231,24 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             "\n#print axioms indirect_value_result\n");
         evidence.Add(proof, "PASS aggregate/vector indirect transfer: " + entry.Name);
         if (entry.Name != "Generic") continue;
-        var call = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.call ",
-            StringComparison.Ordinal));
-        var aggregate = ManagedPatterns.EmptyAggregate.Match(call).Value;
-        var pair = ".aggregate " + System.Text.Json.JsonSerializer.Serialize(
-            module.Assembly.Name.FullName + "::Examples.IndirectValues/Pair") + " 0";
-        var catalog = call.IndexOf(" } [", StringComparison.Ordinal);
-        if (aggregate.Length == 0 || catalog < 0) throw new Exception("Missing generic callable type");
-        // Box<Pair> and Pair both occupy 16 bytes; their scoped type identities still differ.
-        var forged = call[..catalog].Replace(aggregate, pair, StringComparison.Ordinal) + call[catalog..];
-        if (call == forged) throw new Exception("Missing scoped generic callable signature");
+        var call = SingleLink(source, 0, ".indirect ");
+        var owner = System.Text.Json.JsonSerializer.Serialize(
+            $"{module.Assembly.Name.FullName}::Examples.IndirectValues/Pair");
+        var forged = $$"""
+            fun op => match op with
+              | .managed (.call signature tail) =>
+                .managed (.call { signature with result := .aggregate {{owner}} 0 } tail)
+              | _ => op
+            """;
         var narrowed = NarrowEvidence(source, "method0_calls_validated");
         var path = Path.Combine(root, "Rejected-aggregate-identity.lean");
-        File.WriteAllText(path, narrowed.Replace(call, forged, StringComparison.Ordinal));
+        File.WriteAllText(path, ForgeDecodedInstruction(narrowed, 0, call.Pc, forged.ReplaceLineEndings(" ")));
         rejected.Add(path, "PASS distinct aggregate callable identity rejected", "ManagedCallsValid");
         foreach (var (label, pattern) in new[]
         {
-            ("calli-layout", ManagedPatterns.IndirectCallLayout()),
-            ("address-layout", ManagedPatterns.ReturnLayout()),
-            ("address-type-argument", ManagedPatterns.TypeArgumentLayout())
+            ("calli-layout", ManagedPatterns.IndirectCallLayout),
+            ("address-layout", ManagedPatterns.ReturnLayout),
+            ("address-type-argument", ManagedPatterns.TypeArgumentLayout)
         })
         {
             var match = pattern.Match(narrowed);
@@ -261,7 +260,7 @@ using (var module = ModuleDefinition.ReadModule(assembly))
         }
         var local = NarrowEvidence(source, "method0_specialization_validated")
             .Replace("by constructor <;> rfl", "by decide +kernel", StringComparison.Ordinal);
-        var signature = ManagedPatterns.FunctionPointerLayout().Match(local);
+        var signature = ManagedPatterns.FunctionPointerLayout.Match(local);
         if (!signature.Success) throw new Exception("Missing callable local type");
         var invalidLocal = Path.Combine(root, "Rejected-local-layout.lean");
         File.WriteAllText(invalidLocal,
@@ -275,30 +274,22 @@ rejected.Check();
 /// <summary>The patterns that find generated text to mutate.</summary>
 static partial class ManagedPatterns
 {
-    /// <summary>A link definition of method 0, whose text repeats the catalog of its call site.</summary>
-    [GeneratedRegex(@"(?m)^@\[cil_code\] def method0Link\d+ : Link := .*$")]
-    internal static partial Regex LinkDefinition { get; }
-
     /// <summary>The method a link names.</summary>
     [GeneratedRegex(@"method := \d+")]
     internal static partial Regex LinkTarget { get; }
-
-    /// <summary>An aggregate type with no layout index beyond zero.</summary>
-    [GeneratedRegex("""\.aggregate "[^"]+" 0""")]
-    internal static partial Regex EmptyAggregate { get; }
 
     // Each layout pattern captures the text before the layout index it ends with.
     const string ScopedIdentity = """\("[^"]+" \+\+ "[^"]+"\)""";
 
     [GeneratedRegex($"""(\.indirectCall \(\.aggregate {ScopedIdentity} )\d+""")]
-    internal static partial Regex IndirectCallLayout();
+    internal static partial Regex IndirectCallLayout { get; }
 
     [GeneratedRegex($$"""(\.call \{[^\r\n]*?returnType := \.aggregate {{ScopedIdentity}} )\d+""")]
-    internal static partial Regex ReturnLayout();
+    internal static partial Regex ReturnLayout { get; }
 
     [GeneratedRegex($"""(typeArguments := \[\.aggregate {ScopedIdentity} )\d+""")]
-    internal static partial Regex TypeArgumentLayout();
+    internal static partial Regex TypeArgumentLayout { get; }
 
     [GeneratedRegex($"""(\.functionPointer \(\.aggregate {ScopedIdentity} )\d+""")]
-    internal static partial Regex FunctionPointerLayout();
+    internal static partial Regex FunctionPointerLayout { get; }
 }

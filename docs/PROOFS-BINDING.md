@@ -219,9 +219,8 @@ the whole extraction (`environment`) and a call-link table (`links`), and an equ
 embedding compares all of them with the extraction's. A bare literal such as `double` has the
 default signature, with no parameters, a void return and localsinit, so it binds only to a method
 declared that way. Start from the extraction's method and replace its code with `Method.withCode`,
-which keeps `declared`, `environment` and the other fields, gives the body the links its new code
-implies and resets the static sites, which are keyed by pc like the links. A `call` names the method
-its operand names and implies no link, so a body with calls states their links after `withCode`:
+which keeps the metadata and clears the pc-indexed link and static-site tables. Supply the links
+for the instructions in the replacement body.
 
 ```lean extracted
 import Extracted
@@ -237,11 +236,10 @@ Do not write `{ Extracted.method1 with code := ... }`: a structure update copies
 link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
 new code only where no call or static access moved. A body that reads statics sets the sites after
 `withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`, one entry per
-static access at the body's pc with the extraction's descriptor for it. A `call` and a `newobj`
-imply no link, since their operands name the method's metadata and not the method index or
-allocation, so a body that calls or constructs states its whole table after `withCode`, in pc
-order, as in `{ Extracted.method1.withCode code with links := [(pc, link), ...] }`, with the
-extraction's link at each call and construction. This is also the form for a body embedded into an
+static access at the body's pc with the extraction's descriptor for it. A body with calls, constructions or
+managed addresses states its link table after `withCode`,
+in pc order, as in `{ Extracted.method1.withCode code with links := [(pc, link), ...] }`.
+Each entry gives the extraction's binding at the corresponding pc. This is also the form for a body embedded into an
 extraction with dead blocks, where the pcs of the calls differ:
 
 ```lean
@@ -277,12 +275,7 @@ text when the static descriptor lists differ or a moved pc resolves another desc
 
 A proof that steps through a call or a construction reads the link at its pc.
 `cil_instruction_equations` states that read as `body_link{pc} : body.linkAt pc = some link` for
-each call site, so no proof walks the table. For a body that keeps the table its code implies, the
-fact comes from the instruction equation of its pc through `Method.linkAt_of_instruction`; such a
-table has no entry at a `call` or `newobj`, and the command states `body.linkAt pc = none` at a
-`call`, which then runs its method's runtime model or faults. For an explicit table, as an
-extraction, a template or a body that calls or constructs writes, the command checks once
-that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
+each keyed pc. The command checks once that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
 table's entry
 (`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. At
 a `call` the table does not key, the command states `body.linkAt pc = none` from the suffix of the

@@ -30,6 +30,7 @@ theorem Link.relocate_relocate (f g : Nat → Nat) (link : Link) :
 theorem Link.relocate_of_fixes {f : Nat → Nat} {link : Link}
     (fixes : ∀ callee ∈ link.callees, f callee = callee) : link.relocate f = link := by
   cases link with
+  | address method => rfl
   | direct method => simp_all [Link.relocate, Link.callees]
   | aggregate constructor size => simp_all [Link.relocate, Link.callees]
   | object constructor bases size => simp_all [Link.relocate, Link.callees]
@@ -130,7 +131,7 @@ theorem Method.ofBody?_relocate (f : Nat → Nat) (profile : FeatureProfile)
 
 #print axioms Method.ofBody?_relocate
 
-/-- The record with every method index of its link table renamed by `f`. -/
+/-- The record with its executable targets renamed by `f` and its source address bindings. -/
 def Extraction.MethodEvidence.relocateLinks (f : Nat → Nat) (item : MethodEvidence) :
     MethodEvidence :=
   { item with links := item.links.map fun entry => (entry.1, entry.2.relocate f) }

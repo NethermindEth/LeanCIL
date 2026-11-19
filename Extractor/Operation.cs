@@ -287,6 +287,9 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
     /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
     internal MethodRef? Site { get; init; }
 
+    /// <summary>The call enters one body with a caller continuation for contract composition.</summary>
+    internal bool ReturnsToCaller => Kind is CallKind.Static or CallKind.Instance;
+
     /// <summary>The type term of the <c>constrained.</c> prefix's closed operand.</summary>
     internal string? ConstrainedType { get; init; }
 
@@ -296,12 +299,12 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
 
     internal override string? Link(Func<int, string> calleeName) => $".direct {calleeName(Method)}";
 
+    string Operand => Site?.ToLean() ?? throw new InvalidOperationException("A call has no method operand.");
+
     internal override string Render(Func<int, string> calleeName) => Kind switch
     {
-        CallKind.Instance => $".callInstance {calleeName(Method)} {Arguments}",
-        CallKind.Static or CallKind.Tail =>
-            $".call ({Site?.ToLean() ?? throw new InvalidOperationException("A call has no method operand.")}) " +
-            Prefixes,
+        CallKind.Instance => $".callvirt ({Operand})",
+        CallKind.Static or CallKind.Tail => $".call ({Operand}) {Prefixes}",
         _ => throw new ArgumentOutOfRangeException(nameof(Kind))
     };
 
@@ -367,6 +370,9 @@ internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Const
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>
 internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets, int Arguments) : Operation
 {
+    /// <summary>The method reference of the virtual slot named at the call site.</summary>
+    internal MethodRef? Site { get; init; }
+
     internal override IEnumerable<int> Methods => Targets.Select(target => target.Method);
 
     internal override Operation Renumber(Func<int, int> map) =>
@@ -374,8 +380,11 @@ internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets
 
     internal override string? Link(Func<int, string> calleeName) => $".virtual {Table(calleeName)}";
 
-    internal override string Render(Func<int, string> calleeName) =>
-        $".callVirtual {Table(calleeName)} {Arguments}";
+    internal override string Render(Func<int, string> calleeName)
+    {
+        var slot = Site ?? throw new InvalidOperationException("A virtual call has no method operand.");
+        return $".callvirt ({slot.ToLean()})";
+    }
 
     string Table(Func<int, string> calleeName) => "[" + string.Join(", ",
         Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})")) + "]";
@@ -708,7 +717,7 @@ internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> C
     internal override string? Link(Func<int, string> calleeName) => $".indirect {Targets(calleeName)}";
 
     protected override string Body(Func<int, string> calleeName) =>
-        $"(.call {Signature} {Targets(calleeName)} {LeanText.Bool(Tail)})";
+        $"(.call {Signature} {LeanText.Bool(Tail)})";
 
     string Targets(Func<int, string> calleeName) =>
         "[" + string.Join(", ", Catalog.Select(target => target.Lean(calleeName))) + "]";
@@ -722,8 +731,9 @@ internal sealed record MethodAddress(ManagedTarget Target, string Signature) : M
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Target = Target with { Method = map(Target.Method) } };
 
-    protected override string Body(Func<int, string> calleeName) =>
-        $"(.address {Target.Lean(calleeName)} {Signature})";
+    internal override string Link(Func<int, string> calleeName) => $".address {calleeName(Target.Method)}";
+
+    protected override string Body(Func<int, string> calleeName) => $"(.address {Target.Identity} {Signature})";
 }
 
 /// <summary>A runtime memory operation.</summary>

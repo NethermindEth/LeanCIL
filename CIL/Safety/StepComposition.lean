@@ -514,9 +514,9 @@ attribute [cil_step] localAllocation
     catalog its link gives; a fact for that selection, which the kernel checks, decides it without
     comparing identities here. -/
 @[cil_step] theorem step_managed_call_eq (signature : CIL.ManagedSignature)
-    (stated : List CIL.ManagedTarget) (tail : Bool) (pointer : CIL.MethodPointer)
+    (tail : Bool) (pointer : CIL.MethodPointer)
     (values : List Value) :
-    step body (.managed (.call signature stated tail)) pc args frame
+    step body (.managed (.call signature tail)) pc args frame
         (.methodPointer pointer :: values) memory =
       if unspecifiedOperands (signature.parameters.length + 1) (.methodPointer pointer :: values)
       then .error (.unsupported "Instruction observes unspecified vector bits")

@@ -3154,9 +3154,10 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
     var pushBytes = pointers ? 6 : 1;
     var consumeBytes = pointers ? 5 : 1;
     var loaded = addressed ? ".reference" : "kind";
-    var pushed = pointers ? ".managed (.address ⟨⟨\"Scaling\", 2, []⟩, 0⟩ signature)" : ".ldc_i4 0";
+    const string identity = """{ owner := "T::Scaling", token := 2, arguments := [] }""";
+    var pushed = pointers ? $".managed (.address {identity} signature)" : ".ldc_i4 0";
     var emittedLoad = addressed ? ".ldloca index" : ".ldloc index";
-    var consumed = pointers ? ".managed (.call signature [] false)" : ".pop";
+    var consumed = pointers ? ".managed (.call signature false)" : ".pop";
     var header = $$"""
         import CIL.Extraction.Scalars
         set_option maxRecDepth 100000
@@ -3166,7 +3167,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
         def handler : CallSite :=
           { declared := { convention := 0 }, method := {
-              owner := .void, name := name!"", hasThis := false, genericArity := 0,
+              owner := .atom "T" "Scaling", name := name!"", hasThis := false, genericArity := 0,
               returnType := .void, parameters := [] },
             target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩

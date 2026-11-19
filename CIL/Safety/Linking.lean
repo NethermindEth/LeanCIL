@@ -33,6 +33,7 @@ theorem ManagedTarget.find?_relocate (f : Nat → Nat) (catalog : List ManagedTa
 /-- Renames every method index a link enters. -/
 def Link.relocate (f : Nat → Nat) : Link → Link
   | .direct method => .direct (f method)
+  | .address method => .address method
   | .virtual targets => .virtual (targets.map fun (type, method) => (type, f method))
   | .aggregate constructor size => .aggregate (f constructor) size
   | .object constructor bases size => .object (f constructor) bases size
@@ -136,11 +137,11 @@ theorem indirectTarget_relocate (f : Nat → Nat) (signature : CIL.ManagedSignat
 /-- Relocating the catalog an indirect call reads from its link changes only the body index of
     its selected action. -/
 private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
-    (stated : List CIL.ManagedTarget) (tail : Bool) (link : Option CIL.Link) (pc : Nat)
+    (tail : Bool) (link : Option CIL.Link) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) :
-    managedStep (.call signature stated tail) (link.map (CIL.Link.relocate f)) pc frame stack
+    managedStep (.call signature tail) (link.map (CIL.Link.relocate f)) pc frame stack
         memory =
-      (managedStep (.call signature stated tail) link pc frame stack memory).map
+      (managedStep (.call signature tail) link pc frame stack memory).map
         (FrameAction.relocate f) := by
   cases stack with
   | nil => rfl
@@ -198,12 +199,9 @@ private theorem step_relinked {body : CIL.Method} (links : List (Nat × CIL.Link
       step body op pc args frame stack m := by
   -- A matcher stuck on the stack carries the call arms, which read the table; split the
   -- stack as deep as the patterns look so the matcher selects this instruction's arm.
-  cases op <;> simp only [CIL.Instruction.readsLink, CIL.Instruction.link?,
-    CIL.Instruction.statesLink, Option.isSome_none, Option.isSome_some, Bool.or_false,
-    Bool.or_true, reduceCtorEq] at unlinked
+  cases op <;> simp only [CIL.Instruction.readsLink, reduceCtorEq] at unlinked
   case managed operation =>
-    cases operation <;> simp only [Option.isSome_none, Option.isSome_some,
-      Bool.true_eq_false] at unlinked
+    cases operation <;> simp only [Bool.true_eq_false] at unlinked
     all_goals first
       | rfl
       | (rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩
@@ -235,30 +233,33 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
         | some callee => simpa [linked] using (step_callee stepped enters).1
       simp only [Except.map, FrameAction.relocate_of_callee_none f action none]
   | true =>
-    cases op <;> simp only [CIL.Instruction.readsLink, CIL.Instruction.link?,
-      CIL.Instruction.statesLink, Option.isSome_none, Option.isSome_some, Bool.or_false,
-      Bool.or_true, Bool.false_eq_true] at linked
+    cases op <;> simp only [CIL.Instruction.readsLink, Bool.false_eq_true] at linked
     case managed operation =>
-      cases operation <;> simp only [Option.isSome_none, Option.isSome_some,
-        Bool.false_eq_true] at linked
+      cases operation <;> simp only [Bool.false_eq_true] at linked
       simp only [step, CIL.Method.linkAt_relocate]
       rw [apply_ite (Except.map (FrameAction.relocate f))]
       refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
-      exact managedStep_relocate f _ _ _ (body.linkAt pc) pc frame stack m
-    case callVirtual targets argc =>
+      exact managedStep_relocate f _ _ (body.linkAt pc) pc frame stack m
+    case callvirt method =>
       simp only [step, observerCount, CIL.Method.linkAt_relocate]
-      by_cases unknown : unspecifiedOperands argc stack = true
+      by_cases unknown : unspecifiedOperands method.argumentCount stack = true
       · simp only [unknown, ite_true]
         rfl
       simp only [unknown, Bool.false_eq_true, ite_false]
       rcases body.linkAt pc with _ | link
       · rfl
       cases link <;> try rfl
+      case direct index =>
+        simp only [Option.map_some, CIL.Link.relocate]
+        repeat' first
+          | rfl
+          | (split <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure,
+              Except.map, FrameAction.relocate])
       rename_i table
       simp only [Option.map_some, CIL.Link.relocate, virtualTarget_relocate]
       split
       · rfl
-      cases (stack.take argc).reverse.mapM (checkedValue m) with
+      cases (stack.take method.argumentCount).reverse.mapM (checkedValue m) with
       | error => rfl
       | ok arguments =>
         simp only [Bind.bind, Except.bind]

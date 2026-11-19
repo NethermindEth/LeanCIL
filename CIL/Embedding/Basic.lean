@@ -29,13 +29,6 @@ def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
   | .bne_un t => .bne_un (r t)
   | op => op
 
-/-- Renaming code targets never changes the link an instruction implies. -/
-theorem Instruction.link?_relabel (r : Nat → Nat) (op : Instruction) :
-    (op.relabel r).link? = op.link? := by
-  cases op <;> simp [Instruction.relabel, Instruction.link?]
-
-#print axioms Instruction.link?_relabel
-
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
   | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
@@ -61,7 +54,7 @@ theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
 
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Instruction.continues : Instruction → Bool
-  | .managed (.call _ _ true) => false
+  | .managed (.call _ true) => false
   | .call _ prefixes => !prefixes.tail
   | .br _ | .ret | .throw _ | .unadmitted _ => false
   | _ => true

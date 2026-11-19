@@ -55,7 +55,10 @@ var siteTerm = (string)site.GetType().GetMethod("ToLean", BindingFlags.Instance 
     .Invoke(site, [])!;
 object Call(string kind, int method)
 {
-    var call = Create("Call", Enum.Parse(Model("CallKind"), kind), method, 0, false);
+    return WithSite(Create("Call", Enum.Parse(Model("CallKind"), kind), method, 0, false));
+}
+object WithSite(object call)
+{
     call.GetType().GetProperty("Site", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(call, site);
     return call;
 }
@@ -185,12 +188,12 @@ string SharedBody(string name, Func<int, object> caller)
 }
 var numbered = new (string Name, Func<int, object> Caller, string Expected)[]
 {
-    ("CallVirtual", target => Method("Caller", Create("CallVirtual", Listed(typeof((string, int)),
-        [("Class", target)]), 1), ".ret"), ".callVirtual [(Class, callee0)] 1"),
+    ("CallVirtual", target => Method("Caller", WithSite(Create("CallVirtual", Listed(typeof((string, int)),
+        [("Class", target)]), 1)), ".ret"), ".virtual [(Class, callee0)]"),
     ("MethodAddress", target => Method("Caller", Create("MethodAddress", Entry("ID", target), "SIG"), ".ret"),
-        ".managed (.address { identity := ID, method := callee0 } SIG)"),
+        ".address callee0"),
     ("IndirectCall", target => Method("Caller", Create("IndirectCall", "SIG", Listed(Model("ManagedTarget"),
-        [Entry("ID", target)]), false), ".ret"), ".managed (.call SIG [{ identity := ID, method := callee0 }] false)"),
+        [Entry("ID", target)]), false), ".ret"), ".indirect [{ identity := ID, method := callee0 }]"),
     ("Initializer", target => MethodIn("Caller", FrameOf(false, InitializedSite(target)), ".ret"),
         "initializer := some { method := callee0, arguments := []")
 };

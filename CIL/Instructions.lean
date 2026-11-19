@@ -254,14 +254,8 @@ inductive Instruction where
       popped values as arguments. Under `tail.` those are the whole stack and the caller's
       frame retires before the transfer. -/
   | call (method : Extraction.MethodRef) (prefixes : CallPrefixes := {})
-  -- Constructors and receiver calls; `argc` values are popped as arguments.
-  /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the
-      `argc` arguments, throws `System.NullReferenceException` before the call. -/
-  | callInstance (method : Nat) (argc : Nat)
-  /-- `callvirt` of a virtual method of a class: the receiver, the first of the `argc` arguments,
-      enters the body `targets` lists for its exact runtime class. A null receiver throws
-      `System.NullReferenceException`; a class `targets` omits is a model fault, not a call. -/
-  | callVirtual (targets : List (Extraction.TypeExpr × Nat)) (argc : Nat)
+  /-- A receiver call enters the direct body or dispatch table at its pc. Null receivers throw. -/
+  | callvirt (method : Extraction.MethodRef)
   /-- `newobj` of `constructor`: a fresh zeroed instance of its owner, passed to the constructor
       the link at its pc names as its receiver ahead of the constructor's parameters, and pushed
       once it returns. The link states what is allocated: a value-type temporary for
@@ -402,6 +396,8 @@ inductive Link where
   | aggregate (constructor : Nat) (size : Fin (2^64))
   /-- `newobj` of a class: its constructor, admitted bases nearest first, and field bytes. -/
   | object (constructor : Nat) (bases : List Extraction.TypeExpr) (size : Nat)
+  /-- The body whose managed identity an `ldftn` pushes. Taking its address enters no body. -/
+  | address (method : Nat)
   /-- `calli`: the bodies a method pointer of the site's signature may name. -/
   | indirect (catalog : List ManagedTarget)
   deriving DecidableEq, Repr
@@ -410,22 +406,8 @@ inductive Link where
 def Link.callees : Link → List Nat
   | .direct method | .aggregate method _ | .object method _ _ => [method]
   | .virtual targets => targets.map Prod.snd
+  | .address _ => []
   | .indirect catalog => catalog.map ManagedTarget.method
-
-/-- The link that an instruction's own program index implies; `none` for instructions that
-    enter no method and for `call` and `newobj`, whose operands name a method rather than a
-    program index. -/
-def Instruction.link? (op : Instruction) : Option Link := by
-  -- Built by cases: a catch-all `match` on this type elaborates to a sparse recursor that
-  -- depends on `propext`, and every method literal's default link table would inherit it.
-  cases op
-  case callInstance method _ => exact some (.direct method)
-  case callVirtual targets _ => exact some (.virtual targets)
-  case managed operation =>
-    cases operation
-    case call _ catalog _ => exact some (.indirect catalog)
-    all_goals exact none
-  all_goals exact none
 
 /-- The constructor a `newobj` names; `none` for every other instruction. Its link is not implied
     by the operand: the link table states the constructor's index and the allocation. -/
@@ -445,25 +427,21 @@ theorem Instruction.eq_newobj_of_constructor? {op : Instruction}
 
 #print axioms Instruction.eq_newobj_of_constructor?
 
-/-- The instruction's operand names a method without implying its program index, so the link
-    table states the link it reads: a `call` or a `newobj`. -/
+/-- Instructions whose metadata binding belongs to the method's link table. -/
 def Instruction.statesLink (op : Instruction) : Bool := by
   cases op
-  case call | newobj => exact true
+  case call | callvirt | newobj | managed => exact true
   all_goals exact false
 
-/-- The instruction reads the link at its pc when it steps: it implies one, or its table states
-    one. A body that gives such a pc no link of the right kind faults the step. -/
-def Instruction.readsLink (op : Instruction) : Bool :=
-  op.link?.isSome || op.statesLink
-
-/-- The link table a code list implies: each linking instruction's pc with its link. The pcs come
-    from `List.range`, which the kernel reduces to literals. Numbered by `zipIdx`, each pc would be
-    a chain of `+ 1` terms shaped like the pcs `Embeds` reads at, and the kernel would pay a
-    chain's length at every read, so an embedding would cost the square of its calls. -/
-def linksOfCode (code : List Instruction) : List (Nat × Link) :=
-  (code.zip (List.range code.length)).filterMap fun entry =>
-    entry.1.link?.map fun link => (entry.2, link)
+/-- Instructions whose execution can consult the link at their pc. -/
+def Instruction.readsLink (op : Instruction) : Bool := by
+  cases op
+  case call | callvirt | newobj => exact true
+  case managed operation =>
+    cases operation
+    case address => exact false
+    case call => exact true
+  all_goals exact false
 
 /-- An extracted method body with the frame layout the interpreter needs. -/
 structure Method where
@@ -481,7 +459,7 @@ structure Method where
   /-- Program-wide layouts, the same value for every method of an extraction. -/
   environment : LayoutEnvironment := {}
   /-- Call-family pc to link; the first entry for a pc wins. -/
-  links : List (Nat × Link) := linksOfCode code
+  links : List (Nat × Link) := []
   returnsValue : Bool
   deriving Repr
 
@@ -492,7 +470,7 @@ def linkLookup (links : List (Nat × Link)) (query : Nat) : Option Link :=
 /-- The link of the call-family instruction at `pc`, if the table has one; the first entry wins.
     An extracted method states each call site's link as a generated fact, so a proof need not
     evaluate this scan; for any other body the scan runs over its table, which for a body without
-    a written `links` is the one its code implies. -/
+    a written `links` is empty. -/
 def Method.linkAt (body : Method) (pc : Nat) : Option Link :=
   linkLookup body.links pc
 
@@ -501,110 +479,15 @@ def Method.linkAt (body : Method) (pc : Nat) : Option Link :=
 def Method.staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
   (body.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
 
-/-- `method` with new code and the link table that code implies. Static sites are keyed by pc like
-    the links, so they are reset to none; a body that reads statics supplies its own after the
-    call, and so does a body with a pc whose instruction `statesLink`, a `call` or `newobj`,
-    since it implies none. The declared signature, the environment and the other fields are
-    kept. A plain
-    `{ method with code := ... }` keeps the old table and sites, whose pcs are those of the old
-    code. -/
+/-- Replace the code and clear the links and static sites keyed by its pcs. -/
 def Method.withCode (method : Method) (code : List Instruction) : Method :=
-  { method with code := code, links := linksOfCode code, staticSites := [] }
+  { method with code := code, links := [], staticSites := [] }
 
-/-- The implied table, with the code numbered by `zipIdx`. -/
-theorem linksOfCode_eq_zipIdx (code : List Instruction) :
-    linksOfCode code =
-      code.zipIdx.filterMap fun entry => entry.1.link?.map fun link => (entry.2, link) := by
-  simp only [linksOfCode, List.zipIdx_eq_zip_range', List.range_eq_range']
-
-#print axioms linksOfCode_eq_zipIdx
-
-/-- Reading the table implied by code that starts at pc `start` gives the code's own link at each
-    pc from `start` on, and none before it. -/
-theorem linksOfCode_find (code : List Instruction) (start pc : Nat) :
-    (((code.zipIdx start).filterMap fun entry =>
-        entry.1.link?.map fun link => (entry.2, link)).find? fun entry => entry.1 == pc).map
-          Prod.snd = if start ≤ pc then (code[pc - start]?).bind Instruction.link? else none := by
-  induction code generalizing start with
-  | nil => simp
-  | cons op rest ih =>
-    simp only [List.zipIdx_cons, List.filterMap_cons]
-    by_cases same : start = pc
-    · subst same
-      cases link : op.link? with
-      | none =>
-        have none_after : (((rest.zipIdx (start + 1)).filterMap fun entry =>
-            entry.1.link?.map fun link => (entry.2, link)).find? fun entry => entry.1 == start) =
-              none := by
-          have := ih (start + 1)
-          simp only [show ¬ (start + 1 ≤ start) by omega, ite_false] at this
-          exact Option.map_eq_none_iff.mp this
-        simp [link, none_after]
-      | some found =>
-        have first : (((start, found) :: ((rest.zipIdx (start + 1)).filterMap fun entry =>
-            entry.1.link?.map fun link => (entry.2, link))).find? fun entry => entry.1 == start) =
-              some (start, found) := List.find?_cons_of_pos (Nat.beq_refl start)
-        simp [link, first]
-    · have different : ¬ (start == pc) = true := by
-        simp only [beq_iff_eq]
-        exact same
-      cases link : op.link? with
-      | none =>
-        simp only [Option.map_none]
-        rw [ih (start + 1)]
-        by_cases later : start + 1 ≤ pc
-        · have : pc - start = (pc - (start + 1)) + 1 := by omega
-          simp [later, show start ≤ pc by omega, this]
-        · simp [later, show ¬ start ≤ pc by omega]
-      | some found =>
-        have skip : (((start, found) :: ((rest.zipIdx (start + 1)).filterMap fun entry =>
-            entry.1.link?.map fun link => (entry.2, link))).find? fun entry => entry.1 == pc) =
-              ((rest.zipIdx (start + 1)).filterMap fun entry =>
-                entry.1.link?.map fun link => (entry.2, link)).find? fun entry => entry.1 == pc :=
-          List.find?_cons_of_neg different
-        simp only [Option.map_some]
-        rw [skip, ih (start + 1)]
-        by_cases later : start + 1 ≤ pc
-        · have : pc - start = (pc - (start + 1)) + 1 := by omega
-          simp [later, show start ≤ pc by omega, this]
-        · simp [later, show ¬ start ≤ pc by omega]
-
-#print axioms linksOfCode_find
-
-/-- The table a code list implies gives each pc the link of the instruction there. -/
-theorem linkLookup_linksOfCode (code : List Instruction) (pc : Nat) :
-    linkLookup (linksOfCode code) pc = (code[pc]?).bind Instruction.link? := by
-  simp only [linkLookup, linksOfCode_eq_zipIdx]
-  rw [linksOfCode_find code 0 pc]
-  simp
-
-#print axioms linkLookup_linksOfCode
-
-/-- A body whose table is the one its code implies has a link exactly at its linking
-    instructions. -/
-theorem Method.linkAt_of_implied {body : Method} (implied : body.links = linksOfCode body.code)
-    (pc : Nat) : body.linkAt pc = (body.code[pc]?).bind Instruction.link? := by
-  rw [Method.linkAt, implied]
-  exact linkLookup_linksOfCode body.code pc
-
-#print axioms Method.linkAt_of_implied
-
-/-- `withCode` gives the body the links its new code implies. -/
+/-- Replacing the code clears its link table. -/
 theorem Method.withCode_linkAt (method : Method) (code : List Instruction) (pc : Nat) :
-    (method.withCode code).linkAt pc = (code[pc]?).bind Instruction.link? :=
-  Method.linkAt_of_implied rfl pc
+    (method.withCode code).linkAt pc = none := rfl
 
 #print axioms Method.withCode_linkAt
-
-/-- A body whose table is the one its code implies reads the link of its instruction at `pc` in one
-    step once an instruction equation names that instruction; no table is evaluated. -/
-theorem Method.linkAt_of_instruction {body : Method}
-    (implied : body.links = linksOfCode body.code) {pc : Nat} {op : Instruction}
-    (found : body.code[pc]? = some op) : body.linkAt pc = op.link? := by
-  rw [Method.linkAt_of_implied implied pc, found]
-  rfl
-
-#print axioms Method.linkAt_of_instruction
 
 /-- A table that lists no key `pc` gives it no link. -/
 theorem linkLookup_of_unlisted {links : List (Nat × Link)} {pc : Nat}

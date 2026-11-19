@@ -3,6 +3,8 @@ import CIL.Extraction.Scalars
 import CIL.Safety.SymbolicExecution
 import Tests.Support
 
+/-! Raw method specialization, call-site binding and construction checks. -/
+
 namespace Tests.ExtractionGenerics
 open CIL CIL.Extraction
 
@@ -189,15 +191,16 @@ def linkedZero : Option Link := some (.direct 0)
 -- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.
 theorem receiver_checked_calls :
     validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
-      (.callInstance 0 2) ∧
+      (.callvirt depositSite.method) ∧
     ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
       (.call depositSite.method) ∧
     ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true linkedZero
-      (.callInstance 0 2) ∧
+      (.callvirt depositSite.method) ∧
     ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true linkedZero
-      (.callInstance 0 1) ∧
+      (.callvirt { depositSite.method with parameters := [] }) ∧
     ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }⟩] []
-      ⟨0, 111, .call depositSite⟩ true linkedZero (.callInstance 0 2) := by decide +kernel
+      ⟨0, 111, .call depositSite⟩ true linkedZero (.callvirt depositSite.method) := by
+  decide +kernel
 #print axioms receiver_checked_calls
 
 /-- `deposit` marked virtual, as an override or a `virtual` member is. -/
@@ -209,8 +212,43 @@ theorem virtual_bodies_called_directly :
     validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true
       linkedZero (.call depositSite.method) ∧
     ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 111, .call depositSite⟩ true
-      linkedZero (.callInstance 0 2) := by decide +kernel
+      linkedZero (.callvirt depositSite.method) := by decide +kernel
 #print axioms virtual_bodies_called_directly
+
+/-- Both receiver link kinds authenticate the slot. A virtual table requires virtual bodies. -/
+theorem receiver_links_bind_slot :
+    let site : RawInstruction := ⟨0, 111, .call depositSite⟩
+    let other := Instruction.callvirt { depositSite.method with name := name!"Withdraw" }
+    let table := some (Link.virtual [(tally, 0)])
+    validateManagedCall [⟨[], virtualDeposit⟩] [] site true table (.callvirt depositSite.method) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] site true table (.callvirt depositSite.method) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] site true linkedZero other ∧
+    ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] site true table other := by decide +kernel
+#print axioms receiver_links_bind_slot
+
+/-- Managed addresses and catalog entries authenticate the token of the indexed body. -/
+theorem managed_pointer_bindings :
+    let first := { closed with parameters := [], returnType := .void }
+    let second := { first with token := 2 }
+    let methods : List SpecializedMethod := [⟨[], first⟩, ⟨[], second⟩]
+    let signature : ManagedSignature := ⟨.void, []⟩
+    let identity : ManagedIdentity := ⟨first.owner, first.token, []⟩
+    let site := { callSite word with
+      method.parameters := [], method.returnType := .void,
+      method.methodArguments := [], method.genericArity := 0, typeArguments := [],
+      parameterCount := 0, returnsValue := false }
+    let address := Instruction.managed (.address identity signature)
+    let load := RawInstruction.mk 0 65030 (.call site)
+    let indirect := RawInstruction.mk 0 41 (.indirectCall .void [] false false 0)
+    let transfer := Instruction.managed (.call signature false)
+    let target : ManagedTarget := ⟨identity, 0⟩
+    let forged : ManagedTarget := ⟨{ identity with token := second.token }, 0⟩
+    validateManagedCall methods [] load true (some (.address 0)) address ∧
+      ¬ validateManagedCall methods [] load true (some (.address 1)) address ∧
+      validateManagedCall methods [] indirect true (some (.indirect [target])) transfer ∧
+      ¬ validateManagedCall methods [] indirect true (some (.indirect [target, forged]))
+        transfer := by decide +kernel
+#print axioms managed_pointer_bindings
 
 /-- A method with a class instance local and parameter beside a scalar of each. -/
 def holder : RawMethod := { closed with

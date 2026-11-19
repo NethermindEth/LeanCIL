@@ -84,48 +84,44 @@ def elabAtPc (pc : Nat) (fact : Command) : CommandElabM Unit := do
     (← `(command| set_option maxRecDepth $(Syntax.mkNumLit (toString (512 + 4 * pc))) in $fact))
 
 /-- A call instruction found in a method body: `CIL.Instruction.call` or the receiver-checked
-    `CIL.Instruction.callInstance`, with its pc, callee index, argument count and the
+    `CIL.Instruction.callvirt`, with its pc, callee index, argument count and the
     instruction term as the body writes it. -/
 structure CallAt where
   pc : Nat
   callee : Nat
   argc : Nat
-  opcode : Name
   instruction : Expr
   deriving Inhabited
 
 /-- Declares `name : parent.code[pc]? = some op` for the call `site` of the closed body
-    `parent`, checked by `rfl`; a `callInstance` is stated with `index` for its callee, a
-    `call` with the method its body names. -/
-def emitCallFact (name : Ident) (parent : Term) (site : CallAt) (index : Term) :
-    CommandElabM Unit := do
-  if site.opcode == ``CIL.Instruction.callInstance then
-    elabAtPc site.pc (← `(@[cil_code] theorem $name :
-      ($parent).code[$(quote site.pc)]? = some (.callInstance $index $(quote site.argc)) := rfl))
-  else
-    liftTermElabM do
-      let body ← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method)))
-      let lookup ← mkAppM ``GetElem?.getElem?
-        #[mkApp (mkConst ``CIL.Method.code) body, mkNatLit site.pc]
-      let type ← mkEq lookup (← mkAppM ``Option.some #[site.instruction])
-      let declaration := (← getCurrNamespace) ++ name.getId
-      let value ← mkEqRefl lookup
-      addDecl (.thmDecl { name := declaration, levelParams := [], type, value })
-    elabCommand (← `(attribute [cil_code] $name))
+    `parent`, with the method reference its raw site names. -/
+def emitCallFact (name : Ident) (parent : Term) (site : CallAt) : CommandElabM Unit := do
+  liftTermElabM do
+    let body ← instantiateMVars (← elabTermEnsuringType parent (some (mkConst ``CIL.Method)))
+    let lookup ← mkAppM ``GetElem?.getElem?
+      #[mkApp (mkConst ``CIL.Method.code) body, mkNatLit site.pc]
+    let type ← mkEq lookup (← mkAppM ``Option.some #[site.instruction])
+    let declaration := (← getCurrNamespace) ++ name.getId
+    let value ← mkEqRefl lookup
+    addDecl (.thmDecl { name := declaration, levelParams := [], type, value })
+  elabCommand (← `(attribute [cil_code] $name))
 
 /-- The callee of each direct link in a method's table, keyed by pc; the first entry for a pc
 wins, as in `Method.linkAt`. One cell is reduced at a time, so the cost is linear in the table. -/
 def directLinks (method : Expr) : MetaM (Std.HashMap Nat Nat) := do
   let mut cell := mkApp (mkConst ``CIL.Method.links) method
   let mut found : Std.HashMap Nat Nat := {}
+  let mut seen : Std.HashSet Nat := {}
   repeat
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, entry, tail]) =>
       if let (``Prod.mk, #[_, _, pc, link]) := (← whnf entry).getAppFnArgs then
-        if let (``CIL.Link.direct, #[callee]) := (← whnf link).getAppFnArgs then
-          let (pc, callee) := (← whnf pc, ← whnf callee)
-          if let (some pc, some callee) := (← (evalNat pc).run, ← (evalNat callee).run) then
-            unless found.contains pc do found := found.insert pc callee
+        if let some pc ← (evalNat (← whnf pc)).run then
+          unless seen.contains pc do
+            seen := seen.insert pc
+            if let (``CIL.Link.direct, #[callee]) := (← whnf link).getAppFnArgs then
+              if let some callee ← (evalNat (← whnf callee)).run then
+                found := found.insert pc callee
       cell := tail
     | _ => break
   return found
@@ -142,22 +138,17 @@ def calls (method : Expr) : MetaM (Array CallAt) := do
     | (``List.cons, #[_, op, tail]) =>
       let instruction ← whnf op
       match instruction.getAppFnArgs with
-      | (``CIL.Instruction.call, #[method, _]) =>
+      | (``CIL.Instruction.call, #[method, _]) | (``CIL.Instruction.callvirt, #[method]) =>
         let count ← reduce (mkApp (mkConst ``CIL.Extraction.MethodRef.argumentCount) method)
         if let some argc ← (evalNat count).run then
-          sites := sites.push (pc, argc, ``CIL.Instruction.call, instruction)
-      | (``CIL.Instruction.callInstance, #[_, argc]) =>
-        if let some argc ← (evalNat argc).run then
-          sites := sites.push (pc, argc, ``CIL.Instruction.callInstance, instruction)
+          sites := sites.push (pc, argc, instruction)
       | _ => pure ()
       cell := tail
       pc := pc + 1
     | _ => break
-  -- A table the code implies reduces past every pc before a call, so its depth grows with the pc.
-  let linked ← withTheReader Core.Context (fun context =>
-      { context with maxRecDepth := context.maxRecDepth + 4 * pc }) (directLinks method)
-  return sites.filterMap fun (pc, argc, opcode, instruction) =>
-    linked[pc]?.map fun callee => { pc, callee, argc, opcode, instruction }
+  let linked ← directLinks method
+  return sites.filterMap fun (pc, argc, instruction) =>
+    linked[pc]?.map fun callee => { pc, callee, argc, instruction }
 
 /-- The candidate selected by `[occurrence]`, or the only one; never the first of several. -/
 def choose (subject : MessageData) (candidates : Array String) (occurrence : Option Nat) :
@@ -237,7 +228,7 @@ elab_rules : command
       return (method, ← callSite parent method signature.getString (occurrence.map (·.getNat)))
     emit index body signature method
     documentBinding doc index
-    emitCallFact (mkIdent (index.getId ++ `call)) parent site index
+    emitCallFact (mkIdent (index.getId ++ `call)) parent site
     emitLink (mkIdent (index.getId ++ `link)) parent site.pc index
 
 /-- `bind_callee index body := call argc from parent` binds the method `parent` calls with
@@ -268,7 +259,7 @@ elab_rules : command
       return (site, table[site.callee]?.getD "")
     emit index body (Syntax.mkStrLit signature) site.callee
     documentBinding doc index
-    emitCallFact (mkIdent (index.getId ++ `call)) parent site index
+    emitCallFact (mkIdent (index.getId ++ `call)) parent site
     emitLink (mkIdent (index.getId ++ `link)) parent site.pc index
 
 /-- The number of cells in a closed list, reduced one cell at a time without normalizing its

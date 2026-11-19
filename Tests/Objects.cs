@@ -104,15 +104,15 @@ var dispatched = File.ReadAllText(Path.Combine(root, "AnimalLegs", "Extracted.le
 const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
 var birdEntry = $"(.object \"{animalScope}\" \"Examples.Bird\", ";
 var dogEntry = $"(.object \"{animalScope}\" \"Examples.Dog\", ";
-var table = Regex.Match(dispatched, @"\.callVirtual \[\(.*?\)\] 1").Value;
-var entries = Regex.Matches(table, @"(\(\.object [^)]*?, )(\d+)\)").Select(entry => entry.Groups).ToArray();
+var table = DispatchPatterns.Table.Match(dispatched).Value;
+var entries = DispatchPatterns.Entry.Matches(table).Select(entry => entry.Groups).ToArray();
 if (entries.Length != 2 || !table.Contains(birdEntry + entries[0][2].Value, StringComparison.Ordinal) ||
     !table.Contains(dogEntry + entries[1][2].Value, StringComparison.Ordinal))
     throw new InvalidOperationException("The extraction does not list Bird and Dog in its dispatch table: " + table);
 foreach (var (name, forged) in new[]
 {
-    ("swapped", $".callVirtual [{birdEntry}{entries[1][2].Value}), {dogEntry}{entries[0][2].Value})] 1"),
-    ("omitted", $".callVirtual [{dogEntry}{entries[1][2].Value})] 1")
+    ("swapped", $".virtual [{birdEntry}{entries[1][2].Value}), {dogEntry}{entries[0][2].Value})]"),
+    ("omitted", $".virtual [{dogEntry}{entries[1][2].Value})]")
 })
 {
     var path = Path.Combine(root, $"ForgedTable-{name}.lean");
@@ -431,3 +431,12 @@ Console.WriteLine("PASS objects: identity, presence, scalar and reference field,
     "construction, base class field, class reference array, value-array field, virtual dispatch and type " +
     "test proofs, and named rejection of unmodelled class shapes, field and element accesses, calls, " +
     "dispatch tables and type tests");
+
+static partial class DispatchPatterns
+{
+    [GeneratedRegex(@"\.virtual \[\(.*?\)\]")]
+    internal static partial Regex Table { get; }
+
+    [GeneratedRegex(@"(\(\.object [^)]*?, )(\d+)\)")]
+    internal static partial Regex Entry { get; }
+}

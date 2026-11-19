@@ -524,7 +524,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
     | _ => false
   let properCall := match emitted with
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
-    | .callInstance .. | .callVirtual .. => instruction.opcode == 111
+    | .callvirt .. => instruction.opcode == 111
     | .newobj _ => instruction.opcode == 115
     | .castclass _ | .isinst _ =>
       (typeTestSource emitted).any fun (opcode, _) => opcode == instruction.opcode
@@ -542,7 +542,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
   if (match emitted with
-    | .call _ prefixes => prefixes.tail | .managed (.call _ _ true) => true | _ => false) then
+    | .call _ prefixes => prefixes.tail | .managed (.call _ true) => true | _ => false) then
     return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
@@ -645,10 +645,10 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     | .call site => prefixes.tail && site.returnType == raw.returnType &&
       featureOpMatches layouts raw instruction (.call method { prefixes with tail := false })
     | _ => false
-  | some .tailCall, .managed (.call signature catalog true) =>
+  | some .tailCall, .managed (.call signature true) =>
     signature.result == callableType raw.returnType &&
       featureOpMatches layouts raw instruction
-        (.managed (.call signature catalog false))
+        (.managed (.call signature false))
   | some .argument, _ => valueEncodingMatches (previous ()) instruction emitted &&
       featureOpMatches layouts raw instruction emitted
   | some _, _ => false

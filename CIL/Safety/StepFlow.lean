@@ -94,9 +94,9 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
 
 /-- An indirect tail call cannot leave a caller continuation behind. -/
 theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSignature}
-    {catalog : List CIL.ManagedTarget} {pc : Nat} {args : List Value} {frame : Frame}
+    {pc : Nat} {args : List Value} {frame : Frame}
     {stack : List Value} {memory : Memory} {action : FrameAction}
-    (executed : step body (.managed (.call signature catalog true)) pc args frame stack memory =
+    (executed : step body (.managed (.call signature true)) pc args frame stack memory =
       .ok action) :
     ∃ callee arguments result, action = .tailCall callee arguments result := by
   simp only [step, managedStep, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed

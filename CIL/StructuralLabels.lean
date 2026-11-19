@@ -84,7 +84,7 @@ elab_rules : command
       callSite parent method (table[method]?.getD s!"method {method}") (occurrence.map (·.getNat))
     elabCommand (← `(@[cil_code] def $label : Nat := $(quote site.pc)))
     CIL.MethodIdentity.documentBinding doc label
-    CIL.MethodIdentity.emitCallFact (mkIdent (label.getId ++ `call)) parent site callee
+    CIL.MethodIdentity.emitCallFact (mkIdent (label.getId ++ `call)) parent site
     CIL.MethodIdentity.emitLink (mkIdent (label.getId ++ `link)) parent site.pc callee
 
 end CIL.StructuralLabels

@@ -408,24 +408,17 @@ receiver (`objectReceiver`), from which Lean derives the receiver's storage and 
 rejects the address of the receiver and of any class-typed local or argument, so no byref can
 stand in for an object receiver.
 
-`callvirt` without a `constrained.` prefix, which C# emits for every instance call on a class,
-is admitted when its target is a non-virtual method of an admitted class. It has exactly one
-target, so it is a call (`callInstance`) that first checks its receiver: a null receiver throws
-`System.NullReferenceException` at the `callvirt`, in the caller, before the callee is entered
-(ECMA-335 III.3.19), and a receiver that is no object reference is ill-typed. Lean admits a
-`callInstance` only at `callvirt`, only into a method whose receiver is an object, counting the
-receiver among its arguments, and rejects a plain `call` emitted for `callvirt`, which would skip
-the check. It also rejects a `callInstance` into a method whose metadata attributes mark it
-virtual, since `callvirt` selects such a body by runtime type; the attributes are metadata the
-extractor decodes, as it decodes `hasThis`.
+An unprefixed `callvirt` names the method in its raw operand. A direct link selects a
+non-virtual method of an admitted class. Lean checks the method reference, the callee's
+metadata and its object receiver, and counts the receiver among the arguments. A null
+receiver throws `System.NullReferenceException` in the caller (ECMA-335 III.3.19).
 
-`callvirt` of a virtual method of an admitted class is a `callVirtual` whose table names the body
-for each class of the extraction's assemblies that derives from the slot's class
-([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). It checks the receiver for null
-like `callInstance`, then enters the body listed for the receiver's runtime type, which the
-allocation records. Lean admits a `callVirtual` only at `callvirt` and only into virtual methods
-with the slot's signature and an object receiver
-([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)).
+A virtual link maps each admitted class derived from the slot's class to the body for its
+instances. Lean checks the slot reference, the signature and virtual attributes of its
+implementations, and the selected body for every concrete class. Execution checks the receiver
+for null and reads its exact runtime class from its allocation to select the implementation.
+See [virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch) and
+[AnimalLegs](../Examples/Proofs/AnimalLegs.lean).
 
 `castclass` and `isinst` of an admitted class other than `System.Object` test against that
 class. Each keeps a reference whose runtime type, its own class or one of the admitted bases

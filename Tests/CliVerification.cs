@@ -322,7 +322,9 @@ RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--t
 // The trace shows the receiver-checked call and the exception it throws on a null receiver.
 var objectTrace = Exited(Execute([.. cli, "verify", objectOutput, "--proof", depositBothProof, "--theorem",
     "ExampleProof.first_null_throws", "--trace"]), 0).Stdout.ReplaceLineEndings("\n");
-if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Instruction.callInstance 1 2\n") ||
+var depositExtraction = File.ReadAllText(Path.Combine(objectOutput, "Extracted.lean"));
+if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Instruction.callvirt ") ||
+    !depositExtraction.Contains("def method0Link2 : Link := .direct 1", StringComparison.Ordinal) ||
     !objectTrace.Contains("changes faults: ExecutionFault.thrown CIL.ExceptionType.nullReference\n"))
     throw new InvalidOperationException("verify --trace did not show the null receiver's call: " + objectTrace);
 Console.WriteLine("PASS CLI reports a proof stuck on a class instance and traces its receiver-checked call");

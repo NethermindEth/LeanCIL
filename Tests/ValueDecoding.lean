@@ -81,12 +81,12 @@ private def accountConstruction : CallSite := {
   name := ".ctor", target := .managed 1, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
-/-- The constrained instance slot, which decodes only after the receiver prefix. -/
+/-- An instance slot callable with or without a constrained prefix. -/
 private def instanceSite : CallSite := { callSite with method.hasThis := true }
 
 /-- The prefix carried by a named decode-table row. -/
 private def predecessor (raw : RawInstruction) : Option RawInstruction :=
-  if raw.opcode == 111 then some ⟨0, 0xFE16, .type int32⟩ else none
+  if raw.opcode == 111 && raw.offset == 6 then some ⟨0, 0xFE16, .type int32⟩ else none
 
 /-- One raw instruction per value opcode, every short, long and macro form, with the instruction
     ECMA-335 assigns it; constants include the extremes of each form's range and locals the largest
@@ -199,6 +199,12 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 0xFE16, .type int32⟩, .nop),
   -- Calls and constructions, whose target the link at their pc gives.
   (⟨0, 40, .call callSite⟩, .call callSite.method),
+  (⟨0, 111, .call instanceSite⟩, .callvirt instanceSite.method),
+  (⟨0, 65030, .call { callSite with typeArguments := [int32], method.genericArity := 1 }⟩,
+    .managed (.address ⟨"T::T.Account", 0x06000001, [callableType int32]⟩
+      ⟨.void, [callableType int32]⟩)),
+  (⟨0, 41, .indirectCall .void [int32] false false 0⟩,
+    .managed (.call ⟨.void, [callableType int32]⟩ false)),
   (⟨6, 111, .call instanceSite⟩, .call instanceSite.method { constrained := some int32 }),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
@@ -208,8 +214,7 @@ def undecoded : List Name := [
   ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
-  ``Instruction.initializeSpanLocal, ``Instruction.managed, ``Instruction.callInstance,
-  ``Instruction.callVirtual, ``Instruction.skipInit, ``Instruction.feature,
+  ``Instruction.initializeSpanLocal, ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
   ``Instruction.ldtoken]
@@ -231,8 +236,8 @@ theorem literal_operands :
     Instruction.ofRaw? none ⟨0, 208, classOperand⟩ = none := by decide +kernel
 #print axioms literal_operands
 
-/-- Fold results bind their Boolean, branch target or exception. Span constructors and
-    indirect tail calls retain holes. Direct tail calls carry the prefix at the previous pc. -/
+/-- Fold results bind their Boolean, branch target or exception. Direct and indirect tail calls
+    carry the prefix at the previous pc. -/
 theorem role_decodings :
     let tailPrefix : RawInstruction := ⟨0, 65044, .none⟩
     let branch : RawInstruction := ⟨1, 46, .target 9⟩
@@ -250,10 +255,27 @@ theorem role_decodings :
       decoded .argument ⟨0, 2, .none⟩ = some (.ldarg 0) ∧
       Instruction.ofRole? .tailCall (some tailPrefix) call =
         some (.call callSite.method { tail := true }) ∧
-      Instruction.ofRole? .tailCall (some tailPrefix) indirect = none ∧
+      Instruction.ofRole? .tailCall (some tailPrefix) indirect =
+        some (.managed (.call ⟨.void, []⟩ true)) ∧
       decoded (.spanConstructor 0 (.empty 4 true)) call = none := by
   repeat' first | apply And.intro | rfl | (intro impossible; cases impossible)
 #print axioms role_decodings
+
+/-- Closing a generic owner supplies the identity at ldftn and the parameter type at calli. -/
+theorem callable_substitution :
+    let site := { callSite with method.owner := .parameter 0 }
+    let indirect := RawOperand.indirectCall .void [.parameter 0] false false 0
+    let closed := TypeExpr.object "T" "C"
+    Instruction.ofRaw? none ⟨0, 65030, .call site⟩ = none ∧
+      ((substituteOperand [closed] [] 0 (.call site)).bind fun operand =>
+        Instruction.ofRaw? none ⟨0, 65030, operand⟩) =
+          some (.managed (.address ⟨"T::C", 0x06000001, []⟩ ⟨.void, [callableType int32]⟩)) ∧
+      ((substituteOperand [closed] [] 0 indirect).bind fun operand =>
+        Instruction.ofRaw? none ⟨0, 41, operand⟩) =
+          some (.managed (.call ⟨.void, [callableType closed]⟩ false)) ∧
+      Instruction.ofRaw? none ⟨0, 41, .indirectCall .void [] false false 1⟩ = none := by
+  decide +kernel
+#print axioms callable_substitution
 
 /-- A reachable folded argument load names a declared argument and emits its encoded index. -/
 theorem folded_argument_index (localCount index : Nat) (argumentAt : Nat → Option StorageType)
@@ -364,7 +386,7 @@ theorem invalid_constrained_windows :
       [{ modifier with operand := .integer 1 }, instanceCall],
       [⟨0, 0xFE14, .none⟩, modifier, instanceCall, ⟨11, 42, .none⟩]]
     windows.all (fun code => !rawPrefixesValid .void code) &&
-      (Instruction.ofRaw? none instanceCall).isNone := by
+      (Instruction.ofRaw? (some ⟨0, 0xFE14, .none⟩) instanceCall).isNone := by
   decide +kernel
 #print axioms invalid_constrained_windows
 
@@ -655,7 +677,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 90, undecoded 22 of 112 constructors -/
+/-- info: decoded 92, undecoded 19 of 111 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

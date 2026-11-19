@@ -771,13 +771,13 @@ or references it may change.
 | `setSlot` leaves bytes, authority and field locations unchanged | `read_setSlot`, `access_setSlot`, `objectFieldAddress_setSlot` |
 
 An instance call compiled as `callvirt` steps like a call once its receiver forms as a live
-object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
+object (`step_callvirt_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
 through the callee's contract. A null receiver steps to `NullReferenceException` at the
 `callvirt` itself (`receiverCall_null`).
 
 A virtual call steps the same way once the receiver's runtime type is known. Pass a fact
 `runtimeTypeOf memory receiver = .ok type`, with the definitions of `type` and its assembly
-scope; stepping looks the class up in the call's table (`step_callVirtual_eq`,
+scope; stepping looks the class up in the call's table (`step_callvirt_eq`,
 `virtualCall_address`) and enters the listed body
 ([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)). For an instance the method constructs, the
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).

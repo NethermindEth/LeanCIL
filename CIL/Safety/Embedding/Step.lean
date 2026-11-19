@@ -442,39 +442,28 @@ theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPr
 
 #print axioms step_relabel_call
 
-/-- A receiver-checked call relocates no pc; its null receiver raises rather than calls. -/
-theorem step_relabel_callInstance (callee argc : Nat) :
-    StepRelabel (.callInstance callee argc) := by
+/-- A receiver call uses the same direct body or virtual table at the relocated pc. -/
+theorem step_relabel_callvirt (method : CIL.Extraction.MethodRef) :
+    StepRelabel (.callvirt method) := by
   plain_cases
-  link_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    obtain ⟨arguments, found, h⟩ := except_bind_ok h
-    simp only [found, ok_bind_eq]
-    split at h <;> cases h
-    rfl
+  rw [context.link]
+  split at h <;> try cases h
+  all_goals try simp only [‹expected.linkAt pc = _›]
+  all_goals
+    by_cases short : stack.length < method.argumentCount
+    · simp [short] at h
+    · simp only [short, ↓reduceIte] at h ⊢
+      obtain ⟨arguments, found, h⟩ := except_bind_ok h
+      simp only [found, ok_bind_eq]
+      split at h
+      all_goals first
+        | (obtain ⟨callee, selected, h⟩ := except_bind_ok h
+           simp only [selected, ok_bind_eq]
+           cases h
+           rfl)
+        | (cases h <;> rfl)
 
-#print axioms step_relabel_callInstance
-
-/-- A virtual call relocates no pc; its body is selected from memory, which relabeling keeps. -/
-theorem step_relabel_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
-    StepRelabel (.callVirtual targets argc) := by
-  plain_cases
-  link_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    obtain ⟨arguments, found, h⟩ := except_bind_ok h
-    simp only [found, ok_bind_eq]
-    split at h
-    · obtain ⟨callee, selected, h⟩ := except_bind_ok h
-      simp only [selected, ok_bind_eq]
-      cases h
-      rfl
-    all_goals cases h
-
-#print axioms step_relabel_callVirtual
+#print axioms step_relabel_callvirt
 
 /-- A construction relocates no pc; both steps read the same link and allocate alike. -/
 theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
@@ -893,8 +882,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case ldloca index => exact step_relabel_ldloca index
   case stloc index => exact step_relabel_stloc index
   case call method prefixes => exact step_relabel_call method prefixes
-  case callInstance method argc => exact step_relabel_callInstance method argc
-  case callVirtual targets argc => exact step_relabel_callVirtual targets argc
+  case callvirt method => exact step_relabel_callvirt method
   case newobj constructor => exact step_relabel_newobj constructor
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
@@ -1194,28 +1182,20 @@ theorem step_raise_call (method : CIL.Extraction.MethodRef) (prefixes : CallPref
 
 #print axioms step_raise_call
 
-/-- A null receiver raises the same exception at the relocated pc. -/
-theorem step_raise_callInstance (callee argc : Nat) : StepRaise (.callInstance callee argc) := by
+/-- A null receiver raises the same exception at the relocated pc under either link kind. -/
+theorem step_raise_callvirt (method : CIL.Extraction.MethodRef) :
+    StepRaise (.callvirt method) := by
   plain_cases
-  link_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    raise_lockstep
+  rw [context.link]
+  split at h <;> try cases h
+  all_goals try simp only [‹expected.linkAt pc = _›]
+  all_goals
+    by_cases short : stack.length < method.argumentCount
+    · simp [short] at h
+    · simp only [short, ↓reduceIte] at h ⊢
+      raise_lockstep
 
-#print axioms step_raise_callInstance
-
-/-- A null receiver raises the same exception at the relocated pc. -/
-theorem step_raise_callVirtual (targets : List (CIL.Extraction.TypeExpr × Nat)) (argc : Nat) :
-    StepRaise (.callVirtual targets argc) := by
-  plain_cases
-  link_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    raise_lockstep
-
-#print axioms step_raise_callVirtual
+#print axioms step_raise_callvirt
 
 /-- A construction's faults keep their location; both steps read the same link. -/
 theorem step_raise_newobj (constructor : Extraction.MethodRef) :
@@ -1543,8 +1523,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
         | cons value rest => raise_lockstep
     · cases h
   case call method prefixes => exact step_raise_call method prefixes
-  case callInstance callee argc => exact step_raise_callInstance callee argc
-  case callVirtual targets argc => exact step_raise_callVirtual targets argc
+  case callvirt method => exact step_raise_callvirt method
   case newobj constructor => exact step_raise_newobj constructor
   case intrinsic operation argc => exact step_raise_intrinsic operation argc
   case memory operation =>

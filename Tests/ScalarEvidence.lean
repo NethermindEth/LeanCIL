@@ -581,8 +581,8 @@ private def pointerStates : ScalarCertificate :=
   [some [], some [.methodPointer handlerSignature], some [],
     some [.methodPointer handlerSignature], some []]
 private def pointerCode (slot : Nat) : List Instruction :=
-  [.managed (.address ⟨⟨"Scope::Fixture", 2, []⟩, 0⟩ handlerSignature), .stloc slot, .ldloc 1,
-    .managed (.call handlerSignature [] false), .ret]
+  [.managed (.address ⟨"Scope::Fixture", 2, []⟩ handlerSignature), .stloc slot, .ldloc 1,
+    .managed (.call handlerSignature false), .ret]
 
 /-- The indexed pointer locals give a method pointer home only to the native-int local a `calli`
     consumes: storing a method address into the other local, or taking the consumed local's

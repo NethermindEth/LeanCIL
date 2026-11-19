@@ -25,23 +25,6 @@ theorem _root_.CIL.Instruction.relabel_congr {left right : Nat → Nat} (op : In
     op.relabel left = op.relabel right := by
   induction op <;> simp_all [Instruction.relabel, Instruction.targets]
 
-/-- When both link tables are the ones their code implies, a relocated suffix has the links of
-    the original: its linking instructions are the original's with only their targets renamed. -/
-theorem links_of_relocated_suffix {expected actual : Method} {lower start : Nat}
-    (expectedImplied : expected.links = linksOfCode expected.code)
-    (actualImplied : actual.links = linksOfCode actual.code)
-    (suffix : actual.code.drop start =
-      (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start))) :
-    ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc := by
-  intro pc after
-  rw [Method.linkAt_of_implied actualImplied, Method.linkAt_of_implied expectedImplied]
-  have code := congrArg (fun code => code[pc - lower]?) suffix
-  simp only [List.getElem?_drop, List.getElem?_map, Nat.add_sub_cancel' after] at code
-  rw [Nat.add_comm (pc - lower) start, code]
-  cases expected.code[pc]? <;> simp [Instruction.link?_relabel]
-
-#print axioms links_of_relocated_suffix
-
 /-- A table whose keys all lie below `query` gives it no link, so a lookup skips it. -/
 theorem linkLookup_append_of_below {before after : List (Nat × Link)} {query : Nat}
     (below : ∀ entry ∈ before, entry.1 < query) :

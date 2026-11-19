@@ -145,7 +145,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
-  | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callInstance .. | .callVirtual ..
+  | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callvirt ..
   | .castclass _ | .isinst _ | .throw _ | .ret => .boundary
   | _ => .other
 

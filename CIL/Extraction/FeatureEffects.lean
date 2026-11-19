@@ -54,7 +54,7 @@ raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
   | .managed (.address ..) => some (0, 1)
-  | .managed (.call signature _ _) =>
+  | .managed (.call signature _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
   | .localloc | .newarr _ => some (1, 1)
   -- Pushes and one-operand operations.
@@ -78,7 +78,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
   | .call method _ => some (method.argumentCount, if returnsValue then 1 else 0)
-  | .callInstance _ count | .callVirtual _ count => some (count, if returnsValue then 1 else 0)
+  | .callvirt method => some (method.argumentCount, if returnsValue then 1 else 0)
   | .newobj constructor => some (constructor.parameters.length, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)

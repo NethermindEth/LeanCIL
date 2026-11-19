@@ -545,7 +545,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Class type tests and instance fields, direct and constrained calls, and constructions.
         Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
         Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
-        Code.Call, Code.Constrained, Code.Callvirt, Code.Newobj,
+        Code.Call, Code.Constrained, Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli,
         // Branches.
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
@@ -603,12 +603,15 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (instruction.OpCode.Code == Code.Tail && instruction.Next?.OpCode.Code is Code.Call or Code.Calli)
                 continue;
             var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
-            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction) ||
-                (instruction.OpCode.Code == Code.Callvirt && !constrained))
+            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
             var translated = instruction.OpCode.Code switch
             {
                 Code.Call or Code.Callvirt when constrained => operations[pc] is Call { Constrained: true },
+                Code.Callvirt => instruction.Previous?.OpCode.OpCodeType != OpCodeType.Prefix &&
+                    operations[pc] is Call { Kind: CallKind.Instance, Constrained: false } or CallVirtual,
+                Code.Ldftn => operations[pc] is MethodAddress,
+                Code.Calli => operations[pc] is IndirectCall,
                 Code.Call when TailCalls.IsCall(instruction) => operations[pc] is Call { Kind: CallKind.Tail },
                 Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
                 Code.Newobj => operations[pc] is Newobj,

@@ -380,7 +380,7 @@ var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.G
     .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
 var constructors = RenderedLeanReaders.Constructors(sourceFiles["Extractor/Operation.cs"]);
-foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callInstance" })
+foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callvirt" })
     if (!constructors.Contains(rendered)) throw new Exception("Operation no longer renders ." + rendered);
 var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
 (string File, int Reads, string Reason)[] allowedReaders =

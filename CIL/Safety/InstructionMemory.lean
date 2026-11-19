@@ -108,9 +108,9 @@ def observerCount : CIL.Instruction → Nat
   | .stsfld _ => 1
   -- Method boundaries
   | .ret => 1
-  | .callInstance _ argc | .callVirtual _ argc => argc
+  | .callvirt method => method.argumentCount
   | .newobj constructor => constructor.parameters.length
-  | .managed (.call signature _ _) => signature.parameters.length + 1
+  | .managed (.call signature _) => signature.parameters.length + 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount

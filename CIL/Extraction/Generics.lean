@@ -466,13 +466,16 @@ private def managedCallTarget (opcode : Nat) (link : Option Link) :
   | .call method _ => match link with
     | some (.direct target) => if opcode = 40 then some (target, method.argumentCount) else none
     | _ => none
-  | .callInstance target count => if opcode = 111 then some (target, count) else none
+  | .callvirt method => match link with
+    | some (.direct target) => if opcode = 111 then some (target, method.argumentCount) else none
+    | _ => none
   | _ => none
 
 /-- A `call` names the method its raw operand names, unless a `constrained.` prefix lowered the
     operand to the resolved implementation; the constrained-call check ties that operand. -/
 def callOperandMatches (site : CallSite) : Instruction → Bool
   | .call method prefixes => prefixes.constrained.isSome || method == site.method
+  | .callvirt method => method == site.method
   | _ => true
 
 /-- Split a scoped declaring type from its ordered generic arguments. -/
@@ -544,7 +547,7 @@ def RawMethod.isVirtual (method : RawMethod) : Bool :=
     object reference; no other managed call checks its receiver. A virtual callee would need
     dispatch, which one fixed target does not perform. -/
 def checkedReceiverMatches (callee : RawMethod) : Instruction → Bool
-  | .callInstance .. => callee.objectReceiver && !callee.isVirtual
+  | .callvirt .. => callee.objectReceiver && !callee.isVirtual
   | _ => true
 
 /-- Legacy slots accept only primitive signatures; new families require exact typed metadata. -/
@@ -624,15 +627,18 @@ def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
   if !live then true else
-  match emitted with
-  | .managed (.address target signature) => managedAddressMatches methods raw target signature
-  | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
+  match emitted, link with
+  | .managed (.address identity signature), some (.address index) =>
+    managedAddressMatches methods raw ⟨identity, index⟩ signature
+  | .managed (.call signature _), some (.indirect catalog) =>
+    managedIndirectMatches methods raw signature catalog
+  | .managed _, _ => false
   -- Each listed body is a virtual instance method of a class with the slot's signature; which
   -- body each class selects is checked against the dispatch catalog.
-  | .callVirtual targets count => match raw.operand with
-    | .call site => raw.opcode == 111 && site.hasThis && !targets.isEmpty &&
-      (match site.target with | .managed _ => true | .external _ => false) &&
-      count == site.parameterCount + 1 &&
+  | .callvirt method, some (.virtual targets) => match raw.operand with
+    | .call site => raw.opcode == 111 && method == site.method && site.hasThis &&
+      !targets.isEmpty && (match site.target with | .managed _ => true | .external _ => false) &&
+      method.argumentCount == site.parameterCount + 1 &&
       targets.all fun (_, index) => match methods index with
         | some callee => callee.arguments.isEmpty && callee.closed.objectReceiver &&
           callee.closed.hasThis && callee.closed.isVirtual &&
@@ -642,8 +648,8 @@ def validateManagedCallWith (methodCount : Nat)
     | _ => false
   -- A live construction is checked with its link by `validateConstructionWith`; without the link
   -- it passes nothing.
-  | .newobj _ => false
-  | _ =>
+  | .newobj _, _ => false
+  | _, _ =>
   match raw.operand with
   | .call site => match site.target with
     | .managed token => match managedCallTarget raw.opcode link emitted with
@@ -659,17 +665,22 @@ def validateManagedCallWith (methodCount : Nat)
         !prefixes.tail && prefixes.constrained.isNone && method == site.method &&
           validateImportCallWith methodCount imports raw.opcode site identity target
             method.argumentCount
-      | .call .., _ | .callInstance .., _ => false
+      | .call .., _ | .callvirt .., _ => false
       | _, _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .callInstance .. => false
+    | .call .. | .callvirt .. => false
     | _ => true
 
-/-- Whether `link` is a link an instruction other than a construction can have at its pc, where
-    `modelled` says which methods a runtime model stands for: none for a `call` of such a method,
-    whose operand names its model, a `.direct` one for any other `call`, and the link its program
-    index implies for any other instruction. -/
+/-- Link kinds for receiver calls, managed addresses and indirect calls. -/
+private def operandLinkFits (emitted : Instruction) (link : Option Link) : Bool :=
+  match emitted, link with
+  | .callvirt _, some (.direct _) | .callvirt _, some (.virtual _)
+  | .managed (.address ..), some (.address _) | .managed (.call ..), some (.indirect _) => true
+  | .callvirt _, _ | .managed _, _ => false
+  | _, _ => link.isNone
+
+/-- The link kind permitted at an instruction other than a construction. -/
 def _root_.CIL.Instruction.linkFits (modelled : MethodRef → Bool) (emitted : Instruction)
     (link : Option Link) : Bool :=
   match emitted with
@@ -677,7 +688,7 @@ def _root_.CIL.Instruction.linkFits (modelled : MethodRef → Bool) (emitted : I
     | some (.direct _) => !modelled method
     | none => modelled method
     | some _ => false
-  | _ => link == emitted.link?
+  | _ => operandLinkFits emitted link
 
 /-- A live call that states no link keeps the call its raw site makes: a `call` of an external
     method, naming the site's own method, with no prefix. A dead one passes. -/
@@ -714,7 +725,7 @@ def validateLinkedCallWith (modelled : MethodRef → Bool) (methodCount : Nat)
         ((!live || !modelledCallSite modelled raw) &&
           validateManagedCallWith methodCount methods imports raw live link emitted)
     | .call .., some _ => false
-    | _, _ => link == emitted.link? &&
+    | _, _ => operandLinkFits emitted link &&
         ((!live || !modelledCallSite modelled raw) &&
           validateManagedCallWith methodCount methods imports raw live link emitted)
 

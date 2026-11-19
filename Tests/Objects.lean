@@ -30,16 +30,15 @@ private def live : ManagedReference := .address ⟨0, 0⟩
 
 /-- Receiver calls reject partial operands before link lookup and check null after lookup. -/
 theorem receiver_call_fault_order :
-    let direct := Instruction.callInstance 1 2
-    let slot := Instruction.callVirtual [(account.identity, 2)] 2
-    let runCall := fun operation (link : List (Nat × Link)) stack =>
+    let operation := Instruction.callvirt (.arity 1)
+    let runCall := fun (link : List (Nat × Link)) stack =>
       step { body with links := link } operation 0 [] frame stack memory
     let defined := CIL.Safety.Value.scalar (.i32 0)
-    runCall direct [] [.scalar (.v128Low64 0), .object .null] =
+    runCall [] [.scalar (.v128Low64 0), .object .null] =
         .error (.unsupported "Instruction observes unspecified vector bits") ∧
-      runCall direct [] [defined, .object .null] = .error unlinkedCall ∧
-      runCall direct [(0, .direct 1)] [defined, .object .null] = .error (.thrown .nullReference) ∧
-      runCall slot [(0, .virtual [(account.identity, 2)])] [defined, .object live] =
+      runCall [] [defined, .object .null] = .error unlinkedCall ∧
+      runCall [(0, .direct 1)] [defined, .object .null] = .error (.thrown .nullReference) ∧
+      runCall [(0, .virtual [(account.identity, 2)])] [defined, .object live] =
         .ok (.call 2 [.object live, defined] [] memory) := by
   exact ⟨rfl, rfl, rfl, rfl⟩
 #print axioms receiver_call_fault_order
@@ -232,9 +231,13 @@ private def limitField : Extraction.FieldRef :=
 private def nextAccount : Extraction.FieldRef :=
   { owner := account.identity, index := 1, type := account.identity, name := name!"next" }
 
+/-- The receiver-only slot that the fixture links to method 4. -/
+private def slot : Extraction.MethodRef := .arity 0
+
 /-- `callvirt` of method 4 on argument 0. -/
 @[cil_code] def depositing : CIL.Method :=
-  { returnsValue := false, locals := [], code := [.ldarg 0, .callInstance 4 1, .ret] }
+  { returnsValue := false, locals := [], code := [.ldarg 0, .callvirt slot, .ret],
+    links := [(1, .direct 4)] }
 /-- `ldfld` of a scalar field of argument 0. -/
 @[cil_code] def fieldReading : CIL.Method :=
   { returnsValue := true, locals := [],
@@ -256,7 +259,7 @@ private def nextAccount : Extraction.FieldRef :=
   [depositing, fieldReading, slotReading, creating, doingNothing]
 
 -- A walk stopped at a receiver-checked call lacks the callee's contract, as at a direct call.
-/-- "instruction":"CIL.Instruction.callInstance 4 1","method":0,"missing":"calleeContract" -/
+/-- CIL.Instruction.callvirt Tests.Objects.slot","method":0,"missing":"calleeContract" -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : CIL.Safety.Memory) (object : Reference) (frame : Frame)
@@ -517,7 +520,7 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   returnsValue := true, locals := [], code := [
     .ldarg 0, .brtrue 3, .throw .nullReference, .ldarg 0, .ldc_i4 1,
-    .callInstance 1 2, .ret] },
+    .callvirt (.arity 1), .ret], links := [(5, .direct 1)] },
   {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   returnsValue := true, locals := [], code := [.ldarg 1, .ret] }]
