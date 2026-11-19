@@ -489,9 +489,11 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | exact platformEntries_yields feature_stepRenamed constant_stepRenamed entry member
     | exact referenceContentEntries_yields constant_stepRenamed entry member
     | exact guardEntries_yields memory_stepRenamed entry member
+    | exact vectorHelperEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
     | exact vectorEntries_yields intrinsic_stepRenamed entry member
     | exact integerMathEntries_yields intrinsic_stepRenamed entry member
     | exact wideArithmeticEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member
+    | exact binaryEntries_yields memory_stepRenamed entry member
     | exact bitEntries_yields intrinsic_stepRenamed entry member
     | exact unsafeEntries_yields constant_stepRenamed referenceCompare_stepRenamed
         skipInit_stepRenamed entry member

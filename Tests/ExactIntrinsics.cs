@@ -10,6 +10,7 @@
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include ModelOperandChecks.cs
 
 using System.Buffers.Binary;
 using System.Reflection;
@@ -23,8 +24,8 @@ using Program verification = new();
 Run(["lake", "build", "Tests.ExactIntrinsics"], verification.CheckoutPackage());
 string assembly = At("Examples/Assembly/bin/Examples.dll");
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
-Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrinsics").Methods
-    .ToDictionary(method => method.Name, method => method.FullName);
+var divisionMethods = metadata.GetType("Examples.DivisionIntrinsics").Methods.ToDictionary(method => method.Name);
+var selectors = divisionMethods.ToDictionary(pair => pair.Key, pair => pair.Value.FullName);
 Type runtime = Assembly.LoadFile(assembly).GetType("Examples.DivisionIntrinsics")!;
 string root = At("artifacts/DivisionIntrinsics");
 var pending = new List<(GeneratedVerification Request, string Profile, Action Passed)>();
@@ -40,7 +41,7 @@ void Flush()
 
 foreach (var name in new[] { "DefinedLocal", "PrunedUnsafeLocal" })
 {
-    var method = metadata.GetType("Examples.DivisionIntrinsics").Methods.Single(method => method.Name == name);
+    var method = divisionMethods[name];
     var local = method.Body.Variables.First(variable => variable.VariableType.FullName ==
         "System.Runtime.Intrinsics.Vector128`1<System.UInt64>").Index;
     var output = Path.Combine(root, name);
@@ -336,11 +337,10 @@ foreach ((string name, int width, string profile, string unavailable, string fea
 
 Flush();
 
-// Forged evidence must not substitute another load width or another intrinsic for the shuffle.
+// The shuffle instruction must match the exact intrinsic at its raw call.
 var rejectedShuffles = new RejectedEvidence(Path.Combine(root, "RejectedShuffles"));
 foreach ((string name, string theorem, string before, string after, string validator) in new[]
 {
-    ("Shuffle256", "method0_models_validated", ".snapshot .vector256", ".snapshot .vector128", "RuntimeModelsAgree"),
     ("Shuffle256", "method0_intrinsics_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "ExactIntrinsicsValid"),
     ("Shuffle128", "method0_intrinsics_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
         "ExactIntrinsicsValid")
@@ -636,18 +636,92 @@ foreach ((string name, string profile, string feature) in new[]
             $"{name} admitted without {feature} under {profile}: {rejectedCall.Output}");
     Console.WriteLine($"PASS {name} rejected under {profile}");
 }
-// Forged evidence must not change the table select, the lane reversal, or a transfer's offset form.
+// Exercise every portable vector declaration over pinned example metadata.
+var vectorWitnesses = new (string Name, string Profile)[]
+{
+    ("And", "x64-v3"), ("Less", "x64-v4"), ("SignWindow", "x64-v4"),
+    ("DefinedLocal", "scalar"), ("UnsafeEquals", "scalar"), ("ReverseLimbs", "arm64-advsimd"),
+    ("Shuffle128", "x64-v3"), ("Shuffle256", "x64-v3"), ("CreateWords", "scalar"),
+    ("SwapHalves", "arm64-advsimd"), ("EqualWords128", "scalar"),
+    ("EqualBytes256", "scalar"), ("EqualSigned512", "scalar")
+};
+var operandRoot = Path.Combine(root, "VectorOperands");
+ExtractBatch("extract", "Examples", vectorWitnesses.Select(witness =>
+    new GeneratedExtraction(assembly, selectors[witness.Name], Path.Combine(operandRoot, witness.Name),
+        witness.Profile)));
+var operands = new GeneratedEvidence(operandRoot);
+foreach (var (name, _) in vectorWitnesses)
+{
+    var folder = Path.Combine(operandRoot, name);
+    var proof = Path.Combine(folder, "Operand.lean");
+    File.Copy(Path.Combine(folder, "Extracted.lean"), proof, true);
+    var method = divisionMethods[name];
+    ModelOperandChecks.Append(proof, method, VectorModel);
+    if (name == "Shuffle256") CheckShuffleReadWidth(proof, method);
+    operands.Add(proof, $"PASS vector operands of {name}");
+}
+operands.Check(replay: false);
+
+// Each of the two source spans must provide all 32 bytes of its vector.
+static void CheckShuffleReadWidth(string proof, MethodDefinition method)
+{
+    var reads = method.Body.Instructions.Index()
+        .Where(item => item.Item.Operand is MethodReference call &&
+            VectorModel(call) == ".memory (.marshalRead (.snapshot .vector256) false)")
+        .Select(item => item.Index).ToArray();
+    if (reads.Length != 2) throw new InvalidDataException($"Expected two vector reads in {method.FullName}");
+    File.AppendAllText(proof, $$"""
+
+        namespace Extracted
+        open CIL CIL.Extraction
+        /-- Neither 256-bit read can emit a direct 128-bit snapshot read. -/
+        theorem shuffle_rejects_narrow_read :
+            [{{string.Join(", ", reads)}}].all (fun pc => (fixtureOperandCode[pc]?).any fun raw =>
+              let closed := { method0Closed with code := [raw] }
+              let narrow := Instruction.memory (.marshalRead (.snapshot .vector128) false)
+              let emitted := { method0 with code := [narrow], links := [] }
+              !(decide (RuntimeModelsAgree closed [true] emitted))) = true := by cil_kernel_rfl
+        #print axioms shuffle_rejects_narrow_read
+        end Extracted
+
+        """);
+}
+
+// The fixture's declaration fixes the expected operation independently of the extractor.
+static string? VectorModel(MethodReference call)
+{
+    if (call.DeclaringType.Namespace != "System.Runtime.Intrinsics") return null;
+    int width = call.DeclaringType.Name switch
+    {
+        "Vector128" or "Vector128`1" => 128, "Vector256" or "Vector256`1" => 256,
+        "Vector512" or "Vector512`1" => 512, _ => 0
+    };
+    if (width == 0) return null;
+    var count = call.Parameters.Count;
+    var hasOffset = call.Parameters.LastOrDefault()?.ParameterType.MetadataType == MetadataType.UIntPtr;
+    var offset = hasOffset ? "true" : "false";
+    return call.Name switch
+    {
+        "op_Equality" => $".intrinsic (.vector (.equalsAll {width})) 2",
+        "LoadUnsafe" => $".memory (.vector128Unsafe false {offset})",
+        "StoreUnsafe" => $".memory (.vector128Unsafe true {offset})",
+        "Create" when width == 512 => ".intrinsic (.vector .combine256) 2",
+        "Create" when call is GenericInstanceMethod => $".memory (.marshalRead (.snapshot .vector{width}) false)",
+        "Create" when call.Parameters[0].ParameterType.MetadataType == MetadataType.UInt32 =>
+            $".intrinsic (.vector (.create32 {width})) {count}",
+        "Create" => $".intrinsic (.vector (.create64 {width})) {count}",
+        _ => null
+    };
+}
+
+// Forged evidence cannot change the table select or the lane reversal.
 var rejectedEndian = new RejectedEvidence(Path.Combine(root, "RejectedEndian"));
 foreach ((string name, string theorem, string before, string after, string validator, int index) in new[]
 {
     ("SignWindow", "method0_intrinsics_validated", ".avx512 .permuteVar4x64x2", ".avx512 .ternaryLogic",
         "ExactIntrinsicsValid", 0),
     ("ReverseLimbs", "method0_intrinsics_validated", ".advSimd .reverseElement8", ".avx2 .shuffleBytes",
-        "ExactIntrinsicsValid", 1),
-    ("SwapHalves", "method0_unsafe_validated", ".vector128Unsafe true true", ".vector128Unsafe true false",
-        "UnsafeCallsValid", 2),
-    ("SwapHalves", "method0_unsafe_validated", ".memory (.vector128Unsafe false false)", ".memory .load128",
-        "UnsafeCallsValid", 3)
+        "ExactIntrinsicsValid", 1)
 })
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);

@@ -1,4 +1,3 @@
-import CIL.Extraction.MarshalCalls
 import CIL.Extraction.LoweredCalls
 import CIL.Extraction.HardwareCalls
 
@@ -47,21 +46,8 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   let .call site := raw.operand | none
   match family with
   | .hardware => hardwareInstruction environment profile raw site
-  | .vectorCreate =>
-    if byteSpanCreateFamily site then
-      let v128 := TypeExpr.atom intrinsicsScope
-        (metadata_text% "System.Runtime.Intrinsics.Vector128")
-      let kind := if site.declaringType == v128
-        then TransferKind.snapshot .vector128 else .snapshot .vector256
-      _root_.guard (byteSpanCreateMatches raw kind)
-      return .memory (.marshalRead kind false)
-    hardwareInstruction environment profile raw site
-  | .vectorTransfer =>
-    let (write, offset) ← vector128UnsafeCall raw
-    return .memory (.vector128Unsafe write offset)
   | .span => spanInstruction environment role raw site
   | .staticSpan => staticSpanInstruction site
-  | .binary => binaryInstruction raw
   | .typeTest => match role with
     | some .interior => some .nop
     | some (.result value) => some (.ldc_i4 (if value then 1 else 0))

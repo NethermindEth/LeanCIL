@@ -2,10 +2,12 @@ import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.WideArithmetic
 import CIL.Extraction.VectorModels
+import CIL.Extraction.VectorHelpers
 import CIL.Extraction.PlatformModels
 import CIL.Extraction.ReferenceContentModels
 import CIL.Extraction.GuardModels
 import CIL.Extraction.MarshalModels
+import CIL.Extraction.BinaryModels
 import CIL.Extraction.BitModels
 import CIL.Extraction.UnsafeReinterpretations
 import CIL.Extraction.UnsafeOffsets
@@ -28,8 +30,10 @@ namespace CIL.Extraction
 def modelFamilies : List (List ModelEntry) := [
   [objectConstructorEntry],
   vectorEntries,
+  vectorHelperEntries,
   integerMathEntries,
   wideArithmeticEntries,
+  binaryEntries,
   bitEntries,
   unsafeEntries,
   platformEntries,
@@ -90,21 +94,36 @@ def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
 def callModelled (body : Method) (method : MethodRef) : Bool :=
   (runtimeModel body.environment .call method).isSome
 
-open Lean Meta Elab Term in
-/-- The cells of the registered list, for checking membership without unfolding each family. -/
-elab "model_entries% " entries:term : term => do
-  let type := Lean.mkConst ``ModelEntry
-  let list ← elabTermEnsuringType entries (mkApp (mkConst ``List [0]) type)
-  mkListLit type (← literalCells list).toList
+open Lean Meta Elab Tactic in
+/-- Each literal table entry occurs at its recorded index in the registered list. -/
+private def proveEntryMembership : TacticM Unit := do
+  let cells ← literalCells (mkConst ``modelEntries)
+  let key (entry : Expr) := unsafe evalExpr Nat (mkConst ``Nat)
+    (mkApp (mkConst ``ModelEntry.key) entry)
+  let mut positions : Std.HashMap Nat (List Nat) := {}
+  for index in [:cells.size] do
+    let name ← key cells[index]!
+    positions := positions.insert name (index :: positions.getD name [])
+  for goal in ← getGoals do
+    let target := (← instantiateMVars (← goal.getType)).consumeMData
+    unless target.isApp do throwError "expected entry membership: {target}"
+    let entry := target.appArg!.consumeMData
+    let candidates := positions.getD (← key entry) []
+    let some index ← candidates.findM? (fun i => isDefEq cells[i]! entry)
+      | throwError "unregistered model entry: {entry}"
+    let value ← mkAppM ``Option.some #[entry]
+    let proof ← mkAppOptM ``List.mem_of_getElem? #[none, some (mkConst ``modelEntries),
+      some (mkNatLit index), some entry, some (← mkEqRefl value)]
+    goal.assign proof
+  setGoals []
 
-set_option maxRecDepth 8192 in
-set_option maxHeartbeats 4000000 in
 /-- Every entry of the runtime table is one of `modelEntries`. -/
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
-  change ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2, entry ∈ model_entries% modelEntries
-  -- Each table cell is found among the registered cells, so the step count grows with their product.
-  simp (maxSteps := 1000000) [runtimeModels, SearchTree.toList]
+  simp only [runtimeModels, SearchTree.toList, List.forall_mem_append, List.forall_mem_cons,
+    List.not_mem_nil, false_implies, implies_true, and_true, true_and]
+  repeat' first | apply And.intro | exact True.intro
+  run_tac proveEntryMembership
 
 #print axioms runtimeModels_entries
 

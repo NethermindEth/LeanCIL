@@ -76,12 +76,6 @@ private def exactSignatures : List (String × String × String × Intrinsic × N
       System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
       System.Runtime.Intrinsics.Vector512`1<System.UInt64>)",
     .avx512DQ .moveMask512, 1),
-  ("System.Runtime.Intrinsics.Vector512", "Create",
-    "System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
-      System.Runtime.Intrinsics.Vector512::Create(\
-      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
-      System.Runtime.Intrinsics.Vector256`1<System.UInt64>)",
-    .vector .combine256, 2),
   ("System.Runtime.Intrinsics.X86.Avx2", "ShiftLeftLogical",
     "System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
       System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
@@ -172,7 +166,6 @@ private def exactCallTypes : Intrinsic → Option (TypeExpr × List TypeExpr)
     some (ulongVector "512", [ulongVector "512", ulongVector "512"])
   | .avx512DQ .moveMask512 => some (.atom runtimeScope "System.Int32", [ulongVector "512"])
   | .avx512DQ .moveMask64 => some (.atom runtimeScope "System.Int32", [ulongVector "256"])
-  | .vector .combine256 => some (ulongVector "512", [ulongVector "256", ulongVector "256"])
   | .avx2 .shuffleBytes => some (byteVector "256", [byteVector "256", byteVector "256"])
   | .sse .shuffleBytes | .aes .encrypt | .armAes .encrypt =>
     some (byteVector "128", [byteVector "128", byteVector "128"])
@@ -191,7 +184,7 @@ private def portableVectorOperation (name : String) (width : Nat) :
   | "op_BitwiseOr" => some (.vector (.bor width), 2)
   | "op_ExclusiveOr" => some (.vector (.bxor width), 2)
   | "op_OnesComplement" => some (.vector (.bnot width), 1)
-  | "op_Equality" | "EqualsAll" => some (.vector (.equalsAll width), 2)
+  | "EqualsAll" => some (.vector (.equalsAll width), 2)
   | "get_Zero" => some (.vector (.zero width), 0)
   | "get_AllBitsSet" => some (.vector (.ones width), 0)
   | _ => none
@@ -215,7 +208,7 @@ private def portableVectorIntrinsic (instruction : RawInstruction) : Option (Int
   let .apply (.constructor _ owner) (.atom _ element) := vector | none
   let staticOwner := "System.Runtime.Intrinsics.Vector" ++ toString (bytes * 8)
   let parameterName := owner ++ (if isStatic then "<!!0>" else "<!0>")
-  let equality := site.name == "op_Equality" || isStatic
+  let equality := isStatic
   let result := if equality then TypeExpr.atom runtimeScope "System.Boolean" else vector
   let resultName := if equality then "System.Boolean" else parameterName
   let declaringName := if isStatic then staticOwner else owner ++ "<" ++ element ++ ">"
@@ -344,7 +337,7 @@ private def portableVectorFamily (instruction : RawInstruction) : Bool :=
           "System.Runtime.Intrinsics.Vector512", "System.Runtime.Intrinsics.Vector128`1",
           "System.Runtime.Intrinsics.Vector256`1", "System.Runtime.Intrinsics.Vector512`1"].any
           (fun expected => owner == identityBytes expected)) &&
-        (["op_BitwiseAnd", "op_BitwiseOr", "op_ExclusiveOr", "op_OnesComplement", "op_Equality",
+        (["op_BitwiseAnd", "op_BitwiseOr", "op_ExclusiveOr", "op_OnesComplement",
           "EqualsAll", "get_Zero", "get_AllBitsSet"].any
           (fun expected => name == identityBytes expected))
       | none => false
@@ -392,6 +385,7 @@ def emittedExactIntrinsic : Instruction → Option (Intrinsic × Nat)
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
     | .avx512 .ltu512 | .avx512 .gtu512
     | .avx512DQ .moveMask512 | .avx512DQ .moveMask64 | .vector .combine256
+    | .vector (.create32 _) | .vector (.create64 _)
     | .vector .createScalarUnsafe64 | .vector (.extract64 _)
     | .avx2 .shuffleBytes | .sse .shuffleBytes
     | .sse .multiplyEven32 | .aes .encrypt | .armAes .encrypt | .armAes .mixColumns

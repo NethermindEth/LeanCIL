@@ -148,6 +148,7 @@ internal static class RuntimeModels
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
         if (Spans.CoreMember(reference, profile.Architecture) is { } span) return span;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
+        if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
         if (VectorModel(reference) is { } vector)
         {
@@ -199,8 +200,7 @@ internal static class RuntimeModels
         {
             "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
-            "System.Memory" => BinaryTransfers.Translate(reference) ??
-                ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
+            "System.Memory" => ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
@@ -224,15 +224,18 @@ internal static class RuntimeModels
         ("Abs", ScalarFunction.Abs, 1), ("Sign", ScalarFunction.Sign, 1)
     ];
 
-    // The vector helpers a call keeps, each of the exact intrinsics assembly: CreateScalarUnsafe of a ulong and
-    // GetElement of a ulong lane of a 128- or 256-bit vector.
+    // Vector helpers must bind a static declaration in the exact intrinsics assembly.
     static Operation? VectorModel(MethodReference reference)
     {
         var convention = reference is GenericInstanceMethod
             ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
         if (reference.HasThis || reference.ExplicitThis || reference.CallingConvention != convention ||
             !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics)) return null;
+        if (reference is GenericInstanceMethod generic &&
+            generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count) return null;
+        if (reference is not GenericInstanceMethod && reference.HasGenericParameters) return null;
         string signature = reference.FullName;
+        if (VectorHelperCalls.TryGetValue(signature, out var helper)) return helper;
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
             return new VectorCreateScalarUnsafe64();
         foreach (int width in new[] { 128, 256 })
@@ -404,8 +407,6 @@ internal static class RuntimeModels
                     { ("op_BitwiseAnd", "band"), ("op_BitwiseOr", "bor"), ("op_ExclusiveOr", "bxor") })
                     operations.Add($"{memberVector} {vectorOwner}::{name}({memberVector},{memberVector})",
                         Hardware($".vector (.{op} {width})", 2));
-                operations.Add($"System.Boolean {vectorOwner}::op_Equality({memberVector},{memberVector})",
-                    Hardware($".vector (.equalsAll {width})", 2));
                 operations.Add($"{memberVector} {vectorOwner}::op_OnesComplement({memberVector})",
                     Hardware($".vector (.bnot {width})", 1));
                 operations.Add($"System.Boolean {owner}::EqualsAll<{element}>({genericVector},{genericVector})",
@@ -418,32 +419,50 @@ internal static class RuntimeModels
         return operations;
     }
 
-    // Vector128/256.Create<byte>(ReadOnlySpan<byte>) reads the leading bytes and throws
-    // ArgumentOutOfRangeException for a short span, exactly as MemoryMarshal.Read of the vector.
-    private static Operation? VectorFromByteSpan(string signature)
-    {
-        const string spanParameter = "System.ReadOnlySpan`1<!!0>";
-        foreach (var width in new[] { 128, 256 })
-            if (signature == $"{Vector(width, "!!0")} {Intrinsics}.Vector{width}::Create<System.Byte>({spanParameter})")
-                return MemoryOperation.Other($"(.marshalRead (.snapshot .vector{width}) false)");
-        return null;
-    }
+    private static readonly Dictionary<string, Operation> VectorHelperCalls = BuildVectorHelperCalls();
 
-    // Vector128.LoadUnsafe<byte> and StoreUnsafe<byte> are Unsafe.Add by the unsigned byte offset, when
-    // present, then the unaligned 16-byte transfer of Unsafe.ReadUnaligned or WriteUnaligned.
-    private static Operation? Vector128ByteTransfer(string signature)
+    // Every key fixes the open member declaration and the element used by the call.
+    private static Dictionary<string, Operation> BuildVectorHelperCalls()
     {
-        const string owner = $"{Intrinsics}.Vector128";
-        foreach (var offset in new[] { "false", "true" })
+        var calls = new Dictionary<string, Operation>(StringComparer.Ordinal);
+        foreach (int width in VectorWidths)
         {
-            var offsetParameter = offset == "true" ? ",System.UIntPtr" : "";
-            if (signature == $"{Vector(128, "!!0")} {owner}::LoadUnsafe<System.Byte>(!!0&{offsetParameter})")
-                return MemoryOperation.Other($"(.vector128Unsafe false {offset})");
-            if (signature ==
-                $"System.Void {owner}::StoreUnsafe<System.Byte>({Vector(128, "!!0")},!!0&{offsetParameter})")
-                return MemoryOperation.Other($"(.vector128Unsafe true {offset})");
+            var owner = $"{Intrinsics}.Vector{width}";
+            var open = Vector(width, "!0");
+            foreach (var element in new[] { "Byte", "Int32", "UInt32", "Int64", "UInt64" })
+            {
+                var vector = Vector(width, $"System.{element}");
+                calls.Add($"System.Boolean {vector}::op_Equality({open},{open})",
+                    Hardware($".vector (.equalsAll {width})", 2));
+            }
+            if (width == 512)
+            {
+                calls.Add($"{V512UInt64} {owner}::Create({V256UInt64},{V256UInt64})",
+                    Hardware(".vector .combine256", 2));
+                continue;
+            }
+            foreach (var (element, bits, count) in new[]
+            {
+                ("System.UInt64", 64, 1), ("System.UInt64", 64, width / 64), ("System.UInt32", 32, width / 32)
+            })
+            {
+                var parameters = string.Join(",", Enumerable.Repeat(element, count));
+                calls.Add($"{Vector(width, element)} {owner}::Create({parameters})",
+                    Hardware($".vector (.create{bits} {width})", count));
+            }
+            var result = Vector(width, "!!0");
+            calls.Add($"{result} {owner}::Create<System.Byte>(System.ReadOnlySpan`1<!!0>)",
+                MemoryOperation.Other($"(.marshalRead (.snapshot .vector{width}) false)"));
         }
-        return null;
+        var source = Vector(128, "!!0");
+        foreach (var (suffix, offset) in new[] { ("", "false"), (",System.UIntPtr", "true") })
+        {
+            calls.Add($"{source} {Intrinsics}.Vector128::LoadUnsafe<System.Byte>(!!0&{suffix})",
+                MemoryOperation.Other($"(.vector128Unsafe false {offset})"));
+            calls.Add($"System.Void {Intrinsics}.Vector128::StoreUnsafe<System.Byte>({source},!!0&{suffix})",
+                MemoryOperation.Other($"(.vector128Unsafe true {offset})"));
+        }
+        return calls;
     }
 
     private static Operation? Intrinsic(string signature, FeatureProfile profile)
@@ -475,10 +494,6 @@ internal static class RuntimeModels
             return Finish(".avx512 .gtu512", 2, Feature.Avx512F);
         if (signature == $"System.Int32 {Avx512DQ}::MoveMask({V512UInt64})")
             return Finish(".avx512DQ .moveMask512", 1, Feature.Avx512DQ);
-        if (signature == $"{V512UInt64} {Intrinsics}.Vector512::Create({V256UInt64},{V256UInt64})")
-            return Finish(".vector .combine256", 2);
-        if (VectorFromByteSpan(signature) is { } load) return load;
-        if (Vector128ByteTransfer(signature) is { } transfer) return transfer;
         foreach (int width in new[] { 128, 256 })
         {
             string ulongVector = Vector(width, "System.UInt64");
@@ -506,14 +521,6 @@ internal static class RuntimeModels
             string longVector = Vector(width, "System.Int64");
             if (signature == $"{longVector} {owner}::ShiftRightArithmetic({longVector},System.Int32)")
                 return Finish($".vector (.ashr64 {width})", 2);
-            string elementwise = string.Join(",", Enumerable.Repeat("System.UInt64", width / 64));
-            if (signature == $"{ulongVector} {owner}::Create({elementwise})")
-                return Finish($".vector (.create64 {width})", width / 64);
-            if (signature == $"{ulongVector} {owner}::Create(System.UInt64)")
-                return Finish($".vector (.create64 {width})", 1);
-            string uintLanes = string.Join(",", Enumerable.Repeat("System.UInt32", width / 32));
-            if (signature == $"{Vector(width, "System.UInt32")} {owner}::Create({uintLanes})")
-                return Finish($".vector (.create32 {width})", width / 32);
             if (signature == $"{ulongVector} {owner}::CreateScalar(System.UInt64)")
                 return Finish($".vector (.createScalar64 {width})", 1);
             if (signature == $"{Vector(width, "System.UInt32")} {owner}::CreateScalar(System.UInt32)")

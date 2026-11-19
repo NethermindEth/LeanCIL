@@ -1,5 +1,5 @@
 import Lean
-import CIL.Extraction.Translation
+import CIL.Extraction.DecodedMethod
 import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import Tests.Support
@@ -236,7 +236,11 @@ private def call9 : CallSite := {
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
     System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
   typeArguments := [], parameterCount := 2, returnsValue := true }
-example : ExactIntrinsicsValid (raw call9) [true]
+example : runtimeModel {} .call call9.method = some (.intrinsic (.vector .combine256) 2) := by
+  decide +kernel
+example : runtimeCatalog.siteAgrees {} profile ⟨0, 40, .call call9⟩ (.call call9.method {}) := by
+  decide +kernel
+example : ¬ ExactIntrinsicsValid (raw call9) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call9) [true]
     (body [.intrinsic (.vector .combine256) 3]) := by decide +kernel
@@ -244,6 +248,36 @@ example : ¬ ExactIntrinsicsValid (raw { call9 with method.hasThis := true }) [t
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call9 with target := .external "forged" }) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
+/-- The same vector equality declaration instantiated at the supplied owner element. -/
+private def equalitySite (width : Nat) (element : String) : CallSite :=
+  let head := s!"System.Runtime.Intrinsics.Vector{width}`1"
+  let vector := TypeExpr.apply (.constructor scope head) (.atom runtimeScope element)
+  let openVector := TypeExpr.apply (.constructor scope head) (.ownerParameter 0)
+  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  let parameters := s!"{head}<!0>,{head}<!0>"
+  let target := s!"{scope}::System.Boolean {head}<{element}>::op_Equality({parameters})"
+  let method : MethodRef :=
+    { owner := vector, name := name!"op_Equality", hasThis := false, genericArity := 0,
+      returnType := boolean, parameters := [vector, vector] }
+  let declared : OpenSignature :=
+    { convention := 0, returnType := boolean, parameters := [openVector, openVector] }
+  { method, declared,
+    name := "op_Equality", target := .external target, returnsValue := true,
+    parameterCount := 2, typeArguments := [] }
+
+/-- Integer equality keeps a call. A floating element at the same declaration gives a hole. -/
+theorem equalityElements :
+    [128, 256, 512].all (fun width =>
+      ["System.Byte", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
+       "System.Single", "System.Double"].all fun element =>
+        let site := equalitySite width element
+        let expected := if element ∈ ["System.Single", "System.Double"] then .unadmitted 40
+          else Instruction.call site.method {}
+        decide ((Method.ofRaw? .scalar {} [] [true] (raw site) []).map Method.code =
+          some [expected])) = true := by decide +kernel
+
+#print axioms equalityElements
+
 private def call10 : CallSite := {
   declared := {
     convention := 0, returnType := vectorType "128",
@@ -691,8 +725,8 @@ private def emittedAnd : Method :=
   { profile := profile, returnsValue := true, locals := [], localKinds := [],
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
-    code := [.ldarg 0, .intrinsic (.vector (.create64 256)) 1, .ldarg 1,
-      .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
+    code := [.ldarg 0, .call broadcast256Method {}, .ldarg 1,
+      .call broadcast256Method {}, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
       .call getElement256Method {}, .ret] }
 
 example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
@@ -706,7 +740,7 @@ private def emittedShift : Method :=
     opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
     code := [.ldarg 1, .call createScalarUnsafeMethod {}, .stloc 0, .ldarg 0,
-      .intrinsic (.vector (.create64 256)) 1, .ldloc 0, .intrinsic (.avx2 .shl64Count) 2,
+      .call broadcast256Method {}, .ldloc 0, .intrinsic (.avx2 .shl64Count) 2,
       .ldc_i4 0, .call getElement256Method {}, .ret] }
 
 example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]

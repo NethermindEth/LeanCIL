@@ -56,6 +56,10 @@ public static class DivisionIntrinsics
         destination = Vector128.CreateScalarUnsafe(value);
     public static ulong UnsafeHigh(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(1);
     public static bool UnsafeEquals(ulong value) => Vector128.CreateScalarUnsafe(value) == Vector128.CreateScalarUnsafe(value);
+    public static bool EqualWords128(uint a, uint b, uint c, uint d, Vector128<uint> expected) =>
+        Vector128.Create(a, b, c, d) == expected;
+    public static bool EqualBytes256(Vector256<byte> left, Vector256<byte> right) => left == right;
+    public static bool EqualSigned512(Vector512<long> left, Vector512<long> right) => left == right;
     public static void Init128(ref Vector128<ulong> value) => value = default;
     public static void Init256(ref Vector256<ulong> value) => value = default;
     public static void Init512(ref Vector512<ulong> value) => value = default;

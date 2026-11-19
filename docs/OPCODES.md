@@ -469,7 +469,9 @@ aggregate or integer-vector values through byte spans. Short `Read`/`Write` call
 reference and returns false; a short `TryWrite` returns false without reading the input value
 or modifying memory. Successful transfers preserve snapshot initialization masks and retain
 the checked model's bounds, lifetime and authority requirements. `Vector128.Create<byte>` and
-`Vector256.Create<byte>` over a `ReadOnlySpan<byte>` are the same checked `Read` of the vector.
+`Vector256.Create<byte>` over a `ReadOnlySpan<byte>` retain the call and run the same checked
+`Read` of the vector. The table also resolves scalar vector construction, whole-vector
+equality and the byte-reference overloads of `Vector128.LoadUnsafe` and `Vector128.StoreUnsafe`.
 
 A collection-expression property such as `static ReadOnlySpan<uint> Table => [...]` compiles to
 `ldtoken <field>; call RuntimeHelpers::CreateSpan<uint>` over a static data field (`ldsflda`
@@ -839,7 +841,7 @@ and signature. Correspondence to the runtime's implementation is an assumption; 
 
 `BinaryPrimitives.Read{Int,UInt}{16,32,64}{Little,Big}Endian`, their `TryRead` forms,
 native-width `IntPtr`/`UIntPtr` counterparts, `Write` forms and `TryWrite` forms, 64 exact
-signatures in all, operate on checked byte spans. Reads sign- or zero-extend according to the
+signatures in all, keep the call and run its memory model on a checked byte span. Reads sign- or zero-extend according to the
 named integer type after applying byte order, and writes store exactly that width. Short
 ordinary transfers raise `ArgumentOutOfRangeException`; short try-reads write zero to the output
 and return false, and short try-writes return false without modifying memory

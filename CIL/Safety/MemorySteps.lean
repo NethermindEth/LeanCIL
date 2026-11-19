@@ -218,15 +218,34 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
 
--- `Vector128.LoadUnsafe` and `StoreUnsafe` on bytes, without and with a `nuint` byte offset.
-@[cil_step high] theorem step_memory_vector128Load_eq (r : ManagedReference) (rest : List Value) :
+-- Vector transfer equations normalize the memory operation after unlinked call resolution.
+@[cil_step high] private theorem step_memory_vector128Load_eq
+    (r : ManagedReference) (rest : List Value) :
     step body (.memory (.vector128Unsafe false false)) pc args frame (.reference r :: rest)
       memory = do
       let value ← loadValue memory r 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128Load_readOnly_eq (r : ManagedReference)
+#print axioms step_memory_vector128Load_eq
+
+/-- The load call on a writable reference uses the checked transfer. -/
+theorem step_call_vector128Load_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe false false)))
+    (r : ManagedReference) (rest : List Value) :
+    step body (.call method {}) pc args frame (.reference r :: rest)
+      memory = do
+      let value ← loadValue memory r 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128Load_eq
+
+#print axioms step_call_vector128Load_eq
+
+@[cil_step high] private theorem step_memory_vector128Load_readOnly_eq
+    (r : ManagedReference)
     (rest : List Value) :
     step body (.memory (.vector128Unsafe false false)) pc args frame
       (.readOnlyReference r :: rest) memory = do
@@ -234,7 +253,26 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128LoadAt_eq (offset : CIL.W64) (r : ManagedReference)
+#print axioms step_memory_vector128Load_readOnly_eq
+
+/-- The load call on a readonly reference uses the checked transfer. -/
+theorem step_call_vector128Load_readOnly_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe false false)))
+    (r : ManagedReference)
+    (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.readOnlyReference r :: rest) memory = do
+      let value ← loadValue memory r 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128Load_readOnly_eq
+
+#print axioms step_call_vector128Load_readOnly_eq
+
+@[cil_step high] private theorem step_memory_vector128LoadAt_eq
+    (offset : CIL.W64) (r : ManagedReference)
     (rest : List Value) :
     step body (.memory (.vector128Unsafe false true)) pc args frame
       (.scalar (.i64 offset) :: .reference r :: rest) memory = do
@@ -244,7 +282,28 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128LoadAt_readOnly_eq (offset : CIL.W64)
+#print axioms step_memory_vector128LoadAt_eq
+
+/-- The offset load call on a writable reference uses the checked transfer. -/
+theorem step_call_vector128LoadAt_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe false true)))
+    (offset : CIL.W64) (r : ManagedReference)
+    (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.scalar (.i64 offset) :: .reference r :: rest) memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let value ← loadValue memory (.address moved) 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128LoadAt_eq
+
+#print axioms step_call_vector128LoadAt_eq
+
+@[cil_step high] private theorem step_memory_vector128LoadAt_readOnly_eq
+    (offset : CIL.W64)
     (r : ManagedReference) (rest : List Value) :
     step body (.memory (.vector128Unsafe false true)) pc args frame
       (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
@@ -254,7 +313,28 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128Store_eq (bits : BitVec 128) (r : ManagedReference)
+#print axioms step_memory_vector128LoadAt_readOnly_eq
+
+/-- The offset load call on a readonly reference uses the checked transfer. -/
+theorem step_call_vector128LoadAt_readOnly_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe false true)))
+    (offset : CIL.W64)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let value ← loadValue memory (.address moved) 16
+      return .next (pc + 1) (.scalar value :: rest) frame memory := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128LoadAt_readOnly_eq
+
+#print axioms step_call_vector128LoadAt_readOnly_eq
+
+@[cil_step high] private theorem step_memory_vector128Store_eq
+    (bits : BitVec 128) (r : ManagedReference)
     (rest : List Value) :
     step body (.memory (.vector128Unsafe true false)) pc args frame
       (.reference r :: .scalar (.v128 bits) :: rest) memory = do
@@ -262,7 +342,26 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128Store_snapshot_eq (bytes : List (BitVec 8 × Bool))
+#print axioms step_memory_vector128Store_eq
+
+/-- The store call on defined vector bits uses the checked transfer. -/
+theorem step_call_vector128Store_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe true false)))
+    (bits : BitVec 128) (r : ManagedReference)
+    (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.reference r :: .scalar (.v128 bits) :: rest) memory = do
+      let stored ← storeValue memory r (.v128 bits)
+      return .next (pc + 1) rest frame stored := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128Store_eq
+
+#print axioms step_call_vector128Store_eq
+
+@[cil_step high] private theorem step_memory_vector128Store_snapshot_eq
+    (bytes : List (BitVec 8 × Bool))
     (r : ManagedReference) (rest : List Value) :
     step body (.memory (.vector128Unsafe true false)) pc args frame
       (.reference r :: .scalar (.snapshot .vector128 bytes) :: rest) memory = do
@@ -270,7 +369,26 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128StoreAt_eq (offset : CIL.W64) (bits : BitVec 128)
+#print axioms step_memory_vector128Store_snapshot_eq
+
+/-- The store call on a vector snapshot uses the checked transfer. -/
+theorem step_call_vector128Store_snapshot_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe true false)))
+    (bytes : List (BitVec 8 × Bool))
+    (r : ManagedReference) (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.reference r :: .scalar (.snapshot .vector128 bytes) :: rest) memory = do
+      let stored ← storeValue memory r (.snapshot .vector128 bytes)
+      return .next (pc + 1) rest frame stored := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128Store_snapshot_eq
+
+#print axioms step_call_vector128Store_snapshot_eq
+
+@[cil_step high] private theorem step_memory_vector128StoreAt_eq
+    (offset : CIL.W64) (bits : BitVec 128)
     (r : ManagedReference) (rest : List Value) :
     step body (.memory (.vector128Unsafe true true)) pc args frame
       (.scalar (.i64 offset) :: .reference r :: .scalar (.v128 bits) :: rest) memory = do
@@ -280,7 +398,28 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_vector128StoreAt_snapshot_eq (offset : CIL.W64)
+#print axioms step_memory_vector128StoreAt_eq
+
+/-- The offset store call on defined vector bits uses the checked transfer. -/
+theorem step_call_vector128StoreAt_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe true true)))
+    (offset : CIL.W64) (bits : BitVec 128)
+    (r : ManagedReference) (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.scalar (.i64 offset) :: .reference r :: .scalar (.v128 bits) :: rest) memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let stored ← storeValue memory (.address moved) (.v128 bits)
+      return .next (pc + 1) rest frame stored := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128StoreAt_eq
+
+#print axioms step_call_vector128StoreAt_eq
+
+@[cil_step high] private theorem step_memory_vector128StoreAt_snapshot_eq
+    (offset : CIL.W64)
     (bytes : List (BitVec 8 × Bool)) (r : ManagedReference) (rest : List Value) :
     step body (.memory (.vector128Unsafe true true)) pc args frame
       (.scalar (.i64 offset) :: .reference r :: .scalar (.snapshot .vector128 bytes) :: rest)
@@ -290,6 +429,27 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       let stored ← storeValue memory (.address moved) (.snapshot .vector128 bytes)
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
+
+#print axioms step_memory_vector128StoreAt_snapshot_eq
+
+/-- The offset store call on a vector snapshot uses the checked transfer. -/
+theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method =
+      some (.memory (.vector128Unsafe true true)))
+    (offset : CIL.W64)
+    (bytes : List (BitVec 8 × Bool)) (r : ManagedReference) (rest : List Value) :
+    step body (.call method {}) pc args frame
+      (.scalar (.i64 offset) :: .reference r :: .scalar (.snapshot .vector128 bytes) :: rest)
+      memory = do
+      let address ← referenceAt r
+      let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
+      let stored ← storeValue memory (.address moved) (.snapshot .vector128 bytes)
+      return .next (pc + 1) rest frame stored := by
+  rw [step_call_memory body pc args frame memory link found rfl]
+  apply step_memory_vector128StoreAt_snapshot_eq
+
+#print axioms step_call_vector128StoreAt_snapshot_eq
 
 -- References, pointer arithmetic and bit casts.
 @[cil_step high] theorem step_memory_asRef_eq (r : ManagedReference) (rest : List Value) :

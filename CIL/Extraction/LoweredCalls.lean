@@ -5,8 +5,7 @@ import CIL.Extraction.Scalars
 /-!
 # Ownership of lowered call sites
 
-Runtime ownership uses the opcode and qualified member name. Overloads of a member such as
-Vector128.Create share an owner even when one reads a span and another constructs scalar lanes.
+Runtime ownership uses the opcode and qualified member name.
 Each owner resolves the closed signature separately.
 -/
 
@@ -14,7 +13,7 @@ namespace CIL.Extraction
 
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
-  | hardware | vectorCreate | vectorTransfer | span | binary
+  | hardware | span
   | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
@@ -30,11 +29,11 @@ private def hardwareMember (owner member : String) : Bool :=
   | "System.Runtime.Intrinsics.Vector128`1"
   | "System.Runtime.Intrinsics.Vector256`1" => member ∈
       ["get_AllBitsSet", "get_Zero", "op_Addition", "op_BitwiseAnd", "op_BitwiseOr",
-       "op_Equality", "op_ExclusiveOr", "op_OnesComplement", "op_Subtraction"]
+       "op_ExclusiveOr", "op_OnesComplement", "op_Subtraction"]
   | "System.Runtime.Intrinsics.Vector512" => member ∈
       ["EqualsAll"]
   | "System.Runtime.Intrinsics.Vector512`1" => member ∈
-      ["get_AllBitsSet", "get_Zero", "op_BitwiseAnd", "op_BitwiseOr", "op_Equality",
+      ["get_AllBitsSet", "get_Zero", "op_BitwiseAnd", "op_BitwiseOr",
        "op_ExclusiveOr", "op_OnesComplement"]
   | "System.Runtime.Intrinsics.X86.Avx" => member ∈
       ["Blend", "MoveMask", "TestZ"]
@@ -100,14 +99,9 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
       | "System.Array" => if name == "Fill" then some .span else none
       | _ => none
     else if scope == intrinsicsScope then
-      if name == "Create" && type ∈ ["System.Runtime.Intrinsics.Vector128",
-          "System.Runtime.Intrinsics.Vector256", "System.Runtime.Intrinsics.Vector512"] then
-        some .vectorCreate
-      else if vector128UnsafeFamily site then some .vectorTransfer
-      else if hardwareMember type name then some .hardware else none
+      if hardwareMember type name then some .hardware else none
     else if scope == spanMemoryScope then
-      if binaryTransferFamily raw then some .binary
-      else if type == "System.MemoryExtensions" && name == "AsSpan" then some .span else none
+      if type == "System.MemoryExtensions" && name == "AsSpan" then some .span else none
     else none
   | _ => none
 

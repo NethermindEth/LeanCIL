@@ -1,6 +1,5 @@
 import CIL.Extraction.Features
 import CIL.Extraction.UnsafeOffsets
-import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.UnsafeTransferModels
 import CIL.Extraction.SpanModels
 import CIL.Extraction.GuardModels

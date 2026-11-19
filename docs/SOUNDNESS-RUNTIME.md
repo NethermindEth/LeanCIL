@@ -59,8 +59,10 @@ the indexed layout reader.
 
 Portable 128-, 256- and 512-bit integer vector bitwise operators, whole-vector equality, `Zero` and
 `AllBitsSet` share their bit-level semantics for byte, signed/unsigned 32-bit and signed/unsigned
-64-bit elements. The intrinsic certificate checks the exact runtime call, element, width, generic
-arguments and emitted operation. Floating-point equality and unspecified-lane observations are excluded.
+64-bit elements. The runtime model for the equality operator checks the closed vector owner and
+its open declaration. The intrinsic certificate checks the other bitwise operations. Portable
+vector constructors and byte-reference loads and stores retain their calls. Their model entries
+bind the exact external target, open declaration, closed element and operand types. Floating-point equality and unspecified-lane observations are excluded.
 
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers
 proved independent of the upper lane: reinterpretation, lane-zero extraction and the count operands
@@ -248,7 +250,9 @@ GC-reference exclusion. Block alignment is eight unless a valid `unaligned.` pre
 Zero-byte blocks access no memory, including through null. Prefix operands/followers and entry edges
 are validated; correspondence to CoreCLR remains assumed.
 
-`BinaryPrimitives` span operations bind width, endian order, signedness and try behavior exactly.
+The runtime table binds each endian member of `BinaryPrimitives` to its open declaration,
+closed signature and external target. The retained call executes the checked span operation
+for its width, byte order, signedness and try behavior.
 Native integer overloads use eight-byte transfers under the validated 64-bit deployment profile.
 Short ordinary operations raise `ArgumentOutOfRangeException`; short try-reads initialize the output
 to zero and short try-writes preserve memory. Reads capture source before writing an aliased output.

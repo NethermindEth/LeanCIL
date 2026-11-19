@@ -148,10 +148,6 @@ private def vectorInstruction (site : CallSite) : Option (Intrinsic × Nat) := d
   | "CreateScalar" =>
     choose (vec u64) [u64] (.createScalar64 width) <|>
       choose (vec u32) [u32] (.createScalar32 width)
-  | "Create" =>
-    choose (vec u64) [u64] (.create64 width) <|>
-      choose (vec u64) (List.replicate (width / 64) u64) (.create64 width) <|>
-      choose (vec u32) (List.replicate (width / 32) u32) (.create32 width)
   | member =>
     let target ← [("AsByte", "Byte"), ("AsUInt32", "UInt32"), ("AsInt64", "Int64"),
       ("AsDouble", "Double"), ("AsUInt64", "UInt64"), ("AsInt32", "Int32"),
