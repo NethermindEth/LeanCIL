@@ -238,10 +238,6 @@ that owns no allocation.
 
 ### Instruction families
 
-The instruction equations for `ldc.i4.0` through `ldc.i4.8` use word numerals.
-The signed constant loads `ldc.i4.m1`, `ldc.i4.s`, `ldc.i4` and `ldc.i8` use
-`BitVec.ofInt`. For example, stepping `ldc.i4.s 63` in a shift mask gives `63#32`.
-
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding
 the intrinsic evaluator. Register consumer lemmas in the form
 `CIL.evalIntrinsic operation operands = some result` with `BitVec.ofNat` operands, because
