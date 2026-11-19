@@ -201,14 +201,16 @@ def declareExplicitLinks (body : Body) (simpSet : SimpExtension) (method : Expr)
         statement proof
       addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
         (inv := false) .global (eval_prio default)
+  let mut position := 0
   for inRange : pc in [0:ops.size] do
-    if keyed.any (·.1 == pc) then continue
+    if let some (key, _) := keyed[position]? then
+      if key == pc then
+        position := position + 1
+        continue
     unless (← whnfR ops[pc]).isAppOf ``CIL.Instruction.call do continue
     withCurrHeartbeats do
       let read := mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc)
       let absent := mkApp (mkConst ``Option.none [.zero]) (mkConst ``CIL.Link)
-      -- The entries before `start` all have keys below `pc`, so the walk begins at `start`.
-      let position := (keyed.filter (·.1 < pc)).size
       -- A pc past the last key of a full last block starts that block, as no suffix follows it.
       let block := position - position % suffixBlock
       let start := if block < entries.size then block else block - suffixBlock
