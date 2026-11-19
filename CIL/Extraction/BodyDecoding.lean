@@ -436,6 +436,31 @@ private def checkTable (env : MetadataEnv) (frame : Frame) :
     let facts ← (checkEntryIn env frame token operand).mapError BodyError.metadata
     checkTable env frame rest (table.insert token (operand, facts))
 
+/-- Every call in an accepted token table passed the operand check in the same metadata frame. -/
+private theorem checkTable_calls {env : MetadataEnv} {frame : Frame}
+    {entries : List (Nat × RawOperand)} {start result : Std.TreeMap Nat (RawOperand × TokenFacts)}
+    (checked : checkTable env frame entries start = .ok result)
+    {token : Nat} {call : CallSite} (listed : (token, .call call) ∈ entries) :
+    ∃ facts, checkCallOperand env frame token call = .ok facts := by
+  induction entries generalizing start with
+  | nil => simp at listed
+  | cons head rest induction =>
+    obtain ⟨key, operand⟩ := head
+    simp only [checkTable, bind, Except.bind] at checked
+    split at checked
+    · contradiction
+    split at checked
+    · contradiction
+    rename_i facts accepted
+    rcases List.mem_cons.mp listed with first | later
+    · cases first
+      cases bound : checkCallOperand env frame token call with
+      | error fault => simp [checkEntryIn, bound, Except.mapError] at accepted
+      | ok value => exact ⟨value, rfl⟩
+    · exact induction checked later
+
+#print axioms checkTable_calls
+
 /-- The metadata of a body as an environment of indexed slices, its own first, over the given
     identities and tables: independent of the number of rows. -/
 def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : List (List Nat))
@@ -692,5 +717,189 @@ theorem checkBody_prefixEntryFree {body : BodyEvidence} {method : RawMethod}
     | simp_all
 
 #print axioms checkBody_prefixEntryFree
+
+/-- A successful decode used one frame to check every operand in its table. -/
+private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : Nat}
+    {body : BodyEvidence} {decoded : DecodedBody} (ok : decodeBody env arity ownerArity body =
+      .ok decoded) :
+    ∃ frame table, env.frame arity ownerArity = .ok frame ∧
+      checkTable env frame body.tokens.operands ∅ = .ok table := by
+  unfold decodeBody at ok
+  simp only [bind, Except.bind] at ok
+  repeat' split at ok
+  all_goals first
+    | contradiction
+    | (refine ⟨_, _, ?_, by assumption⟩
+       cases frameEq : env.frame arity ownerArity <;>
+         simp_all [Except.mapError])
+
+#print axioms decodeBody_checkedTable
+
+/-- A bound body checks each token's call reference and external identity against one member. -/
+theorem BodyDecodes.externalTarget {pins : List AssemblyPin} {pin : AssemblyPin}
+    {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
+    (decodes : BodyDecodes pins pin body method arguments signature) {token : Nat}
+    {call : CallSite} {identity : String} (listed : (token, .call call) ∈ body.tokens.operands)
+    (externalTarget : call.target = .external identity) :
+    ∃ env frame site,
+      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
+      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
+      site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
+        site.contractName frame = some (bytesOf identity)) := by
+  have matched := decodes.2.2.2.2.2.2
+  unfold bodyMatches at matched
+  split at matched
+  · rename_i checked
+    unfold checkBody at checked
+    simp only [bind, Except.bind] at checked
+    repeat' split at checked
+    all_goals first
+      | contradiction
+      | (obtain ⟨frame, table, frameEq, tableEq⟩ := decodeBody_checkedTable
+           (show decodeBody _ _ _ body = .ok _ from by assumption)
+         obtain ⟨facts, accepted⟩ := checkTable_calls tableEq listed
+         obtain ⟨site, bound⟩ := checkCallOperand_external accepted externalTarget
+         refine ⟨_, frame, site, ?_, frameEq, bound⟩
+         cases envEq : body.metadata.environmentWith body.identities body.tables body.pinned <;>
+           simp_all [Except.mapError])
+  · contradiction
+
+#print axioms BodyDecodes.externalTarget
+
+/-- The checked table contains only supplied token operands or operands already in its input. -/
+private theorem checkTable_origin {env : MetadataEnv} {frame : Frame}
+    {entries : List (Nat × RawOperand)} {start result : Std.TreeMap Nat (RawOperand × TokenFacts)}
+    (checked : checkTable env frame entries start = .ok result) {key operand facts}
+    (found : result[key]? = some (operand, facts)) :
+    (key, operand) ∈ entries ∨ start[key]? = some (operand, facts) := by
+  induction entries generalizing start with
+  | nil => cases checked; exact Or.inr found
+  | cons head rest ih =>
+    obtain ⟨token, value⟩ := head
+    simp only [checkTable, bind, Except.bind] at checked
+    split at checked <;> try contradiction
+    split at checked <;> try contradiction
+    rcases ih checked with later | earlier
+    · exact Or.inl (List.mem_cons_of_mem _ later)
+    · rw [Std.TreeMap.getElem?_insert] at earlier
+      split at earlier
+      · rename_i same
+        obtain rfl := Nat.compare_eq_eq.mp same
+        cases earlier
+        exact Or.inl List.mem_cons_self
+      · exact Or.inr earlier
+
+#print axioms checkTable_origin
+
+/-- A call operand can only come from a token lookup in the instruction bytes. -/
+private theorem decodeOperand_call {table offset start opcode kind bytes value call}
+    (ok : decodeOperand table offset start opcode kind bytes = .ok value)
+    (called : value.1 = RawOperand.call call) :
+    ∃ (token : Nat) (facts : TokenFacts), table[token]? = some (RawOperand.call call, facts) := by
+  obtain ⟨operand, following, remaining⟩ := value
+  cases called
+  cases kind <;> simp only [decodeOperand, readToken, readValue, readBranch, readSwitch,
+    bind, Except.bind] at ok
+  all_goals repeat' split at ok
+  all_goals first
+    | contradiction
+    | (solve | simp at ok)
+    | (have same := congrArg Prod.fst (Except.ok.inj ok)
+       simp only at same
+       subst_vars
+       exact ⟨_, _, by assumption⟩)
+
+#print axioms decodeOperand_call
+
+/-- Each call in a decoded instruction stream belongs to the operand table. -/
+private theorem decodeInstructions_call {table fuel offset index bytes code statics}
+    (ok : decodeInstructions table fuel offset index bytes = .ok (code, statics))
+    {instruction : RawInstruction} (member : instruction ∈ code) {call}
+    (called : instruction.operand = .call call) :
+    ∃ (token : Nat) (facts : TokenFacts), table[token]? = some (RawOperand.call call, facts) := by
+  induction fuel generalizing offset index bytes code statics with
+  | zero =>
+    cases bytes <;> simp only [decodeInstructions] at ok <;> cases ok
+    simp at member
+  | succ fuel ih =>
+    cases bytes with
+    | nil => cases ok; simp at member
+    | cons byte bytes =>
+      simp only [decodeInstructions, bind, Except.bind] at ok
+      repeat' split at ok
+      all_goals first
+        | contradiction
+        | (cases ok
+           rcases List.mem_cons.mp member with rfl | later
+           · simp only at called
+             exact decodeOperand_call (by assumption) called
+           · exact ih (by assumption) later)
+
+#print axioms decodeInstructions_call
+
+/-- Resolving a branch can never introduce or change a call operand. -/
+private theorem resolveBranches_call {starts size raw instruction call}
+    (ok : resolveBranches starts size raw = .ok instruction)
+    (called : instruction.operand = .call call) : raw.operand = .call call := by
+  unfold resolveBranches at ok
+  simp only [bind, Except.bind] at ok
+  repeat' split at ok
+  all_goals first | contradiction | (cases ok; exact called) | (cases ok; cases called)
+
+#print axioms resolveBranches_call
+
+/-- The bytes of a decoded call selected an operand supplied at a token of this body. -/
+private theorem decodeBody_call {env arity ownerArity body decoded}
+    (ok : decodeBody env arity ownerArity body = .ok decoded)
+    {pc : Nat} {instruction : RawInstruction} {call : CallSite}
+    (fetched : decoded.code[pc]? = some instruction) (called : instruction.operand = .call call) :
+    ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
+  unfold decodeBody at ok
+  simp only [bind, Except.bind] at ok
+  repeat' split at ok
+  all_goals first
+    | contradiction
+    | (cases ok
+       obtain ⟨raw, rawAt, resolved⟩ := mapM_ok_at (by assumption) pc instruction fetched
+       obtain ⟨token, facts, found⟩ := decodeInstructions_call (by assumption)
+         (List.mem_of_getElem? rawAt) (resolveBranches_call resolved called)
+       rcases checkTable_origin (by assumption) found with member | empty
+       · exact ⟨token, member⟩
+       · simp at empty)
+
+#print axioms decodeBody_call
+
+/-- Every decoded external call names the metadata member of its own reference. -/
+theorem BodyDecodes.callExternalTarget {pins pin body method arguments signature}
+    (decodes : BodyDecodes pins pin body method arguments signature)
+    {pc : Nat} {instruction : RawInstruction} {call : CallSite} {identity : String}
+    (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call)
+    (externalTarget : call.target = .external identity) :
+    ∃ token env frame site,
+      (token, RawOperand.call call) ∈ body.tokens.operands ∧
+      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
+      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
+      site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
+        site.contractName frame = some (bytesOf identity)) := by
+  have matched := decodes.2.2.2.2.2.2
+  unfold bodyMatches at matched
+  split at matched
+  · rename_i decoded checked
+    simp only [Bool.and_eq_true, beq_iff_eq] at matched
+    rw [← matched.1.2] at fetched
+    unfold checkBody at checked
+    simp only [bind, Except.bind] at checked
+    repeat' split at checked
+    all_goals first
+      | contradiction
+      | (cases checked
+         obtain ⟨token, member⟩ := decodeBody_call (by assumption) fetched called
+         obtain ⟨env, frame, site, same⟩ := decodes.externalTarget member externalTarget
+         exact ⟨token, env, frame, site, member, same⟩)
+  · contradiction
+
+#print axioms BodyDecodes.callExternalTarget
 
 end CIL.Extraction

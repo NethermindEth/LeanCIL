@@ -454,10 +454,9 @@ private def parametersAdmitted (frame : Frame) : List ResolvedType → List Type
     frame.admits type claim && parametersAdmitted frame types claims
   | _, _ => false
 
-/-- Check a `.call` operand against the member its token names. -/
-def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite) :
-    Except MetadataError TokenFacts := do
-  let site ← env.methodSite token
+/-- The reference and open declaration describe the same metadata member in its type frame. -/
+def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site : MethodSite)
+    (call : CallSite) : Except MetadataError Unit := do
   if site.genericArity != 0 && site.methodArguments.isNone then throw (.genericMismatch token)
   let extracted := site.definition.isSome
   let ownerArguments := site.owner.arguments
@@ -506,6 +505,13 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
       !(parameters.zip call.parameterTypes).all
         (fun (type, claimed) => located.admits type claimed)
   then throw (.operandMismatch token)
+  return ()
+
+/-- The operand target and typed reference both name the method at the token. -/
+def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite) :
+    Except MetadataError TokenFacts := do
+  let site ← env.methodSite token
+  checkCallReference env frame token site call
   match call.target with
   | .managed target =>
     match site.definition with
@@ -513,8 +519,36 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
       if target == definition then .ok {} else .error (.operandMismatch token)
     | none => .error (.operandMismatch token)
   | .external identity =>
-    if extracted || !(site.externalMatches frame identity) then .error (.operandMismatch token)
+    if site.definition.isSome || !(site.externalMatches frame identity) then .error (.operandMismatch token)
     else .ok {}
+
+/-- The same member binds the typed reference and both permitted external identity spellings. -/
+theorem checkCallOperand_external {env : MetadataEnv} {frame : Frame} {token : Nat}
+    {call : CallSite} {identity : String} {facts : TokenFacts}
+    (checked : checkCallOperand env frame token call = .ok facts)
+    (externalTarget : call.target = .external identity) :
+    ∃ site, env.methodSite token = .ok site ∧
+      checkCallReference env frame token site call = .ok () ∧ site.definition = none ∧
+      (site.externalName = some (bytesOf identity) ∨
+        site.contractName frame = some (bytesOf identity)) := by
+  unfold checkCallOperand at checked
+  simp only [externalTarget, bind, Except.bind] at checked
+  cases resolved : env.methodSite token with
+  | error fault => simp [resolved] at checked
+  | ok site =>
+    refine ⟨site, rfl, ?_⟩
+    cases reference : checkCallReference env frame token site call with
+    | error fault => simp [resolved, reference, bind, Except.bind] at checked
+    | ok result =>
+      cases result
+      simp [resolved, reference, bind, Except.bind] at checked
+      split at checked
+      · contradiction
+      · rename_i accepted
+        by_cases named : site.externalName = some (bytesOf identity) <;>
+          simpa [MethodSite.externalMatches, named] using accepted
+
+#print axioms checkCallOperand_external
 
 /-! ## Indirect calls and strings -/
 
