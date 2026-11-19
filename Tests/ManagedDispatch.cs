@@ -131,6 +131,11 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     const string flowCheck = "method0_features_validated";
     var signatureChange = changeSignature.ReplaceLineEndings(" ");
     var calls = NarrowEvidence(source, callCheck);
+    var numericPointer = ForgeDecodedInstruction(calls, 0, address.Pc, "fun _ => .ldc_i8 0");
+    var addressEntry = $"({address.Pc}, method0Link{address.Pc}), ";
+    var numericWithoutLink = numericPointer.Replace(addressEntry, "", StringComparison.Ordinal);
+    if (numericPointer == numericWithoutLink)
+        throw new InvalidOperationException("Missing address entry before the indirect call");
     var flow = NarrowEvidence(source, flowCheck);
     var badIndex = ManagedPatterns.LinkTarget.Replace(call.Link, "method := 999999");
     var badOwner = call.Link.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch", StringComparison.Ordinal);
@@ -150,7 +155,8 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         ("identity", ForgeLink(calls, 0, call.Pc, badOwner), "ManagedCallsValid"),
         ("address-target", ForgeLink(calls, 0, address.Pc, ".address 0"), "ManagedCallsValid"),
         ("signature", ForgeDecodedInstruction(calls, 0, call.Pc, signatureChange), "ManagedCallsValid"),
-        ("numeric-pointer", ForgeDecodedInstruction(calls, 0, address.Pc, "fun _ => .ldc_i8 0"), "ManagedCallsValid"),
+        ("numeric-pointer-link", numericPointer, "ManagedCallsValid"),
+        ("numeric-pointer", numericWithoutLink, "ManagedCallsValid"),
         ("convention", badConvention, "ManagedCallsValid"),
         ("tail", ForgeDecodedInstruction(flow, 0, call.Pc, dropTail), "FeatureFlowValid")
     })
