@@ -36,7 +36,7 @@ theorem feature_valid : FeatureFlowValid #[] (fun _ => none) (fun _ => none) (ra
 
 set_option profiler true in
 /-- Fixed scalar validation workload, reduced by the kernel. -/
-theorem scalar_valid : ScalarFlowValid #[] (raw 512) (features 512) (scalars 512) (code 512) := by
+theorem scalar_valid : ScalarFlowValid (raw 512) (features 512) (scalars 512) (code 512) := by
   decide
 #print axioms scalar_valid
 

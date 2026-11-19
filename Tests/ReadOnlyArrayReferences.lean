@@ -120,18 +120,18 @@ private def code (readOnly : Bool) : List CIL.Instruction :=
 
 /-- A branch to the prefix itself does not bypass the restriction. -/
 theorem prefix_certificate :
-    CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code true) := by decide +kernel
+    CIL.Extraction.ScalarFlowValid (raw 2) features states (code true) := by decide +kernel
 #print axioms prefix_certificate
 
 /-- Independently forging a writable address under the same readonly raw CIL fails. -/
 theorem writable_forgery_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code false) := by decide +kernel
+    ¬ CIL.Extraction.ScalarFlowValid (raw 2) features states (code false) := by decide +kernel
 #print axioms writable_forgery_rejected
 
 /-- Changing only the branch target to skip the prefix is rejected, even for a dead branch:
     the scalar check leaves branch entry to body decoding, whose `PrefixEntryFree` refuses it. -/
 theorem branch_into_address_rejected :
-    CIL.Extraction.ScalarFlowValid #[] (raw 3) features states (code true) ∧
+    CIL.Extraction.ScalarFlowValid (raw 3) features states (code true) ∧
       ¬ CIL.Extraction.PrefixEntryFree (raw 3).code := by decide +kernel
 #print axioms branch_into_address_rejected
 
@@ -141,7 +141,7 @@ private def operandRaw : CIL.Extraction.RawMethod :=
 
 /-- A prefix that carries an operand has no decoding, and the certificate is rejected. -/
 theorem prefix_operand_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid #[] operandRaw features states (code true) := by
+    ¬ CIL.Extraction.ScalarFlowValid operandRaw features states (code true) := by
   decide +kernel
 #print axioms prefix_operand_rejected
 
@@ -177,7 +177,7 @@ private def retRaw (offset : Nat) : RawInstruction := ⟨offset, 42, .none⟩
 /-- Whether the scalar check accepts a body with no layouts. -/
 private def accepted (body : RawMethod) (features : FeatureCertificate)
     (states : ScalarCertificate) (code : List CIL.Instruction) : Bool :=
-  decide (ScalarFlowValid #[] body features states code)
+  decide (ScalarFlowValid body features states code)
 
 /-- A readonly and a writable element address, each emitted as it decodes, pass the check. -/
 theorem decoded_addresses_accepted :
@@ -263,7 +263,7 @@ private def deadPrefixRaw : RawMethod :=
 /-- Scalar validation refuses the return after a dead readonly modifier. Branch entry also
     fails because the branch targets the modifier's follower. -/
 theorem dead_prefix_follower_refused :
-    (¬ ScalarFlowValid #[] deadPrefixRaw [some ⟨[], []⟩, none, some ⟨[], []⟩]
+    (¬ ScalarFlowValid deadPrefixRaw [some ⟨[], []⟩, none, some ⟨[], []⟩]
       [some [], none, some []] [.br 2, .unadmitted 65054, .ret]) ∧
       ¬ PrefixEntryFree deadPrefixRaw.code := by
   decide +kernel

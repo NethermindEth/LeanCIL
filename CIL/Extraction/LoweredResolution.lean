@@ -62,11 +62,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   | .span => spanInstruction environment role raw site
   | .staticSpan => staticSpanInstruction site
   | .binary => binaryInstruction raw
-  | .guard => guardInstruction raw
-  | .platform => return .ldc_i4 (← platformConstant site)
-  | .referenceContent =>
-    return .ldc_i4 (← referenceContentConstant environment.indexedRaw site)
-  | .feature => return .feature (← featureGetter site)
   | .typeTest => match role with
     | some .interior => some .nop
     | some (.result value) => some (.ldc_i4 (if value then 1 else 0))

@@ -244,30 +244,30 @@ private def nativeKind : ScalarKind := .nativeMethodTable signature
 /-- Native table addition admits only a decoded `add` without a raw operand and with an int32 or
     native offset in either order; ordinary integer addition keeps its admission. -/
 theorem native_add_admission :
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.word32, nativeKind] .add = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [nativeKind, .native] .add = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.native, nativeKind] .add = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [nativeKind, .word32] .add = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .local 0⟩ [.word32, nativeKind] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 89, .none⟩ [.word32, nativeKind] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.word32, nativeKind] .sub = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.word32, nativeKind] .add_ovf = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.word64, nativeKind] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.other, nativeKind] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [nativeKind, .word64] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [nativeKind, .other] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [nativeKind, .reference] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [nativeKind, nativeKind] .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.word32, .methodTable signature]
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.word32, nativeKind] .add = true ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [nativeKind, .native] .add = true ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.native, nativeKind] .add = true ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [nativeKind, .word32] .add = true ∧
+    scalarEmissionMatches none none ⟨0, 88, .local 0⟩ [.word32, nativeKind] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 89, .none⟩ [.word32, nativeKind] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.word32, nativeKind] .sub = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.word32, nativeKind] .add_ovf = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.word64, nativeKind] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.other, nativeKind] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [nativeKind, .word64] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [nativeKind, .other] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [nativeKind, .reference] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [nativeKind, nativeKind] .add = false ∧
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.word32, .methodTable signature]
       .add = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 88, .none⟩ [.word32, .word32] .add = true := by
+    scalarEmissionMatches none none ⟨0, 88, .none⟩ [.word32, .word32] .add = true := by
   decide +kernel
 #print axioms native_add_admission
 
 /-- A load through a native table cursor admits only the decoded `ldind.i`. -/
 theorem native_load_admission :
-    scalarEmissionMatches #[] none none ⟨0, 77, .none⟩ [nativeKind] (.ldind .i) = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 77, .none⟩ [nativeKind] (.ldind .i8) = false := by
+    scalarEmissionMatches none none ⟨0, 77, .none⟩ [nativeKind] (.ldind .i) = true ∧
+    scalarEmissionMatches none none ⟨0, 77, .none⟩ [nativeKind] (.ldind .i8) = false := by
   decide +kernel
 #print axioms native_load_admission
 
@@ -348,13 +348,13 @@ theorem native_cursor_table_reads_refused :
 /-- `ldlen`, `ldelem.i` and `ldelem` of a handler table emit their decoded instructions, not
     another instruction's decoding. -/
 theorem table_reads_emit_decoded :
-    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [tableKind] .ldlen = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 151, .none⟩ [.word32, tableKind] (.ldelem .i) = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 163, .type signature.typeExpr⟩ [.word32, tableKind]
+    scalarEmissionMatches none none ⟨0, 142, .none⟩ [tableKind] .ldlen = true ∧
+    scalarEmissionMatches none none ⟨0, 151, .none⟩ [.word32, tableKind] (.ldelem .i) = true ∧
+    scalarEmissionMatches none none ⟨0, 163, .type signature.typeExpr⟩ [.word32, tableKind]
       (.ldelem_any signature.typeExpr) = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 151, .none⟩ [.word32, tableKind]
+    scalarEmissionMatches none none ⟨0, 151, .none⟩ [.word32, tableKind]
       (.ldelem_any signature.typeExpr) = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 163, .type signature.typeExpr⟩ [.word32, tableKind]
+    scalarEmissionMatches none none ⟨0, 163, .type signature.typeExpr⟩ [.word32, tableKind]
       (.ldelem .i) = false := by
   decide +kernel
 #print axioms table_reads_emit_decoded

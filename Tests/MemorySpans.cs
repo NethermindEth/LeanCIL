@@ -184,7 +184,7 @@ foreach (var (name, signature, width, arguments, bytes) in new[]
         File.WriteAllText(forged, source.Replace(".spanFill 4 false", ".spanFill 8 false",
             StringComparison.Ordinal));
         rejected.Add(forged, "PASS independent span fill width rejection",
-            "Extraction.ScalarFlowValid rawLayouts.toArray method0Closed " +
+            "Extraction.ScalarFlowValid method0Closed " +
                 "method0FeatureStates method0ScalarStates method0.code");
     }
     var start = name == "FillLongSlice" ? width : 0;

@@ -39,7 +39,7 @@ object Variant(string path, bool avx, object[] methods) => Activator.CreateInsta
 // or 1, each naming the method operand `site`.
 object Operation(object operation) => operation is not string text ? operation : text switch
 {
-    ".feature .avx2" => Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")),
+    ".feature .avx2" => WithSite(Create("ModelCall", Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")))),
     ".nop" => Create("StackOperation", Enum.Parse(Model("StackOpcode"), "Nop")),
     ".ret" => Create("Return"),
     "call 0" => Call("Static", 0),

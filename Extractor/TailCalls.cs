@@ -27,7 +27,7 @@ internal static class TailCalls
             InitAccessors.Return(target.ReturnType).FullName !=
                 InitAccessors.Return(method.ReturnType).FullName ||
             target.DeclaringType.Scope != method.Module ||
-            InstructionTranslation.RuntimeModel(target) is not null)
+            RuntimeModels.Translate(target, FeatureProfile.Scalar) is not null)
             throw new InvalidDataException(
                 "Unsupported tail prefix: requires same-assembly direct call with matching return type");
     }

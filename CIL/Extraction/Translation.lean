@@ -405,7 +405,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   ObjectOperandsValid item.closed item.reachable method ∧
-  (ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates
+  (ScalarFlowValid item.closed item.featureStates item.scalarStates
     method.code item.decoded ∧
     (item.decoded = true → method.code =
       methodCode method.profile method.environment method.links item.reachable item.closed)) ∧

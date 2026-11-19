@@ -2,7 +2,6 @@ import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.SpanCalls
 import CIL.Extraction.BinaryTransfers
 import CIL.Extraction.ObjectConstruction
-import CIL.Extraction.GuardCalls
 
 /-!
 # Unsafe helper calls
@@ -15,6 +14,7 @@ namespace CIL.Extraction
 /-- Standalone reference and memory operations accept only raw opcodes that produce them.
     A call is the only possible origin of a pointer transfer, span transfer or view observation. -/
 private def memoryCallOrigin (raw : RawInstruction) : Instruction → Bool
+  | .memory (.zeroGuard ..) | .memory (.comparisonGuard ..) | .memory .throwIfNull => false
   | .skipInit | .memory .isNullRef | .memory .byteOffset => false
   | .memory .nullRef => raw.opcode == 20 && raw.operand == .none
   | .memory (.pointerTransfer ..) | .memory (.marshalRead ..) | .memory (.marshalWrite ..)
@@ -29,8 +29,7 @@ def UnsafeCallsValid (closed : RawMethod)
       memoryCallOrigin instruction emitted &&
       vector128UnsafeMatches instruction emitted &&
       binaryTransferMatches instruction emitted &&
-      callEmitsNoPop instruction emitted &&
-      guardCallMatches instruction emitted)
+      callEmitsNoPop instruction emitted)
     closed.code reachable code = true
 
 instance (closed : RawMethod)

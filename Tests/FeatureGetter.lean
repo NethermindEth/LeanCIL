@@ -1,9 +1,10 @@
 import CIL.Extraction.Features
+import Tests.Support.ModelOperands
 
 /-!
 # Exact feature getter identities
 
-The byte-table lookup must retain assembly, namespace, class and member identity,
+The model operand binds assembly, namespace, class and member identity,
 including malformed signatures which share the admitted prefix.
 -/
 
@@ -27,44 +28,47 @@ def getter (owner member : String) : CallSite := {
 /-- The external identity must name the selected owner even for two admitted getters. -/
 theorem targetOwner :
     let site := getter "X86.Avx2" "get_IsSupported"
-    featureGetter site = some .avx2 ∧
-      featureGetter { site with target := (getter "X86.Aes" "get_IsSupported").target } = none :=
-  by decide +kernel
+    platformGetterModel site = some (.feature .avx2) ∧
+      platformGetterModel { site with target := (getter "X86.Aes" "get_IsSupported").target } =
+        none := by decide +kernel
 
 #print axioms targetOwner
 
 /-- Hardware acceleration, nested class and ordinary supported getters retain their flags. -/
 theorem supported :
-    featureGetter (getter "Vector256" "get_IsHardwareAccelerated") = some .vector256Accelerated ∧
-    featureGetter (getter "X86.Sse41" "get_IsSupported") = some .sse41 ∧
-    featureGetter (getter "Arm.ArmBase/Arm64" "get_IsSupported") = some .armBase64 ∧
-    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some .advSimd ∧
-    featureGetter (getter "X86.Avx512Vbmi" "get_IsSupported") = some .avx512Vbmi ∧
-    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsSupported") = some .avx512Vbmi ∧
-    featureGetter (getter "X86.Aes" "get_IsSupported") = some .aes ∧
-    featureGetter (getter "X86.Aes/X64" "get_IsSupported") = some .aes ∧
-    featureGetter (getter "Arm.Aes" "get_IsSupported") = some .armAes ∧
-    featureGetter (getter "Arm.Aes/Arm64" "get_IsSupported") = some .armAes := by
+    platformGetterModel (getter "Vector256" "get_IsHardwareAccelerated") =
+      some (.feature .vector256Accelerated) ∧
+    platformGetterModel (getter "X86.Sse41" "get_IsSupported") = some (.feature .sse41) ∧
+    platformGetterModel (getter "Arm.ArmBase/Arm64" "get_IsSupported") =
+      some (.feature .armBase64) ∧
+    platformGetterModel (getter "Arm.AdvSimd/Arm64" "get_IsSupported") = some (.feature .advSimd) ∧
+    platformGetterModel (getter "X86.Avx512Vbmi" "get_IsSupported") = some (.feature .avx512Vbmi) ∧
+    platformGetterModel (getter "X86.Avx512Vbmi/VL" "get_IsSupported") =
+      some (.feature .avx512Vbmi) ∧
+    platformGetterModel (getter "X86.Aes" "get_IsSupported") = some (.feature .aes) ∧
+    platformGetterModel (getter "X86.Aes/X64" "get_IsSupported") = some (.feature .aes) ∧
+    platformGetterModel (getter "Arm.Aes" "get_IsSupported") = some (.feature .armAes) ∧
+    platformGetterModel (getter "Arm.Aes/Arm64" "get_IsSupported") = some (.feature .armAes) := by
   decide +kernel
 #print axioms supported
 
 /-- A syntactically similar identity cannot change the exact admitted feature class or member. -/
 theorem wrong_names :
-    featureGetter (getter "Vector256" "get_IsSupported") = none ∧
-    featureGetter (getter "X86.Sse41X" "get_IsSupported") = none ∧
-    featureGetter (getter "X86.Sse41" "get_IsSupportedX") = none ∧
-    featureGetter (getter "X86.Ssé41" "get_IsSupported") = none := by decide +kernel
+    platformGetterModel (getter "Vector256" "get_IsSupported") = none ∧
+    platformGetterModel (getter "X86.Sse41X" "get_IsSupported") = none ∧
+    platformGetterModel (getter "X86.Sse41" "get_IsSupportedX") = none ∧
+    platformGetterModel (getter "X86.Ssé41" "get_IsSupported") = none := by decide +kernel
 #print axioms wrong_names
 
 /-- Nested 64-bit classes outside the measured runtime groups remain unclassified. -/
 theorem unclassified_nested :
-    featureGetter (getter "Arm.Crc32/Arm64" "get_IsSupported") = none ∧
-    featureGetter (getter "Arm.Rdm/Arm64" "get_IsSupported") = none ∧
-    featureGetter (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none ∧
-    featureGetter (getter "X86.Avx512Vbmi2/VL" "get_IsSupported") = none ∧
-    featureGetter (getter "X86.Avx512Vbmi/VL" "get_IsHardwareAccelerated") = none ∧
-    featureGetter (getter "X86.Pclmulqdq" "get_IsSupported") = none ∧
-    featureGetter (getter "X86.Aes/X86" "get_IsSupported") = none := by
+    platformGetterModel (getter "Arm.Crc32/Arm64" "get_IsSupported") = none ∧
+    platformGetterModel (getter "Arm.Rdm/Arm64" "get_IsSupported") = none ∧
+    platformGetterModel (getter "Arm.AdvSimd/Arm64" "get_IsHardwareAccelerated") = none ∧
+    platformGetterModel (getter "X86.Avx512Vbmi2/VL" "get_IsSupported") = none ∧
+    platformGetterModel (getter "X86.Avx512Vbmi/VL" "get_IsHardwareAccelerated") = none ∧
+    platformGetterModel (getter "X86.Pclmulqdq" "get_IsSupported") = none ∧
+    platformGetterModel (getter "X86.Aes/X86" "get_IsSupported") = none := by
   decide +kernel
 #print axioms unclassified_nested
 
@@ -103,16 +107,17 @@ theorem wrong_prefix_or_tail :
       "Other::System.Boolean System.Runtime.Intrinsics.X86.Sse41::get_IsSupported()",
       intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics.X86.Sse41::get_IsSupported()X"]
       (fun identity =>
-        (featureGetter { getter "X86.Sse41" "get_IsSupported" with
+        (platformGetterModel { getter "X86.Sse41" "get_IsSupported" with
           target := .external identity }).isNone)) = true := by decide +kernel
 #print axioms wrong_prefix_or_tail
 
 /-- Signature acceleration leaves the existing call-shape checks intact. -/
 theorem wrong_call_shape :
-    featureGetter { getter "X86.Sse41" "get_IsSupported" with parameterCount := 1 } = none ∧
-    featureGetter { getter "X86.Sse41" "get_IsSupported" with method.hasThis := true } = none ∧
-    featureGetter { getter "X86.Sse41" "get_IsSupported" with returnsValue := false } = none ∧
-    featureGetter { getter "X86.Sse41" "get_IsSupported" with
+    platformGetterModel { getter "X86.Sse41" "get_IsSupported" with parameterCount := 1 } = none ∧
+    platformGetterModel { getter "X86.Sse41" "get_IsSupported" with method.hasThis := true } =
+      none ∧
+    platformGetterModel { getter "X86.Sse41" "get_IsSupported" with returnsValue := false } = none ∧
+    platformGetterModel { getter "X86.Sse41" "get_IsSupported" with
       typeArguments := [.atom runtimeScope "System.Int32"] } = none := by decide +kernel
 #print axioms wrong_call_shape
 
@@ -128,18 +133,35 @@ def platform (owner member result : String) : CallSite := {
   target := .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++ "::" ++ member ++ "()")
   parameterCount := 0, returnsValue := true, typeArguments := [] }
 
+/-- Each supported hardware owner and each process getter keeps its call only at its exact row. -/
+theorem getter_decoding :
+    (["Arm.AdvSimd", "Arm.AdvSimd/Arm64", "Arm.ArmBase/Arm64", "X86.Sse2", "X86.Ssse3",
+      "X86.Sse41", "X86.Sse42", "X86.Avx", "X86.Avx2", "X86.Avx512F", "X86.Avx512F/VL",
+      "X86.Avx512DQ", "X86.Avx512DQ/VL", "X86.Avx512Vbmi", "X86.Avx512Vbmi/VL", "X86.Aes",
+      "X86.Aes/X64", "Arm.Aes", "Arm.Aes/Arm64", "X86.Bmi1", "X86.Bmi2/X64", "X86.X86Base/X64"].all
+      (fun owner => Tests.ModelOperands.checks (getter owner "get_IsSupported"))) = true ∧
+    (["Vector128", "Vector256"].all (fun owner =>
+      Tests.ModelOperands.checks (getter owner "get_IsHardwareAccelerated"))) = true ∧
+    ([platform "System.IntPtr" "get_Size" "System.Int32",
+      platform "System.UIntPtr" "get_Size" "System.Int32",
+      platform "System.Environment" "get_Is64BitProcess" "System.Boolean"].all
+        Tests.ModelOperands.checks) = true := by
+  decide +kernel
+
+#print axioms getter_decoding
+
 /-- Both native-size getters and the process query use the admitted 64-bit platform. -/
 theorem platform_values :
-    platformConstant (platform "System.IntPtr" "get_Size" "System.Int32") = some 8 ∧
-    platformConstant (platform "System.UIntPtr" "get_Size" "System.Int32") = some 8 ∧
-    platformConstant (platform "System.Environment" "get_Is64BitProcess" "System.Boolean") =
-      some 1 := by decide +kernel
+    platformGetterModel (platform "System.IntPtr" "get_Size" "System.Int32") = some (.constant 8) ∧
+    platformGetterModel (platform "System.UIntPtr" "get_Size" "System.Int32") = some (.constant 8) ∧
+    platformGetterModel (platform "System.Environment" "get_Is64BitProcess" "System.Boolean") =
+      some (.constant 1) := by decide +kernel
 #print axioms platform_values
 
 /-- A platform constant is checked even when its forged instruction has the same stack effect. -/
 theorem platform_encoding (raw : RawMethod) :
     let site := platform "System.IntPtr" "get_Size" "System.Int32"
-    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 8) = true ∧
+    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.call site.method {}) = true ∧
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 4) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
       method.owner := .atom "forged" "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
@@ -153,7 +175,8 @@ theorem platform_encoding (raw : RawMethod) :
     featureOpMatches #[] raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
       typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.ldc_i4 8) = false := by
-  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  unfold featureOpMatches
+  decide +kernel
 #print axioms platform_encoding
 
 /-- A raw static Boolean load from `owner` in `scope`. -/
@@ -204,7 +227,7 @@ def referenceQuery (type : TypeExpr) : CallSite := {
 /-- Representable references and views are not reference-free generic value storage. -/
 theorem reference_content_boundary :
     let integer := TypeExpr.atom runtimeScope "System.Int32"
-    let query := fun type => referenceContentConstant #[] (referenceQuery type)
+    let query := fun type => referenceContentFact #[] (referenceQuery type)
     query integer = some 0 ∧
     query (.atom runtimeScope "System.Boolean") = some 0 ∧
     query (.atom runtimeScope "System.Char") = some 0 ∧
@@ -222,5 +245,14 @@ theorem reference_content_boundary :
     query (.apply (.constructor runtimeScope "System.ReadOnlySpan`1") integer) = none ∧
     query (.aggregate "missing" 0) = none := by decide +kernel
 #print axioms reference_content_boundary
+
+/-- A malformed query or an argument with managed references cannot acquire a model. -/
+theorem reference_decoding :
+    let query := referenceQuery (.atom runtimeScope "System.Int32")
+    Tests.ModelOperands.checks query = true ∧
+      Tests.ModelOperands.decoded (referenceQuery (.array (.atom runtimeScope "System.Int32"))) =
+        some [.unadmitted 40] := by decide +kernel
+
+#print axioms reference_decoding
 
 end Tests.FeatureGetter

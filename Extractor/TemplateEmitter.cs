@@ -162,7 +162,8 @@ internal static partial class TemplateEmitter
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
         var features = Enum.GetValues<Feature>().Where(feature => selected.Any(row =>
-            row.Method.Operations.Any(operation => operation is FeatureTest test && test.Feature == feature)))
+            row.Method.Operations.Any(operation => operation is ModelCall { Model: FeatureTest test } &&
+                test.Feature == feature)))
             .ToArray();
         var callees = selected.SelectMany(row => row.Method.Operations.SelectMany(operation => operation.Methods)
                 .Concat(row.Method.Frame.Methods).Select(index => CalleeIdentity(row.Variant, index)))

@@ -14,8 +14,8 @@ namespace CIL.Extraction
 
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
-  | hardware | vectorCreate | vectorTransfer | span | binary | guard
-  | feature | platform | referenceContent | staticSpan
+  | hardware | vectorCreate | vectorTransfer | span | binary
+  | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
 
@@ -95,20 +95,16 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
     if scope == runtimeScope then
       match type with
       | "System.Runtime.CompilerServices.RuntimeHelpers" =>
-        if name == "CreateSpan" then some .staticSpan
-        else if referenceContentQuery site then some .referenceContent else none
+        if name == "CreateSpan" then some .staticSpan else none
       | "System.Type" => if typeTestInstruction raw then some .typeTest else none
       | "System.Array" => if name == "Fill" then some .span else none
-      | _ =>
-        if platformQuery site then some .platform
-        else if guardCallFamily raw then some .guard else none
+      | _ => none
     else if scope == intrinsicsScope then
       if name == "Create" && type ∈ ["System.Runtime.Intrinsics.Vector128",
           "System.Runtime.Intrinsics.Vector256", "System.Runtime.Intrinsics.Vector512"] then
         some .vectorCreate
       else if vector128UnsafeFamily site then some .vectorTransfer
-      else if hardwareMember type name then some .hardware
-      else if featureGetterFamily type name then some .feature else none
+      else if hardwareMember type name then some .hardware else none
     else if scope == spanMemoryScope then
       if binaryTransferFamily raw then some .binary
       else if type == "System.MemoryExtensions" && name == "AsSpan" then some .span else none

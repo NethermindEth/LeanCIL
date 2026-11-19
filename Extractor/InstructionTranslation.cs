@@ -5,12 +5,6 @@ namespace Nethermind.LeanCIL;
 
 internal static class InstructionTranslation
 {
-    internal static Operation? RuntimeModel(MethodReference reference, FeatureProfile? profile = null)
-    {
-        if (FeatureProfile.PlatformConstant(reference) is int constant) return new Constant(32, constant, true);
-        if (FeatureProfile.Getter(reference) is Feature feature) return new FeatureTest(feature);
-        return RuntimeModels.Translate(reference, profile ?? FeatureProfile.Scalar);
-    }
     internal static Operation Translate(Instruction i, MethodDefinition m,
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
@@ -177,7 +171,7 @@ internal static class InstructionTranslation
             var r = (MethodReference)i.Operand;
             if (i.OpCode.Code == Code.Call && RuntimeModels.CallModel(r, profile) is { } model)
                 return new ModelCall(model);
-            if (RuntimeModel(r, profile) is { } modeled) return modeled;
+            if (RuntimeModels.Translate(r, profile) is { } modeled) return modeled;
             MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
             int index = methods.GetValueOrDefault(resolved, -1);
             if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))

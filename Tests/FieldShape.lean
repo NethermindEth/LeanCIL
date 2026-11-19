@@ -88,8 +88,8 @@ theorem sizeof_forgeries :
       code := [{ site with operand := .type forged }] }
     ¬ ObjectOperandsValid raw [true] body ∧
       ¬ LayoutsValid rawLayouts (computedLayouts.set! 0 ⟨⟨12, [⟨0, 4, false⟩]⟩, 4⟩) .x64 ∧
-      scalarEmissionMatches #[] none none site [] (.sizeof inner) = true ∧
-      scalarEmissionMatches #[] none none site [] (.sizeof pair) = false := by
+      scalarEmissionMatches none none site [] (.sizeof inner) = true ∧
+      scalarEmissionMatches none none site [] (.sizeof pair) = false := by
   decide +kernel
 #print axioms sizeof_forgeries
 

@@ -33,7 +33,7 @@ internal static class ScalarEvidence
         var method = $"method{number}";
         var flag = LeanText.Bool(decoded);
         var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code {flag}";
-        var scalar = $"Extraction.ScalarFlowValid rawLayouts.toArray {flow}";
+        var scalar = $"Extraction.ScalarFlowValid {flow}";
         var context = $"{method}.profile {method}.environment {method}.links";
         var code = $"Extraction.methodCode {context} {method}Reachable {method}Closed";
         var binding = $"{flag} = true -> {method}.code = {code}";

@@ -27,11 +27,12 @@ private def intrinsic (owner name : String) : CallSite :=
       {owner}::{name}()" }
 
 -- Each getter binds to its own flag; Vector128 has no IsSupported.
-example : featureGetter (intrinsic "X86.X86Base/X64" "get_IsSupported") = some .x86Base64 := by
+example : platformGetterModel (intrinsic "X86.X86Base/X64" "get_IsSupported") =
+    some (.feature .x86Base64) := by
   decide +kernel
-example : featureGetter (intrinsic "Vector128" "get_IsHardwareAccelerated") =
-    some .vector128Accelerated := by decide +kernel
-example : featureGetter (intrinsic "Vector128" "get_IsSupported") = none := by decide +kernel
+example : platformGetterModel (intrinsic "Vector128" "get_IsHardwareAccelerated") =
+    some (.feature .vector128Accelerated) := by decide +kernel
+example : platformGetterModel (intrinsic "Vector128" "get_IsSupported") = none := by decide +kernel
 -- Every x86 ISA class derives from X86Base, and X86Base.X64 exists only on x64.
 example : ¬ ({ architecture := .x64, bmi2 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .x64, bmi2 := true, x86Base64 := true } : FeatureProfile).Valid := by decide
@@ -70,7 +71,7 @@ private def state (stack : List (Option W32)) (locals : List (Nat × W32) := [])
 private def branchRaw := raw [i 40 (.call getter), i 45 (.target 4), i 22, i 42, i 23, i 42]
 private def branchStates : FeatureCertificate := [state [], state [some 0], state [], state [some 0], none, none]
 private def branchCode : List Instruction :=
-  [.feature .sse2, .brtrue 4, .ldc_i4 0, .ret, .unadmitted 23, .unadmitted 42]
+  [.call getter.method {}, .brtrue 4, .ldc_i4 0, .ret, .unadmitted 23, .unadmitted 42]
 private def branchMask := [true, true, true, true, false, false]
 
 example : FeatureFlowValid #[] (fun _ => none) (fun _ => none)

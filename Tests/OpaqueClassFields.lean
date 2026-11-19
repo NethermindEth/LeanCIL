@@ -161,7 +161,7 @@ private def copies (index : Nat) (type : TypeExpr) (name : MetadataName) : Bool 
   let operand := field index type name
   let raw := method [i 2, i 3, i 123 operand, i 125 operand, i 42]
   let reference := fieldRef index type name
-  decide (ScalarFlowValid #[] raw [unknown 0, unknown 1, unknown 2, unknown 2, unknown 0]
+  decide (ScalarFlowValid raw [unknown 0, unknown 1, unknown 2, unknown 2, unknown 0]
     [some [], some [.object], some [.object, .object], some [.opaque, .object], some []]
     [.ldarg 0, .ldarg 1, .ldfld reference, .stfld reference, .ret])
 
@@ -176,7 +176,7 @@ theorem opaque_fields_copied :
 /-- Whether `stfld` of the field at `index` holding `type` takes `value` on an object. -/
 private def stores (index : Nat) (type : TypeExpr) (name : MetadataName) (value : ScalarKind) :
     Bool :=
-  scalarEmissionMatches #[] none (some (i 3)) (i 125 (field index type name)) [value, .object]
+  scalarEmissionMatches none (some (i 3)) (i 125 (field index type name)) [value, .object]
     (.stfld (fieldRef index type name))
 
 /-- The method `Fixture::Run()`, called with a receiver. -/
@@ -201,7 +201,7 @@ theorem opaque_references_not_read_through :
     scalarTransfer (method []) (i 111 (.call run)) [.opaque] = none ∧
     scalarTransfer (method []) (i 111 (.call run)) [.object] = some [] ∧
     scalarTransfer (method []) (i 123 (field 7 fixture name!"C")) [.opaque] = some [.object] ∧
-    scalarEmissionMatches #[] none (some (i 3)) (i 123 (field 7 fixture name!"C")) [.opaque]
+    scalarEmissionMatches none (some (i 3)) (i 123 (field 7 fixture name!"C")) [.opaque]
       (.ldfld (fieldRef 7 fixture name!"C")) = false ∧
     scalarTransfer (method []) (i 142) [.opaque] = none ∧
     scalarTransfer (method []) (i 142) [.object] = some [.native] ∧

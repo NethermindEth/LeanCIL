@@ -208,7 +208,7 @@ foreach (var (name, native, pointer) in additions)
             namespace Extracted
             /-- The scalar checker validates emitted instructions against the commuted operands. -/
             private abbrev scalarFits (code : List CIL.Instruction) :=
-              CIL.Extraction.ScalarFlowValid rawLayouts.toArray method0Closed method0FeatureStates
+              CIL.Extraction.ScalarFlowValid method0Closed method0FeatureStates
                 method0ScalarStates code false
 
             /-- The unchanged commuted addition satisfies the explicit scalar encoding. -/

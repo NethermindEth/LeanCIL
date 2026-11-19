@@ -2,6 +2,9 @@ import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.WideArithmetic
 import CIL.Extraction.VectorModels
+import CIL.Extraction.PlatformModels
+import CIL.Extraction.ReferenceContentModels
+import CIL.Extraction.GuardModels
 import CIL.Extraction.MarshalModels
 import CIL.Extraction.BitModels
 import CIL.Extraction.UnsafeReinterpretations
@@ -29,6 +32,9 @@ def modelFamilies : List (List ModelEntry) := [
   wideArithmeticEntries,
   bitEntries,
   unsafeEntries,
+  platformEntries,
+  referenceContentEntries,
+  guardEntries,
   marshalEntries,
   unsafeReinterpretEntries,
   unsafeReferenceEntries,

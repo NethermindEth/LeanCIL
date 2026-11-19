@@ -714,16 +714,19 @@ emitted as unsupported placeholders
 ([feature getters and profiles](SIMD.md#feature-getters-profiles-and-execution-restrictions)).
 Execution that reaches a placeholder fails.
 
-Exact `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` getters produce `8`, `8`
-and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
+Hardware feature getters keep their call and read the selected profile through a runtime model.
+The calls to `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` run constant
+models returning `8`, `8` and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
 `ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is
 `static readonly`, and rejects same-named types and fields from other assemblies and other
-`BitConverter` fields. The certificate binds the raw call signature, or the raw field owner, name,
-type and static load, and the emitted value; the body check requires a field operand's name to
-spell the name of the field row its token names.
+`BitConverter` fields. A getter binds its open declaration, closed signature and external target.
+The field certificate binds the raw owner, name, type and static load to the emitted value. The
+body check compares the operand's name with the name of the field row its token identifies.
 
-These constants feed the feature-flow analysis. Known int32 words propagate through bitwise
+The reference-content query keeps its call. Its model returns zero for checked reference-free
+elements, including an aggregate whose identity matches its layout index. These constants
+feed the feature-flow analysis. Known int32 words propagate through bitwise
 operations and `ceq`, `cgt`, `cgt.un`, `clt` and `clt.un`.
 Single-condition branches and all short/long signed or unsigned comparison branches select an
 edge when their operands are known. Unknown operands, including native and int64 values, keep
@@ -779,8 +782,8 @@ every admitted hardware profile.
 | `System.UInt32`, `System.UInt64`, `System.UIntPtr` | Static `Log2` | Floor base-two logarithm in the input's integer type; zero input returns zero. |
 | `System.Numerics.BitOperations` | `RoundUpToPowerOf2` on `uint`, `ulong` or `nuint` | Least power of two at least the input; zero for zero input or overflow |
 | `System.Buffers.Binary.BinaryPrimitives` | `ReverseEndianness` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Reverse bytes within the value; preserve signed return conventions; byte/sbyte are identity operations |
-| `System.ArgumentNullException` | `ThrowIfNull(object, string)` | Raises `ArgumentNullException` for a null argument and otherwise pops both operands; the parameter name is never read |
-| `System.ArgumentOutOfRangeException` | `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan`, `ThrowIfLessThanOrEqual` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | Raises `ArgumentOutOfRangeException` exactly when the integer test holds, comparing unsigned types as unsigned, and otherwise pops its operands; see [argument guards](SOUNDNESS-RUNTIME.md#argument-guards) |
+| `System.ArgumentNullException` | `ThrowIfNull(object, string)` | The call runs a checked guard that raises `ArgumentNullException` for a null argument and otherwise pops both operands; the parameter name is never read |
+| `System.ArgumentOutOfRangeException` | `ThrowIfZero`, `ThrowIfNegative`, `ThrowIfNegativeOrZero`, `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`, `ThrowIfLessThan`, `ThrowIfLessThanOrEqual` on `sbyte`, `byte`, `short`, `ushort`, `int`, `uint`, `long`, `ulong`, `nint` or `nuint` | The call runs a checked guard that raises `ArgumentOutOfRangeException` exactly when the integer test holds, comparing unsigned types as unsigned, and otherwise pops its operands; see [argument guards](SOUNDNESS-RUNTIME.md#argument-guards) |
 
 Signed 8/16-bit rotations and primitive signed `Log2` are unsupported. A call of a `BitOperations`
 helper, of the same helper on an integer type or of `ReverseEndianness` keeps its `call`, which runs

@@ -156,7 +156,7 @@ theorem reference_type_branches :
       decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) body .scalar states
         (states.map Option.isSome)
         (branchCode taken)) &&
-      decide (ScalarFlowValid #[] body states (branchKinds taken) (branchCode taken))) = true := by
+      decide (ScalarFlowValid body states (branchKinds taken) (branchCode taken))) = true := by
   decide +kernel
 #print axioms reference_type_branches
 
@@ -193,7 +193,7 @@ theorem reference_type_results :
       let code := [.nop, .nop, .nop, .nop, .ldc_i4 result, .ret]
       decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none)
           body .scalar states (List.replicate 6 true) code) &&
-      decide (ScalarFlowValid #[] body states kinds code) &&
+      decide (ScalarFlowValid body states kinds code) &&
       !decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none)
         { body with code := body.code.set 4 (i 65026) }
         .scalar states (List.replicate 6 true) code) &&
@@ -203,7 +203,7 @@ theorem reference_type_results :
       !decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) body .scalar states
         (List.replicate 6 true)
         (code.set 4 (.ldc_i4 (if same then 0 else 1)))) &&
-      !decide (ScalarFlowValid #[] body states kinds
+      !decide (ScalarFlowValid body states kinds
         (code.set 4 (.ldc_i4 (if same then 0 else 1))))) = true := by
   decide +kernel
 #print axioms reference_type_results
@@ -214,8 +214,8 @@ private def bird : TypeExpr := .object owner "Fixture.Bird"
 /-- `castclass` and `isinst` of a class match their own raw opcode and class on an object or
     null. -/
 theorem class_tests_match :
-    scalarEmissionMatches #[] none none (i 116 (.type dog)) [.object] (.castclass dog) = true ∧
-    scalarEmissionMatches #[] none none (i 117 (.type dog)) [.nullObject]
+    scalarEmissionMatches none none (i 116 (.type dog)) [.object] (.castclass dog) = true ∧
+    scalarEmissionMatches none none (i 117 (.type dog)) [.nullObject]
       (.isinst dog) = true := by
   decide
 #print axioms class_tests_match
@@ -223,7 +223,7 @@ theorem class_tests_match :
 /-- A raw `isinst` emitted as `castclass` is rejected by the scalar check and the decoder: the
     two differ on a failed test. -/
 theorem isinst_decoded_as_castclass :
-    scalarEmissionMatches #[] none none (i 117 (.type dog)) [.object] (.castclass dog) = false ∧
+    scalarEmissionMatches none none (i 117 (.type dog)) [.object] (.castclass dog) = false ∧
     valueEncodingMatches none (i 117 (.type dog)) (.castclass dog) = false := by
   decide
 #print axioms isinst_decoded_as_castclass
@@ -231,7 +231,7 @@ theorem isinst_decoded_as_castclass :
 /-- A cast emitted against another class than its raw operand is rejected by the scalar check
     and the decoder. -/
 theorem cast_other_type :
-    scalarEmissionMatches #[] none none (i 116 (.type dog)) [.object] (.castclass bird) = false ∧
+    scalarEmissionMatches none none (i 116 (.type dog)) [.object] (.castclass bird) = false ∧
     valueEncodingMatches none (i 116 (.type dog)) (.castclass bird) = false := by
   decide
 #print axioms cast_other_type

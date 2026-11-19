@@ -323,6 +323,18 @@ theorem step_call_intrinsic {method : Extraction.MethodRef} {prefixes : CallPref
 
 #print axioms step_call_intrinsic
 
+/-- A kept feature getter evaluates the same profile field as a feature instruction. -/
+theorem step_call_feature {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    {feature : CIL.Feature} (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method = some (.feature feature))
+    (direct : prefixes.tail = false) :
+    step body (.call method prefixes) pc args frame stack memory =
+      step body (.feature feature) pc args frame stack memory := by
+  rw [step_call_model (link := link) (found := found) (direct := direct)]
+  rfl
+
+#print axioms step_call_feature
+
 /-- A memory operation's model runs as the `.memory` instruction of that operation: both guard
     its `argumentCount` operands and run `memoryInstruction`, so its step equations apply. -/
 theorem modelStep_memory (operation : CIL.MemoryOp) (stack : List Value) :

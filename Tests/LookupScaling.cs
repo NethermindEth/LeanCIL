@@ -3016,7 +3016,7 @@ long ArrayAddressCost(bool prefixed, int sites)
         def code (prefixed : Bool) (sites : Nat) : List Instruction :=
           (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
         """ + "\n";
-    var statement = $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) " +
+    var statement = $"ScalarFlowValid (raw {flag} {sites}) (features {flag} {sites}) " +
         $"(states {flag} {sites}) (code {flag} {sites})";
     var path = Path.Combine(directory, $"ArrayAddresses{(prefixed ? "Prefixed" : "")}{sites}.lean");
     return DecideCost(path, header, statement, "ArrayAddresses");
@@ -3088,7 +3088,7 @@ void IndirectAccessCosts()
             """ + "\n";
         var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {flag} {sites}) .scalar " +
             $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
-            $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
+            $"ScalarFlowValid (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
             $"(code {flag} {sites})";
         var path = Path.Combine(accessDirectory, $"Blocks{(prefixed ? "Prefixed" : "")}{sites}.lean");
         return DecideCost(path, header, statement, "IndirectAccesses");
@@ -3213,7 +3213,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         def code (slots : Nat) : List Instruction := (List.range slots).flatMap codeSegment ++ [.ret]
         """ + "\n";
     var statement = storage ? $"(closedArguments [] (raw {count})).isSome = true"
-        : $"ScalarFlowValid #[] (raw {count}) (features {count}) (states {count}) (code {count})";
+        : $"ScalarFlowValid (raw {count}) (features {count}) (states {count}) (code {count})";
     var path = Path.Combine(directory, $"{slots}{(storage ? "Storage" : "Locals")}{count}.lean");
     return DecideCost(path, header, statement, "LocalSlots");
 }

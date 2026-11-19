@@ -542,7 +542,7 @@ theorem init_vector_binding :
     let raw := RawInstruction.mk 0 0xfe15 (.type target)
     [Instruction.nop, .initobj (vectorType "256"), .initobj (vectorType "512"),
       .initobj (.atom runtimeScope "System.UInt64"), .ldobj target].all fun emitted =>
-        !scalarEmissionMatches #[] none none raw [] emitted := by decide +kernel
+        !scalarEmissionMatches none none raw [] emitted := by decide +kernel
 #print axioms init_vector_binding
 
 /-- Floating-point loads, class sizes and span stores fail admission. -/

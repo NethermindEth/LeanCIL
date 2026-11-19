@@ -64,9 +64,24 @@ CallWitness[] witnesses =
     new("typeTest", "TypeTests::Marker(System.Int32)",
         1, 4, ".lowered .typeTest"),
     new("feature", "Capabilities::AesFlags()",
-        0, 0, ".lowered .feature"),
+        0, 0, ".model"),
+    new("aesX64", "Capabilities::AesFlags()", 0, 3, ".model"),
+    new("armAes", "Capabilities::AesFlags()", 0, 9, ".model"),
+    new("armAes64", "Capabilities::AesFlags()", 0, 15, ".model"),
+    new("armSimd64", "Capabilities::ArmFlags()", 0, 0, ".model"),
+    new("armSimd", "Capabilities::ArmFlags()", 0, 3, ".model"),
+    new("vbmiVl", "Capabilities::VbmiFlags()", 0, 0, ".model"),
+    new("vbmi", "Capabilities::VbmiFlags()", 0, 3, ".model"),
+    new("x86Base64", "Capabilities::Flags()", 0, 0, ".model"),
+    new("vector128", "Capabilities::Flags()", 0, 3, ".model"),
+    new("avx2", "Loops::FeatureCountdown(uint)", 0, 3, ".model"),
+    new("unsignedSize", "Capabilities::Platform()", 0, 3, ".model"),
+    new("processWidth", "Capabilities::Platform()", 0, 6, ".model"),
     new("guard", "Guards::Required(System.String)",
-        0, 2, ".lowered .guard"),
+        0, 2, ".model"),
+    new("positiveGuard", "ItemPool::.ctor(System.Int32)", 0, 4, ".model"),
+    new("negativeGuard", "Guards::Count(System.Int32)", 0, 2, ".model"),
+    new("comparisonGuard", "Guards::Index(System.UInt32,System.UInt32)", 0, 3, ".model"),
     new("bitModel", "Bits::Population64(System.UInt64)",
         0, 1, ".model"),
     new("byteOrderModel", "Bits::ReverseI16(System.Int16)",
@@ -98,9 +113,9 @@ CallWitness[] witnesses =
     new("isNullRef", "NullReferences::IsNull()",
         0, 1, ".model"),
     new("platform", "Capabilities::Platform()",
-        0, 0, ".lowered .platform"),
+        0, 0, ".model"),
     new("referenceContent", "Capabilities::ReferenceFree()",
-        0, 0, ".lowered .referenceContent"),
+        0, 0, ".model"),
     new("staticSpan", "SpanTables::First()",
         1, 1, ".lowered .staticSpan"),
     new("initBlockUnaligned", "Blocks::Fill(System.Byte&,System.Byte,System.UInt32)", 0, 3, ".model"),
@@ -108,21 +123,66 @@ CallWitness[] witnesses =
     new("copyBlockUnaligned", "Blocks::CopyPointer(System.Byte*,System.Byte*,System.UInt32)", 0, 3, ".model"),
     new("copyBlock", "Blocks::CopyPointerAligned(System.Byte*,System.Byte*,System.UInt32)", 0, 3, ".model"),
 ];
-var methods = witnesses.GroupBy(site => (site.Entry, site.Profile)).ToArray();
-string Folder(CallWitness site) => Path.Combine(output, site.Name);
-ExtractBatch("extract", "Examples", methods.Select(group =>
-    new GeneratedExtraction(assembly, group.Key.Entry, Folder(group.First()), group.Key.Profile)));
-var evidence = new GeneratedEvidence(output);
-foreach (var group in methods)
+string[] extraOwners = [
+    "Arm.ArmBase.Arm64", "X86.Sse2", "X86.Ssse3", "X86.Sse41", "X86.Sse42", "X86.Avx",
+    "X86.Avx512F", "X86.Avx512F.VL", "X86.Avx512DQ", "X86.Avx512DQ.VL", "X86.Bmi1", "X86.Bmi2.X64", "Vector256"
+];
+var fixture = Path.Combine(output, "Fixture");
+Directory.CreateDirectory(fixture);
+File.WriteAllText(Path.Combine(fixture, "Queries.csproj"), """
+    <Project Sdk="Microsoft.NET.Sdk">
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+    </Project>
+    """);
+var extraMethods = new List<string>();
+var extraSites = new List<CallWitness>();
+foreach (var owner in extraOwners)
 {
-    var directory = Folder(group.First());
-    var source = new StringBuilder(File.ReadAllText(Path.Combine(directory, "Extracted.lean")));
-    foreach (var site in group) source.AppendLine(site.Proof());
-    var proof = Path.Combine(directory, "Agreement.lean");
-    File.WriteAllText(proof, source.ToString());
-    evidence.Add(proof, $"PASS exact call-site agreement for {group.Key.Entry}");
+    var method = owner.Replace(".", "", StringComparison.Ordinal);
+    var getter = owner == "Vector256" ? "IsHardwareAccelerated" : "IsSupported";
+    extraMethods.Add($"public static bool {method}() => System.Runtime.Intrinsics.{owner}.{getter};");
+    extraSites.Add(new(method, $"Queries::{method}()", 0, 0, ".model"));
 }
+foreach (var name in new[] { "ThrowIfZero", "ThrowIfEqual", "ThrowIfNotEqual", "ThrowIfGreaterThan",
+    "ThrowIfLessThan", "ThrowIfLessThanOrEqual" })
+{
+    var unary = name == "ThrowIfZero";
+    var parameters = unary ? "int value" : "int value, int bound";
+    var arguments = unary ? "value, null" : "value, bound, null";
+    var signature = unary ? "int" : "int,int";
+    extraMethods.Add($"""
+        public static void {name}({parameters}) => System.ArgumentOutOfRangeException.{name}({arguments});
+        """);
+    extraSites.Add(new(name, $"Queries::{name}({signature})", 0, unary ? 2 : 3, ".model"));
+}
+File.WriteAllText(Path.Combine(fixture, "Queries.cs"), $$"""
+    public static class Queries
+    {
+        {{string.Join(Environment.NewLine, extraMethods)}}
+    }
+    """);
+Run(["dotnet", "build", Path.Combine(fixture, "Queries.csproj"), "-c", "Release"]);
+var evidence = new GeneratedEvidence(output);
+Check(assembly, "Examples", witnesses);
+Check(Path.Combine(fixture, "bin", "Queries.dll"), "Queries", extraSites);
 evidence.Check(replay: false);
+
+void Check(string dll, string identity, IEnumerable<CallWitness> sites)
+{
+    var methods = sites.GroupBy(site => (site.Entry, site.Profile)).ToArray();
+    string Folder(CallWitness site) => Path.Combine(output, site.Name);
+    ExtractBatch("extract", identity, methods.Select(group =>
+        new GeneratedExtraction(dll, group.Key.Entry, Folder(group.First()), group.Key.Profile)));
+    foreach (var group in methods)
+    {
+        var directory = Folder(group.First());
+        var source = new StringBuilder(File.ReadAllText(Path.Combine(directory, "Extracted.lean")));
+        foreach (var site in group) source.AppendLine(site.Proof());
+        var proof = Path.Combine(directory, "Agreement.lean");
+        File.WriteAllText(proof, source.ToString());
+        evidence.Add(proof, $"PASS exact call-site agreement for {group.Key.Entry}");
+    }
+}
 
 sealed record CallWitness(string Name, string Entry, int Method, int Pc, string Claim, string Profile = "scalar")
 {

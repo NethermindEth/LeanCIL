@@ -172,7 +172,7 @@ internal static class Spans
             reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
             reference.Parameters.Count != count)
             return null;
-        return InstructionTranslation.RuntimeModel(reference, profile) is Memory { Operation: var model }
+        return RuntimeModels.Translate(reference, profile) is Memory { Operation: var model }
             ? model switch
         {
             SpanCreate => (call, new SpanFromReference(1, false)),

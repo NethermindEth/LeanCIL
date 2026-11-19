@@ -141,6 +141,11 @@ internal static class RuntimeModels
     /// </summary>
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
+        if (FeatureProfile.PlatformConstant(reference) is int constant) return new Constant(32, constant, true);
+        if (FeatureProfile.Getter(reference) is Feature feature) return new FeatureTest(feature);
+        if (ReferenceQueries.Constant(reference, profile.Architecture) is int referenceContent)
+            return new Constant(32, referenceContent, true);
+        if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
         if (Spans.CoreMember(reference, profile.Architecture) is { } span) return span;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
@@ -180,8 +185,6 @@ internal static class RuntimeModels
 
     internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
     {
-        if (ReferenceQueries.Constant(reference, profile.Architecture) is int constant)
-            return new Constant(32, constant, true);
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
                 (".ctor" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo")) ||
@@ -284,7 +287,7 @@ internal static class RuntimeModels
     {
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" =>
             MemoryOperation.Of(new SpanCreate()),
-        _ => ArgumentGuards.Translate(signature) ?? Span(signature)
+        _ => Span(signature)
     };
 
     private static readonly Dictionary<string, Operation> SpanOperations = BuildSpanOperations();

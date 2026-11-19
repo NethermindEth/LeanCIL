@@ -457,10 +457,9 @@ rejected. The raw literal, comparison operation and branch target remain exactly
 Each `ldstr` emits the string literal of exactly its own text, typed as an object; no other raw
 opcode emits a literal, and inside a folded `throw` the load emits nothing.
 
-Each argument guard operation is decoded again from its raw `call`: the owner, method name, integer
-type argument, parameter types and external identity fix the guard, its width and its signedness
-(`CIL.Extraction.guardCallMatches`). No other instruction emits a guard, and a `ThrowIfNull`
-argument is typed as an object reference.
+Each argument guard keeps its call. The runtime table binds the open declaration and external
+identity to the closed owner, member and parameter types. The type argument determines integer
+width and signedness. The scalar certificate requires an object reference for the null guard.
 
 ## Exception documentation lint
 

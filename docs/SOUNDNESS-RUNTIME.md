@@ -11,8 +11,8 @@ but the verifier does not discover a deployment's actual CPU, runtime or resourc
 See [runtime profiles](RUNTIME-PROFILES.md).
 
 `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` use the profile's required
-64-bit process assumption. Their exact getters translate to constants `8`, `8` and `true`;
-they do not inspect the verifier host or establish a deployment's actual process width.
+64-bit process assumption. The interpreter runs their calls as constant models returning 8, 8 and true.
+Hardware getter models read their named flag from the method's profile, including a false flag.
 
 `RuntimeHelpers.IsReferenceOrContainsReferences<T>()` returns `false` only for supported primitive
 integers, booleans, characters, integer enums and vectors, or a reference-free aggregate admitted
@@ -21,11 +21,11 @@ aggregate is admissible when its validated fields contain neither references nor
 arrays, classes, open generic arguments and unsupported storage are rejected. The query establishes
 neither initialized padding nor memory access, lifetime or escape authority.
 
-The exact runtime signature and generic argument bind the constant independently of extraction.
-Feature and scalar certificates receive `rawLayouts.toArray`, including types used only by queries;
-the enclosing translation certificate checks the complete layout table. Aggregate queries compare
-their index and identity without repeating layout computation. Runtime correspondence assumes the
-.NET 10 helper's reference-and-byref classification, rather than inspecting the verifier host.
+The call keeps its member reference. The runtime model checks the open declaration and closed
+signature, then reads the queried element through the indexed layout reader. Feature-flow
+validation uses the same storage test to propagate zero. An aggregate must match the raw
+layout identity at its index. The deployment's runtime helper must agree with this classification of
+references and byrefs.
 
 | Area | Model convention / deployment premise | Excluded claim |
 | --- | --- | --- |
@@ -600,9 +600,8 @@ integers take the 64-bit target. Only the exception type is claimed. Its message
 The `paramName` argument, a compiler-supplied literal, is popped unread, so a proof binds that
 literal like any other.
 
-The extractor maps each exact signature (`Extractor/ArgumentGuards.cs`) and Lean decodes each
-emitted guard again from the raw call's owner, name, type argument, parameter types and external
-identity (`CIL.Extraction.guardCallMatches`); no other instruction may emit a guard. Other
+Each guard keeps its call. The runtime model binds the open declaration and the exact external
+target before selecting the checked memory operation at the closed type and signedness. Other
 instantiations, among them `char`, floating-point and `decimal`, the `void*` overload of
 `ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, are
 rejected calls. `ThrowIfNull` on a value array or any other operand that is not a class instance or

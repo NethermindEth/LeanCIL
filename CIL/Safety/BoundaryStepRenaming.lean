@@ -378,6 +378,19 @@ theorem constant_stepRenamed (value : CIL.W32) :
 
 #print axioms constant_stepRenamed
 
+/-- A feature getter reads the common profile and preserves both frames and memories. -/
+theorem feature_stepRenamed (feature : CIL.Feature) :
+    (CIL.RuntimeModel.feature feature).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ sourceBody
+    targetBody metadata pc stack _ _
+  simp only [modelStep, observedCall, mapping.unspecifiedOperands, runModel, featureCall,
+    metadata.profile]
+  split
+  · exact .error _
+  exact .ok (.next related frames)
+
+#print axioms feature_stepRenamed
+
 /-- A reference comparison reads the renamed references of the same allocations, so both sides
     fault alike or push the same flag. -/
 theorem referenceCompare_stepRenamed (relation : CIL.ReferenceRelation) :
@@ -473,6 +486,9 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | contradiction
     | obtain rfl := List.mem_singleton.mp member
       exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
+    | exact platformEntries_yields feature_stepRenamed constant_stepRenamed entry member
+    | exact referenceContentEntries_yields constant_stepRenamed entry member
+    | exact guardEntries_yields memory_stepRenamed entry member
     | exact vectorEntries_yields intrinsic_stepRenamed entry member
     | exact integerMathEntries_yields intrinsic_stepRenamed entry member
     | exact wideArithmeticEntries_yields intrinsic_stepRenamed memory_stepRenamed entry member

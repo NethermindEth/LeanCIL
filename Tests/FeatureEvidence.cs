@@ -147,14 +147,13 @@ void Reject(string name, string mutated)
         "Extraction.FeatureFlowValid", "is false");
 }
 
-string MutateState(string source, string update) => Regex.Replace(source,
-    @"(?m)^(def method0FeatureStates : Extraction.FeatureCertificate := )([^\r\n]+)",
-    match => match.Groups[1].Value + "(" + match.Groups[2].Value + ")." + update);
+string MutateState(string source, string update) => FeatureLayoutPattern.FeatureStates.Replace(source,
+    match => $"""{match.Groups[1].Value}({match.Groups[2].Value}).{update}""");
 
 // Each mutation checks feature flow independently, without unrelated validator proofs
 // or instruction lookup equations that could reject it for a different reason.
-Reject("wrong-feature", baseline.Replace(".feature .avx2", ".feature .sse2"));
-Reject("wrong-branch", baseline.Replace(".brfalse 10", ".brfalse 11"));
+Reject("wrong-feature", ForgeDecodedInstruction(baseline, 0, 3, "fun _ => .feature .sse2"));
+Reject("wrong-branch", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
 Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [], locals := [(0, BitVec.ofInt 32 (0))] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
@@ -326,31 +325,37 @@ capabilitiesQueue.Add(new("Capabilities::ReferenceFree()", referenceQueryProof,
 capabilitiesQueue.Flush();
 var referenceQuerySource = File.ReadAllText(Path.Combine(referenceQueryFolder, "Verified", "Extracted.lean"));
 var queryControls = new GeneratedEvidence(Path.Combine(output, "ReferenceQueryControls"));
-foreach (var obligation in new[] { featureObligation, "method0_scalars_validated" })
+foreach (var obligation in new[] { featureObligation, "method0_models_validated" })
 {
     var narrowed = NarrowEvidence(referenceQuerySource, obligation);
     var controlPath = Path.Combine(output, obligation + "-reference-query.lean");
     File.WriteAllText(controlPath, narrowed);
     queryControls.Add(controlPath, "PASS exact reference-content control: " + obligation, obligation);
-    var aggregate = FeatureLayoutPattern.QueryArgument().Match(narrowed);
-    if (!aggregate.Success) throw new InvalidOperationException("Missing query-only aggregate layout");
-    foreach (var (name, before, after) in new[]
+    var answer = ForgeDecodedInstruction(referenceQuerySource, 0, 0, "fun _ => .ldc_i4 1");
+    var answerPath = Path.Combine(output, $"{obligation}-wrong-reference-answer.lean");
+    File.WriteAllText(answerPath, NarrowEvidence(answer, obligation));
+    rejected.Add(answerPath, $"PASS wrong reference-content answer rejected by {obligation}",
+        obligation == featureObligation ? "FeatureFlowValid" : "RuntimeModelsAgree");
+    foreach (var (name, pc, update) in new[]
     {
-        ("answer", ".ldc_i4 0", ".ldc_i4 1"),
-        ("scope", ".atom Extraction.runtimeScope \"System.Runtime.CompilerServices.RuntimeHelpers\"",
-            ".atom \"forged\" \"System.Runtime.CompilerServices.RuntimeHelpers\""),
-        ("byref", "typeArguments := [.atom Extraction.runtimeScope \"System.Int32\"]",
-            "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Int32\")]"),
-        ("layout", aggregate.Value, $"""typeArguments := [.aggregate "forged" {aggregate.Groups["index"].Value}]"""),
-        ("signature", "parameterCount := 0, returnsValue := true", "parameterCount := 1, returnsValue := true")
+        ("scope", 0, """method.owner := .atom "forged" "System.Runtime.CompilerServices.RuntimeHelpers" """),
+        ("byref", 0, "typeArguments := site.typeArguments.map Extraction.TypeExpr.byref"),
+        ("layout", 6, """
+            typeArguments := site.typeArguments.map (fun | .aggregate _ i => .aggregate "forged" i | t => t)
+            """),
+        ("signature", 0, "parameterCount := 1")
     })
     {
-        var changed = narrowed.Replace(before, after, StringComparison.Ordinal);
-        if (changed == narrowed) throw new InvalidOperationException("Missing reference-query mutation: " + name);
-        var forged = Path.Combine(output, obligation + "-reference-query-" + name + ".lean");
-        File.WriteAllText(forged, changed);
-        rejected.Add(forged, "PASS reference-content forgery rejected: " + name + " " + obligation,
-            obligation == featureObligation ? "FeatureFlowValid" : "ScalarFlowValid");
+        var code = $$"""
+            modify {{pc}} (fun raw => match raw.operand with
+              | .call site => { raw with operand := .call { site with {{update}} } }
+              | _ => raw)
+            """;
+        var changed = ForgeClosedCode(referenceQuerySource, 0, code);
+        var forged = Path.Combine(output, $"{obligation}-reference-query-{name}.lean");
+        File.WriteAllText(forged, NarrowEvidence(changed, obligation));
+        rejected.Add(forged, $"PASS {name} forgery rejected by {obligation}",
+            obligation == featureObligation ? "FeatureFlowValid" : "RuntimeModelsAgree");
     }
 }
 queryControls.Check(replay: false);
@@ -472,11 +477,9 @@ foreach (var (obligation, diagnostic) in new[]
     var controlPath = Path.Combine(output, obligation + "-platform.lean");
     File.WriteAllText(controlPath, narrowed);
     platformControls.Add(controlPath, "PASS exact platform constant control: " + diagnostic, obligation);
-    const string literal = ".ldc_i4 8";
-    var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
-    if (position < 0) throw new InvalidOperationException("Missing initial platform getter constant");
     var forged = Path.Combine(output, obligation + "-wrong-platform.lean");
-    File.WriteAllText(forged, narrowed[..position] + ".ldc_i4 4" + narrowed[(position + literal.Length)..]);
+    var changed = ForgeDecodedInstruction(platformSource, 0, 0, "fun _ => .ldc_i4 4");
+    File.WriteAllText(forged, NarrowEvidence(changed, obligation));
     rejected.Add(forged, "PASS exact platform constant rejection: " + diagnostic, diagnostic);
 }
 platformControls.Check(replay: false);
@@ -548,18 +551,17 @@ foreach (var mutation in new[] { "scope", "field", "module-type" })
             "Endianness lookalike accepted or misreported: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS endianness lookalike rejected: " + mutation);
 }
-var comparisonEvidence = NarrowEvidence(platformSource, featureObligation);
-foreach (var (name, before, after) in new[]
+foreach (var (name, pattern, replacement) in new[]
 {
-    ("branch", ".bne_un ", ".beq "), ("signedness", ".cgt,", ".cgt_un,"),
-    ("unsigned-comparison", ".clt_un,", ".clt,")
+    ("branch", ".bne_un target", ".beq target"), ("signedness", ".cgt", ".cgt_un"),
+    ("unsigned-comparison", ".clt_un", ".clt")
 })
 {
-    if (!comparisonEvidence.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException("Missing comparison mutation target: " + name);
-    var forged = Path.Combine(output, "wrong-comparison-" + name + ".lean");
-    File.WriteAllText(forged, comparisonEvidence.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(forged, "PASS exact constant comparison rejection: " + name, "FeatureFlowValid");
+    var update = $"code := method.code.map (fun | {pattern} => {replacement} | op => op)";
+    var changed = ForgeDecodedMethod(platformSource, 0, update);
+    var forged = Path.Combine(output, $"wrong-comparison-{name}.lean");
+    File.WriteAllText(forged, NarrowEvidence(changed, featureObligation));
+    rejected.Add(forged, $"PASS exact constant comparison rejection for {name}", "FeatureFlowValid");
 }
 rejected.Check();
 var scalarCapabilities = Path.Combine(output, "Capabilities-scalar");
@@ -594,6 +596,7 @@ Console.WriteLine("PASS raw feature analysis, join/backedge weakening, local eli
 
 static partial class FeatureLayoutPattern
 {
-    [GeneratedRegex("""typeArguments := \[\.aggregate \("[^"]+" \+\+ "[^"]+"\) (?<index>\d+)\]""")]
-    internal static partial Regex QueryArgument();
+    [GeneratedRegex(@"(?m)^(def method0FeatureStates : Extraction.FeatureCertificate := )([^\r\n]+)")]
+    internal static partial Regex FeatureStates { get; }
+
 }

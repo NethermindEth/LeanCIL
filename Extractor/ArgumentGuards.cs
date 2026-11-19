@@ -2,8 +2,7 @@ using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
 
-// The System.Runtime argument guards modeled as checked runtime calls; CIL.Extraction.guardCallMatches
-// rechecks each emission against the raw call. The parameter name is an opaque argument.
+// The parameter name is an opaque argument to each checked guard.
 internal static class ArgumentGuards
 {
     private const string OutOfRange = "System.ArgumentOutOfRangeException";
@@ -31,7 +30,19 @@ internal static class ArgumentGuards
     private static readonly Dictionary<string, Operation> Operations = Build();
 
     // Exact generic instances only: another type argument or overload is not a modeled guard.
-    internal static Operation? Translate(string signature) => Operations.GetValueOrDefault(signature);
+    internal static Operation? CallModel(MethodReference reference, string architecture)
+    {
+        if (!Operations.TryGetValue(reference.FullName, out var operation)) return null;
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
+            reference.HasThis || reference.ExplicitThis) return null;
+        var generic = reference is GenericInstanceMethod { GenericArguments.Count: 1 } instance &&
+            instance.ElementMethod.GenericParameters.Count == 1;
+        var numeric = reference.DeclaringType.FullName == OutOfRange;
+        var convention = numeric ? MethodCallingConvention.Generic : MethodCallingConvention.Default;
+        if (generic != numeric || reference.CallingConvention != convention) return null;
+        RuntimeModels.ValidateSignature(reference, architecture);
+        return operation;
+    }
 
     // The modeled ThrowIfNull, whose object argument must be a class instance or null on the stack.
     internal static bool IsNullGuard(MethodReference callee) =>

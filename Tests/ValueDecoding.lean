@@ -229,8 +229,8 @@ theorem literal_operands :
     valueEncodingMatches none literal (.memory (.stringLiteral "original")) = true ∧
     valueEncodingMatches none literal (.memory (.stringLiteral "changed")) = false ∧
     valueEncodingMatches none literal .nop = false ∧
-    scalarEmissionMatches #[] none none literal [] (.memory (.stringLiteral "changed")) = false ∧
-    scalarEmissionMatches #[] none none literal [] .nop = false ∧
+    scalarEmissionMatches none none literal [] (.memory (.stringLiteral "changed")) = false ∧
+    scalarEmissionMatches none none literal [] .nop = false ∧
     Instruction.ofRaw? none ⟨0, 114, .none⟩ = none ∧
     Instruction.ofRaw? none ⟨0, 208, .type dog⟩ = none ∧
     Instruction.ofRaw? none ⟨0, 208, classOperand⟩ = none := by decide +kernel
@@ -403,7 +403,7 @@ theorem invalid_constrained_windows :
 /-- Suppressed checks have no scalar emission for any byte operand. -/
 theorem no_prefix_refused :
     (List.range 256).all (fun flags =>
-      !scalarEmissionMatches #[] none none ⟨0, 0xFE19, .integer flags⟩ [] .nop) = true := by
+      !scalarEmissionMatches none none ⟨0, 0xFE19, .integer flags⟩ [] .nop) = true := by
   decide +kernel
 #print axioms no_prefix_refused
 
@@ -414,7 +414,7 @@ theorem malformed_field_prefix_refused :
       (fun (operand, field, receiver) =>
         let raw : RawInstruction := ⟨3, 123, operand⟩
         (Instruction.ofRaw? previous raw).isNone &&
-          !scalarEmissionMatches #[] none previous raw [receiver] (.ldfld field)) := by
+          !scalarEmissionMatches none previous raw [receiver] (.ldfld field)) := by
   decide +kernel
 #print axioms malformed_field_prefix_refused
 
@@ -593,24 +593,24 @@ private def words : ScalarKind := .array .signed32
     refused, an opcode of a kind emits no typed form, and a typed opcode emits its token's element
     type rather than a kind. -/
 theorem element_emission_exact :
-    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
+    scalarEmissionMatches none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .i4) = true ∧
+    scalarEmissionMatches none none ⟨0, 158, .none⟩ [.word32, .word32, words] (.stelem .i4) =
       true ∧
-    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 163, .type int32⟩ [.word32, words]
+    scalarEmissionMatches none none ⟨0, 142, .none⟩ [words] .ldlen = true ∧
+    scalarEmissionMatches none none ⟨0, 163, .type int32⟩ [.word32, words]
       (.ldelem_any int32) =
       true ∧
-    scalarEmissionMatches #[] none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+    scalarEmissionMatches none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
       (.stelem_any int32) = true ∧
-    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words]
+    scalarEmissionMatches none none ⟨0, 148, .none⟩ [.word32, words]
       (.ldelem_any int32) = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 158, .none⟩ [.word32, .word32, words]
+    scalarEmissionMatches none none ⟨0, 158, .none⟩ [.word32, .word32, words]
       (.stelem_any int32) = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 163, .type int32⟩ [.word32, words]
+    scalarEmissionMatches none none ⟨0, 148, .none⟩ [.word32, words] (.ldelem .u4) = false ∧
+    scalarEmissionMatches none none ⟨0, 142, .none⟩ [words] (.ldind .i) = false ∧
+    scalarEmissionMatches none none ⟨0, 163, .type int32⟩ [.word32, words]
       (.ldelem .i4) = false ∧
-    scalarEmissionMatches #[] none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
+    scalarEmissionMatches none none ⟨0, 164, .type int32⟩ [.word32, .word32, words]
       (.stelem .i4) = false := by
   decide +kernel
 

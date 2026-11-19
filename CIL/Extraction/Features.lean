@@ -6,7 +6,7 @@ import CIL.Extraction.FlowIndex
 import CIL.Extraction.FeatureLocals
 import CIL.Extraction.IndirectAccess
 import CIL.Semantics
-import Lean.Elab.Tactic.BuiltinTactic
+import CIL.Extraction.RuntimeModels
 
 /-!
 # Feature flow
@@ -93,102 +93,15 @@ def FeatureFacts.weakens {Locals : Type} (facts : LocalFacts Locals)
 def FeatureState.expand (count : Nat) (state : FeatureState) : FeatureListState :=
   { stack := state.stack, locals := expandKnown count state.locals }
 
-/-- The admitted feature classes, by name under `System.Runtime.Intrinsics`.
-    .NET 10 reports `AdvSimd.Arm64` exactly when it reports `AdvSimd`, `Avx512Vbmi.VL` exactly
-    when it reports `Avx512Vbmi`, and each `Aes.X64` or `Aes.Arm64` exactly when it reports that
-    architecture's `Aes` (docs/RUNTIME-PROFILES.md). -/
-private def featureNames : List (String × Feature) := [
-  ("Arm.AdvSimd", .advSimd), ("Arm.AdvSimd/Arm64", .advSimd), ("Arm.ArmBase/Arm64", .armBase64),
-  ("X86.Sse2", .sse2), ("X86.Ssse3", .ssse3), ("X86.Sse41", .sse41),
-  ("X86.Sse42", .sse42), ("X86.Avx", .avx), ("X86.Avx2", .avx2),
-  ("X86.Avx512F", .avx512F), ("X86.Avx512F/VL", .avx512FVL),
-  ("X86.Avx512DQ", .avx512DQ), ("X86.Avx512DQ/VL", .avx512DQVL),
-  ("X86.Avx512Vbmi", .avx512Vbmi), ("X86.Avx512Vbmi/VL", .avx512Vbmi),
-  ("X86.Aes", .aes), ("X86.Aes/X64", .aes), ("Arm.Aes", .armAes), ("Arm.Aes/Arm64", .armAes),
-  ("X86.Bmi1", .bmi1), ("X86.Bmi2/X64", .bmi2), ("X86.X86Base/X64", .x86Base64),
-  ("Vector128", .vector128Accelerated), ("Vector256", .vector256Accelerated)]
-
-/-- A platform intrinsic owner reserves its declared feature getter at every signature. -/
-def featureGetterFamily (owner member : String) : Bool :=
-  featureNames.any fun (name, feature) =>
-    member == (if feature == .vector128Accelerated || feature == .vector256Accelerated then
-      "get_IsHardwareAccelerated" else "get_IsSupported") &&
-      owner == "System.Runtime.Intrinsics." ++ name
-
-/-- The exact assembly, return type and namespace shared by feature getters. -/
-private def featurePrefix := intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics."
-
-/-- The class and member portion of each admitted feature getter. -/
-private def featureSuffix (name : String) (feature : Feature) : String :=
-  name ++ "::" ++
-    (if feature == .vector128Accelerated || feature == .vector256Accelerated then
-      "get_IsHardwareAccelerated" else "get_IsSupported") ++ "()"
-
-/-- Literal identities avoid rebuilding common assembly and namespace prefixes per lookup. -/
-private def featureIdentities : List (List UInt8) := by
-  run_tac do
-    let expression ← Lean.Elab.Term.elabTerm
-      (← `(featureNames.map fun (name, feature) =>
-        (featureSuffix name feature).toByteArray.data.toList)) none
-    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
-    let expression ← Lean.instantiateMVars expression
-    let values ← unsafe Lean.Meta.evalExpr (List (List UInt8))
-      (← Lean.Meta.inferType expression) expression
-    Lean.Elab.Tactic.closeMainGoal `featureIdentities (Lean.toExpr values)
-
-set_option maxRecDepth 4096 in
-/-- The kernel checks every materialized identity against the original feature names. -/
-private theorem featureIdentities_eq : featureIdentities =
-    featureNames.map (fun (name, feature) =>
-      (featureSuffix name feature).toByteArray.data.toList) := by rfl
-#print axioms featureIdentities_eq
-
-/-- Remove an exact byte prefix, rejecting mismatches and truncated identities. -/
-private def stripFeaturePrefix : List UInt8 → List UInt8 → Option (List UInt8)
-  | [], bytes => some bytes
-  | first :: expected, actual :: bytes =>
-    if first == actual then stripFeaturePrefix expected bytes else none
-  | _, _ => none
-
-/-- Successful prefix removal retains exactly the remaining bytes. -/
-private theorem stripFeaturePrefix_eq (expected bytes suffix : List UInt8) :
-    stripFeaturePrefix expected bytes = some suffix ↔ bytes = expected ++ suffix := by
-  induction expected generalizing bytes with
-  | nil => simp [stripFeaturePrefix]
-  | cons first expected ih =>
-    cases bytes with
-    | nil => simp [stripFeaturePrefix]
-    | cons actual bytes =>
-      by_cases equal : first = actual
-      · subst actual
-        simp [stripFeaturePrefix, ih]
-      · simp [stripFeaturePrefix, equal, beq_iff_eq, Ne.symm equal]
-#print axioms stripFeaturePrefix_eq
-
-/-- The class and member bytes under the exact feature-getter prefix. -/
-private def featureSignature (identity : String) : Option (List UInt8) :=
-  stripFeaturePrefix featurePrefix.toByteArray.data.toList identity.toByteArray.data.toList
-
-/-- Platform query names whose exact signatures must bind emitted constants. -/
-def platformQuery (site : CallSite) : Bool :=
-  match site.declaringType with
-  | .atom _ owner =>
-    (site.name == "get_Size" && owner ∈ ["System.IntPtr", "System.UIntPtr"]) ||
-      (site.name == "get_Is64BitProcess" && owner == "System.Environment")
-  | _ => false
-
-/-- Exact process-width getters under the supported 64-bit runtime profiles. -/
-def platformConstant (site : CallSite) : Option W32 := do
-  let .atom scope owner := site.declaringType | none
-  if !platformQuery site || scope != runtimeScope || site.parameterCount != 0 ||
-      !site.parameterTypes.isEmpty || site.hasThis || !site.returnsValue ||
-      site.ownerArgumentCount != 0 || !site.typeArguments.isEmpty then none
-  else
-    let result := if site.name == "get_Size" then "System.Int32" else "System.Boolean"
-    if site.returnType != .atom runtimeScope result ||
-        site.target != .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++
-          "::" ++ site.name ++ "()") then none
-    else some (if site.name == "get_Size" then 8 else 1)
+/-- The bound getter model supplies the same fact to reachability and execution. -/
+def platformGetterModel (site : CallSite) : Option RuntimeModel := do
+  let name := site.method.name
+  guard (name == name!"get_IsSupported" || name == name!"get_IsHardwareAccelerated" ||
+    name == name!"get_Size" || name == name!"get_Is64BitProcess")
+  let entry ← runtimeModels.entry? .call site.method
+  let row ← entry.select? site.method
+  guard (row.operand.bindsSite site)
+  row.resolve (LayoutEnvironment.callLayouts {}) site.method
 
 /-- `ldsfld` of the System.Runtime `BitConverter` static Boolean `IsLittleEndian`. Valid
     profiles are little-endian, so the load is the constant 1. -/
@@ -196,79 +109,6 @@ def platformField (instruction : RawInstruction) : Option W32 :=
   if instruction.opcode == 126 && instruction.operand == .field littleEndianField.owner
       littleEndianField.index littleEndianField.type littleEndianField.name true
   then some 1 else none
-
-/-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.
-    Aggregate identity lookup does not revalidate fields or confer memory access authority. -/
-def referenceFreeStorage (layouts : Array RawLayout) : TypeExpr → Bool
-  | type@(.atom ..) | type@(.enum _ (.atom ..)) =>
-    match typeStorage [] type with | some (.field _) => true | _ => false
-  | .aggregate identity index => (layouts[index]?).any (·.identity == identity)
-  | type => (integerVectorWidth type).isSome
-
-/-- Reserve the runtime query name even when malformed metadata prevents exact recognition. -/
-def referenceContentQuery (site : CallSite) : Bool :=
-  site.name == "IsReferenceOrContainsReferences" &&
-    (match site.declaringType with
-    | .atom _ owner => owner == "System.Runtime.CompilerServices.RuntimeHelpers"
-    | _ => false)
-
-/-- Bind a false reference-content answer to an exact helper and independently admitted type. -/
-def referenceContentConstant (layouts : Array RawLayout) (site : CallSite) : Option W32 := do
-  let [type] := site.typeArguments | none
-  if !referenceContentQuery site ||
-      site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers" ||
-      site.parameterCount != 0 || !site.parameterTypes.isEmpty || site.hasThis ||
-      !site.returnsValue || site.ownerArgumentCount != 0 ||
-      site.returnType != .atom runtimeScope "System.Boolean" ||
-      site.target != .external (runtimeScope ++
-        "::System.Boolean System.Runtime.CompilerServices.RuntimeHelpers::" ++
-        "IsReferenceOrContainsReferences()") || !referenceFreeStorage layouts type then none
-  else some 0
-
-/-- The declaring type and member must name the same row as the external signature. -/
-private def featureOwnerMatches (site : CallSite) (name : String) (feature : Feature) : Bool :=
-  site.declaringType == .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ name) &&
-    site.name == (if feature == .vector128Accelerated || feature == .vector256Accelerated then
-      "get_IsHardwareAccelerated" else "get_IsSupported")
-
-/-- Identify getters from raw member and assembly identity, never an emitter-supplied flag. -/
-def featureGetter (site : CallSite) : Option Feature := do
-  let .external identity := site.target | none
-  if site.parameterCount != 0 || site.hasThis || !site.returnsValue ||
-      !site.typeArguments.isEmpty then none
-  else
-    let signature := featureSignature identity
-    ((featureIdentities.zip (featureNames.map id)).find? fun (expected, name, feature) =>
-      signature == some expected && featureOwnerMatches site name feature).map (·.2.2)
-
-/-- UTF-8 byte equality is exact string equality, including non-ASCII metadata. -/
-private theorem featureBytes_eq (identity suffix : String) :
-    (featureSignature identity == some suffix.toByteArray.data.toList) =
-      (identity == featurePrefix ++ suffix) := by
-  apply Bool.eq_iff_iff.mpr
-  simp only [featureSignature, beq_iff_eq, stripFeaturePrefix_eq]
-  rw [← ByteArray.toList_data_append, ← String.toByteArray_append, Array.toList_inj]
-  constructor
-  · intro equal
-    exact String.toByteArray_inj.mp (ByteArray.ext equal)
-  · intro equal
-    cases equal
-    rfl
-#print axioms featureBytes_eq
-/-- Literal lookup preserves the admitted getters for every raw call site. -/
-theorem featureGetter_eq_original (site : CallSite) : featureGetter site = (do
-    let .external identity := site.target | none
-    if site.parameterCount != 0 || site.hasThis || !site.returnsValue ||
-        !site.typeArguments.isEmpty then none
-    else (featureNames.find? fun (name, feature) =>
-      (identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++
-        "::" ++ (if feature == .vector128Accelerated || feature == .vector256Accelerated then
-          "get_IsHardwareAccelerated" else "get_IsSupported") ++ "()") &&
-        featureOwnerMatches site name feature).map Prod.snd) := by
-  simp only [featureGetter, featureIdentities_eq, List.zip_map', List.find?_map,
-    Function.comp_def, featureBytes_eq, Option.map_map, featurePrefix, featureSuffix,
-    String.append_assoc, id]
-#print axioms featureGetter_eq_original
 
 /-- A certificate state fits the method: its local facts fit the method's locals and the stack
     holds at most `maxStack` entries. -/
@@ -388,12 +228,15 @@ private def featureStackTransfer (layouts : Array RawLayout) (raw : RawMethod)
     let .call site := instruction.operand | none
     let next ← forget stack
       (site.parameterCount + if instruction.opcode != 115 && site.hasThis then 1 else 0) 0
-    if let some constant := referenceContentConstant layouts site <|> platformConstant site then
+    if let some constant := referenceContentFact layouts site then
       if instruction.opcode != 40 then none else
         return some constant :: next
-    if let some feature := featureGetter site then
-      if instruction.opcode != 40 then none else
-        return some (if profile.evaluate feature then 1 else 0) :: next
+    if let some model := platformGetterModel site then
+      guard (instruction.opcode == 40)
+      match model with
+      | .feature feature => return some (if profile.evaluate feature then 1 else 0) :: next
+      | .constant word => return some word :: next
+      | _ => return none :: next
     return if instruction.opcode == 115 || site.returnsValue then none :: next else next
   -- `ret`, then every other opcode by its fixed stack effect.
   if instruction.opcode == 42 then forget stack (if raw.returnType == .void then 0 else 1) 0
@@ -556,18 +399,12 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   if instruction.opcode == 126 && (match emitted with | .ldc_i4 _ => true | _ => false) then
     return false
   if let .call site := instruction.operand then
-    if referenceContentQuery site then
-      return match referenceContentConstant layouts site, emitted with
-        | some expected, .ldc_i4 actual => instruction.opcode == 40 && expected == actual
-        | _, _ => false
-    if platformQuery site then
-      return match platformConstant site, emitted with
-        | some expected, .ldc_i4 actual => instruction.opcode == 40 && expected == actual
-        | _, _ => false
-    if let some feature := featureGetter site then
+    if (referenceContentFact layouts site).isSome || (platformGetterModel site).isSome then
       return match emitted with
-        | .feature actual => instruction.opcode == 40 && feature == actual
+        | .call method prefixes => instruction.opcode == 40 && method == site.method &&
+            !prefixes.tail && prefixes.constrained.isNone
         | _ => false
+    if emitted matches .ldc_i4 _ then return false
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
     return match emitted with
