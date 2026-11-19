@@ -36,6 +36,7 @@ if (group is not (null or "control" or "objects" or "buffers") || group is null 
 var catalog = new (string Name, string Selector, string Group)[]
 {
     ("Countdown", "Loops::Countdown(uint)", "control"),
+    ("WordByte", "Nethermind.LeanCIL.StaticValues/<>c__DisplayClass10_0::<Bytes>b__0(System.Int32)", "control"),
     ("FillWords", "Loops::FillWords(ulong&,ulong,int)", "control"),
     ("CountUntil", "Loops::CountUntil(uint,uint)", "control"),
     ("CountCalls", "Loops::CountCalls(uint)", "control"),
@@ -208,7 +209,8 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
     var scratch = Path.Combine(outlineRoot, name);
     Directory.CreateDirectory(scratch);
     var extraction = Path.Combine(scratch, "Extraction");
-    Run([.. Extract("extract", assembly, "Examples", selector, extraction),
+    var sourceAssembly = name == "WordByte" ? At("Extractor/bin/Nethermind.LeanCIL.dll") : assembly;
+    Run([.. Extract("extract", sourceAssembly, name == "WordByte" ? null : "Examples", selector, extraction),
         .. typeArguments.GetValueOrDefault(name, [])]);
     var outline = Path.Combine(scratch, "Proof.lean");
     Run(Cli("new-proof", extraction, outline));
@@ -2084,16 +2086,13 @@ if (unfinished.Count > 0) Console.WriteLine(unstepped is null
 
 string OutlineExtraction(string name) => Path.Combine(outlineRoot, name, "Extraction");
 
-if (group == "control")
+if (Selected("WordByte"))
 {
     // LeanCIL's own closure that lays out a static word's bytes: its outline states the getter's contract
     // and steps through it, and the checked-in proof fills only the outline's holes and verifies.
     var wordByte = Path.Combine(outlineRoot, "WordByte");
-    var wordByteExtraction = Path.Combine(wordByte, "Extraction");
-    Run(Cli("extract", At("Extractor/bin/Nethermind.LeanCIL.dll"),
-        "Nethermind.LeanCIL.StaticValues/<>c__DisplayClass10_0::<Bytes>b__0(System.Int32)", wordByteExtraction));
+    var wordByteExtraction = OutlineExtraction("WordByte");
     var wordByteOutline = Path.Combine(wordByte, "Proof.lean");
-    Run(Cli("new-proof", wordByteExtraction, wordByteOutline));
     var wordByteSource = File.ReadAllText(wordByteOutline);
     if (wordByteSource.Contains("-- not outlined:", StringComparison.Ordinal) ||
         !wordByteSource.Contains("theorem get_Bits_holds", StringComparison.Ordinal))

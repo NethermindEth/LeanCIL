@@ -231,6 +231,15 @@ syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* 
 initialize Lean.registerTraceClass `CIL.factNormalize
 
 open Lean in
+/-- The width and value of a numeral used as the right mask of a bitwise AND. -/
+private def numeralMask? (term : Expr) : Option (Expr × Nat) := do
+  guard (term.isAppOfArity ``HAnd.hAnd 6)
+  let mask ← lastArgument? term
+  let #[_, .lit (.natVal value), inst] ← argumentsOf? mask ``OfNat.ofNat 3 | none
+  let #[width, _] ← argumentsOf? inst ``BitVec.instOfNat 2 | none
+  return (width, value)
+
+open Lean in
 /-- Whether `value` is a literal operand the checked state normalizer evaluates. -/
 def closedLiteralOperand (value : Expr) : Bool :=
   let literal (value : Expr) := value.isRawNatLit || value.isAppOfArity ``OfNat.ofNat 3
@@ -243,6 +252,7 @@ def closedLiteralOperand (value : Expr) : Bool :=
     (lastArgument? value).any literal) || (value.isAppOfArity ``Neg.neg 3 &&
     (lastArgument? value).any literal)
   (value.isAppOfArity ``BitVec.ofFin 2 && numeral value) ||
+    (numeralMask? value).isSome ||
     ((value.isAppOfArity ``BitVec.signExtend 3 || value.isAppOfArity ``BitVec.setWidth 3 ||
       value.isAppOfArity ``BitVec.zeroExtend 3) && (argument? value 1).any literal &&
       (lastArgument? value).any numeral) ||
@@ -795,6 +805,15 @@ dsimproc_decl closedBitVecConstructor (BitVec.ofFin _) := fun expression => do
   return .done (mkApp2 (mkConst ``BitVec.ofNat) (toExpr width) (toExpr value))
 
 attribute [cil_literal_proc] closedBitVecConstructor
+
+open Lean Meta in
+/-- State a literal bit mask as a width-qualified bit vector in the stepped expression. -/
+dsimproc_decl bitVecNumeralMask ((_ &&& _ : BitVec _)) := fun expression => do
+  let .app operation _ := expression | return .continue
+  let some (width, value) := numeralMask? expression | return .continue
+  return .done (mkApp operation (mkApp2 (mkConst ``BitVec.ofNat) width (toExpr value)))
+
+attribute [cil_literal_proc] bitVecNumeralMask
 attribute [cil_literal_proc] BitVec.reduceSignExtend BitVec.reduceSetWidth
   BitVec.reduceZeroExtend BitVec.reduceToNat BitVec.reduceOfInt Nat.reduceMod
 
