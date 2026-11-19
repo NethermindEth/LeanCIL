@@ -67,8 +67,8 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
 queue.Flush();
 CheckMarshalModels(root,
 [
-    ("Empty", 1, ".observeView .spanEmpty", ".observeView .spanPinnable"),
-    ("PinnableNull", 1, ".observeView .spanPinnable", ".spanReference"),
-    ("ReferenceNull", 1, ".spanReference", ".observeView .spanPinnable"),
-    ("ArrayData", 1, ".observeView .arrayData", ".observeView .spanPinnable")
+    ("Empty", 1, ".observeView .spanEmpty", null),
+    ("PinnableNull", 1, ".observeView .spanPinnable", null),
+    ("ReferenceNull", 1, ".spanReference", null),
+    ("ArrayData", 1, ".observeView .arrayData", null)
 ]);

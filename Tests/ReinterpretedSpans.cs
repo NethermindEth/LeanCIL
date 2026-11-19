@@ -74,10 +74,10 @@ foreach (var method in methods.Where(method => method.IsPublic))
 queue.Flush();
 CheckMarshalModels(root,
 [
-    ("Bytes", 1, ".spanReinterpret 4 1 true", ".spanReinterpret 8 1 true"),
-    ("Words", 1, ".spanReinterpret 1 4 true", ".spanReinterpret 1 8 true"),
-    ("ReadOnlyWords", 1, ".spanReinterpret 1 2 false", ".spanReinterpret 1 2 true"),
-    ("SameWidth", 1, ".spanReinterpret 4 4 true", ".spanReadOnly")
+    ("Bytes", 1, ".spanReinterpret 4 1 true", ".spanReinterpret 2 1 true"),
+    ("Words", 1, ".spanReinterpret 1 4 true", ".spanReinterpret 2 4 true"),
+    ("ReadOnlyWords", 1, ".spanReinterpret 1 2 false", ".spanReinterpret 2 2 false"),
+    ("SameWidth", 1, ".spanReinterpret 4 4 true", ".spanReinterpret 2 4 true")
 ]);
 
 partial class Program

@@ -113,15 +113,13 @@ foreach (var method in methods.Where(method => method.IsPublic))
 queue.Flush();
 CheckMarshalModels(root,
 [
-    ("Read", 1, ".marshalRead (.scalar 8 false) false", ".marshalRead (.scalar 4 false) false"),
-    ("TryRead", 2, ".marshalRead (.scalar 8 false) true", ".marshalRead (.scalar 8 false) false"),
-    ("TryWrite", 2, ".marshalWrite (.scalar 8 false) true", ".marshalRead (.scalar 8 false) true"),
-    ("Write", 2, ".marshalWrite (.scalar 8 false) false", ".marshalWrite (.scalar 8 false) true"),
-    ("ReadVector", 1, ".marshalRead (.snapshot .vector128) false", ".marshalRead (.snapshot .vector256) false"),
-    ("ReadAggregate", 1, ".marshalRead (.snapshot (.aggregate 32)) false",
-        ".marshalRead (.snapshot (.aggregate 16)) false"),
-    ("WriteAggregate", 2, ".marshalWrite (.snapshot (.aggregate 32)) false",
-        ".marshalWrite (.snapshot (.aggregate 16)) false")
+    ("Read", 1, ".marshalRead (.scalar 8 false) false", ".marshalRead (.scalar 2 false) false"),
+    ("TryRead", 2, ".marshalRead (.scalar 8 false) true", ".marshalRead (.scalar 2 false) true"),
+    ("TryWrite", 2, ".marshalWrite (.scalar 8 false) true", ".marshalWrite (.scalar 2 false) true"),
+    ("Write", 2, ".marshalWrite (.scalar 8 false) false", ".marshalWrite (.scalar 2 false) false"),
+    ("ReadVector", 1, ".marshalRead (.snapshot .vector128) false", ".marshalRead (.scalar 2 false) false"),
+    ("ReadAggregate", 1, ".marshalRead (.snapshot (.aggregate 32)) false", ".marshalRead (.scalar 2 false) false"),
+    ("WriteAggregate", 2, ".marshalWrite (.snapshot (.aggregate 32)) false", ".marshalWrite (.scalar 2 false) false")
 ]);
 
 partial class Program

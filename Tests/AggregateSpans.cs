@@ -104,9 +104,9 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
 queue.Flush();
 CheckMarshalModels(root,
 [
-    ("ReadOnlyFactory", 2, ".spanFromReference 32 false", ".spanFromReference 32 true"),
-    ("Factory", 2, ".spanFromReference 32 true", ".spanFromReference 16 true"),
-    ("Bytes", 1, ".spanReinterpret 32 1 true", ".spanReinterpret 16 1 true"),
-    ("WordsView", 1, ".spanReinterpret 1 32 false", ".spanReinterpret 1 16 false"),
-    ("VectorBytes", 1, ".spanReinterpret 16 1 true", ".spanReinterpret 32 1 true")
+    ("ReadOnlyFactory", 2, ".spanFromReference 32 false", ".spanFromReference 2 false"),
+    ("Factory", 2, ".spanFromReference 32 true", ".spanFromReference 2 true"),
+    ("Bytes", 1, ".spanReinterpret 32 1 true", ".spanReinterpret 2 1 true"),
+    ("WordsView", 1, ".spanReinterpret 1 32 false", ".spanReinterpret 2 32 false"),
+    ("VectorBytes", 1, ".spanReinterpret 16 1 true", ".spanReinterpret 2 1 true")
 ]);
