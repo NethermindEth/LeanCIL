@@ -60,6 +60,33 @@ internal static class Arrays
         return underlying with { Lean = $"enumeration {identity} .{underlying.Lean}", Compound = true };
     }
 
+    /// <summary>Array.Fill accepts primitive and enum storage with an optional int32 range.</summary>
+    internal static Operation? Fill(MethodReference method, string architecture)
+    {
+        if (method.Name != "Fill" || method.DeclaringType.FullName != "System.Array" || method.HasThis ||
+            method.ExplicitThis || method.CallingConvention != MethodCallingConvention.Generic ||
+            method is not GenericInstanceMethod { GenericArguments.Count: 1 } generic ||
+            generic.ElementMethod.GenericParameters.Count != 1 || method.ReturnType.MetadataType != MetadataType.Void ||
+            !RuntimeModels.ExactScope(method.DeclaringType, PlatformAssemblies.SystemRuntime)) return null;
+
+        var parameters = method.Parameters;
+        var counted = parameters.Count == 4;
+        if (parameters.Count is not (2 or 4) ||
+            parameters[0].ParameterType is not ArrayType { IsVector: true } array ||
+            !MethodElement(array.ElementType) || !MethodElement(parameters[1].ParameterType) ||
+            counted && (parameters[2].ParameterType.MetadataType != MetadataType.Int32 ||
+                parameters[3].ParameterType.MetadataType != MetadataType.Int32)) return null;
+
+        var element = generic.GenericArguments[0];
+        if (Primitive(element) is null && !EnumTypes.IsEnum(element)) return null;
+        RuntimeModels.ValidateSignature(method, architecture);
+        var storage = Storage(element, architecture)!;
+        return MemoryOperation.Other($"(.arrayFill {storage.Expression} {LeanText.Bool(counted)})");
+
+        static bool MethodElement(TypeReference type) =>
+            type is GenericParameter { Type: GenericParameterType.Method, Position: 0 };
+    }
+
     internal static Element? Of(TypeReference type, string? architecture = null) =>
         type is ArrayType { IsVector: true } array ? Storage(array.ElementType, architecture) : null;
 

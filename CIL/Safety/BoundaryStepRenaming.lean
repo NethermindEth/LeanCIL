@@ -508,6 +508,7 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | exact unsafeBlockEntries_yields memory_stepRenamed entry member
     | exact spanEntries_yields memory_stepRenamed entry member
     | exact asSpanEntries_yields memory_stepRenamed entry member
+    | exact spanBulkEntries_yields memory_stepRenamed entry member
 
 #print axioms runtimeModel_stepRenamed
 

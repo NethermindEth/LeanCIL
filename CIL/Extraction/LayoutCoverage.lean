@@ -67,7 +67,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
           (site.parameterTypes.head?.map fun type => match type with
             | .array _ => true | _ => false).getD false then
         return [.size pc index .arrayElement]
-      else if spanOwner && site.name ∈ ["CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor"] then
+      else if spanOwner && site.name == ".ctor" then
         return [.size pc index .spanElement] else return []
     | _, _ => return []
   | _, _ => return []

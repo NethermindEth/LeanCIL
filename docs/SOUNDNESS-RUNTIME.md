@@ -128,6 +128,12 @@ Array conversions also reject byref-like elements. The three array overloads of
 type and require the exact System.Memory target. Their calls construct writable views using
 the checked array element storage and layout width.
 
+The bulk entries bind `Clear` and `Fill` on writable spans and both copy members on writable
+and readonly spans. The receiver is the view on the evaluation stack. The checked memory
+operation uses the closed element width for copies, fills and clears under every profile.
+Both `Array.Fill<T>` overloads bind the method parameter in the open declaration and require
+a primitive or enum element. The range overload also requires two int32 bounds.
+
 The runtime table binds ten static `System.Runtime.InteropServices.MemoryMarshal` members.
 The open declaration distinguishes writable and readonly spans and fixes the positions of
 the method parameters. The closed reference fixes their types. `transferKind?` reads the

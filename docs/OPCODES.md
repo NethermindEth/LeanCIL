@@ -446,9 +446,10 @@ integers, Boolean, character and integer-backed enums. A null array throws
 array, throws `ArgumentOutOfRangeException`. Empty ranges, including at the array end, need no
 write authority. Reference-bearing, aggregate and vector elements are not supported.
 
-`Span<T>.Clear` initializes the whole view, including aggregate and vector elements. `Fill`
-repeats a captured primitive, enum, aggregate or integer-vector value; unspecified
-low-lane-only vector values are rejected. A filled aggregate or vector snapshot keeps its
+The decoder retains span and array bulk calls. The runtime model uses the closed element type
+when executing the call. `Span<T>.Clear` initializes the whole view, including aggregate and
+vector elements. `Fill` repeats a captured primitive, enum, aggregate or integer-vector value.
+A fill rejects unspecified low-lane-only vector values. A filled aggregate or vector snapshot keeps its
 initialization mask, so unknown bytes stay uninitialized. Both need write authority but not initialized or
 readable destination bytes, access no bytes for an empty span and preserve neighbouring bytes,
 including other slices of the same allocation. Readonly views do not admit these members.

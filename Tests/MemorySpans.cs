@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 
 using Mono.Cecil;
@@ -119,7 +120,7 @@ foreach (var (name, signature, arguments, expected) in new[]
 
         theorem compiled_span_result :
             (CIL.Safety.invoke Extracted.program 64 0 {{arguments}} spanMemory).map Prod.snd =
-              .ok [.scalar (.i32 {{expected}})] := rfl
+              .ok [.scalar (.i32 {{expected}})] := by cil_kernel_rfl
         #print axioms compiled_span_result
         """);
     spanProofs.Add(name, proof);
@@ -176,20 +177,11 @@ foreach (var (name, signature, width, arguments, bytes) in new[]
     Run(["dotnet", ExtractorPath, "extract", assembly, $"MemorySpans::{name}({signature})", output]);
     var proof = Path.Combine(root, name + ".lean");
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (name == "FillIntegers")
-    {
-        var forged = Path.Combine(root, "Forged-fill-width.lean");
-        if (!source.Contains(".spanFill 4 false", StringComparison.Ordinal))
-            throw new Exception("Missing fill-width mutation");
-        File.WriteAllText(forged, source.Replace(".spanFill 4 false", ".spanFill 8 false",
-            StringComparison.Ordinal));
-        rejected.Add(forged, "PASS independent span fill width rejection",
-            "Extraction.ScalarFlowValid method0Closed " +
-                "method0FeatureStates method0ScalarStates method0.code");
-    }
     var start = name == "FillLongSlice" ? width : 0;
     var count = name == "FillLongSlice" ? 4 : 2;
-    File.WriteAllText(proof, source + $$"""
+    File.WriteAllText(proof, $$"""
+        import CIL.Safety.StepComposition
+        {{source}}
 
         private def fillMemory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
@@ -205,9 +197,12 @@ foreach (var (name, signature, width, arguments, bytes) in new[]
                 let contents := CIL.Safety.read memory ⟨0, {{width + start}}⟩ {{2 * width}} 1
                 pure (contents, memory.cells 0 {{width + start - 1}},
                   memory.cells 0 {{width + start + 2 * width}}, result)) =
-              .ok (.ok ({{bytes}}), ⟨99, false⟩, ⟨99, false⟩, []) := rfl
+              .ok (.ok ({{bytes}}), ⟨99, false⟩, ⟨99, false⟩, []) := by cil_kernel_rfl
         #print axioms compiled_fill_contents
         """);
+    var pc = name switch { "ClearBytes" => 1, "FillLongSlice" => 7, _ => 2 };
+    var clear = name == "ClearBytes" ? "true" : "false";
+    File.AppendAllText(proof, BulkCallEvidence(0, pc, $".spanFill {width} {clear}"));
     spanProofs.Add(name, proof);
 }
 
@@ -241,7 +236,7 @@ foreach (var (name, signature, width, arguments, expected) in new[]
 
         theorem compiled_primitive_span_result :
             (CIL.Safety.invoke Extracted.program 64 0 {{arguments}} primitiveMemory).map Prod.snd =
-              .ok [.scalar ({{expected}})] := rfl
+              .ok [.scalar ({{expected}})] := by cil_kernel_rfl
         #print axioms compiled_primitive_span_result
         """);
     if (name == "BooleanWrite")

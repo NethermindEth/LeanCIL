@@ -15,6 +15,7 @@ import CIL.Extraction.UnsafeTransferModels
 import CIL.Extraction.UnsafeBlocks
 import CIL.Extraction.AsSpanModels
 import CIL.Extraction.StaticSpanModel
+import CIL.Extraction.SpanBulkModels
 
 /-!
 # Runtime model resolution
@@ -49,6 +50,7 @@ def modelFamilies : List (List ModelEntry) := [
   spanEntries,
   asSpanEntries,
   [staticSpanEntry],
+  spanBulkEntries,
 ]
 
 /-- The runtime methods with a model. -/

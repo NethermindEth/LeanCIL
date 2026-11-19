@@ -182,34 +182,104 @@ example : ¬ typeTestInstruction
       (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType name!"Data" true)) ∧
     typeTestInstruction (i 208 (.type intType)) := by decide
 
-/-- The exact writable int32 span member used by whole-region initialization. -/
-private def fillCall : CallSite := {
-  declared := { convention := 0x20, parameters := [.parameter 0] },
-  method := {
-    owner := .apply (.constructor runtime "System.Span`1") intType, name := name!"Fill",
-    hasThis := true, genericArity := 0, returnType := .void, parameters := [intType] },
-  name := "Fill",
-  target := .external (runtime ++ "::System.Void System.Span`1<System.Int32>::Fill(!0)"),
-  typeArguments := [], parameterCount := 1, returnsValue := false }
+/-- The eight bulk declarations instantiated at the named element type. -/
+private def bulkSites (element : TypeExpr) (elementName : String) : List CallSite := Id.run do
+  let writable := spanHead true
+  let boolean := TypeExpr.atom runtime "System.Boolean"
+  let var := TypeExpr.ownerParameter 0
+  let row (owner : TypeExpr) (ownerName name : String) (key : MetadataName)
+      (result : TypeExpr) (resultName params : String) (closed openParams : List TypeExpr)
+      (array := false) : CallSite :=
+    let args := if array then [element] else []
+    { method := ⟨owner, key, !array, if array then 1 else 0, result, closed, args⟩
+      declared := ⟨if array then 0x10 else 0x20, result, openParams⟩
+      name, typeArguments := args, parameterCount := closed.length,
+      returnsValue := result != .void
+      target := .external s!"{runtime}::{resultName} {ownerName}::{name}({params})" }
+  let owner := TypeExpr.apply writable element
+  let spelling := s!"System.Span`1<{elementName}>"
+  let copies := [true, false].flatMap fun writableSource =>
+    let source := TypeExpr.apply (spanHead writableSource) element
+    let head := if writableSource then "System.Span`1" else "System.ReadOnlySpan`1"
+    let sourceName := s!"{head}<{elementName}>"
+    [row source sourceName "CopyTo" name!"CopyTo" .void "System.Void" "System.Span`1<!0>"
+       [owner] [.apply writable var],
+     row source sourceName "TryCopyTo" name!"TryCopyTo" boolean "System.Boolean"
+       "System.Span`1<!0>" [owner] [.apply writable var]]
+  let arrays := [false, true].map fun counted =>
+    let tail := if counted then [intType, intType] else []
+    let params := if counted then "!!0[],!!0,System.Int32,System.Int32" else "!!0[],!!0"
+    row (.atom runtime "System.Array") "System.Array" "Fill" name!"Fill" .void "System.Void"
+      params ([.array element, element] ++ tail) ([.array (.parameter 0), .parameter 0] ++ tail)
+      true
+  return [row owner spelling "Clear" name!"Clear" .void "System.Void" "" [] [],
+    row owner spelling "Fill" name!"Fill" .void "System.Void" "!0" [element] [var]] ++
+    copies ++ arrays
 
-/-- Whole-span stores bind the operation, element width, mutability and complete signature. -/
-theorem exact_span_fill_call :
-    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 4 false)) = true ∧
-    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 8 false)) = false ∧
-    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanFill 4 true)) = false ∧
-    spanCallMatches (i 40 (.call fillCall)) (.memory (.spanSlice false)) = false ∧
-    spanCallMatches (i 40 (.call { fillCall with
-      method.owner := .apply (.constructor runtime "System.ReadOnlySpan`1") intType }))
-      (.memory (.spanFill 4 false)) = false ∧
-    spanCallMatches (i 40 (.call { fillCall with
-      method.parameters := [.atom runtime "System.UInt32"] }))
-      (.memory (.spanFill 4 false)) = false ∧
-    spanCallMatches (i 40 (.call { fillCall with method.hasThis := false }))
-      (.memory (.spanFill 4 false)) = false ∧
-    spanCallMatches (i 40 (.call { fillCall with
-      method.returnType := intType, returnsValue := true }))
-      (.memory (.spanFill 4 false)) = false := by decide +kernel
-#print axioms exact_span_fill_call
+/-- The instruction at the sole reachable call in the fixture. -/
+private def bulkCode (site : CallSite) : Option (List Instruction) :=
+  let body := { raw [] [i 40 (.call site)] with parameters := [] }
+  (Method.ofRaw? .scalar {} [] [true] body []).map Method.code
+
+/-- Every genuine overload retains its call. A single incorrect operand field gives a call hole. -/
+theorem bulk_call_operands :
+    ((bulkSites intType "System.Int32").all fun site =>
+      let method := site.method
+      let wrongOwner := match method.owner with
+        | .apply (.constructor _ name) element => .apply (.constructor owner name) element
+        | _ => TypeExpr.atom owner "System.Array"
+      let wrongResult := if method.returnType == .void then intType else .void
+      let wrongParams := match method.parameters with
+        | [] => [intType] | _ :: rest => TypeExpr.void :: rest
+      decide (bulkCode site = some [.call method {}]) &&
+        [{ site with method.owner := wrongOwner }, { site with method.name := name!"Other" },
+         { site with method.genericArity := method.genericArity + 1 },
+         { site with method.parameters := wrongParams },
+         { site with method.hasThis := !method.hasThis },
+         { site with method.returnType := wrongResult }, { site with declared.convention := 0 },
+         { site with declared.parameters := .void :: site.declared.parameters },
+         { site with name := "Other" }, { site with target := .external "Other" },
+         { site with parameterCount := site.parameterCount + 1 },
+         { site with returnsValue := !site.returnsValue },
+         { site with ownerArgumentCount := 1 }, { site with typeArguments := [TypeExpr.void] }].all
+          fun changed => decide (bulkCode changed = some [.unadmitted 40])) := by
+  decide +kernel
+
+#print axioms bulk_call_operands
+
+/-- A well-formed overload over a floating-point element has no bulk memory model. -/
+theorem bulk_call_elements :
+    ((bulkSites (.atom runtime "System.Single") "System.Single").all fun site =>
+      decide (bulkCode site = some [.unadmitted 40])) := by
+  decide +kernel
+
+#print axioms bulk_call_elements
+
+/-- The signed backing and nominal identity survive both array fill overloads. -/
+theorem bulk_enum_models :
+    let element := TypeExpr.enum "Fixture::Tag" (.atom runtime "System.SByte")
+    let storage := ArrayElement.enumeration "Fixture::Tag" .signed8
+    let operations : List MemoryOp := [.spanFill 1 true, .spanFill 1 false, .spanCopy 1 false,
+      .spanCopy 1 true, .spanCopy 1 false, .spanCopy 1 true, .arrayFill storage false,
+      .arrayFill storage true]
+    ((bulkSites element "Tag").zip operations).all fun (site, operation) =>
+      runtimeModel {} .call site.method == some (.memory operation) &&
+        !(runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
+          (.memory operation) none none true)
+    := by decide +kernel
+
+#print axioms bulk_enum_models
+
+/-- Span copy and fill admit integer vectors. Both array fill overloads reject them. -/
+theorem bulk_vector_models :
+    let vector := TypeExpr.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1"
+    let element := TypeExpr.apply vector intType
+    (bulkSites element "System.Runtime.Intrinsics.Vector128`1<System.Int32>").all fun site =>
+      let expected := if site.hasThis then Instruction.call site.method {} else .unadmitted 40
+      decide (bulkCode site = some [expected])
+    := by decide +kernel
+
+#print axioms bulk_vector_models
 
 /-- Exact array constructor used by an in-place local initialization. -/
 private def localConstructor : CallSite := {

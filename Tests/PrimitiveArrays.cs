@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 
 using System.Globalization;
@@ -329,7 +330,9 @@ foreach (var (name, _, element, width, counted) in fills)
     var output = Path.Combine(root, name);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     var proof = Path.Combine(root, name + ".lean");
-    File.WriteAllText(proof, source + $$"""
+    File.WriteAllText(proof, $$"""
+        import CIL.Safety.StepComposition
+        {{source}}
 
         private def fillMemory : CIL.Safety.Memory := {
           allocations := fun identity => if identity == 0 then
@@ -399,24 +402,6 @@ foreach (var (name, _, element, width, counted) in fills)
               constructor <;> decide +kernel
             #print axioms malformed_fill_states
             """);
-        var obligation = "method1_scalars_validated";
-        var narrowed = NarrowEvidence(source, obligation);
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        foreach (var (label, before, after) in new[]
-        {
-            ("range", ".arrayFill .signed32 true", ".arrayFill .signed32 false"),
-            ("index-type", ".atom Extraction.runtimeScope \"System.Int32\", " +
-                ".atom Extraction.runtimeScope \"System.Int32\"]",
-                ".atom Extraction.runtimeScope \"System.UInt32\", " +
-                ".atom Extraction.runtimeScope \"System.Int32\"]")
-        })
-        {
-            if (!narrowed.Contains(before, StringComparison.Ordinal))
-                throw new Exception("Missing range fill mutation: " + label);
-            var forged = Path.Combine(root, "ForgedFillRange-" + label + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(before, after, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array fill range: " + label, "ScalarFlowValid");
-        }
         foreach (var (start, count) in new[]
             { (1, 2), (0, 0), (4, 0), (-1, 0), (0, -1), (5, 0), (3, 2), (1, int.MaxValue) })
         {
@@ -460,24 +445,6 @@ foreach (var (name, _, element, width, counted) in fills)
               all_goals decide +kernel
             #print axioms empty_and_null_fill
             """);
-        var obligation = "method1_scalars_validated";
-        var narrowed = NarrowEvidence(source, obligation);
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        foreach (var (label, before, after) in new[]
-        {
-            ("element", ".arrayFill .signed32 false", ".arrayFill .unsigned32 false"),
-            ("width", ".arrayFill .signed32 false", ".arrayFill .signed64 false"),
-            ("operation", ".arrayFill .signed32 false", ".spanFill 4 false"),
-            ("arity", "parameterCount := 2, returnsValue := false", "parameterCount := 4, returnsValue := false"),
-            ("scope", ".atom Extraction.runtimeScope \"System.Array\"", ".atom \"Wrong.Scope\" \"System.Array\"")
-        })
-        {
-            if (!narrowed.Contains(before, StringComparison.Ordinal))
-                throw new Exception("Missing array fill mutation: " + label);
-            var forged = Path.Combine(root, "ForgedFill-" + label + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(before, after, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged array fill: " + label, "ScalarFlowValid");
-        }
         var values = new[] { 1, 2 };
         runtime.GetMethod(name)!.Invoke(null, [values, 7]);
         if (!values.SequenceEqual([7, 7])) throw new Exception("Runtime array fill mismatch");
@@ -497,29 +464,10 @@ foreach (var (name, _, element, width, counted) in fills)
         runtime.GetMethod(name)!.Invoke(null, counted ? [values, value, 0, 2] : [values, value]);
         if (!Equals(values.GetValue(0), value) || !Equals(values.GetValue(1), value))
             throw new Exception("Runtime enum array fill mismatch");
-        if (counted)
-        {
-            evidence.Add(proof, "PASS generic array fill: " + name);
-            continue;
-        }
-        var obligation = "method1_scalars_validated";
-        var narrowed = NarrowEvidence(source, obligation);
-        File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, [obligation], 0));
-        var mode = counted ? "true" : "false";
-        var target = $".arrayFill (.enumeration {fillEnum} .unsigned8) {mode}";
-        if (!narrowed.Contains(target, StringComparison.Ordinal))
-            throw new Exception("Missing enum array fill descriptor");
-        foreach (var (label, replacement) in new[]
-        {
-            ("identity", $".arrayFill (.enumeration \"Wrong.Enum\" .unsigned8) {mode}"),
-            ("backing", $".arrayFill (.enumeration {fillEnum} .signed8) {mode}")
-        })
-        {
-            var forged = Path.Combine(root, "Forged" + name + "-" + label + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS forged enum array fill: " + label, "ScalarFlowValid");
-        }
     }
+    var shape = element.StartsWith("enumeration", StringComparison.Ordinal) ? $"(.{element})" : $".{element}";
+    var mode = counted ? "true" : "false";
+    File.AppendAllText(proof, BulkCallEvidence(1, counted ? 4 : 2, $".arrayFill {shape} {mode}"));
     evidence.Add(proof, "PASS generic array fill: " + name);
 }
 evidence.Check();

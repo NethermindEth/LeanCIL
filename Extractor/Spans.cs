@@ -86,8 +86,8 @@ internal static class Spans
         return type is ByReferenceType reference && OwnerElement(reference.ElementType);
     }
 
-    /// <summary>The memory operation of a kept call to a core span member.</summary>
-    internal static Operation? CoreMember(MethodReference method, string architecture)
+    /// <summary>A retained span member uses the element of its closed receiver.</summary>
+    internal static Operation? Member(MethodReference method, string architecture)
     {
         if (method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
             owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
@@ -102,10 +102,19 @@ internal static class Spans
         var result = method.ReturnType;
         var element = owner.GenericArguments[0];
         if (method.Name is not ("get_Item" or "get_Length" or "Slice" or "get_IsEmpty" or
-            "GetPinnableReference" or "op_Implicit" or "get_Empty")) return null;
+            "GetPinnableReference" or "op_Implicit" or "get_Empty" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo"))
+            return null;
         if (ElementWidth(element, architecture) is not int width) return null;
         MemoryOperation? operation = method.Name switch
         {
+            "Clear" when writable && parameters.Count == 0 && result.MetadataType == MetadataType.Void =>
+                new OtherMemory($"(.spanFill {width} true)"),
+            "Fill" when writable && parameters.Count == 1 && OwnerElement(parameters[0].ParameterType) &&
+                result.MetadataType == MetadataType.Void => new OtherMemory($"(.spanFill {width} false)"),
+            "CopyTo" or "TryCopyTo" when parameters.Count == 1 &&
+                DeclaredSpan(parameters[0].ParameterType, "System.Span`1") &&
+                result.MetadataType == (method.Name == "CopyTo" ? MetadataType.Void : MetadataType.Boolean) =>
+                new OtherMemory($"(.spanCopy {width} {LeanText.Bool(method.Name == "TryCopyTo")})"),
             "get_Item" when parameters is [{ ParameterType.MetadataType: MetadataType.Int32 }] &&
                 ElementReference(result, writable) => new SpanItem(width),
             "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => new SpanLength(),

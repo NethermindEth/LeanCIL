@@ -220,7 +220,7 @@ internal sealed class LayoutEvidence
                     Spans.Is(spanOwner) &&
                     spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name is ("CopyTo" or "TryCopyTo" or "Clear" or "Fill" or ".ctor"))
+                    spanCall.Name == ".ctor")
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
             if (instruction.OpCode.Code == Code.Initobj &&

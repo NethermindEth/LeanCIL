@@ -147,7 +147,8 @@ internal static class RuntimeModels
             return new Constant(32, referenceContent, true);
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
         if (Spans.ArrayExtension(reference, profile.Architecture) is { } arrayView) return arrayView;
-        if (Spans.CoreMember(reference, profile.Architecture) is { } span) return span;
+        if (Spans.Member(reference, profile.Architecture) is { } span) return span;
+        if (Arrays.Fill(reference, profile.Architecture) is { } fill) return fill;
         if (StaticSpanModel(reference, profile.Architecture) is { } staticSpan) return staticSpan;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
@@ -217,9 +218,7 @@ internal static class RuntimeModels
     internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            (reference.HasThis && reference.Name is not
-                (".ctor" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo")) ||
-            (reference.Name == ".ctor" && !reference.HasThis)) return null;
+            reference.HasThis != (reference.Name == ".ctor")) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (PlatformAssemblies.Claimed(AssemblyName.OfScope(
                 reference.DeclaringType, IdentityImage(reference.DeclaringType))) is { } platform &&
@@ -366,15 +365,6 @@ internal static class RuntimeModels
         {
             var arrayElement = elementType is null ? Arrays.Primitive(element) :
                 Arrays.Storage(elementType, architecture);
-            var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
-                EnumTypes.IsEnum(elementType);
-            if (staticElement && arrayElement is not null)
-            {
-                operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0)",
-                    MemoryOperation.Other($"(.arrayFill {arrayElement.Expression} false)"));
-                operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0,System.Int32,System.Int32)",
-                    MemoryOperation.Other($"(.arrayFill {arrayElement.Expression} true)"));
-            }
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";
@@ -390,17 +380,6 @@ internal static class RuntimeModels
                     MemoryOperation.Of(new SpanFromReference(width, writable)));
                 operations.Add($"System.Void {owner}::.ctor(!0&)",
                     MemoryOperation.Of(new SpanSingleReference(width, writable)));
-                operations.Add($"System.Void {owner}::CopyTo(System.Span`1<!0>)",
-                    MemoryOperation.Other($"(.spanCopy {width} false)"));
-                operations.Add($"System.Boolean {owner}::TryCopyTo(System.Span`1<!0>)",
-                    MemoryOperation.Other($"(.spanCopy {width} true)"));
-                if (writable)
-                {
-                    operations.Add($"System.Void {owner}::Clear()",
-                        MemoryOperation.Other($"(.spanFill {width} true)"));
-                    operations.Add($"System.Void {owner}::Fill(!0)",
-                        MemoryOperation.Other($"(.spanFill {width} false)"));
-                }
             }
         }
         return operations;

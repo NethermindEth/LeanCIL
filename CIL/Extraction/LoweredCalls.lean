@@ -86,14 +86,11 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
   | .apply (.constructor scope type) _ =>
     if scope == intrinsicsScope && hardwareMember type name then some .hardware
     else if scope != runtimeScope || type ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none
-    else if name ∈ [".ctor", "CopyTo", "TryCopyTo"] ||
-        type == "System.Span`1" && name ∈ ["Fill", "Clear"]
-      then some .span else none
+    else if name == ".ctor" then some .span else none
   | .atom scope type =>
     if scope == runtimeScope then
       match type with
       | "System.Type" => if typeTestInstruction raw then some .typeTest else none
-      | "System.Array" => if name == "Fill" then some .span else none
       | _ => none
     else if scope == intrinsicsScope then
       if hardwareMember type name then some .hardware else none

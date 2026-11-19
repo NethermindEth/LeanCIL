@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 
 using System.Reflection;
@@ -67,21 +68,24 @@ foreach (var method in methods.Where(method => method.IsPublic))
         proofs.Add("by apply result_of_toOption; decide +kernel");
         claims.Add($"({Run(2, 5, 20, 5, "uninitialized")}).map Prod.snd = " +
             ".error ⟨0, 2, .memory .uninitialized (.address ⟨0, 2⟩) 5⟩");
-        proofs.Add("by rfl");
+        proofs.Add("by cil_kernel_rfl");
         claims.Add($"({Run(2, 5, 20, 5, "readOnlyMemory")}).map Prod.snd = " +
             ".error ⟨0, 2, .memory .unwritable (.address ⟨0, 20⟩) 5⟩");
-        proofs.Add("by rfl");
+        proofs.Add("by cil_kernel_rfl");
         claims.Add($"({Run(2, 5, 20, 5, destinationWritable: false)}).map Prod.snd = " +
             ".error ⟨0, 2, .invalidState⟩");
-        proofs.Add("by rfl");
+        proofs.Add("by cil_kernel_rfl");
     }
     if (name == "CopyReadOnly")
     {
         claims.Add($"({Run(2, 5, 20, 3, "uninitialized")}).map Prod.snd = " +
             ".error ⟨0, 2, .thrown .argument⟩");
-        proofs.Add("by rfl");
+        proofs.Add("by cil_kernel_rfl");
     }
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, """
+        import Extracted
+        import CIL.Safety.StepComposition
+        namespace ExampleProof
         /-- Successful observations identify the checked execution result. -/
         private theorem result_of_toOption {error value : Type} {result : Except error value}
             {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
@@ -103,32 +107,11 @@ foreach (var method in methods.Where(method => method.IsPublic))
         """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by exact " +
         (claims.Count == 1 ? proofs[0] : "⟨" + string.Join(", ", proofs) + "⟩") +
         "\n#print axioms correctness\nend ExampleProof\n");
+    var mode = trying ? "true" : "false";
+    File.AppendAllText(proof, BulkCallEvidence(0, 2, $".spanCopy {width} {mode}"));
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS checked span copy: " + name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-var index = 0;
-foreach (var (name, before, after) in new[]
-{
-    ("Copy", ".spanCopy 1 false", ".spanCopy 2 false"),
-    ("TryCopy", ".spanCopy 1 true", ".spanCopy 1 false"),
-    ("CopyReadOnly", ".spanCopy 1 false", ".spanFill 1 false"),
-    ("TryCopyReadOnly", "target := .external externalIdentity0", "target := .external \"forged\""),
-    ("TryCopyEnum", "System.Span\\u00601", "System.ReadOnlySpan\\u00601"),
-    ("TryCopyEnum", "parameters := [.apply (.constructor Extraction.runtimeScope \"System.Span\\u00601\") " +
-        "(.enum \"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.CopyCode\"",
-        "parameters := [.apply (.constructor Extraction.runtimeScope \"System.Span\\u00601\") " +
-        "(.enum \"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.OtherCopyCode\"")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_scalars_validated");
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing copy mutation: " + before);
-    var path = Path.Combine(root, $"Rejected{index++}.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact span copy evidence rejection: " + name, "ScalarFlowValid");
-}
-rejected.Check();
 
 partial class Program
 {

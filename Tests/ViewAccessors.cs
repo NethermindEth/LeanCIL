@@ -47,19 +47,21 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
                 $".ok [.scalar (.i32 {(length == 0 && (!nullOnlyWhenNull || address == ".null") ? 1 : 0)})]");
     }
     File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
-        /-- Successful observations identify the checked execution result. -/
-        private theorem result_of_toOption {error value : Type} {result : Except error value}
-            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
-          cases result <;> simp_all [Except.toOption]
-        #print axioms result_of_toOption
-        /-- Existing storage has no readable bytes or access authority; observations need neither. -/
+        /-- The caller owns an allocation with no readable bytes or access authority. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨16, 1, []⟩, true, [16]⟩ else none
           nextIdentity := 1 }
         /-- Empty views, readonly receivers and zero-length arrays retain their distinct results. -/
-        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) + " := by\n  repeat constructor\n  all_goals first | (apply result_of_toOption; decide +kernel) | decide +kernel\n" +
-        "#print axioms correctness\nend ExampleProof\n");
+        """ + $$"""
+
+        theorem correctness :
+            {{string.Join(" ∧\n", claims)}} := by
+          exact ⟨{{string.Join(", ", claims.Select(_ => "by cil_kernel_rfl"))}}⟩
+        #print axioms correctness
+        end ExampleProof
+
+        """);
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS view accessor: " + method.Name));
 }
 queue.Flush();

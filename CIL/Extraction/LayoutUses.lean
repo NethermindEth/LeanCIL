@@ -66,8 +66,6 @@ private def checkSize (size : Nat) : SizeAccess → Instruction → Bool
   | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
   | .sizeOf, .ldc_i4 bits => bits.toNat == size
   | .spanElement, .initializeSpanLocal _ (.empty width _)
-  | .spanElement, .memory (.spanCopy width _)
-  | .spanElement, .memory (.spanFill width _)
   | .spanElement, .memory (.spanFromReference width _)
   | .spanElement, .memory (.spanSingleReference width _)
   | .spanElement, .initializeSpanLocal _ (.reference width _)

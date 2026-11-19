@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
 #:include MarshalModelEvidence.cs
 
@@ -70,7 +71,15 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
             "(result.1.cells 0 96).bits]) = .ok [0, 63, 96]",
         _ => null
     };
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    var contents = extra is null ? "" : $$"""
+        /-- Stores and overlapping copies preserve neighbouring bytes. -/
+        theorem contents : {{extra}} := by cil_kernel_rfl
+        #print axioms contents
+        """;
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.StepComposition
+        namespace ExampleProof
         /-- Existing initialized caller storage shared by overlapping aggregate views. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
@@ -79,29 +88,20 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
           views := [⟨0, 0, 128, true, true⟩]
           nextIdentity := 1 }
         /-- Compiled span operations retain aggregate and vector storage identities. -/
-        """ + $"\ntheorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [{arguments}] memory).map " +
-        $"Prod.snd = .ok [{expected}] := by rfl\n#print axioms correctness\n" +
-        (extra is null ? "" : "/-- Stores and overlapping copies preserve neighbouring bytes. -/\n" +
-            "theorem contents : " + extra + " := by rfl\n#print axioms contents\n") +
-        "end ExampleProof\n");
+        theorem correctness :
+            (CIL.Safety.invoke Extracted.program 64 0 [{{arguments}}] memory).map Prod.snd =
+              .ok [{{expected}}] := by cil_kernel_rfl
+        #print axioms correctness
+        {{contents}}
+        end ExampleProof
+
+        """);
+    if (name == "Copy") File.AppendAllText(proof, BulkCallEvidence(0, 2, ".spanCopy 32 true"));
+    if (name == "Clear") File.AppendAllText(proof, BulkCallEvidence(0, 1, ".spanFill 32 true"));
     queue.Add(new(method.FullName, proof, output, Profile: profile),
         () => Console.WriteLine("PASS aggregate span: " + name + " (" + profile + ")"));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (name, before, after, theorem) in new[]
-{
-    ("Copy", ".spanCopy 32 true", ".spanCopy 16 true", "method0_layouts_validated"),
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing span mutation");
-    var path = Path.Combine(root, "Rejected" + name + ".lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS aggregate span evidence rejection: " + name,
-        theorem.EndsWith("layouts_validated", StringComparison.Ordinal) ? "MethodLayoutsValid" : "ScalarFlowValid");
-}
-rejected.Check();
 CheckMarshalModels(root,
 [
     ("ReadOnlyFactory", 2, ".spanFromReference 32 false", ".spanFromReference 32 true"),
