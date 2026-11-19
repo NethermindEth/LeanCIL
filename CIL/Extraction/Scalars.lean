@@ -1111,7 +1111,8 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
     (role : Option FoldRole) (pc : Nat) (feature : Option FeatureState)
     (stack : Option (List ScalarKind)) (emitted : Instruction)
     (same : methodTokenCall instruction.opcode = false → role = none →
-      emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction) :
+      emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction ∨
+        emitted = .unadmitted instruction.opcode) :
     checkScalarSite true layouts raw context locals rawAt successor ((instruction, role), pc)
         feature stack emitted =
       checkScalarSite false layouts raw context locals rawAt successor ((instruction, role), pc)
@@ -1124,7 +1125,8 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
     · simp [decodedValueSite, called]
     by_cases unfolded : role = none
     case neg => cases role <;> simp_all [decodedValueSite]
-    have same := same (Bool.eq_false_iff.mpr called) unfolded
+    obtain same | hole := same (Bool.eq_false_iff.mpr called) unfolded
+    case inr => simp [hole, decodedValueSite]
     cases partialDecode : Instruction.ofRaw? (rawBefore rawAt pc) instruction with
     | none =>
       simp [Instruction.ofRaw, partialDecode] at same
@@ -1148,9 +1150,10 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
 /-- A certificate checked against the decoded code also passes every explicit encoding check. -/
 theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
     {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
-    {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
+    {live : Nat → Bool} {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
     (same : code = Instruction.ofRawCode none raw.code
-        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray localKind decodeCall))
+        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray
+          live localKind decodeCall))
     (valid : ScalarFlowValid layouts raw features certificate code true) :
     ScalarFlowValid layouts raw features certificate code false := by
   dsimp only [ScalarFlowValid] at valid ⊢
@@ -1170,9 +1173,13 @@ theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
   intro ordinary unfolded
   have roleAt := (List.getElem?_zip_eq_some.mp entry).2
   rw [unfolded] at roleAt
-  simpa only [Instruction.withCallDecoder, ordinary, Bool.false_eq_true, ite_false,
-    List.getElem?_toArray, roleAt, Option.join, Option.bind_some, id, rawBefore,
-    FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
+  cases active : live pc with
+  | false =>
+    exact Or.inr (by simpa [Instruction.withCallDecoder, active] using
+      (Option.some.inj emittedAt).symm)
+  | true =>
+    exact Or.inl (by simpa [Instruction.withCallDecoder, active, ordinary, roleAt, rawBefore,
+      FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm)
 
 #print axioms ScalarFlowValid.of_decoded
 
@@ -1182,10 +1189,11 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Instruction}
     {decoded : Bool} (valid : ScalarFlowValid layouts raw features certificate code decoded)
-    {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
+    {live : Nat → Bool} {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
     (codeDecodes : decoded = true → code =
       Instruction.ofRawCode none raw.code
-        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray localKind decodeCall))
+        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray
+          live localKind decodeCall))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)

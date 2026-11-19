@@ -408,7 +408,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   (ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates
     method.code item.decoded ∧
     (item.decoded = true → method.code =
-      methodCode method.profile method.environment method.links item.closed)) ∧
+      methodCode method.profile method.environment method.links item.reachable item.closed)) ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
@@ -427,7 +427,7 @@ theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
     (flag : item.decoded = true) : method.code =
-      methodCode method.profile method.environment method.links item.closed := by
+      methodCode method.profile method.environment method.links item.reachable item.closed := by
   obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
   exact same flag
 

@@ -37,7 +37,8 @@ partial class Program
     // A decoded method's definition line: its options, then its decoder over the method's own definitions.
     const string DecodedMethodHead = """(?m)^cil_decoded_method method(?<number>\d+)( \[[^\]\r\n]*\])? := """;
     const string DecoderCall = """Method\.ofClosed\? profile environment method\k<number>Links """;
-    const string DecoderInput = """method\k<number>Closed method\k<number>RawArguments""";
+    const string DecoderInput =
+        """method\k<number>Reachable method\k<number>Closed method\k<number>RawArguments""";
 
     [GeneratedRegex($"""{DecodedMethodHead}{DecoderCall}{DecoderInput}(?=\r?$)""")]
     internal static partial Regex DecodedMethod { get; }
@@ -157,7 +158,8 @@ partial class Program
             throw new InvalidOperationException($"method{method}Original has no {before}");
         var definition = DecodedDefinition(source, method);
         var name = $"method{method}";
-        var decoder = $"Method.ofRaw? profile environment {name}Links {name}Original {name}TypeArgumentsRaw";
+        var context = $"profile environment {name}Links {name}Reachable";
+        var decoder = $"Method.ofRaw? {context} {name}Original {name}TypeArgumentsRaw";
         var command = definition.Value[..definition.Value.IndexOf("Method.ofClosed?", StringComparison.Ordinal)];
         var changed = source.Replace(definition.Value, $"""{command}{decoder}""", StringComparison.Ordinal);
         return changed.Replace(original, original.Replace(before, after, StringComparison.Ordinal),
@@ -178,11 +180,12 @@ partial class Program
         if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
         var forged = $"method{method}Forged";
         var name = $"method{method}";
-        var decoder = $"{forged} profile environment {name}Links {name}Closed {name}RawArguments";
+        var decoder = $"{forged} profile environment {name}Links {name}Reachable {name}Closed {name}RawArguments";
         return $$"""
             {{source[..call.Index]}}def {{forged}} (profile : FeatureProfile) (environment : LayoutEnvironment)
-                (links : List (Prod Nat Link)) (closed : Extraction.RawMethod) (storage : Extraction.RawArguments) :
-                Option Method := (Method.ofClosed? profile environment links closed storage).map fun method =>
+                (links : List (Prod Nat Link)) (reachable : List Bool) (closed : Extraction.RawMethod)
+                (storage : Extraction.RawArguments) : Option Method :=
+                (Method.ofClosed? profile environment links reachable closed storage).map fun method =>
                   { method with {{update}} }
             cil_decoded_method {{name}}{{call.Groups[1].Value}} := {{decoder}}{{source[(call.Index + call.Length)..]}}
             """;

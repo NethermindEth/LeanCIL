@@ -25,9 +25,12 @@ namespace Tests.DecodedMethod
 
 open CIL CIL.Extraction Tests.BodyEncoding Tests.BodyDecoding Tests.MetadataWorld
 
+/-- The mask for a fixture whose entire body is live. -/
+def allLive (raw : RawMethod) : List Bool := raw.code.map fun _ => true
+
 /-- The method of the bytes of `body` against the definition `original`, with no layouts. -/
 private def decoded (body : Option BodyEvidence) (original : RawMethod) : Option Method :=
-  body.bind fun body => Method.ofBody? .scalar {} [] body original []
+  body.bind fun body => Method.ofBody? .scalar {} [] (allLive original) body original []
 
 /-- `ldc.i4.1; ldc.i4.2; add; ret`. -/
 private def addRaw : RawMethod :=
@@ -49,6 +52,13 @@ theorem add_decodes :
   cil_kernel_rfl
 #print axioms add_decodes
 
+/-- The argument check requires one mask entry for every raw instruction. -/
+theorem mismatched_mask_refused :
+    (Method.ofRaw? .scalar {} [] [true, true, true] addRaw []).isNone &&
+      (Method.ofRaw? .scalar {} [] [true, true, true, true, false] addRaw []).isNone := by
+  decide +kernel
+#print axioms mismatched_mask_refused
+
 /-- A dead constrained call whose target is an ordinary static method. -/
 private def ordinaryStaticRaw := method 8 false [] [instr 0 42, instr 1 22,
   instr 2 0xFE16 (.type objectType), instr 8 40 (.call writeLineSite), instr 13 42]
@@ -63,14 +73,14 @@ private def wrongIndirectTailRaw := method 8 false [] [instr 0 42, instr 1 0xFE1
 
 /-- A static method without a virtual interface slot cannot take a constrained receiver. -/
 theorem ordinary_static_prefix_refused :
-    (Method.ofRaw? .scalar {} [] ordinaryStaticRaw []).isNone &&
+    (Method.ofRaw? .scalar {} [] [true, false, false, false, false] ordinaryStaticRaw []).isNone &&
       !decide (MethodShapeValid ordinaryStaticRaw (frame [])) := by
   decide +kernel
 #print axioms ordinary_static_prefix_refused
 
 /-- An unreachable tail transfer still returns the enclosing method's declared result. -/
 theorem tail_result_mismatch_refused :
-    (Method.ofRaw? .scalar {} [] wrongTailRaw []).isNone &&
+    (Method.ofRaw? .scalar {} [] [true, false, false, false] wrongTailRaw []).isNone &&
       !decide (MethodShapeValid wrongTailRaw (frame [])) := by
   decide +kernel
 #print axioms tail_result_mismatch_refused
@@ -93,7 +103,7 @@ theorem dead_call_bytes_refused {pins : List AssemblyPin} {assembly : AssemblyPi
     {body : BodyEvidence} {raw : RawMethod} {signature : String}
     (decodes : BodyDecodes pins assembly body raw [] signature)
     (invalid : raw = ordinaryStaticRaw ∨ raw = wrongTailRaw) :
-    Method.ofBody? .scalar {} [] body raw [] = none := by
+    Method.ofBody? .scalar {} [] (raw.code.mapIdx fun pc _ => pc == 0) body raw [] = none := by
   rw [Method.ofBody?_of_decodes decodes]
   rcases invalid with rfl | rfl <;> decide +kernel
 #print axioms dead_call_bytes_refused
@@ -102,7 +112,7 @@ theorem dead_call_bytes_refused {pins : List AssemblyPin} {assembly : AssemblyPi
 theorem raw_prefix_entry_refused :
     let raw := method 8 false [] [instr 0 20, instr 1 22, instr 2 43 (.target 4),
       instr 4 0xFE1E, instr 6 143 (.type int32), instr 11 38, instr 12 42]
-    (Method.ofRaw? .scalar {} [] raw []).isNone = true := by
+    (Method.ofRaw? .scalar {} [] (allLive raw) raw []).isNone = true := by
   decide +kernel
 #print axioms raw_prefix_entry_refused
 
@@ -132,14 +142,15 @@ theorem invalid_prefix_sequences_refused :
       [modifier, instr 3 0xFE17 (.integer 1)], [modifier, instr 3 0x4A (.integer 1)]]
     cases.all (fun code =>
       let raw := { addRaw with code }
-      (Method.ofRaw? .scalar {} [] raw []).isNone && !decide (MethodShapeValid raw (frame []))) =
-        true := by
+      (Method.ofRaw? .scalar {} [] (allLive raw) raw []).isNone &&
+        !decide (MethodShapeValid raw (frame []))) = true := by
   decide +kernel
 #print axioms invalid_prefix_sequences_refused
 
 /-- An explicit receiver cannot be decoded as an additional implicit argument. -/
 theorem explicit_this_has_no_raw_method :
-    (Method.ofRaw? .scalar {} [] { addRaw with explicitThis := true } []).isNone = true := by
+    let raw := { addRaw with explicitThis := true }
+    (Method.ofRaw? .scalar {} [] (allLive raw) raw []).isNone = true := by
   decide +kernel
 #print axioms explicit_this_has_no_raw_method
 
@@ -224,12 +235,12 @@ private def argumentRaw (opcode index : Nat) : RawMethod :=
 /-- An argument load, store or address of the one declared argument decodes, and one naming a
     second argument gives no method: no frame holds it, and a store or address has no home. -/
 theorem undeclared_argument_has_no_method :
-    (Method.ofRaw? .scalar {} [] (argumentRaw 0x0E 0) []).isSome = true ∧
-      (Method.ofRaw? .scalar {} [] (storeRaw 0) []).isSome = true ∧
-      (Method.ofRaw? .scalar {} [] (argumentRaw 0x0F 0) []).isSome = true ∧
-      (Method.ofRaw? .scalar {} [] (argumentRaw 0x0E 1) []).isNone = true ∧
-      (Method.ofRaw? .scalar {} [] (storeRaw 1) []).isNone = true ∧
-      (Method.ofRaw? .scalar {} [] (argumentRaw 0x0F 1) []).isNone = true := by
+    (Method.ofRaw? .scalar {} [] [true, true, true] (argumentRaw 0x0E 0) []).isSome = true ∧
+      (Method.ofRaw? .scalar {} [] [true, true, true] (storeRaw 0) []).isSome = true ∧
+      (Method.ofRaw? .scalar {} [] [true, true, true] (argumentRaw 0x0F 0) []).isSome = true ∧
+      (Method.ofRaw? .scalar {} [] [true, true, true] (argumentRaw 0x0E 1) []).isNone = true ∧
+      (Method.ofRaw? .scalar {} [] [true, true, true] (storeRaw 1) []).isNone = true ∧
+      (Method.ofRaw? .scalar {} [] [true, true, true] (argumentRaw 0x0F 1) []).isNone = true := by
   decide +kernel
 #print axioms undeclared_argument_has_no_method
 
@@ -258,7 +269,7 @@ private def genericCastRaw : RawMethod :=
 /-- The code is decoded from the instantiated definition, so the cast tests the type argument
     rather than the open parameter. -/
 theorem generic_cast_tests_its_argument :
-    (Method.ofRaw? .scalar {} [] genericCastRaw [dogClass]).map (·.code) =
+    (Method.ofRaw? .scalar {} [] (allLive genericCastRaw) genericCastRaw [dogClass]).map (·.code) =
       some [.ldnull, .castclass dogClass, .pop, .ret] := by
   cil_kernel_rfl
 #print axioms generic_cast_tests_its_argument
@@ -270,7 +281,7 @@ theorem generic_constrained_receiver :
         instr 7 111 (.call slot), instr 12 42] with
       genericParameters := [{ flags := 0, types := [] }], returnType := int32,
       parameters := [.byref (.parameter 0)] }
-    (Method.ofRaw? .scalar {} [(2, .direct 1)] caller [int32]).map (·.code) =
+    (Method.ofRaw? .scalar {} [(2, .direct 1)] (allLive caller) caller [int32]).map (·.code) =
       some [.ldarg 0, .nop, .call slot.method { constrained := some int32 }, .ret] := by
   cil_kernel_rfl
 #print axioms generic_constrained_receiver
@@ -292,7 +303,7 @@ private def unboxBody : BodyEvidence :=
     opcode 0xA5, since no family admits `unbox.any`. -/
 theorem unbox_decodes_to_a_hole :
     (checkBody unboxBody unboxRaw []).toBool = true ∧
-      (Method.ofBody? .scalar {} [] unboxBody unboxRaw []).map (·.code) =
+      (Method.ofBody? .scalar {} [] (allLive unboxRaw) unboxBody unboxRaw []).map (·.code) =
         some [.ldnull, .unadmitted 0xA5, .pop, .ret] := by
   constructor
   · decide +kernel
@@ -301,18 +312,17 @@ theorem unbox_decodes_to_a_hole :
 
 /-- The method decoded from the unbox bytes pushes its null and faults at the hole's pc. -/
 theorem decoded_hole_faults :
-    (Method.ofBody? .scalar {} [] unboxBody unboxRaw []).map (fun method =>
+    (Method.ofBody? .scalar {} [] (allLive unboxRaw) unboxBody unboxRaw []).map (fun method =>
       Safety.invoke [method] 4 0 [] Safety.Memory.empty) =
         some (.error ⟨0, 1, .unsupported "Opcode not admitted"⟩) := by
   cil_kernel_rfl
 #print axioms decoded_hole_faults
 
-/-- An evidence record whose only fields `decodedProgram?` reads are `original`, `body` and
-    `arguments`. -/
+/-- A method evidence record with every instruction reachable and no links. -/
 def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
   { original := original, body := body, arguments := [], closed := original,
-    parameterInput := ⟨[], [], []⟩, reachable := [], featureStates := [], scalarStates := [],
-    layoutUses := [] }
+    parameterInput := ⟨[], [], []⟩, reachable := allLive original, featureStates := [],
+    scalarStates := [], layoutUses := [] }
 
 /-- A body with a hole still gives its method, so the add and unbox program decodes in full,
     while one refused body leaves the program without one. -/
@@ -339,7 +349,8 @@ private def sumRaw : RawMethod :=
   { method 8 false [] [instr 0 2, instr 1 3, instr 2 0x58, instr 3 0x15, instr 4 0x58,
       instr 5 0x2A] with parameters := [uint32, uint32], returnType := uint32 }
 
-cil_decoded_method sumMethod := Method.ofRaw? testProfile testEnvironment [] sumRaw []
+cil_decoded_method sumMethod :=
+  Method.ofRaw? testProfile testEnvironment [] (allLive sumRaw) sumRaw []
 cil_instruction_equations sumMethod
 
 /-- The definition is the method the decoder gives: the decoded code, the declared signature,
@@ -351,7 +362,7 @@ example : sumMethod =
       returnsValue := true } := rfl
 
 /-- info: Tests.DecodedMethod.sumMethod_decoder_eq :
-  Method.ofRaw? testProfile testEnvironment [] sumRaw [] = some sumMethod -/
+  Method.ofRaw? testProfile testEnvironment [] (allLive sumRaw) sumRaw [] = some sumMethod -/
 #guard_msgs (whitespace := lax) in #check sumMethod_decoder_eq
 
 -- The kernel proves the decoded fact and the field facts by reduction, with no other axiom.
@@ -371,7 +382,8 @@ example : sumMethod =
 #guard_msgs in #check sumMethod_profile
 
 -- An instruction outside the value family is defined as the hole carrying its opcode.
-cil_decoded_method unboxMethod := Method.ofRaw? testProfile testEnvironment [] unboxRaw []
+cil_decoded_method unboxMethod :=
+  Method.ofRaw? testProfile testEnvironment [] (allLive unboxRaw) unboxRaw []
 cil_instruction_equations unboxMethod
 
 /-- info: Tests.DecodedMethod.unboxMethod_instruction1 :
@@ -388,7 +400,8 @@ private def ageRaw : RawMethod :=
 
 -- A field operand equal to a listed constant is written as that constant, as an extraction's
 -- literal names it, so the shape facts stated about the constant apply to the decoded method.
-cil_decoded_method ageMethod [ageField] := Method.ofRaw? testProfile testEnvironment [] ageRaw []
+cil_decoded_method ageMethod [ageField] :=
+  Method.ofRaw? testProfile testEnvironment [] (allLive ageRaw) ageRaw []
 cil_instruction_equations ageMethod
 
 /-- info: Tests.DecodedMethod.ageMethod_instruction1 :
@@ -403,20 +416,20 @@ def weightField : FieldRef := { ageField with index := 1 }
   Tests.DecodedMethod.weightField -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method weightMethod [weightField] :=
-  Method.ofRaw? testProfile testEnvironment [] ageRaw []
+  Method.ofRaw? testProfile testEnvironment [] (allLive ageRaw) ageRaw []
 
 -- A body naming an undeclared argument defines nothing.
 /-- error: cil_decoded_method: the decoder gives no method
-  Method.ofRaw? testProfile testEnvironment [] (argumentRaw 14 1) [] -/
+  Method.ofRaw? testProfile testEnvironment [] [true, true, true] (argumentRaw 14 1) [] -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method undeclaredMethod :=
-  Method.ofRaw? testProfile testEnvironment [] (argumentRaw 0x0E 1) []
+  Method.ofRaw? testProfile testEnvironment [] [true, true, true] (argumentRaw 0x0E 1) []
 
 -- A decoder with a hole is not evaluated.
 /-- error: cil_decoded_method: the decoder must be a closed term
-  Method.ofRaw? ?m.1 testEnvironment [] sumRaw [] -/
+  Method.ofRaw? ?m.1 testEnvironment [] (allLive sumRaw) sumRaw [] -/
 #guard_msgs (whitespace := lax) in
-cil_decoded_method openMethod := Method.ofRaw? _ testEnvironment [] sumRaw []
+cil_decoded_method openMethod := Method.ofRaw? _ testEnvironment [] (allLive sumRaw) sumRaw []
 
 /-- A number the kernel cannot reduce; compiled code evaluates it to its default. -/
 opaque stuckIndex : Nat
@@ -451,7 +464,8 @@ private def countdownRaw : RawMethod :=
       instr 10 0x2A] with
     parameters := [uint32], returnType := uint32 }
 
-cil_decoded_method countdownMethod := Method.ofRaw? testProfile testEnvironment [] countdownRaw []
+cil_decoded_method countdownMethod :=
+  Method.ofRaw? testProfile testEnvironment [] (allLive countdownRaw) countdownRaw []
 cil_instruction_equations countdownMethod
 cil_resolution_facts countdownMethod
 
@@ -491,7 +505,7 @@ private def callerRaw : RawMethod :=
 
 -- The bytes name the callee's token; the program index of `summingRaw`, 1, is the link at pc 2.
 cil_decoded_method callerMethod :=
-  Method.ofRaw? testProfile testEnvironment [(2, .direct 1)] callerRaw []
+  Method.ofRaw? testProfile testEnvironment [(2, .direct 1)] (allLive callerRaw) callerRaw []
 cil_instruction_equations callerMethod
 cil_resolution_facts callerMethod
 
@@ -543,7 +557,7 @@ private def aggregateLocalRaw : RawMethod :=
   method 8 true [.aggregate "T::Word" 0] [instr 0 0x2A]
 
 cil_decoded_method aggregateLocalMethod :=
-  Method.ofRaw? testProfile wordEnvironment [] aggregateLocalRaw []
+  Method.ofRaw? testProfile wordEnvironment [] (allLive aggregateLocalRaw) aggregateLocalRaw []
 
 -- A zero-initialized struct local is written as an extraction's literal writes it, so a proof's
 -- hypothesis about making that local matches the goal frame entry leaves.

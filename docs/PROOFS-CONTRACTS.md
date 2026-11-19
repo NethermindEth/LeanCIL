@@ -1230,8 +1230,8 @@ summary proved there binds wherever those methods appear:
   `RelocatesInto lib program` at the indices, with `root` first.
 - `Program.closureEvidence` reads the closure's records from the program's, with their links
   renumbered; `Program.closureEvidence_decodes` says they decode to `lib` when the program's
-  records decode to `program`. `Method.ofBody?_relocate` makes this hold: decoding never reads
-  the links, so records with relocated links decode to the relocated methods.
+  records decode to `program`. Relocation preserves the reachability mask and the set of pcs
+  occupied by links. `Method.ofBody?_relocate` therefore applies to the renumbered records.
 - `MethodContract.Holds.restrict` carries a contract proved in `program` to the closure, where
   `DecodedSummary.of_decoded` binds it to the closure's record.
 - `RelocatesInto.of_decoded` places `lib` in a target program whose records decode, at the

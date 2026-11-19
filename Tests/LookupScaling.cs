@@ -1130,7 +1130,7 @@ void MethodDecodeCosts()
                 locals := List.replicate 4 uint32, initLocals := true,
                 maxStack := 8, genericParameters := [], code := raw }
             #kernel_cost "decoded method {{instructions}}"
-              (Method.ofRaw? .scalar {} [] source []).any (fun method =>
+              (Method.ofRaw? .scalar {} [] (List.replicate {{instructions}} true) source []).any (fun method =>
                 method.code.length == {{instructions}} &&
                   (method.code.zip code).all (fun pair => pair.1.sameValue pair.2) &&
                   method.locals == List.replicate 4 (.i32 0) && method.parameterHomes.isEmpty &&
@@ -1198,7 +1198,8 @@ void DecodedDefinitionCosts()
                 maxStack := 8, genericParameters := [],
                 code := (List.range {{instructions / SegmentLength}}).flatMap segment }
             #command_cost "decoded definition {{instructions}}"
-              cil_decoded_method method := Method.ofRaw? profile environment [] source []
+              cil_decoded_method method :=
+                Method.ofRaw? profile environment [] (List.replicate {{instructions}} true) source []
             end DecodedDefinitionCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
@@ -1250,8 +1251,8 @@ void DecodedProgramCosts()
             variable (profile : FeatureProfile) (environment : LayoutEnvironment)
             /-- The pinned body bytes of `item` decode to `method`. -/
             abbrev Decodes (item : MethodEvidence) (method : CIL.Method) : Prop :=
-              Method.ofBody? profile environment item.links item.body item.original item.arguments =
-                some method
+              Method.ofBody? profile environment item.links item.reachable item.body item.original
+                item.arguments = some method
             #command_cost "decoded program {{records}}"
               theorem decoded ({{items}} : MethodEvidence) ({{methods}} : CIL.Method)
             {{facts}} :

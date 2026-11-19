@@ -256,9 +256,9 @@ whatever the entries' status. Each entry has one status:
 An admitted entry lists its extracted methods in `decodedMethods`, those the extraction defines
 from their decoder, and in `literalMethods`, those it writes as literals. Each literal method
 gives the IL offset and opcode of its first pc that keeps the literal, the refusal (`hole` for an
-opcode the decoder does not decode, `unreachablePc` for a pc the reachability certificate rules
-out, `translated` for a `call` the extraction translates to another instruction than a plain
-call, such as a runtime model or a feature constant) and, for a hole, the opcode's family.
+unsupported live opcode, or `translated` for a live call or construction whose translation differs
+from the decoder's instruction) and, for a hole, the opcode's family. Dead pcs decode to holes
+carrying their raw opcodes.
 
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source

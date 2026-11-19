@@ -217,6 +217,20 @@ foreach (var name in new[] { "AddCounted", "XorPlain" })
     evidence.Add(proof, "PASS static interface dispatch: " + name);
 }
 
+static void CheckPruning(string proof, bool expected)
+{
+    var pruned = expected ? "true" : "false";
+    File.AppendAllText(proof, $$"""
+
+        /-- Whether the extracted program contains a hole under this profile. -/
+        theorem flag_pruning :
+            (Extracted.program.any fun method =>
+              method.code.any fun op => op matches .unadmitted _) = {{pruned}} := by decide +kernel
+        #print axioms flag_pruning
+
+        """);
+}
+
 // A flag getter whose body is a constant return prunes the block it guards, so the process clock read
 // there is never extracted; results match the runtime, which runs neither read for these flags.
 var constantFlags = staticInterfaces.Assembly.GetType("Examples.ConstantFlags")!;
@@ -225,8 +239,6 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     var output = Path.Combine(root, "Flags-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstantFlags::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (!source.Contains("  .unadmitted ", StringComparison.Ordinal))
-        throw new Exception("Constant flag block was not pruned: " + name);
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
         .Select(input => (input, result: (ulong)constantFlags.GetMethod(name)!.Invoke(null, [input])!))
         .Select(pair => $"(CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i64 {pair.input})] " +
@@ -234,6 +246,7 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     var proof = Path.Combine(root, "Flags-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    CheckPruning(proof, true);
     evidence.Add(proof, "PASS constant flag pruning: " + name);
 }
 
@@ -258,9 +271,6 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{type}::{name}(ulong)", output,
         .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (pruned is bool expected && expected !=
-        source.Contains("  .unadmitted ", StringComparison.Ordinal))
-        throw new Exception("Unexpected flag pruning: " + name);
     if (name == "WidthNarrow") widthNarrow = source;
     var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
@@ -270,6 +280,7 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
     var proof = Path.Combine(root, type + "-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    if (pruned is bool expected) CheckPruning(proof, expected);
     evidence.Add(proof, $"PASS {type}: {name}");
 }
 
@@ -467,9 +478,6 @@ foreach (var (owner, name) in new[]
     var output = Path.Combine(root, "MostSpecific-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{owner}::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (name == "TraceQuiet" &&
-        !source.Contains("  .unadmitted ", StringComparison.Ordinal))
-        throw new Exception("Derived constant flag block was not pruned: " + name);
     mostSpecificSources[name] = source;
     var method = examples.GetType("Examples." + owner)!.GetMethod(name)!;
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
@@ -479,6 +487,7 @@ foreach (var (owner, name) in new[]
     var proof = Path.Combine(root, "MostSpecific-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem most_specific_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms most_specific_result\n");
+    if (name == "TraceQuiet") CheckPruning(proof, true);
     evidence.Add(proof, "PASS most specific interface body: " + name);
 }
 

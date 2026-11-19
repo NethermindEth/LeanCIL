@@ -6,7 +6,7 @@ import CIL.SymbolicExecution
 # Methods defined by evaluating the decoder
 
 `cil_decoded_method name := decoder` evaluates a closed `Option CIL.Method`, such as
-`Method.ofClosed? profile environment links closed storage`, defines `name` as the method it gives
+`Method.ofClosed? profile environment links reachable closed storage`, defines `name` as its result
 and adds `name_decoder_eq : decoder = some name`, which the kernel checks by evaluating the
 decoder. Compiled code computes the value, which is written as constructors over numerals, so
 the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`, ... read as
@@ -170,13 +170,14 @@ opaque evaluateField (field : Expr) : MetaM Extraction.FieldRef
 private initialize layoutIdentityCache : EnvExtension (NameMap (Std.HashMap Expr Expr)) ←
   registerEnvExtension (pure {}) (asyncMode := .local)
 
-/-- The raw layout expressions for identity strings used by a decoded constrained call.
-    Reusing the expressions lets the kernel compare aggregate receivers by their source terms. -/
-private def constrainedLayoutIdentities (decoder : Expr) (method : Method) :
+/-- Raw identity expressions for methods with a constrained call or an unreachable site.
+    The kernel compares aggregate types by the same terms as the raw metadata. -/
+private def decodedLayoutIdentities (decoder : Expr) (method : Method) :
     MetaM (Std.HashMap Expr Expr) := do
-  let_expr CIL.Method.ofClosed? _ environment _ _ _ := decoder | return {}
+  let_expr CIL.Method.ofClosed? _ environment _ _ _ _ := decoder | return {}
   let .const name _ := environment | return {}
   unless method.code.any (fun
+      | .unadmitted _ => true
       | .call _ prefixes => prefixes.constrained.isSome
       | _ => false) do return {}
   if let some identities := (layoutIdentityCache.getState (← getEnv)).find? name then
@@ -259,7 +260,7 @@ def proveByReduction (name : Name) (doc : String) (statement : Expr) : MetaM Uni
 /-- The decoder's constant arguments and its declared signature with the raw parameter types. -/
 private def decoderFields (decoder : Expr) : MetaM (Array Expr) := do
   let inputs := decoder.getAppArgs.filter (·.isConst)
-  let_expr Method.ofClosed? _ _ _ closed _ := decoder | return inputs
+  let_expr Method.ofClosed? _ _ _ _ closed _ := decoder | return inputs
   let signature ← kernelWhnf (mkApp (mkConst ``DeclaredSignature.ofRaw) closed)
   let fields ← signature.getAppArgs.mapM kernelWhnf
   return inputs.push (mkAppN signature.getAppFn fields)
@@ -307,7 +308,7 @@ elab_rules : command
       fieldNames := fieldNames.push fieldName
     let some method ← evaluate decoder
       | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
-    let identities ← constrainedLayoutIdentities decoder method
+    let identities ← decodedLayoutIdentities decoder method
     let named (term : Expr) : Option Expr :=
       if passed.contains term then some term else fieldConstants.get? term <|> identities.get? term
     let written ← literal named methodType (← methodTerm passed method)

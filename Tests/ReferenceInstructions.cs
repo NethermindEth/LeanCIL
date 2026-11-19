@@ -78,7 +78,7 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         }
         il.Emit(OpCodes.Ret);
     }
-    // A pc the reachability certificate rules out keeps the literal that the forged additions below edit.
+    // The commuted reference fixture also covers an addition in a method with a dead tail.
     foreach (var (name, native, pointer) in additions)
         AddOffset(name, native ? module.TypeSystem.IntPtr : module.TypeSystem.Int32,
             pointer, OpCodes.Add, deadTail: name == "Offset32Reference");
@@ -205,17 +205,16 @@ foreach (var (name, native, pointer) in additions)
     {
         var narrowed = NarrowEvidence(source, "method0_scalars_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
-        const string target = "  .add,";
         foreach (var (mutation, replacement) in new[]
         {
             ("lowered", ".memory (.add 1 true)"), ("subtract", ".sub"),
             ("stride", ".memory (.add 2 true)"), ("unsigned", ".memory (.add 1 false)")
         })
         {
-            if (!narrowed.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing commuted add target");
-            var forged = Path.Combine(root, "ForgedAdd-" + mutation + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(target, "  " + replacement + ",", StringComparison.Ordinal));
-            rejected.Add(forged, "PASS independent forged commuted addition: " + mutation, "ScalarFlowValid");
+            var forged = Path.Combine(root, $"ForgedAdd-{mutation}.lean");
+            var update = $$"""code := method.code.map fun op => match op with | .add => {{replacement}} | _ => op""";
+            File.WriteAllText(forged, ForgeDecodedMethod(narrowed, 0, update));
+            rejected.Add(forged, $"PASS independent forged commuted addition: {mutation}", "ScalarFlowValid");
         }
     }
     evidence.Add(proof, "PASS runtime, certificate and commuted reference addition: " + name);

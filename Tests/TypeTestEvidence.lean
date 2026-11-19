@@ -248,9 +248,11 @@ theorem type_test_feature_opcodes :
 
 /-- Identical equality calls decode to the value of their two preceding type tokens. -/
 theorem decodedTypeEquality :
-    ((Method.ofRaw? .scalar {} [] (raw (test word word)) []).bind (·.code[4]?)) =
+    ((Method.ofRaw? .scalar {} [] (List.replicate 5 true)
+        (raw (test word word)) []).bind (·.code[4]?)) =
       some (.ldc_i4 1) ∧
-    ((Method.ofRaw? .scalar {} [] (raw (test word intType)) []).bind (·.code[4]?)) =
+    ((Method.ofRaw? .scalar {} [] (List.replicate 5 true)
+        (raw (test word intType)) []).bind (·.code[4]?)) =
       some (.ldc_i4 0) := ⟨rfl, rfl⟩
 
 #print axioms decodedTypeEquality

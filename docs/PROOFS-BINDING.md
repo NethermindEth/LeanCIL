@@ -741,14 +741,14 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
 method that `decoder`, a closed `Option Method` term such as `Method.ofClosed? profile environment
-links closed storage`, gives. The decoder takes the link table as given: a `call` and a
+links reachable closed storage`, gives. The decoder takes the link table as given: a `call` and a
 `newobj` name their method's metadata, and the table states the method index, and for a
 construction the allocation, each enters, which `Extraction.ManagedCallsValid` checks against the
 raw site. Compiled code evaluates the decoder, and the command writes the result as constructors
 over numerals, except that a field whose type is that of a constant passed to the decoder, such as
 the profile, the environment and the link table, is written as that constant, and a
 zero-initialized struct local is written as `.aggregate (List.replicate size 0)`, the term an
-extraction's literal and `make_fitting_local` hypotheses name. In a method with a constrained call,
+extraction's literal and `make_fitting_local` hypotheses name. In a method with a constrained call or a dead site,
 the command writes aggregate identities with the expressions from the environment's raw layouts.
 The kernel then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
@@ -766,16 +766,14 @@ errors, so a file builds only when the kernel confirms what compiled code comput
 `FieldRef` constant as that constant, so the facts `cil_field_shape` states about the constant
 apply to the method; a listed constant that names no field operand is an error.
 
-The extractor defines a method this way when every pc is reachable under the profile, each
-instruction decodes, and each call or construction has the operation its decoder gives.
-A constrained prefix decodes with its adjacent instance `callvirt` or static `call`. A method
-with a pc the reachability certificate rules out keeps its literal, whose `.unadmitted` hole at
-that pc the feature check requires. Its
-`Extracted.lean` then states the method as
+The extractor defines a method this way when every live instruction decodes and each live call
+or construction has the operation its decoder gives. A constrained prefix decodes with its
+adjacent instance `callvirt` or static `call`. Each dead pc carries `.unadmitted` with its raw
+opcode. Argument homes use the same certified mask. The generated definition has this form
 
 ```text
-cil_decoded_method method0 := Method.ofClosed? profile environment method0Links method0Closed
-  method0RawArguments
+cil_decoded_method method0 := Method.ofClosed? profile environment method0Links method0Reachable
+  method0Closed method0RawArguments
 ```
 
 in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when

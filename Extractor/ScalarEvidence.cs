@@ -34,7 +34,8 @@ internal static class ScalarEvidence
         var flag = LeanText.Bool(decoded);
         var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code {flag}";
         var scalar = $"Extraction.ScalarFlowValid rawLayouts.toArray {flow}";
-        var code = $"Extraction.methodCode {method}.profile {method}.environment {method}.links {method}Closed";
+        var context = $"{method}.profile {method}.environment {method}.links";
+        var code = $"Extraction.methodCode {context} {method}Reachable {method}Closed";
         var binding = $"{flag} = true -> {method}.code = {code}";
         var witness = decoded ? $"fun _ => {method}_decoded_code" : "fun h => False.elim (Bool.false_ne_true h)";
         var scalarEvidence = $"And ({scalar}) ({binding})";

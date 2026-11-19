@@ -21,7 +21,8 @@ open Tests.DecodedMethod
 /-- The adder's pinned bytes, `12 02 03 58 2A` against its metadata. -/
 def addBody : BodyEvidence := (encodeBody pin addArgumentsRaw).get (by decide +kernel)
 
-cil_decoded_method addMethod := Method.ofRaw? testProfile testEnvironment [] addArgumentsRaw []
+cil_decoded_method addMethod :=
+  Method.ofRaw? testProfile testEnvironment [] (allLive addArgumentsRaw) addArgumentsRaw []
 cil_instruction_equations addMethod
 cil_resolution_facts addMethod
 
@@ -40,7 +41,7 @@ def callerRaw : RawMethod :=
     token := tokens.main + 1, parameters := [uint64, uint64], returnType := uint64 }
 
 cil_decoded_method callerMethod :=
-  Method.ofRaw? testProfile testEnvironment [(2, .direct 1)] callerRaw []
+  Method.ofRaw? testProfile testEnvironment [(2, .direct 1)] (allLive callerRaw) callerRaw []
 cil_instruction_equations callerMethod
 cil_resolution_facts callerMethod
 
@@ -57,7 +58,8 @@ def evidence : List MethodEvidence :=
 
 /-- The adder's bytes decode to the adder. -/
 theorem add_body_decodes :
-    Method.ofBody? testProfile testEnvironment [] addBody addArgumentsRaw [] = some addMethod := by
+    Method.ofBody? testProfile testEnvironment [] (allLive addArgumentsRaw)
+      addBody addArgumentsRaw [] = some addMethod := by
   cil_kernel_rfl
 #print axioms add_body_decodes
 

@@ -148,7 +148,7 @@ theorem null_throw_entry :
 
 /-- A direct edge or switch arm into the throw disables just the entered fold. -/
 theorem decoded_throw_entry :
-    let decode := fun edge => (Method.ofRaw? .scalar {} [] (raw
+    let decode := fun edge => (Method.ofRaw? .scalar {} [] (List.replicate 8 true) (raw
       [i 2, i 45 (.target 4), i 20, edge, i 115 divide, i 122, i 115 divide, i 122]) []).map
         fun body => (body.code[5]?, body.code[7]?)
     let raised := some (Instruction.throw .divideByZero)

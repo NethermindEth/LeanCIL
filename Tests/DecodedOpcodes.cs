@@ -50,8 +50,7 @@ File.WriteAllText(path, $$"""
 Run(["lake", "env", "lean", path], cwd: FixturePackage());
 Console.WriteLine($"PASS the extractor's {table.Length} decoded opcodes are those of Instruction.valueOpcode");
 
-// The decoder reads every pc, but the feature check requires a hole at each pc the reachability certificate rules
-// out, so a body of decoded opcodes with an unreachable tail must keep its literal and still build.
+// A dead tail includes a raw prefix and virtual call. Both retain their opcode at the original pc.
 var deadDirectory = Path.Combine(directory, "UnreachableTail");
 Directory.CreateDirectory(deadDirectory);
 var deadAssembly = Path.Combine(deadDirectory, "Examples.dll");
@@ -72,24 +71,125 @@ using (var module = Mono.Cecil.ModuleDefinition.ReadModule(At("Examples/Assembly
     il.Emit(OpCodes.Tail);
     il.Emit(OpCodes.Callvirt, hash);
     il.Emit(OpCodes.Ret);
+    var frame = new MethodDefinition("Frame", Mono.Cecil.MethodAttributes.Public |
+        Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+    owner.Methods.Add(frame);
+    var array = new ParameterDefinition(new ArrayType(module.TypeSystem.Int32));
+    frame.Parameters.Add(array);
+    var vector = new MethodDefinition("VectorLocal", Mono.Cecil.MethodAttributes.Public |
+        Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+    owner.Methods.Add(vector);
+    var unsafeReturn = module.GetType("Examples.DivisionIntrinsics").Methods
+        .Single(candidate => candidate.Name == "UnsafeReturn");
+    var create = (MethodReference)unsafeReturn.Body.Instructions.Single(op => op.OpCode == OpCodes.Call).Operand;
+    vector.Body.Variables.Add(new VariableDefinition(unsafeReturn.ReturnType));
+    var constructor = new MethodReference(".ctor", module.TypeSystem.Void, module.TypeSystem.Object)
+        { HasThis = true };
+    var body = frame.Body.GetILProcessor();
+    body.Emit(OpCodes.Ldarg_0);
+    body.Emit(OpCodes.Starg_S, array);
+    body.Emit(OpCodes.Call, vector);
+    body.Emit(OpCodes.Ret);
+    body.Emit(OpCodes.Ldarga_S, array);
+    body.Emit(OpCodes.Pop);
+    body.Emit(OpCodes.Ret);
+    body = vector.Body.GetILProcessor();
+    body.Emit(OpCodes.Ret);
+    body.Emit(OpCodes.Ldc_I8, 0L);
+    body.Emit(OpCodes.Call, create);
+    body.Emit(OpCodes.Pop);
+    body.Emit(OpCodes.Newobj, constructor);
+    body.Emit(OpCodes.Pop);
+    body.Emit(OpCodes.Ret);
     module.Write(deadAssembly);
 }
 var deadOutput = Path.Combine(deadDirectory, "Extraction");
 Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::One()", deadOutput]);
 var deadSource = Path.Combine(deadOutput, "Extracted.lean");
 var deadText = File.ReadAllText(deadSource).ReplaceLineEndings("\n");
-string[] literal = [.. ExtractedInstructions(deadText).Where(instruction => instruction.Method == 0)
-    .Select(instruction => instruction.Op)];
-string[] expectedLiteral =
-    [".ldc_i4 1", ".ret", $".unadmitted {OpCodes.Ldc_I4_0.Value}", $".unadmitted {OpCodes.Ret.Value}",
-        $".unadmitted {OpCodes.Ldnull.Value}", $".unadmitted {(ushort)OpCodes.Tail.Value}",
-        $".unadmitted {OpCodes.Callvirt.Value}", $".unadmitted {OpCodes.Ret.Value}"];
-if (IsDecodedMethod(deadText, 0) ||
-    !literal.SequenceEqual(expectedLiteral, StringComparer.Ordinal))
-    throw new InvalidOperationException("A method with an unreachable tail must keep its literal with a hole " +
-        "at each dead pc, found:\n" + string.Join('\n', literal));
+RequireDecoded(deadText, "UnreachableTail::One");
+File.AppendAllText(deadSource, """
+
+    namespace Extracted
+    open CIL CIL.Extraction
+
+    /-- Every excluded instruction retains its raw opcode, including both bytes of the prefix. -/
+    theorem dead_tail : method0.code = [.ldc_i4 1, .ret, .unadmitted 22, .unadmitted 42,
+        .unadmitted 20, .unadmitted 65044, .unadmitted 111, .unadmitted 42] := rfl
+    #print axioms dead_tail
+
+    /-- A mask that excludes the entry instruction. -/
+    def hidden : List Bool := false :: method0Reachable.tail
+    cil_decoded_method forged := Method.ofRaw? profile environment method0Links hidden
+      method0Original method0TypeArgumentsRaw
+
+    /-- The entry state in the certificate requires the first instruction to be live. -/
+    theorem hidden_entry_rejected : Not (FeatureFlowValid rawLayouts.toArray
+        (evidenceConstants methodEvidence) (linkIndex forged) method0Closed profile
+        method0FeatureStates hidden forged.code) := by decide +kernel
+    #print axioms hidden_entry_rejected
+    end Extracted
+
+    """);
 Run(["lake", "env", "lean", deadSource], cwd: FixturePackage());
-Console.WriteLine("PASS a method with an unreachable tail keeps its literal, with holes at its dead pcs, and builds");
+Console.WriteLine("PASS the decoded tail preserves its holes and the feature check rejects a hidden entry");
+
+var frameOutput = Path.Combine(deadDirectory, "Frame");
+Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::Frame(int[])", frameOutput]);
+var framePath = Path.Combine(frameOutput, "Extracted.lean");
+var frames = File.ReadAllText(framePath);
+RequireDecoded(frames, "UnreachableTail::Frame");
+RequireDecoded(frames, "UnreachableTail::VectorLocal", 1);
+File.AppendAllText(framePath, """
+
+    namespace Extracted
+    open CIL CIL.Extraction
+
+    /-- The live store homes the array. Its dead address and the dead vector call are holes. -/
+    theorem dead_frame :
+        (method0.parameterHomes, method1.localKinds, method1.opaqueVectorLocals,
+          method0.code[4]?, method1.code[2]?, method1.code[4]?) =
+        ([(0, .array .signed32)], [.vector128], [], some (.unadmitted 15),
+          some (.unadmitted 40), some (.unadmitted 115)) := rfl
+    #print axioms dead_frame
+
+    /-- A link at the dead runtime call or the dead construction fails the call check. -/
+    theorem dead_links :
+        let fits := fun (method : Method) => ManagedCallsValid specializedMethods imports
+          (callModelled method) method1Closed method1Reachable method
+        And (fits method1) (And (Not (fits { method1 with links := [(2, .direct 999)] }))
+          (Not (fits { method1 with links := [(4, .direct 0)] }))) := by decide +kernel
+    #print axioms dead_links
+    end Extracted
+
+    """);
+Run(["lake", "env", "lean", framePath], cwd: FixturePackage());
+Console.WriteLine("PASS dead argument addresses, vector calls and constructions preserve the frame and reject links");
+
+var examples = At("Examples/Assembly/bin/Examples.dll");
+var getter = Path.Combine(directory, "Both");
+var trace = Path.Combine(directory, "Trace");
+var shared = Path.Combine(directory, "Templates");
+Run(["dotnet", ExtractorPath, "extract", examples, "ComputedFlags::get_Both()", getter]);
+Run(["dotnet", ExtractorPath, "extract", examples, "ComputedFlags::TraceGated(ulong)", trace]);
+RequireDecoded(File.ReadAllText(Path.Combine(getter, "Extracted.lean")), "ComputedFlags::get_Both");
+RequireDecoded(File.ReadAllText(Path.Combine(trace, "Extracted.lean")), "ComputedFlags::TraceGated");
+Run(["dotnet", ExtractorPath, "templates", shared, getter]);
+var searchPath = string.Join(Path.PathSeparator, getter, shared, FixtureLeanPath());
+foreach (var (root, name) in new[] { (getter, "Extracted"), (shared, "Templates"), (shared, "TemplateBindings0") })
+{
+    var result = Run(["lean", $"--root={root}", "-o", Path.Combine(root, $"{name}.olean"),
+        Path.Combine(root, $"{name}.lean")], leanPath: searchPath);
+    if (result.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException($"Admitted declaration in {name}.");
+}
+Run(["lake", "env", "lean", Path.Combine(trace, "Extracted.lean")], cwd: FixturePackage());
+Console.WriteLine("PASS get_Both binds to its template and TraceGated's frame checks");
+
+static void RequireDecoded(string source, string name, int number = 0)
+{
+    if (!IsDecodedMethod(source, number)) throw new InvalidOperationException($"{name} must decode.");
+}
 
 static void CheckPrefixes()
 {

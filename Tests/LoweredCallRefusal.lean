@@ -26,7 +26,8 @@ private def withoutLink (opcode : Nat) (member : MetadataName) (name : String) :
   let requirement := fun link => runtimeCatalog.callRequirement
     (LayoutEnvironment.callLayouts {}) .scalar link none raw
   return (requirement (some (.direct 0)) matches .linked) &&
-    decide ((Method.ofRaw? .scalar {} [] source []).map Method.code = some [.unadmitted opcode]) &&
+    decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
+      some [.unadmitted opcode]) &&
     (requirement none).accepts false (.unadmitted opcode) &&
     !(requirement none).accepts true (.unadmitted opcode)
 
@@ -132,7 +133,7 @@ theorem sumDeclaration :
 /-- The empty layout environment of the method with an unknown call. -/
 private def emptyEnvironment : LayoutEnvironment := {}
 
-cil_decoded_method unknownMethod := Method.ofRaw? .scalar emptyEnvironment []
+cil_decoded_method unknownMethod := Method.ofRaw? .scalar emptyEnvironment [] [true]
   (body 40 (.atom "Fixture" "Fixture") name!"Missing" "Missing") []
 
 /-- The generated code contains exactly the hole for the unresolved member. -/
@@ -153,7 +154,8 @@ theorem constrainedLinkCode :
     let receiver := TypeExpr.atom runtimeScope "System.Int32"
     let source := { body 111 constrainedSlot.declaringType name!"Read" "Read" with
       code := [⟨0, 0xFE16, .type receiver⟩, ⟨6, 111, .call constrainedSlot⟩] }
-    let decode := fun links => (Method.ofRaw? .scalar {} links source []).map Method.code
+    let decode := fun links =>
+      (Method.ofRaw? .scalar {} links [true, true] source []).map Method.code
     decode [(1, .direct 1)] = some [.nop, .call constrainedSlot.method
       { constrained := some receiver }] ∧ decode [] = some [.nop, .unadmitted 111] := by
   exact ⟨rfl, rfl⟩

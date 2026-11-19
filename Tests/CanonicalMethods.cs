@@ -78,7 +78,6 @@ string Reason(JsonElement refusal) => refusal.GetProperty("refusal").GetString()
 {
     "hole" => "hole: " + refusal.GetProperty("family").GetString(),
     "translated" => "translated call or construction",
-    "unreachablePc" => "unreachable pc",
     var kind => throw new InvalidDataException("Unknown refusal kind: " + kind)
 };
 string Opcodes(IEnumerable<JsonElement> refusals) => string.Join(", ", refusals

@@ -6,7 +6,8 @@ import CIL.Safety.MethodContract
 
 A `DecodedSummary` is a method contract proved for one index of a program together with the
 evidence record that names the method there: the pinned assembly, the metadata token and the
-type arguments, and the body bytes that decode to the method at that index. `BodiesDecode`
+type arguments, and the body bytes, links and reachability mask that decode to that method.
+`BodiesDecode`
 states, record by record, that the evidence decodes to the program, and
 `decodedProgram?_eq_some` turns it into the decoded program the summary ranges over. At a call
 site, `DecodedSummary.site` shows that the summary at the index the call's link enters is
@@ -16,8 +17,8 @@ for the method the site's metadata names.
 namespace CIL.Safety
 open CIL.Extraction
 
-/-- Each evidence record's pinned body bytes, with the record's links, decode to the method at
-    the same index of `program`, and the two lists have the same length. -/
+/-- Each record's pinned body bytes, links and reachability mask decode to the method at the
+    same index of `program`, and the two lists have the same length. -/
 inductive BodiesDecode (profile : FeatureProfile) (environment : LayoutEnvironment) :
     List MethodEvidence → CIL.Program → Prop
   /-- No record and no method. -/
@@ -25,8 +26,8 @@ inductive BodiesDecode (profile : FeatureProfile) (environment : LayoutEnvironme
   /-- The first record decodes to the first method, and the rest to the rest. -/
   | cons {item : MethodEvidence} {method : CIL.Method} {items : List MethodEvidence}
       {methods : CIL.Program}
-      (decodes : Method.ofBody? profile environment item.links item.body item.original
-        item.arguments = some method)
+      (decodes : Method.ofBody? profile environment item.links item.reachable item.body
+        item.original item.arguments = some method)
       (rest : BodiesDecode profile environment items methods) :
       BodiesDecode profile environment (item :: items) (method :: methods)
 
@@ -49,8 +50,8 @@ theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : Layout
       {item : MethodEvidence},
       decodedProgram? profile environment evidence = some program →
       evidence[index]? = some item →
-        Method.ofBody? profile environment item.links item.body item.original item.arguments =
-          program[index]?
+        Method.ofBody? profile environment item.links item.reachable item.body item.original
+          item.arguments = program[index]?
   | [], _, _, _, _, found => by simp at found
   | head :: items, program, index, item, decoded, found => by
     unfold decodedProgram? at decoded
@@ -77,8 +78,8 @@ def DecodedAt (program : CIL.Program) (evidence : List MethodEvidence)
   ∃ item, evidence[index]? = some item ∧ item.assembly = pin ∧ item.original.token = token ∧
     item.arguments = arguments ∧
     instantiateMethod environment.rawLayouts item.original arguments = some item.closed ∧
-    Method.ofBody? profile environment item.links item.body item.original item.arguments =
-      program[index]?
+    Method.ofBody? profile environment item.links item.reachable item.body item.original
+      item.arguments = program[index]?
 
 /-- `contract` holds for the method at `index`, and `bound` names that method by pinned
     assembly, metadata token and type arguments and ties it to the bytes it decodes from.

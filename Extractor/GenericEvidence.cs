@@ -563,11 +563,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Conv_Ovf_U1_Un, Code.Conv_Ovf_U2_Un, Code.Conv_Ovf_U4_Un, Code.Conv_Ovf_U8_Un, Code.Conv_Ovf_U_Un
     }.ToFrozenSet();
 
-    /// <summary>What keeps a method's literal at one pc: a pc the reachability certificate rules out, since a
-    /// decoded instruction there fails the feature check, an opcode `Method.ofRaw?` writes as a hole, or a call or
-    /// construction the extraction translates to another instruction than the decoder gives: a `call` that is not
-    /// a plain call, or a `newobj` of a runtime method the literal emits as its model.</summary>
-    internal enum RefusalKind { UnreachablePc, Hole, Translated }
+    /// <summary>A live instruction requires a literal when its opcode has no decoder or its
+    /// translation differs from its decoded instruction.</summary>
+    internal enum RefusalKind { Hole, Translated }
 
     /// <summary>The part of the model that an opcode outside <see cref="DecodedOpcodes"/> needs before it
     /// decodes.</summary>
@@ -579,15 +577,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// <summary>The first pc, in body order, that keeps a method's literal definition, with its opcode.</summary>
     internal sealed record DecodeRefusal(int Offset, OpCode Opcode, RefusalKind Kind)
     {
-        /// <summary>The family of a hole's opcode; an unreachable pc has none.</summary>
+        /// <summary>The opcode family of a live hole.</summary>
         internal HoleFamily? Family => Kind == RefusalKind.Hole ? FamilyOf(Opcode.Code) : null;
     }
 
     /// <summary>
-    /// Why the extraction does not define `method` from its decoder, or null when it does: `Method.ofRaw?` writes no
-    /// hole at any pc, every pc is reachable, and each call or construction has the operation its decoder gives.
-    /// An unprefixed callvirt has no decoding. A wrong null fails
-    /// the build at the method's `cil_decoded_method` definition or its call check. One pass over the body.
+    /// The first live instruction whose opcode or translation requires a literal method.
+    /// Both representations emit the raw opcode as a hole at every dead site.
     /// </summary>
     internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
         IReadOnlyList<Operation> operations)
@@ -596,8 +592,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         for (var pc = 0; pc < instructions.Count; pc++)
         {
             var instruction = instructions[pc];
-            if (!reachable.Contains(instruction))
-                return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
+            if (!reachable.Contains(instruction)) continue;
             var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
             if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction) ||
                 (instruction.OpCode.Code == Code.Callvirt && !constrained))

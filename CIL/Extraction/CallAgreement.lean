@@ -149,9 +149,11 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
 /-- A call's raw claim determines its required instruction. Occupied pcs keep the linked
     prefixes for the managed-call checks. An unlinked lowering cannot discard a prefix. -/
 def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
-    (occupied : Std.TreeSet Nat) (roles : Array (Option FoldRole)) : CallDecoder :=
+    (occupied : Std.TreeSet Nat) (roles : Array (Option FoldRole)) (reachable : Array Bool) :
+    CallDecoder :=
   let localKind := fun type => (environment.storage type).bind (storageKind environment.layouts)
-  Instruction.withCallDecoder roles localKind fun pc previous raw =>
+  let live := fun pc => reachable[pc]?.getD false
+  Instruction.withCallDecoder roles live localKind fun pc previous raw =>
     if occupied.contains pc then
       (runtimeCatalog.linkedRequirement environment.toLayoutEnvironment profile raw).decode
         (fun _ => Instruction.ofRaw previous raw)
@@ -161,10 +163,10 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
 
 /-- The closed body's instruction list, including call claims at its occupied and unlinked pcs. -/
 def methodCode (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (links : List (Nat × Link)) (closed : RawMethod) : List Instruction :=
+    (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod) : List Instruction :=
   let occupied := Std.TreeSet.ofList (links.map Prod.fst) compare
   let roles := (foldRoles closed.locals closed.code).toArray
   Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
-    occupied roles)
+    occupied roles reachable.toArray)
 
 end CIL.Extraction

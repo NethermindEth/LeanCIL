@@ -265,9 +265,10 @@ inductive FoldRole where
 
 /-- Calls use their site requirement. Other instructions in a fold emit their raw role. -/
 def Instruction.withCallDecoder (roles : Array (Option FoldRole))
-    (localKind : TypeExpr → Option LocalKind) (decodeCall : CallDecoder) :
+    (live : Nat → Bool) (localKind : TypeExpr → Option LocalKind) (decodeCall : CallDecoder) :
     CallDecoder := fun pc previous raw =>
-  if methodTokenCall raw.opcode then decodeCall pc previous raw
+  if !live pc then .unadmitted raw.opcode
+  else if methodTokenCall raw.opcode then decodeCall pc previous raw
   else match roles[pc]?.join with
     | some .head | some .interior => .nop
     | some (.result value) => .ldc_i4 (if value then 1 else 0)

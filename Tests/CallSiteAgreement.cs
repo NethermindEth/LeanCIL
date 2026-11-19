@@ -140,7 +140,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                 let code := {{method}}Closed.code.set {{Pc}} changed
                 let changedRole := (foldRoles {{method}}Closed.locals code)[{{Pc}}]?.join
                 let source := { {{method}}Closed with code }
-                let decoded := Method.ofRaw? profile environment {{method}}Links source []
+                let decoded := Method.ofRaw? profile environment {{method}}Links {{method}}Reachable source []
                 And (runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =
                   .hole raw.opcode) (decoded.bind (fun body => body.code[{{Pc}}]?) =
                     some (.unadmitted raw.opcode)) := by

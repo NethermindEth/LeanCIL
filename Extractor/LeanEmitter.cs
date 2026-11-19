@@ -294,8 +294,6 @@ internal static class LeanEmitter
                     ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
                     var operation => operation
                 };
-            if (collectTemplates)
-                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);
@@ -309,12 +307,12 @@ internal static class LeanEmitter
                         "A field access has no field operand."))).Distinct());
                 var fields = naming.Length == 0 ? "" : $"[{naming}] ";
                 var method = $"method{n}";
-                var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable}";
+                var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable} {method}Reachable";
                 var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
                 var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
                 const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
                 var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
-                var evidence = $"{method}_specialization_validated profile {linkTable}";
+                var evidence = $"{method}_specialization_validated profile {linkTable} {method}Reachable";
                 var proof = $"Eq.trans ({equality} {environment} {evidence}) {method}_decoder_eq";
                 var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
                 var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
@@ -334,6 +332,9 @@ internal static class LeanEmitter
                     (op is INamedField { Reference: { } field } access
                         ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             }
+            // Both selected forms use these operations, including the raw opcode hole at every dead pc.
+            if (collectTemplates)
+                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
             var layoutCheck = $"{layoutTables} method{n} method{n}LayoutUses";
             lean.AppendLine($"theorem method{n}_layouts_validated : {layoutCheck} := ⟨layouts_validated, {Decide}⟩");

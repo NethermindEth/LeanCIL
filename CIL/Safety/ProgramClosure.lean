@@ -82,16 +82,17 @@ theorem Method.callees_relocate (f : Nat → Nat) (body : Method) :
 
 /-- Relocating the links preserves their occupied pcs, so raw decoding relocates the method. -/
 theorem Method.ofRaw?_relocate (f : Nat → Nat) (profile : FeatureProfile)
-    (environment : LayoutEnvironment) (links : List (Nat × Link)) (source : RawMethod)
-    (arguments : List TypeExpr) :
+    (environment : LayoutEnvironment) (links : List (Nat × Link)) (reachable : List Bool)
+    (source : RawMethod) (arguments : List TypeExpr) :
     Method.ofRaw? profile environment (links.map fun entry => (entry.1, entry.2.relocate f))
-        source arguments =
-      (Method.ofRaw? profile environment links source arguments).map (Method.relocate f) := by
+        reachable source arguments =
+      (Method.ofRaw? profile environment links reachable source arguments).map
+        (Method.relocate f) := by
   have occupied : ((links.map fun entry => (entry.1, entry.2.relocate f)).map Prod.fst) =
       links.map Prod.fst := by simp [List.map_map, Function.comp_def]
   have sameCode (closed : RawMethod) :
-      methodCode profile environment (links.map fun e => (e.1, e.2.relocate f)) closed =
-        methodCode profile environment links closed := by
+      methodCode profile environment (links.map fun e => (e.1, e.2.relocate f)) reachable closed =
+        methodCode profile environment links reachable closed := by
     unfold methodCode
     rw [occupied]
   simp only [Method.ofRaw?, Method.ofClosed?, bind, pure, Option.map_bind]
@@ -106,26 +107,26 @@ theorem Method.ofRaw?_relocate (f : Nat → Nat) (profile : FeatureProfile)
   rw [sameCode]
   generalize (rawPrefixesValid closed.returnType closed.code &&
     argumentInstructionsValid storage
-      (requiredHomeIndices storage (storage.code.map fun _ => true))
-      (storage.code.map fun _ => true) (methodCode profile environment links closed)) = valid
+      (requiredHomeIndices storage reachable)
+      reachable (methodCode profile environment links reachable closed)) = valid
   cases valid <;> rfl
 
 #print axioms Method.ofRaw?_relocate
 
 /-- Bytes decoded with a relocated link table give the relocated method. -/
 theorem Method.ofBody?_relocate (f : Nat → Nat) (profile : FeatureProfile)
-    (environment : LayoutEnvironment) (links : List (Nat × Link)) (body : BodyEvidence)
-    (original : RawMethod) (arguments : List TypeExpr) :
+    (environment : LayoutEnvironment) (links : List (Nat × Link)) (reachable : List Bool)
+    (body : BodyEvidence) (original : RawMethod) (arguments : List TypeExpr) :
     Method.ofBody? profile environment (links.map fun entry => (entry.1, entry.2.relocate f))
-        body original arguments =
-      (Method.ofBody? profile environment links body original arguments).map
+        reachable body original arguments =
+      (Method.ofBody? profile environment links reachable body original arguments).map
         (Method.relocate f) := by
   simp only [Method.ofBody?, bind]
   cases (checkBody body original arguments).toOption with
   | none => rfl
   | some decoded =>
     simp only [Option.bind_some]
-    exact Method.ofRaw?_relocate f profile environment links _ arguments
+    exact Method.ofRaw?_relocate f profile environment links reachable _ arguments
 
 #print axioms Method.ofBody?_relocate
 
@@ -137,11 +138,13 @@ def Extraction.MethodEvidence.relocateLinks (f : Nat → Nat) (item : MethodEvid
 /-- A record with relocated links decodes to the relocated method of the record. -/
 theorem Extraction.MethodEvidence.ofBody?_relocateLinks (f : Nat → Nat) (profile : FeatureProfile)
     (environment : LayoutEnvironment) (item : MethodEvidence) :
-    Method.ofBody? profile environment (item.relocateLinks f).links (item.relocateLinks f).body
+    Method.ofBody? profile environment (item.relocateLinks f).links
+        (item.relocateLinks f).reachable (item.relocateLinks f).body
         (item.relocateLinks f).original (item.relocateLinks f).arguments =
-      (Method.ofBody? profile environment item.links item.body item.original
+      (Method.ofBody? profile environment item.links item.reachable item.body item.original
         item.arguments).map (Method.relocate f) :=
-  Method.ofBody?_relocate f profile environment item.links item.body item.original item.arguments
+  Method.ofBody?_relocate f profile environment item.links item.reachable item.body item.original
+    item.arguments
 
 #print axioms Extraction.MethodEvidence.ofBody?_relocateLinks
 
@@ -494,8 +497,9 @@ theorem RelocatesInto.of_decoded {profile : FeatureProfile} {environment : Layou
     (targetDecoded : decodedProgram? profile environment targetEvidence = some target)
     (same : ∀ i, i < libEvidence.length → ∃ item moved, libEvidence[i]? = some item ∧
       targetEvidence[f i]? = some moved ∧
-      Method.ofBody? profile environment moved.links moved.body moved.original moved.arguments =
-        (Method.ofBody? profile environment item.links item.body item.original
+      Method.ofBody? profile environment moved.links moved.reachable moved.body moved.original
+          moved.arguments =
+        (Method.ofBody? profile environment item.links item.reachable item.body item.original
           item.arguments).map (Method.relocate f)) :
     RelocatesInto lib target f := by
   intro i bound

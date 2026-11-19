@@ -1389,8 +1389,8 @@ private theorem branch_encoding_cases :
 
 example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
     scalarEmissionMatches #[] none none (i 88) [.word64, .word64] .add = true :=
-  valid.instruction_checked (localKind := fun _ => none) (decodeCall := fun _ => Instruction.ofRaw)
-    (pc := 2) (by decide) rfl rfl rfl rfl rfl
+  valid.instruction_checked (live := fun _ => true) (localKind := fun _ => none)
+    (decodeCall := fun _ => Instruction.ofRaw) (pc := 2) (by decide) rfl rfl rfl rfl rfl
 
 #print axioms external_call_validated
 
@@ -1507,7 +1507,8 @@ theorem flagged_addition_valid :
 /-- The call-aware method binding restores the explicit encoding checks at every scalar site. -/
 theorem checked_method_encodings (method : Method) (item : MethodEvidence)
     (valid : ScalarFlowValid #[] item.closed item.featureStates item.scalarStates method.code true)
-    (binding : method.code = methodCode method.profile method.environment method.links item.closed) :
+    (binding : method.code =
+      methodCode method.profile method.environment method.links item.reachable item.closed) :
     ScalarFlowValid #[] item.closed item.featureStates item.scalarStates method.code false :=
   valid.of_decoded binding
 
@@ -1523,8 +1524,11 @@ theorem wrong_decoded_owner_refused (item : MethodEvidence) :
       { addMethod with code := [.ldfld field] } := by
   intro owner source evidence field valid
   have different : [Instruction.ldfld field] ≠
-      methodCode addMethod.profile addMethod.environment addMethod.links source := by
-    decide +kernel
+      methodCode addMethod.profile addMethod.environment addMethod.links
+        item.reachable source := by
+    change [Instruction.ldfld field] ≠ [if !item.reachable.toArray[0]?.getD false then
+      .unadmitted 123 else .ldfld { field with owner := owner }]
+    cases item.reachable.toArray[0]?.getD false <;> decide +kernel
   exact different (valid.decoded_code rfl)
 #print axioms wrong_decoded_owner_refused
 
