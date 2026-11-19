@@ -136,9 +136,8 @@ if (ExtractorHash() != extractorHash)
 
 string Refusal(JsonElement refusal) =>
     $"{refusal.GetProperty("ilOffset").GetInt32()} {refusal.GetProperty("opcode").GetString()} {Reason(refusal)}";
-// SameText keeps its literal for the string literal it loads first; Mutate decodes through an integer indirect load
-// and store.
-const string literalExample = "System.Boolean Examples.Strings::SameText()";
+// The span table needs the static data site of its field token.
+const string literalExample = "System.ReadOnlySpan`1<System.UInt32> Examples.SpanTables::get_Words()";
 const string indirectExample = "System.Void Examples.Arithmetic::Mutate(System.UInt64&)";
 var examplesDecoded = new List<string>();
 foreach (var (profile, path) in reports)
@@ -152,9 +151,9 @@ foreach (var (profile, path) in reports)
     if (!names.Contains(indirectExample))
         throw new InvalidOperationException($"{indirectExample} is not defined from its decoder in {path}.");
     var stated = kept.TryGetValue(literalExample, out var refusal) ? Refusal(refusal) : "no refusal";
-    if (stated != "0 ldstr hole: tokens")
-        throw new InvalidOperationException($"{literalExample} must keep its literal for the string load at " +
-            $"IL_0000, found: {stated}.");
+    if (stated != "0 ldtoken hole: tokens")
+        throw new InvalidOperationException(
+            $"{literalExample} must keep its literal for the field token at IL_0000, found {stated}.");
 }
 Console.WriteLine("PASS the example kept as a literal reports its first hole, and Mutate decodes");
 var examples = examplesDecoded.Order(StringComparer.Ordinal).ToArray();
