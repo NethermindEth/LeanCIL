@@ -1148,9 +1148,9 @@ private theorem decodedSite_eq (layouts : Array RawLayout) (raw : RawMethod)
 /-- A certificate checked against the decoded code also passes every explicit encoding check. -/
 theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
     {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
-    {decodeCall : CallDecoder}
+    {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
     (same : code = Instruction.ofRawCode none raw.code
-        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray decodeCall))
+        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray localKind decodeCall))
     (valid : ScalarFlowValid layouts raw features certificate code true) :
     ScalarFlowValid layouts raw features certificate code false := by
   dsimp only [ScalarFlowValid] at valid ⊢
@@ -1182,10 +1182,10 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
     {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Instruction}
     {decoded : Bool} (valid : ScalarFlowValid layouts raw features certificate code decoded)
-    {decodeCall : CallDecoder}
+    {localKind : TypeExpr → Option LocalKind} {decodeCall : CallDecoder}
     (codeDecodes : decoded = true → code =
       Instruction.ofRawCode none raw.code
-        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray decodeCall))
+        (Instruction.withCallDecoder (foldRoles raw.locals raw.code).toArray localKind decodeCall))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)

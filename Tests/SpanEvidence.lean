@@ -214,6 +214,28 @@ theorem decoded_span_constructor_returns :
 
 #print axioms decoded_span_constructor_returns
 
+/-- Resetting an aggregate span uses the frame's checked element width and returns normally. -/
+theorem decoded_span_reset_returns :
+    let identity := "Fixture::Word"
+    let element := TypeExpr.aggregate identity 0
+    let spanType := TypeExpr.apply (.constructor runtimeScope "System.Span`1") element
+    let row : RawLayout := {
+      identity, explicit := false, packing := 0, declaredSize := 0,
+      fields := [⟨.unsigned64, none⟩] }
+    let environment : LayoutEnvironment := {
+      rawLayouts := [row], layouts := #[⟨⟨8, [⟨0, 8, false⟩]⟩, 8⟩] }
+    let source := { raw [spanType] [i 18 (.local 0), i 65045 (.type spanType), i 42] with
+      parameters := [], returnType := .void }
+    let method := Method.ofRaw? .scalar environment [] source []
+    method.map Method.code = some [.nop, .initializeSpanLocal 0 (.empty 8 true), .ret] ∧
+      (method.bind fun body => (Safety.invoke [body] 5 0 [] Safety.Memory.empty).toOption.map
+        (·.2)) = some [] ∧
+      (methodCode .scalar { environment with layouts := #[] } [] source)[1]? =
+        some (.unadmitted 65045) := by
+  exact ⟨rfl, rfl, rfl⟩
+
+#print axioms decoded_span_reset_returns
+
 /-- Constructor arguments and the constructor itself cannot be external branch targets. -/
 theorem constructor_no_interior_entry :
     foldEntry (foldRoles [words] constructorCode)[0]? = true ∧
