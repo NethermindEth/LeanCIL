@@ -102,11 +102,11 @@ if (lost.Length != 0)
     throw new InvalidOperationException($"Methods listed in {listPath} are no longer defined from their decoder:\n" +
         string.Join('\n', lost));
 
-// Every method of the examples assembly under each CI profile, so a change that stops defining an example from its
-// decoder fails even when no proof of it runs.
+// Every method of the examples assembly under each admitted profile, so a change that stops defining an example
+// from its decoder fails even when no proof of it runs.
 var examplesListPath = At("Tests/canonical-examples.txt");
 var examplesAssembly = At("Examples/Assembly/bin/Examples.dll");
-string[] profiles = ["scalar", "x64-v3", "arm64-advsimd"];
+string[] profiles = ["scalar", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd"];
 var examplesDirectory = At("artifacts/CanonicalMethods");
 Directory.CreateDirectory(examplesDirectory);
 var listing = Run(["dotnet", ExtractorPath, "list", examplesAssembly]).Split('\n')
