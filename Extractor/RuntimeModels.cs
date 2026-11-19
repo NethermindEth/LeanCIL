@@ -146,6 +146,7 @@ internal static class RuntimeModels
         if (ReferenceQueries.Constant(reference, profile.Architecture) is int referenceContent)
             return new Constant(32, referenceContent, true);
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
+        if (Spans.ArrayExtension(reference, profile.Architecture) is { } arrayView) return arrayView;
         if (Spans.CoreMember(reference, profile.Architecture) is { } span) return span;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
@@ -200,7 +201,6 @@ internal static class RuntimeModels
         {
             "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),
-            "System.Memory" => ElementSpan(reference, profile.Architecture) ?? Span(reference.FullName),
             "System.Runtime.Intrinsics" => Intrinsic(reference.FullName, profile),
             _ => null
         };
@@ -375,13 +375,6 @@ internal static class RuntimeModels
                         MemoryOperation.Other($"(.spanFill {width} false)"));
                 }
             }
-            foreach (var (parameters, range) in new[]
-            {
-                ("!!0[]", ArrayRange.Whole), ("!!0[],System.Int32", ArrayRange.FromStart),
-                ("!!0[],System.Int32,System.Int32", ArrayRange.Counted)
-            })
-                if (arrayElement is not null) operations.Add("System.Span`1<!!0> System.MemoryExtensions::" +
-                    $"AsSpan<{element}>({parameters})", MemoryOperation.Of(new ArraySpan(arrayElement, true, range)));
         }
         return operations;
     }

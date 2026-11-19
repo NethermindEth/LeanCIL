@@ -205,15 +205,12 @@ internal sealed class LayoutEvidence
             if (!reachable.Contains(instruction)) continue;
             if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
                 instruction.Operand is MethodReference arrayCall &&
-                arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType)
+                arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType &&
+                arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan) &&
+                (instruction.OpCode.Code != Code.Call || arrayCall.Name != "op_Implicit"))
             {
-                var element = arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan) &&
-                    (instruction.OpCode.Code != Code.Call || arrayCall.Name != "op_Implicit")
-                    ? arraySpan.GenericArguments[0]
-                    : arrayCall is GenericInstanceMethod extension &&
-                        extension.DeclaringType.FullName == "System.MemoryExtensions" && extension.Name == "AsSpan"
-                        ? extension.GenericArguments[0] : null;
-                if (element is not null && MetadataValidation.IsAggregate(element, method.Module))
+                var element = arraySpan.GenericArguments[0];
+                if (MetadataValidation.IsAggregate(element, method.Module))
                     uses.Add($".size {pc} {Index(element)} .arrayElement");
             }
             if (instruction.OpCode.Code is Code.Call or Code.Newobj &&

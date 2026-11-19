@@ -39,6 +39,35 @@ internal static class Spans
     internal static bool Writable(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
+    /// <summary>The array overloads of AsSpan preserve the identity and checked layout of the element.</summary>
+    internal static Operation? ArrayExtension(MethodReference reference, string architecture)
+    {
+        if (reference.Name != "AsSpan" || reference.DeclaringType is TypeSpecification ||
+            reference.DeclaringType.FullName != "System.MemoryExtensions" ||
+            reference.HasThis || reference.ExplicitThis ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemMemory) ||
+            reference is not GenericInstanceMethod { GenericArguments.Count: 1 } method ||
+            method.ElementMethod.CallingConvention != MethodCallingConvention.Generic ||
+            method.ElementMethod.GenericParameters.Count != 1 || method.Parameters.Count is < 1 or > 3)
+            return null;
+
+        var variable = method.ElementMethod.GenericParameters[0];
+        if (method.Parameters[0].ParameterType is not ArrayType { IsVector: true } array ||
+            array.ElementType != variable || method.ReturnType is not GenericInstanceType result ||
+            result.ElementType.FullName != "System.Span`1" || result.GenericArguments.Count != 1 ||
+            result.GenericArguments[0] != variable ||
+            !RuntimeModels.ExactScope(result.ElementType, PlatformAssemblies.SystemRuntime) ||
+            method.Parameters.Skip(1).Any(parameter => parameter.ParameterType.MetadataType != MetadataType.Int32 ||
+                !RuntimeModels.ExactScope(parameter.ParameterType, PlatformAssemblies.SystemRuntime)))
+            return null;
+
+        if (Arrays.Storage(method.GenericArguments[0], architecture) is not { } element) return null;
+        RuntimeModels.ValidateSignature(reference, architecture);
+        var range = method.Parameters.Count switch { 1 => ArrayRange.Whole, 2 => ArrayRange.FromStart,
+            _ => ArrayRange.Counted };
+        return MemoryOperation.Of(new ArraySpan(element, true, range));
+    }
+
     static bool OwnerElement(TypeReference type) =>
         type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 

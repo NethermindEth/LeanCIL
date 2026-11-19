@@ -100,8 +100,6 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
       | _ => none
     else if scope == intrinsicsScope then
       if hardwareMember type name then some .hardware else none
-    else if scope == spanMemoryScope then
-      if type == "System.MemoryExtensions" && name == "AsSpan" then some .span else none
     else none
   | _ => none
 

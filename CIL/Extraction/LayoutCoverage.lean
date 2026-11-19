@@ -69,8 +69,6 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
         return [.size pc index .arrayElement]
       else if spanOwner && site.name ∈ ["CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor"] then
         return [.size pc index .spanElement] else return []
-    | .atom _ "System.MemoryExtensions", [.aggregate _ index] =>
-      if site.name == "AsSpan" then return [.size pc index .arrayElement] else return []
     | _, _ => return []
   | _, _ => return []
 

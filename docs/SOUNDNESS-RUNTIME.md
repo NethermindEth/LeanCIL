@@ -123,7 +123,10 @@ The core span entries cover indexing, length, slicing, emptiness, pinnable refer
 empty span and implicit conversions. Both span types accept an array. A writable span also
 converts to a readonly span. Each overload binds its open declaration, closed signature and
 exact external target. Aggregate elements require a matching indexed layout and computed width.
-Array conversions also reject byref-like elements.
+Array conversions also reject byref-like elements. The three array overloads of
+`System.MemoryExtensions.AsSpan<T>` bind the open method variable in the array and return
+type and require the exact System.Memory target. Their calls construct writable views using
+the checked array element storage and layout width.
 
 The runtime table binds ten static `System.Runtime.InteropServices.MemoryMarshal` members.
 The open declaration distinguishes writable and readonly spans and fixes the positions of

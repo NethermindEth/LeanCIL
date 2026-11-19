@@ -430,7 +430,8 @@ keeps its data reference, and a null array raises `NullReferenceException`.
 Array constructors, implicit array conversions and the array overloads of
 `MemoryExtensions.AsSpan` form views over supplied integer, enum, aggregate and integer-vector
 arrays. Enum views keep their exact enum identity through locals, slices, calls and returns;
-equal-width enums are not interchangeable. `AsSpan` accepts a whole array, a start index, or a
+equal-width enums are not interchangeable. The decoder keeps `AsSpan` as a call. Its runtime
+model accepts a whole array, a start index, or a
 start and length. A null array produces an empty span only for a zero range; an invalid range
 raises `ArgumentOutOfRangeException`. Non-array `AsSpan` overloads are unsupported.
 

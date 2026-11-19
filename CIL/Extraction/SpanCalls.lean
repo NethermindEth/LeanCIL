@@ -3,10 +3,8 @@ import CIL.Extraction.Generics
 /-!
 # Exact reference-free span calls
 
-Runtime span members and array-view factories retain their element identity, argument arity,
-width and write capability in translation evidence. Aggregate widths use checked layouts.
-Array factories require the exact
-System.Memory identity; the span types and primitive elements require System.Runtime.
+Span constructors and bulk operations bind their element identity, argument arity, width and
+write capability in translation evidence. Aggregate widths use checked layouts.
 -/
 
 namespace CIL.Extraction
@@ -151,34 +149,12 @@ private def arrayFillCall (opcode : Nat) (site : CallSite) : Option SpanCall := 
         (runtimeScope ++ "::System.Void System.Array::Fill(!!0[],!!0" ++ suffix ++ ")")
       then none else some (.arrayFill element counted)
 
-/-- The array overloads of AsSpan accept an array and zero, one or two int32 arguments. -/
-private def arrayExtensionCall (opcode : Nat) (site : CallSite)
-    (aggregateWidth : Nat := 0) : Option SpanCall := do
-  if opcode != 40 || site.hasThis || !site.returnsValue || site.name != "AsSpan" ||
-      site.declaringType != .atom spanMemoryScope "System.MemoryExtensions" ||
-      site.parameterCount != site.parameterTypes.length then none else pure ()
-  let [elementType] := site.typeArguments | none
-  let arrayElement := arrayElementType elementType aggregateWidth
-  if site.returnType != .apply (.constructor runtimeScope "System.Span`1") elementType then none
-    else pure ()
-  let intType := TypeExpr.atom runtimeScope "System.Int32"
-  let (range, parameters) ←
-    if site.parameterTypes == [.array elementType] then some (.whole, "!!0[]")
-    else if site.parameterTypes == [.array elementType, intType] then
-      some (.fromStart, "!!0[],System.Int32")
-    else if site.parameterTypes == [.array elementType, intType, intType] then
-      some (.counted, "!!0[],System.Int32,System.Int32") else none
-  if site.target != .external (spanMemoryScope ++
-      "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(" ++
-      parameters ++ ")") then none else some (.array (← arrayElement) true range)
-
 /-- The span member or factory at a raw site, with aggregate widths from layout evidence. -/
 def spanCall (instruction : RawInstruction) (width : Nat := 0) :
     Option SpanCall := do
   let .call site := instruction.operand | none
   let opcode := instruction.opcode
-  arrayFillCall opcode site <|> spanMemberCall opcode site width <|>
-    arrayExtensionCall opcode site width
+  arrayFillCall opcode site <|> spanMemberCall opcode site width
 
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/

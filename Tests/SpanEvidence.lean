@@ -1,6 +1,6 @@
 import CIL.Extraction.Features
 import CIL.Extraction.DecodedMethod
-import CIL.Safety.Execution
+import CIL.Safety.StepComposition
 
 set_option maxRecDepth 4096
 
@@ -53,41 +53,79 @@ theorem primitive_span_widths :
     spanStorage (span runtime "System.Boolean") = some (.span 1 false) := by decide
 #print axioms primitive_span_widths
 
-/-- A closed int32 array extension call with its exact defining assembly. -/
-private def arraySpanCall : CallSite := {
-  declared := {
-    convention := 0x10, returnType := .apply (.constructor runtime "System.Span`1") (.parameter 0),
-    parameters := [.array (.parameter 0), intType] },
-  method := {
-    owner := .atom spanMemoryScope "System.MemoryExtensions", name := name!"AsSpan",
-    hasThis := false, genericArity := 1,
-    returnType := .apply (.constructor runtime "System.Span`1") intType,
-    parameters := [.array intType, intType], methodArguments := [intType] },
-  name := "AsSpan",
-  target := .external (spanMemoryScope ++
-    "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(!!0[],System.Int32)"),
-  typeArguments := [intType], parameterCount := 2, returnsValue := true }
+/-- Each range has the MemberRef declaration of the corresponding array overload. -/
+private def arraySpanCall (range : ArraySpanRange) (element : TypeExpr) : CallSite :=
+  let bounds := match range with
+    | .whole => [] | .fromStart => [intType] | .counted => [intType, intType]
+  let targetParams := match range with
+    | .whole => "!!0[]" | .fromStart => "!!0[],System.Int32"
+    | .counted => "!!0[],System.Int32,System.Int32"
+  let view := TypeExpr.apply (.constructor runtime "System.Span`1")
+  { declared := ⟨0x10, view (.parameter 0), .array (.parameter 0) :: bounds⟩
+    method := {
+      owner := .atom spanMemoryScope "System.MemoryExtensions", name := name!"AsSpan",
+      hasThis := false, genericArity := 1, returnType := view element,
+      parameters := .array element :: bounds, methodArguments := [element] }
+    name := "AsSpan"
+    target := .external (spanMemoryScope ++
+      s!"::System.Span`1<!!0> System.MemoryExtensions::AsSpan({targetParams})")
+    typeArguments := [element], parameterCount := 1 + bounds.length, returnsValue := true }
 
-/-- Array conversion certificates bind element identity, range arity and all call metadata. -/
+/-- Decode a single live call under the production model table. -/
+private def decodeArrayCall (site : CallSite) (layouts : LayoutEnvironment := {}) :=
+  (Method.ofRaw? .scalar layouts [] [true] (raw [] [i 40 (.call site)]) []).map Method.code
+
+/-- Each range retains its call and rejects a mismatched raw or closed field. -/
 theorem exact_array_span_call :
-    spanCallMatches (i 40 (.call arraySpanCall))
-      (.memory (.arraySpan .signed32 true .fromStart)) = true ∧
-    spanCallMatches (i 40 (.call arraySpanCall))
-      (.memory (.arraySpan .unsigned32 true .fromStart)) = false ∧
-    spanCallMatches (i 40 (.call arraySpanCall))
-      (.memory (.arraySpan .signed32 false .fromStart)) = false ∧
-    spanCallMatches (i 40 (.call arraySpanCall))
-      (.memory (.arraySpan .signed32 true .whole)) = false ∧
-    spanCallMatches (i 115 (.call arraySpanCall))
-      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
-    spanCallMatches (i 40 (.call { arraySpanCall with method.hasThis := true }))
-      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
-    spanCallMatches (i 40 (.call { arraySpanCall with
-      method.owner := .atom runtime "System.MemoryExtensions" }))
-      (.memory (.arraySpan .signed32 true .fromStart)) = false ∧
-    spanCallMatches (i 40 (.call { arraySpanCall with method.parameters := [intType, intType] }))
-      (.memory (.arraySpan .signed32 true .fromStart)) = false := by decide
+    [ArraySpanRange.whole, .fromStart, .counted].all (fun range =>
+      let site := arraySpanCall range intType
+      let method := site.method
+      let wrongOpen := site.declared.parameters.set 0 (.array (.ownerParameter 0))
+      let refused := [ { site with method.owner := .atom runtime "System.MemoryExtensions" },
+        { site with name := "Another" }, { site with method.name := name!"Another" },
+        { site with method.genericArity := 2 }, { site with method.hasThis := true },
+        { site with method.parameters := method.parameters.set 0 intType },
+        { site with method.returnType := .void }, { site with declared.convention := 0x20 },
+        { site with declared.parameters := wrongOpen }, { site with target := .external "Another" },
+        arraySpanCall range (.atom runtime "System.Double"),
+        arraySpanCall range (.aggregate "Missing::Layout" 0) ]
+      decide (decodeArrayCall site = some [.call method {}]) &&
+        (runtimeModel {} .call method == some (.memory (.arraySpan .signed32 true range))) &&
+        !runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
+          (.memory (.arraySpan .signed32 true range)) none none true &&
+        refused.all (fun other => decide (decodeArrayCall other = some [.unadmitted 40]))) := by
+  decide +kernel
 #print axioms exact_array_span_call
+
+/-- Aggregate strides come from each environment, and byref-like elements cannot form arrays. -/
+theorem arraySpanLayouts :
+    let element := TypeExpr.aggregate "Fixture::Words" 0
+    let env := fun count byRefLike =>
+      let rows : List RawLayout := [{
+        identity := "Fixture::Words", explicit := false,
+        packing := 0, declaredSize := 0, byRefLike,
+        fields := List.replicate count ⟨.unsigned32, none⟩ }]
+      ({ rawLayouts := rows, layouts := (computeLayouts rows).getD #[] } : LayoutEnvironment)
+    [ArraySpanRange.whole, .fromStart, .counted].all (fun range =>
+      let site := arraySpanCall range element
+      decide (decodeArrayCall site (env 1 true) = some [.unadmitted 40]) &&
+        [1, 3].all (fun count =>
+          let storage := ArrayElement.aggregate "Fixture::Words" (count * 4)
+          runtimeModel (env count false) .call site.method ==
+            some (.memory (.arraySpan storage true range)))) := by
+  decide +kernel
+#print axioms arraySpanLayouts
+
+/-- A kept array factory has the same result and faults as its checked memory operation. -/
+theorem arraySpanStep (body : Method) (pc : Nat) (method : MethodRef) (range : ArraySpanRange)
+    (element : ArrayElement) (args stack : List Safety.Value) (frame : Safety.Frame)
+    (memory : Safety.Memory) (link : body.linkAt pc = none)
+    (found : runtimeModel body.environment .call method = some (.memory (.arraySpan element true
+      range))) :
+    Safety.step body (.call method {}) pc args frame stack memory =
+      Safety.step body (.memory (.arraySpan element true range)) pc args frame stack memory :=
+  Safety.step_call_memory body pc args frame memory link found rfl stack
+#print axioms arraySpanStep
 
 -- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.i4; 6: ret
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 (.call getItem), i 74, i 42]
