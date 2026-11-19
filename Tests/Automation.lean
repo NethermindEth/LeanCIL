@@ -1970,6 +1970,19 @@ theorem modelled_then_linked (memory : Memory) (object : Reference) (word : CIL.
   cil_checked_steps [formed]
 #print axioms modelled_then_linked
 
+/-- The unlinked constructor consumes its receiver and preserves the caller's frame and memory. -/
+theorem contract_steps_modelled_call (program : CIL.Program)
+    (caller : program[0]? = some modelledConstructor) (frame : Frame) (memory : Memory)
+    (object : Reference) (args : List Value) (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned,
+      run program fuel 0 2 args frame [] memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned,
+      run program fuel 0 1 args frame [.object (.address object)] memory =
+        .ok (final, returned) ∧ post final returned := by
+  cil_contract_steps 1 [caller]
+  exact continuation
+#print axioms contract_steps_modelled_call
+
 -- The stepper enters the model call by its one equation, not by `step_call_eq`, whose rewrite
 -- under the call's continuation the kernel rechecks at every call.
 open Lean in

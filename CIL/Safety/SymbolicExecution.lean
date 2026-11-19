@@ -2053,14 +2053,15 @@ def unlinkedPc (body pc : Expr) : TacticM Bool := withMainContext do
   return ((← inferType fact).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
 
 open Lean Elab Tactic Meta in
-/-- Whether the `run` goal's pc has no link in the body `methodFound` fetched, so a `call` there
-    runs its runtime model and continues in the same method. -/
-def unlinkedRunPc (methodFound : Term) (target : Expr) : TacticM Bool := withMainContext do
-  let some (_, current, _) := target.eq? | return false
-  let some #[_, _, _, pc, _, _, _, _] := argumentsOf? current ``CIL.Safety.run 8 | return false
-  let found ← instantiateMVars (← inferType (← Term.elabTerm methodFound none))
-  let some (_, _, fetched) := found.consumeMData.eq? | return false
-  let some #[_, body] := argumentsOf? fetched ``Option.some 2 | return false
+/-- A known empty link selects runtime model lookup for a call or constructor at the fetched pc. -/
+def unlinkedModelSite (operation : Name) (instructionFound : Term) : TacticM Bool :=
+    withMainContext do
+  unless operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.newobj do
+    return false
+  let found ← instantiateMVars (← inferType (← Term.elabTerm instructionFound none))
+  let some (_, lookup, _) := found.consumeMData.eq? | return false
+  let some (code, pc) := indexedLookup? lookup | return false
+  let some #[body] := argumentsOf? code ``CIL.Method.code 1 | return false
   unlinkedPc body pc
 
 open Lean Elab Tactic Meta in
@@ -2088,9 +2089,7 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
   -- A construction under an `.object` link runs its constructor as a call before continuing in
   -- the caller; under an `.aggregate` link it steps on as any other instruction does.
   let constructs := operation == ``CIL.Instruction.newobj
-  -- A `call` at a pc without a link runs its runtime model and steps on in the same method.
-  let modelled ← if constructs || operation == ``CIL.Instruction.call then
-      unlinkedRunPc methodSyntax target else pure false
+  let modelled ← unlinkedModelSite operation instructionSyntax
   -- These fault before their callee runs: a call site the link table omits, a short heap
   -- budget, a null receiver, or a receiver whose class a dispatch table omits.
   let faultsFirst := constructs || callsCallee operation

@@ -387,7 +387,10 @@ def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
 ### Step a caller through its callees
 
 `cil_contract_steps [facts]` steps an existential-fuel goal through ordinary instructions and
-calls. At a call it applies:
+calls. At an unlinked call with a runtime model, it uses the generated link and model facts to
+execute the operation in the caller's frame. Supply the facts that `cil_checked_step` needs for
+that operation, such as a span's validity and the result of slicing it. At a managed call it uses
+one of the following proofs.
 
 - a proved `MethodContract.Holds` theorem marked `@[cil_contract]`, or one whose proof is in
   `facts`. Contracts merely present in the local context are not selected. The theorem's program

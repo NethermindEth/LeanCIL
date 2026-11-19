@@ -988,7 +988,7 @@ elab_rules : tactic
     let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
     let facts := currentFacts
     withNormalNodes currentFacts do
-    if callsCallee operation then
+    if callsCallee operation && !(← unlinkedModelSite operation instructionFound) then
       let saved ← saveState
       try cilContractApply methodFound instructionFound facts
       catch _ =>
@@ -1030,13 +1030,8 @@ elab_rules : tactic
       if prepared.size == facts.size then throw error
       advance prepared
 
-/-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
-    composing calls with registered contracts or child evidence. Each composed call names its
-    final memory `called`, its typed output `output` and its `CallResult` `call`, all three
-    with the suffix `_1`, `_2` once a name is taken. Unmatched calls and the postcondition at
-    each return remain explicit goals, a callee's precondition tagged `precondition` and the
-    postcondition `postcondition`. With `CallingFields`, an output-word store can obtain its
-    write and current-memory argument facts from `ValidCall`, after trying supplied facts. -/
+/-- Contract stepping executes runtime models in the caller and composes managed calls with
+    contracts or child invocations. Unmatched calls and unproved conditions remain goals. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, naming the first call it composes: its final memory, typed output
     and `CallResult` take the three names given. Fails when it composes no call. -/
