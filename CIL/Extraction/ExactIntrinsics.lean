@@ -539,12 +539,16 @@ def createsScalarUnsafe (environment : LayoutEnvironment) : Instruction → Bool
     runtimeModel environment .call method == some (.intrinsic (.vector .createScalarUnsafe64) 1)
   | _ => false
 
+/-- A live scalar-unsafe creation requires opaque storage for each eligible vector local. -/
+def expectedOpaqueLocals (environment : LayoutEnvironment) (closed : RawMethod)
+    (code : List Instruction) : List Nat :=
+  if code.any (createsScalarUnsafe environment) then opaqueLocalIndices closed else []
+
 /-- The opaque locals are exactly the eligible ones when the method calls
     `CreateScalarUnsafe` and none otherwise; each is a 128-bit vector slot whose address the
     emitted code never takes. -/
 def OpaqueLocalsValid (closed : RawMethod) (method : Method) : Prop :=
-  method.opaqueVectorLocals = (if method.code.any (createsScalarUnsafe method.environment)
-    then opaqueLocalIndices closed else []) ∧
+  method.opaqueVectorLocals = expectedOpaqueLocals method.environment closed method.code ∧
   opaqueKindsValid method = true ∧ opaqueAddressesValid method = true
 
 /-- Indexed opaque-local checks preserve the original kind and no-address obligations. -/
@@ -557,7 +561,7 @@ theorem OpaqueLocalsValid_iff_scan (closed : RawMethod) (method : Method) :
       method.code.all (fun operation => match operation with
         | .ldloca index => !(index ∈ method.opaqueVectorLocals)
         | _ => true) = true := by
-  simp only [OpaqueLocalsValid, opaqueKindsValid, opaqueAddressesValid,
+  simp only [OpaqueLocalsValid, expectedOpaqueLocals, opaqueKindsValid, opaqueAddressesValid,
     FlowIndex.get?_ofList, Std.TreeSet.contains_ofList, List.contains_eq_mem]
 
 #print axioms OpaqueLocalsValid_iff_scan

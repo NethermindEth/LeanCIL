@@ -71,7 +71,7 @@ File.WriteAllText(path, $$"""
     #print axioms token_opcodes
 
     """ + "\n");
-Run(["lake", "env", "lean", path], cwd: FixturePackage());
+CheckLean(path);
 Console.WriteLine($"PASS the extractor's {table.Length} decoded opcodes are those of Instruction.valueOpcode");
 
 // A dead tail includes a raw prefix and virtual call. Both retain their opcode at the original pc.
@@ -100,6 +100,8 @@ using (var module = Mono.Cecil.ModuleDefinition.ReadModule(At("Examples/Assembly
     owner.Methods.Add(frame);
     var array = new ParameterDefinition(new ArrayType(module.TypeSystem.Int32));
     frame.Parameters.Add(array);
+    var deadArray = new ParameterDefinition(new ArrayType(module.TypeSystem.Int32));
+    frame.Parameters.Add(deadArray);
     var vector = new MethodDefinition("VectorLocal", Mono.Cecil.MethodAttributes.Public |
         Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
     owner.Methods.Add(vector);
@@ -114,7 +116,7 @@ using (var module = Mono.Cecil.ModuleDefinition.ReadModule(At("Examples/Assembly
     body.Emit(OpCodes.Starg_S, array);
     body.Emit(OpCodes.Call, vector);
     body.Emit(OpCodes.Ret);
-    body.Emit(OpCodes.Ldarga_S, array);
+    body.Emit(OpCodes.Ldarga_S, deadArray);
     body.Emit(OpCodes.Pop);
     body.Emit(OpCodes.Ret);
     body = vector.Body.GetILProcessor();
@@ -124,6 +126,17 @@ using (var module = Mono.Cecil.ModuleDefinition.ReadModule(At("Examples/Assembly
     body.Emit(OpCodes.Pop);
     body.Emit(OpCodes.Newobj, constructor);
     body.Emit(OpCodes.Pop);
+    body.Emit(OpCodes.Ret);
+    var liveVector = new MethodDefinition("LiveVector", Mono.Cecil.MethodAttributes.Public |
+        Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+    owner.Methods.Add(liveVector);
+    liveVector.Body.InitLocals = true;
+    liveVector.Body.Variables.Add(new VariableDefinition(unsafeReturn.ReturnType));
+    body = liveVector.Body.GetILProcessor();
+    body.Emit(OpCodes.Ldc_I8, 0L);
+    body.Emit(OpCodes.Call, create);
+    body.Emit(OpCodes.Stloc_0);
+    body.Emit(OpCodes.Ret);
     body.Emit(OpCodes.Ret);
     module.Write(deadAssembly);
 }
@@ -155,7 +168,7 @@ File.AppendAllText(deadSource, """
     end Extracted
 
     """);
-Run(["lake", "env", "lean", deadSource], cwd: FixturePackage());
+CheckLean(deadSource);
 Console.WriteLine("PASS the decoded tail preserves its holes and the feature check rejects a hidden entry");
 
 foreach (var (name, selector, method, code) in new[]
@@ -176,13 +189,13 @@ foreach (var (name, selector, method, code) in new[]
         #print axioms decoded_code
 
         """);
-    Run(["lake", "env", "lean", pathToSource], cwd: FixturePackage());
+    CheckLean(pathToSource);
 }
 
 CheckReceiverMethods(directory);
 
 var frameOutput = Path.Combine(deadDirectory, "Frame");
-Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::Frame(int[])", frameOutput]);
+Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::Frame(int[],int[])", frameOutput]);
 var framePath = Path.Combine(frameOutput, "Extracted.lean");
 var frames = File.ReadAllText(framePath);
 RequireDecoded(frames, "UnreachableTail::Frame");
@@ -192,7 +205,7 @@ File.AppendAllText(framePath, """
     namespace Extracted
     open CIL CIL.Extraction
 
-    /-- The live store homes the array. Its dead address and the dead vector call are holes. -/
+    /-- Only the live store homes its parameter. The other parameter's dead address is a hole. -/
     theorem dead_frame :
         (method0.parameterHomes, method1.localKinds, method1.opaqueVectorLocals,
           method0.code[4]?, method1.code[2]?, method1.code[4]?) =
@@ -210,8 +223,26 @@ File.AppendAllText(framePath, """
     end Extracted
 
     """);
-Run(["lake", "env", "lean", framePath], cwd: FixturePackage());
+CheckLean(framePath);
 Console.WriteLine("PASS dead argument addresses, vector calls and constructions preserve the frame and reject links");
+
+var liveOutput = Path.Combine(deadDirectory, "LiveVector");
+Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::LiveVector()", liveOutput]);
+var livePath = Path.Combine(liveOutput, "Extracted.lean");
+RequireDecoded(File.ReadAllText(livePath), "UnreachableTail::LiveVector");
+File.AppendAllText(livePath, """
+
+    namespace Extracted
+    /-- A live scalar-unsafe creation requires the vector slot even with a dead final return. -/
+    theorem live_vector_frame : And (method0.opaqueVectorLocals = [0])
+        (And (method0.code[4]? = some (.unadmitted 42))
+          (CIL.Extraction.OpaqueLocalsValid method0Closed method0)) :=
+      .intro rfl (.intro rfl method0_opaque_validated)
+    #print axioms live_vector_frame
+    end Extracted
+
+    """);
+CheckLean(livePath);
 
 var examples = At("Examples/Assembly/bin/Examples.dll");
 var getter = Path.Combine(directory, "Both");
@@ -230,8 +261,15 @@ foreach (var (root, name) in new[] { (getter, "Extracted"), (shared, "Templates"
     if (result.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException($"Admitted declaration in {name}.");
 }
-Run(["lake", "env", "lean", Path.Combine(trace, "Extracted.lean")], cwd: FixturePackage());
+CheckLean(Path.Combine(trace, "Extracted.lean"));
 Console.WriteLine("PASS get_Both binds to its template and TraceGated's frame checks");
+
+static void CheckLean(string path)
+{
+    var output = Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException($"Admitted declaration in {path}.");
+}
 
 static void RequireDecoded(string source, string name, int number = 0)
 {
@@ -266,9 +304,7 @@ static void CheckReceiverMethods(string directory)
         {
             var path = Path.Combine(request.Output, "Extracted.lean");
             RequireDecoded(File.ReadAllText(path), request.Entry);
-            var evidence = Run(["lake", "env", "lean", path], cwd: FixturePackage());
-            if (evidence.Contains("sorryAx", StringComparison.Ordinal))
-                throw new InvalidOperationException($"Unchecked evidence for {request.Entry} under {profile}");
+            CheckLean(path);
         }
     }
 }
