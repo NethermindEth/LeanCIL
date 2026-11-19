@@ -20,17 +20,16 @@ internal static class MarshalModels
         var input = method.Parameters[0].ParameterType;
         var output = method.ReturnType;
         var writable = Spans.Writable(input);
-        var sourceSpan = Span(input, writable, source);
         var second = method.Parameters.Count == 2 ? method.Parameters[1].ParameterType : null;
         var byteType = method.Module.TypeSystem.Byte;
         bool Reference(TypeReference? type) => type is ByReferenceType address && address.ElementType == source;
         var matches = method.Name switch
         {
-            "GetReference" => second is null && sourceSpan && Reference(output),
+            "GetReference" => second is null && Span(input, writable, source) && Reference(output),
             "GetArrayDataReference" => second is null && Reference(output) &&
                 input is ArrayType { IsVector: true } array && array.ElementType == source,
-            "AsBytes" => second is null && sourceSpan && Span(output, writable, byteType),
-            "Cast" => second is null && sourceSpan &&
+            "AsBytes" => second is null && Span(input, writable, source) && Span(output, writable, byteType),
+            "Cast" => second is null && Span(input, writable, source) &&
                 Span(output, writable, method.ElementMethod.GenericParameters[1]),
             "CreateSpan" or "CreateReadOnlySpan" => Reference(input) && second?.MetadataType == MetadataType.Int32 &&
                 Span(output, method.Name == "CreateSpan", source),
@@ -70,8 +69,10 @@ internal static class MarshalModels
     private static bool Span(TypeReference type, bool writable, TypeReference element)
     {
         if (type is not GenericInstanceType { GenericArguments.Count: 1 } span ||
-            span.ElementType.FullName != (writable ? "System.Span`1" : "System.ReadOnlySpan`1") ||
-            !RuntimeModels.ExactScope(span.ElementType, PlatformAssemblies.SystemRuntime)) return false;
+            span.ElementType.FullName != (writable ? "System.Span`1" : "System.ReadOnlySpan`1")) return false;
+        var definition = span.ElementType;
+        if (!RuntimeModels.ExactScope(definition, PlatformAssemblies.SystemRuntime))
+            throw new InvalidDataException($"Unsupported type identity: {definition.FullName} [{definition.Scope}]");
         var argument = span.GenericArguments[0];
         return element is GenericParameter ? argument == element : argument.MetadataType == MetadataType.Byte;
     }
