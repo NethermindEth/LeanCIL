@@ -39,6 +39,9 @@ inductive Value where
   /-- A class instance reference: null or offset 0 of an object allocation. It has no byte
       position, so arithmetic, byte loads and byref operations never accept it. -/
   | object (reference : ManagedReference)
+  /-- The address of span local `slot` of the running frame, as `ldloca` or `ldarga` takes it.
+      Only a call reads the slot through it, when it passes the home; it never leaves the frame. -/
+  | spanHome (slot : Nat)
   deriving DecidableEq, Repr
 
 /-- Why the checked interpreter stopped. -/
@@ -73,6 +76,11 @@ abbrev MemoryStep := List Value -> Memory -> ExecutionResult (Prod Memory (List 
 /-- Whether a stack value has bits that must not be observed; only a scalar can. -/
 def Value.hasUnspecified : Value → Bool
   | .scalar value => value.hasUnspecified
+  | _ => false
+
+/-- Whether a stack value is a span local's home, which names a slot of the running frame. -/
+def Value.isHome : Value → Bool
+  | .spanHome _ => true
   | _ => false
 
 /-- Whether any of the top `count` stack entries has unspecified bits. -/
@@ -1456,8 +1464,9 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | _, _ => .error (.unsupported "Not a memory instruction")
 
 /-- Loads or stores a typed primitive, struct or vector using its checked storage shape.
-    A span load accepts only a span value, which stays in place, since the address of a span home
-    is its view; a null reference faults as a null dereference and any other operand is invalid. -/
+    A span load accepts only a span value, which stays in place (`step` has already read a home
+    as its slot's view); a null reference faults as a null dereference and any other operand is
+    invalid. -/
 def transferObject (shape : ValueShape) (store : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) :=
   match shape, store with

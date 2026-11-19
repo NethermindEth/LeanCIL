@@ -54,7 +54,7 @@ theorem stepTransport : StepTransport := by
         targetBody constructor pc metadata arguments stack bounds observable
     case ldobj.refl | stobj.refl | cpobj.refl | initobj.refl | sizeof.refl =>
       refine ⟨mapping, .refl mapping, ?_⟩
-      simp only [LocalIndexMap.operation, step, observerCount, mapping.unspecifiedOperands,
+      simp only [LocalIndexMap.operation, step, observerCount, indices.unspecifiedOperands mapping,
         Extraction.CallLayouts.valueShape_eq, Method.valueShape, metadata.environment]
         at observable ⊢
       rename_i type
@@ -76,6 +76,11 @@ theorem stepTransport : StepTransport := by
       all_goals try exact .error _
       all_goals first
         | exact .ok (.next memories frames)
+        | (cases shape : sourceBody.environment.valueShape type <;>
+             simp only [shape] at observable ⊢ <;>
+             first
+             | exact .error _
+             | exact frames.initializeSpanHome memories pc stack)
         | (first
             | apply (memories.copyInitializedBytesResult _ sourceFormed stack bounds
                 observable.bind_left).bind
@@ -83,6 +88,13 @@ theorem stepTransport : StepTransport := by
                 observable.bind_left).bind
             | apply (memories.transferObjectResult _ _ sourceFormed stack bounds
                 observable.bind_left).bind
+           rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
+           exact .ok (.next related frames))
+        | (apply (frames.viewOperands memories _ stack bounds).bindWithSuccess
+           intro viewed otherViewed sourceViewed operandsRelated
+           obtain ⟨rfl, viewedBounds⟩ := operandsRelated
+           apply (memories.transferObjectResult _ _ sourceFormed viewed viewedBounds
+             (observable.bind_right sourceViewed).bind_left).bind
            rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
            exact .ok (.next related frames))
     case ldelem_any.refl element =>
@@ -109,7 +121,7 @@ theorem stepTransport : StepTransport := by
     case stsfld.refl field =>
       refine ⟨mapping, .refl mapping, ?_⟩
       dsimp only [LocalIndexMap.operation]
-      rw [step_stsfld_eq, step_stsfld_eq, mapping.unspecifiedOperands]
+      rw [step_stsfld_eq, step_stsfld_eq, indices.unspecifiedOperands mapping]
       split <;> exact .error _
     case ldfld.refl field =>
       exact memories.stepFieldLoad frames sourceFormed sourceBody targetBody metadata field pc

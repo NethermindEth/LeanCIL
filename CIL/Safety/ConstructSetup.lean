@@ -42,8 +42,9 @@ theorem step_newobj_aggregate {body : CIL.Method} {pc callee : Nat}
       (by simp) wellFormed
   refine ⟨temporary, updated, ?_, loaded, writable, preserved, fresh⟩
   have nonzero : size ≠ 0 := by intro h; have := congrArg Fin.val h; simp at this; omega
+  have called := callArguments_of_checked (frame := frame) checked
   simp [step, observerCount, newobjStep, constructAggregate, unspecifiedOperands, linked, count,
-    known, nonzero, checked, home,
+    known, nonzero, called, home,
     Nat.not_lt_of_ge (Nat.le_add_right arguments.length rest.length), Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 

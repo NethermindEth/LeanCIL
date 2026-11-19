@@ -207,15 +207,21 @@ and write capability remain bound to the exact span type; aggregate widths and i
 checked against the layout table. Resetting a local replaces its view without modifying backing
 memory, granting authority or extending a lifetime.
 
-A readonly span reference parameter (`in` or `ref readonly`) carries the referenced view rather
-than the address of the caller's span home, as span-local addresses already do. Carrying the view
-is sound only because the home cannot change during the call: the extractor rejects `starg` and
+`ldloca` and `ldarga` of a span local or homed span parameter push a home, a value that names
+the frame's slot, and each consumer reads the slot's view when it runs, so a store to the local
+after its address was taken is visible through the address, as in the CLR. A home never leaves its
+frame: call, return and entry arguments are checked values, which a home is not
+(`FrameAction.HomeFree`, `invokeWith_spanHome`), and admission refuses an address where a callee
+takes a span by value. A readonly span reference parameter (`in` or `ref readonly`) therefore
+carries the view the caller's home holds when the call runs rather than the address of that home.
+Carrying the view is sound only because the home cannot change during the call: the extractor rejects `starg` and
 `ldarga` of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local
 reset, `ref` and `out` span parameters, and span references in locals, returns and fields, so no
 admitted code can rebind, address or overwrite a span home. The parameter's readonly attributes,
 which a generic specialization copies from its definition, and these rejections are trusted
 extractor decisions. Lean binds the raw argument to a managed reference and rejects its address.
-A decoded span `ldobj` forwards the stack. Its preceding instruction must load or address that
+A decoded span `ldobj` forwards a span value and reads a local or parameter home as the view its
+slot holds when the load runs. Its preceding instruction must load or address that
 exact span home, and the copy must have no incoming branch. Loads, stores and comparisons that expect a byte reference fault on a view rather than
 reading it as an address.
 

@@ -4,6 +4,7 @@ import CIL.Safety.StaticInstructionRenaming
 import CIL.Safety.StackAllocationRenaming
 import CIL.Safety.ArrayAllocationRenaming
 import CIL.Safety.InstructionRenaming
+import CIL.Safety.SpanHomeRenaming
 
 /-!
 # Checked allocating instruction steps
@@ -14,6 +15,9 @@ The memory case reuses the checked step equation instead of simplifying the full
 -/
 
 namespace CIL.Safety
+
+-- Stack lists are renamed by the local map of the frame that holds them.
+variable {indices : LocalIndexMap}
 
 /-- Memory dispatch reads neither the method nor the pc, so two bodies agree on it. -/
 theorem staticInstruction_body (sourceBody targetBody : CIL.Method) (pc : Nat)
@@ -37,15 +41,18 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.memory operation) pc arguments sourceFrame stack source)
         (step targetBody (.memory operation) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
-  simp only [step_memory_eq, mapping.unspecifiedOperands] at observable ⊢
+          targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [step_memory_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
     simp only [guard, Bool.false_eq_true, ite_false,
       staticInstruction_body sourceBody targetBody] at observable ⊢
+    apply (frames.viewOperands related (viewOperandCount operation) stack bounds).bindExtending
+    intro viewed otherViewed sourceViewed operandsRelated
+    obtain ⟨rfl, viewedBounds⟩ := operandsRelated
     obtain ⟨later, extension, operations⟩ := related.staticInstructionResult sourceFormed
-      sourceBody pc operation stack bounds observable.bind_left
+      sourceBody pc operation viewed viewedBounds (observable.bind_right sourceViewed).bind_left
     refine ⟨later, extension, ?_⟩
     apply operations.bind
     intro first second result
@@ -76,7 +83,7 @@ private theorem Memory.Renamed.typedElementStep {indices : LocalIndexMap}
         return FrameAction.next (pc + 1) values sourceFrame memory)
       (do
         let (memory, values) ← typedElementInstruction (targetBody.elementShape element) store
-          (stack.map mapping.value) target
+          (stack.map (indices.value mapping)) target
         return FrameAction.next (pc + 1) values targetFrame memory) := by
   have shaped : targetBody.elementShape element = sourceBody.elementShape element := by
     simp only [CIL.Method.elementShape, metadata.environment]
@@ -104,8 +111,8 @@ theorem Memory.Renamed.stepLdelemAny {indices : LocalIndexMap} {mapping : Alloca
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.ldelem_any element) pc arguments sourceFrame stack source)
       (step targetBody (.ldelem_any element) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
-  simp only [step_ldelem_any_eq, mapping.unspecifiedOperands] at observable ⊢
+        targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [step_ldelem_any_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -128,8 +135,8 @@ theorem Memory.Renamed.stepStelemAny {indices : LocalIndexMap} {mapping : Alloca
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.stelem_any element) pc arguments sourceFrame stack source)
       (step targetBody (.stelem_any element) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
-  simp only [step_stelem_any_eq, mapping.unspecifiedOperands] at observable ⊢
+        targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [step_stelem_any_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -153,8 +160,8 @@ theorem Memory.Renamed.stepLdelema {indices : LocalIndexMap} {mapping : Allocati
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.ldelema element readOnly) pc arguments sourceFrame stack source)
       (step targetBody (.ldelema element readOnly) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
-  simp only [step_ldelema_eq, mapping.unspecifiedOperands] at observable ⊢
+        targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [step_ldelema_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -199,20 +206,23 @@ theorem Memory.Renamed.stepLdsfld {indices : LocalIndexMap} {mapping : Allocatio
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.ldsfld field) pc arguments sourceFrame stack source)
       (step targetBody (.ldsfld field) pc (arguments.map mapping.value) targetFrame
-        (stack.map mapping.value) target) := by
+        (stack.map (indices.value mapping)) target) := by
   show ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
     (do
       let (memory, value) ← staticLoad sourceBody pc source
       return FrameAction.next (pc + 1) (value :: stack) sourceFrame memory)
     (do
       let (memory, value) ← staticLoad targetBody pc target
-      return FrameAction.next (pc + 1) (value :: stack.map mapping.value) targetFrame memory)
+      return FrameAction.next (pc + 1) (value :: stack.map (indices.value mapping)) targetFrame
+        memory)
   rw [staticLoad_metadata metadata]
-  apply (related.staticLoadResult staticBounds sourceBody pc).bind
-  intro first second result
+  apply (related.staticLoadResult staticBounds sourceBody pc).bindWithSuccess
+  intro first second loaded result
   rcases first with ⟨sourceAfter, value⟩
   rcases second with ⟨targetAfter, targetValue⟩
   rcases result with ⟨memories, rfl⟩
+  dsimp only
+  rw [indices.push_of_not_home mapping stack (staticLoad_not_spanHome loaded)]
   exact .ok (.next memories frames)
 #print axioms Memory.Renamed.stepLdsfld
 
@@ -239,17 +249,19 @@ theorem Memory.Renamed.stepStaticAddress {indices : LocalIndexMap} {mapping : Al
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody operation pc arguments sourceFrame stack source)
         (step targetBody operation pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
+          targetFrame (stack.map (indices.value mapping)) target) := by
   simp only [addressed, staticAddress_metadata metadata] at observable ⊢
   obtain ⟨later, extension, operations⟩ := related.staticAddressResult sourceFormed
     targetFormed staticBounds sourceBody pc observable.bind_left
   refine ⟨later, extension, ?_⟩
-  apply operations.bind
-  intro first second result
+  apply operations.bindWithSuccess
+  intro first second addressed result
   rcases first with ⟨sourceAfter, value⟩
   rcases second with ⟨targetAfter, targetValue⟩
   rcases result with ⟨memories, rfl⟩
-  rw [← extension.values stack bounds]
+  dsimp only
+  rw [← indices.values_extends extension stack bounds,
+    indices.push_of_not_home later stack (staticAddress_not_spanHome addressed)]
   exact .ok (.next memories (frames.extend extension (fun _ _ scope => scope)))
 #print axioms Memory.Renamed.stepStaticAddress
 
@@ -268,11 +280,11 @@ theorem Memory.Renamed.stepFieldLoad {indices : LocalIndexMap} {mapping : Alloca
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.ldfld field) pc arguments sourceFrame stack source)
         (step targetBody (.ldfld field) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
+          targetFrame (stack.map (indices.value mapping)) target) := by
   refine ⟨mapping, .refl mapping, ?_⟩
   have shape : targetBody.fieldShape field = sourceBody.fieldShape field := by
     simp only [CIL.Method.fieldShape, metadata.environment]
-  simp only [step_ldfld_eq, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step_ldfld_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -315,11 +327,11 @@ theorem Memory.Renamed.stepFieldStore {indices : LocalIndexMap} {mapping : Alloc
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.stfld field) pc arguments sourceFrame stack source)
         (step targetBody (.stfld field) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
+          targetFrame (stack.map (indices.value mapping)) target) := by
   refine ⟨mapping, .refl mapping, ?_⟩
   have shape : targetBody.fieldShape field = sourceBody.fieldShape field := by
     simp only [CIL.Method.fieldShape, metadata.environment]
-  simp only [step_stfld_eq, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step_stfld_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -362,11 +374,11 @@ theorem Memory.Renamed.stepFieldAddress {indices : LocalIndexMap} {mapping : All
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.ldflda field) pc arguments sourceFrame stack source)
         (step targetBody (.ldflda field) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
+          targetFrame (stack.map (indices.value mapping)) target) := by
   refine ⟨mapping, .refl mapping, ?_⟩
   have shape : targetBody.fieldShape field = sourceBody.fieldShape field := by
     simp only [CIL.Method.fieldShape, metadata.environment]
-  simp only [step_ldflda_eq, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step_ldflda_eq, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -418,15 +430,15 @@ theorem Memory.Renamed.stepLocalloc {indices : LocalIndexMap} {mapping : Allocat
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody .localloc pc arguments sourceFrame stack source)
         (step targetBody .localloc pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
-  simp only [step, declared, mapping.unspecifiedOperands] at observable ⊢
+          targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [step, declared, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
     simp only [guard, Bool.false_eq_true, ite_false, localAllocation] at observable ⊢
     split at observable
     · rename_i size
-      simp only [List.map_cons, List.map_nil, AllocationRenaming.value]
+      simp only [List.map_cons, List.map_nil, LocalIndexMap.value]
       cases size <;> simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at observable ⊢
       all_goals try cases observable
       all_goals rename_i bits
@@ -483,39 +495,43 @@ theorem allocateObject_not_thrown (memory : Memory) (type : RuntimeType) (size :
 /-- A class construction transports its fresh instance and checked arguments into the
     constructor call, and leaves the instance under the same mapped caller stack. -/
 theorem Memory.Renamed.constructObject {indices : LocalIndexMap} {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
     (callee argc : Nat) (type : RuntimeType) (size : Nat)
     (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (CIL.Safety.constructObject callee argc type size stack source)) :
+    (observable : SuccessOrThrow
+      (CIL.Safety.constructObject callee argc type size sourceFrame stack source)) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
-        (CIL.Safety.constructObject callee argc type size stack source)
-        (CIL.Safety.constructObject callee argc type size (stack.map mapping.value) target) := by
+        (CIL.Safety.constructObject callee argc type size sourceFrame stack source)
+        (CIL.Safety.constructObject callee argc type size targetFrame
+          (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.constructObject at observable ⊢
   simp only [List.length_map, ← List.map_take, ← List.map_drop, ← List.map_reverse]
   by_cases short : stack.length < argc
   · simp only [short, ite_true]
     exact ⟨mapping, .refl mapping, .error _⟩
   · simp only [short, ite_false] at observable ⊢
-    have checks := related.checkedValues (stack.take argc).reverse (by
+    have checks := frames.callArguments related (stack.take argc).reverse (by
       intro value member
       exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))
-    cases checked : (stack.take argc).reverse.mapM (CIL.Safety.checkedValue source) with
+    cases checked :
+        (stack.take argc).reverse.mapM (CIL.Safety.callArgument sourceFrame source) with
     | error fault =>
       rw [checked] at checks
-      generalize ((stack.take argc).reverse.map mapping.value).mapM
-        (CIL.Safety.checkedValue target) = targetChecked at checks ⊢
+      generalize ((stack.take argc).reverse.map (indices.value mapping)).mapM
+        (CIL.Safety.callArgument targetFrame target) = targetChecked at checks ⊢
       cases checks
       exact ⟨mapping, .refl mapping, .error fault⟩
     | ok operands =>
       have operandBounds : ∀ value ∈ operands, value.Below mapping.sourceLimit := by
         intro value member
         rw [related.sourceLimit]
-        exact ((checkedValues_valid _ _ _ checked).2 value member).below sourceFormed
+        exact (callArguments_valid checked value member).below sourceFormed
       rw [checked] at checks
       obtain ⟨targetOperands, targetChecked, rfl⟩ := checks.success
       simp only [checked, Bind.bind, Except.bind] at observable
@@ -532,11 +548,11 @@ theorem Memory.Renamed.constructObject {indices : LocalIndexMap} {mapping : Allo
         refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
         simp only [targetChecked, targetAllocated, Bind.bind, Except.bind]
         have operandsSame := mapping.allocate_extends.values operands operandBounds
-        have restSame := mapping.allocate_extends.values (stack.drop argc) (by
+        have restSame := indices.values_extends mapping.allocate_extends (stack.drop argc) (by
           intro value member
           exact bounds value (List.mem_of_mem_drop member))
         rw [← operandsSame, ← restSame]
-        simpa only [List.map_cons, AllocationRenaming.value,
+        simpa only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value,
           AllocationRenaming.managedReference, Pure.pure, Except.pure] using
           ResultRenamed.ok (FrameAction.Renamed.call (indices := indices) (callee := callee)
             (arguments := .object (.address object) :: operands)
@@ -562,10 +578,10 @@ theorem Memory.Renamed.stepNewarr {indices : LocalIndexMap} {mapping : Allocatio
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody (.newarr element) pc arguments sourceFrame stack source)
         (step targetBody (.newarr element) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
+          targetFrame (stack.map (indices.value mapping)) target) := by
   have shaped : targetBody.elementShape element = sourceBody.elementShape element := by
     simp only [CIL.Method.elementShape, metadata.environment]
-  simp only [step, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -573,7 +589,7 @@ theorem Memory.Renamed.stepNewarr {indices : LocalIndexMap} {mapping : Allocatio
     split at observable <;> try contradiction
     · rename_i length rest same
       cases same
-      simp only [List.map_cons, AllocationRenaming.value, shaped]
+      simp only [List.map_cons, LocalIndexMap.value, shaped]
       have restBounds : ∀ value ∈ rest, value.Below mapping.sourceLimit :=
         fun value member => bounds value (List.mem_cons_of_mem _ member)
       generalize sourceBody.elementShape element = shape at observable ⊢
@@ -601,7 +617,7 @@ theorem Memory.Renamed.stepNewarr {indices : LocalIndexMap} {mapping : Allocatio
                sourceFormed targetFormed staticBounds inline _ view sourceAfter allocated
              refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
              simp only [targetAllocated]
-             rw [← mapping.allocate_extends.values rest restBounds]
+             rw [← indices.values_extends mapping.allocate_extends rest restBounds]
              exact .ok (.next memories
                (frames.extend mapping.allocate_extends (fun _ _ scope => scope))))
       | reference classElement =>
@@ -627,8 +643,8 @@ theorem Memory.Renamed.stepNewarr {indices : LocalIndexMap} {mapping : Allocatio
                sourceFormed targetFormed staticBounds _ _ array sourceAfter allocated
              refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
              simp only [targetAllocated]
-             rw [← mapping.allocate_extends.values rest restBounds]
-             simpa only [List.map_cons, AllocationRenaming.value,
+             rw [← indices.values_extends mapping.allocate_extends rest restBounds]
+             simpa only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value,
                AllocationRenaming.managedReference, Pure.pure, Except.pure] using
                ResultRenamed.ok (FrameAction.Renamed.next (pc := pc + 1)
                  (stack := .object (.address array) :: rest) memories

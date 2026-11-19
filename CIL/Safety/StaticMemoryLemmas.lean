@@ -320,4 +320,28 @@ theorem staticAddress_site {body : CIL.Method} {pc : Nat} {descriptor : CIL.Stat
 
 #print axioms staticAddress_site
 
+/-- A loaded static field value is a scalar, never a home. -/
+theorem staticLoad_not_spanHome {body : CIL.Method} {pc : Nat} {memory : Memory}
+    {result : Memory × Value} (loaded : staticLoad body pc memory = .ok result) :
+    result.2.isHome = false := by
+  unfold staticLoad at loaded
+  repeat' first
+    | (cases loaded <;> rfl)
+    | split at loaded
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+
+#print axioms staticLoad_not_spanHome
+
+/-- A static field address is a reference, never a home. -/
+theorem staticAddress_not_spanHome {body : CIL.Method} {pc : Nat} {memory : Memory}
+    {result : Memory × Value} (addressed : staticAddress body pc memory = .ok result) :
+    result.2.isHome = false := by
+  unfold staticAddress at addressed
+  repeat' first
+    | (cases addressed <;> rfl)
+    | split at addressed
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at addressed
+
+#print axioms staticAddress_not_spanHome
+
 end CIL.Safety

@@ -47,6 +47,21 @@ theorem ResultRenamed.bind {mapping : AllocationRenaming} {relation : α → β 
   | ok relation => exact next _ _ relation
 #print axioms ResultRenamed.bind
 
+/-- A first computation under a fixed map composes with a continuation that may extend it. -/
+theorem ResultRenamed.bindExtending {mapping : AllocationRenaming} {relation : α → β → Prop}
+    {following : AllocationRenaming → γ → δ → Prop} {source : ExecutionResult α}
+    {target : ExecutionResult β} (related : ResultRenamed mapping relation source target)
+    (sourceNext : α → ExecutionResult γ) (targetNext : β → ExecutionResult δ)
+    (next : ∀ left right, source = .ok left → relation left right →
+      ∃ later, mapping.Extends later ∧
+        ResultRenamed later (following later) (sourceNext left) (targetNext right)) :
+    ∃ later, mapping.Extends later ∧
+      ResultRenamed later (following later) (source >>= sourceNext) (target >>= targetNext) := by
+  cases related with
+  | error fault => exact ⟨mapping, .refl mapping, .error fault⟩
+  | ok relation => exact next _ _ rfl relation
+#print axioms ResultRenamed.bindExtending
+
 /-- Sequential transport may use the source computation's successful equation. -/
 theorem ResultRenamed.bindWithSuccess {mapping : AllocationRenaming}
     {relation : α → β → Prop} {following : γ → δ → Prop}
@@ -71,6 +86,17 @@ theorem ResultRenamed.map {mapping : AllocationRenaming} {relation : α → β �
   | error fault => exact .error fault
   | ok relation => exact .ok (preserved _ _ relation)
 #print axioms ResultRenamed.map
+
+/-- A success relation that follows from the related one, given the source succeeded, holds. -/
+theorem ResultRenamed.imp {mapping : AllocationRenaming} {relation following : α → β → Prop}
+    {source : ExecutionResult α} {target : ExecutionResult β}
+    (related : ResultRenamed mapping relation source target)
+    (implies : ∀ left right, source = .ok left → relation left right → following left right) :
+    ResultRenamed mapping following source target := by
+  cases related with
+  | error fault => exact .error fault
+  | ok related => exact .ok (implies _ _ rfl related)
+#print axioms ResultRenamed.imp
 
 /-- Equal checked-memory faults become execution faults with corresponding references. -/
 theorem ResultEquivalent.checkedAt {mapping : AllocationRenaming} {relation : α → β → Prop}

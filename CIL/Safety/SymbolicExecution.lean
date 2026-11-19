@@ -940,12 +940,14 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| cil_strict (cil_checked_step_by_equations [$[$facts:term],*]))
 
 /-- Closes a memory step with a matching supplied operation fact. Memory-dispatch facts
-    select the static dispatch equation explicitly before this tactic runs. -/
+    select the static dispatch equation explicitly before this tactic runs. A home among the
+    operands is read from its frame slot first, so the fact meets the view it stands for. -/
 macro "cil_checked_memory_from_fact " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
-       cil_try_simp_only [cil_guard]
-       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       cil_try_simp_only [cil_guard, CIL.Safety.viewOperands, CIL.Safety.spanView,
+         List.getElem?_cons_zero, List.getElem?_cons_succ, pure_bind]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, pure_bind, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
 open Lean Elab Tactic Meta in
@@ -1129,22 +1131,55 @@ private partial def dispatchFactMatches (wanted : Expr) (function : Name) (type 
   unless lhs.isAppOf function do return false
   withTransparency .instances <| isDefEq lhs wanted
 
+open Lean Meta in
+/-- `stack` with each home among its top `count` entries replaced by the view its slot in
+    `locals` holds, as `viewOperands` reads it. A home whose slot is no literal view stays. -/
+private partial def viewedOperands (locals : Array (Nat × Expr)) (count : Nat) (stack : Expr) :
+    MetaM Expr := do
+  if count == 0 then return stack
+  let cell ← whnfR stack
+  let some #[type, head, tail] := argumentsOf? cell ``List.cons 3 | return stack
+  let rest ← viewedOperands locals (count - 1) tail
+  let viewed ← do
+    let some #[slot] := argumentsOf? (← whnfR head) ``CIL.Safety.Value.spanHome 1 | pure head
+    let some index ← evalNat slot | pure head
+    let some (_, home) := locals.find? (·.1 == index) | pure head
+    let some #[_, _, held] := argumentsOf? (← whnfR home) ``CIL.Safety.LocalSlot.span 3
+      | pure head
+    let some #[_, view] := argumentsOf? (← whnfR held) ``Option.some 2 | pure head
+    pure (mkApp (mkConst ``CIL.Safety.Value.bufferSpan) view)
+  return mkApp3 cell.getAppFn type viewed rest
+
+open Lean Meta in
+/-- The operands a memory step on `stack` hands `operation`: each home `viewOperands` reads
+    stands for the view its slot of the literal `frame` holds. A stack without a home is
+    returned unchanged. -/
+def viewedStack (frame operation stack : Expr) : MetaM Expr := do
+  if (stack.find? (·.isConstOf ``CIL.Safety.Value.spanHome)).isNone then return stack
+  let count := mkApp (mkConst ``CIL.Safety.viewOperandCount) operation
+  let some count ← evalNat (← whnfD count) | return stack
+  let some #[_, locals, _, _] := argumentsOf? (← whnfR frame) ``CIL.Safety.Frame.mk 4
+    | return stack
+  viewedOperands (← listEntries locals) count stack
+
 open Lean Elab Tactic Meta in
 /-- Supplied dispatch facts for this operation, stack and memory, including facts inside a
     conjunction. Matching fresh quantified variables never instantiates the caller's goal. -/
 def dispatchFacts (step : Expr) (function : Name) (facts : Array Term) :
     TacticM (Array Term) := do
   let arguments := step.getAppArgs
-  let (some body, some opcode, some pc, some stack, some memory) :=
-      (arguments[0]?, arguments[1]?, arguments[2]?, arguments[5]?, arguments[6]?)
+  let (some body, some opcode, some pc, some frame, some stack, some memory) :=
+      (arguments[0]?, arguments[1]?, arguments[2]?, arguments[4]?, arguments[5]?, arguments[6]?)
     | return #[]
   let operation ← whnfR opcode
   let wanted ← if function == ``CIL.Safety.instruction then
       mkAppM function #[operation, stack, memory]
     else if let some operand := lastArgument? operation then
+      -- An operation fact states the operands the step hands over, with each home read.
+      let operands ← viewedStack frame operand stack
       if function == ``CIL.Safety.staticInstruction then
-        mkAppM function #[body, pc, operand, stack, memory]
-      else mkAppM function #[operand, stack, memory]
+        mkAppM function #[body, pc, operand, operands, memory]
+      else mkAppM function #[operand, operands, memory]
     else return #[]
   facts.filterM (suppliedFactSatisfies · (dispatchFactMatches wanted function))
 

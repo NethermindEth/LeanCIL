@@ -132,6 +132,187 @@ theorem observed_appendLocals (observed : Bool) (extra : List LocalSlot)
   cases observed <;> simp [same, Functor.map, Except.map]
 
 #print axioms observed_appendLocals
+/-- `padded` is `original` resumed in padded frames, or `original` is no kept outcome. A home
+    past the original frame's slots reads a padded slot, so only such a home's fault differs. -/
+def PaddedAgrees (extra : List LocalSlot) (padded original : ExecutionResult FrameAction) :
+    Prop :=
+  padded = FrameAction.appendLocals extra <$> original ∨ ¬ StepKept original
+
+/-- A read in the padded frame that gives the original result, or the original read failed
+    without throwing. -/
+def ReadAgrees {α : Type} (padded original : ExecutionResult α) : Prop :=
+  padded = original ∨ ∃ fault, original = .error fault ∧ ∀ exception, fault ≠ .thrown exception
+
+/-- A kept original outcome is the padded one, with padded frames. -/
+theorem PaddedAgrees.kept {extra : List LocalSlot} {padded original : ExecutionResult FrameAction}
+    (agrees : PaddedAgrees extra padded original) (kept : StepKept original) :
+    padded = FrameAction.appendLocals extra <$> original :=
+  agrees.resolve_right fun lost => lost kept
+
+/-- Equal results with padded frames agree. -/
+theorem PaddedAgrees.of_eq {extra : List LocalSlot} {padded original : ExecutionResult FrameAction}
+    (same : padded = FrameAction.appendLocals extra <$> original) :
+    PaddedAgrees extra padded original :=
+  Or.inl same
+
+#print axioms PaddedAgrees.of_eq
+
+/-- A step continues alike after a read that agrees, since a failed original read throws
+    nothing. -/
+theorem PaddedAgrees.bind {α : Type} {extra : List LocalSlot} {padded original : ExecutionResult α}
+    {next other : α → ExecutionResult FrameAction} (read : ReadAgrees padded original)
+    (rest : ∀ value, PaddedAgrees extra (next value) (other value)) :
+    PaddedAgrees extra (padded >>= next) (original >>= other) := by
+  rcases read with same | ⟨fault, failed, unthrown⟩
+  · rw [same]
+    cases original with
+    | error fault => exact Or.inl rfl
+    | ok value => exact rest value
+  · subst failed
+    right
+    intro kept
+    obtain ⟨exception, thrown⟩ := kept
+    exact unthrown exception thrown
+
+/-- A step continues alike after the same computation in both frames. -/
+theorem PaddedAgrees.bind_same {α : Type} {extra : List LocalSlot} {first : ExecutionResult α}
+    {next other : α → ExecutionResult FrameAction}
+    (rest : ∀ value, PaddedAgrees extra (next value) (other value)) :
+    PaddedAgrees extra (first >>= next) (first >>= other) :=
+  PaddedAgrees.bind (Or.inl rfl) rest
+
+#print axioms PaddedAgrees.kept
+#print axioms PaddedAgrees.bind
+#print axioms PaddedAgrees.bind_same
+
+/-- A home read in the padded frame reads the same slot, unless the original frame has none. -/
+theorem spanView_appendLocals (frame : Frame) (extra : List LocalSlot) (memory : Memory)
+    (value : Value) :
+    ReadAgrees (spanView (frame.appendLocals extra) memory value)
+      (spanView frame memory value) := by
+  cases value with
+  | spanHome index =>
+    cases found : frame.locals[index]? with
+    | some slot =>
+      left
+      simp only [spanView, Frame.appendLocals_getElem? found, found]
+    | none =>
+      right
+      refine ⟨.invalidState, by simp only [spanView, found], fun _ thrown => ?_⟩
+      cases thrown
+  | _ => exact Or.inl rfl
+
+/-- A call argument reads alike in the padded frame, unless the original read fails. -/
+theorem callArgument_appendLocals (frame : Frame) (extra : List LocalSlot) (memory : Memory)
+    (value : Value) :
+    ReadAgrees (callArgument (frame.appendLocals extra) memory value)
+      (callArgument frame memory value) := by
+  unfold callArgument
+  rcases spanView_appendLocals frame extra memory value with same | ⟨fault, failed, unthrown⟩
+  · exact Or.inl (by rw [same])
+  · exact Or.inr ⟨fault, by rw [failed]; rfl, unthrown⟩
+
+/-- A list read one value at a time agrees when each read agrees. -/
+theorem ReadAgrees.mapM {α β : Type} {padded original : α → ExecutionResult β}
+    (each : ∀ value, ReadAgrees (padded value) (original value)) :
+    ∀ values : List α, ReadAgrees (values.mapM padded) (values.mapM original)
+  | [] => Or.inl rfl
+  | value :: rest => by
+    simp only [List.mapM_cons]
+    rcases each value with same | ⟨fault, failed, unthrown⟩
+    · rw [same]
+      cases original value with
+      | error fault => exact Or.inl rfl
+      | ok head =>
+        rcases ReadAgrees.mapM each rest with tail | ⟨fault, failed, unthrown⟩
+        · exact Or.inl (by rw [tail])
+        · exact Or.inr ⟨fault, by simp only [failed]; rfl, unthrown⟩
+    · exact Or.inr ⟨fault, by simp only [failed]; rfl, unthrown⟩
+
+/-- A call's arguments read alike in the padded frame, unless an original read fails. -/
+theorem callArguments_appendLocals (frame : Frame) (extra : List LocalSlot) (memory : Memory)
+    (values : List Value) :
+    ReadAgrees (values.mapM (callArgument (frame.appendLocals extra) memory))
+      (values.mapM (callArgument frame memory)) :=
+  ReadAgrees.mapM (callArgument_appendLocals frame extra memory) values
+
+/-- A span operation's operands read alike in the padded frame, unless an original read
+    fails. -/
+theorem viewOperands_appendLocals (frame : Frame) (extra : List LocalSlot) (memory : Memory) :
+    ∀ (count : Nat) (stack : List Value),
+      ReadAgrees (viewOperands (frame.appendLocals extra) memory count stack)
+        (viewOperands frame memory count stack)
+  | 0, _ => Or.inl rfl
+  | _ + 1, [] => Or.inl rfl
+  | count + 1, value :: rest => by
+    simp only [viewOperands]
+    rcases spanView_appendLocals frame extra memory value with same | ⟨fault, failed, unthrown⟩
+    · rw [same]
+      cases spanView frame memory value with
+      | error fault => exact Or.inl rfl
+      | ok head =>
+        rcases viewOperands_appendLocals frame extra memory count rest with
+          tail | ⟨fault, failed, unthrown⟩
+        · exact Or.inl (by rw [tail])
+        · exact Or.inr ⟨fault, by simp only [failed]; rfl, unthrown⟩
+    · exact Or.inr ⟨fault, by simp only [failed]; rfl, unthrown⟩
+
+/-- `initobj` through a home writes the same slot in the padded frame, unless the original frame
+    has no such slot. -/
+theorem initializeSpanHome_appendLocals (pc : Nat) (frame : Frame) (extra : List LocalSlot)
+    (stack : List Value) (memory : Memory) :
+    PaddedAgrees extra (initializeSpanHome pc (frame.appendLocals extra) stack memory)
+      (initializeSpanHome pc frame stack memory) := by
+  unfold initializeSpanHome
+  split
+  · rename_i index rest
+    cases found : frame.locals[index]? with
+    | none =>
+      right
+      simp only [StepKept]
+      intro ⟨_, thrown⟩
+      cases thrown
+    | some slot =>
+      left
+      have bound := (List.getElem?_eq_some_iff.mp found).1
+      cases slot with
+      | span width writable view =>
+        simp only [Frame.appendLocals_getElem? found]
+        cases stored : storeLocal memory (.span width writable view)
+            (.bufferSpan ⟨.null, 0, width, writable⟩) with
+        | error fault =>
+          simp only [Bind.bind, Except.bind, Functor.map, Except.map]
+        | ok result =>
+          simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Functor.map,
+            Except.map, FrameAction.appendLocals, Frame.appendLocals,
+            List.set_append_left _ _ bound]
+      | _ => simp only [Frame.appendLocals_getElem? found]; rfl
+  · exact Or.inl rfl
+
+#print axioms spanView_appendLocals
+#print axioms callArgument_appendLocals
+#print axioms ReadAgrees.mapM
+#print axioms callArguments_appendLocals
+#print axioms viewOperands_appendLocals
+#print axioms initializeSpanHome_appendLocals
+
+set_option hygiene false in
+/-- Closes a padded step whose reads may see padded slots: each home read agrees or fails without
+    throwing, and every other computation is the same in both frames. -/
+local macro "padded_natural" : tactic => `(tactic| (
+  repeat' first
+  | contradiction
+  | (apply PaddedAgrees.of_eq; rfl)
+  | dsimp only
+  | (apply PaddedAgrees.of_eq
+     simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]
+     done)
+  | exact initializeSpanHome_appendLocals _ _ _ _ _
+  | (apply PaddedAgrees.bind (callArguments_appendLocals _ _ _ _); intro)
+  | (apply PaddedAgrees.bind (viewOperands_appendLocals _ _ _ _ _); intro)
+  | (apply PaddedAgrees.bind_same; intro)
+  | split))
+
 /-- An instruction preserves successful and throwing steps under trailing local slots. -/
 def StepAppendLocals (op : Instruction) : Prop :=
   ∀ (body : Method) (pc : Nat) (args : List Value) (frame : Frame)
@@ -1212,10 +1393,10 @@ theorem step_appendLocals_call (method : CIL.Extraction.MethodRef) (prefixes : C
     StepAppendLocals (.call method prefixes) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
+  refine PaddedAgrees.kept ?_ kept
   unfold step modelStep observedCall runModel intrinsicCall referenceCompareCall
     referenceSubtractCall featureCall typedTransferCall skipInitCall
-  frame_natural
+  padded_natural
 
 #print axioms step_appendLocals_call
 
@@ -1224,23 +1405,22 @@ theorem step_appendLocals_callvirt (method : CIL.Extraction.MethodRef) :
     StepAppendLocals (.callvirt method) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
+  refine PaddedAgrees.kept ?_ kept
   unfold step
-  frame_natural
+  padded_natural
 
 #print axioms step_appendLocals_callvirt
 
 /-- `newobj` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
     StepAppendLocals (.newobj constructor) := by
-
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
+  refine PaddedAgrees.kept ?_ kept
   unfold step newobjStep constructAggregate constructObject modelStep observedCall runModel
     intrinsicCall referenceCompareCall referenceSubtractCall featureCall typedTransferCall
     skipInitCall
-  frame_natural
+  padded_natural
 
 #print axioms step_appendLocals_newobj
 
@@ -1284,9 +1464,9 @@ theorem step_appendLocals_memory (operation : MemoryOp) :
     StepAppendLocals (.memory operation) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
+  refine PaddedAgrees.kept ?_ kept
   unfold step
-  frame_natural
+  padded_natural
 
 #print axioms step_appendLocals_memory
 
@@ -1317,9 +1497,9 @@ theorem step_appendLocals_ldobj (type : CIL.Extraction.TypeExpr) :
     StepAppendLocals (.ldobj type) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
+  refine PaddedAgrees.kept ?_ kept
   unfold step
-  frame_natural
+  padded_natural
 #print axioms step_appendLocals_ldobj
 
 /-- A typed stobj preserves outcomes under trailing local slots. -/
@@ -1337,9 +1517,9 @@ theorem step_appendLocals_initobj (type : CIL.Extraction.TypeExpr) :
     StepAppendLocals (.initobj type) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
+  refine PaddedAgrees.kept ?_ kept
   unfold step
-  frame_natural
+  padded_natural
 #print axioms step_appendLocals_initobj
 
 /-- A typed sizeof preserves outcomes under trailing local slots. -/
@@ -1465,18 +1645,9 @@ theorem step_appendLocals_managed (operation : ManagedOp) :
     StepAppendLocals (.managed operation) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  unfold managedStep
-  split
-  all_goals repeat' first
-    | rfl
-    | contradiction
-    | (simp only [map_bind, map_pure, FrameAction.appendLocals, Frame.appendLocals]; done)
-    | (apply bind_congr; intro)
-    | split
-    | simp only [map_bind]
+  refine PaddedAgrees.kept ?_ kept
+  unfold step managedStep
+  padded_natural
 #print axioms step_appendLocals_managed
 
 /-- Every instruction preserves successful and throwing steps under trailing local slots. -/

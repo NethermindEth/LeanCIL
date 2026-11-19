@@ -259,7 +259,7 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
       simp only [Option.map_some, CIL.Link.relocate, virtualTarget_relocate]
       split
       · rfl
-      cases (stack.take method.argumentCount).reverse.mapM (checkedValue m) with
+      cases (stack.take method.argumentCount).reverse.mapM (callArgument frame m) with
       | error => rfl
       | ok arguments =>
         simp only [Bind.bind, Except.bind]

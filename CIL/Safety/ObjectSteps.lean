@@ -83,7 +83,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
           if size = 0 || stack.length < constructor.parameters.length then .error .invalidState
           else do
             let arguments ←
-              (stack.take constructor.parameters.length).reverse.mapM (checkedValue memory)
+              (stack.take constructor.parameters.length).reverse.mapM (callArgument frame memory)
             let (temporary, allocated) ← allocateHome memory frame.activation size
             let (_, stored) ← storeLocal allocated (.bytes (.aggregate size) temporary)
               (.scalar (.aggregate (List.replicate size 0)))
@@ -95,7 +95,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
           if stack.length < constructor.parameters.length then .error .invalidState
           else do
             let arguments ←
-              (stack.take constructor.parameters.length).reverse.mapM (checkedValue memory)
+              (stack.take constructor.parameters.length).reverse.mapM (callArgument frame memory)
             let (object, allocated) ← allocateObject memory ⟨constructor.owner, bases⟩ size
             return FrameAction.call callee (.object (.address object) :: arguments)
               (.object (.address object) :: stack.drop constructor.parameters.length) allocated
@@ -153,12 +153,12 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
         | some (.direct callee) =>
           if stack.length < argc then .error .invalidState
           else (do
-            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            let arguments ← (stack.take argc).reverse.mapM (callArgument frame memory)
             receiverCall callee arguments (stack.drop argc) memory)
         | some (.virtual targets) =>
           if stack.length < argc then .error .invalidState
           else (do
-            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            let arguments ← (stack.take argc).reverse.mapM (callArgument frame memory)
             virtualCall targets arguments (stack.drop argc) memory)
         | _ => .error unlinkedCall := by
   simp only [step, observerCount]
@@ -362,7 +362,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
         (.object name :: .scalar (.i32 bits) :: rest) memory = do
       zeroGuardOutcome guard width signed (.i32 bits)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+    staticInstruction, memoryInstruction,
     zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
     List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
     CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
@@ -377,7 +378,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
         (.object name :: .scalar (.i64 bits) :: rest) memory = do
       zeroGuardOutcome guard width signed (.i64 bits)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+    staticInstruction, memoryInstruction,
     zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
     List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
     CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
@@ -392,7 +394,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
         (.object name :: .scalar (.i32 other) :: .scalar (.i32 value) :: rest) memory = do
       comparisonGuardOutcome guard width signed (.i32 value) (.i32 other)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+    staticInstruction, memoryInstruction,
     comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
     unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
     Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]
@@ -408,7 +411,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
         (.object name :: .scalar (.i64 other) :: .scalar (.i64 value) :: rest) memory = do
       comparisonGuardOutcome guard width signed (.i64 value) (.i64 other)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+    staticInstruction, memoryInstruction,
     comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
     unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
     Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false]

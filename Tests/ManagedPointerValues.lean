@@ -91,7 +91,7 @@ theorem call_selection_unchanged (signature : ManagedSignature)
         let count := signature.parameters.length
         if (if tail then values.length != count else values.length < count) then
           .error .invalidState else pure ()
-        let arguments ← (values.take count).reverse.mapM (checkedValue memory)
+        let arguments ← (values.take count).reverse.mapM (callArgument frame memory)
         if tail then return FrameAction.tailCall target.method arguments memory
         else return .call target.method arguments (values.drop count) memory) := by
   simp only [managedStep, indirectTarget]

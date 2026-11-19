@@ -55,7 +55,8 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
     (by
       rw [step_call_memory (link := rfl) (found := found) (direct := rfl)]
       simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
-        Value.hasUnspecified, specified, staticInstruction, operation] <;> rfl)]
+        Value.hasUnspecified, specified, staticInstruction, operation, viewOperandCount,
+        viewOperands] <;> rfl)]
   rw [run_return (body := addMethod method profile declared environment) rfl rfl
     (by simp [step, returnFrom, observerCount, unspecifiedOperands, addMethod, result,
       CIL.Method.returnNarrow, returnedType, CIL.Extraction.declaredNarrow,
@@ -97,7 +98,8 @@ theorem add_error {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEn
     (by
       rw [step_call_memory (link := rfl) (found := found) (direct := rfl)]
       simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
-        Value.hasUnspecified, specified, staticInstruction, operation] <;> rfl)]
+        Value.hasUnspecified, specified, staticInstruction, operation, viewOperandCount,
+        viewOperands] <;> rfl)]
   rfl
 
 /-- A partial vector is rejected before the integer-offset adapter runs. -/

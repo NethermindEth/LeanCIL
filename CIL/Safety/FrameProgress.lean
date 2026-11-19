@@ -119,6 +119,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .readOnlyReference _ => kind = .reference
   | .bufferSpan view => kind = .span view.width view.writable ∧ (0 < view.width ∧ view.width < 2^64)
   | .array view => kind = .array view.elementType
+  | .spanHome _ => False
 
 /-- Every parameter home names an existing argument that fits its kind. -/
 def ParameterArgumentsFit (parameters : List (Nat × CIL.LocalKind)) (args : List Value) :
@@ -132,6 +133,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       makeLocal activation kind .unmodeled m = .ok (slot, owned, home) ∧
       storeLocal home slot value = .ok (final, result) := by
   cases value with
+  | spanHome _ => exact fits.elim
   | methodPointer pointer =>
     change kind = .methodPointer pointer.signature at fits
     subst kind
@@ -148,7 +150,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | readOnlyReference reference =>
     change kind = .reference at fits
     subst kind
-    have formed := checkedValue_of_valid m (.readOnlyReference reference) valid
+    have formed := checkedValue_of_valid m (.readOnlyReference reference) valid rfl
     refine ⟨.root none, [], m, .readOnlyRoot reference, m, rfl, ?_⟩
     cases reference <;> simp_all [checkedValue, formValue, Value.Valid, checkedAt,
       Except.mapError, storeLocal, Value.hasUnspecified, Bind.bind, Except.bind,
@@ -173,7 +175,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | reference r =>
     change kind = .reference at fits
     subst kind
-    have formed := checkedValue_of_valid m (.reference r) valid
+    have formed := checkedValue_of_valid m (.reference r) valid rfl
     exact ⟨.root none, [], m, .root (some r), m, rfl, by
       simp only [checkedValue] at formed
       simp [storeLocal, formed, Value.hasUnspecified,
@@ -181,7 +183,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | object reference =>
     change kind = .object at fits
     subst kind
-    have formed := checkedValue_of_valid m (.object reference) valid
+    have formed := checkedValue_of_valid m (.object reference) valid rfl
     exact ⟨.object none, [], m, .object (some reference), m, rfl, by
       simp only [checkedValue] at formed
       simp [storeLocal, formed, Value.hasUnspecified,

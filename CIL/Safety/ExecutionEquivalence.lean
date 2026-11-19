@@ -71,6 +71,39 @@ theorem Memory.Equivalent.checkedValues {m n : Memory} (same : m.Equivalent n)
   have equality : CIL.Safety.checkedValue m = CIL.Safety.checkedValue n := funext same.checkedValue
   rw [equality]
 
+/-- A home reads the same view from equivalent memories, and other values are unchanged. -/
+theorem Memory.Equivalent.spanView {m n : Memory} (same : m.Equivalent n) (frame : Frame)
+    (value : Value) : spanView frame m value = spanView frame n value := by
+  cases value <;> simp only [CIL.Safety.spanView, same.loadLocal]
+
+/-- A call argument reads and checks the same in equivalent memories. -/
+theorem Memory.Equivalent.callArgument {m n : Memory} (same : m.Equivalent n) (frame : Frame)
+    (value : Value) : callArgument frame m value = callArgument frame n value := by
+  simp only [CIL.Safety.callArgument, same.spanView, same.checkedValue]
+
+/-- A call's arguments read and check the same in equivalent memories. -/
+theorem Memory.Equivalent.callArguments {m n : Memory} (same : m.Equivalent n) (frame : Frame)
+    (values : List Value) :
+    values.mapM (CIL.Safety.callArgument frame m) =
+      values.mapM (CIL.Safety.callArgument frame n) := by
+  have equality : CIL.Safety.callArgument frame m = CIL.Safety.callArgument frame n :=
+    funext (same.callArgument frame)
+  rw [equality]
+
+/-- A span operation's operands read the same views in equivalent memories. -/
+theorem Memory.Equivalent.viewOperands {m n : Memory} (same : m.Equivalent n) (frame : Frame) :
+    ∀ (count : Nat) (stack : List Value),
+      viewOperands frame m count stack = viewOperands frame n count stack
+  | 0, _ => rfl
+  | _ + 1, [] => rfl
+  | count + 1, value :: rest => by
+    simp only [CIL.Safety.viewOperands, same.spanView, same.viewOperands frame count rest]
+
+#print axioms Memory.Equivalent.spanView
+#print axioms Memory.Equivalent.callArgument
+#print axioms Memory.Equivalent.callArguments
+#print axioms Memory.Equivalent.viewOperands
+
 /-- Control, values and frames agree exactly; only the representation of memory
     views may differ. -/
 inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
@@ -93,7 +126,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent FrameActionEquivalent (managedStep operation link pc frame stack m)
       (managedStep operation link pc frame stack n) := by
   unfold CIL.Safety.managedStep
-  split <;> try simp only [same.checkedValues]
+  split <;> try simp only [same.callArguments]
   all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)
@@ -320,7 +353,7 @@ theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
   split
   all_goals try split
   all_goals try simp only [same.checkedValue, same.referenceEqual, same.referenceLess,
-    same.referenceSubtract, same.formValue]
+    same.referenceSubtract, same.formValue, same.viewOperands]
   all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)
@@ -349,7 +382,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     newobjStep constructAggregate constructObject
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
-    same.loadArgument, same.addressArgument,
+    same.loadArgument, same.addressArgument, same.callArguments, same.viewOperands,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
     same.objectAboveNull, same.virtualTarget, same.objectTest]
@@ -357,6 +390,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | exact same.managedStep _ _ _ _ _
     | unfold returnFrom
     | unfold localAllocation
+    | unfold initializeSpanHome
     | exact same.modelStep _ _ _ _ _
     | simp only [same.checkedValues]
     | (apply ResultEquivalent.bind (same.allocateElements _ _)

@@ -444,7 +444,9 @@ theorem discard_forwards : discardContract.Holds Extracted.program discard :=
       simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact access_reference_valid _ _ _ _ _ (read_access readA)
-      · exact access_reference_valid _ _ _ _ _ (read_access readB)⟩)
+      · exact access_reference_valid _ _ _ _ _ (read_access readB), fun value member => by
+      simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with same | same <;> subst same <;> rfl⟩)
     (fun _ _ _ _ => plainLoads_unchanged (by decide) _) (fun _ _ _ _ => rfl)
     (fun _ _ _ _ _ flag _ _ => ⟨_, rfl, by cases flag <;> decide⟩)
     (fun _ => rfl) (fun _ _ _ _ _ _ _ _ _ member => ⟨_, List.mem_singleton.mp member⟩)
@@ -522,7 +524,9 @@ theorem copy_forwards : copyContract.Holds Extracted.program copyTo :=
       simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact access_reference_valid _ _ _ _ _ writable
-      · exact access_reference_valid _ _ _ _ _ (read_access readB)⟩)
+      · exact access_reference_valid _ _ _ _ _ (read_access readB), fun value member => by
+      simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with same | same <;> subst same <;> rfl⟩)
     (fun _ _ _ _ => plainLoads_unchanged (by decide) _) (fun _ _ _ _ => rfl)
     (fun _ _ _ _ _ _ _ _ => trivial) (fun _ => rfl)
     (fun _ _ _ _ _ _ _ ⟨empty, _⟩ _ member => by subst empty; cases member)
@@ -588,7 +592,7 @@ theorem is_zero_ignoring_forwards :
       simp only [ignoringArgs, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact .inl (List.mem_singleton_self _)
-      · exact .inr rfl)
+      · exact .inr ⟨rfl, rfl⟩)
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 
 #print axioms is_zero_ignoring_forwards
@@ -620,7 +624,7 @@ theorem is_zero_second_forwards :
     (fun _ _ _ value member => by
       simp only [pairArgs, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
-      · exact .inr rfl
+      · exact .inr ⟨rfl, rfl⟩
       · exact .inl (List.mem_singleton_self _))
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 

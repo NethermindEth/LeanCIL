@@ -51,6 +51,6 @@ def StepTransport : Prop :=
       ResultRenamed later (FrameAction.Renamed indices later scopes)
         (step sourceBody operation pc arguments sourceFrame stack source)
         (step targetBody (indices.operation operation) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target)
+          targetFrame (stack.map (indices.value mapping)) target)
 
 end CIL.Safety

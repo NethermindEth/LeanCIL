@@ -10,6 +10,9 @@ Their results can therefore be reused exactly while checked references are mappe
 
 namespace CIL.Safety
 
+-- Stack lists are renamed by the local map of the frame that holds them.
+variable {indices : LocalIndexMap}
+
 /-- The empty relocation leaves every operand unchanged. -/
 theorem LocalIndexMap.operation_nil (operation : CIL.Instruction) :
     LocalIndexMap.nil.operation operation = operation := by cases operation <;> rfl
@@ -39,10 +42,11 @@ theorem AllocationRenaming.checkedIntrinsic (mapping : AllocationRenaming)
 #print axioms AllocationRenaming.checkedIntrinsic
 
 /-- Scalar decoding has the same numeric checks and rejects the same reference shapes. -/
-theorem AllocationRenaming.scalarOperands (mapping : AllocationRenaming) (values : List Value) :
+theorem LocalIndexMap.scalarOperands (indices : LocalIndexMap) (mapping : AllocationRenaming)
+    (values : List Value) :
     ResultRenamed mapping Eq (CIL.Safety.scalars values)
-      (CIL.Safety.scalars (values.map mapping.value)) := by
-  rw [mapping.scalars]
+      (CIL.Safety.scalars (values.map (indices.value mapping))) := by
+  rw [indices.scalars mapping]
   induction values with
   | nil => exact .ok rfl
   | cons value rest induction =>
@@ -55,7 +59,7 @@ theorem AllocationRenaming.scalarOperands (mapping : AllocationRenaming) (values
       subst second
       exact .ok rfl
     · exact .error .invalidState
-#print axioms AllocationRenaming.scalarOperands
+#print axioms LocalIndexMap.scalarOperands
 
 /-- A list consisting only of scalars has no allocation identities to bound. -/
 theorem scalarValues_below (limit : Nat) (values : List CIL.Value) :
@@ -72,7 +76,7 @@ theorem Memory.Renamed.scalarChecks {mapping : AllocationRenaming}
     ResultRenamed mapping (fun left right => right = left.map mapping.value)
       ((values.map Value.scalar).mapM (CIL.Safety.checkedValue source))
       ((values.map Value.scalar).mapM (CIL.Safety.checkedValue target)) := by
-  simpa only [List.map_map, Function.comp_def, AllocationRenaming.value] using
+  simpa only [List.map_map, Function.comp_def, AllocationRenaming.value, LocalIndexMap.value] using
     related.checkedValues (values.map Value.scalar) (scalarValues_below _ values)
 #print axioms Memory.Renamed.scalarChecks
 

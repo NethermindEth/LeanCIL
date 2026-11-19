@@ -13,11 +13,32 @@ an allocation renaming. Local-home insertion does not change scalar computation 
 
 namespace CIL.Safety
 
+-- Stack lists are renamed by the local map of the frame that holds them.
+variable {indices : LocalIndexMap}
+
+/-- Closes a renamed push whose pushed value came from `formValue`, `formObject`,
+    `loadSlot` or `loadArraySlot`, none of which yields a home. -/
+macro "push_renamed" related:term : tactic => `(tactic| first
+  | exact .ok ⟨$related, rfl⟩
+  | exact .ok ⟨$related, LocalIndexMap.push_of_not_home _ _ _ (by first
+      | exact formValue_not_spanHome (by assumption)
+      | exact formObject_not_spanHome (by assumption)
+      | exact loadSlot_not_spanHome (by assumption)
+      | exact loadArraySlot_not_spanHome (by assumption))⟩)
+
 /-- An observable checked outcome is successful or raises a named CLR exception. -/
 def SuccessOrThrow : ExecutionResult α → Prop
   | .ok _ => True
   | .error (.thrown _) => True
   | .error _ => False
+
+/-- A successful or throwing sequence continues observably after a successful first step. -/
+theorem SuccessOrThrow.bind_right {first : ExecutionResult α} {next : α → ExecutionResult β}
+    {value : α} (observable : SuccessOrThrow (first >>= next)) (success : first = .ok value) :
+    SuccessOrThrow (next value) := by
+  subst success
+  exact observable
+#print axioms SuccessOrThrow.bind_right
 
 /-- A successful or throwing sequence cannot start with an unobservable failure. -/
 theorem SuccessOrThrow.bind_left {first : ExecutionResult α}
@@ -48,13 +69,13 @@ private theorem Memory.Renamed.spanCopyInstructionResult {mapping : AllocationRe
     (observable : SuccessOrThrow (spanCopyInstruction width tryCopy stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (spanCopyInstruction width tryCopy stack source)
-      (spanCopyInstruction width tryCopy (stack.map mapping.value) target) := by
+      (spanCopyInstruction width tryCopy (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.spanCopyInstruction at observable ⊢
   split at observable
   · rename_i destinationView sourceView rest
-    simp only [List.map_cons, AllocationRenaming.value]
+    simp only [List.map_cons, LocalIndexMap.value]
     dsimp only [AllocationRenaming.spanView]
     simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
     obtain ⟨destinationBound, sourceBound, restBound⟩ := bounds
@@ -116,12 +137,12 @@ private theorem Memory.Renamed.spanFillInstructionResult {mapping : AllocationRe
     (observable : SuccessOrThrow (spanFillInstruction width clear stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (spanFillInstruction width clear stack source)
-      (spanFillInstruction width clear (stack.map mapping.value) target) := by
+      (spanFillInstruction width clear (stack.map (indices.value mapping)) target) := by
   cases clear <;> simp only [CIL.Safety.spanFillInstruction] at observable ⊢
   all_goals split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try dsimp only [AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
@@ -147,14 +168,14 @@ private theorem Memory.Renamed.arrayFillInstructionResult {mapping : AllocationR
     (observable : SuccessOrThrow (arrayFillInstruction element counted stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (arrayFillInstruction element counted stack source)
-      (arrayFillInstruction element counted (stack.map mapping.value) target) := by
+      (arrayFillInstruction element counted (stack.map (indices.value mapping)) target) := by
   unfold arrayFillInstruction at observable ⊢
   split at observable
   · rename_i value input rest
-    simp only [List.map_cons, AllocationRenaming.value, Bind.bind, Except.bind,
-      Pure.pure, Except.pure] at observable ⊢
+    simp only [List.map_cons, LocalIndexMap.value, Bind.bind,
+      Except.bind, Pure.pure, Except.pure] at observable ⊢
     split at observable
     · rename_i view
       dsimp +instances only [AllocationRenaming.arrayView]
@@ -173,18 +194,19 @@ private theorem Memory.Renamed.arrayFillInstructionResult {mapping : AllocationR
         split at observable
         · simp only [*, ite_true]; exact .error _
         · simp only [*, Bool.false_eq_true, ite_false]
-          have renamed := related.spanFillInstructionResult element.width false
-            (.scalar value :: .bufferSpan view.storage :: rest)
-            (by simpa only [List.mem_cons, forall_eq_or_imp, Value.Below, ArrayView.storage]
-                  using bounds) observable
-          simpa only [List.map_cons, AllocationRenaming.value, AllocationRenaming.spanView,
-            ArrayView.storage] using renamed
-    · simp only [AllocationRenaming.value, AllocationRenaming.managedReference]
+          have renamed :=
+            related.spanFillInstructionResult (indices := indices) element.width false
+              (.scalar value :: .bufferSpan view.storage :: rest)
+              (by simpa only [List.mem_cons, forall_eq_or_imp, Value.Below, ArrayView.storage]
+                    using bounds) observable
+          simpa only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value,
+            AllocationRenaming.spanView, ArrayView.storage] using renamed
+    · simp only [AllocationRenaming.managedReference]
       exact .error _
     · cases observable
   · rename_i count start value input rest
-    simp only [List.map_cons, AllocationRenaming.value, Bind.bind, Except.bind,
-      Pure.pure, Except.pure] at observable ⊢
+    simp only [List.map_cons, LocalIndexMap.value, Bind.bind,
+      Except.bind, Pure.pure, Except.pure] at observable ⊢
     split at observable
     · rename_i view
       dsimp +instances only [AllocationRenaming.arrayView]
@@ -213,16 +235,17 @@ private theorem Memory.Renamed.arrayFillInstructionResult {mapping : AllocationR
             have slicedBound : first.reference.Below mapping.sourceLimit := by
               rw [related.sourceLimit]
               exact formed.span_below first (checkedSpanSlice_valid _ _ _ _ _ sourceStep)
-            have renamed := related.spanFillInstructionResult element.width false
+            have renamed :=
+              related.spanFillInstructionResult (indices := indices) element.width false
               (.scalar value :: .bufferSpan first :: rest)
               (by simpa only [List.mem_cons, forall_eq_or_imp, Value.Below]
                     using And.intro trivial (And.intro slicedBound bounds.2.2.2.2))
               (by simpa only [sourceStep, Bind.bind, Except.bind] using observable)
-            simpa only [List.map_cons, AllocationRenaming.value] using renamed
+            simpa only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value] using renamed
           · rename_i invalidRange
             simp only [invalidRange, ite_false, Bind.bind, Except.bind]
             exact .error _
-    · simp only [AllocationRenaming.value, AllocationRenaming.managedReference]
+    · simp only [AllocationRenaming.managedReference]
       exact .error _
     · cases observable
   · simp only [Bind.bind, Except.bind] at observable
@@ -238,9 +261,9 @@ theorem Memory.Renamed.arrayTransferInstructionResult {mapping : AllocationRenam
     (observable : SuccessOrThrow (arrayTransferInstruction element store stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (arrayTransferInstruction element store stack source)
-      (arrayTransferInstruction element store (stack.map mapping.value) target) := by
+      (arrayTransferInstruction element store (stack.map (indices.value mapping)) target) := by
   cases store <;> simp only [arrayTransferInstruction, Bool.false_eq_true, ite_false, ite_true]
     at observable ⊢
   all_goals simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at observable ⊢
@@ -264,7 +287,7 @@ theorem Memory.Renamed.arrayTransferInstructionResult {mapping : AllocationRenam
     | (apply (related.storeTransfer _ (by assumption) _ _).bindWithSuccess
        intro first second sourceStep memoryRelated)
     | (split at observable <;> try simp only [*, List.map_cons, AllocationRenaming.value,
-        AllocationRenaming.arrayView, AllocationRenaming.managedReference,
+        LocalIndexMap.value, AllocationRenaming.arrayView, AllocationRenaming.managedReference,
         Bool.false_eq_true, ite_false, ite_true, Bind.bind, Except.bind, Pure.pure, Except.pure]
         at observable ⊢)
 #print axioms Memory.Renamed.arrayTransferInstructionResult
@@ -276,12 +299,12 @@ theorem Memory.Renamed.referenceAddInstructionResult {mapping : AllocationRenami
     (observable : SuccessOrThrow (referenceAddInstruction size signed stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (referenceAddInstruction size signed stack source)
-      (referenceAddInstruction size signed (stack.map mapping.value) target) := by
+      (referenceAddInstruction size signed (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.referenceAddInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try solve | cases observable
   all_goals clear observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
@@ -304,12 +327,12 @@ private theorem Memory.Renamed.wideArithmeticInstructionResult {mapping : Alloca
     (observable : SuccessOrThrow (wideArithmeticInstruction operation stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (wideArithmeticInstruction operation stack source)
-      (wideArithmeticInstruction operation (stack.map mapping.value) target) := by
+      (wideArithmeticInstruction operation (stack.map (indices.value mapping)) target) := by
   unfold wideArithmeticInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
@@ -689,12 +712,12 @@ theorem Memory.Renamed.classFieldLoadResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (classFieldLoad owner offset slot stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (classFieldLoad owner offset slot stack source)
-      (classFieldLoad owner offset slot (stack.map mapping.value) target) := by
+      (classFieldLoad owner offset slot (stack.map (indices.value mapping)) target) := by
   unfold classFieldLoad at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
@@ -713,10 +736,10 @@ theorem Memory.Renamed.classFieldLoadResult {mapping : AllocationRenaming}
     | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
        intro first second sourceStep memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
-    | (apply (related.loadSlot formed _ (by assumption)).bind
-       intro first second same
+    | (apply (related.loadSlot formed _ (by assumption)).bindWithSuccess
+       intro first second sourceStep same
        subst second
-       exact .ok ⟨related, rfl⟩)
+       push_renamed related)
     | (apply (related.referenceArrayOf _ (by assumption)).bind
        intro first second same
        subst second
@@ -731,10 +754,10 @@ theorem Memory.Renamed.classFieldLoadResult {mapping : AllocationRenaming}
     | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
        intro first second memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
-    | (apply (related.loadArraySlot formed _ (by assumption) _).bind
-       intro first second same
+    | (apply (related.loadArraySlot formed _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
        subst second
-       exact .ok ⟨related, rfl⟩)
+       push_renamed related)
     | (apply (related.storeArraySlot _ (by assumption) _ (by assumption) _).bind
        intro first second memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
@@ -750,12 +773,12 @@ theorem Memory.Renamed.classFieldStoreResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (classFieldStore owner offset slot stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (classFieldStore owner offset slot stack source)
-      (classFieldStore owner offset slot (stack.map mapping.value) target) := by
+      (classFieldStore owner offset slot (stack.map (indices.value mapping)) target) := by
   unfold classFieldStore at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
@@ -774,10 +797,10 @@ theorem Memory.Renamed.classFieldStoreResult {mapping : AllocationRenaming}
     | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
        intro first second sourceStep memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
-    | (apply (related.loadSlot formed _ (by assumption)).bind
-       intro first second same
+    | (apply (related.loadSlot formed _ (by assumption)).bindWithSuccess
+       intro first second sourceStep same
        subst second
-       exact .ok ⟨related, rfl⟩)
+       push_renamed related)
     | (apply (related.referenceArrayOf _ (by assumption)).bind
        intro first second same
        subst second
@@ -792,10 +815,10 @@ theorem Memory.Renamed.classFieldStoreResult {mapping : AllocationRenaming}
     | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
        intro first second memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
-    | (apply (related.loadArraySlot formed _ (by assumption) _).bind
-       intro first second same
+    | (apply (related.loadArraySlot formed _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
        subst second
-       exact .ok ⟨related, rfl⟩)
+       push_renamed related)
     | (apply (related.storeArraySlot _ (by assumption) _ (by assumption) _).bind
        intro first second memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
@@ -840,9 +863,9 @@ private theorem Memory.Renamed.stringLiteralInstructionResult {mapping : Allocat
     (observable : SuccessOrThrow (stringLiteralInstruction text stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (stringLiteralInstruction text stack source)
-      (stringLiteralInstruction text (stack.map mapping.value) target) := by
+      (stringLiteralInstruction text (stack.map (indices.value mapping)) target) := by
   unfold stringLiteralInstruction literalObject at observable ⊢
   rw [related.literals, lookup_renamedLiterals]
   cases bound : source.literals.lookup text with
@@ -853,10 +876,10 @@ private theorem Memory.Renamed.stringLiteralInstructionResult {mapping : Allocat
     have issued : reference.allocation < mapping.sourceLimit := by
       rw [related.sourceLimit]
       exact formObject_issued sourceFormed formed
-    apply (related.formObject (.address reference) issued).bind
-    intro first second same
+    apply (related.formObject (.address reference) issued).bindWithSuccess
+    intro first second sourceStep same
     subst second
-    exact .ok ⟨related, rfl⟩
+    push_renamed related
 #print axioms Memory.Renamed.stringLiteralInstructionResult
 
 /-- Renaming keeps null and non-null objects apart, so a null guard decides alike. -/
@@ -866,12 +889,13 @@ private theorem Memory.Renamed.throwIfNullInstructionResult {mapping : Allocatio
     (observable : SuccessOrThrow (throwIfNullInstruction stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (throwIfNullInstruction stack source)
-      (throwIfNullInstruction (stack.map mapping.value) target) := by
+      (throwIfNullInstruction (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.throwIfNullInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map, AllocationRenaming.value, AllocationRenaming.managedReference]
+  all_goals try simp only [List.map, LocalIndexMap.value,
+    AllocationRenaming.managedReference]
   · exact .error _
   · exact .ok ⟨related, rfl⟩
   · cases observable
@@ -885,12 +909,12 @@ private theorem Memory.Renamed.zeroGuardInstructionResult {mapping : AllocationR
     (observable : SuccessOrThrow (zeroGuardInstruction guard width signed stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (zeroGuardInstruction guard width signed stack source)
-      (zeroGuardInstruction guard width signed (stack.map mapping.value) target) := by
+      (zeroGuardInstruction guard width signed (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.zeroGuardInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map, AllocationRenaming.value]
+  all_goals try simp only [List.map, LocalIndexMap.value]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨related, rfl⟩
@@ -906,12 +930,13 @@ private theorem Memory.Renamed.comparisonGuardInstructionResult {mapping : Alloc
     (observable : SuccessOrThrow (comparisonGuardInstruction guard width signed stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (comparisonGuardInstruction guard width signed stack source)
-      (comparisonGuardInstruction guard width signed (stack.map mapping.value) target) := by
+      (comparisonGuardInstruction guard width signed (stack.map (indices.value mapping))
+        target) := by
   unfold CIL.Safety.comparisonGuardInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map, AllocationRenaming.value]
+  all_goals try simp only [List.map, LocalIndexMap.value]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨related, rfl⟩
@@ -927,12 +952,12 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
     (observable : SuccessOrThrow (otherMemoryInstruction operation stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (otherMemoryInstruction operation stack source)
-      (otherMemoryInstruction operation (stack.map mapping.value) target) := by
+      (otherMemoryInstruction operation (stack.map (indices.value mapping)) target) := by
   unfold otherMemoryInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
@@ -968,7 +993,7 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
     | (apply (related.formValue _ (by assumption)).bindWithSuccess
        intro first second sourceStep same
        subst second
-       first | (split <;> exact .ok ⟨related, rfl⟩) | exact .ok ⟨related, rfl⟩)
+       first | (split <;> push_renamed related) | push_renamed related)
     | (apply (related.storeValue _ (by assumption) _).bindWithSuccess
        intro first second sourceStep memoryRelated
        exact .ok ⟨memoryRelated, rfl⟩)
@@ -1030,19 +1055,19 @@ private theorem Memory.Renamed.viewObservationInstructionResult {mapping : Alloc
     (observable : SuccessOrThrow (viewObservationInstruction observation stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (viewObservationInstruction observation stack source)
-      (viewObservationInstruction observation (stack.map mapping.value) target) := by
+      (viewObservationInstruction observation (stack.map (indices.value mapping)) target) := by
   unfold viewObservationInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try dsimp only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
   all_goals repeat' rcases bounds with ⟨_, bounds⟩
   all_goals repeat first
-    | exact .ok ⟨related, rfl⟩
+    | push_renamed related
     | exact .error _
     | (apply (related.checkedSpanValidate _ (by assumption)).bindWithSuccess
        intro first second sourceStep same
@@ -1058,12 +1083,12 @@ private theorem Memory.Renamed.viewObservationInstructionResult {mapping : Alloc
         AllocationRenaming.managedReference, Bind.bind, Except.bind])
   all_goals try simp_all [CIL.Safety.formValue, Pure.pure, Except.pure, Bind.bind, Except.bind]
   all_goals subst_vars
-  all_goals try solve | split <;> exact .ok ⟨related, rfl⟩
+  all_goals try solve | split <;> push_renamed related
   all_goals
     apply (related.formValue _ (by assumption)).bindWithSuccess
     intro first second sourceStep same
     subst second
-    split <;> exact .ok ⟨related, rfl⟩
+    split <;> push_renamed related
 #print axioms Memory.Renamed.viewObservationInstructionResult
 
 /-- Byte reordering cannot introduce a fault containing allocation identities. -/
@@ -1085,12 +1110,13 @@ private theorem Memory.Renamed.binaryTransferInstructionResult {mapping : Alloca
       (binaryTransferInstruction width signed bigEndian read trying stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (binaryTransferInstruction width signed bigEndian read trying stack source)
-      (binaryTransferInstruction width signed bigEndian read trying (stack.map mapping.value) target) := by
+      (binaryTransferInstruction width signed bigEndian read trying
+        (stack.map (indices.value mapping)) target) := by
   unfold binaryTransferInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try dsimp only [AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
@@ -1122,12 +1148,12 @@ private theorem Memory.Renamed.singleSpanInstructionResult {mapping : Allocation
     (observable : SuccessOrThrow (singleSpanInstruction width writable stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (singleSpanInstruction width writable stack source)
-      (singleSpanInstruction width writable (stack.map mapping.value) target) := by
+      (singleSpanInstruction width writable (stack.map (indices.value mapping)) target) := by
   unfold singleSpanInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
   all_goals repeat' rcases bounds with ⟨_, bounds⟩
   all_goals repeat first
@@ -1149,12 +1175,13 @@ private theorem Memory.Renamed.pointerTransferInstructionResult {mapping : Alloc
     (observable : SuccessOrThrow (pointerTransferInstruction kind alignment store stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (pointerTransferInstruction kind alignment store stack source)
-      (pointerTransferInstruction kind alignment store (stack.map mapping.value) target) := by
+      (pointerTransferInstruction kind alignment store (stack.map (indices.value mapping))
+        target) := by
   unfold pointerTransferInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
   all_goals repeat' rcases bounds with ⟨_, bounds⟩
@@ -1205,12 +1232,12 @@ private theorem Memory.Renamed.vector128UnsafeInstructionResult {mapping : Alloc
     (observable : SuccessOrThrow (vector128UnsafeInstruction store offset stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (vector128UnsafeInstruction store offset stack source)
-      (vector128UnsafeInstruction store offset (stack.map mapping.value) target) := by
+      (vector128UnsafeInstruction store offset (stack.map (indices.value mapping)) target) := by
   unfold vector128UnsafeInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
@@ -1239,12 +1266,12 @@ private theorem Memory.Renamed.staticSpanInstructionResult {mapping : Allocation
     (observable : SuccessOrThrow (staticSpanInstruction operation stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (staticSpanInstruction operation stack source)
-      (staticSpanInstruction operation (stack.map mapping.value) target) := by
+      (staticSpanInstruction operation (stack.map (indices.value mapping)) target) := by
   unfold staticSpanInstruction at observable ⊢
   split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value,
+  all_goals try simp only [List.map_cons, LocalIndexMap.value,
     AllocationRenaming.managedReference]
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,
     ManagedReference.Below] at bounds
@@ -1277,11 +1304,11 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (memoryInstruction operation stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (memoryInstruction operation stack source)
-      (memoryInstruction operation (stack.map mapping.value) target) := by
+      (memoryInstruction operation (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.memoryInstruction at observable ⊢
-  rw [mapping.unspecifiedOperands]
+  rw [indices.unspecifiedOperands mapping]
   split at observable
   · cases observable
   · rename_i observed

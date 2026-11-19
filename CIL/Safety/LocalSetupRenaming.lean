@@ -162,7 +162,8 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
     | mk storedSlot storedMemory =>
       simp only [Pure.pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at made
       obtain ⟨rfl, rfl, rfl⟩ := made
-      have stores := homes.storeLocal (.bytes retainedKind ⟨source.nextIdentity, 0⟩)
+      have stores := homes.storeLocal (indices := .nil)
+        (.bytes retainedKind ⟨source.nextIdentity, 0⟩)
         (.scalar initial) freshBound (by trivial)
       rw [sourceStored] at stores
       obtain ⟨⟨targetSlot, targetMemory⟩, targetStored, slots, remains⟩ := stores.success
@@ -174,7 +175,7 @@ theorem Memory.Renamed.makeLocalInitialized {mapping : AllocationRenaming}
       · simp only [CIL.Safety.makeLocal, targetAllocated, unmodeled, ite_false,
           Bind.bind, Except.bind]
         simp only [AllocationRenaming.localSlot, AllocationRenaming.reference,
-          AllocationRenaming.value, freshImage, retainedKind] at targetStored
+          LocalIndexMap.value, freshImage, retainedKind] at targetStored
         simp only [targetStored, List.map_cons, List.map_nil, freshImage,
           Pure.pure, Except.pure, AllocationRenaming.localSlot, AllocationRenaming.reference]
       · intro identity member

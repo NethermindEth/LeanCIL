@@ -139,7 +139,8 @@ theorem step_load_unchanged {body : CIL.Method} {index pc : Nat}
     argument; any continuation from the following pc composes. -/
 theorem run_load_arguments {program : CIL.Program} {method : Nat} {body : CIL.Method}
     {args : List Value} {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop}
-    (found : program[method]? = some body) (valid : ValuesValid memory args) :
+    (found : program[method]? = some body) (valid : ValuesValid memory args)
+    (free : ∀ value ∈ args, value.isHome = false) :
     ∀ (loads : List Nat) (pc : Nat) (stack loaded : List Value),
       (∀ position index, loads[position]? = some index →
         body.code[pc + position]? = some (.ldarg index)) →
@@ -166,7 +167,7 @@ theorem run_load_arguments {program : CIL.Program} {method : Nat} {body : CIL.Me
       simp only [List.map_cons, List.cons.injEq] at selected
       obtain ⟨present, selected⟩ := selected
       have checked := checkedValue_of_valid memory value
-        (valid value (List.mem_of_getElem? present))
+        (valid value (List.mem_of_getElem? present)) (free value (List.mem_of_getElem? present))
       have stepped := step_load_unchanged (body := body) (pc := pc) (stack := stack)
         (frame := frame) present checked (narrowed (load, value) (by simp))
       refine run_next_exists post found (by simpa using fetched 0 load rfl) stepped ?_
@@ -186,7 +187,8 @@ theorem step_call_loaded {body : CIL.Method} {method : CIL.Extraction.MethodRef}
     {frame : Frame} {memory : Memory} {arguments : List Value}
     (plain : prefixes.tail = false) (arity : method.argumentCount = arguments.length)
     (linked : body.linkAt pc = some (.direct callee))
-    (valid : ValuesValid memory arguments) (known : arguments.any Value.hasUnspecified = false) :
+    (valid : ValuesValid memory arguments) (free : ∀ value ∈ arguments, value.isHome = false)
+    (known : arguments.any Value.hasUnspecified = false) :
     step body (.call method prefixes) pc args frame arguments.reverse memory =
       .ok (.call callee arguments [] memory) := by
   have taken : arguments.reverse.take arguments.length = arguments.reverse :=
@@ -196,7 +198,8 @@ theorem step_call_loaded {body : CIL.Method} {method : CIL.Extraction.MethodRef}
   have unobserved : unspecifiedOperands 0 arguments.reverse = false := rfl
   simp only [step, observerCount, observedCall, unobserved, arity, exposed, Bool.false_eq_true,
     ↓reduceIte, linked, plain, List.length_reverse, Nat.lt_irrefl, taken, List.reverse_reverse,
-    checkedValues_of_valid valid, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    callArguments_of_checked (frame := frame) (checkedValues_of_valid valid free), Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
   rw [List.drop_of_length_le (by simp)]
 
 #print axioms step_call_loaded
@@ -262,8 +265,12 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
   have calleeValid : ValuesValid memory (contract.args input) := by
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ calleeChecked
     exact same ▸ valid
+  have calleeFree : ∀ value ∈ contract.args input, value.isHome = false := by
+    have free := checkedValues_not_spanHome calleeChecked
+    obtain ⟨same, _⟩ := checkedValues_valid _ _ _ calleeChecked
+    rwa [same] at free
   refine run_call_of_contract holds input found callFetched
-    (step_call_loaded plain arity callLinked calleeValid known) rfl permitted ?_
+    (step_call_loaded plain arity callLinked calleeValid calleeFree known) rfl permitted ?_
   intro final out call
   obtain ⟨_, called⟩ := call.invoked
   have returns : contract.Returns input memory final (contract.results out) :=
@@ -273,12 +280,13 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
     rw [returnsValue]
     exact run_return_length _ _ _ _ _ _ _ _ _ _ _ calleeFound ran
   have valid := invoke_result_valid _ _ _ _ _ _ _ called
+  have free := invoke_result_not_spanHome _ _ _ _ _ _ _ called
   refine run_return_exists found returnFetched ?_
-    (checkedValues_of_valid (survives final _ valid returns))
+    (checkedValues_of_valid (survives final _ valid returns) free)
     (continuation final _ call.framed returns)
   rw [List.append_nil]
   exact step_return_unchanged returnNarrow arity (invoke_return_known called)
-    (checkedValues_of_valid valid)
+    (checkedValues_of_valid valid free)
     (unchanged final out call.post)
 
 #print axioms run_forward_call
@@ -286,9 +294,9 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
 /-- A forwarder inherits its callee's contract: it meets `pre`, `footprint` and `post`
     unchanged, with arguments encoded by `forwarded`. The callee's arguments must be the
     forwarder's selected by `loads`, each kept as the forwarder reads it; each forwarder
-    argument must reach the callee or be valid under `pre`, since the forwarder checks them
-    all; the call must expose no unspecified vector bits; and a narrowed return must not
-    change the callee's result. -/
+    argument must reach the callee or be valid and not a span home under `pre`, since the
+    forwarder checks them all; the call must expose no unspecified vector bits; and a narrowed
+    return must not change the callee's result. -/
 theorem MethodContract.Holds.forward {Input Output : Type}
     {contract : MethodContract Input Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
@@ -302,7 +310,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
     (narrowed : ∀ input initial, contract.pre input initial →
       ∀ pair ∈ loads.zip (contract.args input), LoadsUnchanged body pair.1 pair.2)
     (covered : ∀ input initial, contract.pre input initial → ∀ value ∈ forwarded input,
-      value ∈ contract.args input ∨ value.Valid initial)
+      value ∈ contract.args input ∨ (value.Valid initial ∧ value.isHome = false))
     (known : ∀ input initial, contract.pre input initial →
       (contract.args input).any Value.hasUnspecified = false)
     (unchanged : ∀ input initial final out, contract.post input initial final out →
@@ -315,15 +323,21 @@ theorem MethodContract.Holds.forward {Input Output : Type}
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ calleeChecked
     subst same
     exact fun value member =>
-      (covered input initial permitted value member).elim (valid value) id
+      (covered input initial permitted value member).elim (valid value) (·.1)
+  have forwardedFree : ∀ value ∈ forwarded input, value.isHome = false := by
+    have calleeFree := checkedValues_not_spanHome calleeChecked
+    obtain ⟨same, _⟩ := checkedValues_valid _ _ _ calleeChecked
+    rw [same] at calleeFree
+    exact fun value member =>
+      (covered input initial permitted value member).elim (calleeFree value) (·.2)
   have length : (contract.args input).length = loads.length := by
     simpa using (congrArg List.length (selected input)).symm
   have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads called)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
   apply WP.adequate.mpr
-  refine invoke_exists_of_run found (checkedValues_of_valid forwardedValid)
+  refine invoke_exists_of_run found (checkedValues_of_valid forwardedValid forwardedFree)
     (forwards.enterFrame _ _) ?_
-  refine run_load_arguments found forwardedValid loads 0 [] (contract.args input)
+  refine run_load_arguments found forwardedValid forwardedFree loads 0 [] (contract.args input)
     (fun position load located => ?_) (selected input) (narrowed input initial permitted) ?_
   · have bound : position < loads.length := (List.getElem?_eq_some_iff.mp located).1
     rw [Nat.zero_add, fetched, forwarderCode,
@@ -440,13 +454,13 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
 
 /-- A forwarder that passes a fresh local as a last out argument and drops it meets `outer`
     when its callee meets `inner` at `extend input home`, `home` being that local. Each
-    argument must be valid under `outer.pre` (`checked`), since the forwarder checks them
-    all. The callee's arguments must be the forwarder's selected by `loads`, each kept as the
-    forwarder reads it, and then `home`; its precondition must follow from `outer.pre` in the
-    memory after frame entry, where `home` is fresh, writable over the local's width and
-    holds its initializer; its footprint may name fresh storage or lie inside
-    `outer.footprint`; its postcondition must give `outer.post` once the frame has expired;
-    and its results must be scalars, which survive the expiry of `home`. The home's
+    argument must be valid and not a span home under `outer.pre` (`checked`), since the
+    forwarder checks them all. The callee's arguments must be the forwarder's selected by
+    `loads`, each kept as the forwarder reads it, and then `home`; its precondition must
+    follow from `outer.pre` in the memory after frame entry, where `home` is fresh, writable
+    over the local's width and holds its initializer; its footprint may name fresh storage or lie
+    inside `outer.footprint`; its postcondition must give `outer.post` once the frame has
+    expired; and its results must be scalars, which survive the expiry of `home`. The home's
     alignment is not surfaced. -/
 theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     {outer : MethodContract Outer Output} {inner : MethodContract Inner Output}
@@ -462,7 +476,8 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
           [some (.reference (.address home))] =
         (inner.args (extend input home)).map some)
     (checked : ∀ input memory, outer.pre input memory →
-      memory.WellFormed ∧ ValuesValid memory (outer.args input))
+      memory.WellFormed ∧ ValuesValid memory (outer.args input) ∧
+        ∀ value ∈ outer.args input, value.isHome = false)
     (narrowed : ∀ input memory home, outer.pre input memory →
       ∀ pair ∈ loads.zip (inner.args (extend input home)), LoadsUnchanged body pair.1 pair.2)
     (known : ∀ input memory home, outer.pre input memory →
@@ -493,7 +508,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       inner.post (extend input home) entered final out → outer.post input memory left out) :
     outer.Holds program method := by
   intro input memory permitted
-  obtain ⟨formed, outerValid⟩ := checked input memory permitted
+  obtain ⟨formed, outerValid, outerFree⟩ := checked input memory permitted
   obtain ⟨home, entered, setup, fresh, writable, initialized, entryBelow, enteredFormed⟩ :=
     forwards.enterFrame (outer.args input) memory formed
   have owned := enterFrame_fresh _ _ _ _ _ setup
@@ -525,8 +540,8 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     exact List.mem_append_left _ member
   have enteredValid := outerValid.preserve formed owned.1
   apply WP.adequate.mpr
-  refine invoke_exists_of_run found (checkedValues_of_valid outerValid) setup ?_
-  refine run_load_arguments found enteredValid loads 0 [] loaded
+  refine invoke_exists_of_run found (checkedValues_of_valid outerValid outerFree) setup ?_
+  refine run_load_arguments found enteredValid outerFree loads 0 [] loaded
     (fun position load located => ?_) loadedSome.symm loadedNarrowed ?_
   · have bound : position < loads.length := (List.getElem?_eq_some_iff.mp located).1
     rw [Nat.zero_add, fetched, outForwarderCode,

@@ -165,13 +165,13 @@ theorem storeArgument_stores {body : CIL.Method} {index : Nat} {value : Value} {
   · cases h
 #print axioms storeArgument_stores
 
-theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
-    (h : localAddress m slot = .ok value) : value.Valid m := by
+theorem localAddress_result_valid (m : Memory) (index : Nat) (slot : LocalSlot) (value : Value)
+    (h : localAddress m index slot = .ok value) : value.Valid m := by
   cases slot with
   | root root => cases h
   | readOnlyRoot _ => cases h
   | opaque128 _ => cases h
-  | span _ _ _ => exact loadLocal_result_valid m _ value h
+  | span _ _ _ => cases h; trivial
   | array _ _ => cases h
   | methodPointer _ _ | methodTable _ _ | object _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
@@ -183,7 +183,7 @@ theorem addressArgument_result_valid (body : CIL.Method) (index : Nat) (frame : 
   unfold addressArgument at h
   split at h
   · split at h
-    · exact localAddress_result_valid _ _ _ h
+    · exact localAddress_result_valid _ _ _ _ h
     · cases h
   · cases h
 #print axioms addressArgument_result_valid
@@ -196,6 +196,109 @@ theorem checkedValues_preserved (m result : Memory) (values checked : List Value
     (hm : m.WellFormed) (ext : AllocationExtension m result)
     (h : values.mapM (checkedValue m) = .ok checked) : ValuesValid result checked :=
   (checkedValues_valid _ _ _ h).2.preserve hm ext
+
+/-- A call argument is a checked value: valid in the memory it was read in, and never a home. -/
+theorem callArgument_checked {frame : Frame} {m : Memory} {value result : Value}
+    (h : callArgument frame m value = .ok result) : result.Valid m ∧ result.isHome = false := by
+  unfold callArgument at h
+  cases viewed : spanView frame m value with
+  | error _ => simp [viewed, Bind.bind, Except.bind] at h
+  | ok projected =>
+    simp only [viewed, Bind.bind, Except.bind] at h
+    exact ⟨(checkedValue_valid _ _ _ h).2, checkedValue_not_spanHome h⟩
+
+#print axioms callArgument_checked
+
+/-- A call's arguments, read from `frame`, are valid in the memory they were read in. -/
+theorem callArguments_valid {frame : Frame} {m : Memory} {values checked : List Value}
+    (h : values.mapM (callArgument frame m) = .ok checked) : ValuesValid m checked :=
+  mapM_ok_forall (fun _ _ read => (callArgument_checked read).1) h
+
+#print axioms callArguments_valid
+
+/-- A call's arguments, read from `frame`, stay valid as memory only gains allocations. -/
+theorem callArguments_preserved (m result : Memory) (frame : Frame) (values checked : List Value)
+    (hm : m.WellFormed) (ext : AllocationExtension m result)
+    (h : values.mapM (callArgument frame m) = .ok checked) : ValuesValid result checked :=
+  (callArguments_valid h).preserve hm ext
+
+#print axioms callArguments_preserved
+
+/-- A call argument has unspecified bits exactly when the value it was read from has them; a
+    home stands for a view, which has none. -/
+theorem callArgument_hasUnspecified {frame : Frame} {m : Memory} {value result : Value}
+    (h : callArgument frame m value = .ok result) :
+    result.hasUnspecified = value.hasUnspecified := by
+  unfold callArgument at h
+  cases viewed : spanView frame m value with
+  | error _ => simp [viewed, Bind.bind, Except.bind] at h
+  | ok projected =>
+    simp only [viewed, Bind.bind, Except.bind] at h
+    rw [(checkedValue_valid _ _ _ h).1]
+    cases value <;> simp only [spanView, Pure.pure, Except.pure, Except.ok.injEq] at viewed
+    all_goals first
+      | (subst viewed; rfl)
+      | (split at viewed
+         · simp only [loadLocal, Bind.bind, Except.bind, Pure.pure, Except.pure] at viewed
+           repeat' (first | (cases viewed; rfl) | contradiction | split at viewed)
+         · cases viewed)
+
+#print axioms callArgument_hasUnspecified
+
+/-- A call's arguments have unspecified bits exactly when the values they were read from have. -/
+theorem callArguments_hasUnspecified {frame : Frame} {m : Memory} :
+    ∀ {values checked : List Value}, values.mapM (callArgument frame m) = .ok checked →
+      checked.any Value.hasUnspecified = values.any Value.hasUnspecified
+  | [], checked, mapped => by cases mapped; rfl
+  | value :: rest, checked, mapped => by
+    simp only [List.mapM_cons, Bind.bind, Except.bind, Pure.pure, Except.pure] at mapped
+    cases head : callArgument frame m value with
+    | error _ => simp [head] at mapped
+    | ok produced =>
+      cases tail : rest.mapM (callArgument frame m) with
+      | error _ => simp [head, tail] at mapped
+      | ok others =>
+        simp only [head, tail, Except.ok.injEq] at mapped
+        subst mapped
+        simp only [List.any_cons, callArgument_hasUnspecified head,
+          callArguments_hasUnspecified tail]
+
+#print axioms callArguments_hasUnspecified
+
+/-- The view a home stands for is valid where it was read, and every other value is unchanged. -/
+theorem spanView_valid {frame : Frame} {m : Memory} {value result : Value}
+    (h : spanView frame m value = .ok result) (valid : value.Valid m) : result.Valid m := by
+  cases value with
+  | spanHome index =>
+    simp only [spanView] at h
+    split at h
+    · exact loadLocal_result_valid _ _ _ h
+    · cases h
+  | _ => cases h; exact valid
+
+#print axioms spanView_valid
+
+/-- Reading the homes among a stack's top operands keeps every value valid. -/
+theorem viewOperands_valid {frame : Frame} {m : Memory} :
+    ∀ {count : Nat} {stack operands : List Value},
+      viewOperands frame m count stack = .ok operands → ValuesValid m stack →
+        ValuesValid m operands
+  | 0, _, _, h, valid => by cases h; exact valid
+  | _ + 1, [], _, h, _ => by cases h; intro _ member; cases member
+  | count + 1, value :: rest, operands, h, valid => by
+    simp only [viewOperands, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    cases viewed : spanView frame m value with
+    | error _ => simp [viewed] at h
+    | ok produced =>
+      cases others : viewOperands frame m count rest with
+      | error _ => simp [viewed, others] at h
+      | ok tail =>
+        simp only [viewed, others, Except.ok.injEq] at h
+        subst h
+        exact ValuesValid.cons (spanView_valid viewed (valid value (List.mem_cons_self ..)))
+          (viewOperands_valid others valid.tail)
+
+#print axioms viewOperands_valid
 
 theorem allocated_store_reference_valid (m home result : Memory) (activation width : Nat)
     (r : Reference) (value : CIL.Value) (hm : m.WellFormed)
@@ -259,6 +362,16 @@ theorem StepContract.instruction {body : CIL.Method} {site : Nat} {operation : C
     StepContract body site operation frame stack m (.next pc values frame result) :=
   ⟨.memory (.ordinary contract.effect), contract.values⟩
 
+/-- A step that runs on the stack with its homes read as views has that step's contract. -/
+theorem StepContract.viewed {body : CIL.Method} {site : Nat} {operation : CIL.Instruction}
+    {frame : Frame} {stack operands : List Value} {m : Memory} {action : FrameAction}
+    {count : Nat} (viewed : viewOperands frame m count stack = .ok operands)
+    (contract : StepContract body site operation frame operands m action) :
+    StepContract body site operation frame stack m action :=
+  ⟨contract.effect, fun hm valid => contract.values hm (viewOperands_valid viewed valid)⟩
+
+#print axioms StepContract.viewed
+
 theorem StepContract.staticInstruction {body : CIL.Method} {site : Nat}
     {operation : CIL.Instruction}
     {frame : Frame}
@@ -306,7 +419,7 @@ theorem StepContract.objectAllocation {body : CIL.Method} {site : Nat} {frame : 
     {constructor : CIL.Extraction.MethodRef} {bases : List CIL.Extraction.TypeExpr}
     {size linkedSize index callee argc : Nat}
     (linked : body.linkAt site = some (.object index bases linkedSize))
-    (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
+    (checked : (stack.take argc).reverse.mapM (callArgument frame memory) = .ok arguments)
     (success : allocateObject memory ⟨constructor.owner, bases⟩ size = .ok (object, result)) :
     StepContract body site (.newobj constructor) frame stack memory
       (.call callee (.object (.address object) :: arguments)
@@ -315,7 +428,7 @@ theorem StepContract.objectAllocation {body : CIL.Method} {site : Nat} {frame : 
   apply StepContract.of_effect (.objectAllocation effect (by simp only [objectSiteType, linked]))
   intro hm extension retained
   exact ⟨ValuesValid.cons effect.object_valid
-      (checkedValues_preserved _ _ _ _ hm extension checked),
+      (callArguments_preserved _ _ _ _ _ hm extension checked),
     ValuesValid.cons effect.object_valid (retained.drop _)⟩
 
 #print axioms StepContract.objectAllocation
@@ -409,7 +522,7 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
         | exact retained.tail
         | exact retained.tail.tail
         | exact retained.tail.drop _
-        | exact (checkedValues_valid _ _ _ (by assumption)).2
+        | exact callArguments_valid (by assumption)
         | (apply ValuesValid.cons; first | trivial | exact retained | exact retained.tail.tail)
         | constructor
     | cases executed
@@ -468,6 +581,8 @@ theorem modelStep_contract {body : CIL.Method} {model : Option CIL.RuntimeModel}
   all_goals first
     | exact StepContract.instruction (memoryInstruction_contract _ _ _ _ _ (by assumption))
     | exact StepContract.instruction (instruction_contract _ _ _ _ _ (by assumption))
+    | exact StepContract.viewed (by assumption)
+        (StepContract.instruction (memoryInstruction_contract _ _ _ _ _ (by assumption)))
     | refine StepContract.of_effect (.memory (.ordinary (.unchanged _))) ?_
   all_goals
     intro formed extended retained
@@ -492,7 +607,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     StepContract body pc operation frame stack m action := by
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
-    constructAggregate constructObject observedCall at h
+    constructAggregate constructObject observedCall initializeSpanHome at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | exact modelStep_contract (by assumption)
@@ -500,6 +615,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | solve | exact StepContract.storeArgument (by assumption)
     | unfold returnFrom at h
     | unfold localAllocation at h
+    | unfold initializeSpanHome at h
     | unfold intrinsicCall at h
     | unfold referenceCompareCall at h
     | unfold referenceSubtractCall at h
@@ -512,6 +628,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | solve | exact .newarr (by assumption)
     | solve | exact .objectAllocation (by assumption) (by assumption) (by assumption)
     | solve |
+        apply StepContract.viewed (by assumption)
         apply StepContract.staticInstruction
         apply staticInstruction_contract
         assumption
@@ -525,6 +642,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         apply instruction_contract
         assumption
     | solve |
+        apply StepContract.viewed (by assumption)
         apply StepContract.instruction
         apply memoryInstruction_contract
         assumption
@@ -550,6 +668,11 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
           | (apply fieldStore_contract; assumption)
           | (apply fieldReference_contract; assumption)
     | solve |
+        apply StepContract.viewed (by assumption)
+        apply StepContract.instruction
+        apply transferObject_contract
+        assumption
+    | solve |
         refine StepContract.of_effect ?_ ?_
         · first
           | exact .memory (.ordinary (.unchanged _))
@@ -567,6 +690,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
             | exact retained.tail.tail
             | solve | exact retained.drop _
             | solve | apply checkedValues_preserved _ _ _ _ hm ext; assumption
+            | solve | apply callArguments_preserved _ _ _ _ _ hm ext; assumption
             | solve |
                 apply ValuesValid.append
                 · apply checkedValues_preserved _ _ _ _ hm ext; assumption
@@ -592,11 +716,107 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
                   | exact retained.tail.tail
                   | exact retained.tail
                   | apply checkedValues_preserved _ _ _ _ hm ext; assumption
+                  | apply callArguments_preserved _ _ _ _ _ hm ext; assumption
             | constructor
     | cases h
     | split at h
 
 #print axioms step_contract
+
+/-- No value `action` hands to another frame is a home: the arguments of a call, tail call or
+    construction and the returned values. A `.next` keeps its stack in the same frame. -/
+def FrameAction.HomeFree : FrameAction → Prop
+  | .next .. => True
+  | .call _ arguments _ _ | .tailCall _ arguments _ | .construct _ arguments _ _ _ _ _
+  | .returned arguments _ => ∀ value ∈ arguments, value.isHome = false
+
+/-- Call arguments read from a frame contain no home. -/
+theorem callArguments_not_spanHome {frame : Frame} {m : Memory} {values checked : List Value}
+    (h : values.mapM (callArgument frame m) = .ok checked) :
+    ∀ value ∈ checked, value.isHome = false :=
+  mapM_ok_forall (fun _ _ read => (callArgument_checked read).2) h
+
+#print axioms callArguments_not_spanHome
+
+/-- Closes the home-freedom of an action built from checked lists and fixed values. -/
+local macro "home_free_close" : tactic => `(tactic| (
+  dsimp only [FrameAction.HomeFree]
+  all_goals first
+    | trivial
+    | exact callArguments_not_spanHome (by assumption)
+    | exact checkedValues_not_spanHome (by assumption)
+    | exact List.forall_mem_cons.2 ⟨rfl, callArguments_not_spanHome (by assumption)⟩
+    | exact List.forall_mem_cons.2 ⟨rfl, fun _ member => nomatch member⟩))
+
+
+/-- A managed pointer call hands its callee checked arguments, none of them a home. -/
+theorem managedStep_homeFree {operation : CIL.ManagedOp} {link : Option CIL.Link} {pc : Nat}
+    {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction}
+    (executed : managedStep operation link pc frame stack memory = .ok action) :
+    action.HomeFree := by
+  unfold managedStep at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | (cases executed; home_free_close; done)
+    | (cases executed; done)
+    | split at executed
+
+#print axioms managedStep_homeFree
+
+/-- No successful step hands a home to another frame, so a home never leaves the frame whose
+    slot it names. -/
+theorem step_homeFree {body : CIL.Method} {operation : CIL.Instruction} {pc : Nat}
+    {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
+    (h : step body operation pc args frame stack m = .ok action) : action.HomeFree := by
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+    constructAggregate constructObject modelStep observedCall runModel featureCall
+    typedTransferCall skipInitCall initializeSpanHome at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | (cases h; home_free_close; done)
+    | (cases h; done)
+    | exact managedStep_homeFree h
+    | unfold returnFrom at h
+    | unfold localAllocation at h
+    | unfold initializeSpanHome at h
+    | unfold intrinsicCall at h
+    | unfold referenceCompareCall at h
+    | unfold referenceSubtractCall at h
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+    | split at h
+
+#print axioms step_homeFree
+
+/-- A list holding an element that `apply` refuses is refused by `mapM`. -/
+theorem mapM_error_of_mem {α β ε : Type} {apply : α → Except ε β} {value : α} {fault : ε}
+    (refused : apply value = .error fault) :
+    ∀ {values : List α}, value ∈ values → ∃ fault, values.mapM apply = .error fault
+  | head :: rest, member => by
+    rw [List.mapM_cons]
+    cases headResult : apply head with
+    | error other => exact ⟨other, by simp only [Bind.bind, Except.bind]⟩
+    | ok result =>
+      cases member with
+      | head => rw [refused] at headResult; cases headResult
+      | tail _ inRest =>
+        obtain ⟨other, failed⟩ := mapM_error_of_mem refused inRest
+        exact ⟨other, by simp only [failed, Bind.bind, Except.bind]⟩
+
+#print axioms mapM_error_of_mem
+
+/-- A home among the entry arguments stops `invokeWith` before any frame starts, so no frame
+    begins holding a home that names a slot of a frame that does not exist. -/
+theorem invokeWith_spanHome (lookup : Nat → Option CIL.Method) (fuel method : Nat)
+    {args : List Value} {m : Memory} {slot : Nat} (forged : Value.spanHome slot ∈ args) :
+    ∃ fault, invokeWith lookup fuel method args m = .error ⟨method, 0, fault⟩ := by
+  obtain ⟨fault, refused⟩ := mapM_error_of_mem (apply := checkedValue m) rfl forged
+  unfold invokeWith
+  cases lookup method with
+  | none => exact ⟨.invalidState, rfl⟩
+  | some body =>
+    exact ⟨fault, by simp only [refused, Except.mapError, Bind.bind, Except.bind]⟩
+
+#print axioms invokeWith_spanHome
 
 theorem step_effect (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)

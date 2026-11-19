@@ -110,7 +110,7 @@ if (suite is "all" or "core")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
-        "Tests/Objects.cs", "Tests/Guards.cs"]);
+        "Tests/Objects.cs", "Tests/Guards.cs", "Tests/SpanHomeReads.cs"]);
 if (suite is "all" or "dispatch")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
         "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",
@@ -243,7 +243,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
     "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
     "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
-    "Tests.BodyLiteral", "Tests.DecodedSummary",
+    "Tests.BodyLiteral", "Tests.DecodedSummary", "Tests.SpanHomes",
     "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
     "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
@@ -256,9 +256,10 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "local snapshot, struct field view, loop frame, contract consequence, invocation certificate, call transport, "
     + "buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
-    + "decoding, declared narrowing, value opcode decoding, decoded method, decoded summary, replay diagnostic, "
-    + "literal body evidence, return metadata, object array, embedding retention and profile, full transfer, "
-    + "SHA-1, assembly index, pin index scaling, field reference, runtime model and bit helper model tests");
+    + "decoding, declared narrowing, value opcode decoding, decoded method, decoded summary, span home, "
+    + "replay diagnostic, literal body evidence, return metadata, object array, embedding retention and profile, "
+    + "full transfer, SHA-1, assembly index, pin index scaling, field reference, runtime model and bit helper model "
+    + "tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 RunFixture("Tests/SummaryCalls.cs", [], streamOutput: true, progress: "Byref calls through a decoded summary");

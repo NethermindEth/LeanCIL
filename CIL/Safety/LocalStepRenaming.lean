@@ -29,8 +29,8 @@ theorem Frame.Renamed.stepInitializeSpanLocal {indices : LocalIndexMap}
       (step sourceBody (.initializeSpanLocal position constructor) pc arguments
         sourceFrame stack source)
       (step targetBody (.initializeSpanLocal (indices.index position) constructor) pc
-        (arguments.map mapping.value) targetFrame (stack.map mapping.value) target) := by
-  simp only [step, observerCount, mapping.unspecifiedOperands] at observable ⊢
+        (arguments.map mapping.value) targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [step, observerCount, indices.unspecifiedOperands mapping] at observable ⊢
   by_cases guard : unspecifiedOperands constructor.operation.argumentCount stack = true
   · simp only [guard, ite_true] at observable
     cases observable
@@ -80,7 +80,7 @@ theorem Frame.Renamed.stepLdloc {indices : LocalIndexMap} {mapping : AllocationR
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.ldloc position) pc arguments sourceFrame stack source)
       (step targetBody (.ldloc (indices.index position)) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
+        targetFrame (stack.map (indices.value mapping)) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_eq_true, ite_false]
   have slots := frames.locals.getElem?_all position
@@ -93,6 +93,7 @@ theorem Frame.Renamed.stepLdloc {indices : LocalIndexMap} {mapping : AllocationR
     apply (memories.loadLocal slot bounded).bindWithSuccess
     intro value otherValue loaded same
     subst otherValue
+    rw [indices.push_of_not_home mapping stack (loadLocal_not_spanHome loaded)]
     exact .ok (.next memories frames)
 #print axioms Frame.Renamed.stepLdloc
 
@@ -106,7 +107,7 @@ theorem Frame.Renamed.stepLdloca {indices : LocalIndexMap} {mapping : Allocation
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.ldloca position) pc arguments sourceFrame stack source)
       (step targetBody (.ldloca (indices.index position)) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
+        targetFrame (stack.map (indices.value mapping)) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_eq_true, ite_false]
   have slots := frames.locals.getElem?_all position
@@ -116,7 +117,7 @@ theorem Frame.Renamed.stepLdloca {indices : LocalIndexMap} {mapping : Allocation
   | none => exact .error .invalidState
   | @some slot otherSlot slots =>
     rcases slots with ⟨bounded, rfl⟩
-    apply (memories.localAddress slot bounded).bindWithSuccess
+    apply (memories.localAddress position slot bounded).bindWithSuccess
     intro value otherValue loaded same
     subst otherValue
     exact .ok (.next memories frames)
@@ -132,7 +133,8 @@ theorem Frame.Renamed.stepStloc {indices : LocalIndexMap} {mapping : AllocationR
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody (.stloc position) pc arguments sourceFrame (value :: rest) source)
       (step targetBody (.stloc (indices.index position)) pc
-        (arguments.map mapping.value) targetFrame ((value :: rest).map mapping.value) target) := by
+        (arguments.map mapping.value) targetFrame ((value :: rest).map (indices.value mapping))
+        target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_eq_true, ite_false, List.map_cons]
   have slots := frames.locals.getElem?_all position

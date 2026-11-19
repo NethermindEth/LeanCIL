@@ -1170,6 +1170,46 @@ theorem ScalarFlowValid.instruction_checked {raw : RawMethod}
 
 #print axioms ScalarFlowValid.instruction_checked
 
+/-- At a reachable pc the certificate's stack passes the raw instruction's scalar transfer, or
+    the site is a narrowing store the interpreter rejects, and every successor's certificate
+    entry is exactly the transferred stack. -/
+theorem ScalarFlowValid.transfer_at {raw : RawMethod} {features : FeatureCertificate}
+    {certificate : ScalarCertificate} {code : List Instruction} {decoded : Bool}
+    (valid : ScalarFlowValid raw features certificate code decoded)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole}
+    {feature : Option FeatureState} {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : raw.code[pc]? = some instruction)
+    (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
+    (featureAt : features[pc]? = some feature)
+    (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
+    ∃ state, feature = some state ∧ (scalarStoreFault raw instruction stack emitted = true ∨
+      ∃ after successors, scalarTransfer raw instruction stack role = some after ∧
+        featureSuccessors role pc instruction state.stack = some successors ∧
+        ∀ target ∈ successors, certificate[target]? = some (some after)) := by
+  have sites := ((ScalarFlowValid_iff_list raw features certificate code decoded).mp valid).2.2.2.2
+  have pairAt : ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features)[pc]? =
+      some (((instruction, role), pc), feature) := by
+    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt, featureAt]
+  have checked := all3_at sites pairAt stackAt emittedAt
+  cases feature with
+  | none => simp [checkScalarSite] at checked
+  | some state =>
+    refine ⟨state, rfl, ?_⟩
+    simp only [checkScalarSite, Bool.and_eq_true, Bool.or_eq_true] at checked
+    rcases checked.2 with fault | transfer
+    · exact Or.inl fault
+    · right
+      split at transfer
+      · rename_i after successors transferred successorsAt
+        refine ⟨after, successors, transferred, successorsAt, fun target member => ?_⟩
+        have reached := List.all_eq_true.mp transfer target member
+        split at reached
+        · exact beq_iff_eq.mp reached
+        · cases reached
+      · cases transfer
+
+#print axioms ScalarFlowValid.transfer_at
+
 /-- At a live folded pc in a prefix-valid literal, the decoder selects its certified
     instruction. The decoded operation passes the feature and scalar checks at that pc.
     The managed and constrained call certificates bind a direct tail call to its raw operand. -/

@@ -247,7 +247,8 @@ theorem reference_add_byte_offsets (body : CIL.Method) (pc : Nat) (args : List V
         (.readOnlyReference reference :: .scalar offset :: rest) memory := by
   cases unspecified : offset.hasUnspecified <;>
     simp [step, staticInstruction, memoryInstruction, observerCount,
-      CIL.MemoryOp.argumentCount, unspecifiedOperands, Value.hasUnspecified, unspecified]
+      CIL.MemoryOp.argumentCount, unspecifiedOperands, Value.hasUnspecified, unspecified,
+      viewOperandCount, viewOperands]
 #print axioms reference_add_byte_offsets
 
 /-- Reference addition rejects memory-model substitution and a spurious encoded operand. -/

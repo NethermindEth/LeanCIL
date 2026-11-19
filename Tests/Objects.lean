@@ -92,7 +92,7 @@ theorem ldnull_pushes_object_null :
 
 /-- An object home never exposes an address. -/
 theorem object_local_has_no_address :
-    localAddress memory (.object (some live)) =
+    localAddress memory 0 (.object (some live)) =
       .error (.unsupported "Address of object reference local") := rfl
 #print axioms object_local_has_no_address
 

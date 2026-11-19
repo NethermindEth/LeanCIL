@@ -165,17 +165,23 @@ theorem Memory.Renamed.loadLocal {mapping : AllocationRenaming}
       | ok bytes => cases kind <;> first | exact .ok rfl | exact .error .invalidState
 #print axioms Memory.Renamed.loadLocal
 
-/-- Taking a retained local's address preserves its mapped byte home pointer or span view and all
-    checks. -/
-theorem Memory.Renamed.localAddress {mapping : AllocationRenaming}
+/-- Taking a retained local's address preserves its mapped byte home pointer and all checks, and
+    a span local's home names the relocated slot. -/
+theorem Memory.Renamed.localAddress {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (slot : LocalSlot)
+    (related : Memory.Renamed mapping scopes source target) (index : Nat) (slot : LocalSlot)
     (bound : slot.Below mapping.sourceLimit) :
-    ResultRenamed mapping (fun source target => target = mapping.value source)
-      (localAddress source slot) (localAddress target (mapping.localSlot slot)) := by
+    ResultRenamed mapping (fun source target => target = indices.value mapping source)
+      (localAddress source index slot)
+      (localAddress target (indices.index index) (mapping.localSlot slot)) := by
   cases slot with
-  | bytes kind reference => exact related.formValue (.address reference) bound
-  | span width writable contents => exact related.loadLocal (.span width writable contents) bound
+  | bytes kind reference =>
+    exact (related.formValue (.address reference) bound).imp fun left right formed same => by
+      simp only [CIL.Safety.formValue, Bind.bind, Except.bind, checkedAt, Except.mapError]
+        at formed
+      split at formed <;> cases formed
+      exact same
+  | span width writable contents => exact .ok rfl
   | root _ | readOnlyRoot _ | opaque128 _ | array _ _
   | methodPointer _ _ | methodTable _ _ | object _ => exact .error _
 #print axioms Memory.Renamed.localAddress

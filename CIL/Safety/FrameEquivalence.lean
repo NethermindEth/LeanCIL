@@ -97,8 +97,8 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n)
     cases value <;> simp only [CIL.Safety.loadLocal, same.arrayValidate]
 
 theorem Memory.Equivalent.localAddress {m n : Memory} (same : m.Equivalent n)
-    (slot : LocalSlot) :
-    CIL.Safety.localAddress m slot = CIL.Safety.localAddress n slot := by
+    (index : Nat) (slot : LocalSlot) :
+    CIL.Safety.localAddress m index slot = CIL.Safety.localAddress n index slot := by
   cases slot <;> simp only [CIL.Safety.localAddress, same.formValue, same.loadLocal]
 
 theorem Memory.Equivalent.allocateHome {m n : Memory} (same : m.Equivalent n)
@@ -136,7 +136,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference _ => exact .error _
     | span _ _ => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ => exact .error _
+    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | root root | readOnlyRoot root =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -147,7 +147,8 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       exact .ok ⟨rfl, same⟩
     | scalar scalar => cases scalar <;> exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ => exact .error _
+    | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ | spanHome _ =>
+      exact .error _
   | bytes kind reference =>
     cases value with
     | scalar value =>
@@ -170,7 +171,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference reference => exact .error _
     | span reference length => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ => exact .error _
+    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | span width writable stored =>
     cases value
     case scalar scalar => cases scalar <;> exact .error _

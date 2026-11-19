@@ -775,7 +775,8 @@ inductive ValueShape where
   | aggregate (size : Nat)
   /-- A vector of `width` bytes. -/
   | vector (width : Nat)
-  /-- A span, whose address on the stack is already the view it names. -/
+  /-- A span. The address a load reads it through is the view an `in` argument passed; a local's
+      home names a slot instead, which the load refuses. -/
   | span
   /-- A type outside the checked layouts and primitives; an access faults with `reason`. -/
   | unsupported (reason : String)

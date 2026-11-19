@@ -75,6 +75,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     | exact managedStep_callee h enters
     | unfold returnFrom at h
     | unfold localAllocation at h
+    | unfold initializeSpanHome at h
     | solve | cases h; cases enters
     | solve |
       cases h

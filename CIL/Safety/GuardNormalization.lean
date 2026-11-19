@@ -25,6 +25,10 @@ namespace CIL.Safety
 
 @[cil_guard] theorem guard_span (reference : ManagedReference) (length : Nat) :
     Value.hasUnspecified (.span reference length) = false := rfl
+/-- A span local's home carries no unspecified vector bits. -/
+@[cil_guard] theorem guard_spanHome (slot : Nat) :
+    Value.hasUnspecified (.spanHome slot) = false := rfl
+#print axioms guard_spanHome
 
 @[cil_guard] theorem guard_snapshot (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool)) :
     CIL.Value.hasUnspecified (.snapshot shape bytes) = false := rfl
@@ -52,6 +56,13 @@ namespace CIL.Safety
     CIL.Value.hasUnspecified (.ref address) = false := rfl
 @[cil_guard] theorem guard_nullRef : CIL.Value.hasUnspecified .nullRef = false := rfl
 @[cil_guard] theorem guard_unmodeled : CIL.Value.hasUnspecified .unmodeled = false := rfl
+
+-- A memory operation that reads no span view takes its operands from the stack unchanged.
+attribute [cil_guard] viewOperandCount
+/-- With no view operands to read, the stack is the operation's operand list. -/
+@[cil_guard] theorem viewOperands_zero (frame : Frame) (memory : Memory) (stack : List Value) :
+    viewOperands frame memory 0 stack = .ok stack := rfl
+#print axioms viewOperands_zero
 
 -- The guard inspects only the top `count` stack operands.
 @[cil_guard] theorem guard_operands_zero (stack : List Value) :
@@ -237,6 +248,39 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
 @[cil_guard] theorem guard_count_spanItem (width : Nat) :
     (CIL.MemoryOp.spanItem width).argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_spanLength : CIL.MemoryOp.spanLength.argumentCount = 1 := rfl
+-- The remaining span and view operations, whose counts `viewOperandCount` also reads.
+@[cil_guard] theorem guard_count_observeView (observation : CIL.ViewObservation) :
+    (CIL.MemoryOp.observeView observation).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanReinterpret (source target : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanReinterpret source target writable).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanCopy (width : Nat) (tryCopy : Bool) :
+    (CIL.MemoryOp.spanCopy width tryCopy).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_spanClear (width : Nat) :
+    (CIL.MemoryOp.spanFill width true).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanFill (width : Nat) :
+    (CIL.MemoryOp.spanFill width false).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_arrayFill (element : CIL.ArrayElement) :
+    (CIL.MemoryOp.arrayFill element false).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_arrayFillCounted (element : CIL.ArrayElement) :
+    (CIL.MemoryOp.arrayFill element true).argumentCount = 4 := rfl
+@[cil_guard] theorem guard_count_spanEmpty (width : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanEmpty width writable).argumentCount = 0 := rfl
+@[cil_guard] theorem guard_count_spanFromReference (width : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanFromReference width writable).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_spanSingleReference (width : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanSingleReference width writable).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanSlice : (CIL.MemoryOp.spanSlice false).argumentCount = 2 :=
+  rfl
+@[cil_guard] theorem guard_count_spanSliceCount :
+    (CIL.MemoryOp.spanSlice true).argumentCount = 3 := rfl
+@[cil_guard] theorem guard_count_spanReadOnly : CIL.MemoryOp.spanReadOnly.argumentCount = 1 :=
+  rfl
+@[cil_guard] theorem guard_count_arraySpan (element : CIL.ArrayElement) (writable : Bool) :
+    (CIL.MemoryOp.arraySpan element writable .whole).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_arraySpanFrom (element : CIL.ArrayElement) (writable : Bool) :
+    (CIL.MemoryOp.arraySpan element writable .fromStart).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_arraySpanCounted (element : CIL.ArrayElement) (writable : Bool) :
+    (CIL.MemoryOp.arraySpan element writable .counted).argumentCount = 3 := rfl
 @[cil_guard] theorem guard_count_nullRef : CIL.MemoryOp.nullRef.argumentCount = 0 := rfl
 @[cil_guard] theorem guard_count_isNullRef : CIL.MemoryOp.isNullRef.argumentCount = 1 := rfl
 

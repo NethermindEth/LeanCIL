@@ -331,7 +331,14 @@ of `loadArgument` on `body.argumentAccess index`, which a later fact decides. A 
 `step_starg_value_eq` or `step_ldarga_value_eq` to the unsupported fault, and an undecided access
 to `storeArgument` or `addressArgument`. Under a home, `step_ldarg_home_ldloc`,
 `step_starg_home_stloc` and `step_ldarga_home_ldloca` state each argument instruction as the
-local instruction of its slot.
+local instruction of its slot. `step_ldloca_eq` pushes what `localAddress` gives, which for a
+span slot is `.spanHome index`; a span model that reads the home steps by its `_home_eq`
+equation, such as `step_memory_spanLength_home_eq`, to the same model on the slot's view, and a
+call argument steps through `callArgument`, which `cil_checked` reduces to `checkedValue` for
+every value but a home. A supplied `memoryInstruction` or `staticInstruction` fact for a span
+operation states the slot's view in place of the home: stepping matches the fact against the stack
+with each home read from its frame slot, and reads the home before the fact rewrites the
+operation.
 
 A `.ldsfld field` step pushes the value `staticLoad body pc memory` returns, and `.ldsflda field`
 or `.ldtoken (.field field)` the reference `staticAddress body pc memory` returns
@@ -817,7 +824,8 @@ authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and
 `step_newobj_aggregate_action`, which takes the `.aggregate` link of a `newobj`, separate a call from a
 construction; `step_call_action` also gives a call whose pc states no link, whose runtime model
-continues at `pc + 1` in the same frame. The module imports only the step
+continues at `pc + 1` in the same frame, or with one span slot set when the model runs a span
+constructor in place (`modelStep_frame`). The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.
 

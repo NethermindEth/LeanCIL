@@ -59,6 +59,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
           List.length_nil, Nat.zero_add, ↓reduceIte, List.any_cons, Value.hasUnspecified,
           CIL.Value.hasUnspecified, List.any_nil, Bool.or_self, and_self]
     | cases executed
+    | unfold initializeSpanHome at executed
     | obtain ⟨_, _, executed⟩ := bind_success.mp executed
     | simp only [Bind.bind, Pure.pure, Except.pure] at executed
 
@@ -149,17 +150,18 @@ theorem step_call_known {body : CIL.Method} {method : Extraction.MethodRef}
   split at executed
   · split at executed
     · cases executed
-    · cases checked : stack.reverse.mapM (checkedValue memory) <;>
+    · cases checked : stack.reverse.mapM (callArgument frame memory) <;>
         simp [checked, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   split at executed
   · cases executed
-  · cases checked : (stack.take method.argumentCount).reverse.mapM (checkedValue memory) with
+  · cases checked :
+        (stack.take method.argumentCount).reverse.mapM (callArgument frame memory) with
     | error fault => simp [checked, Bind.bind, Except.bind] at executed
     | ok checkedArgs =>
       simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure,
         Except.ok.injEq, FrameAction.call.injEq] at executed
       obtain ⟨_, rfl, rfl, rfl⟩ := executed
-      rw [(checkedValues_valid _ _ _ checked).1]
+      rw [callArguments_hasUnspecified checked]
       simpa [unspecifiedOperands] using known
 
 #print axioms step_call_known

@@ -29,6 +29,8 @@ Run(["dotnet", "run", "--file", "Tests/ArrayElementReferences.cs"], streamOutput
     progress: "Array element references");
 Run(["dotnet", "run", "--file", "Tests/ReadOnlyArrayReferences.cs"], streamOutput: true,
     progress: "Readonly array references");
+Run(["dotnet", "run", "--file", "Tests/SpanHomeReads.cs"], streamOutput: true,
+    progress: "Span locals read through their addresses");
 Run(["dotnet", "run", "--file", "Tests/ExternalIdentityEncoding.cs"], streamOutput: true,
     progress: "UTF-8 metadata identity certificates");
 foreach (var name in new[]

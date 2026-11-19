@@ -217,13 +217,13 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object =>
       .error .invalidState
 
-/-- What taking a local's address pushes: the address of its byte home, or for a span local the
-    view it holds, which the model uses in place of the span's address. Root, array, opaque
-    vector, callable and object slots have no address the model forms. -/
-def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
+/-- What taking the address of local `index`, held in `slot`, pushes: the address of its byte
+    home, or for a span local its home, which reads nothing until a call passes it. Root,
+    array, opaque vector, callable and object slots have no address the model forms. -/
+def localAddress (m : Memory) (index : Nat) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
-  | .span width writable view => loadLocal m (.span width writable view)
+  | .span .. => .ok (.spanHome index)
   | .root _ | .readOnlyRoot _ => .error (.unsupported "Address of managed-reference local")
   | .array .. => .error (.unsupported "Address of array root local")
   | .opaque128 _ => .error (.unsupported "Address of opaque vector local")

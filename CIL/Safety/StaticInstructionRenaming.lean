@@ -11,6 +11,9 @@ while cached fields preserve their existing allocation correspondence.
 
 namespace CIL.Safety
 
+-- Stack lists are renamed by the local map of the frame that holds them.
+variable {indices : LocalIndexMap}
+
 /-- Static resolution reports model or memory faults, never a named CLR exception. -/
 theorem staticReference_not_thrown (descriptor : CIL.StaticDescriptor) (memory : Memory)
     (exception : ExceptionType) :
@@ -37,9 +40,9 @@ theorem Memory.Renamed.staticInstructionResult {mapping : AllocationRenaming}
     ∃ later, mapping.Extends later ∧
       ResultRenamed later
         (fun left right => Memory.Renamed later scopes left.1 right.1 ∧
-          right.2 = left.2.map later.value)
+          right.2 = left.2.map (indices.value later))
         (staticInstruction body pc operation stack source)
-        (staticInstruction body pc operation (stack.map mapping.value) target) := by
+        (staticInstruction body pc operation (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.staticInstruction at observable ⊢
   exact ⟨mapping, .refl mapping,
     related.memoryInstructionResult _ sourceFormed _ bounds observable⟩
@@ -126,7 +129,8 @@ theorem Memory.Renamed.staticAddressResult {mapping : AllocationRenaming}
       refine ⟨later, extension, ?_⟩
       simp only [targetLoaded]
       exact .ok ⟨memories, by
-        simp only [AllocationRenaming.value, AllocationRenaming.managedReference]⟩
+        simp only [AllocationRenaming.value,
+          AllocationRenaming.managedReference]⟩
 
 #print axioms Memory.Renamed.staticAddressResult
 

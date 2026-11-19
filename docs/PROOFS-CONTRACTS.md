@@ -1109,8 +1109,8 @@ premises:
 - The callee's arguments are the forwarder's at those indices, each kept by the forwarder's read
   (`LoadsUnchanged body index value`). `plainLoads_unchanged` discharges it for arguments read
   without narrowing, and `LoadsUnchanged.narrow` for an i32 already in its declared range.
-- Every forwarder argument reaches the callee or is valid under the precondition, since the
-  forwarder's own invocation checks them all.
+- Every forwarder argument reaches the callee or is valid and not a span home under the
+  precondition, since the forwarder's own invocation checks them all.
 - The call exposes no unspecified vector bits.
 - A return with declared narrowing `some kind` does not change the callee's result (`ReturnsUnchanged`), which
   holds for a boolean.
@@ -1131,8 +1131,8 @@ premises over those memories:
 
 - The callee's arguments are the forwarder's selected by the loads followed by the home, each kept
   by its load's narrowing and none with unspecified vector bits.
-- `outer.pre` gives a well-formed memory in which every forwarder argument is valid (`checked`),
-  since the forwarder checks them all.
+- `outer.pre` gives a well-formed memory in which every forwarder argument is valid and not a
+  span home (`checked`), since the forwarder checks them all.
 - `inner.pre` follows from `outer.pre` with the home fresh, writable and holding its initializer
   (`LocalHolds`).
 - The `inner` footprint names fresh storage or lies inside `outer.footprint`. The lemma checks

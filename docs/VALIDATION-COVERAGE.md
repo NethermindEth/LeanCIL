@@ -460,6 +460,14 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   `Tests/ArrayElementReferences.lean` covers null, empty and out-of-range accesses, expired
   references and address formation without granting memory authority. Both run in the `evidence`
   suite.
+- `Tests/SpanHomeReads.cs` adds a method that stores a span local, takes its address, stores
+  another span and reads the length through the address, checks the CLR result and proves that the
+  extracted method returns the second length for both argument orders. `Tests/SpanHomes.lean`
+  covers a recursive callee that stores to its own slot while the caller holds a home, a linked
+  callee receiving the view, a homed parameter, uninitialized slots, a relocated home, homes refused
+  at entry, return, `stloc` and `stobj`, and shows that `ScalarFlowValid` refuses an address at a
+  by-value span parameter for every certificate. The first runs in the `evidence` suite and the
+  second in the `core` suite.
 - `Tests/ReadOnlyArrayReferences.cs` inserts `readonly.` prefixes into compiled fixtures,
   checks returned and locally stored references, and proves that caller stores fail despite
   writable backing memory. It rejects a raw body with the prefix removed, whose bytes body decoding

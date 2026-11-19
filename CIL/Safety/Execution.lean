@@ -96,6 +96,82 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
     let _ ← formValue m r
     return .span r length
   | .scalar value => if numericValue value then .ok (.scalar value) else .error .invalidState
+  -- A home names a slot of one frame, so no value that crosses a frame boundary is one.
+  | .spanHome _ => .error .invalidState
+
+/-- What a call passes for `value`: for a span home, the view its slot of `frame` holds when the
+    call runs; every other value unchanged. A home whose slot holds no view faults. -/
+def spanView (frame : Frame) (memory : Memory) : Value → ExecutionResult Value
+  | .spanHome index => match frame.locals[index]? with
+    | some (.span width writable view) => loadLocal memory (.span width writable view)
+    | _ => .error .invalidState
+  | .scalar value => pure (.scalar value)
+  | .reference reference => pure (.reference reference)
+  | .span reference length => pure (.span reference length)
+  | .bufferSpan view => pure (.bufferSpan view)
+  | .array view => pure (.array view)
+  | .readOnlyReference reference => pure (.readOnlyReference reference)
+  | .methodPointer pointer => pure (.methodPointer pointer)
+  | .methodTable table => pure (.methodTable table)
+  | .object reference => pure (.object reference)
+
+/-- A call argument of `frame`: `value`, a home read as `spanView` reads it, checked as
+    `checkedValue` checks a pushed value. -/
+def callArgument (frame : Frame) (memory : Memory) (value : Value) : ExecutionResult Value := do
+  checkedValue memory (← spanView frame memory value)
+
+/-- How many operands of `operation` `viewOperands` reads: all of a span or view operation's,
+    where a home stands for the view its slot holds, and none of any other. The match has no
+    default, so each new operation is classified. -/
+def viewOperandCount (operation : CIL.MemoryOp) : Nat :=
+  match operation with
+  | .observeView _ | .spanReinterpret .. | .spanCopy .. | .spanFill .. | .arrayFill ..
+  | .spanCreate | .spanReference | .createSpan _ | .spanItem _ | .spanLength | .spanEmpty ..
+  | .spanFromReference .. | .spanSingleReference .. | .spanSlice _ | .spanReadOnly
+  | .arraySpan .. => operation.argumentCount
+  | .binaryRead .. | .binaryWrite .. | .marshalRead .. | .marshalWrite .. | .pointerTransfer ..
+  | .vector128Unsafe .. | .bigMul64 _ | .divRemOut _
+  | .asRef | .add .. | .byteOffset | .bitcastByteBool | .bitcastValue .. | .nullRef | .isNullRef
+  | .throwIfNull | .zeroGuard .. | .comparisonGuard ..
+  | .copyBlock _ | .initBlock _
+  | .load128 | .load256 | .load512 | .store128 | .store256 | .store512
+  | .stringLiteral _ => 0
+
+/-- A value `checkedValue` accepts is passed as that same checked value, since it is no home. -/
+theorem callArgument_of_checked {frame : Frame} {memory : Memory} {value result : Value}
+    (checked : checkedValue memory value = .ok result) :
+    callArgument frame memory value = .ok result := by
+  cases value <;> first | (cases checked; done) | exact checked | (cases checked; rfl)
+
+#print axioms callArgument_of_checked
+
+/-- Values `checkedValue` accepts one by one pass as call arguments unchanged. -/
+theorem callArguments_of_checked {frame : Frame} {memory : Memory} :
+    ∀ {values results : List Value}, values.mapM (checkedValue memory) = .ok results →
+      values.mapM (callArgument frame memory) = .ok results
+  | [], _, checked => checked
+  | value :: rest, results, checked => by
+    simp only [List.mapM_cons, Bind.bind, Except.bind] at checked ⊢
+    cases head : checkedValue memory value with
+    | error _ => simp [head] at checked
+    | ok checkedHead =>
+      rw [callArgument_of_checked head]
+      cases tail : rest.mapM (checkedValue memory) with
+      | error _ => simp [head, tail] at checked
+      | ok others =>
+        rw [callArguments_of_checked tail]
+        simpa [head, tail] using checked
+
+#print axioms callArguments_of_checked
+
+/-- The stack with each of its top `count` entries read as `spanView` reads it: the operands a
+    span operation consumes, a home among them standing for the view its slot holds. -/
+def viewOperands (frame : Frame) (memory : Memory) :
+    Nat → List Value → ExecutionResult (List Value)
+  | 0, stack => pure stack
+  | _ + 1, [] => pure []
+  | count + 1, value :: rest => do
+    return (← spanView frame memory value) :: (← viewOperands frame memory count rest)
 
 /-- Only the value-only instruction whitelist may use the original pure
     arithmetic semantics. No memory/reference operation can enter this path. -/
@@ -177,7 +253,7 @@ def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) 
     let count := signature.parameters.length
     if (if tail then values.length != count else values.length < count) then
       .error .invalidState else pure ()
-    let arguments ← (values.take count).reverse.mapM (checkedValue memory)
+    let arguments ← (values.take count).reverse.mapM (callArgument frame memory)
     if tail then return .tailCall method arguments memory
     else return .call method arguments (values.drop count) memory
   | _, _ => .error .invalidState
@@ -250,7 +326,7 @@ def addressArgument (body : CIL.Method) (index : Nat) (frame : Frame) (memory : 
   match body.argumentAccess index with
   | .home slot => do
     let some home := frame.locals[slot]? | .error .invalidState
-    localAddress memory home
+    localAddress memory slot home
   | .value _ => .error (.unsupported "Address of an argument without a home")
 
 /-- Runs `next` unless one of the top `count` operands has unspecified bits, which `step` rejects
@@ -342,7 +418,8 @@ def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : 
   match model with
   | .intrinsic operation argc => intrinsicCall body.profile operation argc pc frame stack memory
   | .memory operation => do
-    let (memory, values) ← memoryInstruction operation stack memory
+    let operands ← viewOperands frame memory (viewOperandCount operation) stack
+    let (memory, values) ← memoryInstruction operation operands memory
     return .next (pc + 1) values frame memory
   | .feature feature => featureCall body.profile feature pc frame stack memory
   | .constant value => .ok (.next (pc + 1) (.scalar (.i32 value) :: stack) frame memory)
@@ -442,13 +519,25 @@ def allocateElements (shape : ElementShape) (length : CIL.Value) (memory : Memor
   | .method _ => .error (.unsupported ElementShape.methodAllocation)
   | .unsupported reason => .error (.unsupported reason)
 
+/-- `initobj` of a span through the home on top of the stack: its slot then holds the empty view
+    of the slot's width and access. Any other operand has no width to initialize. -/
+def initializeSpanHome (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    ExecutionResult FrameAction :=
+  match stack with
+  | .spanHome index :: rest => do
+    let some (.span width writable view) := frame.locals[index]? | .error .invalidState
+    let (slot, memory) ← storeLocal memory (.span width writable view)
+      (.bufferSpan ⟨.null, 0, width, writable⟩)
+    return .next (pc + 1) rest { frame with locals := frame.locals.set index slot } memory
+  | _ => .error (.unsupported "Initialization width")
+
 /-- `newobj` of a value type: a zeroed temporary of `size` bytes owned by `frame`, passed by
     address to `callee` ahead of the `argc` arguments on the stack; the driver pushes the
     temporary's value once the constructor returns. -/
 def constructAggregate (callee argc : Nat) (size : Fin (2^64)) (frame : Frame)
     (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if size = 0 || stack.length < argc then .error .invalidState else
-    let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+    let arguments ← (stack.take argc).reverse.mapM (callArgument frame m)
     let (temporary, memory) ← allocateHome m frame.activation size
     let (_, memory) ← storeLocal memory (.bytes (.aggregate size) temporary)
       (.scalar (.aggregate (List.replicate size 0)))
@@ -459,10 +548,10 @@ def constructAggregate (callee argc : Nat) (size : Fin (2^64)) (frame : Frame)
 /-- `newobj` of a class: a fresh zeroed instance of `type` with `size` bytes of fields, passed
     to `constructor` as its receiver ahead of the `argc` arguments on the stack, and left on the
     caller's stack for when the constructor returns. -/
-def constructObject (constructor argc : Nat) (type : RuntimeType) (size : Nat)
+def constructObject (constructor argc : Nat) (type : RuntimeType) (size : Nat) (frame : Frame)
     (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if stack.length < argc then .error .invalidState else
-    let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+    let arguments ← (stack.take argc).reverse.mapM (callArgument frame m)
     let (object, memory) ← allocateObject m type size
     let created := Value.object (.address object)
     return .call constructor (created :: arguments) (created :: stack.drop argc) memory
@@ -476,7 +565,7 @@ def newobjStep (link : Option CIL.Link) (method : CIL.Extraction.MethodRef)
   match link with
   | some (.aggregate callee size) => constructAggregate callee argc size frame stack m
   | some (.object constructor bases size) =>
-    constructObject constructor argc ⟨owner, bases⟩ size stack m
+    constructObject constructor argc ⟨owner, bases⟩ size frame stack m
   | none => modelStep (CIL.Extraction.runtimeModel body.environment .newobj method) body pc
       frame stack m
   | _ => .error unlinkedCall
@@ -598,9 +687,11 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .newarr element, .scalar length :: rest =>
     let (array, memory) ← allocateElements (body.elementShape element) length m
     return .next (pc + 1) (array :: rest) frame memory
-  -- Object transfers use the checked shape of the instruction's closed type operand.
+  -- Object transfers use the checked shape of the instruction's closed type operand. A span load
+  -- reads a home as the view its slot holds when the load runs.
   | .ldobj type, _ =>
-    let (memory, values) ← transferObject (body.valueShape type) false stack m
+    let operands ← viewOperands frame m (if Extraction.spanLocal type then 1 else 0) stack
+    let (memory, values) ← transferObject (body.valueShape type) false operands m
     return .next (pc + 1) values frame memory
   | .stobj type, _ =>
     let (memory, values) ← transferObject (body.valueShape type) true stack m
@@ -610,7 +701,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (memory, values) ← copyInitializedBytes size stack m
     return .next (pc + 1) values frame memory
   | .initobj type, _ =>
-    let some size := (body.valueShape type).size? | .error (.unsupported "Initialization width")
+    let some size := (body.valueShape type).size? | match body.valueShape type with
+      | .span => initializeSpanHome pc frame stack m
+      | _ => .error (.unsupported "Initialization width")
     let (memory, values) ← initializeBytes size stack m
     return .next (pc + 1) values frame memory
   | .sizeof type, _ =>
@@ -640,9 +733,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       | .direct callee =>
         if prefixes.tail then
           if stack.length != method.argumentCount then .error .invalidState else
-            return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
+            return .tailCall callee (← stack.reverse.mapM (callArgument frame m)) m
         else if stack.length < method.argumentCount then .error .invalidState else
-          let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
+          let arguments ← (stack.take method.argumentCount).reverse.mapM (callArgument frame m)
           return .call callee arguments (stack.drop method.argumentCount) m
       | _ => .error unlinkedCall
   -- A construction allocates what the link at its pc states and enters the constructor it names.
@@ -735,7 +828,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
   | .ldloca i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
-    return .next (pc + 1) ((← localAddress m slot) :: stack) frame m
+    return .next (pc + 1) ((← localAddress m i slot) :: stack) frame m
   | .stloc i, value :: rest =>
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
@@ -752,7 +845,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     match body.linkAt pc with
     | some (.direct callee) =>
       if stack.length < argc then .error .invalidState else
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+        let arguments ← (stack.take argc).reverse.mapM (callArgument frame m)
         -- The receiver is the deepest argument; anything but an object reference is ill-typed.
         match arguments with
         | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
@@ -760,7 +853,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         | _ => .error .invalidState
     | some (.virtual targets) =>
       if stack.length < argc then .error .invalidState else
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
+        let arguments ← (stack.take argc).reverse.mapM (callArgument frame m)
         match arguments with
         | .object (.address receiver) :: _ =>
           return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
@@ -768,7 +861,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         | _ => .error .invalidState
     | _ => .error unlinkedCall
   | .memory operation, _ =>
-    let (memory, values) ← staticInstruction body pc operation stack m
+    let operands ← viewOperands frame m (viewOperandCount operation) stack
+    let (memory, values) ← staticInstruction body pc operation operands m
     return .next (pc + 1) values frame memory
   | .throw exception, _ => .error (.thrown exception)
   | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m

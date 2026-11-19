@@ -137,12 +137,16 @@ theorem step_ldarga_eq (index : Nat) (stack : List Value) :
 
 attribute [cil_step] addressArgument
 
+-- A home is read only where a call or span operation passes it; stepping evaluates each read.
+attribute [cil_step] spanView callArgument viewOperandCount viewOperands
+
 /-- A homed argument's address is its frame slot's, as `ldloca` of that slot takes it. -/
 theorem step_ldarga_home_eq (index : Nat) (stack : List Value) (slot : Nat)
     (access : body.argumentAccess index = .home slot) :
     step body (.ldarga index) pc args frame stack memory = do
       let some home := frame.locals[slot]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← localAddress memory home) :: stack) frame memory := by
+      return FrameAction.next (pc + 1) ((← localAddress memory slot home) :: stack) frame
+        memory := by
   simp only [step_ldarga_eq, addressArgument, access]
   cases frame.locals[slot]? <;> rfl
 
@@ -194,17 +198,18 @@ end InstructionEquations
     definition, so the kernel checks a rewrite of its arguments by comparing them, where a `match`
     on the link would make it evaluate the table's read. -/
 def callStep (link : Option CIL.Link) (count : Nat) (tail : Bool)
-    (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) (memory : Memory) :
-    ExecutionResult FrameAction :=
+    (unlinked : Unit → ExecutionResult FrameAction) (frame : Frame) (stack : List Value)
+    (memory : Memory) : ExecutionResult FrameAction :=
   match link with
   | some (.direct callee) =>
     if tail then
       if stack.length != count then .error .invalidState
       else do
-        return FrameAction.tailCall callee (← stack.reverse.mapM (checkedValue memory)) memory
+        return FrameAction.tailCall callee
+          (← stack.reverse.mapM (callArgument frame memory)) memory
     else if stack.length < count then .error .invalidState
     else do
-      let arguments ← (stack.take count).reverse.mapM (checkedValue memory)
+      let arguments ← (stack.take count).reverse.mapM (callArgument frame memory)
       return FrameAction.call callee arguments (stack.drop count) memory
   | none => if tail then .error unlinkedCall else unlinked ()
   | some _ => .error unlinkedCall
@@ -223,7 +228,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
         .error (.unsupported "Instruction observes unspecified vector bits")
       else callStep (body.linkAt pc) method.argumentCount prefixes.tail
         (fun _ => modelStep (Extraction.runtimeModel body.environment .call method) body pc frame
-          stack memory) stack memory := by
+          stack memory) frame stack memory := by
   simp only [step, observerCount, guard_operands_zero, Bool.false_eq_true, ite_false, callStep]
   cases body.linkAt pc with
   | none => rfl
@@ -239,7 +244,7 @@ theorem step_call_linked {method : Extraction.MethodRef} {prefixes : CallPrefixe
       if unspecifiedOperands method.argumentCount stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else callStep (some link) method.argumentCount prefixes.tail
-        (fun _ => .error unlinkedCall) stack memory := by
+        (fun _ => .error unlinkedCall) frame stack memory := by
   rw [step_call_eq, linked]
   cases link <;> rfl
 
@@ -249,10 +254,10 @@ theorem step_call_linked {method : Extraction.MethodRef} {prefixes : CallPrefixe
     caller's continuation. -/
 @[cil_step] theorem callStep_call (callee count : Nat)
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
-    callStep (some (.direct callee)) count false unlinked stack memory =
+    callStep (some (.direct callee)) count false unlinked frame stack memory =
       if stack.length < count then .error .invalidState
       else do
-        let arguments ← (stack.take count).reverse.mapM (checkedValue memory)
+        let arguments ← (stack.take count).reverse.mapM (callArgument frame memory)
         return FrameAction.call callee arguments (stack.drop count) memory := rfl
 
 #print axioms callStep_call
@@ -260,10 +265,11 @@ theorem step_call_linked {method : Extraction.MethodRef} {prefixes : CallPrefixe
 /-- A call under `tail.` takes the whole stack as its arguments and retires the frame. -/
 @[cil_step] theorem callStep_tailCall (callee count : Nat)
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
-    callStep (some (.direct callee)) count true unlinked stack memory =
+    callStep (some (.direct callee)) count true unlinked frame stack memory =
       if stack.length != count then .error .invalidState
       else do
-        return FrameAction.tailCall callee (← stack.reverse.mapM (checkedValue memory)) memory :=
+        return FrameAction.tailCall callee
+          (← stack.reverse.mapM (callArgument frame memory)) memory :=
   rfl
 
 #print axioms callStep_tailCall
@@ -272,7 +278,7 @@ theorem step_call_linked {method : Extraction.MethodRef} {prefixes : CallPrefixe
 @[cil_step] theorem callStep_unlinked (link : CIL.Link) (count : Nat) (tail : Bool)
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value)
     (undirected : ∀ callee, link ≠ .direct callee) :
-    callStep (some link) count tail unlinked stack memory = .error unlinkedCall := by
+    callStep (some link) count tail unlinked frame stack memory = .error unlinkedCall := by
   unfold callStep
   split
   · exact absurd (Option.some.inj ‹_›) (undirected _)
@@ -284,14 +290,14 @@ theorem step_call_linked {method : Extraction.MethodRef} {prefixes : CallPrefixe
 /-- A call whose pc states no link runs its runtime model. -/
 @[cil_step] theorem callStep_none (count : Nat)
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
-    callStep none count false unlinked stack memory = unlinked () := rfl
+    callStep none count false unlinked frame stack memory = unlinked () := rfl
 
 #print axioms callStep_none
 
 /-- A `tail.` call whose pc states no link faults, since a model retires no frame. -/
 @[cil_step] theorem callStep_none_tail (count : Nat)
     (unlinked : Unit → ExecutionResult FrameAction) (stack : List Value) :
-    callStep none count true unlinked stack memory = .error unlinkedCall := rfl
+    callStep none count true unlinked frame stack memory = .error unlinkedCall := rfl
 
 #print axioms callStep_none_tail
 
@@ -414,8 +420,8 @@ theorem step_call_typedTransfer {method : Extraction.MethodRef} {prefixes : Call
     | rfl
     | (simp only [modelStep, observedCall, runModel, typedTransferCall, typedTransferInstruction,
         CIL.RuntimeModel.observerCount, step, observerCount, staticInstruction, instruction,
-        CIL.MemoryOp.argumentCount]
-       split <;> simp_all)
+        CIL.MemoryOp.argumentCount, viewOperandCount, viewOperands, pure_bind]
+       first | rfl | (split <;> simp_all))
 
 #print axioms step_call_typedTransfer
 
@@ -427,7 +433,7 @@ theorem step_call_direct {method : Extraction.MethodRef} {prefixes : CallPrefixe
       if unspecifiedOperands method.argumentCount stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else callStep (some (.direct callee)) method.argumentCount prefixes.tail
-        (fun _ => .error unlinkedCall) stack memory := by
+        (fun _ => .error unlinkedCall) frame stack memory := by
   rw [step_call_eq, link]
   rfl
 
@@ -584,7 +590,7 @@ attribute [cil_step] localAllocation
         let count := signature.parameters.length
         if (if tail then values.length != count else values.length < count) then
           .error .invalidState else pure ()
-        let arguments ← (values.take count).reverse.mapM (checkedValue memory)
+        let arguments ← (values.take count).reverse.mapM (callArgument frame memory)
         if tail then return .tailCall method arguments memory
         else return .call method arguments (values.drop count) memory := by
   simp only [step, observerCount, managedStep]
@@ -733,21 +739,68 @@ theorem step_ldobj_span_address {type : Extraction.TypeExpr}
       pureArity, staticInstruction] <;> rfl
 #print axioms step_ldobj_span_address
 
-/-- A decoded ldobj of span storage forwards a span view or span value, faults on a null reference
-    as a null dereference, and raises an invalid state on any other stack. -/
+/-- A home a span operation reads stands for the view its slot holds. -/
+theorem spanView_home_view {frame : Frame} {memory : Memory} {slot : Nat} {result : Value}
+    (viewed : spanView frame memory (.spanHome slot) = .ok result) :
+    ∃ view, result = .bufferSpan view := by
+  simp only [spanView] at viewed
+  split at viewed
+  · simp only [loadLocal, Bind.bind, Except.bind, Pure.pure, Except.pure] at viewed
+    repeat' (first | (cases viewed; exact ⟨_, rfl⟩) | contradiction | split at viewed)
+  · cases viewed
+#print axioms spanView_home_view
+
+/-- A decoded ldobj of span storage reads a home as the view its slot holds when the load runs.
+    A home whose slot holds no view faults. -/
+@[cil_step high] theorem step_ldobj_span_home {type : Extraction.TypeExpr}
+    (shape : body.valueShape type = .span) (slot : Nat) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.spanHome slot :: rest) memory =
+      match spanView frame memory (.spanHome slot) with
+      | .ok (.bufferSpan view) => step body .nop pc args frame (.bufferSpan view :: rest) memory
+      | .ok _ => .error .invalidState
+      | .error fault => .error fault := by
+  cases viewed : spanView frame memory (.spanHome slot) with
+  | error fault =>
+    simp only [step, observerCount, valueShape_span_test body type, shape, viewOperands, viewed,
+      unspecifiedOperands, List.take, List.any, CIL.Value.hasUnspecified, Bool.false_eq_true,
+      ite_false, ite_true, Bind.bind, Except.bind]
+  | ok result =>
+    obtain ⟨view, rfl⟩ := spanView_home_view viewed
+    simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+      viewOperands, viewed, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, ite_true, Bind.bind, Except.bind,
+      pureArity, staticInstruction]
+    rfl
+#print axioms step_ldobj_span_home
+
+/-- A decoded ldobj of span storage forwards a span view or span value, reads a home as the view
+    its slot holds, faults on a null reference as a null dereference, and raises an invalid state
+    on any other stack. -/
 theorem step_ldobj_span_result {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .span) (stack : List Value) :
     step body (.ldobj type) pc args frame stack memory = match stack with
       | .bufferSpan _ :: _ | .span .. :: _ => step body .nop pc args frame stack memory
+      | .spanHome slot :: rest => match spanView frame memory (.spanHome slot) with
+        | .ok (.bufferSpan view) => step body .nop pc args frame (.bufferSpan view :: rest) memory
+        | .ok _ => .error .invalidState
+        | .error fault => .error fault
       | .reference .null :: _ | .readOnlyReference .null :: _ =>
         .error (.memory .nullDereference .null 0)
       | _ => .error .invalidState := by
-  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
-    pureArity]
   cases stack with
-  | nil => rfl
+  | nil =>
+    simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+      pureArity]
+    rfl
   | cons head rest =>
-    cases head <;> first | rfl | (rename_i reference; cases reference <;> rfl)
+    cases head
+    case spanHome slot =>
+      exact step_ldobj_span_home (body := body) (pc := pc) (args := args) (frame := frame)
+        (memory := memory) shape slot rest
+    all_goals
+      simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
+        pureArity]
+      first | rfl | (rename_i reference; cases reference <;> rfl)
 #print axioms step_ldobj_span_result
 
 /-- The decoded stobj of primitive storage has the full result of its memory rule. -/
@@ -1037,7 +1090,8 @@ attribute [cil_step, cil_instruction_step] CIL.NumericKind.width CIL.NumericKind
 @[cil_step] theorem step_ldloca_eq (index : Nat) (stack : List Value) :
     step body (.ldloca index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← localAddress memory slot) :: stack) frame memory :=
+      return FrameAction.next (pc + 1) ((← localAddress memory index slot) :: stack) frame
+        memory :=
   id rfl
 
 @[cil_step] theorem step_stloc_eq (index : Nat) (value : Value) (rest : List Value) :
@@ -1098,7 +1152,8 @@ theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
       if unspecifiedOperands operation.argumentCount stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else do
-        let (memory, values) ← staticInstruction body pc operation stack memory
+        let operands ← viewOperands frame memory (viewOperandCount operation) stack
+        let (memory, values) ← staticInstruction body pc operation operands memory
         return FrameAction.next (pc + 1) values frame memory := by
   simp only [step, observerCount]
   rfl

@@ -192,8 +192,8 @@ same views.
 `memoryInstruction_emptySpan` proves that every supported element width and capability produces
 a null, zero-length view without changing memory. `SpanConstructor.empty` uses that same operation
 when `initializeSpanLocal` replaces a local's previous view.
-An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpan` view, so a
-contract states the same view argument as a by-value span and reuses `SpanView.validate`,
+An `in` or `ref readonly` span parameter is passed as the `.bufferSpan` view the caller's home
+holds when the call runs, so a contract states the same view argument as a by-value span and reuses `SpanView.validate`,
 `Contents` and the span element lemmas, whether the caller passes a span local or a temporary.
 `MemoryMarshal.GetReference` of a readonly view keeps its call. `step_call_memory` exposes the memory
 operation, and `step_memory_spanReference_readOnlyView_eq` gives its `.readOnlyReference`.

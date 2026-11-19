@@ -11,6 +11,9 @@ Primitive matching tries writes before reads to avoid reducing a write while rej
 
 namespace CIL.Safety
 
+-- Stack lists are renamed by the local map of the frame that holds them.
+variable {indices : LocalIndexMap}
+
 /-- Observable execution through a native table requires a successful checked memory step. -/
 theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ → Prop}
     (source target : Checked α) (sourceNext : α → ExecutionResult β)
@@ -87,8 +90,8 @@ set_option hygiene false in
 /-- Closes the renaming of one arm of an element access once its stack is split: each checked
     read, write and table lookup touches the mapped element and relates the memories. -/
 local macro "element_result" : tactic => `(tactic| (
-    all_goals try simp only [List.map_cons, AllocationRenaming.value, AllocationRenaming.arrayView,
-      arrayLoad, arrayStore] at observable ⊢
+    all_goals try simp only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value,
+      AllocationRenaming.arrayView, arrayLoad, arrayStore] at observable ⊢
     all_goals try dsimp +instances only [AllocationRenaming.arrayView]
     all_goals try solve | repeat first | contradiction | cases observable | split at observable
     all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,
@@ -108,10 +111,10 @@ local macro "element_result" : tactic => `(tactic| (
       | (apply related.methodTableElement_bind formed _ _ _ _ observable
          intro pointer observable
          exact .ok ⟨related, rfl⟩)
-      | (apply (related.loadSlot formed _ (by assumption)).bind
-         intro first second same
+      | (apply (related.loadSlot formed _ (by assumption)).bindWithSuccess
+         intro first second sourceStep same
          subst second
-         exact .ok ⟨related, rfl⟩)
+         push_renamed related)
       | (apply (related.referenceArrayOf _ (by assumption)).bind
          intro first second same
          subst second
@@ -157,9 +160,9 @@ theorem Memory.Renamed.elementInstructionResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (elementInstruction op stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (elementInstruction op stack source)
-      (elementInstruction op (stack.map mapping.value) target) := by
+      (elementInstruction op (stack.map (indices.value mapping)) target) := by
   unfold elementInstruction at observable ⊢
   split at observable
   -- Every arm names its stack constructors, so the renamed stack reduces to the same arm.
@@ -175,9 +178,9 @@ theorem Memory.Renamed.typedElementInstructionResult {mapping : AllocationRenami
     (observable : SuccessOrThrow (typedElementInstruction shape store stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (typedElementInstruction shape store stack source)
-      (typedElementInstruction shape store (stack.map mapping.value) target) := by
+      (typedElementInstruction shape store (stack.map (indices.value mapping)) target) := by
   cases shape with
   | value element =>
     simp only [typedElementInstruction] at observable ⊢
@@ -199,7 +202,7 @@ theorem Memory.Renamed.typedElementInstructionResult {mapping : AllocationRenami
     all_goals split at observable
     all_goals try simp only [CIL.ElementShape.method.injEq] at *
     all_goals try subst_vars
-    all_goals try simp only [List.map_cons, AllocationRenaming.value]
+    all_goals try simp only [List.map_cons, LocalIndexMap.value]
     -- The table's signature test reads no allocation, so both sides take the same branch.
     all_goals try (split at observable <;>
       simp only [*, ite_true, ite_false, Bool.false_eq_true, Bind.bind, Except.bind])
@@ -217,9 +220,9 @@ theorem Memory.Renamed.elementAddressInstructionResult {mapping : AllocationRena
     (observable : SuccessOrThrow (elementAddressInstruction shape readOnly stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (elementAddressInstruction shape readOnly stack source)
-      (elementAddressInstruction shape readOnly (stack.map mapping.value) target) := by
+      (elementAddressInstruction shape readOnly (stack.map (indices.value mapping)) target) := by
   cases shape with
   | value element =>
     simp only [elementAddressInstruction] at observable ⊢
@@ -235,7 +238,7 @@ set_option hygiene false in
 /-- Moves checked memory accesses in a matched stack arm through the allocation map. -/
 local macro "rename_memory_arm" : tactic => `(tactic| (
     all_goals try simp (config := { singlePass := true }) only
-      [List.map_cons, AllocationRenaming.value]
+      [List.map_cons, AllocationRenaming.value, LocalIndexMap.value]
     all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
     all_goals try exact related.memoryInstructionResult _ formed _ bounds observable
     all_goals try exact related.elementInstructionResult _ formed _ bounds observable
@@ -322,11 +325,11 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (instruction operation stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (instruction operation stack source)
-      (instruction operation (stack.map mapping.value) target) := by
+      (instruction operation (stack.map (indices.value mapping)) target) := by
   unfold CIL.Safety.instruction at observable ⊢
-  rw [mapping.unspecifiedOperands]
+  rw [indices.unspecifiedOperands mapping]
   split at observable
   · cases observable
   · rename_i guard
@@ -345,9 +348,9 @@ theorem Memory.Renamed.copyInitializedBytesResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (copyInitializedBytes size stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (copyInitializedBytes size stack source)
-      (copyInitializedBytes size (stack.map mapping.value) target) := by
+      (copyInitializedBytes size (stack.map (indices.value mapping)) target) := by
   unfold copyInitializedBytes at observable ⊢
   split at observable
   rename_memory_arm
@@ -362,9 +365,9 @@ theorem Memory.Renamed.initializeBytesResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (initializeBytes size stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (initializeBytes size stack source)
-      (initializeBytes size (stack.map mapping.value) target) := by
+      (initializeBytes size (stack.map (indices.value mapping)) target) := by
   unfold initializeBytes at observable ⊢
   split at observable
   rename_memory_arm
@@ -379,9 +382,9 @@ theorem Memory.Renamed.transferObjectResult {mapping : AllocationRenaming}
     (observable : SuccessOrThrow (transferObject shape store stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
-        right.2 = left.2.map mapping.value)
+        right.2 = left.2.map (indices.value mapping))
       (transferObject shape store stack source)
-      (transferObject shape store (stack.map mapping.value) target) := by
+      (transferObject shape store (stack.map (indices.value mapping)) target) := by
   unfold transferObject at observable ⊢
   split at observable
   all_goals first

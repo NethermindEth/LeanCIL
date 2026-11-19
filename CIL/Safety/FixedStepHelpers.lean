@@ -11,6 +11,9 @@ Fresh allocation instructions are handled separately by the extending step simul
 
 namespace CIL.Safety
 
+-- Stack lists are renamed by the local map of the frame that holds them.
+variable {indices : LocalIndexMap}
+
 /-- The ordinary dispatcher tail preserves corresponding frames and checked result stacks. -/
 theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -49,16 +52,18 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
       (do
         match pureArity operation with
         | some argc =>
-          if (stack.map mapping.value).length < argc then .error .invalidState else
-            let values ← CIL.Safety.scalars ((stack.map mapping.value).take argc)
+          if (stack.map (indices.value mapping)).length < argc then .error .invalidState else
+            let values ← CIL.Safety.scalars ((stack.map (indices.value mapping)).take argc)
             let some (.next destination result _) :=
               CIL.step operation false none pc values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue target)
-            return FrameAction.next destination (result ++ (stack.map mapping.value).drop argc)
+            return FrameAction.next destination
+              (result ++ (stack.map (indices.value mapping)).drop argc)
               targetFrame target
         | none =>
-          let (memory, values) ← CIL.Safety.instruction operation (stack.map mapping.value) target
+          let (memory, values) ←
+            CIL.Safety.instruction operation (stack.map (indices.value mapping)) target
           return FrameAction.next (pc + 1) values targetFrame memory) := by
   cases arity : pureArity operation with
   | none =>
@@ -73,14 +78,15 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
     simp only [arity, List.length_map, ← List.map_take, ← List.map_drop]
     split
     · exact .error .invalidState
-    · apply (mapping.scalarOperands (stack.take argc)).bind
+    · apply (indices.scalarOperands mapping (stack.take argc)).bind
       intro values otherValues same
       subst otherValues
       split
       · rename_i destination result ignored _
-        apply (related.scalarChecks result).bind
-        intro checked otherChecked same
+        apply (related.scalarChecks result).bindWithSuccess
+        intro checked otherChecked checkedStep same
         subst otherChecked
+        rw [← indices.values_of_not_home mapping (checkedValues_not_spanHome checkedStep)]
         simpa only [List.map_append, pure, Except.pure] using
           ResultRenamed.ok (FrameAction.Renamed.next (pc := destination)
             (stack := checked ++ stack.drop argc) related frames)
@@ -116,8 +122,8 @@ theorem Memory.Renamed.nativeTableAddition {indices : LocalIndexMap}
           | .i64 bits => .ok bits
           | _ => .error .invalidState
         let selected ← checkedAt .null nativeMethodWidth (addNativeTable table target offset)
-        return FrameAction.next (pc + 1) (.methodTable selected :: rest.map mapping.value)
-          targetFrame target) := by
+        return FrameAction.next (pc + 1)
+          (.methodTable selected :: rest.map (indices.value mapping)) targetFrame target) := by
   cases offset
   all_goals simp only [Bind.bind, Except.bind] at observable ⊢
   all_goals try exact .error _
@@ -192,17 +198,18 @@ macro "fixed_fallback" : tactic => `(tactic| (
     exact fallback
   | cons first rest =>
     cases first
-    all_goals try dsimp only [List.map_cons, AllocationRenaming.value]
+    all_goals try dsimp only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value]
     all_goals try exact fallback
     all_goals cases rest with
     | nil =>
-      try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value]
+      try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value, LocalIndexMap.value]
       first
       | contradiction
       | exact fallback
     | cons second rest =>
       cases second
-      all_goals try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value]
+      all_goals try dsimp only [List.map_nil, List.map_cons, AllocationRenaming.value,
+        LocalIndexMap.value]
       all_goals first
       | contradiction
       | exact fallback
@@ -266,8 +273,9 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     at observable
   change ResultRenamed mapping _
     (if unspecifiedOperands (observerCount operation) stack then _ else _)
-    (if unspecifiedOperands (observerCount operation) (stack.map mapping.value) then _ else _)
-  rw [mapping.unspecifiedOperands]
+    (if unspecifiedOperands (observerCount operation) (stack.map (indices.value mapping))
+      then _ else _)
+  rw [indices.unspecifiedOperands mapping]
   by_cases guard : unspecifiedOperands (observerCount operation) stack = true
   · simp only [guard, ite_true] at observable
     cases observable
@@ -324,8 +332,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         loadsTyped storesTyped addressesTyped constructs
       split at observable)
     all_goals try solve | cases family
-    all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
-      metadata.returnsValue, metadata.returnNarrow]
+    all_goals try simp only [List.map_cons, AllocationRenaming.value, LocalIndexMap.value,
+      metadata.profile, metadata.returnsValue, metadata.returnNarrow]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
     -- Only the dispatcher's final arm excludes `.managed`, so the guard skips every other arm

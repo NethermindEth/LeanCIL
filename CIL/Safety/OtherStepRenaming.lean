@@ -18,7 +18,7 @@ theorem Memory.Renamed.stepOther {indices : LocalIndexMap} {mapping : Allocation
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
       (step sourceBody operation pc arguments sourceFrame stack source)
       (step targetBody operation pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) := by
+        targetFrame (stack.map (indices.value mapping)) target) := by
   allocation_fixed_step skip
 #print axioms Memory.Renamed.stepOther
 

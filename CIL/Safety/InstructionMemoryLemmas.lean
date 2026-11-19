@@ -70,6 +70,8 @@ def Value.Valid (m : Memory) : Value → Prop
   | .readOnlyReference (.address r) => form m r = .ok r
   | .reference .null | .span .null _ => True
   | .reference (.address r) | .span (.address r) _ => form m r = .ok r
+  -- A home names a frame slot and addresses no memory; a call checks the view it reads.
+  | .spanHome _ => True
 
 /-- Every value in the list is valid in `m`. -/
 def ValuesValid (m : Memory) (values : List Value) : Prop :=
@@ -353,6 +355,7 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
   | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
+  | spanHome _ => cases h
   | object r =>
     exact ⟨formObject_returns_input h, formObject_result_valid h⟩
   | scalar value =>
@@ -392,10 +395,11 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
       rw [same] at valid
       cases r <;> exact ⟨rfl, valid⟩
 
-theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m) :
-    checkedValue m value = .ok value := by
+theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m)
+    (free : value.isHome = false) : checkedValue m value = .ok value := by
   cases value with
   | methodPointer _ | methodTable _ => rfl
+  | spanHome _ => cases free
   | object r =>
     cases r with
     | null => rfl
@@ -422,7 +426,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   intro value member
   have hv := valid value member
   cases value with
-  | scalar value | methodPointer _ | methodTable _ => exact hv
+  | scalar value | methodPointer _ | methodTable _ | spanHome _ => exact hv
   | object r =>
     cases r with
     | null => exact True.intro
@@ -469,17 +473,174 @@ theorem checkedValues_valid (m : Memory) (values result : List Value)
 #print axioms ValuesValid.preserve
 #print axioms checkedValues_valid
 
-/-- Values valid in `memory` pass the argument and result checks unchanged. -/
+/-- Values valid in `memory`, none of them a home, pass the argument and result checks
+    unchanged. -/
 theorem checkedValues_of_valid {memory : Memory} {values : List Value}
-    (valid : ValuesValid memory values) : values.mapM (checkedValue memory) = .ok values := by
+    (valid : ValuesValid memory values) (free : ∀ value ∈ values, value.isHome = false) :
+    values.mapM (checkedValue memory) = .ok values := by
   induction values with
   | nil => rfl
   | cons value rest restChecked =>
     have head := checkedValue_of_valid memory value (valid value (List.mem_cons_self ..))
-    have tail := restChecked fun other member => valid other (List.mem_cons_of_mem _ member)
+      (free value (List.mem_cons_self ..))
+    have tail := restChecked (fun other member => valid other (List.mem_cons_of_mem _ member))
+      (fun other member => free other (List.mem_cons_of_mem _ member))
     simp only [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms checkedValues_of_valid
+
+/-- Valid values pass the argument and result checks unchanged, or one of them is a home and
+    the check faults with `.invalidState`. -/
+theorem checkedValues_of_valid_or_home {memory : Memory} :
+    ∀ {values : List Value}, ValuesValid memory values →
+      values.mapM (checkedValue memory) = .ok values ∨
+        values.mapM (checkedValue memory) = .error .invalidState
+  | [], _ => .inl rfl
+  | value :: rest, valid => by
+    have restValid : ValuesValid memory rest :=
+      fun other member => valid other (List.mem_cons_of_mem _ member)
+    cases value with
+    | spanHome _ =>
+      exact .inr (by simp [List.mapM_cons, checkedValue, Bind.bind, Except.bind])
+    | _ =>
+      have head := checkedValue_of_valid memory _ (valid _ (List.mem_cons_self ..)) rfl
+      rcases checkedValues_of_valid_or_home restValid with tail | tail <;>
+        simp [List.mapM_cons, head, tail, Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+#print axioms checkedValues_of_valid_or_home
+
+/-- A value `checkedValue` accepts is never a home, so no checked value names a frame slot. -/
+theorem checkedValue_not_spanHome {m : Memory} {value result : Value}
+    (checked : checkedValue m value = .ok result) : result.isHome = false := by
+  obtain ⟨same, _⟩ := checkedValue_valid m value result checked
+  subst same
+  cases result <;> first | rfl | cases checked
+
+#print axioms checkedValue_not_spanHome
+
+/-- A formed managed pointer is a reference, never a home. -/
+theorem formValue_not_spanHome {memory : Memory} {reference : ManagedReference} {result : Value}
+    (formed : formValue memory reference = .ok result) : result.isHome = false := by
+  unfold formValue at formed
+  repeat' first
+    | (cases formed <;> rfl)
+    | split at formed
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at formed
+
+#print axioms formValue_not_spanHome
+
+/-- A formed object reference is an object, never a home. -/
+theorem formObject_not_spanHome {memory : Memory} {reference : ManagedReference} {result : Value}
+    (formed : formObject memory reference = .ok result) : result.isHome = false := by
+  unfold formObject at formed
+  repeat' first
+    | (cases formed <;> rfl)
+    | split at formed
+    | simp only [Bind.bind, Except.bind] at formed
+
+#print axioms formObject_not_spanHome
+
+/-- A reference loaded from an object field is an object, never a home. -/
+theorem loadSlot_not_spanHome {memory : Memory} {field : Reference} {result : Value}
+    (loaded : loadSlot memory field = .ok result) : result.isHome = false := by
+  unfold loadSlot at loaded
+  simp only [Bind.bind, Except.bind] at loaded
+  split at loaded
+  · cases loaded
+  · exact formObject_not_spanHome loaded
+
+#print axioms loadSlot_not_spanHome
+
+/-- A value array loaded from an object field is an array view, never a home. -/
+theorem loadArraySlot_not_spanHome {memory : Memory} {field : Reference}
+    {element : CIL.ArrayElement} {result : Value}
+    (loaded : loadArraySlot memory field element = .ok result) : result.isHome = false := by
+  unfold loadArraySlot arrayOfSlot at loaded
+  repeat' first
+    | (cases loaded <;> rfl)
+    | split at loaded
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+
+#print axioms loadArraySlot_not_spanHome
+
+/-- A loaded local is a scalar, reference, view or callable, never a home. -/
+theorem loadLocal_not_spanHome {memory : Memory} {slot : LocalSlot} {result : Value}
+    (loaded : loadLocal memory slot = .ok result) : result.isHome = false := by
+  unfold loadLocal at loaded
+  split at loaded <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+  all_goals
+    repeat' first
+      | (cases loaded <;> rfl)
+      | exact formValue_not_spanHome loaded
+      | exact formObject_not_spanHome loaded
+      | split at loaded
+
+#print axioms loadLocal_not_spanHome
+
+/-- The view a home stands for, and every other value passed through, is never a home. -/
+theorem spanView_not_spanHome {frame : Frame} {memory : Memory} {value result : Value}
+    (viewed : spanView frame memory value = .ok result) : result.isHome = false := by
+  cases value with
+  | spanHome slot =>
+    simp only [spanView] at viewed
+    split at viewed
+    · exact loadLocal_not_spanHome viewed
+    · cases viewed
+  | _ =>
+    simp only [spanView, Pure.pure, Except.pure, Except.ok.injEq] at viewed
+    subst viewed
+    rfl
+
+#print axioms spanView_not_spanHome
+
+/-- A loaded argument is a checked value or a loaded local, never a home. -/
+theorem loadArgument_not_spanHome {body : CIL.Method} {index : Nat} {args : List Value}
+    {frame : Frame} {memory : Memory} {result : Value}
+    (loaded : loadArgument body index args frame memory = .ok result) : result.isHome = false := by
+  unfold loadArgument at loaded
+  repeat' first
+    | exact loadLocal_not_spanHome loaded
+    | exact checkedValue_not_spanHome loaded
+    | (cases loaded; done)
+    | split at loaded
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at loaded
+
+#print axioms loadArgument_not_spanHome
+
+/-- Every result of a successful `mapM` has a property each successful application gives. -/
+theorem mapM_ok_forall {α β ε : Type} {apply : α → Except ε β} {property : β → Prop}
+    (each : ∀ input output, apply input = .ok output → property output) :
+    ∀ {inputs : List α} {outputs : List β}, inputs.mapM apply = .ok outputs →
+      ∀ output ∈ outputs, property output
+  | [], outputs, mapped => by
+    cases mapped
+    intro _ member
+    cases member
+  | input :: rest, outputs, mapped => by
+    simp only [List.mapM_cons, Bind.bind, Except.bind, Pure.pure, Except.pure] at mapped
+    cases head : apply input with
+    | error _ => simp [head] at mapped
+    | ok produced =>
+      cases tail : rest.mapM apply with
+      | error _ => simp [head, tail] at mapped
+      | ok others =>
+        simp only [head, tail, Except.ok.injEq] at mapped
+        subst mapped
+        intro output member
+        rcases List.mem_cons.mp member with same | inner
+        · subst same
+          exact each input _ head
+        · exact mapM_ok_forall each tail output inner
+
+#print axioms mapM_ok_forall
+
+/-- Values `checkedValue` accepts one by one contain no home. -/
+theorem checkedValues_not_spanHome {m : Memory} {values results : List Value}
+    (checked : values.mapM (checkedValue m) = .ok results) :
+    ∀ result ∈ results, result.isHome = false :=
+  mapM_ok_forall (fun _ _ accepted => checkedValue_not_spanHome accepted) checked
+
+#print axioms checkedValues_not_spanHome
 
 theorem loadValue_scalar_valid (m : Memory) (r : ManagedReference) (width : Nat)
     {signed : Bool} (value : CIL.Value) (h : loadValue m r width signed = .ok value) :

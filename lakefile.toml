@@ -79,6 +79,9 @@ name = "Tests.Identity"
 name = "Tests.ResolutionFacts"
 
 [[lean_lib]]
+name = "Tests.SpanHomes"
+
+[[lean_lib]]
 name = "Tests.ValueDecoding"
 
 [[lean_lib]]

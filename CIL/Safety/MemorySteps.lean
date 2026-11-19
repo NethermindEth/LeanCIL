@@ -21,10 +21,10 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
-    vector128UnsafeInstruction, displaceReference, observerCount,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
-    Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,
-    bind_assoc, pure_bind]
+    vector128UnsafeInstruction, displaceReference, observerCount, viewOperandCount, viewOperands,
+    spanView, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue,
+    cil_guard, bind_ite, bind_assoc, pure_bind]
   all_goals (repeat' split) <;>
     (try simp only [*, Bool.false_eq_true, ite_false, ite_true, bind_assoc, pure_bind]) <;> rfl))
 
@@ -98,7 +98,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
   cases outcome : CIL.divRemBits true left right <;>
     simp only [step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
-      Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, outcome, bind_assoc, pure_bind] <;>
+      viewOperandCount, viewOperands, Bool.or_false, Bool.false_eq_true, ite_false, cil_guard,
+      outcome, bind_assoc, pure_bind] <;>
     rfl
 
 /-- `Math.DivRem(long, long, out long)` divides first, then stores the remainder's eight bytes. -/
@@ -116,7 +117,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
   cases outcome : CIL.divRemBits true left right <;>
     simp only [step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
-      Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, outcome, bind_assoc, pure_bind] <;>
+      viewOperandCount, viewOperands, Bool.or_false, Bool.false_eq_true, ite_false, cil_guard,
+      outcome, bind_assoc, pure_bind] <;>
     rfl
 
 /-- A zero-byte copy touches no memory, even through null references; otherwise overlapping
@@ -672,6 +674,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
       return .next (pc + 1) (value :: rest) frame memory := by
   simp only [step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    viewOperandCount, viewOperands, spanView,
     Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, bind_ite, bind_assoc, pure_bind]
   all_goals (repeat' split) <;> first
     | exact absurd trivial (by assumption)
@@ -688,6 +691,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
       return .next (pc + 1) (.readOnlyReference reference :: rest) frame memory := by
   simp only [step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    viewOperandCount, viewOperands, spanView,
     Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, bind_ite, bind_assoc, pure_bind]
   all_goals (repeat' split) <;> first
     | exact absurd trivial (by assumption)
@@ -760,6 +764,88 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
           else .readOnlyReference (.address reference)) :: rest) frame memory := by
   memory_step_proof
 #print axioms step_memory_bufferSpanItem_eq
+
+set_option hygiene false in
+/-- Closes a span operation's step through a home: a failed read of the slot faults both sides
+    alike, and a read view leaves the step on that view. -/
+local macro "home_step_proof" : tactic => `(tactic| (
+  cases viewed : spanView frame memory (.spanHome slot) with
+  | error fault =>
+    simp only [step_memory_eq, viewOperandCount, viewOperands, cil_guard, viewed,
+      CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, ite_true,
+      Bind.bind, Except.bind]
+    try simp only [spanView, Pure.pure, Except.pure]
+  | ok result =>
+    obtain ⟨view, rfl⟩ := spanView_home_view viewed
+    simp only [step_memory_eq, viewOperandCount, viewOperands, cil_guard, viewed,
+      CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, ite_true,
+      Bind.bind, Except.bind]
+    try simp only [spanView, Pure.pure, Except.pure]))
+
+/-- `get_Length` through a home steps on the view its slot holds; any other slot faults. -/
+@[cil_step high] theorem step_memory_spanLength_home_eq (slot : Nat) (rest : List Value) :
+    step body (.memory .spanLength) pc args frame (.spanHome slot :: rest) memory =
+      match spanView frame memory (.spanHome slot) with
+      | .ok (.bufferSpan view) =>
+        step body (.memory .spanLength) pc args frame (.bufferSpan view :: rest) memory
+      | .ok _ => .error .invalidState
+      | .error fault => .error fault := by
+  home_step_proof
+#print axioms step_memory_spanLength_home_eq
+
+/-- `GetReference` through a home steps on the view its slot holds; any other slot faults. -/
+@[cil_step high] theorem step_memory_spanReference_home_eq (slot : Nat) (rest : List Value) :
+    step body (.memory .spanReference) pc args frame (.spanHome slot :: rest) memory =
+      match spanView frame memory (.spanHome slot) with
+      | .ok (.bufferSpan view) =>
+        step body (.memory .spanReference) pc args frame (.bufferSpan view :: rest) memory
+      | .ok _ => .error .invalidState
+      | .error fault => .error fault := by
+  home_step_proof
+#print axioms step_memory_spanReference_home_eq
+
+/-- An indexed element read through a home steps on the view its slot holds; any other slot
+    faults. -/
+@[cil_step high] theorem step_memory_spanItem_home_eq (width : Nat) (index : CIL.W32)
+    (slot : Nat) (rest : List Value) :
+    step body (.memory (.spanItem width)) pc args frame
+      (.scalar (.i32 index) :: .spanHome slot :: rest) memory =
+      match spanView frame memory (.spanHome slot) with
+      | .ok (.bufferSpan view) => step body (.memory (.spanItem width)) pc args frame
+        (.scalar (.i32 index) :: .bufferSpan view :: rest) memory
+      | .ok _ => .error .invalidState
+      | .error fault => .error fault := by
+  home_step_proof
+#print axioms step_memory_spanItem_home_eq
+
+/-- A slice from a start through a home steps on the view its slot holds; any other slot
+    faults. -/
+@[cil_step high] theorem step_memory_spanSlice_home_eq (start : CIL.W32) (slot : Nat)
+    (rest : List Value) :
+    step body (.memory (.spanSlice false)) pc args frame
+      (.scalar (.i32 start) :: .spanHome slot :: rest) memory =
+      match spanView frame memory (.spanHome slot) with
+      | .ok (.bufferSpan view) => step body (.memory (.spanSlice false)) pc args frame
+        (.scalar (.i32 start) :: .bufferSpan view :: rest) memory
+      | .ok _ => .error .invalidState
+      | .error fault => .error fault := by
+  home_step_proof
+#print axioms step_memory_spanSlice_home_eq
+
+/-- A counted slice through a home steps on the view its slot holds; any other slot faults. -/
+@[cil_step high] theorem step_memory_spanSliceCount_home_eq (start length : CIL.W32)
+    (slot : Nat) (rest : List Value) :
+    step body (.memory (.spanSlice true)) pc args frame
+      (.scalar (.i32 length) :: .scalar (.i32 start) :: .spanHome slot :: rest) memory =
+      match spanView frame memory (.spanHome slot) with
+      | .ok (.bufferSpan view) => step body (.memory (.spanSlice true)) pc args frame
+        (.scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest) memory
+      | .ok _ => .error .invalidState
+      | .error fault => .error fault := by
+  home_step_proof
+#print axioms step_memory_spanSliceCount_home_eq
 
 -- Array length: `ldlen` validates the array's view first, then faults on the null array.
 /-- `ldlen` of an array validates its view, then throws on the null array and pushes the length

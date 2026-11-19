@@ -172,14 +172,15 @@ end FaultingArithmetic
 section LocalAddress
 open CIL CIL.Safety
 
--- Taking a span local's address pushes the view the local holds, exactly as loading it does.
+-- Taking a span local's address pushes its home, which names the slot and reads no view, so
+-- an uninitialized local is taken as readily as an initialized one.
 example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (width : Nat) (writable : Bool)
     (view : Option SpanView)
     (slot : frame.locals[0]? = some (.span width writable view)) :
     step body (.ldloca 0) pc args frame stack memory =
-      step body (.ldloc 0) pc args frame stack memory := by
-  simp only [step_ldloca_eq, step_ldloc_eq, slot, localAddress]
+      .ok (.next (pc + 1) (.spanHome 0 :: stack) frame memory) := by
+  simp only [step_ldloca_eq, slot, localAddress, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 -- Taking a byte home's address pushes the formed home reference.
 example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)

@@ -413,7 +413,8 @@ open CIL.Safety in
 -- The homed argument's address is its home slot's.
 example : step twoParameters (.ldarga 1) pc args frame stack memory = (do
       let some home := frame.locals[1]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← localAddress memory home) :: stack) frame memory) := by
+      return FrameAction.next (pc + 1) ((← localAddress memory 1 home) :: stack) frame
+        memory) := by
   simp only [reduceArgumentAddress]
   rfl
 

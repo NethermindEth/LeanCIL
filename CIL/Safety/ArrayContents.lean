@@ -436,6 +436,7 @@ theorem step_arraySpan_whole {memory : Memory} {view : ArrayView} {element : CIL
   rw [step_memory_eq]
   simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, CIL.ArraySpanRange.argumentCount,
     Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction, checked,
+    viewOperandCount, viewOperands, spanView,
     ArrayView.span, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_arraySpan_whole
