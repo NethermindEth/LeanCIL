@@ -1,4 +1,3 @@
-import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.BinaryTransfers

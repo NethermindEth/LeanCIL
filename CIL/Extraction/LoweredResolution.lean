@@ -11,13 +11,6 @@ environment and profile, and its role in a fold of the raw method.
 
 namespace CIL.Extraction
 
-/-- A closed generic helper with one of the admitted value storage representations. -/
-private def unsafeReferenceInstruction (environment : CallLayouts) (raw : RawInstruction)
-    (site : CallSite) : Option Instruction := do
-  let [element] := site.typeArguments | none
-  _root_.guard ((environment.valueShape element).size?.isSome)
-  return (← unsafeReferenceHelper raw).instruction
-
 /-- Only a nominal aggregate needs a layout-table width in the span signature matchers. -/
 private def aggregateWidth (environment : CallLayouts) (type : TypeExpr) : Option Nat :=
   match type with
@@ -76,14 +69,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     return .memory (.observeView (← viewObservation raw))
   | .binary => binaryInstruction raw
   | .guard => guardInstruction raw
-  | .unsafeReference => unsafeReferenceInstruction environment raw site
-  | .unsafeOffset =>
-    _root_.guard (unsafeElementOffset raw)
-    let [element] := site.typeArguments | none
-    let width ← (environment.valueShape element).size?
-    let stride := if site.name == "Subtract" then subtractionStride width else width
-    let signed := site.parameterTypes[1]? != some (.atom runtimeScope "System.UIntPtr")
-    return .memory (.add stride signed)
   | .platform => return .ldc_i4 (← platformConstant site)
   | .referenceContent =>
     return .ldc_i4 (← referenceContentConstant environment.indexedRaw site)
