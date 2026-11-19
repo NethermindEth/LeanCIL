@@ -138,10 +138,11 @@ internal static class RuntimeModels
     /// <summary>
     /// The operation a call of a method the Lean model table models runs as, or null. Such a call keeps its call:
     /// the <c>System.Object</c> constructor pops its receiver, and each integer helper of <c>System.Math</c> or of
-    /// the integer type that declares it runs as its scalar intrinsic.
+    /// the integer type that declares it runs as its scalar intrinsic. MemoryMarshal calls run their memory operation.
     /// </summary>
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
+        if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
         if (VectorModel(reference) is { } vector)
         {
@@ -177,7 +178,6 @@ internal static class RuntimeModels
         Operation? op = scope switch
         {
             "System.Runtime" => Scalar(reference)
-                ?? MarshalModels.CallModel(reference, profile.Architecture)
                 ?? ValueBitCasts.Translate(reference, profile.Architecture)
                 ?? UnsafeModels.Translate(reference, profile.Architecture)
                 ?? ElementSpan(reference, profile.Architecture) ?? Runtime(reference.FullName),

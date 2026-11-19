@@ -20,7 +20,7 @@ inductive FieldAccess where
 /-- How an instruction uses a struct's size, including scaled reference addition/subtraction. -/
 inductive SizeAccess where
   | load | store | initialize | copy | sizeOf | construct | referenceAdd | referenceSubtract
-  | spanElement | spanSource | spanTarget
+  | spanElement
   | arrayElement
   deriving DecidableEq, Repr
 
@@ -67,8 +67,6 @@ private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bo
     width == size && actual == alignment
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
   | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
-  | .load, .memory (.marshalRead (.snapshot (.aggregate width)) _)
-  | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
   | .sizeOf, .ldc_i4 bits => bits.toNat == size
@@ -81,8 +79,6 @@ private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bo
   | .spanElement, .memory (.spanSingleReference width _)
   | .spanElement, .initializeSpanLocal _ (.reference width _)
   | .spanElement, .initializeSpanLocal _ (.singleReference width _) => width == size
-  | .spanSource, .memory (.spanReinterpret width _ _) => width == size
-  | .spanTarget, .memory (.spanReinterpret _ width _) => width == size
   | .referenceAdd, .memory (.add width _) => width == size
   | .referenceSubtract, .memory (.add stride _) => stride == subtractionStride size
   | _, _ => false

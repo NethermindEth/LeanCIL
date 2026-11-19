@@ -10,6 +10,7 @@
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using Mono.Cecil;
 
@@ -90,12 +91,7 @@ queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
 foreach (var (name, before, after, theorem) in new[]
 {
-    ("ReadOnlyFactory", ".spanFromReference 32 false", ".spanFromReference 32 true", "method0_scalars_validated"),
-    ("Factory", ".spanFromReference 32 true", ".spanFromReference 16 true", "method0_layouts_validated"),
-    ("Bytes", ".spanReinterpret 32 1 true", ".spanReinterpret 16 1 true", "method0_layouts_validated"),
-    ("WordsView", ".spanReinterpret 1 32 false", ".spanReinterpret 1 16 false", "method0_layouts_validated"),
     ("Copy", ".spanCopy 32 true", ".spanCopy 16 true", "method0_layouts_validated"),
-    ("VectorBytes", ".spanReinterpret 16 1 true", ".spanReinterpret 32 1 true", "method0_scalars_validated")
 })
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
@@ -106,3 +102,11 @@ foreach (var (name, before, after, theorem) in new[]
         theorem.EndsWith("layouts_validated", StringComparison.Ordinal) ? "MethodLayoutsValid" : "ScalarFlowValid");
 }
 rejected.Check();
+CheckMarshalModels(root,
+[
+    ("ReadOnlyFactory", 2, ".spanFromReference 32 false", ".spanFromReference 32 true"),
+    ("Factory", 2, ".spanFromReference 32 true", ".spanFromReference 16 true"),
+    ("Bytes", 1, ".spanReinterpret 32 1 true", ".spanReinterpret 16 1 true"),
+    ("WordsView", 1, ".spanReinterpret 1 32 false", ".spanReinterpret 1 16 false"),
+    ("VectorBytes", 1, ".spanReinterpret 16 1 true", ".spanReinterpret 32 1 true")
+]);

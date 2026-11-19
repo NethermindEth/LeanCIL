@@ -402,6 +402,10 @@ unresolved aggregate layout leaves a hole at `initobj`.
 
 Span `IsEmpty` and `GetPinnableReference` do not read the view's bytes. An empty span's
 pinnable reference is null, and readonly views return readonly references.
+The decoder keeps supported `MemoryMarshal` calls. The runtime model checks the generic
+declaration and closed element types, then derives the memory operation from the method's
+layouts. Vector elements must have integer lanes, including the target of a cast.
+
 `MemoryMarshal.GetReference<T>(Span<T>)` returns a writable span's start reference, including
 for an empty span. The `ReadOnlySpan<T>` overload returns a reference restricted as `readonly.`
 results are, although .NET types it `ref T`: reads and field reads through it succeed and stores

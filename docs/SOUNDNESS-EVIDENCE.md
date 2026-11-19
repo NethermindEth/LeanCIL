@@ -25,6 +25,11 @@ cannot substitute for it.
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
 | Static values | Checked execution yields emitted bytes without circular reads of the values being justified; unknown values have no initializer and are read only from the caller's binding | Initializer recognition and deployment initialization/immutability |
 
+For a supported `MemoryMarshal` member, `RuntimeModelsAgree` checks the kept call against its
+declaration, closed operand and checked layouts. Both element widths of `Cast` and the transfer
+kind of the read and write operations come from the model. A missing overload or layout leaves
+an opcode-tagged hole that the validator accepts only at an unreachable site.
+
 For a method defined by its decoder, the evidence proves that its entire instruction list equals
 the decoding of the closed body. At a reachable instruction outside a fold, the scalar validator
 uses this equality for value encodings when the decoder supplies an instruction. A decoded hole

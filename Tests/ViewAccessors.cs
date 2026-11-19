@@ -10,6 +10,7 @@
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using Mono.Cecil;
 
@@ -67,8 +68,6 @@ foreach (var (name, before, after) in new[]
 {
     ("Empty", ".observeView .spanEmpty", ".observeView .spanPinnable"),
     ("PinnableNull", ".observeView .spanPinnable", ".spanReference"),
-    ("ReferenceNull", ".memory .spanReference", ".memory (.observeView .spanPinnable)"),
-    ("ArrayData", ".observeView .arrayData", ".observeView .spanPinnable")
 })
 {
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
@@ -79,3 +78,8 @@ foreach (var (name, before, after) in new[]
     rejected.Add(path, "PASS exact accessor evidence rejection: " + name, "UnsafeCallsValid");
 }
 rejected.Check();
+CheckMarshalModels(root,
+[
+    ("ReferenceNull", 1, ".spanReference", ".observeView .spanPinnable"),
+    ("ArrayData", 1, ".observeView .arrayData", ".observeView .spanPinnable")
+]);

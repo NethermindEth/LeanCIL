@@ -218,16 +218,7 @@ internal sealed class LayoutEvidence
             if (instruction.OpCode.Code is Code.Call or Code.Newobj &&
                 instruction.Operand is MethodReference spanCall)
             {
-                if (spanCall is GenericInstanceMethod reinterpret &&
-                    spanCall.DeclaringType.FullName == "System.Runtime.InteropServices.MemoryMarshal" &&
-                    spanCall.Name is "AsBytes" or "Cast")
-                {
-                    for (var argument = 0; argument < reinterpret.GenericArguments.Count; argument++)
-                        if (MetadataValidation.IsAggregate(reinterpret.GenericArguments[argument], method.Module))
-                            uses.Add($".size {pc} {Index(reinterpret.GenericArguments[argument])} " +
-                                (argument == 0 ? ".spanSource" : ".spanTarget"));
-                }
-                else if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
+                if (spanCall.DeclaringType is GenericInstanceType spanOwner &&
                     Spans.Is(spanOwner) &&
                     spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
@@ -253,16 +244,16 @@ internal sealed class LayoutEvidence
                 uses.Add($".size {pc} {Index(constructor is MethodDefinition closedConstructor
                     ? MethodSpecialization.DeclaringType(closedConstructor) : constructor.DeclaringType)} .construct");
             else if (instruction.OpCode.Code == Code.Call && instruction.Operand is GenericInstanceMethod generic &&
-                generic.DeclaringType.FullName is "System.Runtime.CompilerServices.Unsafe" or
-                    "System.Runtime.InteropServices.MemoryMarshal" && generic.GenericArguments.Count == 1 &&
+                generic.DeclaringType.FullName == "System.Runtime.CompilerServices.Unsafe" &&
+                generic.GenericArguments.Count == 1 &&
                 MetadataValidation.IsAggregate(generic.GenericArguments[0], method.Module))
             {
                 var access = generic.Name switch
                 {
                     "Add" => "referenceAdd", "Subtract" => "referenceSubtract",
-                    "ReadUnaligned" or "Read" or "TryRead" => "load",
-                    "WriteUnaligned" or "Write" or "TryWrite" => "store",
-                    "CreateSpan" or "CreateReadOnlySpan" => "spanElement", _ => null
+                    "ReadUnaligned" or "Read" => "load",
+                    "WriteUnaligned" or "Write" => "store",
+                    _ => null
                 };
                 if (access is not null)
                     uses.Add($".size {pc} {Index(generic.GenericArguments[0])} .{access}");

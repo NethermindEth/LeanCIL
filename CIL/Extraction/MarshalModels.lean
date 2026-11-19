@@ -54,7 +54,7 @@ private def writableInput (parameters : List TypeExpr) : Bool :=
   | _ => false
 
 /-- The closed operation, including the element widths and signedness from the layouts. -/
-private def Member.operation (member : Member) (environment : LayoutEnvironment)
+private def Member.operation (member : Member) (shape : TypeExpr → ValueShape)
     (method : MethodRef) : Option MemoryOp := do
   guard (!method.hasThis && method.owner == owner)
   let (source, target) ← match member, method.methodArguments with
@@ -66,14 +66,14 @@ private def Member.operation (member : Member) (environment : LayoutEnvironment)
   let writable := writableInput method.parameters
   guard (method.signature 0x10 == member.signature source target writable)
   guard ((arrayElementType source).isSome)
-  let kind ← environment.transferKind? source
+  let kind ← transferKind? shape source
   match member with
   | .getReference => return .spanReference
   | .getArrayDataReference => return .observeView .arrayData
   | .asBytes => return .spanReinterpret kind.width 1 writable
   | .cast =>
     guard ((arrayElementType target).isSome)
-    return .spanReinterpret kind.width (← environment.transferKind? target).width writable
+    return .spanReinterpret kind.width (← transferKind? shape target).width writable
   | .createSpan | .createReadOnlySpan =>
     return .spanFromReference kind.width (member == .createSpan)
   | .read | .tryRead => return .marshalRead kind (member == .tryRead)
@@ -85,8 +85,7 @@ private def entry (name : MetadataName) (member : Member) : ModelEntry :=
   { opcode := .call, owner, name,
     declares := fun sig =>
       sig == member.signature (.parameter 0) (.parameter 1) (writableInput sig.parameters),
-    resolve := fun environment method =>
-      RuntimeModel.memory <$> member.operation environment method }
+    resolve := fun shape method => RuntimeModel.memory <$> member.operation shape method }
 
 /-- The runtime MemoryMarshal entries, one for each member name. -/
 def marshalEntries : List ModelEntry :=

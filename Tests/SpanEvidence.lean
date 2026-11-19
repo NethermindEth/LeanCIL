@@ -271,39 +271,6 @@ theorem constructor_forgery_rejected :
       (i 40 (.call localConstructor))
       (.initializeSpanLocal 0 (.array .unsigned32 true .whole)) = false := by decide +kernel
 #print axioms constructor_forgery_rejected
-/-- A readonly cast binds both element types and the exact runtime overload. -/
-private def reinterpretCall : CallSite := {
-  declared := {
-    convention := 0x10,
-    returnType := .apply (.constructor runtime "System.ReadOnlySpan`1") (.parameter 1),
-    parameters := [.apply (.constructor runtime "System.ReadOnlySpan`1") (.parameter 0)] },
-  method := {
-    owner := .atom runtime "System.Runtime.InteropServices.MemoryMarshal", name := name!"Cast",
-    hasThis := false, genericArity := 2, returnType := span runtime "System.Int32",
-    parameters := [span runtime "System.Byte"],
-    methodArguments := [.atom runtime "System.Byte", intType] },
-  name := "Cast",
-  target := .external (runtime ++ "::System.ReadOnlySpan`1<!!1> " ++
-    "System.Runtime.InteropServices.MemoryMarshal::Cast(System.ReadOnlySpan`1<!!0>)"),
-  typeArguments := [.atom runtime "System.Byte", intType], parameterCount := 1,
-  returnsValue := true }
-
-/-- Width, readonly status, result identity and the declaring assembly cannot be forged. -/
-theorem exact_reinterpret_call :
-    spanCallMatches (i 40 (.call reinterpretCall))
-      (.memory (.spanReinterpret 1 4 false)) = true ∧
-    spanCallMatches (i 40 (.call reinterpretCall))
-      (.memory (.spanReinterpret 1 8 false)) = false ∧
-    spanCallMatches (i 40 (.call reinterpretCall))
-      (.memory (.spanReinterpret 1 4 true)) = false ∧
-    spanCallMatches (i 40 (.call reinterpretCall)) (.memory .spanReadOnly) = false ∧
-    spanCallMatches (i 40 (.call { reinterpretCall with
-      method.returnType := span runtime "System.UInt32" }))
-      (.memory (.spanReinterpret 1 4 false)) = false ∧
-    spanCallMatches (i 40 (.call { reinterpretCall with
-      method.owner := .atom owner "System.Runtime.InteropServices.MemoryMarshal" }))
-      (.memory (.spanReinterpret 1 4 false)) = false := by decide +kernel
-#print axioms exact_reinterpret_call
 /-- Runtime names omit scopes without discarding nested or adjacent generic arguments. -/
 theorem closed_generic_element_names :
     spanElementName (.aggregate ("Examples::Pair`1<" ++ runtimeScope ++ "::System.UInt64>") 0) =

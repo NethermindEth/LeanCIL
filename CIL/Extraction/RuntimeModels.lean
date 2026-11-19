@@ -2,6 +2,7 @@ import CIL.Extraction.ModelTable
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.IntegerMath
 import CIL.Extraction.VectorModels
+import CIL.Extraction.MarshalModels
 import CIL.Extraction.BitModels
 import CIL.Extraction.UnsafeModels
 
@@ -18,7 +19,8 @@ namespace CIL.Extraction
 
 /-- The runtime methods with a model. -/
 def modelEntries : List ModelEntry :=
-  objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries ++ unsafeEntries
+  objectConstructorEntry :: vectorEntries ++ integerMathEntries ++ bitEntries ++ unsafeEntries ++
+    marshalEntries
 
 /-- The table of `modelEntries`. -/
 def runtimeModels : ModelTable := model_table% modelEntries
@@ -66,7 +68,7 @@ def callModelled (body : Method) (method : MethodRef) : Bool :=
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by
   simp [runtimeModels, SearchTree.toList, modelEntries, vectorEntries, integerMathEntries,
-    bitEntries, bitHelpers, bitHelperModel,
+    marshalEntries, bitEntries, bitHelpers, bitHelperModel,
     mathOperations, mathIntegers, IntegerMath.signedOnly, unsafeEntries]
 
 #print axioms runtimeModels_entries

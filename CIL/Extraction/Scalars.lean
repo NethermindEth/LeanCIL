@@ -658,7 +658,7 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
 private def callResult (site : CallSite) : ScalarKind :=
   if unsafePointerOffset ⟨0, 40, .call site⟩ || spanCallReturnsReference site ||
       (viewObservation ⟨0, 40, .call site⟩).any
-        (fun operation => operation == .spanPinnable || operation == .arrayData) then .reference
+        (fun operation => operation == .spanPinnable) then .reference
   else match site.target with
     | .managed _ => scalarType site.returnType
     | .external identity => externalResult site identity

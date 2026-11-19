@@ -14,10 +14,10 @@ namespace CIL.Extraction
 
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
-  | hardware | vectorCreate | vectorTransfer | span | view | marshal | binary | guard
+  | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
   | unsafeHelper (helper : UnsafeHelper)
   | unsafeReference | unsafeOffset | unsafeTransfer | unsafeBlock | bitCast
-  | integerMath | feature | platform | referenceContent | staticSpan | spanReference
+  | integerMath | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
 
@@ -108,13 +108,6 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
     if scope == runtimeScope then
       match type with
       | "System.Runtime.CompilerServices.Unsafe" => unsafeFamily raw name
-      | "System.Runtime.InteropServices.MemoryMarshal" =>
-        if marshalTransferFamily site then some .marshal
-        else match name with
-          | "GetArrayDataReference" => some .view
-          | "GetReference" => some .spanReference
-          | "AsBytes" | "Cast" | "CreateSpan" | "CreateReadOnlySpan" => some .span
-          | _ => none
       | "System.Runtime.CompilerServices.RuntimeHelpers" =>
         if name == "CreateSpan" then some .staticSpan
         else if referenceContentQuery site then some .referenceContent else none

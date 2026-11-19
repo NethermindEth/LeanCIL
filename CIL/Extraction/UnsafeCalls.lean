@@ -1,6 +1,5 @@
 import CIL.Extraction.UnsafeReferences
 import CIL.Extraction.UnsafeTransfers
-import CIL.Extraction.MarshalCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.BinaryTransfers
 import CIL.Extraction.ObjectConstruction
@@ -133,15 +132,22 @@ def unsafeHelperMatches (layouts : List RawLayout) (raw : RawInstruction)
       | _ => false
     | _ => emittedUnsafeHelper emitted == some helper
 
+/-- The site rule checks calls. Other raw opcodes cannot emit a byte-span transfer,
+    reinterpret a span or take an array's data reference. -/
+private def memoryCallOrigin (raw : RawInstruction) : Instruction → Bool
+  | .memory (.marshalRead ..) | .memory (.marshalWrite ..)
+  | .memory (.spanReinterpret ..) | .memory (.observeView .arrayData) => raw.opcode == 40
+  | _ => true
+
 /-- A recognized call emits exactly its helper operation, which no other instruction may emit. -/
 def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
     (reachable : List Bool) (code : List Instruction) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
   all3 (fun instruction live emitted => !live ||
+      memoryCallOrigin instruction emitted &&
       unsafeTransferMatches layouts instruction emitted &&
       unsafeBlockMatches instruction emitted &&
       vector128UnsafeMatches instruction emitted &&
-      marshalTransferMatches layouts instruction emitted &&
       viewObservationMatches instruction emitted &&
       binaryTransferMatches instruction emitted &&
       unsafeElementOffsetMatches layouts instruction emitted &&

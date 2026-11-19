@@ -104,6 +104,12 @@ model its method has; `ManagedCallsValid` requires a live call of a modelled met
 would drop the call. A proof about the models the table gives (`Extraction.runtimeModel_yields`)
 holds for each entry's models.
 
+The runtime table binds ten static `System.Runtime.InteropServices.MemoryMarshal` members.
+The open declaration distinguishes writable and readonly spans and fixes the positions of
+the method parameters. The closed reference fixes their types. `transferKind?` reads the
+scalar width and signedness, integer-vector width or aggregate size from the layout environment.
+A resolved call runs the corresponding memory instruction via `step_call_memory`.
+
 At an unlinked site outside the model table, `loweredCallFamily` selects a family by raw
 opcode, owner and member name. The family resolves the overload using the raw operands,
 the method's layout environment, its profile and its role in a fold of the raw instructions.

@@ -195,9 +195,9 @@ when `initializeSpanLocal` replaces a local's previous view.
 An `in` or `ref readonly` span parameter is passed as the referenced `.bufferSpan` view, so a
 contract states the same view argument as a by-value span and reuses `SpanView.validate`,
 `Contents` and the span element lemmas, whether the caller passes a span local or a temporary.
-`MemoryMarshal.GetReference` of a readonly view steps by `step_memory_spanReference_readOnlyView_eq`
-to a `.readOnlyReference`; loads, field loads and `ldflda` accept it, so the first-element load
-is proved with the same lemmas.
+`MemoryMarshal.GetReference` of a readonly view keeps its call. `step_call_memory` exposes the memory
+operation, and `step_memory_spanReference_readOnlyView_eq` gives its `.readOnlyReference`.
+Loads, field loads and `ldflda` accept that reference.
 Element and byte offsets of a readonly reference step by the `step_memory_add_readOnly_*`
 equations to a `.readOnlyReference` with the writable form's address, so `add_element` applies
 unchanged, including for `Unsafe.Add(..., 1)`. Integer byte-order transfers and view observations

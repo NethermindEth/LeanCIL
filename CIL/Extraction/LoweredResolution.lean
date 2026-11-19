@@ -1,3 +1,4 @@
+import CIL.Extraction.MarshalCalls
 import CIL.Extraction.LoweredCalls
 import CIL.Extraction.HardwareCalls
 
@@ -85,12 +86,11 @@ private def spanInstruction (environment : CallLayouts) (role : Option FoldRole)
     | .apply _ element => element
     | _ => site.typeArguments.headD .void
   let source ← aggregateWidth environment first
-  let target ← aggregateWidth environment (site.typeArguments[1]?.getD .void)
   if raw.opcode == 40 && site.name == ".ctor" then
     let some (.spanConstructor index _) := role | none
     return .initializeSpanLocal index (← spanLocalConstructor site source)
   if byteSpanConstructor raw.opcode site then return .memory .spanCreate
-  return (← spanCall raw source target).instruction
+  return (← spanCall raw source).instruction
 
 /-- A runtime field handle produces a read-only span of an admitted scalar element width. -/
 private def staticSpanInstruction (site : CallSite) : Option Instruction := do
@@ -101,18 +101,6 @@ private def staticSpanInstruction (site : CallSite) : Option Instruction := do
     "System.Runtime.CompilerServices.RuntimeHelpers::CreateSpan(System.RuntimeFieldHandle)")
     result [.atom runtimeScope "System.RuntimeFieldHandle"] [element])
   return .memory (.createSpan width)
-
-/-- An exact writable or read-only MemoryMarshal.GetReference overload. -/
-private def spanReferenceInstruction (environment : CallLayouts) (site : CallSite) :
-    Option Instruction := do
-  let [element] := site.typeArguments | none
-  let [span@(.apply (.constructor scope owner) held)] := site.parameterTypes | none
-  _root_.guard (scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-    held == element && (environment.valueShape element).size?.isSome)
-  _root_.guard (staticRuntimeCall site runtimeScope
-    ("!!0& System.Runtime.InteropServices.MemoryMarshal::GetReference(" ++ owner ++ "<!!0>)")
-    (.byref element) [span] [element])
-  return .memory .spanReference
 
 /-- The instruction of this raw member, or no instruction when its overload cannot resolve. -/
 def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
@@ -135,7 +123,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     return .memory (.vector128Unsafe write offset)
   | .integerMath => integerMathInstruction environment site
   | .span => spanInstruction environment role raw site
-  | .spanReference => spanReferenceInstruction environment site
   | .staticSpan => staticSpanInstruction site
   | .view =>
     let element := match site.declaringType with
@@ -143,10 +130,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
       | _ => site.typeArguments.headD .void
     let _ ← aggregateWidth environment element
     return .memory (.observeView (← viewObservation raw))
-  | .marshal =>
-    let (element, read, trying) ← marshalCall raw
-    let (kind, _) ← transferOf environment element
-    return .memory (if read then .marshalRead kind trying else .marshalWrite kind trying)
   | .binary => binaryInstruction raw
   | .guard => guardInstruction raw
   | .unsafeHelper helper =>

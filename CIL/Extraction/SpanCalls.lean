@@ -19,7 +19,6 @@ def spanMemoryScope : String :=
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
   | empty (width : Nat) (writable : Bool)
-  | reinterpret (sourceWidth targetWidth : Nat) (writable : Bool)
   | copy (width : Nat) (tryCopy : Bool)
   | reference (width : Nat) (writable : Bool)
   | singleReference (width : Nat) (writable : Bool)
@@ -32,7 +31,6 @@ inductive SpanCall where
 /-- The memory instruction for a resolved span signature. -/
 def SpanCall.instruction : SpanCall → Instruction
   | .empty width writable => .memory (.spanEmpty width writable)
-  | .reinterpret source target writable => .memory (.spanReinterpret source target writable)
   | .copy width trying => .memory (.spanCopy width trying)
   | .reference width writable => .memory (.spanFromReference width writable)
   | .singleReference width writable => .memory (.spanSingleReference width writable)
@@ -47,7 +45,6 @@ def SpanCall.instruction : SpanCall → Instruction
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
 private def emittedSpanCall : Instruction → Option SpanCall
   | .memory (.spanEmpty width writable) => some (.empty width writable)
-  | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
   | .memory (.spanCopy width tryCopy) => some (.copy width tryCopy)
   | .memory (.spanFromReference width writable) => some (.reference width writable)
   | .memory (.spanSingleReference width writable) => some (.singleReference width writable)
@@ -219,45 +216,6 @@ private def arrayExtensionCall (opcode : Nat) (site : CallSite)
       "::System.Span`1<!!0> System.MemoryExtensions::AsSpan(" ++
       parameters ++ ")") then none else some (.array (← arrayElement) true range)
 
-/-- Reinterpretation retains readonly status and both primitive or enum element types. -/
-private def reinterpretCall (opcode : Nat) (site : CallSite)
-    (sourceAggregateWidth targetAggregateWidth : Nat) : Option SpanCall := do
-  if opcode != 40 || site.hasThis || !site.returnsValue || site.parameterCount != 1 ||
-      site.declaringType != .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
-    none else pure ()
-  let (source, target, resultName) ← match site.name, site.typeArguments with
-    | "AsBytes", [source] => some (source, .atom runtimeScope "System.Byte", "System.Byte")
-    | "Cast", [source, target] => some (source, target, "!!1")
-    | _, _ => none
-  let sourceWidth ← spanElementWidth source sourceAggregateWidth
-  let targetWidth ← spanElementWidth target targetAggregateWidth
-  let [input] := site.parameterTypes | none
-  let .span _ writable ← spanStorage input | none
-  let owner := if writable then "System.Span`1" else "System.ReadOnlySpan`1"
-  if input != .apply (.constructor runtimeScope owner) source ||
-      site.returnType != .apply (.constructor runtimeScope owner) target ||
-      site.target != .external (runtimeScope ++ "::" ++ owner ++ "<" ++ resultName ++
-        "> System.Runtime.InteropServices.MemoryMarshal::" ++ site.name ++ "(" ++ owner ++
-        "<!!0>)") then none
-  else some (.reinterpret sourceWidth targetWidth writable)
-
-/-- Reference factories bind the exact element, output capability and generic signature. -/
-private def referenceFactory (opcode : Nat) (site : CallSite)
-    (aggregateWidth : Nat) : Option SpanCall := do
-  if opcode != 40 || site.hasThis || !site.returnsValue || site.parameterCount != 2 ||
-      site.declaringType != .atom runtimeScope "System.Runtime.InteropServices.MemoryMarshal" then
-    none else pure ()
-  let [element] := site.typeArguments | none
-  let writable ← if site.name == "CreateSpan" then some true
-    else if site.name == "CreateReadOnlySpan" then some false else none
-  let owner := if writable then "System.Span`1" else "System.ReadOnlySpan`1"
-  if site.parameterTypes != [.byref element, .atom runtimeScope "System.Int32"] ||
-      site.returnType != .apply (.constructor runtimeScope owner) element ||
-      site.target != .external (runtimeScope ++ "::" ++ owner ++
-        "<!!0> System.Runtime.InteropServices.MemoryMarshal::" ++ site.name ++
-        "(!!0&,System.Int32)") then none
-  else some (.reference (← spanElementWidth element aggregateWidth) writable)
-
 /-- An exactly checked span indexer returns a reference, including readonly metadata modifiers. -/
 def spanCallReturnsReference (site : CallSite) : Bool :=
   (spanMemberCall 40 site).any fun operation => match operation with
@@ -265,24 +223,22 @@ def spanCallReturnsReference (site : CallSite) : Bool :=
     | _ => false
 
 /-- The span member or factory at a raw site, with aggregate widths from layout evidence. -/
-def spanCall (instruction : RawInstruction) (sourceWidth targetWidth : Nat := 0) :
+def spanCall (instruction : RawInstruction) (width : Nat := 0) :
     Option SpanCall := do
   let .call site := instruction.operand | none
   let opcode := instruction.opcode
-  arrayFillCall opcode site <|> spanMemberCall opcode site sourceWidth <|>
-    arrayExtensionCall opcode site sourceWidth <|> referenceFactory opcode site sourceWidth <|>
-    reinterpretCall opcode site sourceWidth targetWidth
+  arrayFillCall opcode site <|> spanMemberCall opcode site width <|>
+    arrayExtensionCall opcode site width
 
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
 def spanCallMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
-    let (sourceWidth, targetWidth) := match emittedSpanCall emitted with
-      | some (.reinterpret source target _) => (source, target)
+    let width := match emittedSpanCall emitted with
       | some (.copy width _) | some (.fill width _) | some (.item width)
       | some (.reference width _) | some (.singleReference width _)
-      | some (.empty width _) => (width, width)
-      | some (.array element _ _) => (element.width, element.width)
-      | _ => (0, 0)
-    spanCall instruction sourceWidth targetWidth == emittedSpanCall emitted
+      | some (.empty width _) => width
+      | some (.array element _ _) => element.width
+      | _ => 0
+    spanCall instruction width == emittedSpanCall emitted
 
 end CIL.Extraction

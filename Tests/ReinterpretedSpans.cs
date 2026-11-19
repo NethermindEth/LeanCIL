@@ -9,7 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
-#:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -72,24 +72,13 @@ foreach (var method in methods.Where(method => method.IsPublic))
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS reinterpreted span: " + name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-var index = 0;
-foreach (var (name, before, after) in new[]
-{
-    ("Bytes", ".spanReinterpret 4 1 true", ".spanReinterpret 8 1 true"),
-    ("Words", ".spanReinterpret 1 4 true", ".spanReinterpret 1 8 true"),
-    ("ReadOnlyWords", ".spanReinterpret 1 2 false", ".spanReinterpret 1 2 true"),
-    ("SameWidth", ".spanReinterpret 4 4 true", ".spanReadOnly")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_scalars_validated");
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing reinterpret mutation");
-    var path = Path.Combine(root, $"Rejected{index++}.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact reinterpret evidence rejection: " + name, "ScalarFlowValid");
-}
-rejected.Check();
+CheckMarshalModels(root,
+[
+    ("Bytes", 1, ".spanReinterpret 4 1 true", ".spanReinterpret 8 1 true"),
+    ("Words", 1, ".spanReinterpret 1 4 true", ".spanReinterpret 1 8 true"),
+    ("ReadOnlyWords", 1, ".spanReinterpret 1 2 false", ".spanReinterpret 1 2 true"),
+    ("SameWidth", 1, ".spanReinterpret 4 4 true", ".spanReadOnly")
+]);
 
 partial class Program
 {
