@@ -324,17 +324,20 @@ def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
     parameterInput := ⟨[], [], []⟩, reachable := allLive original, featureStates := [],
     scalarStates := [], layoutUses := [] }
 
-/-- A body with a hole still gives its method, so the add and unbox program decodes in full,
-    while one refused body leaves the program without one. -/
+/-- The adder's certificate records the stack depth before each instruction. -/
+def addFeatureStates : FeatureCertificate :=
+  [0, 1, 2, 1].map fun depth => some ⟨List.replicate depth none, []⟩
+
+/-- Both adders decode. A malformed second body or missing certificate rejects the program. -/
 theorem program_needs_every_body :
-    ((encodeBody pin addRaw).bind fun addBody =>
-      (decodedProgram? .scalar {} [item addRaw addBody, item unboxRaw unboxBody]).map
-        List.length) = some 2 ∧
-      ((encodeBody pin addRaw).bind fun addBody =>
-        decodedProgram? .scalar {}
-          [item addRaw addBody, item { addRaw with parameters := [uint64] } addBody]).isNone =
-        true := by
-  constructor <;> decide +kernel
+    ((encodeBody pin addArgumentsRaw).bind fun body => do
+      let adder := { item addArgumentsRaw body with featureStates := addFeatureStates }
+      let pair ← decodedProgram? .scalar {} [adder, adder]
+      let badBody := { adder with original := { addArgumentsRaw with parameters := [uint64] } }
+      let noCertificate := { adder with featureStates := [] }
+      pure (pair.length, (decodedProgram? .scalar {} [adder, badBody]).isNone,
+        (decodedProgram? .scalar {} [adder, noCertificate]).isNone)) =
+      some (2, true, true) := by decide +kernel
 #print axioms program_needs_every_body
 
 /-- The profile the decoded definitions below are evaluated under; a named constant passed to

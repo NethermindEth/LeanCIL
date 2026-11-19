@@ -1286,10 +1286,12 @@ void DecodedProgramCosts()
                 item.arguments = some method
             #command_cost "decoded program {{records}}"
               theorem decoded ({{items}} : MethodEvidence) ({{methods}} : CIL.Method)
-            {{facts}} :
+            {{facts}}
+                  (masks : programMasksValid [{{items.Replace(" ", ", ")}}]
+                    [{{methods.Replace(" ", ", ")}}] = true) :
                   decodedProgram? profile environment [{{items.Replace(" ", ", ")}}] =
                     some [{{methods.Replace(" ", ", ")}}] :=
-                decodedProgram?_eq_some {{bodies}}
+                decodedProgram?_eq_some masks {{bodies}}
             end DecodedProgramCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());

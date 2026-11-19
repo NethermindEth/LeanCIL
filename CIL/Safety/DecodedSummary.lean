@@ -6,10 +6,9 @@ import CIL.Safety.MethodContract
 
 A `DecodedSummary` is a method contract proved for one index of a program together with the
 evidence record that names the method there: the pinned assembly, the metadata token and the
-type arguments, and the body bytes, links and reachability mask that decode to that method.
-`BodiesDecode`
-states, record by record, that the evidence decodes to the program, and
-`decodedProgram?_eq_some` turns it into the decoded program the summary ranges over. At a call
+type arguments, and the body bytes, links and certified reachability mask used to decode it.
+`decodedProgram?_eq_some` combines each record's body equation in `BodiesDecode` with the
+program's feature checks to identify the program the summary ranges over. At a call
 site, `DecodedSummary.site` shows that the summary at the index the call's link enters is
 for the method the site's metadata names.
 -/
@@ -31,30 +30,33 @@ inductive BodiesDecode (profile : FeatureProfile) (environment : LayoutEnvironme
       (rest : BodiesDecode profile environment items methods) :
       BodiesDecode profile environment (item :: items) (method :: methods)
 
-/-- Bodies that decode record by record give `program` as the decoded program. -/
+/-- Certified masks and per-record body equations identify the decoded program. -/
 theorem decodedProgram?_eq_some {profile : FeatureProfile} {environment : LayoutEnvironment}
     {evidence : List MethodEvidence} {program : CIL.Program}
+    (masks : programMasksValid evidence program = true)
     (bodies : BodiesDecode profile environment evidence program) :
     decodedProgram? profile environment evidence = some program := by
+  apply Option.filter_eq_some_iff.mpr
+  refine ⟨?_, masks⟩
+  clear masks
   induction bodies with
   | nil => rfl
   | cons decodes _ tail =>
-    unfold decodedProgram? at tail ⊢
     simp [List.mapM_cons, decodes, tail]
 
 #print axioms decodedProgram?_eq_some
 
 /-- The method at each index of a decoded program is the one that index's record decodes to. -/
-theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : LayoutEnvironment} :
+private theorem bodyMap_getElem {profile : FeatureProfile} {environment : LayoutEnvironment} :
     ∀ {evidence : List MethodEvidence} {program : CIL.Program} {index : Nat}
       {item : MethodEvidence},
-      decodedProgram? profile environment evidence = some program →
+      (evidence.mapM fun entry => Method.ofBody? profile environment entry.links entry.reachable
+        entry.body entry.original entry.arguments) = some program →
       evidence[index]? = some item →
         Method.ofBody? profile environment item.links item.reachable item.body item.original
           item.arguments = program[index]?
   | [], _, _, _, _, found => by simp at found
   | head :: items, program, index, item, decoded, found => by
-    unfold decodedProgram? at decoded
     simp only [List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
       Option.some.injEq] at decoded
     obtain ⟨method, decodes, methods, rest, rfl⟩ := decoded
@@ -65,13 +67,39 @@ theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : Layout
       simpa using decodes
     | succ index =>
       simp only [List.getElem?_cons_succ] at found ⊢
-      exact decodedProgram?_getElem rest found
+      exact bodyMap_getElem rest found
+
+#print axioms bodyMap_getElem
+
+/-- The method at a decoded index is the result of decoding its record's pinned body. -/
+theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : LayoutEnvironment}
+    {evidence : List MethodEvidence} {program : CIL.Program} {index : Nat} {item : MethodEvidence}
+    (decoded : decodedProgram? profile environment evidence = some program)
+    (found : evidence[index]? = some item) :
+    Method.ofBody? profile environment item.links item.reachable item.body item.original
+      item.arguments = program[index]? :=
+  bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
 
 #print axioms decodedProgram?_getElem
 
+/-- The feature certificate at each decoded index validates its record's mask and method. -/
+theorem decodedProgram?_maskValid {profile : FeatureProfile} {environment : LayoutEnvironment}
+    {evidence : List MethodEvidence} {program : CIL.Program} {index : Nat}
+    {item : MethodEvidence} {method : Method}
+    (decoded : decodedProgram? profile environment evidence = some program)
+    (found : evidence[index]? = some item) (present : program[index]? = some method) :
+    item.MaskValid evidence method := by
+  have paired : (item, method) ∈ evidence.zip program :=
+    List.mem_of_getElem? (List.getElem?_zip_eq_some.mpr ⟨found, present⟩)
+  have masks : programMasksValid evidence program = true := (Option.filter_eq_some_iff.mp decoded).2
+  unfold programMasksValid at masks
+  exact of_decide_eq_true (List.all_eq_true.mp masks (item, method) paired)
+
+#print axioms decodedProgram?_maskValid
+
 /-- Record `index` of `evidence` is the method with metadata token `token` of assembly `pin`
     at type arguments `arguments`, its closed body instantiates that definition, and its pinned
-    body bytes decode to the method at `index` of `program`. -/
+    body bytes decode to the method at `index` of `program` under its certified mask. -/
 def DecodedAt (program : CIL.Program) (evidence : List MethodEvidence)
     (profile : FeatureProfile) (environment : LayoutEnvironment) (index : Nat)
     (pin : AssemblyPin) (token : Nat) (arguments : List TypeExpr) : Prop :=
@@ -79,7 +107,8 @@ def DecodedAt (program : CIL.Program) (evidence : List MethodEvidence)
     item.arguments = arguments ∧
     instantiateMethod environment.rawLayouts item.original arguments = some item.closed ∧
     Method.ofBody? profile environment item.links item.reachable item.body item.original
-      item.arguments = program[index]?
+      item.arguments = program[index]? ∧
+    ∀ method, program[index]? = some method → item.MaskValid evidence method
 
 /-- `contract` holds for the method at `index`, and `bound` names that method by pinned
     assembly, metadata token and type arguments and ties it to the bytes it decodes from.
@@ -106,7 +135,8 @@ theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContra
     (holds : contract.Holds program index) :
     DecodedSummary program evidence profile environment index item.assembly item.original.token
       item.arguments contract :=
-  ⟨holds, item, found, rfl, rfl, rfl, instantiated, decodedProgram?_getElem decoded found⟩
+  ⟨holds, item, found, rfl, rfl, rfl, instantiated, decodedProgram?_getElem decoded found,
+    fun _ => decodedProgram?_maskValid decoded found⟩
 
 #print axioms DecodedSummary.of_decoded
 

@@ -49,7 +49,8 @@ cil_resolution_facts callerMethod
 def program : CIL.Program := [callerMethod, addMethod]
 
 /-- The adder's record, with its bytes. -/
-def addItem : MethodEvidence := { item addArgumentsRaw addBody with assembly := pin }
+def addItem : MethodEvidence := { item addArgumentsRaw addBody with
+  assembly := pin, featureStates := addFeatureStates }
 
 /-- The records of `program`; the caller's carries the adder's bytes, so only the adder's record
     decodes to its method. -/
@@ -66,8 +67,27 @@ theorem add_body_decodes :
 /-- A one-record program decodes record by record, so `decodedProgram?` gives it. -/
 theorem adder_program_decodes :
     decodedProgram? testProfile testEnvironment [addItem] = some [addMethod] :=
-  decodedProgram?_eq_some (.cons add_body_decodes .nil)
+  decodedProgram?_eq_some (by decide +kernel) (.cons add_body_decodes .nil)
 #print axioms adder_program_decodes
+
+/-- The original certificate marks the add live, while the supplied mask hides it. -/
+private def hiddenAdd := { addItem with reachable := [true, true, false, true] }
+
+/-- The byte decoder under the forged mask replaces the live add with its raw opcode. -/
+private def hiddenMethod := { addMethod with code := [.ldarg 0, .ldarg 1, .unadmitted 88, .ret] }
+
+/-- Neither the decoded program nor a summary with the original identity accepts the hidden add. -/
+theorem hidden_add_rejected :
+    Method.ofBody? testProfile testEnvironment [] hiddenAdd.reachable addBody addArgumentsRaw [] =
+      some hiddenMethod ∧
+    decodedProgram? testProfile testEnvironment [hiddenAdd] = none ∧
+    ¬ DecodedAt [hiddenMethod] [hiddenAdd] testProfile testEnvironment 0 pin tokens.main [] := by
+  refine ⟨by cil_kernel_rfl, by decide +kernel, ?_⟩
+  rintro ⟨record, found, _, _, _, _, _, valid⟩
+  simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+  subst record
+  exact (by decide +kernel : ¬ hiddenAdd.MaskValid [hiddenAdd] hiddenMethod) (valid _ rfl)
+#print axioms hidden_add_rejected
 
 /-- `(left, right)` returns `left + right` and changes no memory. -/
 def addContract : MethodContract (W64 × W64) W64 where
@@ -94,7 +114,8 @@ theorem add_holds_alone : addContract.Holds [addMethod] 0 := by
 /-- The adder's contract, bound to its record at index 1. -/
 theorem addSummary : DecodedSummary program evidence testProfile testEnvironment 1 pin
     tokens.main [] addContract :=
-  ⟨add_holds, addItem, rfl, rfl, rfl, rfl, by cil_kernel_rfl, add_body_decodes⟩
+  ⟨add_holds, addItem, rfl, rfl, rfl, rfl, by cil_kernel_rfl, add_body_decodes,
+    by rintro method found; cases found; decide +kernel⟩
 #print axioms addSummary
 
 /-- A summary of the decoded one-record program is bound to the adder's identity. -/

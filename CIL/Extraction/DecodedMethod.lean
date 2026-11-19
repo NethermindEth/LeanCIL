@@ -66,13 +66,44 @@ def _root_.CIL.Method.ofBody? (profile : FeatureProfile) (environment : LayoutEn
   Method.ofRaw? profile environment links reachable
     { original with code := decoded.code, initLocals := decoded.initLocals } arguments
 
+/-- The feature certificate checks this method's mask and code against its pinned body's
+    specialization, using the constant returns of the surrounding records. -/
+abbrev MethodEvidence.MaskValid (item : MethodEvidence) (all : List MethodEvidence)
+    (method : Method) : Prop :=
+  bodyMatches item.body item.original item.arguments = true ∧
+  instantiateMethod method.environment.rawLayouts item.original item.arguments = some item.closed ∧
+  FeatureFlowValid method.environment.rawLayouts.toArray (evidenceConstants all) (linkIndex method)
+    item.closed method.profile item.featureStates item.reachable method.code
+
+/-- Each paired record and decoded method has a valid feature certificate in this program. -/
+def programMasksValid (evidence : List MethodEvidence) (program : Program) : Bool :=
+  (evidence.zip program).all fun (item, method) => decide (item.MaskValid evidence method)
+
+/-- A validated translation has checked every decoded mask against its pinned, closed body. -/
+theorem TranslationValid.programMasksValid {rawLayouts layouts pins evidence imports program}
+    (valid : TranslationValid rawLayouts layouts pins evidence imports program) :
+    programMasksValid evidence program = true := by
+  apply List.all_eq_true.mpr
+  rintro ⟨item, method⟩ member
+  obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp member
+  obtain ⟨recorded, compiled⟩ := List.getElem?_zip_eq_some.mp found
+  obtain ⟨bound, rfl⟩ := List.getElem?_eq_some_iff.mp recorded
+  have checked := translation_method_checked valid ⟨index, bound⟩ method compiled
+  obtain ⟨specialized, -, -, features, -, -, -, -, -, -, -, -, -, -, body, env, -⟩ := checked
+  apply decide_eq_true
+  unfold MethodEvidence.MaskValid
+  rw [show method.environment = _ from env]
+  exact ⟨body.2.2.2.2.2.2, specialized.1, features⟩
+
+#print axioms TranslationValid.programMasksValid
+
 /-- The program the evidence's body bytes denote, method by method, each with the links its
     evidence record states and the reachability mask its feature certificate checks. -/
 def decodedProgram? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (evidence : List MethodEvidence) : Option Program :=
-  evidence.mapM fun item =>
+  (evidence.mapM fun item =>
     Method.ofBody? profile environment item.links item.reachable item.body item.original
-      item.arguments
+      item.arguments).filter (programMasksValid evidence)
 
 /-- A body that decodes to `method` passes `checkBody` with the method's own code and init flag. -/
 theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : BodyEvidence}

@@ -39,7 +39,7 @@ theorem addTwo_holds : addTwoContract.Holds Extracted.program addTwo := by
 theorem bodies_decode :
     decodedProgram? Extracted.profile Extracted.environment Extracted.methodEvidence =
       some Extracted.program :=
-  decodedProgram?_eq_some
+  decodedProgram?_eq_some Extracted.translation_valid.programMasksValid
     (.cons ((Method.ofBody?_of_decodes Extracted.method0_body_validated).trans
         Extracted.method0_decoded)
       (.cons ((Method.ofBody?_of_decodes Extracted.method1_body_validated).trans

@@ -287,10 +287,11 @@ next. The check reads each pc's link by one walk beside the code and costs about
 `dotnet run --file Tests/LookupScaling.cs -- --call-check-only`.
 
 The suite states and proves with `decodedProgram?_eq_some` that 8, 32 and 128 evidence records
-decode to their methods, given one decoding fact per record, and reads the heartbeats of that one
-command. It fails when the heartbeats per record grow more than 1.25 times from one size to the
-next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
-with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
+decode to their methods, given a proof for the program's masks and one decoding fact per record.
+It reads the heartbeats for that command and fails when the cost per record grows more than 1.25
+times from one size to the next. With body facts alone, the measured costs were about 14,300,
+13,000 and 14,200 heartbeats per record. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
 
 The suite decides with `decide +kernel` the closure of method 0 in four shapes of program: a chain
 of 8, 32 and 128 methods each calling the next, whose closure is the whole program; the same chain

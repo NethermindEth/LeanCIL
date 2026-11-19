@@ -513,19 +513,22 @@ A contract whose precondition implies well-formed memory and a valid static worl
 `DecodedSummary program evidence profile environment index pin token arguments contract` holds
 when `contract.Holds program index` and record `index` of `evidence` is the method with
 metadata token `token` of the assembly pinned by `pin`, closed at type arguments `arguments`,
-whose pinned body bytes decode to `program[index]?`. `MethodContract.Certified` names only an
-index, which another extraction can fill with another body; a summary also names the metadata
-method and the bytes.
+whose pinned body bytes decode to `program[index]?`. For a method at that index, the record's
+feature certificate must validate its reachability mask and decoded instructions.
+`MethodContract.Certified` names only an index, which another extraction can fill with another
+body. A summary also names the metadata method and the bytes.
 
 | Name | Use |
 | --- | --- |
 | `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
-| `decodedProgram?_eq_some` | Turns `BodiesDecode` into `decodedProgram? profile environment evidence = some program` |
+| `decodedProgram?_eq_some` | Proves the decoded program from `programMasksValid evidence program = true` and `BodiesDecode` |
 | `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
 | `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |
 
+Use `Extracted.translation_valid.programMasksValid` for the mask check. It binds each record's
+feature certificate to its pinned, instantiated body and the method's emitted code.
 An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
 `(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
 for a method defined from its decoder, and `site` its `ManagedCallsValid` premise from
@@ -1228,10 +1231,11 @@ summary proved there binds wherever those methods appear:
   [lookup scaling suite](performance/InstructionLookups.md) pins both costs.
 - `Program.closure_closed` gives `Closed lib`, and `Program.closure_relocates` gives
   `RelocatesInto lib program` at the indices, with `root` first.
-- `Program.closureEvidence` reads the closure's records from the program's, with their links
-  renumbered; `Program.closureEvidence_decodes` says they decode to `lib` when the program's
-  records decode to `program`. Relocation preserves the reachability mask and the set of pcs
-  occupied by links. `Method.ofBody?_relocate` therefore applies to the renumbered records.
+- `Program.closureEvidence` renumbers the records' links and checks the feature certificates
+  against the closure's method indices. `Program.closureEvidence_decodes` says the records
+  decode to `lib` when the program's records decode to `program`. Relocation preserves the
+  reachability mask and the set of pcs occupied by links. `Method.ofBody?_relocate` therefore
+  applies to the renumbered records.
 - `MethodContract.Holds.restrict` carries a contract proved in `program` to the closure, where
   `DecodedSummary.of_decoded` binds it to the closure's record.
 - `RelocatesInto.of_decoded` places `lib` in a target program whose records decode, at the

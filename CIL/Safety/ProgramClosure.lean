@@ -273,12 +273,14 @@ theorem Program.closure_eq_closureWith {program : Program} {lookup : Nat → Opt
 #print axioms Program.closure_eq_closureWith
 
 /-- The records of the methods `Program.closure` takes out of `program`, in closure order, each
-    with its links renumbered as the closure renumbers them. -/
+    with its links renumbered and its feature certificate checked against the closure. -/
 def Program.closureEvidence (program : Program) (evidence : List MethodEvidence) (root : Nat) :
     Option (List MethodEvidence) :=
   let search := program.closureSearch root
-  search.found.reverse.mapM fun visited =>
-    evidence[visited.1]?.map (MethodEvidence.relocateLinks search.position)
+  let visits := search.found.reverse
+  (visits.mapM fun visited =>
+    evidence[visited.1]?.map (MethodEvidence.relocateLinks search.position)).filter fun records =>
+      programMasksValid records (visits.map fun visit => visit.2.relocate search.position)
 
 /-- Every method `search` visited is the method at its index of `program`. -/
 def ClosureSearch.Sound (program : Program) (search : ClosureSearch) : Prop :=
@@ -458,8 +460,10 @@ theorem Program.closureEvidence_decodes {profile : FeatureProfile}
   dsimp only at records
   generalize program.closureSearch root = search at facts records
   obtain ⟨sound, -, rfl, -⟩ := facts
-  unfold decodedProgram?
-  refine mapM_map_of records fun visited member item relocated => ?_
+  obtain ⟨mapped, masks⟩ := Option.filter_eq_some_iff.mp records
+  apply Option.filter_eq_some_iff.mpr
+  refine ⟨?_, masks⟩
+  refine mapM_map_of mapped fun visited member item relocated => ?_
   obtain ⟨original, recorded, rfl⟩ := Option.map_eq_some_iff.mp relocated
   rw [MethodEvidence.ofBody?_relocateLinks, Safety.decodedProgram?_getElem decoded recorded,
     sound visited (List.mem_reverse.mp member)]
@@ -505,8 +509,7 @@ theorem RelocatesInto.of_decoded {profile : FeatureProfile} {environment : Layou
     RelocatesInto lib target f := by
   intro i bound
   have length : libEvidence.length = lib.length := by
-    unfold decodedProgram? at libDecoded
-    exact (mapM_length libDecoded).symm
+    exact (mapM_length (Option.filter_eq_some_iff.mp libDecoded).1).symm
   obtain ⟨item, moved, recorded, placed, decodes⟩ := same i (length ▸ bound)
   rw [← decodedProgram?_getElem targetDecoded placed, decodes,
     decodedProgram?_getElem libDecoded recorded, List.getElem?_eq_getElem bound]
@@ -539,7 +542,8 @@ theorem DecodedSummary.relocate {Input Output : Type} {contract : MethodContract
     record item recorded
   refine ⟨summary.holds.relocate closed relocates, moved, placed, movedAssembly.trans assembly,
     movedOriginal ▸ sameToken, movedArguments.trans sameArguments, ?_,
-    decodedProgram?_getElem targetDecoded placed⟩
+    decodedProgram?_getElem targetDecoded placed,
+    fun _ => decodedProgram?_maskValid targetDecoded placed⟩
   rw [movedOriginal, movedClosed]
   exact instantiated
 

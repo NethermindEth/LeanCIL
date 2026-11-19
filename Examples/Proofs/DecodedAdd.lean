@@ -5,10 +5,8 @@ import CIL.Extraction.DecodedMethod
 # Addition over the decoded program
 
 `correctness_decoded` states the addition contract of `Examples.Arithmetic::Add` for the program
-that `Extraction.decodedProgram?` reads from the extraction's body bytes. The proof rewrites each
-method of the evidence with `Method.ofBody?_of_decodes` and the generated body check, then runs
-the decoded method by evaluation; it names neither `Extracted.method0` nor `Extracted.program`,
-so no instruction the translator emitted enters the statement or the proof.
+that `Extraction.decodedProgram?` reads from the extraction's body bytes. The proof checks the
+feature certificate and evaluates the method decoded from the pinned bytes.
 -/
 
 open CIL
@@ -23,8 +21,9 @@ theorem correctness_decoded : ∃ program : CIL.Program,
         Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 result)] ∧
       result.toNat = (x.toNat + y.toNat) % 2^64 := by
   simp only [Extraction.decodedProgram?, Extracted.methodEvidence, List.mapM_cons,
-    List.mapM_nil, Method.ofBody?_of_decodes Extracted.method0_body_validated]
-  exact ⟨_, rfl, fun x y => ⟨x + y, rfl, BitVec.toNat_add x y⟩⟩
+    List.mapM_nil, Method.ofBody?_of_decodes Extracted.method0_body_validated,
+    Option.filter_eq_some_iff]
+  exact ⟨_, ⟨rfl, by decide +kernel⟩, fun x y => ⟨x + y, rfl, BitVec.toNat_add x y⟩⟩
 
 #print axioms correctness_decoded
 end ExampleProof
