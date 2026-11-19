@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.Constrained
 import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
 import CIL.Extraction.FlowIndex
@@ -687,35 +688,56 @@ theorem argument_of_featureOpMatchesAt {layouts : Array RawLayout} {method : Raw
 
 #print axioms argument_of_featureOpMatchesAt
 
-/-- A direct tail call that passes its operand check has its decoded method and prefixes. -/
-theorem tailCall_of_valueEncodingMatches {previous : Option RawInstruction} {raw : RawInstruction}
-    {emitted : Instruction} (direct : raw.opcode = 40)
-    (checked : valueEncodingMatches previous raw emitted = true) :
-    Instruction.ofRole? .tailCall previous raw = some emitted := by
-  simp [Instruction.ofRole?, direct, valueEncodingMatches_sound checked]
-
-#print axioms tailCall_of_valueEncodingMatches
-
-/-- At a linked managed tail call the operand fixes the emitted call and its prefixes.
-    The callee at the linked index has the raw token and type arguments of that operand. -/
-theorem ManagedCallsValid.tailCall_target {methods : List SpecializedMethod}
-    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
-    {reachable : List Bool} {emitted : Method}
-    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
-    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
-    {instruction : RawInstruction} {site : CallSite}
-    (found : emitted.code[pc]? = some (.call method prefixes))
-    (live : reachable[pc]? = some true) (rawAt : raw.code[pc]? = some instruction)
-    (direct : instruction.opcode = 40) (operand : instruction.operand = .call site)
-    (managed : site.target = .managed token) (linked : emitted.linkAt pc = some (.direct target))
-    (encoding : valueEncodingMatches (rawBefore (raw.code[·]?) pc) instruction
-      (.call method prefixes) = true) :
-    Instruction.ofRole? .tailCall (rawBefore (raw.code[·]?) pc) instruction =
-      some (.call method prefixes) ∧
-      ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
-        callee.arguments = site.typeArguments :=
-  ⟨tailCall_of_valueEncodingMatches direct encoding,
-    valid.callee_token found live rawAt operand managed linked⟩
+/-- A live managed tail call has the method named by its raw operand, exactly the tail prefix,
+    and a linked callee with that operand's token and type arguments. -/
+theorem ManagedCallsValid.tailCall_target {types : List DispatchType}
+    {methods : List SpecializedMethod} {imports : List ImportSlot} {modelled : MethodRef → Bool}
+    {raw : RawMethod} {reachable : List Bool} {body : Method} {layouts : Array RawLayout}
+    (calls : ManagedCallsValid methods imports modelled (lowerConstrainedRaw types raw)
+      reachable body)
+    (constrained : ConstrainedCallsValid types methods raw reachable body)
+    {pc target token prefixOffset callOffset : Nat} {site : CallSite} {op : Instruction}
+    (rawAt : raw.code[pc]? = some ⟨callOffset, 40, .call site⟩)
+    (tailAt : rawBefore (raw.code[·]?) pc = some ⟨prefixOffset, 0xFE14, .none⟩)
+    (found : body.code[pc]? = some op) (live : reachable[pc]? = some true)
+    (feature : featureOpMatchesAt layouts raw (some .tailCall) ⟨callOffset, 40, .call site⟩
+      op (rawBefore (raw.code[·]?) pc) = true)
+    (managed : site.target = .managed token) (linked : body.linkAt pc = some (.direct target)) :
+    Instruction.ofRole? .tailCall (rawBefore (raw.code[·]?) pc) ⟨callOffset, 40, .call site⟩ =
+      some op ∧ ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
+        callee.arguments = site.typeArguments := by
+  have previous : raw.code[pc - 1]? = some ⟨prefixOffset, 0xFE14, .none⟩ := by
+    unfold rawBefore at tailAt
+    split at tailAt <;> simp_all
+  have lowered : (lowerConstrainedRaw types raw).code[pc]? = some ⟨callOffset, 40, .call site⟩ := by
+    rw [lowerConstrainedRaw_eq_original]
+    split
+    · exact rawAt
+    · simp [List.getElem?_map, List.getElem?_zipIdx, rawAt, previous]
+  have shape : ∃ method prefixes, op = .call method prefixes ∧ prefixes.tail = true := by
+    cases op <;> first | contradiction | skip
+    case call method prefixes =>
+      exact ⟨_, _, rfl, (Bool.and_eq_true_iff.mp (Bool.and_eq_true_iff.mp feature).1).1⟩
+    case managed operation =>
+      have fits := calls.linkFits found rfl
+      rw [linked] at fits
+      cases operation <;> contradiction
+  obtain ⟨method, prefixes, rfl, tail⟩ := shape
+  have window := List.all_eq_true.mp
+    ((ConstrainedCallsValid_iff_original _ _ _ _ _).mp constrained).2.2 pc
+    (List.mem_range.mpr (List.getElem?_eq_some_iff.mp rawAt).1)
+  have noReceiver : prefixes.constrained = none := by
+    simpa [constrainedSiteValid, constrainedSiteCheck, constrainedSiteCheckWith,
+      constrainedSiteWindow, live, rawAt, previous, found, typeTestSource] using window
+  obtain ⟨operand, callee⟩ := calls.direct_operand found live lowered rfl managed linked
+  have name : method = site.method := by simpa [callOperandMatches, noReceiver] using operand
+  refine ⟨?_, callee⟩
+  rw [tailAt, name]
+  obtain ⟨flag, receiver⟩ := prefixes
+  change flag = true at tail
+  change receiver = none at noReceiver
+  subst flag receiver
+  rfl
 
 #print axioms ManagedCallsValid.tailCall_target
 

@@ -161,7 +161,7 @@ theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Inp
     token = siteToken ∧ arguments = site.typeArguments := by
   obtain ⟨item, recorded, -, sameToken, sameArguments, instantiated, -⟩ := summary.bound
   obtain ⟨callee, selected, calleeToken, calleeArguments⟩ :=
-    calls.callee_token found live rawFound operand managed linked
+    (calls.direct_operand found live rawFound operand managed linked).2
   simp only [specializationTable, List.getElem?_map, recorded, Option.map_some,
     Option.some.injEq] at selected
   subst selected

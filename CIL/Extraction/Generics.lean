@@ -854,8 +854,8 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
 #print axioms ManagedCallsValid.linkFits
 
 /-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
-    link enters has that token and the site's type arguments. -/
-theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
+    link enters has that token and the site's type arguments. Its operand passes the name check. -/
+theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
     {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
@@ -865,6 +865,7 @@ theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
     (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
     (operand : instruction.operand = .call site) (managed : site.target = .managed token)
     (linked : emitted.linkAt pc = some (.direct target)) :
+    callOperandMatches site (.call method prefixes) = true ∧
     ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
       callee.arguments = site.typeArguments := by
   obtain ⟨_, _, _, _, checks⟩ := (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
@@ -883,10 +884,10 @@ theorem ManagedCallsValid.callee_token {methods : List SpecializedMethod}
     | none => simp [selected] at checked
     | some callee =>
       simp only [selected, calleeMatchesSite, Bool.and_eq_true, beq_iff_eq] at checked
-      exact ⟨callee, rfl, checked.1.1.1.1.1.1.1.1.1.2, checked.1.1.1.1.1.1.1.1.2⟩
+      exact ⟨checked.2, callee, rfl, checked.1.1.1.1.1.1.1.1.1.2, checked.1.1.1.1.1.1.1.1.2⟩
   · simp [opcode] at checked
 
-#print axioms ManagedCallsValid.callee_token
+#print axioms ManagedCallsValid.direct_operand
 
 instance (methods : List SpecializedMethod) (imports : List ImportSlot)
     (modelled : MethodRef → Bool) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :

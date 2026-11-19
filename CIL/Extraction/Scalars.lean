@@ -1219,24 +1219,31 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
 
 /-- At a live folded pc in a prefix-valid literal, the decoder selects its certified
     instruction. The decoded operation passes the feature and scalar checks at that pc.
-    A direct tail call also needs the operand check that binds its managed target. -/
+    The managed and constrained call certificates bind a direct tail call to its raw operand. -/
 theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
     {constants : Nat → Option W32} {linkAt : Nat → Option Link} {profile : FeatureProfile}
-    {features : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
-    {scalars : ScalarCertificate}
+    {features : FeatureCertificate} {reachable : List Bool} {body : Method}
+    {scalars : ScalarCertificate} {types : List DispatchType} {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : MethodRef → Bool}
     (prefixes : rawPrefixesValid raw.returnType raw.code = true)
-    (featureFlow : FeatureFlowValid layouts constants linkAt raw profile features reachable code)
-    (scalarFlow : ScalarFlowValid layouts raw features scalars code false)
+    (featureFlow : FeatureFlowValid layouts constants linkAt raw profile features reachable
+      body.code)
+    (scalarFlow : ScalarFlowValid layouts raw features scalars body.code false)
+    (calls : ManagedCallsValid methods imports modelled (lowerConstrainedRaw types raw)
+      reachable body)
+    (constrained : ConstrainedCallsValid types methods raw reachable body)
     {pc : Nat} {instruction : RawInstruction} {role : FoldRole} {state : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
     (roleAt : (foldRoles raw.locals raw.code)[pc]? = some (some role))
     (featureAt : features[pc]? = some (some state)) (stackAt : scalars[pc]? = some (some stack))
-    (codeAt : code[pc]? = some emitted)
+    (codeAt : body.code[pc]? = some emitted)
     (supported : match role with
       | .blocked | .spanConstructor .. => False
-      | .tailCall => instruction.opcode = 40 ∧
-        valueEncodingMatches (rawBefore (raw.code[·]?) pc) instruction emitted = true
+      | .tailCall => ∃ prefixOffset callOffset site token target,
+        rawBefore (raw.code[·]?) pc = some ⟨prefixOffset, 0xFE14, .none⟩ ∧
+        instruction = ⟨callOffset, 40, .call site⟩ ∧ site.target = .managed token ∧
+        body.linkAt pc = some (.direct target)
       | _ => True) :
     let previous := rawBefore (raw.code[·]?) pc
     invalidPredecessor previous instruction = false ∧
@@ -1252,7 +1259,12 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
       some emitted := by
     cases role with
     | argument => exact argument_of_featureOpMatchesAt feature
-    | tailCall => exact tailCall_of_valueEncodingMatches supported.1 supported.2
+    | tailCall =>
+      obtain ⟨_, _, _, _, _, tailAt, rfl, managed, linked⟩ := supported
+      have live : reachable[pc]? = some true := by
+        rw [featureFlow.2.2.1]
+        simp [List.getElem?_map, featureAt]
+      exact (calls.tailCall_target constrained rawAt tailAt codeAt live feature managed linked).1
     | blocked | spanConstructor => exact supported.elim
     | head | interior | result | raise | typeBranch =>
       exact (fixedRole_matches _ _ _ _ _ _ trivial).mp feature
