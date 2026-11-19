@@ -600,8 +600,8 @@ internal static partial class ProofOutline
                 extraction.Emitted[index].Frame.HasNoLocals &&
                 ops.Any(op => Body.Conditional(op) || op is Throw) &&
                 ops.All(op => op is Return ? plainReturn : op is Arg load ? MethodArguments.Plain(callee, load.Index) :
-                    op is Constant { Width: 32 or 64 } or
-                    Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
+                    Body.ConstantOf(op) is { Width: 32 or 64 } ||
+                    op is Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
                         or StackOpcode.And or StackOpcode.Or or
                         StackOpcode.Xor or StackOpcode.Nop });
         }
@@ -655,7 +655,7 @@ internal static partial class ProofOutline
                     var bits = 8 * ElementWidth(callee.Parameters[argument].ParameterType)!.Value;
                     stack.Add(new(arguments[argument], bits));
                 }
-                else if (op is Constant { Width: 32 or 64 } constant)
+                else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
                     stack.Add(new(ConstantTerm(constant), constant.Width, constant.Numeral ? constant.Value : null));
                 else if (Arithmetic(op) is { } symbol)
                 {
@@ -1486,7 +1486,7 @@ internal static partial class ProofOutline
                 stack.Add(new SpannedArray(whole));
                 state.Facts.Add(whole.Name + "Spanned");
             }
-            else if (op is Constant { Width: 32 or 64 } constant)
+            else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
             {
                 var width = constant.Width == 64 ? 8 : 4;
                 stack.Add(new Number(ConstantTerm(constant), width, Value: constant.Numeral ? constant.Value : null));

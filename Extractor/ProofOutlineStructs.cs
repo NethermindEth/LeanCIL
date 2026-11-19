@@ -35,7 +35,7 @@ internal static partial class ProofOutline
     }
 
     /// <summary>A scalar literal with its stack width in bytes; conversions preserve this source width.</summary>
-    static (string Term, int Width)? StructLiteral(Operation op) => op is Constant constant
+    static (string Term, int Width)? StructLiteral(Operation op) => Body.ConstantOf(op) is { } constant
         ? (constant.Numeral ? $"({constant.Value}#{constant.Width})"
             : $"(BitVec.ofInt {constant.Width} ({constant.Value}))",
             constant.Width == 64 ? 8 : 4) : null;

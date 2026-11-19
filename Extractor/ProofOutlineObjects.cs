@@ -438,7 +438,7 @@ internal static partial class ProofOutline
                     return Branch(condition, takenWhenTrue, test.Target);
                 }
                 else if (op is Jump { Kind: JumpKind.Always } branch) pc = branch.Target - 1;
-                else if (op is Constant { Width: 32 or 64 } constant)
+                else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
                     stack.Add(new Word(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
                         constant.Width == 64 ? 8 : 4, constant));
                 else if (op is StackOperation { IsArithmetic: true } arithmetic)
