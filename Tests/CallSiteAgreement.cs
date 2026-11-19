@@ -139,8 +139,12 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                   | _ => raw
                 let code := {{method}}Closed.code.set {{Pc}} changed
                 let changedRole := (foldRoles {{method}}Closed.locals code)[{{Pc}}]?.join
-                runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =
-                  .hole raw.opcode := by cil_kernel_rfl
+                let source := { {{method}}Closed with code }
+                let decoded := Method.ofRaw? profile environment {{method}}Links source []
+                And (runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =
+                  .hole raw.opcode) (decoded.bind (fun body => body.code[{{Pc}}]?) =
+                    some (.unadmitted raw.opcode)) := by
+              constructor <;> cil_kernel_rfl
             #print axioms unresolvedOverload
             end Extracted.{{Name}}
             """;

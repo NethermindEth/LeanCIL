@@ -26,6 +26,7 @@ private def withoutLink (opcode : Nat) (member : MetadataName) (name : String) :
   let requirement := fun link => runtimeCatalog.callRequirement
     (LayoutEnvironment.callLayouts {}) .scalar link none raw
   return (requirement (some (.direct 0)) matches .linked) &&
+    decide ((Method.ofRaw? .scalar {} [] source []).map Method.code = some [.unadmitted opcode]) &&
     (requirement none).accepts false (.unadmitted opcode) &&
     !(requirement none).accepts true (.unadmitted opcode)
 
