@@ -690,7 +690,7 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
   cil_loop_advance
 
 -- The stuck step shows its pc as a literal, as the message's first line does.
-/-- (CIL.Instruction.call stampOffset) 5 -/
+/-- (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) 5 -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)

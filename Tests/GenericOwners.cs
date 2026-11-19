@@ -239,6 +239,7 @@ foreach (var (name, fixture, definition, change) in targetCases)
     var tablePath = Path.Combine(root, "TableFirst.lean");
     File.WriteAllText(tablePath, tableSource + $$"""
 
+        open CIL in
         /-- The entry `TableFirst<ulong>` calls the catalogued `OwnerHelper<uint>.Identity`. -/
         theorem generic_table_entry :
             (CIL.Safety.invoke Extracted.program 64 0
