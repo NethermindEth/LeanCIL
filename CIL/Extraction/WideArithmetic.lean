@@ -9,7 +9,7 @@ def integerPairResult (environment : CallLayouts) (type : TypeExpr)
     (name : String) (width : Nat) : Bool :=
   match type with
   | .aggregate identity index =>
-    let expected := runtimeScope ++ "::System.ValueTuple`2<" ++ name ++ "," ++ name ++ ">"
+    let expected := s!"{runtimeScope}::System.ValueTuple`2<{name},{name}>"
     let validRaw := (environment.indexedRaw[index]?).any fun raw =>
       match raw.fields with
       | [first, second] => raw.identity == identity && raw.packing <= 0 &&
@@ -51,7 +51,7 @@ private def arithmeticRow (name : String) (form : Form) (element : String) (widt
   let argumentNames := if out then s!"{element},{element},{element}&" else s!"{element},{element}"
   let target := s!"{runtimeScope}::{result} System.Math::{name}({argumentNames})"
   let returns := fun (type : TypeExpr) => match form, type with
-    | .tuple, .aggregate identity _ => identity == runtimeScope ++ "::" ++ result
+    | .tuple, .aggregate identity _ => identity == s!"{runtimeScope}::{result}"
     | .tuple, _ => false
     | _, _ => type == .atom runtimeScope result
   -- These declarations are non-generic, so their raw types equal the selected closed types.

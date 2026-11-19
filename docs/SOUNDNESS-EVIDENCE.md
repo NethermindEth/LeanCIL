@@ -27,8 +27,10 @@ cannot substitute for it.
 
 For a supported `MemoryMarshal` member, `RuntimeModelsAgree` checks the kept call against its
 declaration, closed operand and checked layouts. Both element widths of `Cast` and the transfer
-kind of the read and write operations come from the model. A missing overload or layout leaves
-an opcode-tagged hole that the validator accepts only at an unreachable site.
+kind of the read and write operations come from the model. At a site with no link, a missing
+overload or layout leaves an opcode-tagged hole that the validator accepts only at an unreachable
+site. At a linked site the decoder keeps the call, and `ManagedCallsValid` refuses the method
+because no import slot binds a generic `MemoryMarshal` member.
 
 For a method defined by its decoder, the evidence proves that its entire instruction list equals
 the decoding of the closed body. At a reachable instruction outside a fold, the scalar validator
