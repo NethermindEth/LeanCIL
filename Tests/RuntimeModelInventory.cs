@@ -106,12 +106,14 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
                 {
                     var operation = TranslatePinned(method, profile);
                     if (operation is null) continue;
-                    if (!conventionChecks.Contains(method.Name) &&
-                        (method.DeclaringType.FullName, method.Name) is
-                            ("System.Object", ".ctor") or ("System.Math", "Min") or
-                            ("System.Numerics.BitOperations", "PopCount") or
-                            ("System.Buffers.Binary.BinaryPrimitives", "ReverseEndianness") or
-                            ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe" or "GetElement") &&
+                    var probeConvention = (method.DeclaringType.GetElementType().FullName, method.Name) is
+                        ("System.Object", ".ctor") or ("System.Math", "Min") or
+                        ("System.Numerics.BitOperations", "PopCount") or
+                        ("System.Buffers.Binary.BinaryPrimitives", "ReverseEndianness") or
+                        ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe" or "GetElement") or
+                        ("System.Span`1" or "System.ReadOnlySpan`1", "get_Item" or "Slice" or "get_Length" or
+                            "get_IsEmpty" or "GetPinnableReference" or "get_Empty" or "op_Implicit");
+                    if (probeConvention && !conventionChecks.Contains(method.Name) &&
                         callModel.Invoke(null, [method, profile]) is not null)
                     {
                         conventionChecks.Add(method.Name);
@@ -138,7 +140,7 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
     }
 }
 var entries = admitted.Values.SelectMany(values => values).Order(StringComparer.Ordinal).ToArray();
-if (conventionChecks.Count != 6 || acceptedConventions.Count != 0)
+if (conventionChecks.Count != 13 || acceptedConventions.Count != 0)
     throw new InvalidOperationException(
         $"Checked {conventionChecks.Count} names. Accepted conventions: {string.Join(", ", acceptedConventions)}");
 if (entries.Length == 0 || instances.Count == 0 || unsupported == 0 || !checkedMissingContext)

@@ -2,8 +2,7 @@ import CIL.Extraction.Features
 import CIL.Extraction.UnsafeOffsets
 import CIL.Extraction.UnsafeTransfers
 import CIL.Extraction.UnsafeTransferModels
-import CIL.Extraction.SpanCalls
-import CIL.Extraction.ViewObservations
+import CIL.Extraction.SpanModels
 import CIL.Extraction.GuardCalls
 import CIL.Extraction.Prefixes
 import CIL.Extraction.RuntimeModels
@@ -644,9 +643,7 @@ private def externalResult (site : CallSite) (identity : String) : ScalarKind :=
 
 /-- The kind a call pushes. -/
 private def callResult (site : CallSite) : ScalarKind :=
-  if pointerDisplacementSite site || spanCallReturnsReference site ||
-      (viewObservation ⟨0, 40, .call site⟩).any
-        (fun operation => operation == .spanPinnable) then .reference
+  if pointerDisplacementSite site || spanReferenceResult site then .reference
   else match site.target with
     | .managed _ => scalarType site.returnType
     | .external identity => externalResult site identity

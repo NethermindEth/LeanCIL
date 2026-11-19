@@ -709,8 +709,8 @@ private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnly
 private def spanSite : CallSite := {
   declared := {
     convention := 0x20,
-    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
-    parameters := [intType] },
+    returnType := .modified true runtime "System.Runtime.InteropServices.InAttribute"
+      (.byref (.ownerParameter 0)), parameters := [intType] },
   method := {
     owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
     returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
@@ -725,7 +725,7 @@ private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intT
 private theorem span_signature_cases :
     (ScalarFlowValid #[] spanRaw [unknown 0, unknown 1, unknown 2, unknown 1, unknown 1] [some [],
       some [.reference], some [.word32, .reference], some [.reference], some [.word32]] [.ldarg 0,
-      .ldarg 1, .memory (.spanItem 4), .ldobj intType, .ret]) ∧
+      .ldarg 1, .call spanSite.method {}, .ldobj intType, .ret]) ∧
     (scalarTransfer spanRaw (i 40 (.call { spanSite with
         method.parameters := [word] })) [.word64, .reference] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with

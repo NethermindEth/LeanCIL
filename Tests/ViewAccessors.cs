@@ -63,23 +63,10 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS view accessor: " + method.Name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (name, before, after) in new[]
-{
-    ("Empty", ".observeView .spanEmpty", ".observeView .spanPinnable"),
-    ("PinnableNull", ".observeView .spanPinnable", ".spanReference"),
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_unsafe_validated");
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing accessor mutation");
-    var path = Path.Combine(root, name + "Rejected.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact accessor evidence rejection: " + name, "UnsafeCallsValid");
-}
-rejected.Check();
 CheckMarshalModels(root,
 [
+    ("Empty", 1, ".observeView .spanEmpty", ".observeView .spanPinnable"),
+    ("PinnableNull", 1, ".observeView .spanPinnable", ".spanReference"),
     ("ReferenceNull", 1, ".spanReference", ".observeView .spanPinnable"),
     ("ArrayData", 1, ".observeView .arrayData", ".observeView .spanPinnable")
 ]);

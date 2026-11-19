@@ -61,12 +61,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     return .memory (.vector128Unsafe write offset)
   | .span => spanInstruction environment role raw site
   | .staticSpan => staticSpanInstruction site
-  | .view =>
-    let element := match site.declaringType with
-      | .apply _ type => type
-      | _ => site.typeArguments.headD .void
-    let _ ← aggregateWidth environment element
-    return .memory (.observeView (← viewObservation raw))
   | .binary => binaryInstruction raw
   | .guard => guardInstruction raw
   | .platform => return .ldc_i4 (← platformConstant site)

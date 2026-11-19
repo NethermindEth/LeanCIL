@@ -33,6 +33,14 @@ internal static partial class ProofOutline
             _ => null
         };
 
+        /// <summary>The array view supplied by a constructor, factory or conversion call.</summary>
+        internal static ArraySpan? ArrayView(Operation operation) => operation switch
+        {
+            Memory { Operation: ArraySpan view } => view,
+            ModelCall { Model: Memory { Operation: ArraySpan view } } => view,
+            _ => null
+        };
+
         internal static int? Target(Operation operation) => JumpOf(operation)?.Target;
 
         internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
@@ -325,7 +333,7 @@ internal static partial class ProofOutline
             var ops = body.Operations;
             var stores = Enumerable.Range(1, ops.Length - 1).Where(pc =>
                 ops[pc] is SetLocal store && store.Index == local &&
-                ops[pc - 1] is not Memory { Operation: SpanSlice { Counted: false } }).ToArray();
+                ops[pc - 1] is not ModelCall { Model: Memory { Operation: SpanSlice { Counted: false } } }).ToArray();
             var refused = Unsupported($"span local `{name}` is not assigned once from a span argument or from the " +
                 "whole of an array argument");
             if (stores.Length != 1 || stores[0] >= loops[0].Head) throw refused;
@@ -336,7 +344,7 @@ internal static partial class ProofOutline
             if (ops[store - 1] is Arg)
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
-                ops[store - 1] is Memory { Operation: ArraySpan { Range: ArrayRange.Whole } whole } &&
+                Body.ArrayView(ops[store - 1]) is { Range: ArrayRange.Whole } whole &&
                 whole.Writable == array.Writable && whole.Element == array.Element)
                 source = array;
             else throw refused;
@@ -1480,7 +1488,7 @@ internal static partial class ProofOutline
             }
             // The span a local takes over a whole array argument before the loop, on the entry path, where the
             // entry frame carries the array's validity past the frame's allocations.
-            else if (op is Memory { Operation: ArraySpan } && stack.Count > 0 &&
+            else if (Body.ArrayView(op) is not null && stack.Count > 0 &&
                 stack[^1] is WordArrayArgument { Array: var whole } && spanned.Contains(whole))
             {
                 stack.RemoveAt(stack.Count - 1);
@@ -1559,13 +1567,13 @@ internal static partial class ProofOutline
                 state.State[components.IndexOf(field)] = value is Number { Literal: false } number && field.Width < 4
                     ? number with { Narrow = true } : value;
             }
-            else if (op is Memory { Operation: SpanLength })
+            else if (op is ModelCall { Model: Memory { Operation: SpanLength } })
             {
                 if (Pop() is not LocalValue value || slots[value.Slot].Components[0].Part != Part.Span)
                     return Stop("the length of a span the outline does not follow");
                 stack.Add(new SpanLengthValue(components.IndexOf(slots[value.Slot].Components[0])));
             }
-            else if (op is Memory { Operation: SpanSlice { Counted: false } })
+            else if (op is ModelCall { Model: Memory { Operation: SpanSlice { Counted: false } } })
             {
                 var count = Pop();
                 var source = Pop();
@@ -1576,7 +1584,7 @@ internal static partial class ProofOutline
                 PendingTail(state, component, span);
                 stack.Add(new Sliced(component));
             }
-            else if (op is Memory { Operation: SpanItem })
+            else if (op is ModelCall { Model: Memory { Operation: SpanItem } })
             {
                 var index = Pop();
                 var source = Pop();

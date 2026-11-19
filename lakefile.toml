@@ -277,6 +277,9 @@ name = "Tests.ThrowEvidence"
 name = "Tests.SpanEvidence"
 
 [[lean_lib]]
+name = "Tests.SpanModels"
+
+[[lean_lib]]
 name = "Tests.MarshalModels"
 
 [[lean_lib]]

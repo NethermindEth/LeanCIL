@@ -25,6 +25,7 @@ Directory.CreateDirectory(root);
 var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.SpanTables")!;
+using var metadata = ModuleDefinition.ReadModule(assembly);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 string Scalar(object value) => value switch
@@ -55,37 +56,43 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     var folder = Path.Combine(root, name);
     Run(Extract("extract", assembly, "Examples", selector, folder));
     var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
-    var instructions = ExtractedInstructions(source);
-    var site = instructions.FirstOrDefault(instruction =>
-        Regex.IsMatch(instruction.Op, @"\A\.memory \(\.spanItem \d\)\z"));
+    var code = metadata.GetType("Examples.SpanTables").Methods.Single(method => method.Name == name).Body.Instructions;
+    var indexer = code.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Call &&
+        instruction.Operand is MethodReference { Name: "get_Item" });
     var claims = inputs.Select(input =>
     {
         try { return Claim(assembly, name, input, $".ok [{Scalar(runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!)}]"); }
-        catch (TargetInvocationException error) when (site is not null)
+        catch (TargetInvocationException error) when (indexer is not null)
         {
             string member = ExceptionMember(error.InnerException!);
-            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown .{member}⟩");
+            return Claim(assembly, name, input, $".error ⟨0, {code.IndexOf(indexer)}, .thrown .{member}⟩");
         }
     }).ToList();
     // The RVA descriptor carries the declared packing Roslyn aligned the table to.
     var packing = name is "Word" or "Count" ? 4 : 8;
     if (!source.Contains($"alignment := {packing} }})", StringComparison.Ordinal))
         throw new InvalidOperationException($"{name}: missing static data alignment {packing}");
-    var store = instructions.FirstOrDefault(instruction => instruction.Op == ".stloc 0");
-    if (name != "First" && (store is null ||
-            !instructions.Any(instruction => instruction.Method == store.Method &&
-                instruction.Pc == store.Pc + 1 && instruction.Op == ".ldloca 0")))
+    var store = code.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Stloc_0);
+    if (name != "First" && store?.Next.OpCode.Code != Code.Ldloca_S)
         throw new InvalidOperationException($"{name}: missing span receiver store and address");
-    var obligation = $"method{store?.Method}_features_validated";
+    const string obligation = "method0_features_validated";
     var control = store is null ? "" :
         CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0);
+    if (store is not null)
+    {
+        var pc = code.IndexOf(store);
+        claims.Add($"Extracted.method0.code[{pc}]? = some (.stloc 0)");
+        claims.Add($"Extracted.method0.code[{pc + 1}]? = some (.ldloca 0)");
+    }
     Prove(assembly, selector, name + "-Verified", claims,
         () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"), control);
 
     // The feature certificate binds each receiver instruction to its raw opcode.
     if (store is null) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(forged, NarrowEvidence(source.Replace(".stloc 0", ".nop"), obligation));
+    var narrowed = NarrowEvidence(source, obligation);
+    File.WriteAllText(forged, narrowed.Replace("method0Reachable method0.code",
+        $"method0Reachable (method0.code.set {code.IndexOf(store)} .nop)", StringComparison.Ordinal));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
         diagnostic => Regex.IsMatch(diagnostic,
             @"Extraction\.FeatureFlowValid rawLayouts\.toArray \(Extraction\.evidenceConstants methodEvidence\)\s+" +

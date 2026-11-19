@@ -1474,6 +1474,7 @@ elab_rules : tactic
           | (refine Eq.trans (CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl _) ?_
              first
              | cil_checked_memory_from_fact [$facts:term,*]
+             | cil_checked_step_normalized [$facts:term,*]
              | cil_checked_memory_by_equations [$facts:term,*])
           | cil_checked_linked_step_by_equations [$link, $model] [$[$stepFacts:term],*]))
       else if let (true, #[link]) := (operation == ``CIL.Instruction.call, linkFacts) then

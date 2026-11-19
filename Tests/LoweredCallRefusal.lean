@@ -186,6 +186,45 @@ theorem sumDeclaration :
 
 #print axioms sumDeclaration
 
+/-- A direct call to the length getter of a span of the fixture struct. -/
+private def lengthBody : RawMethod :=
+  let owner := TypeExpr.apply (.constructor runtimeScope "System.Span`1")
+    (.aggregate "Fixture::Words" 0)
+  let int := TypeExpr.atom runtimeScope "System.Int32"
+  let site : CallSite := {
+    method := ⟨owner, name!"get_Length", true, 0, int, [], []⟩,
+    declared := ⟨0x20, int, []⟩, name := "get_Length", typeArguments := [],
+    target := .external s!"{runtimeScope}::System.Int32 System.Span`1<Words>::get_Length()",
+    parameterCount := 0, returnsValue := true }
+  { body 40 owner site.method.name site.name with code := [⟨0, 40, .call site⟩] }
+
+/-- A resolving getter rejects an unrelated one-in, one-out operation. A getter outside
+    the layouts and an unknown span member decode only to their opcode's hole. -/
+theorem spanClaims :
+    let int := TypeExpr.atom runtimeScope "System.Int32"
+    let rows : List RawLayout := [{
+      identity := "Fixture::Words", explicit := false, packing := 0, declaredSize := 0,
+      fields := [⟨.unsigned32, none⟩] }]
+    let full : LayoutEnvironment :=
+      { rawLayouts := rows, layouts := (computeLayouts rows).getD #[] }
+    let unknown := body 40 (TypeExpr.apply (.constructor runtimeScope "System.Span`1") int)
+      name!"Missing" "Missing"
+    let missing := fun (source : RawMethod) (claim : SiteClaim LoweredFamily) =>
+      source.code.all fun raw => siteClaim loweredCallFamily {} none raw == claim &&
+        !(runtimeCatalog.siteAgrees {} .scalar raw .pop none none true) &&
+        runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none none false &&
+        decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
+          some [.unadmitted 40])
+    (lengthBody.code.all fun raw => Id.run do
+      let .call site := raw.operand | return false
+      return siteClaim loweredCallFamily full none raw == .model &&
+        runtimeCatalog.siteAgrees full .scalar raw (.call site.method {}) none none true &&
+        !(runtimeCatalog.siteAgrees full .scalar raw (.fieldAddress 0) none none true)) ∧
+      missing lengthBody .model ∧ missing unknown .refused := by
+  decide +kernel
+
+#print axioms spanClaims
+
 /-- The empty layout environment of the method with an unknown call. -/
 private def emptyEnvironment : LayoutEnvironment := {}
 

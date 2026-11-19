@@ -8,6 +8,7 @@ import CIL.Extraction.UnsafeReinterpretations
 import CIL.Extraction.UnsafeOffsets
 import CIL.Extraction.UnsafeTransferModels
 import CIL.Extraction.UnsafeBlocks
+import CIL.Extraction.SpanModels
 
 /-!
 # Runtime model resolution
@@ -34,6 +35,7 @@ def modelFamilies : List (List ModelEntry) := [
   unsafeOffsetEntries,
   unsafeTransferEntries,
   unsafeBlockEntries,
+  spanEntries,
 ]
 
 /-- The runtime methods with a model. -/
@@ -89,6 +91,8 @@ elab "model_entries% " entries:term : term => do
   let list ← elabTermEnsuringType entries (mkApp (mkConst ``List [0]) type)
   mkListLit type (← literalCells list).toList
 
+set_option maxRecDepth 8192 in
+set_option maxHeartbeats 4000000 in
 /-- Every entry of the runtime table is one of `modelEntries`. -/
 theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
     entry ∈ modelEntries := by

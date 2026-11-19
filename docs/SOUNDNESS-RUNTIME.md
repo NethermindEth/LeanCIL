@@ -117,6 +117,12 @@ model its method has; `ManagedCallsValid` requires a live call of a modelled met
 would drop the call. A proof about the models the table gives (`Extraction.runtimeModel_yields`)
 holds for each entry's models.
 
+The core span entries cover indexing, length, slicing, emptiness, pinnable references, the
+empty span and implicit conversions. Both span types accept an array. A writable span also
+converts to a readonly span. Each overload binds its open declaration, closed signature and
+exact external target. Aggregate elements require a matching indexed layout and computed width.
+Array conversions also reject byref-like elements.
+
 The runtime table binds ten static `System.Runtime.InteropServices.MemoryMarshal` members.
 The open declaration distinguishes writable and readonly spans and fixes the positions of
 the method parameters. The closed reference fixes their types. `transferKind?` reads the

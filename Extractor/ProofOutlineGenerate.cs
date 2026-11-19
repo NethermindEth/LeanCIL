@@ -173,7 +173,7 @@ internal static partial class ProofOutline
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
         if (loops == 0 || arrays.Length == 0 || !ops.Any(op => Arrays.Numeric(op) is { Store: true } ||
-            op is Memory { Operation: ArraySpan { Element.Compound: false, Writable: true } })) return parameters;
+            Body.ArrayView(op) is { Element.Compound: false, Writable: true })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
                 "new-proof follows a loop's stores into a method's one array argument");

@@ -14,7 +14,7 @@ namespace CIL.Extraction
 
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
-  | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
+  | hardware | vectorCreate | vectorTransfer | span | binary | guard
   | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
@@ -88,9 +88,8 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
   | .apply (.constructor scope type) _ =>
     if scope == intrinsicsScope && hardwareMember type name then some .hardware
     else if scope != runtimeScope || type ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none
-    else if name ∈ ["get_IsEmpty", "GetPinnableReference"] then some .view
-    else if name ∈ [".ctor", "get_Item", "get_Length", "get_Empty", "CopyTo", "TryCopyTo",
-        "op_Implicit", "Slice"] || type == "System.Span`1" && name ∈ ["Fill", "Clear"]
+    else if name ∈ [".ctor", "CopyTo", "TryCopyTo"] ||
+        type == "System.Span`1" && name ∈ ["Fill", "Clear"]
       then some .span else none
   | .atom scope type =>
     if scope == runtimeScope then

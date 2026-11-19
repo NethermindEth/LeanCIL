@@ -43,6 +43,10 @@ pass by stack effect alone. Type-test folds and runtime queries can emit scalar 
 A `sizeof` instruction pushes the width of its closed operand. An `Unsafe.SizeOf` call retains
 its call instruction and obtains its result from its runtime model.
 
+For a span indexer or pinnable reference, scalar flow checks the same open declaration, closed
+signature and external target as the model before classifying the result as a reference. The
+readonly declaration requires the `InAttribute` modifier on the by-reference result.
+
 Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
 `ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes, and so must
 each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `stelem`, `ldelema`,

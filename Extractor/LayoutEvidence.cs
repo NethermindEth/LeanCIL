@@ -207,7 +207,8 @@ internal sealed class LayoutEvidence
                 instruction.Operand is MethodReference arrayCall &&
                 arrayCall.Parameters.FirstOrDefault()?.ParameterType is ArrayType)
             {
-                var element = arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan)
+                var element = arrayCall.DeclaringType is GenericInstanceType arraySpan && Spans.Is(arraySpan) &&
+                    (instruction.OpCode.Code != Code.Call || arrayCall.Name != "op_Implicit")
                     ? arraySpan.GenericArguments[0]
                     : arrayCall is GenericInstanceMethod extension &&
                         extension.DeclaringType.FullName == "System.MemoryExtensions" && extension.Name == "AsSpan"
@@ -222,8 +223,7 @@ internal sealed class LayoutEvidence
                     Spans.Is(spanOwner) &&
                     spanCall.Parameters.FirstOrDefault()?.ParameterType is not ArrayType &&
                     MetadataValidation.IsAggregate(spanOwner.GenericArguments[0], method.Module) &&
-                    spanCall.Name is ("get_Item" or "CopyTo" or "TryCopyTo" or "Clear" or "Fill" or
-                        ".ctor" or "get_Empty"))
+                    spanCall.Name is ("CopyTo" or "TryCopyTo" or "Clear" or "Fill" or ".ctor"))
                     uses.Add($".size {pc} {Index(spanOwner.GenericArguments[0])} .spanElement");
             }
             if (instruction.OpCode.Code == Code.Initobj &&

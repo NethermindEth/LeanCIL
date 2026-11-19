@@ -59,16 +59,15 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
   | 0x28, .call site =>
     match site.declaringType, site.typeArguments with
     | .apply (.constructor scope owner) (.aggregate identity index), [] =>
-      if site.name == "get_Empty" &&
+      let spanOwner := scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"]
+      if !spanOwner && site.name == "get_Empty" &&
           typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
         none else
-      if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ [".ctor", "op_Implicit"] &&
+      if spanOwner && site.name == ".ctor" &&
           (site.parameterTypes.head?.map fun type => match type with
             | .array _ => true | _ => false).getD false then
         return [.size pc index .arrayElement]
-      else if scope == runtimeScope && owner ∈ ["System.Span`1", "System.ReadOnlySpan`1"] &&
-          site.name ∈ ["get_Item", "CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor", "get_Empty"] then
+      else if spanOwner && site.name ∈ ["CopyTo", "TryCopyTo", "Clear", "Fill", ".ctor"] then
         return [.size pc index .spanElement] else return []
     | .atom _ "System.MemoryExtensions", [.aggregate _ index] =>
       if site.name == "AsSpan" then return [.size pc index .arrayElement] else return []

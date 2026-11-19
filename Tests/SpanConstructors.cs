@@ -95,12 +95,6 @@ queue.Flush();
 var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
 foreach (var (name, before, after, theorem, marker) in new[]
 {
-    ("Empty", ".spanEmpty 4 true", ".spanEmpty 8 true",
-        "method0_scalars_validated", "ScalarFlowValid"),
-    ("ReadOnlyEmpty", ".spanEmpty 32 false", ".spanEmpty 32 true",
-        "method0_scalars_validated", "ScalarFlowValid"),
-    ("ReadOnlyEmpty", ".spanEmpty 32 false", ".spanEmpty 24 false",
-        "method0_layouts_validated", "MethodLayoutsValid"),
     ("DefaultReset", ".empty 4 true", ".empty 8 true",
         "method0_features_validated", "FeatureFlowValid"),
     ("Single", ".spanSingleReference 4 true", ".spanSingleReference 8 true",
@@ -125,8 +119,16 @@ foreach (var (name, before, after, theorem, marker) in new[]
     File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
     rejected.Add(path, "PASS constructor evidence rejection: " + name, marker, "is false");
 }
-foreach (var name in new[] { "ReadOnlyEmpty", "ReadOnlyDefaultReset" })
+foreach (var (name, width, writable) in new[]
+    { ("Empty", 8, "true"), ("ReadOnlyEmpty", 32, "true"), ("ReadOnlyEmpty", 24, "false") })
 {
+    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var path = Path.Combine(root, $"{name}-{width}-{writable}-rejected.lean");
+    File.WriteAllText(path, ForgeModelEmission(source, 0, $".memory (.spanEmpty {width} {writable})"));
+    rejected.Add(path, $"PASS forged empty span refused: {name}", "RuntimeModelsAgree", "is false");
+}
+{
+    const string name = "ReadOnlyDefaultReset";
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
         "method0_coverage_validated");
     var changed = Regex.Replace(source, @"\.aggregate ""[^""]+"" 0", ".aggregate \"Wrong.Identity\" 0");

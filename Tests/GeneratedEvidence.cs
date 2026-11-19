@@ -297,6 +297,18 @@ partial class Program
         return AxiomsCommand.Replace(result, "");
     }
 
+    /// <summary>Check a replacement instruction at a live pc against the original call operand.</summary>
+    static string ForgeModelEmission(string source, int pc, string instruction)
+    {
+        const string inputs = "method0Closed method0Reachable method0";
+        var narrowed = NarrowEvidence(source, "method0_models_validated");
+        var changed = narrowed.Replace(inputs,
+            $$"""method0Closed method0Reachable { method0 with code := method0.code.set {{pc}} ({{instruction}}) }""",
+            StringComparison.Ordinal);
+        if (changed == narrowed) throw new InvalidOperationException("Missing model agreement inputs");
+        return changed;
+    }
+
     // Keep narrowed declarations and exact obligation types checked, but reuse the original
     // proof instead of reducing the same validator twice. Mutations never use these witnesses.
     static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)

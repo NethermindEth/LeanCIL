@@ -1,4 +1,5 @@
 import CIL.TypeExpr
+import CIL.Extraction.KernelEquation
 
 /-!
 # Exact named metadata identities
@@ -68,13 +69,24 @@ private theorem asciiChars_encode (bytes : List UInt8) (chars : List Char)
 def metadataChars (value : String) : List Char :=
   match asciiChars value.toByteArray.data.toList with
   | some chars => chars
-  | none => value.toList
+  | none =>
+    let bytes := value.toByteArray.data.toList.map UInt8.toNat
+    (utf8Characters bytes.length bytes).getD []
 
 /-- Metadata decoding preserves the original character sequence for every string. -/
 theorem metadataChars_eq (value : String) : metadataChars value = value.toList := by
   unfold metadataChars
   cases decoded : asciiChars value.toByteArray.data.toList with
-  | none => rfl
+  | none =>
+    obtain ⟨chars, rfl⟩ : ∃ chars, value = String.ofList chars :=
+      ⟨value.toList, String.ofList_toList.symm⟩
+    have bytes : (String.ofList chars).toByteArray.data.toList.map UInt8.toNat =
+        chars.flatMap fun char => (String.utf8EncodeChar char).map UInt8.toNat := by
+      simp [String.toByteArray_ofList, List.utf8Encode, List.map_flatMap]
+    rw [bytes]
+    dsimp only
+    rw [utf8Characters_decode chars _ (Nat.le_refl _), String.toList_ofList]
+    rfl
   | some chars =>
     have encoded := asciiChars_encode _ _ decoded
     have same : String.ofList chars = value := by
@@ -156,7 +168,7 @@ private def unscopedArguments : Nat → List Char → List Char
 
 /-- The runtime signature spelling of a scoped aggregate identity, nested arguments included. -/
 def aggregateName (identity : String) : Option (List Char) := do
-  let name ← afterArgumentScope identity.toList
+  let name ← afterArgumentScope (metadataChars identity)
   let name := unscopedArguments name.length name
   if name.isEmpty then none else return name
 

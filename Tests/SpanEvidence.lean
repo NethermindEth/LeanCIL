@@ -17,14 +17,16 @@ private def span (scope element : String) : TypeExpr :=
   .apply (.constructor scope "System.ReadOnlySpan`1") (.atom runtime element)
 private def words := span runtime "System.UInt32"
 
-private def getItem : RawOperand := .call {
+/-- The readonly indexer at the local receiver. -/
+private def getItem : CallSite := {
   declared := {
     convention := 0x20, parameters := [intType],
     returnType := .modified true runtime "System.Runtime.InteropServices.InAttribute"
-      (.byref (.parameter 0)) },
+      (.byref (.ownerParameter 0)) },
   method := {
     owner := words, name := name!"get_Item", hasThis := true, genericArity := 0,
-    returnType := .void, parameters := [] },
+    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
+    parameters := [intType] },
   name := "get_Item",
   target := .external (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) \
     System.ReadOnlySpan`1<System.UInt32>::get_Item(System.Int32)"),
@@ -88,11 +90,11 @@ theorem exact_array_span_call :
 #print axioms exact_array_span_call
 
 -- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.i4; 6: ret
-private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 42]
+private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 (.call getItem), i 74, i 42]
 private def itemStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none, none], state [none], state [none]]
 private def itemOps : List Instruction :=
-  [.ldarg 0, .stloc 0, .ldloca 0, .ldarg 1, .memory (.spanItem 4), .ldind .i4, .ret]
+  [.ldarg 0, .stloc 0, .ldloca 0, .ldarg 1, .call getItem.method {}, .ldind .i4, .ret]
 
 /-- Storing and addressing a span receiver leaves every instruction outside a fold. -/
 theorem length_receiver_roles :

@@ -358,18 +358,15 @@ foreach (var (name, signature, element, width, writable, range) in new[]
     spanProofs.Add(name, proof);
     if (name == "ArrayReadOnly")
     {
-        foreach (var (mutation, before, after) in new[]
+        foreach (var (mutation, operation) in new[]
         {
-            ("array-element", ".arraySpan .signed32 false .whole", ".arraySpan .unsigned32 false .whole"),
-            ("array-writability", ".arraySpan .signed32 false .whole", ".arraySpan .signed32 true .whole")
+            ("array-element", ".memory (.arraySpan .unsigned32 false .whole)"),
+            ("array-writability", ".memory (.arraySpan .signed32 true .whole)")
         })
         {
-            if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing " + mutation);
-            var forged = Path.Combine(root, "Forged-" + mutation + ".lean");
-            File.WriteAllText(forged, source.Replace(before, after, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS independent span call rejection: " + mutation,
-                "Extraction.ScalarFlowValid rawLayouts.toArray method0Closed " +
-                "method0FeatureStates method0ScalarStates method0.code");
+            var forged = Path.Combine(root, $"Forged-{mutation}.lean");
+            File.WriteAllText(forged, ForgeModelEmission(source, 1, operation));
+            rejected.Add(forged, $"PASS independent span call rejection: {mutation}", "RuntimeModelsAgree", "is false");
         }
     }
 }

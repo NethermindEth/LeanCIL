@@ -39,6 +39,68 @@ internal static class Spans
     internal static bool Writable(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" };
 
+    static bool OwnerElement(TypeReference type) =>
+        type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
+
+    static bool DeclaredSpan(TypeReference type, string owner) =>
+        type is GenericInstanceType { GenericArguments.Count: 1 } span &&
+        span.ElementType.FullName == owner && OwnerElement(span.GenericArguments[0]);
+
+    static bool ElementReference(TypeReference type, bool writable)
+    {
+        if (!writable)
+        {
+            if (type is not RequiredModifierType
+                { ModifierType.FullName: "System.Runtime.InteropServices.InAttribute" } modifier) return false;
+            type = modifier.ElementType;
+        }
+        return type is ByReferenceType reference && OwnerElement(reference.ElementType);
+    }
+
+    /// <summary>The memory operation of a kept call to a core span member.</summary>
+    internal static Operation? CoreMember(MethodReference method, string architecture)
+    {
+        if (method.DeclaringType is not GenericInstanceType { GenericArguments.Count: 1 } owner ||
+            owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
+            method.HasGenericParameters || method is GenericInstanceMethod || method.ExplicitThis ||
+            method.CallingConvention != MethodCallingConvention.Default ||
+            method.HasThis == (method.Name is "get_Empty" or "op_Implicit") ||
+            !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return null;
+
+        var name = owner.ElementType.FullName;
+        var writable = Writable(owner);
+        var parameters = method.Parameters;
+        var result = method.ReturnType;
+        var element = owner.GenericArguments[0];
+        if (method.Name is not ("get_Item" or "get_Length" or "Slice" or "get_IsEmpty" or
+            "GetPinnableReference" or "op_Implicit" or "get_Empty")) return null;
+        if (ElementWidth(element, architecture) is not int width) return null;
+        MemoryOperation? operation = method.Name switch
+        {
+            "get_Item" when parameters is [{ ParameterType.MetadataType: MetadataType.Int32 }] &&
+                ElementReference(result, writable) => new SpanItem(width),
+            "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => new SpanLength(),
+            "Slice" when parameters.Count is 1 or 2 && DeclaredSpan(result, name) &&
+                parameters.All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) =>
+                new SpanSlice(parameters.Count == 2),
+            "get_IsEmpty" when parameters.Count == 0 && result.MetadataType == MetadataType.Boolean =>
+                new ObserveView(ViewQuery.SpanEmpty),
+            "GetPinnableReference" when parameters.Count == 0 && ElementReference(result, writable) =>
+                new ObserveView(ViewQuery.SpanPinnable),
+            "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => new SpanEmpty(width, writable),
+            "op_Implicit" when parameters is [{ ParameterType: ArrayType { IsVector: true } array }] &&
+                OwnerElement(array.ElementType) && DeclaredSpan(result, name) &&
+                Arrays.Storage(element, architecture) is { } storage =>
+                new ArraySpan(storage, writable, ArrayRange.Whole),
+            _ => null
+        };
+        if (operation is null && !(method.Name == "op_Implicit" && writable && parameters.Count == 1 &&
+            DeclaredSpan(parameters[0].ParameterType, name) && DeclaredSpan(result, "System.ReadOnlySpan`1")))
+            return null;
+        RuntimeModels.ValidateSignature(method, architecture);
+        return operation is null ? MemoryOperation.Other(".spanReadOnly") : MemoryOperation.Of(operation);
+    }
+
     private sealed class Architectures
     {
         internal readonly Dictionary<string, Analysis> Results = new(StringComparer.Ordinal);
@@ -114,7 +176,7 @@ internal static class Spans
             ? model switch
         {
             SpanCreate => (call, new SpanFromReference(1, false)),
-            SpanSource source and not SpanEmpty => (call, source),
+            SpanSource source => (call, source),
             _ => null
         } : null;
     }

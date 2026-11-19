@@ -395,6 +395,10 @@ checks signed input ranges and permits an empty view at the allocation end. Gene
 are outside this support; see [span reference parameters](#span-reference-parameters) for `in`
 and `ref readonly` spans.
 
+Indexing, length, both `Slice` overloads, `IsEmpty`, `GetPinnableReference` and `Empty` keep their
+direct call. The same rule applies to conversions from an array to either span type and from
+a writable span to a readonly span. Each overload executes its corresponding memory operation.
+
 Aggregate span widths come from the validated target-specific layout, including vector-field
 alignment; vectors use their exact storage width. Indexing yields a checked element reference
 for typed loads and stores. Single-reference constructors form one-element views over live

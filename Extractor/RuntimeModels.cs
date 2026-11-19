@@ -141,6 +141,7 @@ internal static class RuntimeModels
     /// </summary>
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
+        if (Spans.CoreMember(reference, profile.Architecture) is { } span) return span;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
         if (VectorModel(reference) is { } vector)
@@ -183,8 +184,7 @@ internal static class RuntimeModels
             return new Constant(32, constant, true);
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
-                (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or
-                 "CopyTo" or "TryCopyTo" or "get_IsEmpty" or "GetPinnableReference")) ||
+                (".ctor" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
         if (PlatformAssemblies.Claimed(AssemblyName.OfScope(
@@ -331,7 +331,6 @@ internal static class RuntimeModels
         {
             var arrayElement = elementType is null ? Arrays.Primitive(element) :
                 Arrays.Storage(elementType, architecture);
-            var span = $"System.ReadOnlySpan`1<{element}>";
             var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
                 EnumTypes.IsEnum(elementType);
             if (staticElement && arrayElement is not null)
@@ -343,8 +342,6 @@ internal static class RuntimeModels
             }
             if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
                 $"CreateSpan<{element}>(System.RuntimeFieldHandle)", MemoryOperation.Other($"(.createSpan {width})"));
-            operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
-                MemoryOperation.Of(new SpanItem(width)));
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";
@@ -353,7 +350,6 @@ internal static class RuntimeModels
                 {
                     var arrayWhole = MemoryOperation.Of(new ArraySpan(arrayElement, writable, ArrayRange.Whole));
                     operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
-                    operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
                     operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
                         MemoryOperation.Of(new ArraySpan(arrayElement, writable, ArrayRange.Counted)));
                 }
@@ -361,33 +357,18 @@ internal static class RuntimeModels
                     MemoryOperation.Of(new SpanFromReference(width, writable)));
                 operations.Add($"System.Void {owner}::.ctor(!0&)",
                     MemoryOperation.Of(new SpanSingleReference(width, writable)));
-                operations.Add($"{name}<!0> {owner}::get_Empty()",
-                    MemoryOperation.Of(new SpanEmpty(width, writable)));
-                operations.Add($"System.Int32 {owner}::get_Length()", MemoryOperation.Of(new SpanLength()));
-                operations.Add($"System.Boolean {owner}::get_IsEmpty()",
-                    MemoryOperation.Of(new ObserveView(ViewQuery.SpanEmpty)));
-                var pinnableResult = writable ? "!0&" :
-                    "!0& modreq(System.Runtime.InteropServices.InAttribute)";
-                operations.Add($"{pinnableResult} {owner}::GetPinnableReference()",
-                    MemoryOperation.Of(new ObserveView(ViewQuery.SpanPinnable)));
                 operations.Add($"System.Void {owner}::CopyTo(System.Span`1<!0>)",
                     MemoryOperation.Other($"(.spanCopy {width} false)"));
                 operations.Add($"System.Boolean {owner}::TryCopyTo(System.Span`1<!0>)",
                     MemoryOperation.Other($"(.spanCopy {width} true)"));
                 if (writable)
                 {
-                    operations.Add($"!0& {owner}::get_Item(System.Int32)", MemoryOperation.Of(new SpanItem(width)));
                     operations.Add($"System.Void {owner}::Clear()",
                         MemoryOperation.Other($"(.spanFill {width} true)"));
                     operations.Add($"System.Void {owner}::Fill(!0)",
                         MemoryOperation.Other($"(.spanFill {width} false)"));
                 }
-                operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", MemoryOperation.Of(new SpanSlice(false)));
-                operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)",
-                    MemoryOperation.Of(new SpanSlice(true)));
             }
-            operations.Add($"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
-                "op_Implicit(System.Span`1<!0>)", MemoryOperation.Other(".spanReadOnly"));
             foreach (var (parameters, range) in new[]
             {
                 ("!!0[]", ArrayRange.Whole), ("!!0[],System.Int32", ArrayRange.FromStart),
