@@ -150,9 +150,15 @@ private def constructors (writable : Bool) (element : TypeExpr) (name : String) 
       typeArguments := [], parameterCount := (parameters element).length, returnsValue := false }
     (site, operation)
 
-/-- The production decoder keeps a resolving constructor and refuses the method otherwise. -/
+/-- The production decoder keeps a resolving constructor in the method body. -/
 private def decodeConstructor (site : CallSite) (layouts : LayoutEnvironment := {}) :=
   (Method.ofRaw? .scalar layouts [] [true] (raw [] [i 115 (.call site)]) []).map Method.code
+
+/-- A refused constructor leaves a newobj hole and prevents admission of the live method. -/
+private def refusesConstructor (site : CallSite) (layouts : LayoutEnvironment := {}) : Bool :=
+  let source := raw [] [i 115 (.call site)]
+  methodCode .scalar layouts [] [true] source == [.unadmitted 115] &&
+    (decodeConstructor site layouts).isNone
 
 /-- Both owners bind the eight declarations, the exact external target and the closed arguments. -/
 theorem constructor_models :
@@ -172,11 +178,11 @@ theorem constructor_models :
           (runtimeModel {} .newobj method == some (.memory op)) &&
           (method.parameters.length == op.argumentCount) &&
           !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.memory op) none none true &&
-          refused.all (fun other => decide (decodeConstructor other = none))) &&
+          refused.all (fun other => refusesConstructor other)) &&
       [(TypeExpr.atom runtime "System.Double", "System.Double"),
        (.aggregate "Missing::Layout" 0, "Layout")].all (fun (element, name) =>
         (constructors writable element name).all (fun (site, _) =>
-          decide (decodeConstructor site = none)))) := by
+          refusesConstructor site))) := by
   decide +kernel
 #print axioms constructor_models
 
@@ -189,7 +195,7 @@ theorem constructor_array_storage :
     let env : LayoutEnvironment := { rawLayouts := rows, layouts := (computeLayouts rows).getD #[] }
     [true, false].all (fun writable =>
       ((constructors writable element "Words").take 2).all (fun (site, _) =>
-        decide (decodeConstructor site env = none))) := by
+        refusesConstructor site env)) := by
   decide +kernel
 #print axioms constructor_array_storage
 
