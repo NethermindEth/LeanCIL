@@ -284,6 +284,10 @@ runtime implementations.
 
 ### Static storage
 
+The method decoder retains the storage descriptor at each static load or address. An opaque
+scalar load requires the caller's binding. A reachable `stsfld` fails extraction, and executing
+a hand-built store returns the unsupported static field store error.
+
 RVA storage is immutable and extraction-bound. Static keys hash full assembly/field identities;
 hash injectivity is not assumed. Within one extraction, `TranslationValid` requires each identity
 to name exactly one field and each field to have one identity, by the metadata row its token

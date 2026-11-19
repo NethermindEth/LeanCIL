@@ -558,9 +558,10 @@ initializers are a checked helper call, a copy of an earlier field, a direct int
 a direct struct construction, described in that order below.
 
 `public static readonly Word256 One = 1ul;` compiles to
-`ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable
-`ldsfld` of such a field emits `.ldsfld field`, naming the field as its raw operand does, and
-pushes the value of the descriptor bound to its pc as an aggregate, touching no memory. The static constructor must store the field exactly once,
+`ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. For a reachable
+`ldsfld`, the method decoder matches the typed descriptor at the instruction index against the
+static field operand. The resulting `.ldsfld field` pushes the aggregate bytes recorded for that
+field. The static constructor must store the field exactly once,
 unconditionally (no control flow before the store and no branch back to it). A helper-call
 initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`,
 `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead
@@ -584,14 +585,16 @@ Closed constructors use the ordinary checked generic specialization. How Lean ch
 value, and what the initialization assumption covers, is in
 [static storage](SOUNDNESS-RUNTIME.md#static-storage).
 
-`ldsflda` of an admitted readonly field uses the same identity-keyed immutable storage as RVA
-data. Repeated accesses share one allocation; distinct fields remain distinct even when their
-bytes agree. The reference can be passed to supported helpers and instance methods. Checked
-writes through it fail, including writes through `Unsafe.AsRef`.
+For an admitted readonly field, the decoder binds `ldsflda` to the field and its descriptor.
+Repeated accesses share one immutable allocation, as they do for RVA data. Distinct fields have
+separate storage even when their bytes agree. Supported helpers and instance methods can use the
+reference. Checked writes through it fail, including writes through `Unsafe.AsRef`.
 
-Extraction rejects a declaring type without the assumption; aggregate values built by other code
-shapes; a second store, a store outside the static constructor, or `ldsflda` of the field during
-initialization; and `stsfld` in an extracted method.
+Extraction requires the declaring type's initialization assumption and one of the supported
+aggregate initializer forms. A second store, a store outside the static constructor, or taking
+the field's address during initialization prevents extraction. The closed decoder can represent
+a matching `stsfld` operand. Extraction rejects a reachable store, and the interpreter reports
+an unsupported store if one occurs in a hand-built method.
 
 #### Unknown readonly values
 

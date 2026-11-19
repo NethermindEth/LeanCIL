@@ -12,7 +12,7 @@ An unlinked call resolves against the runtime catalog or its named lowering fami
 resolver uses the method's layouts, profile and raw fold role. The first live hole prevents
 method construction and identifies the pc and opcode in the closed decoder's error.
 `Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
-and `decodedProgram?` applies it to every evidence record.
+and `decodedProgram?` checks each method and the static values and identities of the program.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
 the bytes is the method of the definition, so a proof about the decoded program needs no
 translator output.
@@ -55,7 +55,7 @@ def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : Layout
       opaqueVectorLocals := rawOpaqueLocals closed reachable,
       parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
       environment := environment, links := links,
-      staticSites := closed.rvaSites.map fun (pc, field) => (pc, field.descriptor),
+      staticSites := closed.staticDescriptors,
       returnsValue := closed.returnType != .void }
   | _, _ => .error .invalidFrame
 
@@ -96,20 +96,23 @@ abbrev MethodEvidence.MaskValid (item : MethodEvidence) (all : List MethodEviden
   FeatureFlowValid method.environment.rawLayouts.toArray (evidenceConstants all) (linkIndex method)
     item.closed method.profile item.featureStates item.reachable method.code
 
-/-- Each decoded method's reachability mask and call targets agree with its closed body. -/
+/-- The program binds each static identity and value and each method's mask and call targets. -/
 def programBindingsValid (evidence : List MethodEvidence) (program : Program)
     (imports : List ImportSlot := []) : Bool :=
   let methods := specializationTable evidence
-  (evidence.zip program).all fun (item, method) =>
-    decide (item.MaskValid evidence method ∧
-      ManagedCallsValid methods imports (callModelled method)
-        (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
-      ConstrainedCallsValid item.dispatchTypes methods item.closed item.reachable method)
+  decide (StaticValuesValid program ∧ StaticIdentitiesValid program (evidence.map (·.body))) &&
+    (evidence.zip program).all fun (item, method) =>
+      decide (item.MaskValid evidence method ∧
+        ManagedCallsValid methods imports (callModelled method)
+          (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
+        ConstrainedCallsValid item.dispatchTypes methods item.closed item.reachable method)
 
 /-- A validated translation checks each mask and call binding against the pinned, closed body. -/
 theorem TranslationValid.programBindingsValid {rawLayouts layouts pins evidence imports program}
     (valid : TranslationValid rawLayouts layouts pins evidence imports program) :
     programBindingsValid evidence program imports = true := by
+  apply Bool.and_eq_true_iff.mpr
+  refine ⟨decide_eq_true ⟨valid.2.2.2.1, valid.2.2.2.2.1⟩, ?_⟩
   apply List.all_eq_true.mpr
   rintro ⟨item, method⟩ member
   obtain ⟨index, found⟩ := List.mem_iff_getElem?.mp member
@@ -126,13 +129,22 @@ theorem TranslationValid.programBindingsValid {rawLayouts layouts pins evidence 
 
 #print axioms TranslationValid.programBindingsValid
 
-/-- The program decoded from the pinned bodies, with validated reachability masks and call
-    bindings to the program's own methods or the supplied import slots. -/
+/-- The pinned bodies determine the program. Its masks, calls, static identities and initializer
+    results agree with the supplied evidence and import slots. -/
 def decodedProgram? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (evidence : List MethodEvidence) (imports : List ImportSlot := []) : Option Program :=
   (evidence.mapM fun item =>
     Method.ofBody? profile environment item.links item.reachable item.body item.original
       item.arguments).filter fun program => programBindingsValid evidence program imports
+
+/-- A decoded program validates initializer results and the identity of every static field. -/
+theorem decodedProgram?_statics {profile : FeatureProfile} {environment : LayoutEnvironment}
+    {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
+    (decoded : decodedProgram? profile environment evidence imports = some program) :
+    StaticValuesValid program ∧ StaticIdentitiesValid program (evidence.map (·.body)) :=
+  of_decide_eq_true (Bool.and_eq_true_iff.mp (Option.filter_eq_some_iff.mp decoded).2).1
+
+#print axioms decodedProgram?_statics
 
 /-- A body that decodes to `method` passes `checkBody` with the method's own code and init flag. -/
 theorem BodyDecodes.code {pins : List AssemblyPin} {pin : AssemblyPin} {body : BodyEvidence}
@@ -203,17 +215,28 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 
 #print axioms Method.ofBody?_of_decodes
 
-/-- Closed decoding preserves exactly the instruction list decoded from the closed body. -/
-theorem _root_.CIL.Method.ofClosed?_code {profile : FeatureProfile}
+/-- Closed decoding binds the code and every static descriptor to the same raw method. -/
+theorem _root_.CIL.Method.ofClosed?_fields {profile : FeatureProfile}
     {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
     {closed : RawMethod} {storage : RawArguments} {method : Method}
     (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
-    method.code = methodCode profile environment links reachable closed := by
+    method.code = methodCode profile environment links reachable closed ∧
+      method.staticSites = closed.staticDescriptors := by
   unfold Method.ofClosed? at decoded
   cases failure : firstLiveHole 0 reachable (methodCode profile environment links reachable closed)
     <;> simp only [failure] at decoded
   repeat' split at decoded
-  all_goals first | contradiction | (cases decoded; rfl)
+  all_goals first | contradiction | (cases decoded; exact ⟨rfl, rfl⟩)
+
+#print axioms Method.ofClosed?_fields
+
+/-- A decoded method contains exactly the instructions of its closed definition. -/
+theorem _root_.CIL.Method.ofClosed?_code {profile : FeatureProfile}
+    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
+    {closed : RawMethod} {storage : RawArguments} {method : Method}
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
+    method.code = methodCode profile environment links reachable closed :=
+  (Method.ofClosed?_fields decoded).1
 
 #print axioms Method.ofClosed?_code
 
@@ -226,7 +249,8 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     (decoded : Method.ofRaw? profile environment links reachable source arguments = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc
-        (methodInstruction profile environment.callLayouts (firstEntryIndex closed.rvaSites)
+        (methodInstruction profile environment.callLayouts closed.owner
+          (firstEntryIndex closed.staticFields)
           (Std.TreeSet.ofList (links.map Prod.fst))
           (foldRoles closed.code).toArray reachable.toArray) := by
   unfold Method.ofRaw? at decoded

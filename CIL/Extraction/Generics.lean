@@ -84,10 +84,10 @@ structure GenericConstraint where
   interfaces : List TypeExpr := []
   deriving DecidableEq, Repr
 
-/-- The declared class size and extracted storage of an RVA field come from separate PE data. -/
-structure RvaField where
-  declaredSize : Nat
+/-- Each static access carries its storage descriptor. RVA data also has a declared class size. -/
+structure StaticFieldSite where
   descriptor : StaticDescriptor
+  rvaSize : Option Nat := none
   deriving DecidableEq, Repr
 
 /-- A method definition as read from metadata: signature, locals and body. -/
@@ -117,9 +117,13 @@ structure RawMethod where
   objectFieldCount : Nat := 0
   /-- The admitted base classes of a class declaring type, nearest first. -/
   objectBases : List TypeExpr := []
-  /-- Each RVA access carries its field, immutable bytes and declared packing at its pc. -/
-  rvaSites : List (Nat × RvaField) := []
+  /-- Each reachable static access has a descriptor at its instruction index. -/
+  staticFields : List (Nat × StaticFieldSite) := []
   deriving DecidableEq, Repr
+
+/-- The method frame retains the descriptor at each static instruction index in source order. -/
+def RawMethod.staticDescriptors (method : RawMethod) : List (Nat × StaticDescriptor) :=
+  method.staticFields.map fun (pc, site) => (pc, site.descriptor)
 
 /-- Close metadata storage after substitution without changing callable owner expressions. -/
 def substituteStorageType (layouts : List RawLayout) (arguments : List TypeExpr)

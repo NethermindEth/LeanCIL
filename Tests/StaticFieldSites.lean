@@ -1,4 +1,4 @@
-import CIL.Extraction.Translation
+import CIL.Extraction.DecodedMethod
 import Tests.BodyEncoding
 
 /-!
@@ -375,6 +375,24 @@ theorem shared_identity_in_one_method_rejected :
     TranslationValid [] #[] [] [compareEvidence] [] [compareMethod 1 2] := by
   decide +kernel
 #print axioms shared_identity_in_one_method_rejected
+
+/-- The method retains both supplied keys. The pinned program requires one key per field row. -/
+theorem decoded_static_keys_bound :
+    let check := fun key =>
+      let expected := compareMethod 1 key
+      let sites : List (Nat × StaticFieldSite) :=
+        expected.staticSites.map fun (pc, descriptor) => (pc, ⟨descriptor, none⟩)
+      let source := { compareRaw with staticFields := sites }
+      let item := { compareEvidence with original := source, closed := source, decoded := true }
+      let decoded := Method.ofClosed? .scalar {} [] item.reachable source item.parameterInput
+      let kept := match decoded with
+        | .ok method => method.staticSites == expected.staticSites
+        | .error _ => false
+      (kept, (decodedProgram? .scalar {} [item]).isSome)
+    check 2 = (true, true) ∧ check 1 = (true, false) := by
+  decide +kernel
+
+#print axioms decoded_static_keys_bound
 
 /-- The evidence of a method of its own that loads the carried `field` with `token`. -/
 private def loadEvidence (field : FieldRef) (token : Nat) : MethodEvidence :=

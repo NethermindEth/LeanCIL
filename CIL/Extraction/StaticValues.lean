@@ -40,6 +40,12 @@ def staticStoredBytes (descriptor : StaticDescriptor) (value : Value) : Option (
     if descriptor.bytes.length == 8 then some (Safety.numberBytes word.toNat 8) else none
   | _, _ => none
 
+/-- Scalar storage has the width and extension of its field. An aggregate has no scalar flag. -/
+def staticStorageMatches (type : TypeExpr) (descriptor : StaticDescriptor) : Bool :=
+  match objectFieldShape type with
+  | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
+  | none => !(type matches .enum ..) && descriptor.scalar.isNone
+
 /-- Run constructors through the ordinary checked aggregate-construction operation. -/
 def constructorYields (program : Program) (descriptor : StaticDescriptor)
     (init : StaticInitializer) : Bool := Id.run do

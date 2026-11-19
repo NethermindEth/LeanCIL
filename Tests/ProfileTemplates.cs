@@ -212,6 +212,7 @@ foreach (var (name, selector, spelling) in kinds)
     {
         var extracted = kindExtractions[index];
         var path = extracted + Path.PathSeparator + kindPath;
+        if (name == "Initial") RequireDecodedEntry(extracted);
         Compile(extracted, "Extracted", path);
         var binding = "TemplateBindings" + index;
         File.Copy(Path.Combine(kindShared, binding + ".lean"), Path.Combine(extracted, binding + ".lean"),
@@ -350,12 +351,20 @@ Compile(staticShared, "Templates", staticShared + Path.PathSeparator + library);
 for (var index = 0; index < staticOutputs.Length; index++)
 {
     var path = staticOutputs[index] + Path.PathSeparator + staticShared + Path.PathSeparator + library;
+    RequireDecodedEntry(staticOutputs[index]);
     Compile(staticOutputs[index], "Extracted", path);
     var binding = "TemplateBindings" + index;
     File.Copy(Path.Combine(staticShared, binding + ".lean"), Path.Combine(staticOutputs[index], binding + ".lean"),
         overwrite: true);
     Compile(staticOutputs[index], binding, path);
 }
+void RequireDecodedEntry(string directory)
+{
+    if (!File.ReadLines(Path.Combine(directory, "Extracted.lean"))
+        .Any(line => line.StartsWith("cil_decoded_method method0 ", StringComparison.Ordinal)))
+        throw new InvalidOperationException($"The static entry in {directory} has no decoder equation.");
+}
+
 var staticBinding = File.ReadAllText(Path.Combine(staticShared, "TemplateBindings0.lean"));
 var staticPath = staticOutputs[0] + Path.PathSeparator + library;
 var changedStatic = Path.Combine(directory, "ChangedStatic");

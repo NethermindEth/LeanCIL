@@ -97,10 +97,7 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
   | some instruction, some descriptor =>
     if instruction.opcode != opcode then false else
     match instruction.operand with
-    | .field _ _ type _ _ =>
-      match objectFieldShape type with
-      | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
-      | none => !(type matches .enum ..) && descriptor.scalar.isNone
+    | .field _ _ type _ _ => staticStorageMatches type descriptor
     | _ => false
   | _, _ => false
 
@@ -414,7 +411,8 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
   MethodEnvironmentValid rawLayouts layouts method ∧
-  DeclaredValid item.closed method ∧ item.links = method.links
+  DeclaredValid item.closed method ∧ item.links = method.links ∧
+  (item.decoded = true → method.staticSites = item.closed.staticDescriptors)
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
@@ -427,9 +425,18 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
 theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
     item.links = method.links := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links, -⟩ := valid
   exact links
 #print axioms MethodEvidenceValid.links_eq
+
+/-- A decoded method retains the identities, bytes and initializers of its checked static sites. -/
+theorem MethodEvidenceValid.decoded_staticSites {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    (flag : item.decoded = true) : method.staticSites = item.closed.staticDescriptors := by
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, fields⟩ := valid
+  exact fields flag
+
+#print axioms MethodEvidenceValid.decoded_staticSites
 
 /-- A set decoded flag in a validated record binds every emitted instruction to its decoding. -/
 theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}

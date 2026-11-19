@@ -2,6 +2,7 @@ import CIL.Extraction.OpaqueLocals
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.Scalars
 import CIL.Extraction.LinkIndex
+import CIL.Extraction.StaticValues
 import CIL.EntryIndex
 
 /-!
@@ -167,16 +168,47 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
 
 #print axioms RuntimeModelsAgree.siteClaimTotal
 
-/-- A static data instruction names the field of the descriptor at its pc and its full blob. -/
-private def staticInstruction (profile : FeatureProfile) (site : Option RvaField)
-    (raw : RawInstruction) : Option Instruction := do
+/-- An ordinary static field belongs to a closed type in the method's assembly. -/
+private def localStaticOwner (methodOwner : String) (owner : TypeExpr) : Bool :=
+  let scope := String.ofList ((metadataChars methodOwner).takeWhile (· != ':'))
+  if scope.isEmpty || !ownedBy scope methodOwner then false else
+  match owner with
+  | .object assembly _ | .atom assembly _ => scope == assembly
+  | .aggregate identity _ => ownedBy scope identity
+  | _ => false
+
+/-- Loads and addresses bind immutable storage. A store retains its field for the store fault. -/
+private def ordinaryStaticInstruction (environment : CallLayouts) (methodOwner : String)
+    (descriptor : StaticDescriptor) (opcode : Nat) : Option Instruction := do
+  let field := descriptor.field
+  guard (localStaticOwner methodOwner field.owner && descriptor.alignment == 1)
+  guard (staticStorageMatches field.type descriptor)
+  if descriptor.scalar.isNone then
+    guard (environment.valueShape field.type == .aggregate descriptor.bytes.length)
+  if descriptor.opaqueValue then
+    guard (opcode == 126 && initializerYields [] descriptor)
+  else
+    let init ← descriptor.initializer
+    guard (init.literal.isNone || initializerYields [] descriptor)
+  match opcode with
+  | 126 => return .ldsfld field
+  | 127 => return .ldsflda field
+  | 128 => return .stsfld field
+  | _ => none
+
+/-- The raw operand names the descriptor's field. An RVA site also requires its full blob. -/
+private def staticInstruction (profile : FeatureProfile) (environment : CallLayouts)
+    (methodOwner : String) (site : Option StaticFieldSite) (raw : RawInstruction) :
+    Option Instruction := do
   if let some word := platformField raw then
     guard (profile.littleEndian && site.isNone)
     return .ldc_i4 word
   let data ← site
   let field := data.descriptor.field
   guard (raw.operand == .field field.owner field.index field.type field.name true)
-  guard (data.declaredSize > 0 && data.descriptor.bytes.length == data.declaredSize &&
+  let some size := data.rvaSize |
+    return ← ordinaryStaticInstruction environment methodOwner data.descriptor raw.opcode
+  guard (size > 0 && data.descriptor.bytes.length == size &&
     data.descriptor.alignment ∈ [1, 2, 4, 8] && data.descriptor.initializer.isNone &&
     data.descriptor.scalar.isNone && !data.descriptor.opaqueValue)
   match raw.opcode with
@@ -187,14 +219,15 @@ private def staticInstruction (profile : FeatureProfile) (site : Option RvaField
 /-- A call's raw claim determines its required instruction. Occupied pcs keep the linked
     prefixes for the managed-call checks. An unlinked lowering cannot discard a prefix. -/
 def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
-    (statics : Std.TreeMap Nat RvaField) (occupied : Std.TreeSet Nat)
+    (methodOwner : String) (statics : Std.TreeMap Nat StaticFieldSite) (occupied : Std.TreeSet Nat)
     (roles : Array (Option FoldRole)) (reachable : Array Bool) :
     SiteDecoder :=
   let live := fun pc => (indexedRead? reachable pc).getD false
   Instruction.withSiteDecoder roles live fun pc previous raw =>
     if !methodTokenCall raw.opcode then
       if occupied.contains pc || previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
-      else (staticInstruction profile statics[pc]? raw).getD (.unadmitted raw.opcode)
+      else (staticInstruction profile environment methodOwner statics[pc]? raw).getD
+        (.unadmitted raw.opcode)
     else if occupied.contains pc then
       (runtimeCatalog.linkedRequirement environment profile raw).decode
         (fun _ => Instruction.ofRaw previous raw)
@@ -226,14 +259,15 @@ def methodCode (profile : FeatureProfile) (environment : LayoutEnvironment)
     let occupied := Std.TreeSet.ofList (links.map Prod.fst) compare
     let roles := (foldRoles closed.code).toArray
     Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
-      (firstEntryIndex closed.rvaSites) occupied roles reachable.toArray)
+      closed.owner (firstEntryIndex closed.staticFields) occupied roles reachable.toArray)
 
 /-- Both decoding paths implement the same reachability, link and fold rule at every pc. -/
 theorem methodCode_eq (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod) :
     methodCode profile environment links reachable closed =
       Instruction.ofRawCode none closed.code (methodInstruction profile environment.callLayouts
-        (firstEntryIndex closed.rvaSites) (Std.TreeSet.ofList (links.map Prod.fst) compare)
+        closed.owner (firstEntryIndex closed.staticFields)
+        (Std.TreeSet.ofList (links.map Prod.fst) compare)
         (foldRoles closed.code).toArray reachable.toArray) := by
   unfold methodCode
   split

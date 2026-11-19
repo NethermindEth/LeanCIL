@@ -268,7 +268,13 @@ What `MetadataResolution` and `MetadataBinding` check:
   check reads as the profile's endianness constant. A static field named through a generic
   instantiation of its owner fails with `instantiatedStaticField`, since each closed instantiation
   has its own storage. The descriptor of the static site at an access must name the instruction's
-  field operand as its `field`.
+  field operand as its `field`. For ordinary statics, `Method.ofClosed?` reads the descriptor
+  from `RawMethod.staticFields` and checks its owner, field index, type, name and scalar storage.
+  It checks a literal against its bytes. An initializer call needs the complete program, where
+  `StaticValuesValid` executes the recorded callee and checks the result against those bytes.
+  Both `decodedProgram?` and `TranslationValid` require `StaticValuesValid` and
+  `StaticIdentitiesValid` for the complete program. A standalone closure must include each
+  initializer needed to reproduce its static bytes at the index the descriptor records.
 - The decoder records the instruction index and token of each static access whose field a carried
   row defines, and the body must list the same ones (`BodyEvidence.statics`). Over the whole
   program, `StaticIdentitiesValid` requires two static sites to share an identity exactly when

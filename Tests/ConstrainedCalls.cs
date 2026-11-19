@@ -271,6 +271,9 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{type}::{name}(ulong)", output,
         .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    if (name == "CountConfigured" && source.Split('\n').Any(line =>
+        line.StartsWith("def method", StringComparison.Ordinal) && line.Contains(" : Method := {")))
+        throw new InvalidOperationException("CountConfigured or its static field getter required a literal method.");
     if (name == "WidthNarrow") widthNarrow = source;
     var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }

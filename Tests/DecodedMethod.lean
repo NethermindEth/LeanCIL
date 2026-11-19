@@ -69,14 +69,15 @@ theorem decoded_unbound_span_reset :
   exact ⟨rfl, rfl⟩
 #print axioms decoded_unbound_span_reset
 
-/-- The raw field load uses the owner, slot, held type and name encoded by its token. -/
+/-- A raw static access uses the owner, slot, held type and name encoded by its token. -/
 private def fieldSite (opcode : Nat) (field : FieldRef) : RawInstruction :=
   instr 0 opcode (.field field.owner field.index field.type field.name true)
 
 /-- The decoder binds a single field instruction under its profile and RVA evidence. -/
-private def fieldCode (opcode : Nat) (field : FieldRef) (sites : List (Nat × RvaField) := [])
-    (profile := FeatureProfile.scalar) : Option (List Instruction) :=
-  let source := { addRaw with code := [fieldSite opcode field], rvaSites := sites }
+private def fieldCode (opcode : Nat) (field : FieldRef)
+    (sites : List (Nat × StaticFieldSite) := []) (profile := FeatureProfile.scalar) :
+    Option (List Instruction) :=
+  let source := { addRaw with code := [fieldSite opcode field], staticFields := sites }
   (Method.ofRaw? profile {} [] [true] source []).map Method.code
 
 /-- The constant requires the exact runtime field and a little-endian profile. -/
@@ -95,7 +96,8 @@ theorem endianFieldDecodes :
 /-- Both RVA opcodes bind the descriptor's field and require its complete declared storage. -/
 theorem rvaFieldsDecode :
     let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data", name!"Words"⟩
-    let data : RvaField := ⟨4, { identity := 3, field, bytes := [1, 2, 3, 4], alignment := 4 }⟩
+    let data : StaticFieldSite :=
+      ⟨{ identity := 3, field, bytes := [1, 2, 3, 4], alignment := 4 }, some 4⟩
     [(127, Instruction.ldsflda field), (208, .ldtoken (.field field))].all (fun (opcode, op) =>
       let sites := [(0, data)]
       let wrong := [{ field with owner := .object "Other" "Tables" },
@@ -104,11 +106,109 @@ theorem rvaFieldsDecode :
       decide (fieldCode opcode field sites = some [op]) &&
       wrong.all (fun other => decide (fieldCode opcode other sites = none)) &&
       decide (fieldCode opcode field [] = none) &&
-      decide (fieldCode opcode field [(0, { data with declaredSize := 3 })] =
+      decide (fieldCode opcode field [(0, { data with rvaSize := some 3 })] =
         none)) = true := by
   decide +kernel
 
 #print axioms rvaFieldsDecode
+
+/-- The fixture's unsigned word field is initialized to seven. -/
+private def bias : StaticDescriptor :=
+  { identity := 9, field := ⟨.object ownIdentity "Statics", 1, uint32, name!"Bias"⟩,
+    bytes := [7, 0, 0, 0], scalar := some false,
+    initializer := some { method := 0, arguments := [], literal := some (.i32 7) } }
+
+/-- The checked inputs of a static access retain its descriptor in the resulting method. -/
+private def staticResult (opcode : Nat) (operand : FieldRef) (descriptor : StaticDescriptor)
+    (hasVolatilePrefix := false) : Except MethodDecodeError Method :=
+  let value := if opcode == 128 then [instr 0 0x17] else []
+  let prefixes := if hasVolatilePrefix then [instr value.length 0xfe13] else []
+  let offset := value.length + 2 * prefixes.length
+  let access := { fieldSite opcode operand with offset }
+  let code := value ++ prefixes ++ [access, instr (offset + 5) 0x2a]
+  let result : TypeExpr := match opcode with
+    | 127 => .byref operand.type
+    | 128 => .void
+    | _ => operand.type
+  let source := { addRaw with
+    code, returnType := result,
+    staticFields := [(value.length + prefixes.length, ⟨descriptor, none⟩)] }
+  let arguments : RawArguments :=
+    { arguments := [], locals := [], code := code.map fun _ => .other }
+  Method.ofClosed? .scalar {} [] (allLive source) source arguments
+
+/-- Each ordinary static opcode uses its exact field, and the method retains its initializer. -/
+theorem ordinaryStaticsDecode :
+    let field := bias.field
+    let descriptor := bias
+    [(126, Instruction.ldsfld field), (127, .ldsflda field), (128, .stsfld field)].all
+      (fun (opcode, op) =>
+        match staticResult opcode field descriptor with
+        | .ok method =>
+          let value := if opcode == 128 then [Instruction.ldc_i4 1] else []
+          method.code == (value ++ [op, .ret]) &&
+            method.staticSites == [(value.length, descriptor)]
+        | .error _ => false) = true := by
+  decide +kernel
+
+#print axioms ordinaryStaticsDecode
+
+/-- A mismatched value leaves a hole at the access. A volatile prefix is itself a live hole. -/
+theorem ordinaryStaticRefusals :
+    let field := bias.field
+    let descriptor := bias
+    let init := bias.initializer.getD { method := 0, arguments := [] }
+    let changed := { init with literal := some (.i32 8) }
+    let wrongLiteral := { descriptor with initializer := some changed }
+    let wrongCallee := { descriptor with initializer := some { init with method := 1 } }
+    let other := { field with owner := .object "Foreign" "Statics" }
+    [126, 127, 128].all (fun opcode =>
+      let pc := if opcode == 128 then 1 else 0
+      let wrong := [{ field with name := name!"Other" }, { field with index := 0 },
+        { field with owner := .object ownIdentity "Other" }, { field with type := int32 }]
+      let errorAt := fun (result : Except MethodDecodeError Method) pc =>
+        match result with
+        | .error error => error == .liveHole pc opcode
+        | .ok _ => false
+      wrong.all (fun operand => errorAt (staticResult opcode operand descriptor) pc) &&
+      errorAt (staticResult opcode other { descriptor with field := other }) pc &&
+      errorAt (staticResult opcode field wrongLiteral) pc &&
+      errorAt (staticResult opcode field wrongCallee) pc &&
+      (match staticResult opcode field descriptor true with
+       | .error (.liveHole index 0xfe13) => index == pc
+       | _ => false)) = true := by
+  decide +kernel
+
+#print axioms ordinaryStaticRefusals
+
+/-- A caller-bound field supports a load with zero placeholder bytes and no address or store. -/
+theorem opaqueStaticAccess :
+    let field := bias.field
+    let site := { bias with bytes := [0, 0, 0, 0], initializer := none, opaqueValue := true }
+    let refusal := fun opcode (descriptor : StaticDescriptor) =>
+      match staticResult opcode field descriptor with
+      | .error (.liveHole pc raw) => pc == (if opcode == 128 then 1 else 0) && raw == opcode
+      | _ => false
+    ((staticResult 126 field site).isOk &&
+      refusal 126 { site with bytes := [1, 0, 0, 0] } && refusal 127 site && refusal 128 site) =
+      true := by
+  decide +kernel
+
+#print axioms opaqueStaticAccess
+
+/-- The decoder preserves a call initializer's index so the program check executes that callee. -/
+theorem staticInitializerCallee :
+    let check := fun callee =>
+      let site := { bias with initializer := some { method := callee, arguments := [] } }
+      match staticResult 126 bias.field site with
+      | .ok method =>
+        let seven : Method := { code := [.ldc_i4 7, .ret], locals := [], returnsValue := true }
+        some (method.staticSites == [(0, site)], decide (StaticValuesValid [method, seven]))
+      | .error _ => none
+    check 1 = some (true, true) ∧ check 0 = some (true, false) := by
+  decide +kernel
+
+#print axioms staticInitializerCallee
 
 /-- A field handle produces a span only at the open declaration and the matching closed width. -/
 theorem staticSpanDecodes :

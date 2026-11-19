@@ -243,7 +243,6 @@ internal static class LeanEmitter
                     ElementAddress address => address with { Element = genericEvidence.ArrayElementOf(m, i) },
                     ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                     StructField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
-                    StaticFieldInstruction access => access with { Field = genericEvidence.FieldReferenceOf(m, pc) },
                     Newobj construction =>
                         construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
                     _ => operation
@@ -283,22 +282,26 @@ internal static class LeanEmitter
                 linkEntries.Select(entry => $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
-            var rvaSites = sites.Where(site => site.Detail is StaticDataBlock).Select(site =>
+            var staticInput = "";
+            if (sites.Length != 0)
             {
-                var field = (FieldReference)m.Body.Instructions[site.Pc].Operand;
-                var size = field.FieldType.Resolve().ClassSize;
-                var descriptor = site.DescriptorLean(LeanText.MethodNumber);
-                return $"({site.Pc}, {{ declaredSize := {size}, descriptor := {descriptor} }})";
-            }).ToArray();
-            var rvaInput = "";
-            if (rvaSites.Length != 0)
-            {
-                var table = $"method{n}RvaSites";
-                var entries = string.Join(", ", rvaSites);
-                lean.AppendLine($"def {table} : List (Prod Nat Extraction.RvaField) := [{entries}]");
-                rvaInput = $"rvaSites := {table}, ";
+                var table = $"method{n}StaticFields";
+                var entries = sites.Select(site =>
+                {
+                    var descriptor = site.DescriptorLean(LeanText.MethodNumber);
+                    var size = "";
+                    if (site.Detail is StaticDataBlock)
+                    {
+                        var field = (FieldReference)m.Body.Instructions[site.Pc].Operand;
+                        size = $", rvaSize := some {field.FieldType.Resolve().ClassSize}";
+                    }
+                    return $$"""({{site.Pc}}, { descriptor := {{descriptor}}{{size}} })""";
+                });
+                var fields = string.Join(", ", entries);
+                lean.AppendLine($"def {table} : List (Prod Nat Extraction.StaticFieldSite) := [{fields}]");
+                staticInput = $"staticFields := {table}, ";
             }
-            genericEvidence.EmitMethod(lean, m, n, reachable, rvaInput);
+            genericEvidence.EmitMethod(lean, m, n, reachable, staticInput);
             // A call names the method its raw operand names; a constrained one also the type the definition just
             // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)
@@ -319,6 +322,11 @@ internal static class LeanEmitter
             var objectProof = operandShapes.AdmissionProof(m, n, ops);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);
             var decoded = refusals[n] is null;
+            // Only a literal method or a template renders the static instruction in C#.
+            if (!decoded || collectTemplates)
+                foreach (var site in sites)
+                    if (ops[site.Pc] is StaticFieldInstruction access)
+                        ops[site.Pc] = access with { Field = site.Field };
             if (decoded)
             {
                 // The decoder's raw definition is the method's only source; the command states its field facts and
@@ -387,16 +395,18 @@ internal static class LeanEmitter
             lean.AppendLine($"cil_instruction_equations method{n}");
             // A modelled call's step reads its model from the fact the command states for its pc.
             if (ops.Any(op => op is ModelCall)) lean.AppendLine($"cil_runtime_models method{n}");
-            (string Field, string Value)[] facts =
-            [
-                ("profile", "profile"), ("locals", $"[{frame.LocalsLean}]"),
-                ("localKinds", $"[{frame.LocalKindsLean}]"), ("returnsValue", frame.ReturnsValueLean),
-                ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
-                ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
-            ];
             if (!decoded)
+            {
+                (string Field, string Value)[] facts =
+                [
+                    ("profile", "profile"), ("locals", $"[{frame.LocalsLean}]"),
+                    ("localKinds", $"[{frame.LocalKindsLean}]"), ("returnsValue", frame.ReturnsValueLean),
+                    ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
+                    ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
+                ];
                 foreach (var (field, value) in facts)
                     lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            }
             lean.AppendLine($"cil_resolution_facts method{n}");
         }
         lean.Insert(shapeFactsAt, operandShapes.Lean());
@@ -459,7 +469,11 @@ internal static class LeanEmitter
                 $"profile_valid, method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated, rfl⟩");
+            var statics = refusals[n] is null
+                ? $"fun _ => (Method.ofClosed?_fields method{n}_decoder_eq).2"
+                : "fun h => False.elim (Bool.false_ne_true h)";
+            lean.AppendLine(
+                $"    method{n}_environment_validated, method{n}_declared_validated, rfl, {statics}\u27e9");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");

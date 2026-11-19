@@ -96,7 +96,8 @@ theorem decodedProgram?_maskValid {profile : FeatureProfile} {environment : Layo
   have bindings : programBindingsValid evidence program imports = true :=
     (Option.filter_eq_some_iff.mp decoded).2
   unfold programBindingsValid at bindings
-  exact (of_decide_eq_true (List.all_eq_true.mp bindings (item, method) paired)).1
+  have methods := (Bool.and_eq_true_iff.mp bindings).2
+  exact (of_decide_eq_true (List.all_eq_true.mp methods (item, method) paired)).1
 
 #print axioms decodedProgram?_maskValid
 

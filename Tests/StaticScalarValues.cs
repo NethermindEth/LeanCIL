@@ -109,9 +109,9 @@ foreach (var name in new[] { "mutable", "twice", "branch", "address" })
 var original = File.ReadAllText(Path.Combine(root, "ReadSignedByte", "Extracted.lean"));
 foreach (var (name, before, after, marker) in new[]
 {
-    ("signedness", "scalar := some true", "scalar := some false", "MethodShapeValid"),
-    ("width", "[(BitVec.ofNat 8 128)]", "[(BitVec.ofNat 8 128), (BitVec.ofNat 8 255)]", "MethodShapeValid"),
-    ("literal", "literal := some (.i32 4294967168)", "literal := some (.i32 127)", "StaticValuesValid")
+    ("signedness", "scalar := some true", "scalar := some false", "MethodDecodeError.liveHole"),
+    ("width", "[(BitVec.ofNat 8 128)]", "[(BitVec.ofNat 8 128), (BitVec.ofNat 8 255)]", "MethodDecodeError.liveHole"),
+    ("literal", "literal := some (.i32 4294967168)", "literal := some (.i32 127)", "MethodDecodeError.liveHole")
 })
 {
     if (!original.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing tamper target: " + name);
@@ -154,7 +154,7 @@ rejected.Add(guessedProof, "PASS unknown seed is never read as its zero placehol
 var forgedSeed = Path.Combine(root, "Opaque-forged.lean");
 File.WriteAllText(forgedSeed, mixSource.Replace(seedBytes, seedBytes[..^2] + "5)", StringComparison.Ordinal));
 rejected.Add(forgedSeed, "PASS Lean evidence rejects a value written into an unknown seed",
-    "StaticValuesValid");
+    "MethodDecodeError.liveHole");
 
 void RejectSeeded(string name, string dll, string method, string marker, bool assume = true)
 {

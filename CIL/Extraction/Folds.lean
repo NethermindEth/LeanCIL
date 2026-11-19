@@ -280,7 +280,7 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
 /-- Calls and static field operands need the method's bindings or profile to decode. -/
 def boundSite (raw : RawInstruction) : Bool :=
   methodTokenCall raw.opcode || raw.opcode == 126 || raw.opcode == 127 ||
-    raw.opcode == 208 && (raw.operand matches .field ..)
+    raw.opcode == 128 || raw.opcode == 208 && (raw.operand matches .field ..)
 
 /-- These roles determine the entire instruction, including a call inside a fold. -/
 def foldOwnsSite : Option FoldRole → Bool
