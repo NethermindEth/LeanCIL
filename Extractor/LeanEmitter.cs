@@ -539,12 +539,7 @@ internal static class LeanEmitter
             }
             // A struct shape fact reuses its checked layout entry. Other shapes reduce directly.
             if (!needsLayout) return null;
-            var pairs = operands.Distinct().Reverse().ToArray();
-            var sites = string.Join(", ", pairs.Select(pair => $"({pair.Opcode}, {pair.Type})"));
-            var facts = string.Join(", ", pairs.Select(pair => pair.Type).Distinct(StringComparer.Ordinal)
-                .Select(type => $"{type}_shape (body := method{index}) rfl"));
-            var shapeProof = $"by simp only [List.all_cons, List.all_nil, {facts}] <;> decide +kernel";
-            return $"Extraction.ObjectOperandsValid.of_sites [{sites}] rfl ({Decide}) ({shapeProof})";
+            return ObjectOperandProof.Render($"method{index}", operands);
         }
 
         /// <summary>The definition of a recorded closed type operand.</summary>

@@ -8,11 +8,17 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
 #:include ../Extractor/ProgramLookupFacts.cs
+#:include ../Extractor/ObjectOperandProof.cs
 
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
+if (args.Contains("--object-admission-only", StringComparer.Ordinal))
+{
+    ShapeResolutionCosts(admissionOnly: true);
+    return;
+}
 if (args.Contains("--layout-identities-only", StringComparer.Ordinal))
 {
     LayoutIdentityCosts();
@@ -630,7 +636,7 @@ void ElementShapeCosts()
 // before: fields of one struct up to 128, and fields and value types of a struct each up to 512, read by a
 // 512-instruction body. A fact that walks the layouts to its struct costs 1.7 times as much per operand at 512 as
 // at 128 for fields and 3.2 times for value types. Every row is measured before the first failure is reported.
-void ShapeResolutionCosts()
+void ShapeResolutionCosts(bool admissionOnly = false)
 {
     const double AllowedShapeGrowth = 1.35;
     var resolutionDirectory = At("artifacts/LookupScaling/ShapeResolution");
@@ -645,14 +651,18 @@ void ShapeResolutionCosts()
     var failures = new List<string>();
     foreach (var row in rows)
     {
+        if (admissionOnly && row.Name != "Value") continue;
         var samples = new List<(int Size, long Facts, long Reads)>();
         var admission = new List<(int Sites, double Cost)>();
         foreach (var size in row.Sizes)
         {
-            var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value, row.Repeated);
-            var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
             var measureAdmission = row.Name == "Value" && size <= 128;
-            if (costs.Length != (row.Repeated ? 1 : size) + 1 + (measureAdmission ? 1 : 0))
+            if (admissionOnly && !measureAdmission) continue;
+            var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value, row.Repeated,
+                admissionOnly);
+            var costs = LookupPatterns.ReturnResolution.Matches(output).Cast<Match>().ToArray();
+            var shapeCosts = admissionOnly ? 0 : (row.Repeated ? 1 : size) + 1;
+            if (costs.Length != shapeCosts + (measureAdmission ? 1 : 0))
                 throw new InvalidOperationException("Missing shape resolution costs: " + output);
             long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
                 .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
@@ -664,6 +674,7 @@ void ShapeResolutionCosts()
                 failures.Add($"Object admission grew from {previous.Cost:F0} to {current.Cost:F0} heartbeats/site.");
         foreach (var sample in admission)
             Console.WriteLine($"Object admission at {sample.Sites} distinct layouts: {sample.Cost:F0} heartbeats/site");
+        if (admissionOnly) continue;
         foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
             { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
         {
@@ -758,7 +769,8 @@ string RunLineageFixture(string directory, int bases)
 }
 
 // Declares one shape fact per operand over size structs, or over one struct of size fields, and reads every fact.
-string RunShapeFixture(string directory, string name, int size, bool spread, bool value, bool repeated)
+string RunShapeFixture(string directory, string name, int size, bool spread, bool value, bool repeated,
+    bool admissionOnly)
 {
     var operandCount = repeated ? 1 : size;
     var structs = spread ? operandCount : 1;
@@ -781,7 +793,8 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
             : $"def operand{operand} : FieldRef := {{ owner := .aggregate \"T::S{owner}\" {owner}, " +
                 $"index := {(spread ? 0 : operand)}, type := .atom runtimeScope \"System.Int32\", " +
                 $"name := name!\"f{operand}\" }}");
-        facts.AppendLine($"#resolution_cost \"fact\" in cil_{(value ? "value" : "field")}_shape environment " +
+        if (!admissionOnly) facts.Append("#resolution_cost \"fact\" in ");
+        facts.AppendLine($"cil_{(value ? "value" : "field")}_shape environment " +
             $"operand{operand}");
     }
     var reads = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
@@ -796,6 +809,8 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
         var sites = string.Join(", ", indices.Select(index =>
             $"RawInstruction.mk {index} 0xfe1c (.type operand{index})"));
         var code = string.Join(", ", indices.Select(index => $".sizeof operand{index}"));
+        var proof = Nethermind.LeanCIL.ObjectOperandProof.Render("emitted",
+            indices.Select(index => (0xfe1c, $"operand{index}")));
         admission = $$"""
             def raw : RawMethod := {
               token := 1, owner := "Scaling", hasThis := false, explicitThis := false, callingConvention := 0,
@@ -803,11 +818,16 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
               initLocals := false, maxStack := {{size}}, genericParameters := [], code := [{{sites}}] }
             def emitted : Method := { body with code := [{{code}}] }
             #resolution_cost "objects" in
-            theorem objects_checked : ObjectOperandsValid raw (List.replicate {{size}} true) emitted := by
-              decide +kernel
+            theorem objects_checked : ObjectOperandsValid raw (List.replicate {{size}} true) emitted :=
+              {{proof}}
             #print axioms objects_checked
             """;
     }
+    var shapeReads = admissionOnly ? "" : $$"""
+        #resolution_cost "simplifier" in
+        theorem body_reads : ([{{reads}}] : List {{shapeType}}) = [{{shapes}}] := by simp only [cil_code]
+        #print axioms body_reads
+        """;
     var source = $$"""
         import CIL.Safety.ResolutionFacts
         import CIL.Extraction.ObjectOperands
@@ -830,10 +850,8 @@ string RunShapeFixture(string directory, string name, int size, bool spread, boo
         {{operands}}
         {{facts}}
         {{admission}}
-        #resolution_cost "simplifier" in
-        theorem body_reads : ([{{reads}}] : List {{shapeType}}) = [{{shapes}}] := by simp only [cil_code]
+        {{shapeReads}}
         #print axioms operand{{operandCount - 1}}_shape
-        #print axioms body_reads
         """ + "\n";
     var path = Path.Combine(directory, $"{name}{size}.lean");
     File.WriteAllText(path, source);

@@ -54,6 +54,9 @@ requires the raw instruction after each reachable `readonly.` to be `ldelema`, w
 translated instruction to the rule (`readOnlyPrefixMatches`). Object loads, stores, initializations, copies
 and sizes decode with their type tokens.
 `ObjectOperandsValid` checks the storage shape for each distinct live opcode and operand.
+For methods with aggregate object instructions, the extractor supplies the named shape fact at
+each site in instruction order. `ObjectOperandsValid.of_sites` checks this sequence against the
+raw body and proves that it covers every distinct operand.
 The scalar validator binds each literal opcode and type to its site. Only a proved decoding
 can skip that comparison. A span load requires a direct source of the same span type. A span
 reset uses the checked local fold. Block copies and initializations retain the alignment of

@@ -29,15 +29,14 @@ private def spanCopySource (parameter localAt : Nat → Option TypeExpr)
     if previous.opcode ∉ [18, 65037] then none else
       localAt (← encodedLocal previous)
 
-/-- The distinct live opcode and type pairs, after checking span provenance and reset folds. -/
-def objectOperands (raw : RawMethod) (reachable : List Bool) (method : Method) :
+/-- The live opcode and type pairs in instruction order, after checking span copies and resets. -/
+def objectSites (raw : RawMethod) (reachable : List Bool) (method : Method) :
     Option (List (Nat × TypeExpr)) := do
   let targets := Std.TreeSet.ofList (branchTargets raw.code) compare
   let parameters := FlowIndex.ofList raw.parameters
   let locals := FlowIndex.ofList raw.locals
   let parameter := fun index => if raw.hasThis && index == 0 then none else
     parameters.get? (index - raw.hasThis.toNat)
-  let mut seen : Std.TreeMap (List (List UInt8)) (List TypeExpr) compare := ∅
   let mut operands := []
   let mut previous := none
   let mut pc := 0
@@ -51,14 +50,42 @@ def objectOperands (raw : RawMethod) (reachable : List Bool) (method : Method) :
           let source := previous.bind (spanCopySource parameter locals.get?)
           unless !targets.contains pc && source == some type do
             return ← none
-        let key := keyBytes (toString current.opcode) :: typeKeyInto type []
-        let bucket := seen.getD key []
-        unless bucket.contains type do
-          seen := seen.insert key (type :: bucket)
-          operands := (current.opcode, type) :: operands
+        operands := (current.opcode, type) :: operands
     previous := some current
     pc := pc + 1
-  return operands
+  return operands.reverse
+
+/-- Collect first occurrences in reverse order, checking full types within a bucket. -/
+private def distinctOperands (seen : Std.TreeMap (List (List UInt8)) (List TypeExpr) compare) :
+    List (Nat × TypeExpr) → List (Nat × TypeExpr) → List (Nat × TypeExpr)
+  | kept, [] => kept
+  | kept, (opcode, type) :: rest =>
+    let key := keyBytes (toString opcode) :: typeKeyInto type []
+    let bucket := seen.getD key []
+    if bucket.contains type then distinctOperands seen kept rest
+    else distinctOperands (seen.insert key (type :: bucket)) ((opcode, type) :: kept) rest
+
+/-- Every selected operand was already collected or occurs among the remaining live sites. -/
+private theorem distinctOperands_mem (seen kept sites) {pair : Nat × TypeExpr}
+    (member : pair ∈ distinctOperands seen kept sites) : pair ∈ kept ∨ pair ∈ sites := by
+  induction sites generalizing seen kept with
+  | nil => exact Or.inl member
+  | cons site rest ih =>
+    obtain ⟨opcode, type⟩ := site
+    simp only [distinctOperands] at member
+    split at member
+    · exact (ih _ _ member).imp_right (List.mem_cons_of_mem _)
+    · rcases ih _ _ member with earlier | later
+      · rcases List.mem_cons.mp earlier with rfl | kept
+        · exact Or.inr (.head _)
+        · exact Or.inl kept
+      · exact Or.inr (.tail _ later)
+#print axioms distinctOperands_mem
+
+/-- The distinct live pairs in reverse order of first occurrence. -/
+def objectOperands (raw : RawMethod) (reachable : List Bool) (method : Method) :
+    Option (List (Nat × TypeExpr)) :=
+  (objectSites raw reachable method).map (distinctOperands ∅ [])
 
 /-- The method admits each distinct live object operand and every span copy source. -/
 def ObjectOperandsValid (raw : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
@@ -69,18 +96,28 @@ def ObjectOperandsValid (raw : RawMethod) (reachable : List Bool) (method : Meth
       operands.all fun (opcode, type) =>
         objectShapeAdmitted opcode (indexed.valueShape type)) = true
 
-/-- The named operands at all live sites suffice when their method shape facts admit each pair. -/
+/-- A live object instruction and the checked shape of its named type operand. -/
+structure ObjectSiteShape (method : Method) where
+  opcode : Nat
+  type : TypeExpr
+  shape : ValueShape
+  resolved : method.valueShape type = shape
+
+/-- Shape facts for the live instruction sequence suffice for all its distinct operands. -/
 theorem ObjectOperandsValid.of_sites {raw : RawMethod} {reachable : List Bool} {method : Method}
-    (operands : List (Nat × TypeExpr))
-    (sites : objectOperands raw reachable method = some operands)
+    (operands : List (ObjectSiteShape method))
+    (sites : objectSites raw reachable method = some (operands.map fun s => (s.opcode, s.type)))
     (lengths : method.profile.Valid ∧ raw.code.length = reachable.length ∧
       raw.code.length = method.code.length)
-    (shapes : operands.all (fun (opcode, type) =>
-      objectShapeAdmitted opcode (method.valueShape type)) = true) :
+    (shapes : operands.all (fun s => objectShapeAdmitted s.opcode s.shape) = true) :
     ObjectOperandsValid raw reachable method := by
   refine ⟨lengths.1, lengths.2.1, lengths.2.2, ?_⟩
-  rw [sites]
-  simpa only [Option.any, CallLayouts.valueShape_eq, Method.valueShape] using shapes
+  simp only [objectOperands, sites, Option.map_some, Option.any_some, List.all_eq_true]
+  intro pair member
+  have live := (distinctOperands_mem _ _ _ member).resolve_left List.not_mem_nil
+  obtain ⟨site, atSite, rfl⟩ := List.mem_map.mp live
+  rw [CallLayouts.valueShape_eq]
+  simpa only [← site.resolved, Method.valueShape] using List.all_eq_true.mp shapes site atSite
 #print axioms ObjectOperandsValid.of_sites
 
 instance (raw : RawMethod) (reachable : List Bool) (method : Method) :
