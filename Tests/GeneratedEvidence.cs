@@ -137,6 +137,24 @@ partial class Program
         .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
 
     /// <summary>
+    /// Change the emitted instruction at a decoded pc while retaining its raw evidence.
+    /// </summary>
+    static string ForgeDecodedInstruction(string source, int method, int pc, string change) =>
+        ForgeDecodedMethod(source, method, $"code := method.code.modify {pc} ({change})");
+
+    // Change the feature check's raw input while the method still decodes from the original bytes.
+    static string ForgeFeatureCode(string source, int method, string code)
+    {
+        var closed = $"method{method}Closed";
+        var suffix = $" profile method{method}FeatureStates";
+        var input = $"{closed}{suffix}";
+        if (!source.Contains(input, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Missing feature input for method{method}");
+        return source.Replace(input, $$"""({ {{closed}} with code := {{closed}}.code.{{code}} }){{suffix}}""",
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The line defining the raw method a decoded method is decoded from, the decoder's input. A method kept as a
     /// literal fails, so a reader never takes an absent body for an empty one.
     /// </summary>

@@ -186,4 +186,40 @@ theorem rawPrefixesValid_iff (result : TypeExpr) (code : List RawInstruction) :
   rw [rawPrefixesValid, prefixSequenceValid_eq, Bool.and_eq_true, prefixEntryFree_iff]
 #print axioms rawPrefixesValid_iff
 
+/-- Every suffix of prefix-valid code still pairs each prefix with its legal follower. -/
+private theorem prefixSequenceValid_drop {result : TypeExpr} {code : List RawInstruction}
+    (valid : prefixSequenceValid result code = true) (count : Nat) :
+    prefixSequenceValid result (code.drop count) = true := by
+  induction count generalizing code with
+  | zero => simpa using valid
+  | succ count ih =>
+    cases code with
+    | nil => rfl
+    | cons first rest =>
+      exact ih (Bool.and_eq_true_iff.mp valid).2
+#print axioms prefixSequenceValid_drop
+
+/-- An instruction in a prefix-valid body can take the modifier at the preceding pc. -/
+theorem rawPrefixesValid_predecessor {result : TypeExpr} {code : List RawInstruction}
+    {pc : Nat} {modifier instruction : RawInstruction}
+    (valid : rawPrefixesValid result code = true)
+    (before : code[pc]? = some modifier) (here : code[pc+1]? = some instruction) :
+    invalidPredecessor (some modifier) instruction = false := by
+  have suffix := prefixSequenceValid_drop ((rawPrefixesValid_iff _ _).mp valid).1 pc
+  have first := List.drop_eq_getElem_cons (List.getElem?_eq_some_iff.mp before).choose
+  have second := List.drop_eq_getElem_cons (List.getElem?_eq_some_iff.mp here).choose
+  rw [first, second] at suffix
+  simp only [List.getElem?_eq_some_iff] at before here
+  obtain ⟨_, rfl⟩ := before
+  obtain ⟨_, rfl⟩ := here
+  have window := (Bool.and_eq_true_iff.mp (Bool.and_eq_true_iff.mp suffix).1).2
+  simp only [invalidPredecessor, Option.any_some]
+  cases prefixed : isPrefixOpcode _ with
+  | false => rfl
+  | true =>
+    simp only [prefixed, Bool.not_true, Bool.false_or, List.head?_cons,
+      Option.any_some, Bool.and_eq_true] at window
+    simp only [window.1, Bool.not_true, Bool.and_false]
+#print axioms rawPrefixesValid_predecessor
+
 end CIL.Extraction

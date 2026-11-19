@@ -191,6 +191,15 @@ theorem constructor_fold : foldRoles [words] constructorCode =
       none] := by decide +kernel
 #print axioms constructor_fold
 
+/-- The feature check binds the array constructor's null argument to its raw push. -/
+theorem constructor_argument_exact :
+    let source := raw [words] [i 18 (.local 0), i 20, i 40 (.call localConstructor), i 42]
+    let role := (foldRoles source.locals source.code)[1]?.join
+    role = some .argument ∧
+      featureOpMatchesAt #[] source role (i 20) .ldnull = true ∧
+      featureOpMatchesAt #[] source role (i 20) (.ldc_i4 1) = false := by decide +kernel
+#print axioms constructor_argument_exact
+
 /-- The folded byte-span constructor consumes its argument and returns with an empty stack. -/
 theorem decoded_span_constructor_returns :
     let byte := TypeExpr.atom runtimeScope "System.Byte"

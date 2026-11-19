@@ -631,7 +631,8 @@ def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : I
     `System.Type` calls have no admitted translation. -/
 def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     (role : Option FoldRole)
-    (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+    (instruction : RawInstruction) (emitted : Instruction)
+    (previous : Unit → Option RawInstruction := fun _ => none) : Bool :=
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
@@ -647,10 +648,75 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     signature.result == callableType raw.returnType &&
       featureOpMatches layouts raw instruction
         (.managed (.call signature catalog false))
-  | some .argument, _ => featureOpMatches layouts raw instruction emitted
+  | some .argument, _ => valueEncodingMatches (previous ()) instruction emitted &&
+      featureOpMatches layouts raw instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction &&
       featureOpMatches layouts raw instruction emitted
+
+/-- A fixed fold role accepts exactly its decoded instruction, including the branch target
+    and the exception kind. -/
+theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
+    (role : FoldRole) (previous : Option RawInstruction) (raw : RawInstruction)
+    (emitted : Instruction)
+    (fixed : match role with
+      | .head | .interior | .result _ | .typeBranch _ | .raise _ => True | _ => False) :
+    featureOpMatchesAt layouts method (some role) raw emitted (fun _ => previous) = true ↔
+      Instruction.ofRole? role previous raw = some emitted := by
+  cases role with
+  | typeBranch taken =>
+    change typeBranchMatches raw taken emitted = true ↔ _
+    cases operand : raw.operand <;> try simp [typeBranchMatches, operand, Instruction.ofRole?]
+    cases taken <;> cases emitted <;> simp_all <;> exact eq_comm
+  | result value =>
+    cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
+    exact eq_comm
+  | argument | tailCall | blocked | spanConstructor => exact fixed.elim
+  | head | interior | raise =>
+    cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
+
+#print axioms fixedRole_matches
+
+/-- An accepted fold argument has the value and index of its encoded push or return. -/
+theorem argument_of_featureOpMatchesAt {layouts : Array RawLayout} {method : RawMethod}
+    {raw : RawInstruction} {emitted : Instruction} {previous : Unit → Option RawInstruction}
+    (checked : featureOpMatchesAt layouts method (some .argument) raw emitted previous = true) :
+    Instruction.ofRole? .argument (previous ()) raw = some emitted := by
+  exact valueEncodingMatches_sound (Bool.and_eq_true_iff.mp checked).1
+
+#print axioms argument_of_featureOpMatchesAt
+
+/-- A direct tail call that passes its operand check has its decoded method and prefixes. -/
+theorem tailCall_of_valueEncodingMatches {previous : Option RawInstruction} {raw : RawInstruction}
+    {emitted : Instruction} (direct : raw.opcode = 40)
+    (checked : valueEncodingMatches previous raw emitted = true) :
+    Instruction.ofRole? .tailCall previous raw = some emitted := by
+  simp [Instruction.ofRole?, direct, valueEncodingMatches_sound checked]
+
+#print axioms tailCall_of_valueEncodingMatches
+
+/-- At a linked managed tail call the operand fixes the emitted call and its prefixes.
+    The callee at the linked index has the raw token and type arguments of that operand. -/
+theorem ManagedCallsValid.tailCall_target {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
+    {instruction : RawInstruction} {site : CallSite}
+    (found : emitted.code[pc]? = some (.call method prefixes))
+    (live : reachable[pc]? = some true) (rawAt : raw.code[pc]? = some instruction)
+    (direct : instruction.opcode = 40) (operand : instruction.operand = .call site)
+    (managed : site.target = .managed token) (linked : emitted.linkAt pc = some (.direct target))
+    (encoding : valueEncodingMatches (rawBefore (raw.code[·]?) pc) instruction
+      (.call method prefixes) = true) :
+    Instruction.ofRole? .tailCall (rawBefore (raw.code[·]?) pc) instruction =
+      some (.call method prefixes) ∧
+      ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
+        callee.arguments = site.typeArguments :=
+  ⟨tailCall_of_valueEncodingMatches direct encoding,
+    valid.callee_token found live rawAt operand managed linked⟩
+
+#print axioms ManagedCallsValid.tailCall_target
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     be well shaped, match its emitted instruction, including the indirect access rule over the
@@ -666,7 +732,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
   | _, none, .unadmitted _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw facts state &&
-      (featureOpMatchesAt layouts raw role instruction emitted &&
+      (featureOpMatchesAt layouts raw role instruction emitted (fun _ => rawBefore rawAt pc) &&
         indirectSiteWindow rawAt pc instruction emitted false) &&
       match featureTransferAtWith layouts raw facts profile
           (calleeConstant constants (linkAt pc) emitted)
@@ -758,6 +824,28 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
   rfl
 
 #print axioms FeatureFlowValid_iff_indexed
+
+/-- At a live instruction the feature certificate checks the role and the actual predecessor. -/
+theorem FeatureFlowValid.instruction_checked {layouts : Array RawLayout} {raw : RawMethod}
+    {constants : Nat → Option W32} {linkAt : Nat → Option Link} {profile : FeatureProfile}
+    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
+    (valid : FeatureFlowValid layouts constants linkAt raw profile certificate reachable code)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole}
+    {state : FeatureState} {emitted : Instruction}
+    (rawAt : raw.code[pc]? = some instruction)
+    (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
+    (stateAt : certificate[pc]? = some (some state)) (codeAt : code[pc]? = some emitted) :
+    featureOpMatchesAt layouts raw role instruction emitted
+      (fun _ => rawBefore (raw.code[·]?) pc) = true := by
+  have pairAt : (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx[pc]? =
+      some ((instruction, role), pc) := by
+    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
+  have sites := ((FeatureFlowValid_iff_indexed _ _ _ _ _ _ _ _).mp valid).2.2.2.2
+  have checked := all3_at sites pairAt stateAt codeAt
+  simp only [checkFeatureSiteWith, Bool.and_eq_true] at checked
+  exact checked.1.2.1
+
+#print axioms FeatureFlowValid.instruction_checked
 
 /-- Expanding a known-fact state commutes with the transfer, which keeps its locals known. -/
 private theorem featureTransferWith_expand (layouts : Array RawLayout) (raw : RawMethod)

@@ -14,7 +14,6 @@
 #:include ExceptionMembers.cs
 
 using System.Reflection;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -26,6 +25,8 @@ var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
 var controls = new GeneratedEvidence(Path.Combine(root, "EvidenceControls"));
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Throws")!;
+using var exampleModule = ModuleDefinition.ReadModule(assembly);
+var throwMethods = exampleModule.GetType("Examples.Throws").Methods;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 // Every fault is located at the folded `throw` and names the type .NET raises.
@@ -43,11 +44,13 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     Run(Extract("extract", assembly, "Examples", selector, folder));
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
-    var site = ExtractedInstructions(source)
-        .Select(instruction => (instruction, Throw: ThrowPatterns.FoldedThrow.Match(instruction.Op)))
-        .FirstOrDefault(candidate => candidate.Throw.Success);
-    if (site.instruction is null) throw new InvalidOperationException($"No folded throw in {name}");
-    var (method, pc, label) = (site.instruction.Method, site.instruction.Pc, site.Throw.Groups[1].Value);
+    var entry = throwMethods.Single(candidate => candidate.Name == name);
+    var method = name is "Null" or "Quotient" ? 1 : 0;
+    var owner = method == 0 ? entry : ((MethodReference)entry.Body.Instructions
+        .Single(instruction => instruction.OpCode.Code == Code.Call).Operand).Resolve();
+    var body = owner.Body.Instructions;
+    var pc = body.IndexOf(body.Single(instruction => instruction.OpCode.Code == Code.Throw));
+    if (!IsDecodedMethod(source, method)) throw new InvalidOperationException($"Expected decoded {owner.FullName}");
     if (name == "Null")
     {
         var obligation = $"method{method}_features_validated";
@@ -61,33 +64,46 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
             if (!source.Contains(before, StringComparison.Ordinal))
                 throw new InvalidOperationException("Missing null-throw operand: " + opcode);
             var forgedOperand = Path.Combine(folder, $"Operand-{opcode}.lean");
-            File.WriteAllText(forgedOperand, source.Replace(before,
-                $"opcode := {opcode}, operand := .integer 0", StringComparison.Ordinal));
+            var rawPc = opcode == 122 ? pc : pc - 1;
+            File.WriteAllText(forgedOperand, ForgeFeatureCode(source, method,
+                $$"""modify {{rawPc}} (fun raw => { raw with operand := .integer 0 })"""));
             rejected.Add(forgedOperand, "PASS null-throw operand forgery rejected: " + opcode,
                 "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
         }
     }
 
+    string? label = null;
     var claims = inputs.Select(input =>
     {
         string outcome;
         try { outcome = $".ok [.scalar (.i32 {(uint)runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!})]"; }
         catch (TargetInvocationException error)
         {
-            outcome = $".error ⟨{method}, {pc}, .thrown .{ExceptionMember(error.InnerException!)}⟩";
+            label = ExceptionMember(error.InnerException!);
+            outcome = $".error \u27e8{method}, {pc}, .thrown .{label}\u27e9";
         }
         return $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => $".scalar (.i32 {v})"))}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
     }).ToList();
+    if (label is null) throw new InvalidOperationException($"No runtime input reached the throw in {name}");
     var proof = Path.Combine(folder, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
-        string.Join(" ∧\n", claims) + " := by\n  exact ⟨" + string.Join(", ", claims.Select(_ => "rfl")) +
-        "⟩\n#print axioms correctness\nend ExampleProof\n");
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        example : Extracted.method{{method}}.code[{{pc}}]? = some (.throw .{{label}}) :=
+          Extracted.method{{method}}_instruction{{pc}}
+        theorem correctness :
+          {{string.Join(" \u2227\n  ", claims)}} := by
+          repeat' first | apply And.intro | rfl
+        #print axioms correctness
+        end ExampleProof
+        """);
     queue.Add(new(selector, proof, Path.Combine(root, name + "-Verified")), () =>
         Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}"));
 
     // A forged type must fail the feature certificate, independently of the instruction lemma.
     var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
-    var forged = source.Replace($".throw .{label}", $".throw .{forgedLabel}");
+    var forged = ForgeDecodedInstruction(source, method, pc, $"fun _ => .throw .{forgedLabel}");
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
@@ -98,8 +114,11 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         const string nullLoad = "opcode := 20, operand := .none";
         if (!source.Contains(nullLoad, StringComparison.Ordinal))
             throw new InvalidOperationException("Missing null constructor argument");
-        File.WriteAllText(nonNull, source.Replace(nullLoad,
-            "opcode := 114, operand := .text \"not null\"", StringComparison.Ordinal));
+        var changed = """
+            map (fun raw => if raw.opcode == 20 then
+              { raw with opcode := 114, operand := .text "not null" } else raw)
+            """.ReplaceLineEndings(" ");
+        File.WriteAllText(nonNull, ForgeFeatureCode(source, method, changed));
         rejected.Add(nonNull, $"PASS {name}: non-null constructor operand rejected",
             "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
     }
@@ -230,9 +249,3 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS rejection: " + mutation);
 }
 Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forged types and exact-pattern rejection");
-
-static partial class ThrowPatterns
-{
-    [GeneratedRegex(@"\A\.throw \.(\w+)\z")]
-    internal static partial Regex FoldedThrow { get; }
-}

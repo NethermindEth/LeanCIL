@@ -768,8 +768,15 @@ apply to the method; a listed constant that names no field operand is an error.
 
 The extractor defines a method this way when every live instruction decodes and each live call
 or construction has the operation its decoder gives. A constrained prefix decodes with its
-adjacent instance `callvirt` or static `call`. Each dead pc carries `.unadmitted` with its raw
-opcode. Argument homes use the same certified mask. The generated definition has this form
+adjacent instance `callvirt` or static `call`. A bare `ldstr` decodes to a string literal with
+the text bound to its metadata token. A recognized throw erases its message and constructor,
+then raises the constructed exception at the raw `throw` pc. A folded type test over closed
+type arguments produces its decided word or branch. A branch or switch into a fold's interior
+disables that fold. A direct managed tail call retains its prefix and target. An indirect call
+requires a callable catalog, and a field token requires the method's static site.
+
+Each dead pc carries `.unadmitted` with its raw opcode. Argument homes use the same certified
+mask. The generated definition has this form
 
 ```text
 cil_decoded_method method0 := Method.ofClosed? profile environment method0Links method0Reachable

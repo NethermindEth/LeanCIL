@@ -67,6 +67,7 @@ def named : List (RawInstruction × Instruction) := [
   -- Stack shuffling and return.
   (⟨0, 0, .none⟩, .nop), (⟨0, 37, .none⟩, .dup), (⟨0, 38, .none⟩, .pop), (⟨0, 42, .none⟩, .ret),
   -- Constants.
+  (⟨0, 114, .text "literal"⟩, .memory (.stringLiteral "literal")),
   (⟨0, 20, .none⟩, .ldnull), (⟨0, 21, .none⟩, .ldc_i4 (-1)), (⟨0, 22, .none⟩, .ldc_i4 0),
   (⟨0, 23, .none⟩, .ldc_i4 1),
   (⟨0, 24, .none⟩, .ldc_i4 2), (⟨0, 25, .none⟩, .ldc_i4 3), (⟨0, 26, .none⟩, .ldc_i4 4),
@@ -177,13 +178,58 @@ def undecoded : List Name := [
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
   ``Instruction.initializeSpanLocal, ``Instruction.managed, ``Instruction.callInstance,
   ``Instruction.callVirtual, ``Instruction.skipInit, ``Instruction.feature,
-  ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
+  ``Instruction.intrinsic, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
   ``Instruction.ldtoken]
 
 /-- What each named opcode decodes to after its predecessor. -/
 def decodedNamed : List (Option Instruction) :=
   named.map fun (raw, _) => Instruction.ofRaw? (predecessor raw) raw
+
+/-- A string load binds its text and a metadata token needs a separate decoding rule. -/
+theorem literal_operands :
+    let literal : RawInstruction := ⟨0, 114, .text "original"⟩
+    valueEncodingMatches none literal (.memory (.stringLiteral "original")) = true ∧
+    valueEncodingMatches none literal (.memory (.stringLiteral "changed")) = false ∧
+    valueEncodingMatches none literal .nop = false ∧
+    scalarEmissionMatches #[] none none literal [] (.memory (.stringLiteral "changed")) = false ∧
+    scalarEmissionMatches #[] none none literal [] .nop = false ∧
+    Instruction.ofRaw? none ⟨0, 114, .none⟩ = none ∧
+    Instruction.ofRaw? none ⟨0, 208, .type dog⟩ = none ∧
+    Instruction.ofRaw? none ⟨0, 208, classOperand⟩ = none := by decide +kernel
+#print axioms literal_operands
+
+/-- Fold results bind their Boolean, branch target or exception. Span constructors and
+    indirect tail calls retain holes. Direct tail calls carry the prefix at the previous pc. -/
+theorem role_decodings :
+    let tailPrefix : RawInstruction := ⟨0, 65044, .none⟩
+    let branch : RawInstruction := ⟨1, 46, .target 9⟩
+    let call : RawInstruction := ⟨2, 40, .call callSite⟩
+    let indirect : RawInstruction := ⟨2, 41, .indirectCall .void [] false false 0⟩
+    let decoded := fun role raw => Instruction.ofRole? role none raw
+    decoded .head call = some .nop ∧ decoded .interior call = some .nop ∧
+      decoded .blocked call = none ∧ decoded (.result true) call = some (.ldc_i4 1) ∧
+      decoded (.result false) call = some (.ldc_i4 0) ∧
+      decoded (.typeBranch true) branch = some (.br 9) ∧
+      decoded (.typeBranch true) branch ≠ some (.br 8) ∧
+      decoded (.typeBranch false) branch = some .nop ∧
+      decoded (.raise .argument) ⟨0, 122, .none⟩ = some (.throw .argument) ∧
+      decoded (.raise .argument) ⟨0, 122, .none⟩ ≠ some (.throw .overflow) ∧
+      decoded .argument ⟨0, 2, .none⟩ = some (.ldarg 0) ∧
+      Instruction.ofRole? .tailCall (some tailPrefix) call =
+        some (.call callSite.method { tail := true }) ∧
+      Instruction.ofRole? .tailCall (some tailPrefix) indirect = none ∧
+      decoded (.spanConstructor 0 (.empty 4 true)) call = none := by
+  repeat' first | apply And.intro | rfl | (intro impossible; cases impossible)
+#print axioms role_decodings
+
+/-- A reachable folded argument load names a declared argument and emits its encoded index. -/
+theorem folded_argument_index (localCount index : Nat) (argumentAt : Nat → Option StorageType)
+    (homeAt : Nat → Option Nat) (emitted : Instruction) :
+    validateArgumentOpAt localCount argumentAt homeAt (.load index) true emitted = true ↔
+      (argumentAt index).isSome = true ∧ emitted = .ldarg index := by
+  cases found : argumentAt index <;> cases emitted <;> simp [validateArgumentOpAt, found]
+#print axioms folded_argument_index
 
 /-- Raw instructions over every one-byte and two-byte opcode with each operand kind the value
     family reads, plus text, a type, a class field and a call site; `ofRaw?` must give `none`
@@ -552,7 +598,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 84, undecoded 25 of 109 constructors -/
+/-- info: decoded 85, undecoded 24 of 109 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

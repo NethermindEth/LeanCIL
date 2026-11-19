@@ -22,7 +22,7 @@ RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.
 RequireLeanFixtures("Tests.ExtractionParameters");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string instanceParameter = "Counter::Parameter(byte)";
-var literalControl = Path.Combine(output, "StringLoad");
+var literalControl = Path.Combine(output, "StaticFieldLoad");
 var samples = new[]
 {
     "Arguments::Overwrite(uint,uint)", "Arguments::Alias(uint)", "Arguments::Address(uint)",
@@ -53,11 +53,13 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             else if (instruction.OpCode.Code == Code.Starg_S) instruction.OpCode = OpCodes.Starg;
             else if (instruction.OpCode.Code == Code.Ldarga_S) instruction.OpCode = OpCodes.Ldarga;
         }
-    // A string load is admitted and has no decoding, so this body keeps a literal with a hole at its first pc.
+    // The platform field is admitted as a constant but its ldsfld keeps the method literal.
     var counter = module.GetType("Examples.Counter").Methods.Single(method => method.Name == "Parameter");
     var processor = counter.Body.GetILProcessor();
     var entry = counter.Body.Instructions[0];
-    processor.InsertBefore(entry, processor.Create(OpCodes.Ldstr, "literal"));
+    var endian = module.GetType("Examples.Capabilities").Methods.Single(method => method.Name == "Endian");
+    var load = endian.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldsfld);
+    processor.InsertBefore(entry, processor.Create(OpCodes.Ldsfld, (FieldReference)load.Operand));
     processor.InsertBefore(entry, processor.Create(OpCodes.Pop));
     var longAssembly = Path.Combine(output, "LongArguments.dll");
     module.Write(longAssembly);
@@ -71,13 +73,13 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     }
 }
 
-evidence.Add(Path.Combine(literalControl, "Extracted.lean"), "PASS literal instance parameter after a string load");
+evidence.Add(Path.Combine(literalControl, "Extracted.lean"), "PASS literal instance parameter after a field load");
 evidence.Check();
 var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
 var baseline = File.ReadAllText(Path.Combine(literalControl, "Extracted.lean"));
 if (!IsDecodedMethod(decoded, 0) || IsDecodedMethod(baseline, 0) || !DefinedMethods(baseline).Contains(0))
     throw new InvalidOperationException(
-        "Overwrite must decode and the instance method with a string load must have a literal body");
+        "Overwrite must decode and the instance method with a static field load must have a literal body");
 void Reject(string name, string mutated, string? source = null)
 {
     if (mutated == (source ?? baseline))

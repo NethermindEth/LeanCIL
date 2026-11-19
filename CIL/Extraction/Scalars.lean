@@ -1205,4 +1205,57 @@ theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : R
 
 #print axioms ScalarFlowValid.instruction_checked
 
+/-- At a live folded pc in a prefix-valid literal, the decoder selects its certified
+    instruction. The decoded operation passes the feature and scalar checks at that pc.
+    A direct tail call also needs the operand check that binds its managed target. -/
+theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
+    {constants : Nat → Option W32} {linkAt : Nat → Option Link} {profile : FeatureProfile}
+    {features : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
+    {scalars : ScalarCertificate}
+    (prefixes : rawPrefixesValid raw.returnType raw.code = true)
+    (featureFlow : FeatureFlowValid layouts constants linkAt raw profile features reachable code)
+    (scalarFlow : ScalarFlowValid layouts raw features scalars code false)
+    {pc : Nat} {instruction : RawInstruction} {role : FoldRole} {state : FeatureState}
+    {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : raw.code[pc]? = some instruction)
+    (roleAt : (foldRoles raw.locals raw.code)[pc]? = some (some role))
+    (featureAt : features[pc]? = some (some state)) (stackAt : scalars[pc]? = some (some stack))
+    (codeAt : code[pc]? = some emitted)
+    (supported : match role with
+      | .blocked | .spanConstructor .. => False
+      | .tailCall => instruction.opcode = 40 ∧
+        valueEncodingMatches (rawBefore (raw.code[·]?) pc) instruction emitted = true
+      | _ => True) :
+    let previous := rawBefore (raw.code[·]?) pc
+    invalidPredecessor previous instruction = false ∧
+      Instruction.ofRole? role previous instruction = some emitted ∧
+      ∀ decoded, Instruction.ofRole? role previous instruction = some decoded →
+        featureOpMatchesAt layouts raw (some role) instruction decoded (fun _ => previous) = true ∧
+        scalarEmissionMatches layouts (some role) previous instruction stack decoded = true := by
+  have feature := featureFlow.instruction_checked rawAt roleAt featureAt codeAt
+  have scalar := scalarFlow.instruction_checked (live := fun _ => true)
+    (localKind := fun _ => none) (decodeCall := fun _ _ raw => .unadmitted raw.opcode)
+    (by intro impossible; contradiction) rawAt roleAt featureAt stackAt codeAt
+  have bound : Instruction.ofRole? role (rawBefore (raw.code[·]?) pc) instruction =
+      some emitted := by
+    cases role with
+    | argument => exact argument_of_featureOpMatchesAt feature
+    | tailCall => exact tailCall_of_valueEncodingMatches supported.1 supported.2
+    | blocked | spanConstructor => exact supported.elim
+    | head | interior | result | raise | typeBranch =>
+      exact (fixedRole_matches _ _ _ _ _ _ trivial).mp feature
+  refine ⟨?_, bound, ?_⟩
+  · cases pc with
+    | zero => rfl
+    | succ index =>
+      simp only [rawBefore, Nat.add_one_sub_one, beq_iff_eq, Nat.succ_ne_zero, if_false]
+      cases before : raw.code[index]? with
+      | none => rfl
+      | some modifier => exact rawPrefixesValid_predecessor prefixes before rawAt
+  · intro decoded found
+    cases Option.some.inj (bound.symm.trans found)
+    exact ⟨feature, scalar⟩
+
+#print axioms fold_decoding_agreement
+
 end CIL.Extraction

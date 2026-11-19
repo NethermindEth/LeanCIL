@@ -115,9 +115,9 @@ open Extraction
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
   opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 || opcode == 40 ||
     (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
-    (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 111) || opcode == 115 ||
-    opcode == 116 ||
-    opcode == 117 || (123 <= opcode && opcode <= 125) || (130 <= opcode && opcode <= 139) ||
+    (88 <= opcode && opcode <= 106) || (109 <= opcode && opcode <= 111) ||
+    (114 <= opcode && opcode <= 117) || (123 <= opcode && opcode <= 125) ||
+    (130 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
@@ -217,6 +217,9 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
   | .ldnull => (emitted matches .ldnull)
+  | .memory (.stringLiteral text) => match emitted with
+    | .memory (.stringLiteral actual) => decide (text = actual)
+    | _ => false
   | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
   | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
   | .starg expected => match emitted with | .starg actual => expected == actual | _ => false
@@ -340,6 +343,7 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   | 42, .none => emit .ret
   -- Constants, with the operand ranges ECMA-335 gives each form.
   | 20, .none => emit .ldnull
+  | 114, .text text => emit (.memory (.stringLiteral text))
   | 21, .none => emit (.ldc_i4 (BitVec.ofInt 32 (-1)))
   | 31, .integer value =>
     if -128 <= value && value < 128 then emit (.ldc_i4 (BitVec.ofInt 32 value)) else none
@@ -666,7 +670,7 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
   cases decoded <;> simp only [Instruction.sameValue] at same
   all_goals first
     | exact absurd same Bool.false_ne_true
-    | (split at same <;> simp_all)
+    | (repeat' split at same) <;> simp_all
 
 #print axioms Instruction.sameValue_eq
 

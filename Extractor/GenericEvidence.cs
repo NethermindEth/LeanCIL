@@ -532,6 +532,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Constants.
         Code.Ldc_I4_M1, Code.Ldc_I4_0, Code.Ldc_I4_1, Code.Ldc_I4_2, Code.Ldc_I4_3, Code.Ldc_I4_4, Code.Ldc_I4_5,
         Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldnull,
+        Code.Ldstr,
         // Indirect loads and stores of integers and native integers.
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
@@ -589,10 +590,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         IReadOnlyList<Operation> operations)
     {
         var instructions = method.Body.Instructions;
+        var throws = Throws.Analyze(method);
+        var typeTests = TypeTests.Analyze(method);
         for (var pc = 0; pc < instructions.Count; pc++)
         {
             var instruction = instructions[pc];
             if (!reachable.Contains(instruction)) continue;
+            if (throws.Operands.Contains(instruction) || throws.Raises.ContainsKey(instruction) ||
+                typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction))
+                continue;
+            if (instruction.OpCode.Code == Code.Tail && instruction.Next?.OpCode.Code is Code.Call or Code.Calli)
+                continue;
             var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
             if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction) ||
                 (instruction.OpCode.Code == Code.Callvirt && !constrained))
@@ -600,6 +608,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             var translated = instruction.OpCode.Code switch
             {
                 Code.Call or Code.Callvirt when constrained => operations[pc] is Call { Constrained: true },
+                Code.Call when TailCalls.IsCall(instruction) => operations[pc] is Call { Kind: CallKind.Tail },
                 Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
                 Code.Newobj => operations[pc] is Newobj,
                 _ => true

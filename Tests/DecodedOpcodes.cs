@@ -32,7 +32,11 @@ var directory = At("artifacts/DecodedOpcodes");
 Directory.CreateDirectory(directory);
 var path = Path.Combine(directory, "Table.lean");
 File.WriteAllText(path, $$"""
-    import CIL.Extraction.ValueDecoding
+    import CIL.Extraction.Folds
+
+    /-! The extractor opcode table and folded instructions against the Lean decoder. -/
+
+    open CIL CIL.Extraction
 
     /-- The opcodes the extractor predicts `Instruction.ofRaw?` decodes. -/
     def table : List Nat := [{{string.Join(", ", table)}}]
@@ -46,6 +50,25 @@ File.WriteAllText(path, $$"""
           CIL.Instruction.valueOpcode opcode == table.contains opcode) = true := by
       decide +kernel
     #print axioms table_is_valueOpcode
+
+    /-- A folded prefix emits nop for either transfer, and an indirect tail call needs a catalog. -/
+    theorem tail_opcodes :
+        let tailPrefix := RawInstruction.mk 0 {{(ushort)OpCodes.Tail.Value}} .none
+        let indirect := RawInstruction.mk 2 {{OpCodes.Calli.Value}} (.indirectCall .void [] false false 0)
+        (Instruction.ofRole? .head none tailPrefix matches some .nop) &&
+          (Instruction.ofRole? .tailCall (some tailPrefix) indirect).isNone := by decide +kernel
+    #print axioms tail_opcodes
+
+    /-- Folded type handles erase their operands and a throw retains its exception kind. -/
+    theorem token_opcodes :
+        let token := RawInstruction.mk 0 {{OpCodes.Ldtoken.Value}} (.type .void)
+        let raise := RawInstruction.mk 0 {{OpCodes.Throw.Value}} .none
+        (Instruction.ofRole? .head none token matches some .nop) &&
+          (Instruction.ofRole? .interior none token matches some .nop) &&
+          (Instruction.ofRole? (.raise .overflow) none raise matches some (.throw .overflow)) := by
+      decide +kernel
+    #print axioms token_opcodes
+
     """ + "\n");
 Run(["lake", "env", "lean", path], cwd: FixturePackage());
 Console.WriteLine($"PASS the extractor's {table.Length} decoded opcodes are those of Instruction.valueOpcode");
@@ -133,6 +156,27 @@ File.AppendAllText(deadSource, """
     """);
 Run(["lake", "env", "lean", deadSource], cwd: FixturePackage());
 Console.WriteLine("PASS the decoded tail preserves its holes and the feature check rejects a hidden entry");
+
+foreach (var (name, selector, method, code) in new[]
+{
+    ("SameText", "Strings::SameText()", 0,
+        """[.memory (.stringLiteral "x"), .memory (.stringLiteral "x"), .ceq, .ret]"""),
+    ("WordFlag", "GenericReceivers::CountWide(ulong)", 2, "[.nop, .nop, .nop, .nop, .ldc_i4 1, .ret]")
+})
+{
+    var output = Path.Combine(directory, name);
+    Run(["dotnet", ExtractorPath, "extract", At("Examples/Assembly/bin/Examples.dll"), selector, output]);
+    var pathToSource = Path.Combine(output, "Extracted.lean");
+    RequireDecoded(File.ReadAllText(pathToSource), name, method);
+    File.AppendAllText(pathToSource, $$"""
+
+        /-- The closed example decodes to its exact instruction sequence. -/
+        theorem decoded_code : Extracted.method{{method}}.code = {{code}} := rfl
+        #print axioms decoded_code
+
+        """);
+    Run(["lake", "env", "lean", pathToSource], cwd: FixturePackage());
+}
 
 var frameOutput = Path.Combine(deadDirectory, "Frame");
 Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::Frame(int[])", frameOutput]);

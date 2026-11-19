@@ -47,6 +47,19 @@ example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
 example : throwFold [i 115 divide, i 38, i 122] = none := by decide
 
+/-- A throw message has the operand of a string or null load. -/
+theorem message_operands :
+    throwFold [i 114, i 115 argument, i 122] = none ∧
+    throwFold [i 20 (.text "forged"), i 115 argument, i 122] = none := by decide
+#print axioms message_operands
+
+/-- An ordinary string load retains its text, while a throw consumes its own message. -/
+theorem string_and_throw :
+    let closed := raw [i 114 (.text "keep"), i 38, i 114 (.text "message"), i 115 argument, i 122]
+    methodCode .scalar {} [] (List.replicate 5 true) closed =
+      [.memory (.stringLiteral "keep"), .pop, .nop, .nop, .throw .argument] := rfl
+#print axioms string_and_throw
+
 /-- Rejecting an oversized message prefix still discovers an admitted fold in its suffix. -/
 theorem long_prefix_suffix :
     foldRoles [] ([i 20, i 20, i 20] ++

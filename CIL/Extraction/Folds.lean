@@ -112,8 +112,9 @@ def typeTestInstruction (instruction : RawInstruction) : Bool :=
     | _ => false
 
 /-- `ldstr` (114) or `ldnull` (20): a message argument of a folded `throw`. -/
-private def messageLoad (instruction : RawInstruction) : Bool :=
-  instruction.opcode == 114 || instruction.opcode == 20
+private def messageLoad : RawInstruction → Bool
+  | ⟨_, 114, .text _⟩ | ⟨_, 20, .none⟩ => true
+  | _ => false
 
 /-- The member a constructor's owner spells, the scope compared once; `none` for any other type. -/
 def exceptionOwner? : TypeExpr → Option ExceptionType
@@ -263,6 +264,21 @@ inductive FoldRole where
   | blocked
   deriving DecidableEq, Repr
 
+/-- The instruction fixed by a fold role. Constructors also need their checked layout, and
+    an indirect tail transfer needs its catalog. -/
+def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
+    (raw : RawInstruction) : Option Instruction :=
+  match role with
+  | .head | .interior => some .nop
+  | .result value => some (.ldc_i4 (if value then 1 else 0))
+  | .typeBranch taken => match raw.operand with
+    | .target target => some (if taken then .br target else .nop)
+    | _ => none
+  | .raise exception => some (.throw exception)
+  | .argument => Instruction.ofRaw? previous raw
+  | .tailCall => if raw.opcode == 40 then Instruction.ofRaw? previous raw else none
+  | .spanConstructor .. | .blocked => none
+
 /-- Calls use their site requirement. Other instructions in a fold emit their raw role. -/
 def Instruction.withCallDecoder (roles : Array (Option FoldRole))
     (live : Nat → Bool) (localKind : TypeExpr → Option LocalKind) (decodeCall : CallDecoder) :
@@ -270,19 +286,14 @@ def Instruction.withCallDecoder (roles : Array (Option FoldRole))
   if !live pc then .unadmitted raw.opcode
   else if methodTokenCall raw.opcode then decodeCall pc previous raw
   else match roles[pc]?.join with
-    | some .head | some .interior => .nop
-    | some (.result value) => .ldc_i4 (if value then 1 else 0)
-    | some (.typeBranch taken) => match raw.operand with
-      | .target target => if taken then .br target else .nop
-      | _ => .unadmitted raw.opcode
-    | some (.raise exception) => .throw exception
+    | none | some .blocked => Instruction.ofRaw previous raw
     | some (.spanConstructor index (.empty ..)) =>
       match raw.operand with
       | .type initialized => match localKind initialized with
         | some (.span width writable) => .initializeSpanLocal index (.empty width writable)
         | _ => .unadmitted raw.opcode
       | _ => .unadmitted raw.opcode
-    | _ => Instruction.ofRaw previous raw
+    | some role => (Instruction.ofRole? role previous raw).getD (.unadmitted raw.opcode)
 
 /-- Resetting a span local binds its exact type and never exposes its storage address. -/
 private def spanDefaultFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
