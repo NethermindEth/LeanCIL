@@ -86,7 +86,7 @@ CallWitness[] witnesses =
     new("byteOrderModel", "Bits::ReverseI16(System.Int16)",
         0, 1, ".model"),
     new("hardware", "DivisionIntrinsics::And(ulong,ulong)",
-        0, 4, ".lowered .hardware", "x64-v3"),
+        0, 4, ".model", "x64-v3"),
     new("vectorConstruction", "DivisionIntrinsics::And(ulong,ulong)",
         0, 1, ".model", "x64-v3"),
     new("spanConstruction",
