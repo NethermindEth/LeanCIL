@@ -14,7 +14,6 @@ namespace CIL.Extraction
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
   | hardware | span
-  | typeTest | throwConstructor
   deriving DecidableEq, Repr
 
 /-- The portable arithmetic and hardware members lowered to intrinsic instructions. -/
@@ -73,22 +72,14 @@ def loweredCallFamily (raw : RawInstruction) : Option LoweredFamily := do
   let .call site := raw.operand | none
   let owner := site.declaringType
   let name := site.name
-  if raw.opcode == 115 then
-    if name == ".ctor" && (exceptionOwner? owner).isSome then some .throwConstructor else none
-  else if raw.opcode != 40 then none else
+  if raw.opcode != 40 then none else
   match owner with
   | .apply (.constructor scope type) _ =>
     if scope == intrinsicsScope && hardwareMember type name then some .hardware
     else if scope != runtimeScope || type ∉ ["System.Span`1", "System.ReadOnlySpan`1"] then none
     else if name == ".ctor" then some .span else none
   | .atom scope type =>
-    if scope == runtimeScope then
-      match type with
-      | "System.Type" => if typeTestInstruction raw then some .typeTest else none
-      | _ => none
-    else if scope == intrinsicsScope then
-      if hardwareMember type name then some .hardware else none
-    else none
+    if scope == intrinsicsScope && hardwareMember type name then some .hardware else none
   | _ => none
 
 end CIL.Extraction

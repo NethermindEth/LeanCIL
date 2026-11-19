@@ -821,7 +821,7 @@ theorem unknownVirtualRefused {Family : Type} (familyOf : RawInstruction → Opt
     (environment : LayoutEnvironment) (offset : Nat) (site : CallSite)
     (unknown : familyOf ⟨offset, 111, .call site⟩ = none) :
     ¬ SiteClaimTotal familyOf environment none ⟨offset, 111, .call site⟩ true := by
-  simp [SiteClaimTotal, siteClaim, methodTokenCall, callOpcode?, unknown]
+  simp [SiteClaimTotal, foldOwnsSite, siteClaim, methodTokenCall, callOpcode?, unknown]
 
 #print axioms unknownVirtualRefused
 

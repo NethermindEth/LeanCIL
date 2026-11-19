@@ -140,7 +140,12 @@ the method parameters. The closed reference fixes their types. `transferKind?` r
 scalar width and signedness, integer-vector width or aggregate size from the layout environment.
 A resolved call runs the corresponding memory instruction via `step_call_memory`.
 
-At an unlinked site outside the model table, `loweredCallFamily` selects a family by raw
+The decoder reads the checked fold role before resolving a call. An exact runtime
+`System.Type` comparison supplies its Boolean result. The constructor of an allowlisted
+exception emits `nop` inside the matching throw sequence. Literal methods must emit the
+instruction prescribed by the same role.
+
+At other unlinked sites outside the model table, `loweredCallFamily` selects a family by raw
 opcode, owner and member name. The family resolves the overload using the raw operands,
 the method's layout environment, its profile and its role in a fold of the raw instructions.
 The decoder emits the resolved instruction or a hole tagged with the raw opcode. A validated

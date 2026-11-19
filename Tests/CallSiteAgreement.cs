@@ -59,9 +59,9 @@ CallWitness[] witnesses =
     new("objectModel", "VirtualCalls::DogLegs()",
         4, 1, ".model"),
     new("throwConstructor", "Throws::Inner(System.UInt32)",
-        0, 4, ".lowered .throwConstructor"),
+        0, 4, ".refused"),
     new("typeTest", "TypeTests::Marker(System.Int32)",
-        1, 4, ".lowered .typeTest"),
+        1, 4, ".refused"),
     new("feature", "Capabilities::AesFlags()",
         0, 0, ".model"),
     new("aesX64", "Capabilities::AesFlags()", 0, 3, ".model"),
@@ -191,10 +191,31 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
         var method = $"method{Method}";
         var change = Name switch
         {
+            "typeTest" => "method.owner := .atom runtimeScope \"MyType\"",
+            "throwConstructor" => "method.owner := .atom runtimeScope \"System.Object\"",
             "areSame" => "method.owner := .atom \"Fixture\" \"System.Runtime.CompilerServices.Unsafe\"",
             _ when Claim == ".model" => "declared.convention := site.declared.convention + 1",
             _ => "target := .external \"Another overload\""
         };
+        var agreement = Claim == ".refused" ? """
+                And (foldOwnsSite role = true)
+                  (role.bind (fun part => Instruction.ofRole? part none raw) = some expected)) := by
+              constructor
+              case left => cil_kernel_rfl
+              case right => constructor <;> cil_kernel_rfl
+            """ : """
+                forall emitted, runtimeCatalog.siteAgrees environment profile raw emitted link role true =
+                  decide (emitted = expected)) := by
+              constructor
+              case left => cil_kernel_rfl
+              case right =>
+                intro emitted
+                have token : methodTokenCall raw.opcode = true := by cil_kernel_rfl
+                have resolved : runtimeCatalog.callRequirement environment.callLayouts profile link role raw =
+                    .instruction expected := by cil_kernel_rfl
+                simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, token, resolved,
+                  CallRequirement.accepts]
+            """;
         return $$"""
             namespace Extracted.{{Name}}
             open CIL CIL.Extraction
@@ -209,17 +230,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
             /-- The resolving member accepts exactly its emitted instruction. -/
             theorem exactEmission :
                 And (siteClaim loweredCallFamily environment link raw = {{Claim}})
-                (forall emitted, runtimeCatalog.siteAgrees environment profile raw emitted link role true =
-                  decide (emitted = expected)) := by
-              constructor
-              case left => cil_kernel_rfl
-              case right =>
-                intro emitted
-                have token : methodTokenCall raw.opcode = true := by cil_kernel_rfl
-                have resolved : runtimeCatalog.callRequirement environment.callLayouts profile link role raw =
-                    .instruction expected := by cil_kernel_rfl
-                simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, token, resolved,
-                  CallRequirement.accepts]
+                ({{agreement}}
             #print axioms exactEmission
             /-- Changing one part of the resolving operand leaves an opcode-tagged hole. -/
             theorem unresolvedOverload :

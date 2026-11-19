@@ -442,14 +442,15 @@ theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
 
 #print axioms MethodEvidenceValid.decoded_code
 
-/-- Every reachable method-token call in validated method evidence has a raw claim. -/
+/-- Every reachable method-token call outside a fold in validated evidence has a raw claim. -/
 theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
     {pc : Nat} {raw : RawInstruction} (atRaw : item.closed.code[pc]? = some raw)
     (atLive : item.reachable[pc]? = some true) :
-    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true := by
+    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true
+      ((foldRoles item.closed.locals item.closed.code)[pc]?.join) := by
   obtain ⟨-, -, -, -, -, -, -, -, -, agree, -⟩ := valid
   exact agree.siteClaimTotal atRaw atLive
 

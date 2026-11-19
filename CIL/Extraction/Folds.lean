@@ -284,13 +284,20 @@ def boundSite (raw : RawInstruction) : Bool :=
   methodTokenCall raw.opcode || raw.opcode == 126 || raw.opcode == 127 ||
     raw.opcode == 208 && (raw.operand matches .field ..)
 
-/-- Bound operands use their site decoder. Type tokens keep their roles in folded type tests. -/
+/-- These roles determine the entire instruction, including a call inside a fold. -/
+def foldOwnsSite : Option FoldRole → Bool
+  | some .head | some .interior | some (.result _) => true
+  | _ => false
+
+/-- Bound operands outside a recognized fold use their site decoder. -/
 def Instruction.withSiteDecoder (roles : Array (Option FoldRole))
     (live : Nat → Bool) (localKind : TypeExpr → Option LocalKind) (decodeSite : SiteDecoder) :
     SiteDecoder := fun pc previous raw =>
   if !live pc then .unadmitted raw.opcode
-  else if boundSite raw then decodeSite pc previous raw
-  else match (indexedRead? roles pc).join with
+  else
+    let role := (indexedRead? roles pc).join
+    if boundSite raw && !foldOwnsSite role then decodeSite pc previous raw
+    else match role with
     | none | some .blocked => Instruction.ofClosedValue previous raw
     | some (.spanConstructor index (.empty ..)) =>
       match raw.operand with

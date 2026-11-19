@@ -93,7 +93,10 @@ private def modelSitesAgree (catalog : ModelCatalog) (environment : LayoutEnviro
   let roles := (foldRoles closed.locals closed.code).toArray
   all3 (fun (raw, pc) live emitted =>
     if live then
-      catalog.agreesAt layouts profile raw emitted links[pc]?.join (roles[pc]?.join) true
+      let role := roles[pc]?.join
+      if foldOwnsSite role then
+        decide (role.bind (Instruction.ofRole? · none raw) = some emitted)
+      else catalog.agreesAt layouts profile raw emitted links[pc]?.join role true
     else !methodTokenCall raw.opcode || decide (emitted = .unadmitted raw.opcode))
     closed.code.zipIdx reachable code
 
@@ -127,13 +130,22 @@ instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (RuntimeModelsAgree closed reachable method) :=
   inferInstanceAs (Decidable (ModelsAgree _ _ _ _ _ _ _))
 
-/-- Every live method-token site of a body accepted by the runtime catalog has a raw claim. -/
+/-- A live method-token site outside a fold has a claim. -/
+def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
+    (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
+    (live : Bool) (role : Option FoldRole := none) : Prop :=
+  (live && !foldOwnsSite role) = true → methodTokenCall raw.opcode = true →
+    siteClaim familyOf environment link raw ≠ .refused
+
+/-- Every live method-token site outside a fold in a validated body has a raw claim. -/
 theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List Bool}
     {method : Method} (agree : RuntimeModelsAgree closed reachable method)
     {pc : Nat} {raw : RawInstruction} (atRaw : closed.code[pc]? = some raw)
     (atLive : reachable[pc]? = some true) :
-    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true := by
-  intro _ token refused
+    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true
+      ((foldRoles closed.locals closed.code)[pc]?.join) := by
+  intro ordinary token refused
+  simp only [Bool.true_and, Bool.not_eq_true'] at ordinary
   have live := List.contains_iff_mem.mpr (List.mem_of_getElem? atLive)
   simp only [RuntimeModelsAgree, live, ite_true] at agree
   obtain ⟨_, lengthCode, checks⟩ := agree
@@ -146,7 +158,7 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
       method.linkAt pc := by simp [linkReads_eq, inCode, Method.linkAt]
   change siteClaim loweredCallFamily method.environment (method.linkAt pc) raw
     runtimeCatalog.table.claims = .refused at refused
-  simp [ModelCatalog.agreesAt, token, linkAt, ModelCatalog.callRequirement, refused,
+  simp [ordinary, ModelCatalog.agreesAt, token, linkAt, ModelCatalog.callRequirement, refused,
     CallRequirement.accepts] at checked
 
 #print axioms RuntimeModelsAgree.siteClaimTotal

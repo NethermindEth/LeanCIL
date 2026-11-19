@@ -33,12 +33,5 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
   match family with
   | .hardware => hardwareInstruction environment profile raw site
   | .span => spanInstruction environment role raw site
-  | .typeTest => match role with
-    | some .interior => some .nop
-    | some (.result value) => some (.ldc_i4 (if value then 1 else 0))
-    | _ => none
-  | .throwConstructor => match role with
-    | some .head | some .interior => some .nop
-    | _ => none
 
 end CIL.Extraction

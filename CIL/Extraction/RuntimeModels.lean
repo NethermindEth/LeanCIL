@@ -89,13 +89,6 @@ def siteClaim {Family : Type} (familyOf : RawInstruction → Option Family)
     else (familyOf raw).elim .refused .lowered
   | _ => .refused
 
-/-- Every live direct call, virtual call or construction has a claim. -/
-def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
-    (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
-    (live : Bool) : Prop :=
-  live = true → methodTokenCall raw.opcode = true →
-    siteClaim familyOf environment link raw ≠ .refused
-
 /-- A modelled opcode and method use the body's runtime environment and require no link. -/
 def callModelled (body : Method) (site : CallOpcode × MethodRef) : Bool :=
   (runtimeModel body.environment site.1 site.2).isSome
