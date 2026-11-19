@@ -2023,6 +2023,8 @@ void ModelTableCosts()
 {
     var tableDirectory = At("artifacts/LookupScaling/ModelTables");
     Directory.CreateDirectory(tableDirectory);
+    const int modelLookupDepth = 75;
+    const int layoutLookupDepth = 210;
     int[] tableSizes = [16, 256];
     int[] siteCounts = [8, 32, 128];
     string[] positions = ["first", "middle", "last"];
@@ -2032,6 +2034,7 @@ void ModelTableCosts()
         ModelEntry.exact .call (method name!"Model{{index:D4}}") { convention := 0 }
           (.memory (.divRemOut {{index}}))
         """));
+    string RawRows(int size) => string.Join(", ", Enumerable.Range(0, size - 1).Select(i => $"row \"L{i}\" 1"));
     string Table(int size) => $$"""
         /-- {{size}} modelled methods. -/
         def entries{{size}} : List ModelEntry := [
@@ -2039,12 +2042,26 @@ void ModelTableCosts()
         /-- Their literal table. -/
         def table{{size}} : ModelTable := model_table% entries{{size}}
         {{string.Join("\n", positions.Select(position => Lookup(position, size)))}}
+        /-- The target follows every unrelated layout in this table. -/
+        def layouts{{size}} : LayoutEnvironment := {
+          rawLayouts := [{{RawRows(size)}}, row "Target" 8]
+          layouts := #[{{string.Join(", ", Enumerable.Repeat("layout 1", size - 1))}}, layout 8] }
+        set_option maxRecDepth {{layoutLookupDepth}} in
+        example : runtimeModel layouts{{size}} .call (sizeRef {{size - 1}}) =
+            some (.constant 8) := by rfl
         """;
-    string Lookup(string position, int size) => $$"""
-        #kernel_cost "model lookup {{position}} {{size}}"
-          (table{{size}}.find {} .call (method name!"Model{{Queried(position, size):D4}}") =
-            some (.memory (.divRemOut {{Queried(position, size)}})))
-        """;
+    string Lookup(string position, int size)
+    {
+        var index = Queried(position, size);
+        var claim = $$"""
+            table{{size}}.find {} .call (method name!"Model{{index:D4}}") = some (.memory (.divRemOut {{index}}))
+            """;
+        return $$"""
+            set_option maxRecDepth {{modelLookupDepth}} in
+            example : {{claim}} := by rfl
+            #kernel_cost "model lookup {{position}} {{size}}" ({{claim}})
+            """;
+    }
     string Emitted(int index) => $".memory (.divRemOut {index})";
     string Call(int index) => $$""".call (method name!"Model{{index:D4}}") {}""";
     string Site(int index) => $$"""
@@ -2076,6 +2093,16 @@ void ModelTableCosts()
         def method (name : MetadataName) : MethodRef :=
           { owner := .atom "Tests" "Models", name, hasThis := false, genericArity := 0, returnType := .void,
             parameters := [] }
+        /-- Only the final position in each layout table carries the eight-byte target. -/
+        def sizeRef (position : Nat) : MethodRef :=
+          { owner := unsafeOwner, name := name!"SizeOf", hasThis := false, genericArity := 1,
+            parameters := [], returnType := .atom runtimeScope "System.Int32",
+            methodArguments := [.aggregate "Target" position] }
+        /-- The raw row binds a size query to its named type. -/
+        def row (identity : String) (size : Nat) : RawLayout :=
+          { identity, fields := [], explicit := false, packing := 0, declaredSize := size }
+        /-- The computed row supplies the byte count read by the size query. -/
+        def layout (size : Nat) : ComputedLayout := .mk (.mk size []) 1
         {{string.Join("\n", tableSizes.Select(Table))}}
         /-- The larger table of modelled calls. -/
         def catalog : ModelCatalog where

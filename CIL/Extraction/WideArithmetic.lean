@@ -10,13 +10,13 @@ def integerPairResult (environment : CallLayouts) (type : TypeExpr)
   match type with
   | .aggregate identity index =>
     let expected := s!"{runtimeScope}::System.ValueTuple`2<{name},{name}>"
-    let validRaw := (environment.indexedRaw[index]?).any fun raw =>
+    let validRaw := (layoutAt? environment.indexedRaw index).any fun raw =>
       match raw.fields with
       | [first, second] => raw.identity == identity && raw.packing <= 0 &&
         (primitiveField name).any fun kind => first.type == kind && second.type == kind
       | _ => false
     identity == expected && validRaw &&
-      (environment.layouts[index]?).any fun entry =>
+      (layoutAt? environment.layouts index).any fun entry =>
         entry.alignment == width && entry.layout.size == 2 * width &&
           match entry.layout.fields with
           | [first, second] => first.offset == 0 && first.width == width &&

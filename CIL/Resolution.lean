@@ -781,6 +781,39 @@ inductive ValueShape where
   | unsupported (reason : String)
   deriving DecidableEq, Repr
 
+/-- A layout read stops at its row or the end of the list. Each tail supplies a lookup function
+    so reducing a closed index does not nest one match per preceding row. -/
+noncomputable def layoutAt? (rows : Array α) (index : Nat) : Option α :=
+  rows.toList.rec (fun _ => none) (fun row _ next position =>
+    match position with
+    | 0 => some row
+    | index + 1 => next index) index
+
+/-- Layout reads agree with optional indexing at every position. -/
+@[simp] theorem layoutAt?_eq (rows : Array α) (index : Nat) :
+    layoutAt? rows index = rows[index]? := by
+  rw [← Array.getElem?_toList]
+  cases rows with
+  | mk rows =>
+    induction rows generalizing index with
+    | nil => cases index <;> rfl
+    | cons row rest ih =>
+      cases index with
+      | zero => rfl
+      | succ index => exact ih index
+
+#print axioms layoutAt?_eq
+
+/-- Native code reads the same position directly from the array. -/
+private def nativeLayoutAt? (rows : Array α) (index : Nat) : Option α := rows[index]?
+
+/-- Compiled layout reads use the array's native bounds check and index. -/
+@[csimp] private theorem layoutAt?_compiled : @layoutAt? = @nativeLayoutAt? := by
+  funext α rows index
+  exact layoutAt?_eq rows index
+
+#print axioms layoutAt?_compiled
+
 /-- How a value of `type` reaches memory: as a span, a vector of its width, a struct sized by its
     checked layout or a primitive of its width. -/
 def valueShapeAt (layouts : Array Extraction.ComputedLayout)
@@ -790,7 +823,7 @@ def valueShapeAt (layouts : Array Extraction.ComputedLayout)
   match Extraction.integerVectorWidth type with
   | some width => .vector width
   | none => match storage type with
-    | some (.field (.aggregate index)) => match layouts[index]? with
+    | some (.field (.aggregate index)) => match layoutAt? layouts index with
       | some layout => .aggregate layout.layout.size
       | none => .unsupported "Value type outside the checked layouts"
     | some (.field kind) => match Extraction.primitiveFieldWidth kind with

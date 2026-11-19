@@ -20,7 +20,7 @@ def _root_.CIL.LayoutEnvironment.callLayouts (environment : LayoutEnvironment) :
 
 /-- Storage of a closed argument under the indexed raw layout metadata. -/
 def CallLayouts.storage (environment : CallLayouts) : TypeExpr → Option StorageType :=
-  typeStorageAt (environment.indexedRaw[·]?)
+  typeStorageAt (layoutAt? environment.indexedRaw)
 
 /-- A value representation uses the same storage and computed layout as execution. -/
 def CallLayouts.valueShape (environment : CallLayouts) : TypeExpr → ValueShape :=
@@ -49,7 +49,7 @@ theorem CallLayouts.valueShape_eq (environment : LayoutEnvironment) (type : Type
 def CallLayouts.alignment? (reader : CallLayouts) (type : TypeExpr) : Option Nat := do
   let .aggregate _ index := type | none
   _root_.guard (reader.storage type == some (.field (.aggregate index)))
-  return (← reader.layouts[index]?).alignment
+  return (← layoutAt? reader.layouts index).alignment
 
 /-- Preparing the same layout environment for execution gives the validation reader. -/
 @[simp] theorem CallLayouts.prepare_eq (reader : CallLayouts) :
