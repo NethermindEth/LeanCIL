@@ -26,6 +26,12 @@ def integerVectorWidth : TypeExpr → Option Nat
     else none
   | _ => none
 
+/-- A closed object operand may retain a type application for a runtime span or an integer
+    vector. Other admitted generic structs are represented by their layout index. -/
+def objectApplicationAdmitted : TypeExpr → Bool
+  | type@(.apply ..) => type.isRuntimeSpan || (integerVectorWidth type).isSome
+  | _ => true
+
 /-- Primitive array element identity is derived from the exact runtime metadata scope. -/
 def arrayElementType (type : TypeExpr) (aggregateWidth : Nat := 0) : Option ArrayElement :=
   match type with

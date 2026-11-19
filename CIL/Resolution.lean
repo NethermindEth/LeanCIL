@@ -796,6 +796,9 @@ def valueShapeAt (layouts : Array Extraction.ComputedLayout)
     | some (.field kind) => match Extraction.primitiveFieldWidth kind with
       | some width => .primitive width (Extraction.signedField kind)
       | none => .unsupported "Value type without a width"
+    | some .vector128 => .vector 16
+    | some .vector256 => .vector 32
+    | some .vector512 => .vector 64
     | _ => .unsupported "Not a value type"
 
 /-- The value representation given by the method's checked layout environment. -/

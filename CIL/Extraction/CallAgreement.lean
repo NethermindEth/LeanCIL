@@ -170,12 +170,12 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
 /-- Decode an ordinary body using only the predecessor required by the value decoder. -/
 private def plainCode (previous : Option RawInstruction) : List RawInstruction → List Instruction
   | [] => []
-  | raw :: rest => Instruction.ofRaw previous raw :: plainCode (some raw) rest
+  | raw :: rest => Instruction.ofClosedValue previous raw :: plainCode (some raw) rest
 
 /-- Ignoring the unused pc in an ordinary body preserves each decoded instruction. -/
 private theorem plainCode_eq (code : List RawInstruction) (previous : Option RawInstruction)
     (pc : Nat) : plainCode previous code =
-      Instruction.ofRawCode previous code (fun _ => Instruction.ofRaw) pc := by
+      Instruction.ofRawCode previous code (fun _ => Instruction.ofClosedValue) pc := by
   induction code generalizing previous pc with
   | nil => rfl
   | cons first rest ih => exact congrArg (List.cons _) (ih (some first) (pc + 1))

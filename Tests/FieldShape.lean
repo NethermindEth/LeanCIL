@@ -265,12 +265,12 @@ theorem value_kinds :
   by decide +kernel
 #print axioms value_kinds
 
-/-- Object instructions admit only vectors of the supported integer elements. -/
-theorem double_vector_unsupported :
-    (environment.valueShape (.apply (.constructor intrinsicsScope
-        "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double"))).size? =
-      none := by decide +kernel
-#print axioms double_vector_unsupported
+/-- The storage size of a 128-bit floating-point vector is available to runtime models. -/
+theorem double_vector_shape :
+    environment.valueShape (.apply (.constructor intrinsicsScope
+        "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double")) =
+      .vector 16 := by decide +kernel
+#print axioms double_vector_shape
 
 -- The kernel checks each generated fact, which rests on no axiom beyond `propext`.
 /-- info: 'Tests.FieldShape.lowField_shape' depends on axioms: [propext] -/

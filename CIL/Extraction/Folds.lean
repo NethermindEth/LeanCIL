@@ -286,7 +286,7 @@ def Instruction.withCallDecoder (roles : Array (Option FoldRole))
   if !live pc then .unadmitted raw.opcode
   else if methodTokenCall raw.opcode then decodeCall pc previous raw
   else match (indexedRead? roles pc).join with
-    | none | some .blocked => Instruction.ofRaw previous raw
+    | none | some .blocked => Instruction.ofClosedValue previous raw
     | some (.spanConstructor index (.empty ..)) =>
       match raw.operand with
       | .type initialized => match localKind initialized with

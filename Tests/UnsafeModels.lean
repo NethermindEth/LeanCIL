@@ -159,6 +159,21 @@ private def method (instruction : RawInstruction) : RawMethod :=
 private def emitting (emitted : CIL.Instruction) : CIL.Method :=
   { code := [emitted], locals := [], returnsValue := true, environment := sized 3 }
 
+/-- A double vector has a runtime SizeOf call, while its raw object load decodes to a hole. -/
+theorem double_vector_size_and_load :
+    let head := TypeExpr.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1"
+    let vector := TypeExpr.apply head (runtimeType "System.Double")
+    let called := sizeOf vector
+    let load := method ⟨0, 0x71, .type vector⟩
+    runtimeModel {} .call called = some (.constant 16) ∧
+      runtimeCatalog.siteAgrees {} .scalar (site called) (.call called {}) = true ∧
+      methodCode .scalar {} [] [true] (method (site called)) = [.call called {}] ∧
+      methodCode .scalar {} [] [true] load = [.unadmitted 0x71] ∧
+      methodCode .scalar {} [] [true, false] { load with code := load.code ++ [⟨5, 0, .none⟩] } =
+        [.unadmitted 0x71, .unadmitted 0] ∧
+      ¬ ObjectOperandsValid load [true] (emitting (.ldobj vector)) := by decide +kernel
+#print axioms double_vector_size_and_load
+
 -- The body validator requires the modelled call at the SizeOf site.
 example : RuntimeModelsAgree (method (site (sizeOf packet))) [true]
     (emitting (.call (sizeOf packet) {})) := by decide +kernel

@@ -105,6 +105,9 @@ theorem substituteOperand_mentionsType {arguments : List TypeExpr} {layouts : Li
 
 #print axioms substituteOperand_mentionsType
 
+/-- The five raw opcodes that access a value through a type token. -/
+def objectOpcode (opcode : Nat) : Bool := opcode ∈ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c]
+
 end CIL.Extraction
 
 namespace CIL
@@ -627,6 +630,14 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
     admits one, and otherwise a hole carrying the raw opcode, which faults when stepped. -/
 def Instruction.ofRaw (previous : Option RawInstruction) (raw : RawInstruction) : Instruction :=
   (Instruction.ofRaw? previous raw).getD (.unadmitted raw.opcode)
+
+/-- Decode an ordinary closed site, checking the element type of an object transfer or size. -/
+def Instruction.ofClosedValue (previous : Option RawInstruction) (raw : RawInstruction) :
+    Instruction :=
+  if (match raw.operand with
+    | .type type => objectOpcode raw.opcode && !objectApplicationAdmitted type
+    | _ => false) then .unadmitted raw.opcode
+  else Instruction.ofRaw previous raw
 
 /-- Decoding gives a hole exactly when `ofRaw?` admits nothing, and the hole carries the raw
     opcode; an instruction `ofRaw?` admits is never a hole. -/

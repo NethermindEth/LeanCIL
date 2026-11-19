@@ -11,11 +11,11 @@ requires a direct address of the same view, and a span reset requires a folded l
 namespace CIL.Extraction
 
 /-- The storage shapes that an object opcode admits. -/
-def objectShapeAdmitted (opcode : Nat) (shape : ValueShape) : Bool :=
-  match shape with
+def objectShapeAdmitted (opcode : Nat) (type : TypeExpr) (shape : ValueShape) : Bool :=
+  objectApplicationAdmitted type && match shape with
   | .span => opcode == 0x71
   | .unsupported _ => false
-  | _ => opcode ∈ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c]
+  | _ => objectOpcode opcode
 
 /-- The type of the span home loaded or addressed immediately before a span copy. -/
 private def spanCopySource (parameter localAt : Nat → Option TypeExpr)
@@ -41,7 +41,7 @@ def objectSites (raw : RawMethod) (reachable : List Bool) (method : Method) :
   let mut previous := none
   let mut pc := 0
   for (current, live, emitted) in raw.code.zip (reachable.zip method.code) do
-    if live && current.opcode ∈ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c] then
+    if live && objectOpcode current.opcode then
       let .type type := current.operand | return ← none
       if current.opcode == 0xfe15 && spanLocal type then
         unless emitted matches .initializeSpanLocal _ (.empty ..) do return ← none
@@ -94,7 +94,7 @@ def ObjectOperandsValid (raw : RawMethod) (reachable : List Bool) (method : Meth
     raw.code.length = method.code.length ∧
     (objectOperands raw reachable method).any (fun operands =>
       operands.all fun (opcode, type) =>
-        objectShapeAdmitted opcode (indexed.valueShape type)) = true
+        objectShapeAdmitted opcode type (indexed.valueShape type)) = true
 
 /-- A live object instruction and the checked shape of its named type operand. -/
 structure ObjectSiteShape (method : Method) where
@@ -109,7 +109,7 @@ theorem ObjectOperandsValid.of_sites {raw : RawMethod} {reachable : List Bool} {
     (sites : objectSites raw reachable method = some (operands.map fun s => (s.opcode, s.type)))
     (lengths : method.profile.Valid ∧ raw.code.length = reachable.length ∧
       raw.code.length = method.code.length)
-    (shapes : operands.all (fun s => objectShapeAdmitted s.opcode s.shape) = true) :
+    (shapes : operands.all (fun s => objectShapeAdmitted s.opcode s.type s.shape) = true) :
     ObjectOperandsValid raw reachable method := by
   refine ⟨lengths.1, lengths.2.1, lengths.2.2, ?_⟩
   simp only [objectOperands, sites, Option.map_some, Option.any_some, List.all_eq_true]

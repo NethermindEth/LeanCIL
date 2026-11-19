@@ -429,7 +429,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (stack : List ScalarKind) (emitted : Instruction) (skipEncoding := false) : Bool :=
   if instruction.opcode == 0xFE19 || invalidPredecessor previous instruction then false
   else if (emitted matches .ldobj _ | .stobj _ | .initobj _ | .cpobj _ | .sizeof _) ||
-      instruction.opcode ∈ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c] then
+      objectOpcode instruction.opcode then
     match role, emitted with
     | some (.spanConstructor ..), .initializeSpanLocal .. => true
     | _, _ => skipEncoding || valueEncodingMatches previous instruction emitted
@@ -1171,8 +1171,13 @@ theorem ScalarFlowValid.of_decoded {layouts : Array RawLayout} {raw : RawMethod}
     exact Or.inr (by simpa [Instruction.withCallDecoder, active] using
       (Option.some.inj emittedAt).symm)
   | true =>
-    exact Or.inl (by simpa [Instruction.withCallDecoder, active, ordinary, roleAt, rawBefore,
-      FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm)
+    have closed : emitted = Instruction.ofClosedValue
+        (rawBefore (FlowIndex.ofList raw.code).get? pc) instruction := by
+      simpa [Instruction.withCallDecoder, active, ordinary, roleAt, rawBefore,
+        FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
+    unfold Instruction.ofClosedValue at closed
+    repeat' split at closed
+    all_goals first | exact Or.inl closed | exact Or.inr closed
 
 #print axioms ScalarFlowValid.of_decoded
 

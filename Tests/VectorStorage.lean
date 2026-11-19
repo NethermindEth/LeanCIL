@@ -27,7 +27,7 @@ theorem integer_storage_checked :
       let shape := ({} : LayoutEnvironment).valueShape type
       shape == .vector (bits / 8) && (operations type).all fun (opcode, operation) =>
         valueEncodingMatches none ⟨0, opcode, .type type⟩ operation &&
-          objectShapeAdmitted opcode shape) = true := by decide +kernel
+          objectShapeAdmitted opcode type shape) = true := by decide +kernel
 #print axioms integer_storage_checked
 
 /-- Site binding rejects altered widths. Admission checks element types and scopes. -/
@@ -42,7 +42,8 @@ theorem altered_storage_rejected :
         !valueEncodingMatches none ⟨0, opcode, .type other⟩ operation &&
         !valueEncodingMatches none ⟨0, opcode, .none⟩ operation &&
         [vectorType bits "System.Int16", vectorType bits "System.Double", wrong].all fun operand =>
-          !objectShapeAdmitted opcode (({} : LayoutEnvironment).valueShape operand)) = true := by
+          !objectShapeAdmitted opcode operand (({} : LayoutEnvironment).valueShape operand)) =
+      true := by
   decide +kernel
 #print axioms altered_storage_rejected
 

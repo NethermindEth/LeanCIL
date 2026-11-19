@@ -720,8 +720,9 @@ checked layout entry when the operand holds the field's declared tag. For an enu
 `System.SByte`, `System.Byte`, `System.Int16`, `System.UInt16`, `System.Int32`, `System.UInt32`,
 `System.Int64` or `System.UInt64`. The enum has that integer's field kind. Other struct fields
 must match their primitive kind, struct index, or vector width and element lane. A class instance
-field resolves to the model slot of its index. `valueShape` gives the admitted integer vectors
-their widths. Floating-point vector operands have unsupported object storage.
+field resolves to the model slot of its index. `valueShape` gives runtime models the storage width
+of integer and floating-point vectors. A vector operand on a raw object instruction must have a
+supported integer element.
 
 Decoded and literal object instructions name the same `valueType{k}` constant. A primitive
 load or store steps through its width and signedness, a struct through its checked size, and
