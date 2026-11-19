@@ -18,6 +18,8 @@ and type operands as their listed `FieldRef` and `TypeExpr` constants. Stepping 
 their `cil_field_shape` and `cil_value_shape` facts. A decoded constrained call keeps
 the identity expressions from its raw layouts, and a closed decoder keeps the raw type expressions
 in the declared signature. The kernel checks `name_decoder_eq` and every fact.
+Integer loads with a signed immediate keep their `BitVec.ofInt` operand. The opcodes for zero
+through eight use numerals, as in a literal method.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -220,6 +222,27 @@ def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
     | none, none => throwError "cil_decoded_method: no term is written for the field {field}"
   return mkAppN (mkConst ``CIL.Method.mk) fields
 
+/-- A signed integer load retains the operand form used by arithmetic step facts. -/
+private def signedLoad (raw instruction : Expr) : MetaM Expr := do
+  let width := if instruction.isAppOf ``Instruction.ldc_i4 then 32
+    else if instruction.isAppOf ``Instruction.ldc_i8 then 64 else 0
+  if width == 0 then return instruction
+  let_expr RawInstruction.mk _ opcode operand := (← kernelWhnf raw) | return instruction
+  let value : Int ← match ← natValue opcode with
+    | 21 => pure (-1)
+    | 31 | 32 | 33 =>
+      let_expr RawOperand.integer value := (← kernelWhnf operand) | return instruction
+      intValue value
+    | _ => return instruction
+  return mkApp instruction.getAppFn (mkApp2 (mkConst ``BitVec.ofInt) (toExpr width) (toExpr value))
+
+/-- The decoded code with each signed load written at its raw pc. -/
+private partial def signedLoads (raw code : Expr) : MetaM Expr := do
+  let some (type, instruction, tail) := code.app3? ``List.cons | return code
+  let some (_, head, rest) := (← kernelWhnf raw).app3? ``List.cons
+    | throwError "cil_decoded_method: decoded code exceeds its raw body"
+  return mkApp3 code.getAppFn type (← signedLoad head instruction) (← signedLoads rest tail)
+
 /-- The term `written` that `literal` gives for the initial value `value` of a local, with a
     zero-filled aggregate written as `List.replicate size 0`: the form `LocalKind.initialValue`
     and an extraction give, which a caller's hypothesis about making the local names. -/
@@ -319,7 +342,16 @@ elab_rules : command
     let fields := getStructureFields (← getEnv) ``CIL.Method
     let some localsPosition := fields.idxOf? `locals
       | throwError "cil_decoded_method: CIL.Method has no field locals"
-    let arguments := written.getAppArgs
+    let mut arguments := written.getAppArgs
+    let raw? := match_expr decoder with
+      | Method.ofClosed? _ _ _ _ closed _ => some closed
+      | Method.ofRaw? _ _ _ _ original _ => some original
+      | _ => none
+    if let some raw := raw? then
+      let some codePosition := fields.idxOf? `code
+        | throwError "cil_decoded_method: CIL.Method has no code"
+      let code ← signedLoads (mkApp (mkConst ``RawMethod.code) raw) arguments[codePosition]!
+      arguments := arguments.set! codePosition code
     let value := mkAppN written.getAppFn <| arguments.set! localsPosition
       (← initialLocals method.locals arguments[localsPosition]!)
     let used := value.getUsedConstantsAsSet
