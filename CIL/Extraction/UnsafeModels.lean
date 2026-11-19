@@ -89,7 +89,7 @@ def unsafeDeclaration (parameters : TypeExpr → List TypeExpr) (result : TypeEx
 def unsafeOperand (name result parameters : String) (declared : OpenSignature) : ModelOperand :=
   let owner := "System.Runtime.CompilerServices.Unsafe"
   let target := s!"{runtimeScope}::{result} {owner}::{name}({parameters})"
-  .external declared name (fun _ => some target)
+  .external (fun _ => declared) name (fun _ => some target)
 
 /-- The reserved `call` entry for a single Unsafe overload. -/
 def unsafeEntry (key : MetadataName) (name result parameters : String) (declared : OpenSignature)

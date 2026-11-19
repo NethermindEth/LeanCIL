@@ -374,7 +374,8 @@ theorem singleton_binding (key : MetadataName) (name result parameters : String)
 
 /-- A synthetic overload returns its parameter count as a distinguishable execution result. -/
 private def countedOverload (parameters : List TypeExpr) (target : String) : ModelOverload :=
-  { operand := .external { sizeOfDeclared with parameters } "Count" (fun _ => some target),
+  { operand := .external (fun _ => { sizeOfDeclared with parameters }) "Count"
+      (fun _ => some target),
     accepts := fun method => method.parameters == parameters,
     resolve := fun _ _ => some (.constant (BitVec.ofNat 32 parameters.length)) }
 

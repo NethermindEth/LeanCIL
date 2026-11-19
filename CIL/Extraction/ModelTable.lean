@@ -25,17 +25,18 @@ def TypeExpr.genericHead : TypeExpr → TypeExpr
   | type => type
 
 /-- The raw operand a closed overload accepts. An external member binds its name, exact target
-    and open declaration. Shared entries can check a declaration for a range of closed types. -/
+    and open declaration, including aggregate indices from the selected method. -/
 inductive ModelOperand where
   | declaration (accepts : OpenSignature → Bool)
-  | external (declared : OpenSignature) (name : String) (target : MethodRef → Option String)
+  | external (declared : MethodRef → OpenSignature) (name : String)
+      (target : MethodRef → Option String)
 
 /-- Whether the raw declaration and redundant fields describe this operand. -/
 def ModelOperand.bindsSite (operand : ModelOperand) (site : CallSite) : Bool :=
   match operand with
   | .declaration accepts => accepts site.declared
   | .external declared name target =>
-    site.declared == declared && site.name == name &&
+    site.declared == declared site.method && site.name == name &&
       (target site.method).any (fun id => site.target == .external id) &&
       site.ownerArgumentCount == 0 && site.typeArguments == site.method.methodArguments &&
       site.parameterCount == site.method.parameters.length &&
@@ -68,6 +69,24 @@ where
       if overload.accepts method then
         if rest.any (fun other => other.accepts method) then none else some overload
       else select rest
+
+/-- A successful selection always names a row of this entry. -/
+theorem ModelEntry.select?_mem {entry : ModelEntry} {method : MethodRef} {row : ModelOverload}
+    (selected : entry.select? method = some row) : row ∈ entry.overloads := by
+  change ModelEntry.select?.select method entry.overloads = some row at selected
+  generalize entry.overloads = rows at *
+  induction rows with
+  | nil => cases selected
+  | cons first rest ih =>
+    simp only [ModelEntry.select?.select] at selected
+    split at selected
+    · split at selected
+      · contradiction
+      · cases selected
+        exact List.mem_cons_self
+    · exact List.mem_cons_of_mem _ (ih selected)
+
+#print axioms ModelEntry.select?_mem
 
 /-- The selected overload binds the site's declaration and raw operand. -/
 def ModelEntry.bindsSite (entry : ModelEntry) (site : CallSite) : Bool :=
