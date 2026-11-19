@@ -74,16 +74,16 @@ internal static class ManagedPointers
             return $".aggregate {IdentityText.Quote(LayoutEvidence.Identity(type))} 0";
         if (type is GenericInstanceType generic && MetadataValidation.IntegerVectorWidth(type) is not null)
         {
-            var scope = IdentityText.Quote(LayoutEvidence.Scope(generic.ElementType));
             var name = IdentityText.Quote(generic.ElementType.FullName);
-            return $".apply (.constructor {scope} {name}) ({TypeEvidence(generic.GenericArguments[0])})";
+            var element = TypeEvidence(generic.GenericArguments[0]);
+            return $".apply (.constructor {GenericEvidence.Scope(generic.ElementType)} {name}) ({element})";
         }
         if (EnumTypes.IsEnum(type))
         {
             var identity = IdentityText.Quote(LayoutEvidence.Identity(type));
             return $".enum {identity} ({TypeEvidence(EnumTypes.Storage(type))})";
         }
-        return $".atom {IdentityText.Quote(LayoutEvidence.Scope(type))} {IdentityText.Quote(type.FullName)}";
+        return $".atom {GenericEvidence.Scope(type)} {IdentityText.Quote(type.FullName)}";
     }
 
     internal static string SignatureEvidence(IMethodSignature signature) =>
