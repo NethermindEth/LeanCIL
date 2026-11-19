@@ -251,7 +251,8 @@ var operands = new Dictionary<Type, object[]>
 string BoundaryProof(IReadOnlyList<string> claims) =>
     "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
     "def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
-    string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
+    // The kernel compares each closed run: the elaborator exceeds its recursion limit reducing the model table.
+    string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by cil_kernel_rfl\n")) +
     "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
     Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) +
     "\nend ExampleProof\n";

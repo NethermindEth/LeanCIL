@@ -59,7 +59,7 @@ foreach (var aligned in new[] { false, true })
     var claims = new List<string>
     {
         $$"""
-        (match Extracted.method0.code[3]? with
+        (match (Extracted.method0.code[3]? : Option CIL.Instruction) with
          | some (.call method _) =>
            CIL.Extraction.runtimeModel Extracted.environment .call method ==
              some (.memory (.{{operation}} {{alignment}}))
