@@ -395,8 +395,9 @@ references.
 `Span<T>.Empty` and `ReadOnlySpan<T>.Empty` return a null, zero-length view with the element
 width and readonly capability of the span type. Explicit `default` initialization or
 reassignment of a span local accepts the exact `ldloca; initobj` pair, including resetting a
-nonempty local; the initialized type must match the local, and branches cannot enter at
-`initobj`.
+nonempty local. The initialized type must match the local, and branches must enter at the
+address load. The raw decoder uses the local's checked element width for the reset. An
+unresolved aggregate layout leaves a hole at `initobj`.
 
 Span `IsEmpty` and `GetPinnableReference` do not read the view's bytes. An empty span's
 pinnable reference is null, and readonly views return readonly references.
@@ -705,6 +706,8 @@ both edges; joins and backedges discard conflicting constants. A known int32 swi
 chooses its indexed arm, or falls through when its unsigned value is out of range. Unknown
 selectors retain every successor. Every encoded branch or switch target remains bounds-checked
 and must enter a folded sequence or tail transfer at its start, even when unselected.
+The raw decoder checks all encoded targets before applying a fold. An edge into a folded
+throw after its head leaves the raw `throw` as an opcode-tagged hole.
 
 `RuntimeHelpers.IsReferenceOrContainsReferences<T>()` produces `false` for supported primitive
 integer, Boolean, character, integer-enum and integer-vector types and for reference-free

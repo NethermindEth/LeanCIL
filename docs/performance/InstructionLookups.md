@@ -117,16 +117,24 @@ root), and 66,319 and 68,478 for the last. The suite fails when any position cos
 1.05 times as much at 256 entries as at 16.
 
 The same file measures 8, 32 and 128 live sites, each calling a distinct modelled method.
-Checking rejection at every site costs 169,254, 521,797 and 1,938,700 heartbeats.
+Checking rejection at every site costs 169,266, 521,797 and 1,938,694 heartbeats.
 The suite permits up to 1.15 times the previous rejection cost per site.
-Checking the complete body with `ModelsAgree` costs 253,780, 840,810 and 3,195,523 heartbeats
+Checking the complete body with `ModelsAgree` costs 253,782, 840,794 and 3,195,521 heartbeats
 when every site retains its call. The cost per retained call must stay flat or decrease.
 It falls from 31,723 to 26,275 to 24,965 heartbeats.
 
-The compiled `RuntimeModelsAgree` check walks bodies of 512, 1,024 and 2,048 live nops.
-The median of nine walks took 1.53, 2.92 and 6.13 ms respectively on the integration machine.
-Each doubling permits at most 1.15 times the preceding median cost per instruction.
-Run these rows alone with
+The compiled checks interleave sizes across nine trials. The table gives median times in
+milliseconds. Each size doubles the instruction count or both the tuple field count and query
+count. Tuple queries retain the same computed layout and change only the indexed raw row.
+
+| Production check | 512 | 1,024 | 2,048 |
+| --- | ---: | ---: | ---: |
+| `RuntimeModelsAgree`, live nops | 1.811 | 3.515 | 7.257 |
+| `RuntimeModelsAgree`, dead nops with reverse-ordered links | 1.514 | 2.906 | 6.203 |
+| `integerPairResult`, oversized DivRem tuple | 0.486 | 0.973 | 1.908 |
+
+Each doubling permits up to 1.15 times the preceding median cost per instruction, or 1.25
+times the preceding median cost per tuple query. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
 
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
