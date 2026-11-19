@@ -52,8 +52,8 @@ def indirectOpcode (opcode : Nat) : Bool :=
 
 /-- An indirect access after `previous` emits exactly the instruction its opcode, operand type
     and prefix give. Integer indirect loads and stores retain their decoded kinds. Any other
-    instruction emits none of the forms `indirectEmission` names, except a call, which
-    `UnsafeCallsValid` binds and which may emit a typed transfer. -/
+    instruction emits none of the forms `indirectEmission` names, except a call: a live modelled
+    call emits only itself under `ManagedCallsValid`, and `RuntimeModelsAgree` binds its model. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (emitted : Instruction) (skipEncoding := false) : Bool :=
   if instruction.opcode == 0x71 || instruction.opcode == 0x81 ||
