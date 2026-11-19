@@ -184,4 +184,9 @@ def fieldKind? (layouts : List RawLayout) (type : TypeExpr) : Option FieldType :
     FieldType.vector256 <$> (primitiveField element).bind VectorLane.ofField?
   | _, _ => none
 
+/-- Storage accepted by Unsafe reference casts and element offsets. -/
+def StorageType.isFieldOrVector : StorageType → Bool
+  | .field _ | .vector128 | .vector256 | .vector512 => true
+  | _ => false
+
 end CIL.Extraction

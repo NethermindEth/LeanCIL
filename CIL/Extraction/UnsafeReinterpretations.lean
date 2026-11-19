@@ -66,4 +66,51 @@ theorem unsafeReinterpretEntries_yields {property : RuntimeModel → Prop}
 
 #print axioms unsafeReinterpretEntries_yields
 
+/-- A stored reference helper binds the same signature at the open and closed type arguments. -/
+private def referenceOverload (name result parameters : String)
+    (signature : TypeExpr → OpenSignature) (admitted : StorageType → Bool)
+    (operation : MemoryOp) : ModelOverload :=
+  { operand := unsafeOperand name result parameters (signature (.parameter 0))
+    accepts := fun method => (unsafeArgument method).any fun element =>
+      method.signature 0x10 == signature element
+    resolve := fun reader method => unsafeGuarded
+      (method.methodArguments.any fun type => (reader.storage type).any admitted)
+      (.memory operation) }
+
+/-- Both AsRef overloads form the reference supplied by the caller. -/
+private def asRefOverload (pointer : Bool) : ModelOverload :=
+  referenceOverload "AsRef" "!!0&" (if pointer then "System.Void*" else "!!0&")
+    (fun element => reinterpretDeclaration (if pointer then .pointer .void else .byref element)
+      (.byref element)) StorageType.isFieldOrVector .asRef
+
+/-- The reserved reference helpers and their exact external overloads. -/
+def unsafeReferenceEntries : List ModelEntry :=
+  let nonReference := fun (storage : StorageType) => storage != .reference
+  let boolean := TypeExpr.atom runtimeScope "System.Boolean"
+  [{ opcode := .call, owner := unsafeOwner, name := name!"AsRef", ownsName := true,
+     overloads := [asRefOverload false, asRefOverload true] },
+   { opcode := .call, owner := unsafeOwner, name := name!"NullRef", ownsName := true,
+     overloads := [referenceOverload "NullRef" "!!0&" "" (fun element =>
+       { convention := 0x10, parameters := [], returnType := .byref element })
+       nonReference .nullRef] },
+   { opcode := .call, owner := unsafeOwner, name := name!"IsNullRef", ownsName := true,
+     overloads := [referenceOverload "IsNullRef" "System.Boolean" "!!0&" (fun element =>
+       reinterpretDeclaration (.byref element) boolean) nonReference .isNullRef] }]
+
+/-- Every selected reference overload runs its checked memory operation. -/
+theorem unsafeReferenceEntries_yields {property : RuntimeModel → Prop}
+    (memory : ∀ operation, property (.memory operation)) :
+    ∀ entry ∈ unsafeReferenceEntries, entry.Yields property := by
+  intro entry listed reader method model found
+  simp only [unsafeReferenceEntries, List.mem_cons, List.not_mem_nil, or_false] at listed
+  rcases listed with rfl | rfl | rfl <;>
+    simp only [ModelEntry.resolve, ModelEntry.select?, ModelEntry.select?.select,
+      List.any_cons, List.any_nil, Bool.or_false, Bool.false_eq_true, ite_false] at found <;>
+    repeat' split at found
+  all_goals first
+    | contradiction
+    | rw [unsafeGuarded_eq found]; exact memory _
+
+#print axioms unsafeReferenceEntries_yields
+
 end CIL.Extraction
