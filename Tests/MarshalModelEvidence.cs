@@ -15,14 +15,13 @@ partial class Program
                 open CIL CIL.Extraction
                 /-- The retained call binds its exact operation, closed operand and open signature. -/
                 theorem marshalEvidence :
-                    (match (method0Closed.code[{{pc}}]? : Option RawInstruction),
-                       (method0.code[{{pc}}]? : Option Instruction) with
-                     | some raw, some (.call method _) => match raw.operand with
+                    (match method0Closed.code[{{pc}}]?, method0.code[{{pc}}]? with
+                     | some raw, some (Instruction.call method _) => match raw.operand with
                        | .call site =>
                          let agrees := fun operand op =>
                            runtimeCatalog.siteAgrees environment profile operand op none none true
-                         let changedSite : CallSite := { site with declared.convention := 0 }
-                         let changed := { raw with operand := .call changedSite }
+                         let forged := { site with declared.convention := 0 }
+                         let changed := { raw with operand := .call forged }
                          runtimeModel environment .call method == some (.memory ({{model}})) &&
                            runtimeModel environment .call method != some (.memory ({{other}})) &&
                            agrees raw (.call method {}) && !agrees changed (.call method {}) &&
