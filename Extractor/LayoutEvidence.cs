@@ -10,6 +10,7 @@ internal sealed class LayoutEvidence
 {
     readonly TypeReference[] rawTypes;
     readonly string[] identityTerms;
+    readonly Dictionary<string, string> namedOperandTypes = new(StringComparer.Ordinal);
     // Raw metadata is topological; emitted layout constants retain the caller supplied order.
     readonly Dictionary<string, int> emittedIndices = new(StringComparer.Ordinal);
     readonly Dictionary<string, int> typeIndices = new(StringComparer.Ordinal);
@@ -99,6 +100,9 @@ internal sealed class LayoutEvidence
 
     internal string IdentityTerm(int index) => identityTerms[index];
 
+    /// <summary>The same operand type with a shared byte-backed name for a closed generic layout.</summary>
+    internal string NamedOperandType(string term) => namedOperandTypes.GetValueOrDefault(term, term);
+
     internal string RawFieldType(TypeReference type, ModuleDefinition module)
     {
         if (MetadataValidation.IsAggregate(type, module) || layouts.IsImported(type))
@@ -129,6 +133,19 @@ internal sealed class LayoutEvidence
 
     internal void EmitLayouts(StringBuilder lean)
     {
+        var rowIdentities = (string[])identityTerms.Clone();
+        for (var index = 0; index < rawTypes.Length; index++)
+        {
+            if (!GenericStructs.Is(rawTypes[index])) continue;
+            var identity = Identity(rawTypes[index]);
+            var name = $"layoutIdentity{index}";
+            var bytes = MetadataSlices.Bytes(IdentityText.Utf8(identity));
+            var spelling = IdentityText.Quote(identity);
+            lean.AppendLine($"def {name} : String := Extraction.byteString {bytes} {spelling} (by cil_kernel_rfl)");
+            rowIdentities[index] = name;
+            // Field resolution compares the owner's and held type's bytes with the bytes in the layout row.
+            namedOperandTypes[$".aggregate {identityTerms[index]} {index}"] = $".aggregate {name} {index}";
+        }
         lean.AppendLine("def rawLayouts : List Extraction.RawLayout := [");
         lean.AppendLine(string.Join(",\n", rawTypes.Select((type, index) =>
         {
@@ -163,7 +180,7 @@ internal sealed class LayoutEvidence
             var attributes = $"{genericEvidence}{kind}{auto}{marker}{interfaces}";
             var size = $"packing := {metadata.PackingSize}, declaredSize := {metadata.ClassSize}";
             var fieldList = string.Join(", ", fields);
-            var identity = IdentityTerm(index);
+            var identity = rowIdentities[index];
             return $$"""  { identity := {{identity}}, {{attributes}}{{size}}, fields := [{{fieldList}}] }""";
         })));
         lean.AppendLine("]");

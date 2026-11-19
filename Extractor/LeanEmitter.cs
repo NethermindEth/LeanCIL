@@ -196,7 +196,7 @@ internal static class LeanEmitter
         // The shape facts are written here once every method has been translated, so admission reports its own
         // refusals first, and every method's components see them.
         var shapeFactsAt = lean.Length;
-        var operandShapes = new OperandShapes();
+        var operandShapes = new OperandShapes(layoutEvidence);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
@@ -470,7 +470,7 @@ internal static class LeanEmitter
     /// The distinct field and type operands of the reachable field and value-type instructions of every method, each
     /// written once as a definition beside the fact that states how every method of the extraction resolves it.
     /// </summary>
-    internal sealed class OperandShapes
+    internal sealed class OperandShapes(LayoutEvidence layouts)
     {
         readonly Dictionary<FieldRef, int> fields = [];
         // TypeExpr has no typed C# form, so a type operand is keyed by its rendered term.
@@ -491,7 +491,11 @@ internal static class LeanEmitter
                     var field = evidence.FieldReferenceOf(method, pc);
                     if (!fields.TryAdd(field, fields.Count)) continue;
                     var name = $"fieldRef{fields[field]}";
-                    text.AppendLine($"def {name} : Extraction.FieldRef := {field.ToLean()}");
+                    var operand = field with
+                    {
+                        Owner = layouts.NamedOperandType(field.Owner), Type = layouts.NamedOperandType(field.Type)
+                    };
+                    text.AppendLine($"def {name} : Extraction.FieldRef := {operand.ToLean()}");
                     text.AppendLine($"cil_field_shape {FrameMetadata.EnvironmentLean} {name}");
                 }
                 else if (instruction.OpCode.Code is
@@ -500,7 +504,7 @@ internal static class LeanEmitter
                     var type = evidence.TypeOperandOf(method, instruction);
                     if (!types.TryAdd(type, types.Count)) continue;
                     var name = $"valueType{types[type]}";
-                    text.AppendLine($"def {name} : Extraction.TypeExpr := {type}");
+                    text.AppendLine($"def {name} : Extraction.TypeExpr := {layouts.NamedOperandType(type)}");
                     text.AppendLine($"cil_value_shape {FrameMetadata.EnvironmentLean} {name}");
                 }
             }
