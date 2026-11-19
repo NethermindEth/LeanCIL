@@ -8,8 +8,6 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
-#:include GeneratedEvidence.cs
-#:include RejectedEvidence.cs
 
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -56,8 +54,17 @@ foreach (var aligned in new[] { false, true })
     var second = copy ? ".reference (.address ⟨1, 0⟩)" : ".scalar (.i32 7)";
     var expected = copy ? "[32, 33, 34, 165]" : "[7, 7, 7, 165]";
     var parameters = copy ? "byte*,byte*,uint" : "byte*,byte,uint";
+    var operation = copy ? "copyBlock" : "initBlock";
+    var alignment = aligned ? 8 : 1;
     var claims = new List<string>
     {
+        $$"""
+        (match Extracted.method0.code[3]? with
+         | some (.call method _) =>
+           CIL.Extraction.runtimeModel Extracted.environment .call method ==
+             some (.memory (.{{operation}} {{alignment}}))
+         | _ => false) = true
+        """,
         $"(CIL.Safety.invoke Extracted.program 16 0 [Tests.reference, {second}, .scalar (.i32 3)] " +
          "memory).map (fun result => (List.range 4).map (fun offset => " +
          $"(result.1.cells 0 offset).bits.toNat)) = .ok {expected}"
@@ -68,30 +75,9 @@ foreach (var aligned in new[] { false, true })
     Prove(assembly, $"Blocks::{name}({parameters})", name, claims);
 }
 
-void CheckPointerEvidence()
-{
-    var rejected = new RejectedEvidence(Path.Combine(root, "RejectedPointerEvidence"));
-    foreach (var (name, before, after) in new[]
-    {
-        ("CopyPointer", ".copyBlock 1", ".copyBlock 8"),
-        ("FillPointerAligned", ".initBlock 8", ".initBlock 1"),
-        ("CopyPointer", ".copyBlock 1", ".initBlock 1")
-    })
-    {
-        var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-            "method0_unsafe_validated");
-        if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing block mutation");
-        var path = Path.Combine(root, name + after.Replace(' ', '-') + ".lean");
-        File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-        rejected.Add(path, "PASS pointer block evidence rejection: " + name + after, "UnsafeCallsValid");
-    }
-    rejected.Check();
-}
-
 if (args.Length != 0)
 {
     queue.Flush();
-    CheckPointerEvidence();
     return;
 }
 
@@ -285,7 +271,6 @@ foreach (var mutation in new[] { "zero", "three", "eight", "target", "duplicate"
 }
 
 queue.Flush();
-CheckPointerEvidence();
 
 Console.WriteLine($"PASS {cases} block memory checks and universal overrun rejection");
 

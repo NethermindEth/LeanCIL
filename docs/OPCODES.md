@@ -226,10 +226,11 @@ bypasses no safety check: `ldfld` and `stfld` after it decode to the same field 
 without it. `ldflda` after `unaligned.`, and any field instruction after `volatile.`, are
 rejected.
 
-The exact managed-reference and pointer overloads of `Unsafe.InitBlock`, `InitBlockUnaligned`,
-`CopyBlock` and `CopyBlockUnaligned` use these same operations. Pointer arguments must come from
-admitted allocation-relative references; arbitrary integer addresses are unsupported. The
-certificate binds each helper's exact signature, operation and alignment.
+Calls to `Unsafe.InitBlock`, `InitBlockUnaligned`, `CopyBlock` and `CopyBlockUnaligned` retain
+their call instruction. The runtime model accepts two static overloads per name, one taking byte
+references and one taking void pointers. Both use the checked block operation with alignment
+eight for the aligned helpers and one for the unaligned helpers. Pointer arguments must come
+from admitted allocation-relative references.
 
 ## Pointer subtraction and ordering
 

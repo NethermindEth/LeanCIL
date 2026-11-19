@@ -14,6 +14,9 @@ transfer also requires the enclosing return type and the adjacent return.
 
 namespace CIL.Extraction
 
+/-- The address alignment of an aligned block instruction or runtime helper, in bytes. -/
+def defaultBlockAlignment : Nat := 8
+
 /-- The opcodes that prefix the instruction after them: `unaligned.`, `volatile.`, `tail.`,
     `constrained.`, `no.` and `readonly.`, all between `0xFE12` and `0xFE1E`. -/
 def isPrefixOpcode (opcode : Nat) : Bool :=

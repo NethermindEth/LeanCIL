@@ -154,8 +154,24 @@ internal static class RuntimeModels
         if (reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
             reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default ||
-            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
-            !IntegerMathCalls.TryGetValue(reference.FullName, out var model)) return null;
+            !ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime)) return null;
+        var model = reference.FullName switch
+        {
+            $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
+            $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" =>
+                MemoryOperation.Other("(.copyBlock 8)"),
+            $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" or
+            $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" =>
+                MemoryOperation.Other("(.copyBlock 1)"),
+            $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" or
+            $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" =>
+                MemoryOperation.Other("(.initBlock 8)"),
+            $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
+            $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
+                MemoryOperation.Other("(.initBlock 1)"),
+            _ => IntegerMathCalls.GetValueOrDefault(reference.FullName)
+        };
+        if (model is null) return null;
         ValidateSignature(reference, profile.Architecture);
         return model;
     }
@@ -285,18 +301,6 @@ internal static class RuntimeModels
 
     private static Operation? Runtime(string signature) => signature switch
     {
-        $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
-        $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" =>
-            MemoryOperation.Other("(.copyBlock 8)"),
-        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" or
-        $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" =>
-            MemoryOperation.Other("(.copyBlock 1)"),
-        $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" or
-        $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" =>
-            MemoryOperation.Other("(.initBlock 8)"),
-        $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
-        $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
-            MemoryOperation.Other("(.initBlock 1)"),
         "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" =>
             MemoryOperation.Of(new SpanCreate()),
         _ => ArgumentGuards.Translate(signature) ?? Span(signature)

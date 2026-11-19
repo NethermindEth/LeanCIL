@@ -11,42 +11,6 @@ bound to the one operation that displaces and transfers like `Unsafe.Add` and `l
 
 namespace CIL.Extraction
 
-/-- The alignment `cpblk`, `initblk`, `Unsafe.CopyBlock` and `Unsafe.InitBlock` assume of their
-    addresses without an `unaligned.` prefix or the `Unaligned` helper. -/
-def defaultBlockAlignment : Nat := 8
-
-/-- Exact byte-reference and pointer block helpers share the existing checked block operations. -/
-def unsafeBlockCall (raw : RawInstruction) : Option (Bool × Nat) := do
-  if raw.opcode != 40 then none else pure ()
-  let .call site := raw.operand | none
-  if site.declaringType != .atom runtimeScope "System.Runtime.CompilerServices.Unsafe" ||
-      site.hasThis || site.returnsValue || site.returnType != .void ||
-      !site.typeArguments.isEmpty || site.parameterCount != 3 then none else pure ()
-  let (copy, alignment) ← match site.name with
-    | "CopyBlock" => some (true, defaultBlockAlignment) | "CopyBlockUnaligned" => some (true, 1)
-    | "InitBlock" => some (false, defaultBlockAlignment) | "InitBlockUnaligned" => some (false, 1)
-    | _ => none
-  let byte := TypeExpr.atom runtimeScope "System.Byte"
-  let pointer := site.parameterTypes.head? == some (.pointer .void)
-  let address := if pointer then .pointer .void else .byref byte
-  if site.parameterTypes != [address, if copy then address else byte,
-      .atom runtimeScope "System.UInt32"] then none else pure ()
-  let addressName := if pointer then "System.Void*" else "System.Byte&"
-  if site.target != .external (runtimeScope ++
-      "::System.Void System.Runtime.CompilerServices.Unsafe::" ++ site.name ++ "(" ++
-      addressName ++ "," ++ (if copy then addressName else "System.Byte") ++
-      ",System.UInt32)") then none else some (copy, alignment)
-
-/-- Block helper calls bind operation, alignment and signature independently of the extractor. -/
-def unsafeBlockMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
-  match unsafeBlockCall raw with
-  | some (copy, alignment) => match copy, emitted with
-    | true, .memory (.copyBlock actual) | false, .memory (.initBlock actual) => actual == alignment
-    | _, _ => false
-  | none => match raw.opcode, emitted with
-    | 40, .memory (.copyBlock _) | 40, .memory (.initBlock _) => false
-    | _, _ => true
-
 /-- Whether `Vector128.LoadUnsafe` or `StoreUnsafe` is named, whatever the remaining metadata. -/
 def vector128UnsafeFamily (site : CallSite) : Bool :=
   (site.name == "LoadUnsafe" || site.name == "StoreUnsafe") &&

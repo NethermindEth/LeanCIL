@@ -7,6 +7,7 @@ import CIL.Extraction.BitModels
 import CIL.Extraction.UnsafeReinterpretations
 import CIL.Extraction.UnsafeOffsets
 import CIL.Extraction.UnsafeTransferModels
+import CIL.Extraction.UnsafeBlocks
 
 /-!
 # Runtime model resolution
@@ -31,6 +32,7 @@ def modelFamilies : List (List ModelEntry) := [
   unsafeReferenceEntries,
   unsafeOffsetEntries,
   unsafeTransferEntries,
+  unsafeBlockEntries,
 ]
 
 /-- The runtime methods with a model. -/

@@ -484,6 +484,7 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
     | exact unsafeReinterpretEntries_yields memory_stepRenamed entry member
     | exact unsafeOffsetEntries_yields (property := CIL.RuntimeModel.StepRenamed)
         (memory_stepRenamed .byteOffset) entry member
+    | exact unsafeBlockEntries_yields memory_stepRenamed entry member
 
 #print axioms runtimeModel_stepRenamed
 

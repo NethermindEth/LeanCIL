@@ -15,7 +15,7 @@ namespace CIL.Extraction
 /-- A checked runtime family of calls or constructions. -/
 inductive LoweredFamily where
   | hardware | vectorCreate | vectorTransfer | span | view | binary | guard
-  | unsafeReference | unsafeOffset | unsafeBlock
+  | unsafeReference | unsafeOffset
   | integerMath | feature | platform | referenceContent | staticSpan
   | typeTest | throwConstructor
   deriving DecidableEq, Repr
@@ -74,7 +74,6 @@ private def hardwareMember (owner member : String) : Bool :=
 /-- The Unsafe runtime method named by the raw operand. -/
 private def unsafeFamily (name : String) : Option LoweredFamily :=
   match name with
-  | "InitBlock" | "InitBlockUnaligned" | "CopyBlock" | "CopyBlockUnaligned" => some .unsafeBlock
   | "AddByteOffset" | "SubtractByteOffset" => some .unsafeReference
   | "Add" | "Subtract" => some .unsafeOffset
   | _ => none

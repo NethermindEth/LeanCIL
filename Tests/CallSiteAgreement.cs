@@ -91,8 +91,10 @@ CallWitness[] witnesses =
         0, 0, ".lowered .referenceContent"),
     new("staticSpan", "SpanTables::First()",
         1, 1, ".lowered .staticSpan"),
-    new("unsafeBlock", "Blocks::Fill(System.Byte&,System.Byte,System.UInt32)",
-        0, 3, ".lowered .unsafeBlock"),
+    new("initBlockUnaligned", "Blocks::Fill(System.Byte&,System.Byte,System.UInt32)", 0, 3, ".model"),
+    new("initBlock", "Blocks::FillPointerAligned(System.Byte*,System.Byte,System.UInt32)", 0, 3, ".model"),
+    new("copyBlockUnaligned", "Blocks::CopyPointer(System.Byte*,System.Byte*,System.UInt32)", 0, 3, ".model"),
+    new("copyBlock", "Blocks::CopyPointerAligned(System.Byte*,System.Byte*,System.UInt32)", 0, 3, ".model"),
 ];
 var methods = witnesses.GroupBy(site => (site.Entry, site.Profile)).ToArray();
 string Folder(CallWitness site) => Path.Combine(output, site.Name);

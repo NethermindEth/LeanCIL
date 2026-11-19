@@ -6,6 +6,7 @@ import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.GuardCalls
 import CIL.Extraction.Prefixes
+import CIL.Extraction.RuntimeModels
 import CIL.Resolution
 
 /-!
@@ -904,8 +905,13 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- `call` and `newobj`: the operands must have the signature's kinds.
   if opcode == 40 || opcode == 111 || opcode == 115 then
     let .call site := instruction.operand | none
-    let expected := if let some (copy, _) := unsafeBlockCall instruction then
-        [.word32, if copy then .reference else .word32, .reference] else
+    -- Block helpers consume allocation-relative references in their void-pointer slots.
+    let pointerModel := if opcode == 40 && site.parameterTypes.head? == some (.pointer .void)
+      then runtimeModel {} .call site.method else none
+    let expected := if pointerModel matches some (.memory (.copyBlock _)) then
+        [.word32, .reference, .reference] else
+      if pointerModel matches some (.memory (.initBlock _)) then
+        [.word32, .word32, .reference] else
       if opcode == 40 && site.parameterTypes.head? == some (.pointer .void) &&
           unsafeTransferEntries.any (fun entry => entry.name == site.method.name &&
             entry.bindsSite site) then

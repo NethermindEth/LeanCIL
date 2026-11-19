@@ -60,7 +60,6 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
   all3 (fun instruction live emitted => !live ||
       memoryCallOrigin instruction emitted &&
-      unsafeBlockMatches instruction emitted &&
       vector128UnsafeMatches instruction emitted &&
       viewObservationMatches instruction emitted &&
       binaryTransferMatches instruction emitted &&

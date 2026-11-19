@@ -85,9 +85,6 @@ def LoweredFamily.resolve (family : LoweredFamily) (environment : CallLayouts)
     let stride := if site.name == "Subtract" then subtractionStride width else width
     let signed := site.parameterTypes[1]? != some (.atom runtimeScope "System.UIntPtr")
     return .memory (.add stride signed)
-  | .unsafeBlock =>
-    let (copy, alignment) ← unsafeBlockCall raw
-    return .memory (if copy then .copyBlock alignment else .initBlock alignment)
   | .platform => return .ldc_i4 (← platformConstant site)
   | .referenceContent =>
     return .ldc_i4 (← referenceContentConstant environment.indexedRaw site)

@@ -115,6 +115,9 @@ name = "Tests.UnsafeReinterpretations"
 name = "Tests.UnsafeOffsets"
 
 [[lean_lib]]
+name = "Tests.UnsafeBlocks"
+
+[[lean_lib]]
 name = "Tests.ReturnOpcode"
 
 [[lean_lib]]

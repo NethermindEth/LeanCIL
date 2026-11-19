@@ -226,6 +226,12 @@ Nonempty destinations need write authority, not prior readability. Copy requires
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.
 
+The four Unsafe block helpers retain their calls. The closed signature selects the byte-reference
+or void-pointer overload. The raw operand must match its external target and open declaration.
+Each member takes a `uint` byte count and returns void. Copy takes two addresses of the same type,
+and initialization takes an address and a byte. The aligned helpers require eight-byte alignment
+and the unaligned helpers require one-byte alignment on every supported profile.
+
 Block copies require disjoint regions; `cpobj` permits identical addresses but rejects partial
 overlap. Nonempty block accesses check lifetime, bounds, permissions, initialization, alignment and
 GC-reference exclusion. Block alignment is eight unless a valid `unaligned.` prefix selects 1/2/4.
