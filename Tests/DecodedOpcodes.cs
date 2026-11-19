@@ -51,24 +51,35 @@ File.WriteAllText(path, $$"""
       decide +kernel
     #print axioms table_is_valueOpcode
 
-    /-- A folded prefix emits nop and the indirect call carries the tail transfer. -/
+    /-- The instruction selected by a recognized role at its raw pc. -/
+    private def folded (code : List RawInstruction) (pc : Nat) : Option Instruction := do
+      let role <- (foldRoles [] code)[pc]?.join
+      let raw <- code[pc]?
+      Instruction.ofRole? role (rawBefore (fun i => code[i]?) pc) raw
+
+    /-- All three opcodes are required for the indirect tail transfer. -/
     theorem tail_opcodes :
         let tailPrefix := RawInstruction.mk 0 {{(ushort)OpCodes.Tail.Value}} .none
         let indirect := RawInstruction.mk 2 {{OpCodes.Calli.Value}} (.indirectCall .void [] false false 0)
-        (Instruction.ofRole? .head none tailPrefix matches some .nop) &&
-          (Instruction.ofRole? .tailCall (some tailPrefix) indirect matches
-            some (.managed (.call _ true))) := by decide +kernel
+        let code := [tailPrefix, indirect, RawInstruction.mk 7 {{OpCodes.Ret.Value}} .none]
+        let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
+        foldRoles [] code == [some .head, some .tailCall, some .argument] &&
+          (folded code 0 matches some .nop) && (folded code 1 matches some (.managed (.call _ true))) &&
+          ([0, 1, 2].all fun pc =>
+            foldRoles [] (code.set pc nop) == List.replicate 3 none) := by
+      decide +kernel
     #print axioms tail_opcodes
 
-    /-- Folded type handles erase their operands and a throw retains its exception kind. -/
-    theorem token_opcodes :
-        let token := RawInstruction.mk 0 {{OpCodes.Ldtoken.Value}} (.type .void)
-        let raise := RawInstruction.mk 0 {{OpCodes.Throw.Value}} .none
-        (Instruction.ofRole? .head none token matches some .nop) &&
-          (Instruction.ofRole? .interior none token matches some .nop) &&
-          (Instruction.ofRole? (.raise .overflow) none raise matches some (.throw .overflow)) := by
+    /-- A null throw needs both the null load and the throw opcode. -/
+    theorem throw_opcodes :
+        let code := [RawInstruction.mk 0 {{OpCodes.Ldnull.Value}} .none,
+          RawInstruction.mk 1 {{OpCodes.Throw.Value}} .none]
+        let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
+        foldRoles [] code == [some .head, some (.raise .nullReference)] &&
+          (folded code 1 matches some (.throw .nullReference)) &&
+          ([0, 1].all fun pc => foldRoles [] (code.set pc nop) == [none, none]) := by
       decide +kernel
-    #print axioms token_opcodes
+    #print axioms throw_opcodes
 
     """ + "\n");
 CheckLean(path);
@@ -189,6 +200,25 @@ foreach (var (name, selector, method, code) in new[]
         #print axioms decoded_code
 
         """);
+    if (name == "WordFlag")
+        File.AppendAllText(pathToSource, $$"""
+
+            open CIL CIL.Extraction
+
+            /-- Both type-handle opcodes are required for this closed equality fold. -/
+            theorem token_opcodes :
+                let code := Extracted.method{{method}}Closed.code
+                let token := {{(ushort)OpCodes.Ldtoken.Value}}
+                let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
+                let opcode := fun (pc : Nat) => (code[pc]?).map RawInstruction.opcode
+                (opcode 0, opcode 2) == (some token, some token) &&
+                  foldRoles [] code == [some .head, some .interior, some .interior, some .interior,
+                    some (.result true), none] &&
+                  ([0, 2].all fun pc => foldRoles [] (code.set pc nop) == List.replicate 6 none) := by
+              decide +kernel
+            #print axioms token_opcodes
+
+            """);
     CheckLean(pathToSource);
 }
 
