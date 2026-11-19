@@ -224,6 +224,12 @@ def referenceContentConstant (layouts : Array RawLayout) (site : CallSite) : Opt
         "IsReferenceOrContainsReferences()") || !referenceFreeStorage layouts type then none
   else some 0
 
+/-- The declaring type and member must name the same row as the external signature. -/
+private def featureOwnerMatches (site : CallSite) (name : String) (feature : Feature) : Bool :=
+  site.declaringType == .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ name) &&
+    site.name == (if feature == .vector128Accelerated || feature == .vector256Accelerated then
+      "get_IsHardwareAccelerated" else "get_IsSupported")
+
 /-- Identify getters from raw member and assembly identity, never an emitter-supplied flag. -/
 def featureGetter (site : CallSite) : Option Feature := do
   let .external identity := site.target | none
@@ -231,8 +237,8 @@ def featureGetter (site : CallSite) : Option Feature := do
       !site.typeArguments.isEmpty then none
   else
     let signature := featureSignature identity
-    ((featureIdentities.zip (featureNames.map Prod.snd)).find?
-      fun (expected, _) => signature == some expected).map Prod.snd
+    ((featureIdentities.zip (featureNames.map id)).find? fun (expected, name, feature) =>
+      signature == some expected && featureOwnerMatches site name feature).map (·.2.2)
 
 /-- UTF-8 byte equality is exact string equality, including non-ASCII metadata. -/
 private theorem featureBytes_eq (identity suffix : String) :
@@ -254,12 +260,13 @@ theorem featureGetter_eq_original (site : CallSite) : featureGetter site = (do
     if site.parameterCount != 0 || site.hasThis || !site.returnsValue ||
         !site.typeArguments.isEmpty then none
     else (featureNames.find? fun (name, feature) =>
-      identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++
+      (identity == intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++ name ++
         "::" ++ (if feature == .vector128Accelerated || feature == .vector256Accelerated then
-          "get_IsHardwareAccelerated" else "get_IsSupported") ++ "()").map Prod.snd) := by
+          "get_IsHardwareAccelerated" else "get_IsSupported") ++ "()") &&
+        featureOwnerMatches site name feature).map Prod.snd) := by
   simp only [featureGetter, featureIdentities_eq, List.zip_map', List.find?_map,
     Function.comp_def, featureBytes_eq, Option.map_map, featurePrefix, featureSuffix,
-    String.append_assoc]
+    String.append_assoc, id]
 #print axioms featureGetter_eq_original
 
 /-- A certificate state fits the method: its local facts fit the method's locals and the stack

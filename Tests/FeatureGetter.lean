@@ -24,6 +24,15 @@ def getter (owner member : String) : CallSite := {
     owner ++ "::" ++ member ++ "()")
   parameterCount := 0, returnsValue := true, typeArguments := [] }
 
+/-- The external identity must name the selected owner even for two admitted getters. -/
+theorem targetOwner :
+    let site := getter "X86.Avx2" "get_IsSupported"
+    featureGetter site = some .avx2 ∧
+      featureGetter { site with target := (getter "X86.Aes" "get_IsSupported").target } = none :=
+  by decide +kernel
+
+#print axioms targetOwner
+
 /-- Hardware acceleration, nested class and ordinary supported getters retain their flags. -/
 theorem supported :
     featureGetter (getter "Vector256" "get_IsHardwareAccelerated") = some .vector256Accelerated ∧
