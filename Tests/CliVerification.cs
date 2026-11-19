@@ -323,9 +323,11 @@ RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--t
 var objectTrace = Exited(Execute([.. cli, "verify", objectOutput, "--proof", depositBothProof, "--theorem",
     "ExampleProof.first_null_throws", "--trace"]), 0).Stdout.ReplaceLineEndings("\n");
 var depositExtraction = File.ReadAllText(Path.Combine(objectOutput, "Extracted.lean"));
-if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Instruction.callvirt ") ||
-    !depositExtraction.Contains("def method0Link2 : Link := .direct 1", StringComparison.Ordinal) ||
-    !objectTrace.Contains("changes faults: ExecutionFault.thrown CIL.ExceptionType.nullReference\n"))
+var nullReceiverCall = objectTrace.Split("[CIL.step] ").Skip(1).Any(entry =>
+    entry.StartsWith("pc 2: CIL.Instruction.callvirt", StringComparison.Ordinal) &&
+    entry.Contains("name := name!\"Deposit\", hasThis := true", StringComparison.Ordinal) &&
+    entry.Contains("changes faults: ExecutionFault.thrown CIL.ExceptionType.nullReference\n", StringComparison.Ordinal));
+if (!nullReceiverCall || !depositExtraction.Contains("def method0Link2 : Link := .direct 1", StringComparison.Ordinal))
     throw new InvalidOperationException("verify --trace did not show the null receiver's call: " + objectTrace);
 Console.WriteLine("PASS CLI reports a proof stuck on a class instance and traces its receiver-checked call");
 
