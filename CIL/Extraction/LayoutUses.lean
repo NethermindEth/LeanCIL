@@ -19,7 +19,7 @@ inductive FieldAccess where
 
 /-- How an instruction uses a struct's size. -/
 inductive SizeAccess where
-  | sizeOf | construct
+  | construct
   | spanElement
   | arrayElement
   deriving DecidableEq, Repr
@@ -64,7 +64,6 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
 private def checkSize (size : Nat) : SizeAccess → Instruction → Bool
   | .arrayElement, .memory (.arraySpan (.aggregate _ width) _ _)
   | .arrayElement, .initializeSpanLocal _ (.array (.aggregate _ width) _ _) => width == size
-  | .sizeOf, .ldc_i4 bits => bits.toNat == size
   | .spanElement, .initializeSpanLocal _ (.empty width _)
   | .spanElement, .memory (.spanFromReference width _)
   | .spanElement, .memory (.spanSingleReference width _)
