@@ -115,7 +115,8 @@ instance (catalog : ModelCatalog) (environment : LayoutEnvironment) (profile : F
 /-- Every live method-token call satisfies the runtime catalog or its linked-call obligation. -/
 def RuntimeModelsAgree (closed : RawMethod) (reachable : List Bool) (method : Method) : Prop :=
   ModelsAgree runtimeCatalog method.environment method.profile closed reachable method.code
-    (linkReads method.links (List.range method.code.length)).toArray
+    (if reachable.contains true then
+      (linkReads method.links (List.range method.code.length)).toArray else #[])
 
 instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
     Decidable (RuntimeModelsAgree closed reachable method) :=
@@ -128,6 +129,8 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
     (atLive : reachable[pc]? = some true) :
     SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true := by
   intro _ token refused
+  have live := List.contains_iff_mem.mpr (List.mem_of_getElem? atLive)
+  simp only [RuntimeModelsAgree, live, ite_true] at agree
   obtain ⟨_, lengthCode, checks⟩ := agree
   have inside : pc < closed.code.length := (List.getElem?_eq_some_iff.mp atRaw).1
   have inCode : pc < method.code.length := lengthCode ▸ inside

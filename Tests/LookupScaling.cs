@@ -2067,29 +2067,21 @@ void ModelTableCosts()
             return (← IO.monoNanosNow) - start
         #eval checkScaling "DivRem oversized tuple queries" 250 timeOversizedTuple
         /-- Decide the production relation on the supplied body. -/
-        @[noinline] def liveNops (raw : RawMethod) (reachable : List Bool) (body : Method) : Bool :=
+        @[noinline] def agreedNops (raw : RawMethod) (reachable : List Bool) (body : Method) : Bool :=
           decide (RuntimeModelsAgree raw reachable body)
-        /-- Median elapsed time with all three input lists allocated before timing. -/
-        def timeNops (count : Nat) : IO Nat := do
+        /-- Prepare the body, reachability and links before timing a walk. -/
+        def timeNops (live : Bool) (count : Nat) : Nat → IO Nat :=
           let raw := { shell with code := List.replicate count (.mk 0 0 .none) }
-          let body : Method := { code := List.replicate count .nop, locals := [], returnsValue := false }
-          let reachable := List.replicate count true
-          let mut samples := #[]
-          for trial in [:9] do
+          let links := if live then [] else (List.range count).reverse.map fun pc => (pc, Link.direct pc)
+          let body : Method := { code := List.replicate count .nop, links, locals := [], returnsValue := false }
+          let reachable := List.replicate count live
+          fun trial => do
             let start <- IO.monoNanosNow
-            unless liveNops { raw with token := trial } reachable body do
-              throw (IO.userError "RuntimeModelsAgree refused live nops")
-            let finish <- IO.monoNanosNow
-            samples := samples.push (finish - start)
-          return samples.qsortOrd[4]!
-        #eval show IO Unit from do
-          let mut previous := 0
-          for count in [512, 1024, 2048] do
-            let elapsed <- timeNops count
-            IO.println s!"RuntimeModelsAgree {count} live nops: {elapsed} ns"
-            if elapsed == 0 || (previous != 0 && elapsed * 100 > previous * 230) then
-              throw (IO.userError "RuntimeModelsAgree exceeded 1.15 times the cost per instruction")
-            previous := elapsed
+            unless agreedNops { raw with token := trial } reachable body do
+              throw (IO.userError "RuntimeModelsAgree refused nops")
+            return (← IO.monoNanosNow) - start
+        #eval checkScaling "RuntimeModelsAgree live nops" 230 (timeNops true)
+        #eval checkScaling "RuntimeModelsAgree dead nops with reversed links" 230 (timeNops false)
         {{string.Join("\n", siteCounts.Select(Sites))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
