@@ -147,6 +147,16 @@ internal static class LeanEmitter
     internal static int RecursionDepth(int longestBody) =>
         Math.Max(BaseRecursionDepth, RecursionDepthPerInstruction * longestBody);
 
+    /// <summary>Lean's default heartbeat budget, which the instruction checks of a shorter body fit in.</summary>
+    const int BaseHeartbeats = 200_000;
+
+    /// <summary>Twice the 60 heartbeats per instruction the kernel measured on the decided instruction checks.</summary>
+    const int HeartbeatsPerInstruction = 120;
+
+    // The kernel decides the instruction checks once per site, so their budget follows the body length.
+    internal static int InstructionCheckHeartbeats(int instructions) =>
+        Math.Max(BaseHeartbeats, HeartbeatsPerInstruction * instructions);
+
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
         ImportResolution? importResolution = null,
         StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)

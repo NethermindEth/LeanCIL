@@ -24,11 +24,12 @@ internal static class ScalarEvidence
             certificate.Incoming.TryGetValue(instruction, out NativeOperands.StackType[]? stack)
                 ? $"some [{string.Join(", ", stack.Reverse().Select(Kind))}]" : "none");
         lean.AppendLine($"def method{number}ScalarStates : Extraction.ScalarCertificate := [{string.Join(", ", states)}]");
-        EmitInstructionChecks(lean, number, decoded, objectProof);
+        EmitInstructionChecks(lean, number, method.Body.Instructions.Count, decoded, objectProof);
     }
 
     // The checks share the closed operands. Decoded methods already prove their code equality.
-    static void EmitInstructionChecks(StringBuilder lean, int number, bool decoded, string? objectProof)
+    static void EmitInstructionChecks(StringBuilder lean, int number, int instructions, bool decoded,
+        string? objectProof)
     {
         var method = $"method{number}";
         var flag = LeanText.Bool(decoded);
@@ -47,6 +48,9 @@ internal static class ScalarEvidence
         var remaining = $"And ({otherChecks}) ({objects})";
         var decided = objectProof is null ? remaining : otherChecks;
         var checkedTail = objectProof is null ? "checks.2" : $"(And.intro checks.2 ({objectProof}))";
+        var heartbeats = LeanEmitter.InstructionCheckHeartbeats(instructions);
+        if (heartbeats > LeanEmitter.InstructionCheckHeartbeats(0))
+            lean.AppendLine($"set_option maxHeartbeats {heartbeats} in");
         lean.AppendLine($"""
             theorem {method}_instruction_checks : And ({scalarEvidence}) ({remaining}) := by
               have checks : And ({scalar}) ({decided}) := {LeanEmitter.Decide}

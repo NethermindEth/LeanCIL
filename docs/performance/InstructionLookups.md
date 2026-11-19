@@ -33,6 +33,11 @@ instruction of the longest method when that is more, because Lean compiles and c
 list one nested cell per instruction. At a fixed 4096, a method of 2,002 instructions fails to
 compile.
 
+The kernel decides a method's instruction checks once per site, at 60,000 heartbeats per
+instruction. `Extracted.lean` therefore states `set_option maxHeartbeats` on those checks for a
+method of more than 1,666 instructions, at 120 per instruction; a shorter method keeps Lean's
+default of 200,000. At the default, the checks of a method of 4,006 instructions run out.
+
 ## The `lookups` suite
 
 ```sh
