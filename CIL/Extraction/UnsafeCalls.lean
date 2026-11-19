@@ -87,7 +87,17 @@ private def UnsafeHelper.signature : UnsafeHelper → Nat × Bool × String
 def UnsafeHelper.resolvesAt (helper : UnsafeHelper) (storage : TypeExpr → Option StorageType)
     (site : CallSite) : Bool :=
   let (count, returnsValue, signature) := helper.signature
-  !site.hasThis && site.parameterCount == count && site.returnsValue == returnsValue &&
+  let typed := match site.typeArguments with
+    | [element] =>
+      let result := match helper with
+        | .skipInit => TypeExpr.void
+        | .nullRef => .byref element
+        | .isNullRef => .atom runtimeScope "System.Boolean"
+      site.returnType == result && site.parameterTypes ==
+        (if helper == .nullRef then [] else [.byref element]) &&
+        site.method.methodArguments == [element] && site.method.genericArity == 1
+    | _ => false
+  typed && !site.hasThis && site.parameterCount == count && site.returnsValue == returnsValue &&
     site.target == unsafeTarget signature && admittedArgument storage site.typeArguments
 
 /-- Whether a helper resolves under the method's raw layouts. -/

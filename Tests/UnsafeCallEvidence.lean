@@ -12,7 +12,7 @@ private def call : CallSite := {
   declared := { convention := 0x10, parameters := [.byref (.parameter 0)] },
   method := {
     owner := unsafeType, name := name!"SkipInit", hasThis := false, genericArity := 1,
-    returnType := .void, parameters := [], methodArguments := [word] },
+    returnType := .void, parameters := [.byref word], methodArguments := [word] },
   name := "SkipInit",
   target := .external (scope ++ "::System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(\
     !!0&)"),
@@ -21,7 +21,7 @@ private def nullCall : CallSite := {
   declared := { convention := 0x10, returnType := .byref (.parameter 0) },
   method := {
     owner := unsafeType, name := name!"NullRef", hasThis := false, genericArity := 1,
-    returnType := .void, parameters := [], methodArguments := [word] },
+    returnType := .byref word, parameters := [], methodArguments := [word] },
   name := "NullRef",
   target := .external (scope ++ "::!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"),
   typeArguments := [word], parameterCount := 0, returnsValue := true }
@@ -31,7 +31,7 @@ private def testCall : CallSite := {
     parameters := [.byref (.parameter 0)] },
   method := {
     owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
-    returnType := .void, parameters := [], methodArguments := [word] },
+    returnType := .atom scope "System.Boolean", parameters := [.byref word], methodArguments := [word] },
   name := "IsNullRef",
   target := .external (scope ++ "::System.Boolean System.Runtime.CompilerServices.Unsafe::\
     IsNullRef(!!0&)"),
@@ -82,6 +82,14 @@ example : ¬ UnsafeCallsValid [] (raw { testCall with target := .external "forge
 example : ¬ UnsafeCallsValid [] (raw { testCall with parameterCount := 2 }) [true] [.memory .isNullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { testCall with returnsValue := false }) [true] [.memory .isNullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { testCall with typeArguments := [word, word] }) [true] [.memory .isNullRef] := by decide +kernel
+
+/-- A closed Boolean result includes its defining assembly. -/
+theorem isNullRefResultScope :
+    UnsafeHelper.isNullRef.resolves [] testCall = true ∧
+      UnsafeHelper.isNullRef.resolves [] { testCall with
+        method.returnType := .atom "Fixture" "System.Boolean" } = false := by decide +kernel
+
+#print axioms isNullRefResultScope
 
 -- A helper operation cannot replace an unrelated instruction.
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide +kernel
