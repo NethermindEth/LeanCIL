@@ -34,8 +34,10 @@ because no import slot binds a generic `MemoryMarshal` member.
 
 For a method defined by its decoder, the evidence proves that its entire instruction list equals
 the decoding of the closed body. At a reachable instruction outside a fold, the scalar validator
-uses this equality for value encodings when the decoder supplies an instruction. A decoded hole
-still needs the explicit site check, as do folded sites and methods emitted as literals.
+uses this equality for value encodings when the decoder supplies an instruction. Folded
+sites and methods emitted as literals retain their explicit site checks.
+Closed method construction refuses the first reachable hole with its pc and raw opcode.
+Dead sites retain their opcode-tagged holes.
 
 At each decoded position, `RuntimeModelsAgree.of_decoded_site` proves the runtime
 agreement check from the instruction lookup, the reachability bit and the absence of a

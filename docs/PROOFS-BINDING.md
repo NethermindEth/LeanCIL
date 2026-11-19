@@ -741,8 +741,9 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 ### Methods defined from their decoder
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
-method that `decoder`, a closed `Option Method` term such as `Method.ofClosed? profile environment
-links reachable closed storage`, gives. The decoder takes the link table as given: a `call` and a
+method returned by a closed decoder. `Method.ofClosed?` returns a typed error for an invalid
+frame or prefix, or the pc and opcode of the first reachable hole. `Method.ofRaw?` returns an
+optional method. The decoder takes the link table as given: a `call` and a
 `newobj` name their method's metadata, and the table states the method index, and for a
 construction the allocation, each enters, which `Extraction.ManagedCallsValid` checks against the
 raw site. Compiled code evaluates the decoder, and the command writes the result as constructors
@@ -752,7 +753,8 @@ zero-initialized struct local is written as `.aggregate (List.replicate size 0)`
 extraction's literal and `make_fitting_local` hypotheses name. In a method with a constrained call or a dead site,
 the command writes aggregate identities with the expressions from the environment's raw layouts.
 The kernel then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
-`decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
+`decoder = .ok name` for a closed method or `decoder = some name` for an optional method,
+and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
 `_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
 `Extracted.method0_decoder_eq`, `Extracted.method0_profile` and so on. For a `Method.ofClosed?`

@@ -286,7 +286,7 @@ private def refuses (control changed : RawInstruction) (reference : MethodRef)
     (Method.ofRaw? .scalar environment [] [true] (method raw) []).map Method.code
   decide (decode (sized 3) control = some [.call reference {}]) &&
     decide (siteClaim loweredCallFamily layouts none changed = .model) &&
-    decide (decode layouts changed = some [.unadmitted changed.opcode]) &&
+    decide (decode layouts changed = none) &&
     !runtimeCatalog.siteAgrees layouts .scalar changed replacement none none true
 
 /-- Substituting a method parameter for the declared Int32 result refuses SizeOf. -/

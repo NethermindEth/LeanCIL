@@ -169,7 +169,7 @@ private def refused (raw : RawInstruction) (alternative : Instruction) : Bool :=
     .scalar none none raw
   siteClaim loweredCallFamily {} none raw == .refused &&
     decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
-      some [.unadmitted 40]) &&
+      none) &&
     required.accepts false (.unadmitted 40) && !required.accepts true (.unadmitted 40) &&
     !required.accepts true alternative && !required.accepts false alternative
 

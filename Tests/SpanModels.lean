@@ -142,10 +142,10 @@ theorem byRefLikeArrays :
       let raw := row.raw row.declared
       let call := Instruction.call row.method {}
       let expected := match row.operation with
-        | .arraySpan .. => Instruction.unadmitted 40
-        | _ => call
+        | .arraySpan .. => none
+        | _ => some [call]
       decide (decoded raw (environment 1) = some [call]) &&
-        decide (decoded raw (environment 1 true) = some [expected])) = true := by
+        decide (decoded raw (environment 1 true) = expected)) = true := by
   decide +kernel
 
 #print axioms byRefLikeArrays
@@ -188,7 +188,7 @@ theorem liveAgreement :
 theorem decodedOverloads :
     ((rows int32 4).all fun row =>
       decide (decoded (row.raw row.declared) = some [.call row.method {}]) &&
-        decide (decoded (row.raw row.forged) = some [.unadmitted 40])) := by
+        decide (decoded (row.raw row.forged) = none)) := by
   decide +kernel
 
 #print axioms decodedOverloads
@@ -203,7 +203,7 @@ theorem operandRefusals :
         { site with returnsValue := false },
         { site with typeArguments := [int32] }, { site with ownerArgumentCount := 1 }].all
           fun changed => decide (decoded { raw with operand := .call changed } =
-            some [.unadmitted 40])) := by
+            none)) := by
   decide +kernel
 
 #print axioms operandRefusals

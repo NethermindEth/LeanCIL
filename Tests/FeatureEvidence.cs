@@ -473,6 +473,7 @@ platformControls.Check(replay: false);
 // Lean binds the raw endianness load to System.Runtime's BitConverter Boolean and the value 1.
 var endianSource = File.ReadAllText(Path.Combine(output, "Capabilities-scalar", "Endian", "Extracted.lean"));
 var endianControls = new GeneratedEvidence(Path.Combine(output, "EndianControls"));
+const string endianOwner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
 foreach (var (obligation, diagnostic) in new[]
 {
     (featureObligation, "FeatureFlowValid"), ("method0_scalars_validated", "ScalarFlowValid")
@@ -486,15 +487,26 @@ foreach (var (obligation, diagnostic) in new[]
     var forgedValue = Path.Combine(output, obligation + "-wrong-endian.lean");
     File.WriteAllText(forgedValue, NarrowEvidence(changedValue, obligation));
     rejected.Add(forgedValue, "PASS endianness constant value rejection: " + diagnostic, diagnostic);
-    const string owner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
-    if (!narrowed.Contains(owner, StringComparison.Ordinal))
+    if (!narrowed.Contains(endianOwner, StringComparison.Ordinal))
         throw new InvalidOperationException("Missing endianness owner");
     var forgedOwner = Path.Combine(output, obligation + "-forged-endian-owner.lean");
-    var changedOwner = ForgeDecodedOriginal(endianSource, 0, owner, ".atom \"forged\" \"System.BitConverter\"");
+    var changedOwner = ForgeClosedCode(endianSource, 0, """
+        modify 0 (fun raw => match raw.operand with
+          | .field _ index type name isStatic =>
+            { raw with operand := .field (.atom "forged" "System.BitConverter") index type name isStatic }
+          | _ => raw)
+        """);
     File.WriteAllText(forgedOwner, NarrowEvidence(changedOwner, obligation));
     rejected.Add(forgedOwner, "PASS endianness owner forgery rejection: " + diagnostic, diagnostic);
 }
 endianControls.Check(replay: false);
+
+var refusedOwner = Path.Combine(output, "forged-endian-decoder.lean");
+var refusedEndian = ForgeDecodedOriginal(endianSource, 0, endianOwner,
+    ".atom \"forged\" \"System.BitConverter\"");
+File.WriteAllText(refusedOwner, NarrowEvidence(refusedEndian, featureObligation));
+rejected.Add(refusedOwner, "PASS forged endianness owner refuses raw decoding",
+    "cil_decoded_method: the decoder gives no method");
 foreach (var mutation in new[] { "scope", "field", "module-type" })
 {
     using var module = ModuleDefinition.ReadModule(assembly);

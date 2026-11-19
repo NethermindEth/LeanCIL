@@ -293,8 +293,25 @@ foreach (var (name, changed, obligation, marker) in new[]
 })
 {
     if (changed == baseline) throw new InvalidOperationException($"Ineffective vector mutation: {name}");
+    if (obligation == shapes)
+    {
+        var live = Path.Combine(root, $"{name}-decoder.lean");
+        File.WriteAllText(live, NarrowEvidence(changed, shapes));
+        rejected.Add(live, $"PASS live vector element refused: {name}", "MethodDecodeError.liveHole 1 65045");
+        var element = name == "float-element" ? "System.Double" : "System.Int16";
+        var token = $$"""
+            map (fun raw => match raw.operand with
+              | .type (.apply head _) =>
+                { raw with operand := .type (.apply head (.atom Extraction.runtimeScope "{{element}}")) }
+              | _ => raw)
+            """;
+        var literal = Path.Combine(root, $"{name}-operand.lean");
+        File.WriteAllText(literal, NarrowEvidence(ForgeClosedCode(baseline, 0, token), shapes));
+        rejected.Add(literal, $"PASS independently rejected vector evidence: {name}", marker, "is false");
+        continue;
+    }
     var path = Path.Combine(root, $"{name}.lean");
-    File.WriteAllText(path, obligation == scalars ? LiteralScalars(changed) : NarrowEvidence(changed, obligation));
+    File.WriteAllText(path, LiteralScalars(changed));
     rejected.Add(path, $"PASS independently rejected vector evidence: {name}", marker, "is false");
 }
 

@@ -12,7 +12,7 @@ Bodies built by `Tests.BodyEncoding.encodeBody` and by hand over `Tests.Metadata
 decode through `Method.ofBody?` to the method their bytes denote: the code `Instruction.ofRaw`
 gives, locals initialized by the flag in the bytes rather than the definition's, and the code of
 the bytes rather than the definition's. A stored argument takes a home. An instruction outside
-the value family decodes to a hole carrying its opcode, which faults when stepped; a body the
+the admitted families at a live site prevents method construction. A body the
 check refuses, or one with an argument instruction naming an undeclared argument, gives no
 method, and neither does a program with such a body. A method defined by `cil_decoded_method`
 is the decoder's method, written as literals its facts and stepping read, with a zero-initialized
@@ -85,8 +85,8 @@ theorem endianFieldDecodes :
       { field with owner := .atom runtimeScope "System.Other" },
       { field with name := name!"Other" }, { field with type := int32 }]
     fieldCode 126 field = some [.ldc_i4 1] ∧
-      wrong.all (fun other => decide (fieldCode 126 other = some [.unadmitted 126])) ∧
-      fieldCode 126 field [] { littleEndian := false } = some [.unadmitted 126] := by
+      wrong.all (fun other => decide (fieldCode 126 other = none)) ∧
+      fieldCode 126 field [] { littleEndian := false } = none := by
   decide +kernel
 
 #print axioms endianFieldDecodes
@@ -101,10 +101,10 @@ theorem rvaFieldsDecode :
         { field with owner := .object "Fixture" "Other" }, { field with name := name!"Other" },
         { field with type := int32 }, { field with index := 0 }]
       decide (fieldCode opcode field sites = some [op]) &&
-      wrong.all (fun other => decide (fieldCode opcode other sites = some [.unadmitted opcode])) &&
-      decide (fieldCode opcode field [] = some [.unadmitted opcode]) &&
+      wrong.all (fun other => decide (fieldCode opcode other sites = none)) &&
+      decide (fieldCode opcode field [] = none) &&
       decide (fieldCode opcode field [(0, { data with declaredSize := 3 })] =
-        some [.unadmitted opcode])) = true := by
+        none)) = true := by
   decide +kernel
 
 #print axioms rvaFieldsDecode
@@ -130,7 +130,7 @@ theorem staticSpanDecodes :
     Tests.ModelOperands.checks site ∧
       runtimeModel {} .call site.method = some (.memory (.createSpan 4)) ∧
       Tests.ModelOperands.decoded { site with method.methodArguments := [wide] } =
-        some [.unadmitted 40] := by
+        none := by
   decide +kernel
 
 #print axioms staticSpanDecodes
@@ -382,24 +382,27 @@ private def unboxBody : BodyEvidence :=
   evidenceOf unboxBytes [(tokens.objectRef, .type objectType)] { own := own.1, others := [lib] }
     unboxRaw
 
-/-- The unbox body passes the body check and decodes with a hole at pc 1 carrying `unbox.any`'s
-    opcode 0xA5, since no family admits `unbox.any`. -/
-theorem unbox_decodes_to_a_hole :
+/-- The pinned bytes are well formed, but live unbox.any prevents method construction. -/
+theorem live_unbox_refused :
     (checkBody unboxBody unboxRaw []).toBool = true ∧
       (Method.ofBody? .scalar {} [] (allLive unboxRaw) unboxBody unboxRaw []).map (·.code) =
-        some [.ldnull, .unadmitted 0xA5, .pop, .ret] := by
+        none := by
   constructor
   · decide +kernel
   · cil_kernel_rfl
-#print axioms unbox_decodes_to_a_hole
+#print axioms live_unbox_refused
 
-/-- The method decoded from the unbox bytes pushes its null and faults at the hole's pc. -/
-theorem decoded_hole_faults :
-    (Method.ofBody? .scalar {} [] (allLive unboxRaw) unboxBody unboxRaw []).map (fun method =>
-      Safety.invoke [method] 4 0 [] Safety.Memory.empty) =
-        some (.error ⟨0, 1, .unsupported "Opcode not admitted"⟩) := by
+/-- Closed decoding identifies the first live hole by its index and opcode. -/
+theorem unbox_refusal_site :
+    Method.ofClosed? .scalar {} [] (allLive unboxRaw) unboxRaw
+      ⟨[], [], List.replicate 4 .other⟩ = .error (.liveHole 1 0xa5) := by
   cil_kernel_rfl
-#print axioms decoded_hole_faults
+#print axioms unbox_refusal_site
+
+/-- error: cil_decoded_method: CIL.Extraction.MethodDecodeError.liveHole 1 165 -/
+#guard_msgs in
+cil_decoded_method refusedUnbox := Method.ofClosed? .scalar {} [] (allLive unboxRaw)
+  unboxRaw ⟨[], [], List.replicate 4 .other⟩
 
 /-- A method evidence record with every instruction reachable and no links. -/
 def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
@@ -493,9 +496,9 @@ example : sumMethod =
 /-- info: Tests.DecodedMethod.sumMethod_profile : sumMethod.profile = testProfile -/
 #guard_msgs in #check sumMethod_profile
 
--- An instruction outside the value family is defined as the hole carrying its opcode.
+-- The same unbox opcode remains a hole when its mask entry is false.
 cil_decoded_method unboxMethod :=
-  Method.ofRaw? testProfile testEnvironment [] (allLive unboxRaw) unboxRaw []
+  Method.ofRaw? testProfile testEnvironment [] [true, false, true, true] unboxRaw []
 cil_instruction_equations unboxMethod
 
 /-- info: Tests.DecodedMethod.unboxMethod_instruction1 :

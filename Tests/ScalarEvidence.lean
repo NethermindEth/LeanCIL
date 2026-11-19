@@ -1291,7 +1291,7 @@ private def guardSite (name : String) (element : TypeExpr) (comparison := false)
     typeArguments := arguments, parameterCount := (parameters element).length,
     returnsValue := false }
 
-/-- Every guard keeps its exact call. A different shape or a floating element emits a hole. -/
+/-- Every guard keeps its exact call. A different shape or a floating element is refused. -/
 theorem guard_decoding :
     let uint := TypeExpr.atom runtimeScope "System.UInt32"
     let unary := ["ThrowIfZero", "ThrowIfNegative", "ThrowIfNegativeOrZero"]
@@ -1302,7 +1302,7 @@ theorem guard_decoding :
     (binary.all (fun name => Tests.ModelOperands.checks (guardSite name uint true))) = true ∧
     (unary ++ binary).all (fun name => decide (Tests.ModelOperands.decoded
       (guardSite name (.atom runtimeScope "System.Double") (binary.contains name)) =
-        some [.unadmitted 40])) = true ∧
+        none)) = true ∧
     runtimeModel {} .call (guardSite "ThrowIfNegative" uint).method =
       some (.memory (.zeroGuard .negative 32 false)) ∧
     runtimeModel {} .call (guardSite "ThrowIfNegative" (.atom runtimeScope "System.Int32")).method =

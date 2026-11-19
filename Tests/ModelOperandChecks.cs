@@ -44,7 +44,7 @@ internal static class ModelOperandChecks
                         return { site with
                           method.returnType := result, method.parameters := parameters,
                           method.methodArguments := [floating], typeArguments := [floating] }
-                      let hole := fun changed => decide (decode changed = some [.unadmitted 40])
+                      let refused := fun changed => decide (decode changed = none)
                       let bad : List CallSite := [
                         { site with method.owner := foreign },
                         { site with name := "Unknown" },
@@ -55,7 +55,7 @@ internal static class ModelOperandChecks
                         { site with typeArguments := [.atom runtimeScope "System.Double"] },
                         { site with target := .external "Other overload" }]
                       decide (decode site = some [.call site.method {}]) &&
-                        bad.all hole && (site.method.genericArity == 0 || floatingSite.any hole)
+                        bad.all refused && (site.method.genericArity == 0 || floatingSite.any refused)
                     | _ => false) = true := by cil_kernel_rfl
                 #print axioms operand_checked
                 /-- The generated model fact names the expected checked operation and all its operands. -/

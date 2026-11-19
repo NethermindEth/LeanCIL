@@ -93,7 +93,7 @@ theorem exact_array_span_call :
         (runtimeModel {} .call method == some (.memory (.arraySpan .signed32 true range))) &&
         !runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
           (.memory (.arraySpan .signed32 true range)) none none true &&
-        refused.all (fun other => decide (decodeArrayCall other = some [.unadmitted 40]))) := by
+        refused.all (fun other => decide (decodeArrayCall other = none))) := by
   decide +kernel
 #print axioms exact_array_span_call
 
@@ -108,7 +108,7 @@ theorem arraySpanLayouts :
       ({ rawLayouts := rows, layouts := (computeLayouts rows).getD #[] } : LayoutEnvironment)
     [ArraySpanRange.whole, .fromStart, .counted].all (fun range =>
       let site := arraySpanCall range element
-      decide (decodeArrayCall site (env 1 true) = some [.unadmitted 40]) &&
+      decide (decodeArrayCall site (env 1 true) = none) &&
         [1, 3].all (fun count =>
           let storage := ArrayElement.aggregate "Fixture::Words" (count * 4)
           runtimeModel (env count false) .call site.method ==
@@ -294,7 +294,7 @@ private def bulkCode (site : CallSite) : Option (List Instruction) :=
   let body := { raw [] [i 40 (.call site)] with parameters := [] }
   (Method.ofRaw? .scalar {} [] [true] body []).map Method.code
 
-/-- Every genuine overload retains its call. A single incorrect operand field gives a call hole. -/
+/-- Every genuine overload retains its call. One incorrect operand field refuses the method. -/
 theorem bulk_call_operands :
     ((bulkSites intType "System.Int32").all fun site =>
       let method := site.method
@@ -315,7 +315,7 @@ theorem bulk_call_operands :
          { site with parameterCount := site.parameterCount + 1 },
          { site with returnsValue := !site.returnsValue },
          { site with ownerArgumentCount := 1 }, { site with typeArguments := [TypeExpr.void] }].all
-          fun changed => decide (bulkCode changed = some [.unadmitted 40])) := by
+          fun changed => decide (bulkCode changed = none)) := by
   decide +kernel
 
 #print axioms bulk_call_operands
@@ -323,7 +323,7 @@ theorem bulk_call_operands :
 /-- A well-formed overload over a floating-point element has no bulk memory model. -/
 theorem bulk_call_elements :
     ((bulkSites (.atom runtime "System.Single") "System.Single").all fun site =>
-      decide (bulkCode site = some [.unadmitted 40])) := by
+      decide (bulkCode site = none)) := by
   decide +kernel
 
 #print axioms bulk_call_elements
@@ -348,8 +348,8 @@ theorem bulk_vector_models :
     let vector := TypeExpr.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1"
     let element := TypeExpr.apply vector intType
     (bulkSites element "System.Runtime.Intrinsics.Vector128`1<System.Int32>").all fun site =>
-      let expected := if site.hasThis then Instruction.call site.method {} else .unadmitted 40
-      decide (bulkCode site = some [expected])
+      let expected := if site.hasThis then some [.call site.method {}] else none
+      decide (bulkCode site = expected)
     := by decide +kernel
 
 #print axioms bulk_vector_models

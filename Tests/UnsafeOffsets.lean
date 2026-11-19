@@ -60,7 +60,7 @@ theorem byteOffset_bad_site :
       { site with declared.returnType := .parameter 0 }]
     let conventions := [0x00, 0x11, 0x30, 0x50, 0x70].map fun convention =>
       { site with declared.convention := convention }
-    (invalid ++ conventions).all (fun changed => decoded changed == some [.unadmitted 40]) =
+    (invalid ++ conventions).all (fun changed => decoded changed == none) =
       true := by decide +kernel
 
 #print axioms byteOffset_bad_site
@@ -72,7 +72,7 @@ theorem byteOffset_unsized :
       .object runtimeScope "System.String", .atom runtimeScope "System.Single",
       .aggregate "Fixture::Pair" 0]
     elements.all (fun element => decoded (byteSite (byteOffset element)) ==
-      some [.unadmitted 40]) = true := by decide +kernel
+      none) = true := by decide +kernel
 
 #print axioms byteOffset_unsized
 
@@ -212,7 +212,7 @@ theorem displacement_emissions :
 
 /-- An altered operand produces the call opcode's hole and refuses the former live lowering. -/
 private def refusesOffset (site : CallSite) (model : RuntimeModel) : Bool :=
-  decoded site == some [.unadmitted 40] &&
+  decoded site == none &&
     !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none none true
 
 /-- Forging the open signature, convention, identity or receiver invalidates a resolving site. -/
@@ -272,7 +272,7 @@ theorem unknown_offset_name :
     let unknown := { control with method.name := name!"UnknownOffset", name := "UnknownOffset" }
     decoded control = some [.call control.method {}] ∧
       siteClaim loweredCallFamily {} none (operand unknown) = .refused ∧
-      decoded unknown = some [.unadmitted 40] ∧
+      decoded unknown = none ∧
       runtimeCatalog.siteAgrees {} .scalar (operand unknown) (.unadmitted 40) = true ∧
       runtimeCatalog.siteAgrees {} .scalar (operand unknown) (.call unknown.method {})
         none none true = false := by decide +kernel

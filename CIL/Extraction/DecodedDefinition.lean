@@ -5,10 +5,9 @@ import CIL.SymbolicExecution
 /-!
 # Methods defined by evaluating the decoder
 
-`cil_decoded_method name := decoder` evaluates a closed `Option CIL.Method`, such as
-`Method.ofClosed? profile environment links reachable closed storage`, defines `name` as its result
-and adds `name_decoder_eq : decoder = some name`, which the kernel checks by evaluating the
-decoder. Compiled code computes the value, which is written as constructors over numerals, so
+`cil_decoded_method name := decoder` evaluates an optional method or a typed closed decoder,
+defines `name` as its result and proves that the decoder returns `some name` or `.ok name`.
+Compiled code computes the value, which is written as constructors over numerals, so
 the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`, ... read as
 literals to `cil_instruction_equations`, `cil_resolution_facts` and stepping, and no text an
 extractor writes supplies any part of the method. A field whose type is that of a constant
@@ -158,6 +157,15 @@ unsafe def evaluateUnsafe (decoder : Expr) : MetaM (Option Method) :=
 @[implemented_by evaluateUnsafe]
 opaque evaluate (decoder : Expr) : MetaM (Option Method)
 
+/-- Closed decoding reports the position and opcode of a reachable hole. -/
+private unsafe def evaluateClosedUnsafe (decoder : Expr) :
+    MetaM (Except MethodDecodeError Method) := do
+  evalExpr (Except MethodDecodeError Method) (← inferType decoder) decoder
+
+/-- The typed result of evaluating a closed decoder. -/
+@[implemented_by evaluateClosedUnsafe]
+private opaque evaluateClosed (decoder : Expr) : MetaM (Except MethodDecodeError Method)
+
 /-- The literal of a named field or value type used by a decoded instruction. -/
 unsafe def operandLiteralUnsafe (operand : Expr) : MetaM Expr := do
   let type ← inferType operand
@@ -270,11 +278,9 @@ private def decoderFields (decoder : Expr) : MetaM (Array Expr) := do
 syntax decodedOperands := "[" ident,* "]"
 
 /-- `cil_decoded_method name [operand, ...] := decoder` defines `name` as the method the closed
-    `Option CIL.Method` `decoder` evaluates to, with each listed field or type operand
-    written as its constant and each zero-initialized struct local as
-    `List.replicate size 0`, proves `name_decoder_eq : decoder = some name` and the `@[cil_code]`
-    facts `name_{field}` for each of `factFields`. Fails when the decoder gives `none` or does
-    not reduce, or when a listed constant names no operand. -/
+    decoder evaluates to, with each listed field or type operand
+    written as its constant and each zero-initialized struct local as `List.replicate size 0`.
+    It proves the successful decoder equation and one tagged fact for each field in `factFields`. -/
 syntax (name := decodedMethod)
   "cil_decoded_method " ident (decodedOperands)? " := " term : command
 
@@ -283,7 +289,9 @@ elab_rules : command
     liftTermElabM do
     let methodType := mkConst ``CIL.Method
     let optionType := mkApp (mkConst ``Option [.zero]) methodType
-    let decoder ← Term.elabTermEnsuringType decoderSyntax optionType
+    let closedType := mkApp2 (mkConst ``Except [.zero, .zero])
+      (mkConst ``MethodDecodeError) methodType
+    let decoder ← Term.elabTerm decoderSyntax (some optionType)
     Term.synthesizeSyntheticMVarsNoPostponing
     let decoder ← instantiateMVars decoder
     if decoder.hasMVar || decoder.hasFVar then
@@ -305,8 +313,17 @@ elab_rules : command
       let constant := mkConst operandName
       operandConstants := operandConstants.insert (← operandLiteral constant) constant
       operandNames := operandNames.push operandName
-    let some method ← evaluate decoder
-      | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
+    let (method, success) ← if ← isDefEq (← inferType decoder) closedType then do
+      match ← evaluateClosed decoder with
+      | .error reason => throwError "cil_decoded_method: {repr reason}"
+      | .ok method => pure (method, mkApp2 (mkConst ``Except.ok [.zero, .zero])
+          (mkConst ``MethodDecodeError) methodType)
+    else do
+      unless ← isDefEq (← inferType decoder) optionType do
+        throwError "cil_decoded_method: expected an optional method or closed decoder result"
+      let some method ← evaluate decoder
+        | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
+      pure (method, mkApp (mkConst ``Option.some [.zero]) methodType)
     let identities ← decodedLayoutIdentities decoder method
     let named (term : Expr) : Option Expr :=
       if passed.contains term then some term
@@ -333,7 +350,7 @@ elab_rules : command
     addDocStringCore name s!"The method `{decoderSyntax}` decodes to."
     let method := mkConst name
     proveByReduction (name.appendAfter "_decoder_eq") s!"`{name}` is the decoded method."
-      (← mkEq decoder (mkApp2 (mkConst ``Option.some [.zero]) methodType method))
+      (← mkEq decoder (mkApp success method))
     for field in factFields do
       let some position := fields.idxOf? field
         | throwError "cil_decoded_method: CIL.Method has no field {field}"

@@ -96,21 +96,16 @@ theorem Method.ofRaw?_relocate (f : Nat → Nat) (profile : FeatureProfile)
         methodCode profile environment links reachable closed := by
     unfold methodCode
     rw [occupied]
-  simp only [Method.ofRaw?, Method.ofClosed?, bind, pure, Option.map_bind]
+  simp only [Method.ofRaw?, bind, Option.map_bind]
   refine congrArg _ (funext fun closed => ?_)
   simp only [Function.comp_apply, Option.map_bind]
   refine congrArg _ (funext fun storage => ?_)
-  simp only [Function.comp_apply, Option.map_bind]
-  refine congrArg _ (funext fun localKinds => ?_)
-  simp only [Function.comp_apply, Option.map_bind]
-  refine congrArg _ (funext fun homes => ?_)
-  simp only [Function.comp_apply]
+  simp only [Function.comp_apply, Method.ofClosed?]
   rw [sameCode]
-  generalize (rawPrefixesValid closed.returnType closed.code &&
-    argumentInstructionsValid storage
-      (requiredHomeIndices storage reachable)
-      reachable (methodCode profile environment links reachable closed)) = valid
-  cases valid <;> rfl
+  generalize methodCode profile environment links reachable closed = code
+  cases firstLiveHole 0 reachable code <;> simp only
+  all_goals repeat' split
+  all_goals rfl
 
 #print axioms Method.ofRaw?_relocate
 

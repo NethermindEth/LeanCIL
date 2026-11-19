@@ -62,7 +62,7 @@ theorem rejectedFloatingSites :
                 let raw := site name store element byref 0x10
                 match raw.operand with
                 | .call call => (runtimeModel {} .call call.method).isNone &&
-                  decide (decoded {} .scalar raw = some [.unadmitted 40]) &&
+                  decide (decoded {} .scalar raw = none) &&
                   !runtimeCatalog.siteAgrees {} .scalar raw op none none true
                 | _ => false) = true := by decide +kernel
 
@@ -90,7 +90,7 @@ private def resolves (environment : LayoutEnvironment) (element : TypeExpr)
       | .call call =>
         let model := runtimeModel environment .call call.method
         if aligned && byref then
-          model.isNone && decide (decoded environment .scalar raw = some [.unadmitted 40])
+          model.isNone && decide (decoded environment .scalar raw = none)
         else
         let expected := if aligned then RuntimeModel.memory (.pointerTransfer kind alignment store)
           else .typedTransfer kind store
@@ -160,10 +160,8 @@ theorem refusedElementsAndReferences :
           let changed := change call.method
           let raw := site name store type false 0x10
           let changedRaw := { raw with operand := .call { call with method := changed } }
-          let expected : Option (List Instruction) :=
-            if type == .parameter 0 then none else some [.unadmitted 40]
           (runtimeModel {} .call changed).isNone &&
-            decide (decoded {} .scalar changedRaw = expected)
+            decide (decoded {} .scalar changedRaw = none)
         | _ => false
       [TypeExpr.apply (.constructor runtimeScope "System.Span`1") word,
        .apply (.constructor runtimeScope "System.ReadOnlySpan`1") word, .parameter 0,
@@ -193,7 +191,7 @@ theorem refusedDeclarations :
           let op := if aligned then Instruction.memory (.pointerTransfer (.scalar 8 false) 8 store)
             else typedTransferInstruction (.scalar 8 false) store
           decide (decoded {} .scalar raw = some [.call call.method {}]) &&
-            decide (decoded {} .scalar changed = some [.unadmitted 40]) &&
+            decide (decoded {} .scalar changed = none) &&
             !runtimeCatalog.siteAgrees {} .scalar changed (.call call.method {}) &&
             !runtimeCatalog.siteAgrees {} .scalar changed op
         let byteAddress := TypeExpr.byref (.atom runtimeScope "System.Byte")
@@ -218,7 +216,7 @@ theorem crossedOverloads :
         | .call call, .call other =>
           let hole := fun (changed : CallSite) =>
             let changedRaw := { raw with operand := .call changed }
-            decide (decoded {} .scalar changedRaw = some [.unadmitted 40])
+            decide (decoded {} .scalar changedRaw = none)
           decide (decoded {} .scalar raw = some [.call call.method {}]) &&
             hole { call with target := other.target } &&
             hole { call with declared := other.declared }
@@ -236,7 +234,7 @@ theorem reservedEmissions :
       .memory (.pointerTransfer (.scalar 8 false) 8 false)]
     (match control.operand with
      | .call call => decide (decoded {} .scalar control = some [.call call.method {}])
-     | _ => false) = true ∧ decoded {} .scalar other = some [.unadmitted 40] ∧
+     | _ => false) = true ∧ decoded {} .scalar other = none ∧
       operations.any (fun op => runtimeCatalog.siteAgrees {} .scalar other op none none true)
         = false ∧
       runtimeCatalog.siteAgrees {} .scalar other (.unadmitted 40) none none false = true ∧
@@ -268,7 +266,7 @@ theorem unresolvedTransfers :
       [TypeExpr.pointer .void, .apply (.constructor runtimeScope "System.Span`1") byte].all
         (fun element =>
           let raw := site name!"ReadUnaligned" false element false 0x10
-          decide (decoded {} .scalar raw = some [.unadmitted 40]) &&
+          decide (decoded {} .scalar raw = none) &&
             !runtimeCatalog.siteAgrees {} .scalar raw (.memory .bitcastByteBool) none none true &&
             runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none none false) = true := by
   decide +kernel

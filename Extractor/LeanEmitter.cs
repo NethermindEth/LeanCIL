@@ -346,7 +346,8 @@ internal static class LeanEmitter
                 const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
                 var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
                 var evidence = $"{method}_specialization_validated profile {linkTable} {method}Reachable";
-                var proof = $"Eq.trans ({equality} {environment} {evidence}) {method}_decoder_eq";
+                var closedProof = $"(congrArg Except.toOption {method}_decoder_eq)";
+                var proof = $"Eq.trans ({equality} {environment} {evidence}) {closedProof}";
                 var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
                 var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
                 var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";

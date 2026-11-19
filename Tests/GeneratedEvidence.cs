@@ -182,7 +182,7 @@ partial class Program
         return $$"""
             {{source[..call.Index]}}def {{forged}} (profile : FeatureProfile) (environment : LayoutEnvironment)
                 (links : List (Prod Nat Link)) (reachable : List Bool) (closed : Extraction.RawMethod)
-                (storage : Extraction.RawArguments) : Option Method :=
+                (storage : Extraction.RawArguments) : Except Extraction.MethodDecodeError Method :=
                 (Method.ofClosed? profile environment links reachable closed storage).map fun method =>
                   { method with {{update}} }
             cil_decoded_method {{name}}{{call.Groups[1].Value}} := {{decoder}}{{source[(call.Index + call.Length)..]}}

@@ -265,16 +265,16 @@ private def equalitySite (width : Nat) (element : String) : CallSite :=
     name := "op_Equality", target := .external target, returnsValue := true,
     parameterCount := 2, typeArguments := [] }
 
-/-- Integer equality keeps a call. A floating element at the same declaration gives a hole. -/
+/-- Integer equality keeps its call and a floating element at the same declaration is refused. -/
 theorem equalityElements :
     [128, 256, 512].all (fun width =>
       ["System.Byte", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
        "System.Single", "System.Double"].all fun element =>
         let site := equalitySite width element
-        let expected := if element ∈ ["System.Single", "System.Double"] then .unadmitted 40
-          else Instruction.call site.method {}
+        let expected := if element ∈ ["System.Single", "System.Double"] then none
+          else some [Instruction.call site.method {}]
         decide ((Method.ofRaw? .scalar {} [] [true] (raw site) []).map Method.code =
-          some [expected])) = true := by decide +kernel
+          expected)) = true := by decide +kernel
 
 #print axioms equalityElements
 
@@ -329,6 +329,7 @@ example : ¬ ExactIntrinsicsValid (raw call0) [true]
 private def vector128 : TypeExpr := .apply (.constructor scope "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.UInt64")
 private def withLocal : RawMethod := { raw call10 with locals := [vector128], code := [] }
 private def createsBody : Method := body [.call createScalarUnsafeMethod {}]
+
 private def localBody : Method :=
   { createsBody with
       locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0] }

@@ -36,7 +36,7 @@ theorem skipInitOperand :
        { call with method.hasThis := true }, { call with parameterCount := 2 },
        { call with returnsValue := true }, { call with typeArguments := [.byref word] },
        { call with typeArguments := [] }, { call with method.genericArity := 2 }].all
-        (fun changed => decide (decode changed = some [.unadmitted 40])) = true := by
+        (fun changed => decide (decode changed = none)) = true := by
   decide +kernel
 
 #print axioms skipInitOperand

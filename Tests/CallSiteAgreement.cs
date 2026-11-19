@@ -232,7 +232,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                 And (siteClaim loweredCallFamily environment link raw = {{Claim}})
                 ({{agreement}}
             #print axioms exactEmission
-            /-- Changing one part of the resolving operand leaves an opcode-tagged hole. -/
+            /-- Changing one part of the resolving operand refuses the live call. -/
             theorem unresolvedOverload :
                 let changed := match raw.operand with
                   | .call site => { raw with operand := .call { site with {{change}} } }
@@ -242,8 +242,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                 let source := { {{method}}Closed with code }
                 let decoded := Method.ofRaw? profile environment {{method}}Links {{method}}Reachable source []
                 And (runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =
-                  .hole raw.opcode) (decoded.bind (fun body => body.code[{{Pc}}]?) =
-                    some (.unadmitted raw.opcode)) := by
+                  .hole raw.opcode) (decoded = none) := by
               constructor <;> cil_kernel_rfl
             #print axioms unresolvedOverload
             end Extracted.{{Name}}

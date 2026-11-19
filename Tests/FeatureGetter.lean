@@ -251,7 +251,7 @@ theorem reference_decoding :
     let query := referenceQuery (.atom runtimeScope "System.Int32")
     Tests.ModelOperands.checks query = true ∧
       Tests.ModelOperands.decoded (referenceQuery (.array (.atom runtimeScope "System.Int32"))) =
-        some [.unadmitted 40] := by decide +kernel
+        none := by decide +kernel
 
 #print axioms reference_decoding
 

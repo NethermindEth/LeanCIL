@@ -60,7 +60,7 @@ theorem block_refusals : cases.all (fun (call, _) =>
     other.any fun (overload, _) =>
       let crossed := [{ call with target := overload.target },
         { call with declared := overload.declared }]
-      (invalid ++ crossed).all (fun changed => decoded changed == some [.unadmitted 40])) =
+      (invalid ++ crossed).all (fun changed => decoded changed == none)) =
     true := by
   decide +kernel
 

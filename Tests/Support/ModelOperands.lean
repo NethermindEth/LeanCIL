@@ -16,7 +16,7 @@ def decoded (site : CallSite) (environment : LayoutEnvironment := {})
       code := [⟨0, 40, .call site⟩] }
   (Method.ofRaw? profile environment [] [true] source []).map Method.code
 
-/-- The control keeps its call. Each altered operand decodes to a call hole. -/
+/-- The control keeps its call. Each altered operand prevents method construction. -/
 def checks (site : CallSite) : Bool :=
   let wrong := TypeExpr.atom "Fixture" "Other"
   let owner := match site.method.owner with
@@ -33,6 +33,6 @@ def checks (site : CallSite) : Bool :=
     { site with method.returnType := wrong }, { site with declared.convention := 5 },
     { site with target := .external "Fixture" }]
   decide (decoded site = some [.call site.method {}]) &&
-    variants.all (fun changed => decide (decoded changed = some [.unadmitted 40]))
+    variants.all (fun changed => decide (decoded changed = none))
 
 end Tests.ModelOperands

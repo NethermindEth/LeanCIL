@@ -161,14 +161,18 @@ theorem null_throw_entry :
 
 /-- A direct edge or switch arm into the throw disables just the entered fold. -/
 theorem decoded_throw_entry :
-    let decode := fun edge => (Method.ofRaw? .scalar {} [] (List.replicate 8 true) (raw
-      [i 2, i 45 (.target 4), i 20, edge, i 115 divide, i 122, i 115 divide, i 122]) []).map
-        fun body => (body.code[5]?, body.code[7]?)
+    let source := fun edge => raw
+      [i 2, i 45 (.target 4), i 20, edge, i 115 divide, i 122, i 115 divide, i 122]
+    let mask := List.replicate 8 true
+    let decode := fun edge => (Method.ofRaw? .scalar {} [] mask (source edge) []).map
+      fun body => (body.code[5]?, body.code[7]?)
+    let refused := fun edge =>
+      let code := methodCode .scalar {} [] mask (source edge)
+      decode edge = none ∧ code[5]? = some (.unadmitted 122) ∧
+        code[7]? = some (.throw .divideByZero)
     let raised := some (Instruction.throw .divideByZero)
-    let hole := some (Instruction.unadmitted 122)
     decode (i 43 (.target 4)) = some (raised, raised) ∧
-      decode (i 43 (.target 5)) = some (hole, raised) ∧
-      decode (i 69 (.targets [4, 5])) = some (hole, raised) := by decide +kernel
+      refused (i 43 (.target 5)) ∧ refused (i 69 (.targets [4, 5])) := by decide +kernel
 
 #print axioms decoded_throw_entry
 

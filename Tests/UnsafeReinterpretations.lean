@@ -98,7 +98,7 @@ private def decoded (call : CallSite) (env := environment 2) :=
 /-- A single mutation of a resolving operand leaves precisely its opcode's hole. -/
 private def refuses (control changed : CallSite) : Bool :=
   decide (decoded control = some [.call control.method {}]) &&
-    decide (decoded changed = some [.unadmitted 40])
+    decide (decoded changed = none)
 
 /-- Every pair of snapshot classes and the scalar overload, in a 16-byte layout. -/
 private def values : List (CallSite × MemoryOp) :=

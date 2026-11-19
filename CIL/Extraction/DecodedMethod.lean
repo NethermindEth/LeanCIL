@@ -9,7 +9,8 @@ import CIL.Extraction.Prefixes
 Live sites use the instantiated operands and the preceding instruction. A dead site is a hole
 carrying its raw opcode. The same definition supplies the signature, local kinds and live homes.
 An unlinked call resolves against the runtime catalog or its named lowering family. The
-resolver uses the method's layouts, profile and raw fold role. A missing overload is a hole.
+resolver uses the method's layouts, profile and raw fold role. The first live hole prevents
+method construction and identifies the pc and opcode in the closed decoder's error.
 `Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
 and `decodedProgram?` applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
@@ -19,27 +20,44 @@ translator output.
 
 namespace CIL.Extraction
 
+/-- A closed body fails at a live opcode or cannot supply its declared frame or prefixes. -/
+inductive MethodDecodeError where
+  | liveHole (pc opcode : Nat)
+  | invalidFrame
+  | invalidPrefixes
+  deriving DecidableEq, Repr
+
+/-- The first reachable hole carries its instruction index and raw opcode. -/
+def firstLiveHole : Nat → List Bool → List Instruction → Option MethodDecodeError
+  | pc, live :: rest, instruction :: code =>
+    match live, instruction with
+    | true, .unadmitted opcode => some (.liveHole pc opcode)
+    | _, _ => firstLiveHole (pc + 1) rest code
+  | _, _, _ => none
+
 /-- The method denoted by a closed definition and its argument storage. Its code contains
     one instruction per raw site and a hole carrying the opcode at each dead site. The frame
     requires supported local kinds, valid argument homes and accesses, and valid prefixes. -/
 def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod)
-    (storage : RawArguments) : Option Method := do
+    (storage : RawArguments) : Except MethodDecodeError Method :=
   let code := methodCode profile environment links reachable closed
-  let localKinds ← storage.locals.mapM (storageKind environment.layouts)
-  let parameterHomes ← expectedHomes environment.layouts storage reachable
-  -- An argument instruction outside the declared arguments has no frame slot or incoming value.
-  let homes := requiredHomeIndices storage reachable
-  unless rawPrefixesValid closed.returnType closed.code &&
-      argumentInstructionsValid storage homes reachable code do none
-  return {
-    profile := profile, code := code, localKinds := localKinds,
-    locals := localKinds.map (LocalKind.initialValue closed.initLocals),
-    opaqueVectorLocals := expectedOpaqueLocals environment closed code,
-    parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
-    environment := environment, links := links,
-    staticSites := closed.rvaSites.map fun (pc, field) => (pc, field.descriptor),
-    returnsValue := closed.returnType != .void }
+  if let some failure := firstLiveHole 0 reachable code then .error failure else
+  match storage.locals.mapM (storageKind environment.layouts),
+      expectedHomes environment.layouts storage reachable with
+  | some localKinds, some parameterHomes =>
+    let homes := requiredHomeIndices storage reachable
+    if !rawPrefixesValid closed.returnType closed.code then .error .invalidPrefixes else
+    if !argumentInstructionsValid storage homes reachable code then .error .invalidFrame else
+    .ok {
+      profile := profile, code := code, localKinds := localKinds,
+      locals := localKinds.map (LocalKind.initialValue closed.initLocals),
+      opaqueVectorLocals := expectedOpaqueLocals environment closed code,
+      parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
+      environment := environment, links := links,
+      staticSites := closed.rvaSites.map fun (pc, field) => (pc, field.descriptor),
+      returnsValue := closed.returnType != .void }
+  | _, _ => .error .invalidFrame
 
 /-- The method a raw definition denotes at its type arguments, with the supplied link table. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
@@ -47,7 +65,7 @@ def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnv
     (arguments : List TypeExpr) : Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
   let storage ← closedArguments environment.rawLayouts closed
-  Method.ofClosed? profile environment links reachable closed storage
+  (Method.ofClosed? profile environment links reachable closed storage).toOption
 
 /-- A validated specialization gives the closed definition and storage for raw decoding. -/
 theorem SpecializationValid.ofRaw?_eq_ofClosed? {environment : LayoutEnvironment}
@@ -55,7 +73,7 @@ theorem SpecializationValid.ofRaw?_eq_ofClosed? {environment : LayoutEnvironment
     (valid : SpecializationValid environment.rawLayouts source arguments closed storage)
     (profile : FeatureProfile) (links : List (Nat × Link)) (reachable : List Bool) :
     Method.ofRaw? profile environment links reachable source arguments =
-      Method.ofClosed? profile environment links reachable closed storage := by
+      (Method.ofClosed? profile environment links reachable closed storage).toOption := by
   simp only [Method.ofRaw?, valid.1, valid.2, bind, Option.bind]
 
 #print axioms SpecializationValid.ofRaw?_eq_ofClosed?
@@ -189,15 +207,13 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 theorem _root_.CIL.Method.ofClosed?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
     {closed : RawMethod} {storage : RawArguments} {method : Method}
-    (decoded : Method.ofClosed? profile environment links reachable closed storage = some method) :
+    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
     method.code = methodCode profile environment links reachable closed := by
   unfold Method.ofClosed? at decoded
-  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
-  obtain ⟨_, _, _, _, built⟩ := decoded
-  split at built
-  · cases built
-    rfl
-  · simp at built
+  cases failure : firstLiveHole 0 reachable (methodCode profile environment links reachable closed)
+    <;> simp only [failure] at decoded
+  repeat' split at decoded
+  all_goals first | contradiction | (cases decoded; rfl)
 
 #print axioms Method.ofClosed?_code
 
@@ -215,9 +231,15 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
           (foldRoles closed.locals closed.code).toArray reachable.toArray) := by
   unfold Method.ofRaw? at decoded
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
-  obtain ⟨closed, instantiated, _, _, built⟩ := decoded
+  obtain ⟨closed, instantiated, storage, _, built⟩ := decoded
   refine ⟨closed, instantiated, fun pc => ?_⟩
-  rw [Method.ofClosed?_code built, methodCode_eq, Instruction.ofRawCode_getElem? closed.code pc _]
+  cases checked : Method.ofClosed? profile environment links reachable closed storage with
+  | error => rw [checked] at built; cases built
+  | ok value =>
+    rw [checked] at built
+    cases built
+    rw [Method.ofClosed?_code checked, methodCode_eq,
+      Instruction.ofRawCode_getElem? closed.code pc _]
 
 #print axioms Method.ofRaw?_code
 
