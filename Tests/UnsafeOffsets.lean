@@ -42,9 +42,9 @@ theorem byteOffset_emission :
     let method := byteOffset native
     let site := byteSite method
     decoded site = some [.call method {}] ∧
-      runtimeCatalog.siteAgrees {} .scalar (operand site) (.memory .byteOffset) none none true =
+      runtimeCatalog.siteAgrees {} .scalar (operand site) (.memory .byteOffset) none true =
         false ∧
-      runtimeCatalog.siteAgrees {} .scalar (operand site) .sub none none true = false := by
+      runtimeCatalog.siteAgrees {} .scalar (operand site) .sub none true = false := by
   decide +kernel
 
 #print axioms byteOffset_emission
@@ -204,8 +204,8 @@ private def loweredOffset : RuntimeModel → Instruction
 theorem displacement_emissions :
     (offsetSites int 4).all (fun (site, model) =>
       decoded site == some [.call site.method {}] &&
-      !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none none true &&
-      !runtimeCatalog.siteAgrees {} .scalar (operand site) .add none none true) = true := by
+      !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none true &&
+      !runtimeCatalog.siteAgrees {} .scalar (operand site) .add none true) = true := by
   decide +kernel
 
 #print axioms displacement_emissions
@@ -213,7 +213,7 @@ theorem displacement_emissions :
 /-- An altered operand produces the call opcode's hole and refuses the former live lowering. -/
 private def refusesOffset (site : CallSite) (model : RuntimeModel) : Bool :=
   decoded site == none &&
-    !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none none true
+    !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none true
 
 /-- Forging the open signature, convention, identity or receiver invalidates a resolving site. -/
 theorem displacement_binding :
@@ -250,7 +250,7 @@ theorem span_displacements_refused :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") int
     (offsetSites span 0).all (fun (site, model) => refusesOffset site model &&
       !runtimeCatalog.siteAgrees {} .scalar (operand site) (.call site.method {})
-        (some (.direct 0)) none true) = true := by decide +kernel
+        (some (.direct 0)) true) = true := by decide +kernel
 
 #print axioms span_displacements_refused
 
@@ -271,11 +271,11 @@ theorem unknown_offset_name :
     let control := byteSite (byteOffset native)
     let unknown := { control with method.name := name!"UnknownOffset", name := "UnknownOffset" }
     decoded control = some [.call control.method {}] ∧
-      siteClaim loweredCallFamily {} none (operand unknown) = .refused ∧
+      siteClaim {} none (operand unknown) = .refused ∧
       decoded unknown = none ∧
       runtimeCatalog.siteAgrees {} .scalar (operand unknown) (.unadmitted 40) = true ∧
       runtimeCatalog.siteAgrees {} .scalar (operand unknown) (.call unknown.method {})
-        none none true = false := by decide +kernel
+        none true = false := by decide +kernel
 
 #print axioms unknown_offset_name
 

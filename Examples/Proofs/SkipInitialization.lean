@@ -49,9 +49,9 @@ theorem step_preserves (body : CIL.Method) (pc : Nat) (args : List Value) (frame
 /-- Both environments assign the call to the SkipInit family before checking its layout. -/
 theorem skip_family :
     let raw := Extracted.method0Closed.code[1]'(by decide)
-    CIL.Extraction.siteClaim CIL.Extraction.loweredCallFamily Extracted.environment none raw =
+    CIL.Extraction.siteClaim Extracted.environment none raw =
       .model ∧
-    CIL.Extraction.siteClaim CIL.Extraction.loweredCallFamily {} none raw =
+    CIL.Extraction.siteClaim {} none raw =
       .model := by
   decide +kernel
 

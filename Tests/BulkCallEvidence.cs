@@ -22,7 +22,7 @@ partial class Program
             | some raw => match raw.operand with
               | .call site =>
                 let agrees := fun operand emitted =>
-                  runtimeCatalog.siteAgrees environment profile operand emitted none none true
+                  runtimeCatalog.siteAgrees environment profile operand emitted none true
                 let forged := { raw with operand := .call { site with declared.convention := 0 } }
                 let call := Instruction.call site.method {}
                 agrees raw call && !agrees forged call && !agrees raw (.memory ({{operation}}))

@@ -1,4 +1,6 @@
-import CIL.Extraction.LoweredResolution
+import CIL.Extraction.OpaqueLocals
+import CIL.Extraction.UnsafeCalls
+import CIL.Extraction.Scalars
 import CIL.Extraction.LinkIndex
 import CIL.EntryIndex
 
@@ -36,17 +38,14 @@ def ModelCatalog.linkedRequirement (catalog : ModelCatalog) (environment : CallL
     else .linked
   | _, _ => .linked
 
-/-- Decode the raw claim using the layouts, profile and raw fold role at its pc. -/
+/-- Decode the raw claim using the layouts and profile. -/
 def ModelCatalog.callRequirement (catalog : ModelCatalog) (environment : CallLayouts)
-    (profile : FeatureProfile) (link : Option Link) (role : Option FoldRole)
-    (raw : RawInstruction) : CallRequirement :=
+    (profile : FeatureProfile) (link : Option Link) (raw : RawInstruction) : CallRequirement :=
   let missing := CallRequirement.hole raw.opcode
   let layouts := environment.toLayoutEnvironment
-  match siteClaim loweredCallFamily layouts link raw catalog.table.claims with
+  match siteClaim layouts link raw catalog.table.claims with
   | .link => catalog.linkedRequirement environment profile raw
   | .refused => missing
-  | .lowered family =>
-    ((family.resolve environment raw).map CallRequirement.instruction).getD missing
   | .model =>
     match raw.operand, callOpcode? raw.opcode with
     | .call site, some opcode =>
@@ -74,16 +73,16 @@ def CallRequirement.accepts (live : Bool) (emitted : Instruction) : CallRequirem
 /-- A method-token site satisfies its raw claim. At other opcodes no call obligation applies. -/
 def ModelCatalog.agreesAt (catalog : ModelCatalog) (environment : CallLayouts)
     (profile : FeatureProfile) (raw : RawInstruction) (emitted : Instruction)
-    (link : Option Link) (role : Option FoldRole) (live : Bool) : Bool :=
+    (link : Option Link) (live : Bool) : Bool :=
   if methodTokenCall raw.opcode then
-    (catalog.callRequirement environment profile link role raw).accepts live emitted
+    (catalog.callRequirement environment profile link raw).accepts live emitted
   else true
 
 /-- Check one emitted instruction against its method's layouts and raw claim. -/
 def ModelCatalog.siteAgrees (catalog : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (raw : RawInstruction) (emitted : Instruction)
-    (link : Option Link := none) (role : Option FoldRole := none) (live : Bool := false) : Bool :=
-  catalog.agreesAt environment.callLayouts profile raw emitted link role live
+    (link : Option Link := none) (live : Bool := false) : Bool :=
+  catalog.agreesAt environment.callLayouts profile raw emitted link live
 
 /-- A folded site emits its role, a live call satisfies its claim, and a dead call is a hole. -/
 def ModelCatalog.emissionAgrees (catalog : ModelCatalog) (layouts : CallLayouts)
@@ -91,7 +90,7 @@ def ModelCatalog.emissionAgrees (catalog : ModelCatalog) (layouts : CallLayouts)
     (link : Option Link) (role : Option FoldRole) (live : Bool) : Bool :=
   if live then
     if foldOwnsSite role then decide (role.bind (Instruction.ofRole? · none raw) = some emitted)
-    else catalog.agreesAt layouts profile raw emitted link role true
+    else catalog.agreesAt layouts profile raw emitted link true
   else !methodTokenCall raw.opcode || decide (emitted = .unadmitted raw.opcode)
 
 /-- The instruction walk checks live claims and the representation of dead calls. -/
@@ -136,18 +135,17 @@ instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
   inferInstanceAs (Decidable (ModelsAgree _ _ _ _ _ _ _))
 
 /-- A live method-token site outside a fold has a claim. -/
-def SiteClaimTotal {Family : Type} (familyOf : RawInstruction → Option Family)
-    (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
+def SiteClaimTotal (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
     (live : Bool) (role : Option FoldRole := none) : Prop :=
   (live && !foldOwnsSite role) = true → methodTokenCall raw.opcode = true →
-    siteClaim familyOf environment link raw ≠ .refused
+    siteClaim environment link raw ≠ .refused
 
 /-- Every live method-token site outside a fold in a validated body has a raw claim. -/
 theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List Bool}
     {method : Method} (agree : RuntimeModelsAgree closed reachable method)
     {pc : Nat} {raw : RawInstruction} (atRaw : closed.code[pc]? = some raw)
     (atLive : reachable[pc]? = some true) :
-    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true
+    SiteClaimTotal method.environment (method.linkAt pc) raw true
       ((foldRoles closed.code)[pc]?.join) := by
   intro ordinary token refused
   simp only [Bool.true_and, Bool.not_eq_true'] at ordinary
@@ -161,7 +159,7 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
   have checked := all3_at checks zipped atLive (List.getElem?_eq_getElem inCode)
   have linkAt : (linkReads method.links (List.range method.code.length))[pc]?.join =
       method.linkAt pc := by simp [linkReads_eq, inCode, Method.linkAt]
-  change siteClaim loweredCallFamily method.environment (method.linkAt pc) raw
+  change siteClaim method.environment (method.linkAt pc) raw
     runtimeCatalog.table.claims = .refused at refused
   simp [ModelCatalog.emissionAgrees, ordinary, ModelCatalog.agreesAt, token, linkAt,
     ModelCatalog.callRequirement, refused,
@@ -202,8 +200,7 @@ def methodInstruction (profile : FeatureProfile) (environment : CallLayouts)
         (fun _ => Instruction.ofRaw previous raw)
     else if previous.any (isPrefixOpcode ·.opcode) then .unadmitted raw.opcode
     else
-      let role := (indexedRead? roles pc).join
-      (runtimeCatalog.callRequirement environment profile none role raw).decode
+      (runtimeCatalog.callRequirement environment profile none raw).decode
         (fun _ => Instruction.ofRaw previous raw)
 
 /-- Decode an ordinary body using only the predecessor required by the value decoder. -/
@@ -319,7 +316,7 @@ theorem RuntimeModelsAgree.of_decoded_site {profile : FeatureProfile}
           simp only [link, Option.isSome_none, Bool.false_eq_true, ite_false] at same
           split at same
           · exact absurd same.symm (admitted rfl _)
-          · cases req : runtimeCatalog.callRequirement env.callLayouts profile none role raw <;>
+          · cases req : runtimeCatalog.callRequirement env.callLayouts profile none raw <;>
               simp_all [CallRequirement.decode, CallRequirement.accepts]
             exact admitted _ same.symm
         | some target =>

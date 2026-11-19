@@ -92,7 +92,7 @@ theorem exact_array_span_call :
       decide (decodeArrayCall site = some [.call method {}]) &&
         (runtimeModel {} .call method == some (.memory (.arraySpan .signed32 true range))) &&
         !runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
-          (.memory (.arraySpan .signed32 true range)) none none true &&
+          (.memory (.arraySpan .signed32 true range)) none true &&
         refused.all (fun other => decide (decodeArrayCall other = none))) := by
   decide +kernel
 #print axioms exact_array_span_call
@@ -177,7 +177,7 @@ theorem constructor_models :
         decide (decodeConstructor site = some [.newobj method]) &&
           (runtimeModel {} .newobj method == some (.memory op)) &&
           (method.parameters.length == op.argumentCount) &&
-          !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.memory op) none none true &&
+          !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.memory op) none true &&
           refused.all (fun other => refusesConstructor other)) &&
       [(TypeExpr.atom runtime "System.Double", "System.Double"),
        (.aggregate "Missing::Layout" 0, "Layout")].all (fun (element, name) =>
@@ -344,7 +344,7 @@ theorem bulk_enum_models :
     ((bulkSites element "Tag").zip operations).all fun (site, operation) =>
       runtimeModel {} .call site.method == some (.memory operation) &&
         !(runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
-          (.memory operation) none none true)
+          (.memory operation) none true)
     := by decide +kernel
 
 #print axioms bulk_enum_models

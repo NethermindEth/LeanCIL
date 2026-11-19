@@ -94,7 +94,7 @@ theorem local_reference_helper_name :
     let check := validateManagedCallWith 1 (fun i => if i == 0 then some callee else none)
       (fun _ => none) instruction true
     UnsafeCallsValid (raw localAreSame) [true] [emitted] ∧
-      siteClaim loweredCallFamily {} (some (.direct 0)) instruction = .link ∧
+      siteClaim {} (some (.direct 0)) instruction = .link ∧
       check (some (.direct 0)) emitted = true ∧ check (some (.direct 1)) emitted = false := by
   decide +kernel
 #print axioms local_reference_helper_name

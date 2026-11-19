@@ -63,7 +63,7 @@ theorem rejectedFloatingSites :
                 match raw.operand with
                 | .call call => (runtimeModel {} .call call.method).isNone &&
                   decide (decoded {} .scalar raw = none) &&
-                  !runtimeCatalog.siteAgrees {} .scalar raw op none none true
+                  !runtimeCatalog.siteAgrees {} .scalar raw op none true
                 | _ => false) = true := by decide +kernel
 
 #print axioms rejectedFloatingSites
@@ -235,10 +235,10 @@ theorem reservedEmissions :
     (match control.operand with
      | .call call => decide (decoded {} .scalar control = some [.call call.method {}])
      | _ => false) = true ∧ decoded {} .scalar other = none ∧
-      operations.any (fun op => runtimeCatalog.siteAgrees {} .scalar other op none none true)
+      operations.any (fun op => runtimeCatalog.siteAgrees {} .scalar other op none true)
         = false ∧
-      runtimeCatalog.siteAgrees {} .scalar other (.unadmitted 40) none none false = true ∧
-      runtimeCatalog.siteAgrees {} .scalar other (.unadmitted 40) none none true = false := by
+      runtimeCatalog.siteAgrees {} .scalar other (.unadmitted 40) none false = true ∧
+      runtimeCatalog.siteAgrees {} .scalar other (.unadmitted 40) none true = false := by
   decide +kernel
 
 #print axioms reservedEmissions
@@ -261,14 +261,14 @@ theorem unresolvedTransfers :
     let control := site name!"ReadUnaligned" false byte false 0x10
     (match control.operand with
      | .call call => decide (decoded {} .scalar control = some [.call call.method {}]) &&
-         !runtimeCatalog.siteAgrees {} .scalar control (.memory .bitcastByteBool) none none true
+         !runtimeCatalog.siteAgrees {} .scalar control (.memory .bitcastByteBool) none true
      | _ => false) = true ∧
       [TypeExpr.pointer .void, .apply (.constructor runtimeScope "System.Span`1") byte].all
         (fun element =>
           let raw := site name!"ReadUnaligned" false element false 0x10
           decide (decoded {} .scalar raw = none) &&
-            !runtimeCatalog.siteAgrees {} .scalar raw (.memory .bitcastByteBool) none none true &&
-            runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none none false) = true := by
+            !runtimeCatalog.siteAgrees {} .scalar raw (.memory .bitcastByteBool) none true &&
+            runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none false) = true := by
   decide +kernel
 
 #print axioms unresolvedTransfers

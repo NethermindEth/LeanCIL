@@ -173,7 +173,7 @@ theorem closedRefusals :
 theorem liveAgreement :
     ((rows int32 4).all fun row =>
       let accepts := fun sig op =>
-        runtimeCatalog.siteAgrees {} .scalar (row.raw sig) op none none true
+        runtimeCatalog.siteAgrees {} .scalar (row.raw sig) op none true
       let call := Instruction.call row.method {}
       accepts row.declared call && !accepts row.declared (.memory row.operation) &&
         !accepts row.forged call && !accepts row.forged (.memory row.operation) &&

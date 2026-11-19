@@ -92,7 +92,7 @@ var requests = cases.Select(item =>
                 let raw := Extracted.method0Closed.code[{{pc}}]'(by decide +kernel)
                 let kept := Extracted.method0.code[{{pc}}]'(by decide +kernel)
                 let check := fun emitted => runtimeCatalog.siteAgrees Extracted.environment
-                  Extracted.profile raw emitted none none true
+                  Extracted.profile raw emitted none true
                 And ((match kept with
                  | .call method _ => runtimeModel Extracted.environment .call method
                  | _ => none) = some (.memory {{operation}}))

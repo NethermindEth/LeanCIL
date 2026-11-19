@@ -89,7 +89,7 @@ private def caller (call : CallSite) : RawMethod :=
 
 /-- The runtime-site check applies to a live call. -/
 private def accepts (call : CallSite) (emitted : Instruction) : Bool :=
-  runtimeCatalog.siteAgrees (environment 2) .scalar ⟨0, 40, .call call⟩ emitted none none true
+  runtimeCatalog.siteAgrees (environment 2) .scalar ⟨0, 40, .call call⟩ emitted none true
 
 /-- One live call as the public raw-method decoder emits it. -/
 private def decoded (call : CallSite) (env := environment 2) :=

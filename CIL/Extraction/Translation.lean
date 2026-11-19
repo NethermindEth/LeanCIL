@@ -450,7 +450,7 @@ theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
     {pc : Nat} {raw : RawInstruction} (atRaw : item.closed.code[pc]? = some raw)
     (atLive : item.reachable[pc]? = some true) :
-    SiteClaimTotal loweredCallFamily method.environment (method.linkAt pc) raw true
+    SiteClaimTotal method.environment (method.linkAt pc) raw true
       ((foldRoles item.closed.code)[pc]?.join) := by
   obtain ⟨-, -, -, -, -, -, -, -, -, agree, -⟩ := valid
   exact agree.siteClaimTotal atRaw atLive

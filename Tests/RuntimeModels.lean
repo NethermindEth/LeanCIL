@@ -265,8 +265,8 @@ example : catalog.table.find {} .call { spanLength word with hasThis := false } 
 theorem unclaimedLiveRefused (models : ModelCatalog) (environment : LayoutEnvironment)
     (profile : FeatureProfile) (raw : RawInstruction) (emitted : CIL.Instruction)
     (called : methodTokenCall raw.opcode = true)
-    (missing : siteClaim loweredCallFamily environment none raw models.table.claims = .refused) :
-    models.siteAgrees environment profile raw emitted none none true = false := by
+    (missing : siteClaim environment none raw models.table.claims = .refused) :
+    models.siteAgrees environment profile raw emitted none true = false := by
   simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt,
     ModelCatalog.callRequirement, called, missing,
     CallRequirement.accepts]
@@ -278,7 +278,7 @@ theorem retainedModelNamesMember (models : ModelCatalog) (environment : LayoutEn
     (profile : FeatureProfile) (raw : RawInstruction) (member : CallSite)
     (target : MethodRef) (prefixes : CallPrefixes)
     (called : raw.opcode = 40) (operand : raw.operand = .call member)
-    (model : siteClaim loweredCallFamily environment none raw models.table.claims = .model)
+    (model : siteClaim environment none raw models.table.claims = .model)
     (accepted : models.siteAgrees environment profile raw (.call target prefixes) = true) :
     target = member.method := by
   simp only [ModelCatalog.siteAgrees, ModelCatalog.agreesAt,
@@ -527,7 +527,7 @@ example : avx2Catalog.siteAgrees {} { avx2 := true } (site avx2And) (.call avx2A
 /-- A linked pc must also satisfy the profile requirements of its resolved model. -/
 theorem linkedProfileRequired :
     avx2Catalog.siteAgrees {} {} (site avx2And) (.call avx2And {}) (some (.direct 0))
-      none true = false := by decide +kernel
+      true = false := by decide +kernel
 
 #print axioms linkedProfileRequired
 
@@ -1013,10 +1013,10 @@ end
 open CIL CIL.Extraction
 
 /-- A virtual call with a link belongs to the totality obligation and satisfies it. -/
-theorem linkedVirtualClaim {Family : Type} (familyOf : RawInstruction → Option Family)
-    (environment : LayoutEnvironment) (link : Link) (offset : Nat) (site : CallSite) :
-    SiteClaimTotal familyOf environment (some link) ⟨offset, 111, .call site⟩ true ∧
-      siteClaim familyOf environment (some link) ⟨offset, 111, .call site⟩ = .link := by
+theorem linkedVirtualClaim (environment : LayoutEnvironment) (link : Link) (offset : Nat)
+    (site : CallSite) :
+    SiteClaimTotal environment (some link) ⟨offset, 111, .call site⟩ true ∧
+      siteClaim environment (some link) ⟨offset, 111, .call site⟩ = .link := by
   constructor
   · intro _ _
     simp [siteClaim, methodTokenCall]
@@ -1024,25 +1024,22 @@ theorem linkedVirtualClaim {Family : Type} (familyOf : RawInstruction → Option
 
 #print axioms linkedVirtualClaim
 
-/-- A live, unlinked virtual call outside the named families has no claim. -/
-theorem unknownVirtualRefused {Family : Type} (familyOf : RawInstruction → Option Family)
-    (environment : LayoutEnvironment) (offset : Nat) (site : CallSite)
-    (unknown : familyOf ⟨offset, 111, .call site⟩ = none) :
-    ¬ SiteClaimTotal familyOf environment none ⟨offset, 111, .call site⟩ true := by
-  simp [SiteClaimTotal, foldOwnsSite, siteClaim, methodTokenCall, callOpcode?, unknown]
+/-- A live, unlinked virtual call has no claim. -/
+theorem unknownVirtualRefused (environment : LayoutEnvironment) (offset : Nat) (site : CallSite) :
+    ¬ SiteClaimTotal environment none ⟨offset, 111, .call site⟩ true := by
+  simp [SiteClaimTotal, foldOwnsSite, siteClaim, methodTokenCall, callOpcode?]
 
 #print axioms unknownVirtualRefused
 
-/-- An unlinked method-token site that neither the table nor a raw family claims is refused. -/
-theorem unclaimedSiteRefused {Family : Type} (familyOf : RawInstruction → Option Family)
-    (environment : LayoutEnvironment) (raw : RawInstruction) (site : CallSite)
-    (token : methodTokenCall raw.opcode = true) (operand : raw.operand = .call site)
+/-- An unlinked method-token site that the table does not claim is refused. -/
+theorem unclaimedSiteRefused (environment : LayoutEnvironment) (raw : RawInstruction)
+    (site : CallSite) (token : methodTokenCall raw.opcode = true)
+    (operand : raw.operand = .call site)
     (claims : LayoutEnvironment → CallOpcode → MethodRef → Bool)
     (unclaimed : (callOpcode? raw.opcode).any
-      (fun op => claims environment op site.method) = false)
-    (unknown : familyOf raw = none) :
-    siteClaim familyOf environment none raw claims = .refused := by
-  simp [siteClaim, token, operand, unclaimed, unknown]
+      (fun op => claims environment op site.method) = false) :
+    siteClaim environment none raw claims = .refused := by
+  simp [siteClaim, token, operand, unclaimed]
 
 #print axioms unclaimedSiteRefused
 

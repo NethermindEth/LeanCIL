@@ -285,9 +285,9 @@ private def refuses (control changed : RawInstruction) (reference : MethodRef)
   let decode := fun environment raw =>
     (Method.ofRaw? .scalar environment [] [true] (method raw) []).map Method.code
   decide (decode (sized 3) control = some [.call reference {}]) &&
-    decide (siteClaim loweredCallFamily layouts none changed = .model) &&
+    decide (siteClaim layouts none changed = .model) &&
     decide (decode layouts changed = none) &&
-    !runtimeCatalog.siteAgrees layouts .scalar changed replacement none none true
+    !runtimeCatalog.siteAgrees layouts .scalar changed replacement none true
 
 /-- Substituting a method parameter for the declared Int32 result refuses SizeOf. -/
 theorem forged_sizeOf_refused :
@@ -413,7 +413,7 @@ theorem overload_binding :
     let one := countedSite [int32] "Count(Int32)"
     let raw := fun site => RawInstruction.mk 0 40 (.call site)
     let needs := fun site => catalog.callRequirement (LayoutEnvironment.callLayouts {})
-      .scalar none none (raw site)
+      .scalar none (raw site)
     let unknown := countedSite [int32, int32] "Count(Int32,Int32)"
     catalog.table.find {} .call zero.method = some (.constant 0) ∧
       catalog.table.find {} .call one.method = some (.constant 1) ∧

@@ -190,7 +190,7 @@ private def castBinding (writable : Bool) : Bool := Id.run do
   let crossed := { control with method := opposite.method }
   return (checkCallOperand env frame token control).isOk &&
     runtimeCatalog.siteAgrees {} .scalar ⟨0, 40, .call crossed⟩ (.call crossed.method {})
-      none none true &&
+      none true &&
     (match checkCallOperand env frame token crossed with
      | .error (.operandMismatch found) => found == token
      | _ => false)
@@ -211,8 +211,8 @@ private def marshalCaller (raw : RawInstruction) : RawMethod :=
 /-- A refused method-token operand decodes to its opcode's hole, which must be dead. -/
 private def refused (raw : RawInstruction) (alternative : Instruction) : Bool :=
   let required := runtimeCatalog.callRequirement (LayoutEnvironment.callLayouts {})
-    .scalar none none raw
-  siteClaim loweredCallFamily {} none raw == .refused &&
+    .scalar none raw
+  siteClaim {} none raw == .refused &&
     decide ((Method.ofRaw? .scalar {} [] [true] (marshalCaller raw) []).map Method.code =
       none) &&
     required.accepts false (.unadmitted 40) && !required.accepts true (.unadmitted 40) &&
@@ -275,7 +275,7 @@ theorem marshal_site_emissions :
     scalarSites.all (fun (fixture, declaration) =>
       let site := fixture.raw declaration
       let agrees := fun raw emitted =>
-        runtimeCatalog.siteAgrees {} .scalar raw emitted none none true
+        runtimeCatalog.siteAgrees {} .scalar raw emitted none true
       let call := Instruction.call fixture.method {}
       let operation := Instruction.memory fixture.operation
       agrees site call && !agrees site operation && !agrees site (.memory .spanReadOnly) &&
@@ -301,7 +301,7 @@ private def unrelated : RawInstruction :=
 /-- An unrelated call cannot observe array data, construct these spans or transfer their bytes. -/
 theorem unrelated_marshal_emissions :
     scalarSites.all (fun (fixture, _) =>
-      !runtimeCatalog.siteAgrees {} .scalar unrelated (.memory fixture.operation) none none true) =
+      !runtimeCatalog.siteAgrees {} .scalar unrelated (.memory fixture.operation) none true) =
       true := by decide +kernel
 
 #print axioms unrelated_marshal_emissions

@@ -148,12 +148,10 @@ The decoder reads the checked fold role before resolving a call. An exact runtim
 exception emits `nop` inside the matching throw sequence. Literal methods must emit the
 instruction prescribed by the same role.
 
-At other unlinked sites outside the model table, `loweredCallFamily` selects a family by raw
-opcode, owner and member name. The family resolves the overload using the raw operands,
-the method's layout environment, its profile and its role in a fold of the raw instructions.
-The decoder emits the resolved instruction or a hole tagged with the raw opcode. A validated
-literal method must contain the same instruction at each live site. An unknown member or
-unsupported overload therefore cannot occur at a live site.
+At other unlinked sites, `siteClaim` refuses a call that no model claims, and the decoder emits
+a hole tagged with the raw opcode. A validated literal method must contain the same instruction
+at each live site. An unknown member or unsupported overload therefore cannot occur at a live
+site.
 
 ### Arrays, views and bulk memory
 

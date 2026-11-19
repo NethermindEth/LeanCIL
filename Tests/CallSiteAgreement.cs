@@ -204,14 +204,14 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
               case left => cil_kernel_rfl
               case right => constructor <;> cil_kernel_rfl
             """ : """
-                forall emitted, runtimeCatalog.siteAgrees environment profile raw emitted link role true =
+                forall emitted, runtimeCatalog.siteAgrees environment profile raw emitted link true =
                   decide (emitted = expected)) := by
               constructor
               case left => cil_kernel_rfl
               case right =>
                 intro emitted
                 have token : methodTokenCall raw.opcode = true := by cil_kernel_rfl
-                have resolved : runtimeCatalog.callRequirement environment.callLayouts profile link role raw =
+                have resolved : runtimeCatalog.callRequirement environment.callLayouts profile link raw =
                     .instruction expected := by cil_kernel_rfl
                 simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, token, resolved,
                   CallRequirement.accepts]
@@ -229,7 +229,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
             private def link := {{method}}.linkAt {{Pc}}
             /-- The resolving member accepts exactly its emitted instruction. -/
             theorem exactEmission :
-                And (siteClaim loweredCallFamily environment link raw = {{Claim}})
+                And (siteClaim environment link raw = {{Claim}})
                 ({{agreement}}
             #print axioms exactEmission
             /-- Changing one part of the resolving operand refuses the live call. -/
@@ -238,10 +238,9 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                   | .call site => { raw with operand := .call { site with {{change}} } }
                   | _ => raw
                 let code := {{method}}Closed.code.set {{Pc}} changed
-                let changedRole := (foldRoles code)[{{Pc}}]?.join
                 let source := { {{method}}Closed with code }
                 let decoded := Method.ofRaw? profile environment {{method}}Links {{method}}Reachable source []
-                And (runtimeCatalog.callRequirement environment.callLayouts profile link changedRole changed =
+                And (runtimeCatalog.callRequirement environment.callLayouts profile link changed =
                   .hole raw.opcode) (decoded = none) := by
               constructor <;> cil_kernel_rfl
             #print axioms unresolvedOverload

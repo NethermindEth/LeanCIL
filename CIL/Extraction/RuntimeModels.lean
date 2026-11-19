@@ -24,8 +24,7 @@ import CIL.Extraction.SpanConstructorModels
 
 `runtimeModel` resolves calls and constructors by opcode and method. A modelled site keeps
 its operand and has no link. The checked interpreter runs the model for that operand.
-At an unlinked method-token call, the raw selector gives a resolving model priority over a
-lowered family.
+An unlinked method-token call that no model claims is refused.
 -/
 
 namespace CIL.Extraction
@@ -79,25 +78,22 @@ theorem runtimeModels_exactHardware (environment : LayoutEnvironment) (method : 
 #print axioms runtimeModels_exactHardware
 
 /-- The mechanism responsible for a method-token call site. -/
-inductive SiteClaim (Family : Type) where
+inductive SiteClaim where
   | link
   | model
-  | lowered (family : Family)
   | refused
   deriving DecidableEq, Repr
 
-/-- A link claims its pc first, followed by a model family or resolving overload, then a
-    lowered family named by the raw operand. -/
-def siteClaim {Family : Type} (familyOf : RawInstruction → Option Family)
-    (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
+/-- A link claims its pc first, followed by a model family or resolving overload. -/
+def siteClaim (environment : LayoutEnvironment) (link : Option Link) (raw : RawInstruction)
     (claims : LayoutEnvironment → CallOpcode → MethodRef → Bool := runtimeModels.claims) :
-    SiteClaim Family :=
+    SiteClaim :=
   if !methodTokenCall raw.opcode then .refused else
   match raw.operand with
   | .call site =>
     if link.isSome then .link
     else if (callOpcode? raw.opcode).any (fun op => claims environment op site.method) then .model
-    else (familyOf raw).elim .refused .lowered
+    else .refused
   | _ => .refused
 
 /-- A modelled opcode and method use the body's runtime environment and require no link. -/

@@ -24,7 +24,7 @@ private def withoutLink (opcode : Nat) (member : MetadataName) (name : String) :
   let source := body opcode (.object "Fixture" "Fixture") member name
   let some raw := source.code.head? | return false
   let requirement := fun link => runtimeCatalog.callRequirement
-    (LayoutEnvironment.callLayouts {}) .scalar link none raw
+    (LayoutEnvironment.callLayouts {}) .scalar link raw
   return (requirement (some (.direct 0)) matches .linked) &&
     decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
       none) &&
@@ -228,17 +228,17 @@ theorem spanClaims :
       { rawLayouts := rows, layouts := (computeLayouts rows).getD #[] }
     let unknown := body 40 (TypeExpr.apply (.constructor runtimeScope "System.Span`1") int)
       name!"Missing" "Missing"
-    let missing := fun (source : RawMethod) (claim : SiteClaim LoweredFamily) =>
-      source.code.all fun raw => siteClaim loweredCallFamily {} none raw == claim &&
-        !(runtimeCatalog.siteAgrees {} .scalar raw .pop none none true) &&
-        runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none none false &&
+    let missing := fun (source : RawMethod) (claim : SiteClaim) =>
+      source.code.all fun raw => siteClaim {} none raw == claim &&
+        !(runtimeCatalog.siteAgrees {} .scalar raw .pop none true) &&
+        runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none false &&
         decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
           none)
     (lengthBody.code.all fun raw => Id.run do
       let .call site := raw.operand | return false
-      return siteClaim loweredCallFamily full none raw == .model &&
-        runtimeCatalog.siteAgrees full .scalar raw (.call site.method {}) none none true &&
-        !(runtimeCatalog.siteAgrees full .scalar raw (.fieldAddress 0) none none true)) ∧
+      return siteClaim full none raw == .model &&
+        runtimeCatalog.siteAgrees full .scalar raw (.call site.method {}) none true &&
+        !(runtimeCatalog.siteAgrees full .scalar raw (.fieldAddress 0) none true)) ∧
       missing lengthBody .model ∧ missing unknown .refused := by
   decide +kernel
 
@@ -275,38 +275,5 @@ theorem constrainedLinkCode :
   exact ⟨rfl, rfl⟩
 
 #print axioms constrainedLinkCode
-
-/-- Every resolved family rejects every instruction other than its exact result. -/
-theorem otherInstructionRefused (family : LoweredFamily) (environment : LayoutEnvironment)
-    (profile : FeatureProfile) (raw : RawInstruction) (role : Option FoldRole)
-    (expected emitted : Instruction) (called : methodTokenCall raw.opcode = true)
-    (claimed : siteClaim loweredCallFamily environment none raw = .lowered family)
-    (resolved : family.resolve environment.callLayouts raw = some expected)
-    (other : emitted ≠ expected) :
-    runtimeCatalog.siteAgrees environment profile raw emitted none role true = false := by
-  change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.claims =
-    .lowered family at claimed
-  simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, called,
-    ModelCatalog.callRequirement, claimed, resolved,
-    CallRequirement.accepts, other]
-
-#print axioms otherInstructionRefused
-
-/-- A missing overload requires its own opcode's hole and is refused at a live site. -/
-theorem missingOverloadRefused (family : LoweredFamily) (environment : LayoutEnvironment)
-    (profile : FeatureProfile) (raw : RawInstruction) (role : Option FoldRole)
-    (emitted : Instruction) (called : methodTokenCall raw.opcode = true)
-    (claimed : siteClaim loweredCallFamily environment none raw = .lowered family)
-    (missing : family.resolve environment.callLayouts raw = none) :
-    runtimeCatalog.siteAgrees environment profile raw emitted none role true = false ∧
-    (runtimeCatalog.siteAgrees environment profile raw emitted none role false = true ↔
-      emitted = .unadmitted raw.opcode) := by
-  change siteClaim loweredCallFamily environment none raw runtimeCatalog.table.claims =
-    .lowered family at claimed
-  simp [ModelCatalog.siteAgrees, ModelCatalog.agreesAt, called,
-    ModelCatalog.callRequirement, claimed, missing,
-    CallRequirement.accepts]
-
-#print axioms missingOverloadRefused
 
 end Tests.LoweredCallRefusal

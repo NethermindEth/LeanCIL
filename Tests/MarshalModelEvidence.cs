@@ -25,7 +25,7 @@ partial class Program
                   let method := { site.method with
                     methodArguments := arguments, returnType := result, parameters }
                   return runtimeModel environment .call method == some (.memory expected) &&
-                    !runtimeCatalog.siteAgrees environment profile raw (.call method {}) none none true
+                    !runtimeCatalog.siteAgrees environment profile raw (.call method {}) none true
 
                 /-- The retained call binds its exact operation, closed operand and open signature. -/
                 theorem marshalEvidence :
@@ -33,7 +33,7 @@ partial class Program
                      | some raw, some (Instruction.call method _) => match raw.operand with
                        | .call site =>
                          let agrees := fun operand op =>
-                           runtimeCatalog.siteAgrees environment profile operand op none none true
+                           runtimeCatalog.siteAgrees environment profile operand op none true
                          let forged := { site with declared.convention := 0 }
                          let changed := { raw with operand := .call forged }
                          runtimeModel environment .call method == some (.memory ({{model}})) &&

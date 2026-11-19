@@ -170,7 +170,7 @@ theorem linkedDeclarationRequired :
       method := popCount, declared := popCount.signature 0x40,
       target := .external "", typeArguments := [], parameterCount := 1, returnsValue := true }
     runtimeCatalog.siteAgrees {} {} ⟨0, 40, .call operand⟩ (.call popCount {})
-      (some (.direct 0)) none true = false := by decide +kernel
+      (some (.direct 0)) true = false := by decide +kernel
 
 #print axioms linkedDeclarationRequired
 
@@ -182,9 +182,9 @@ private def emitting (emitted : CIL.Instruction) : CIL.Method := { body with cod
 
 /-- Each helper family has model ownership at its raw site. -/
 theorem bitClaims :
-    siteClaim loweredCallFamily {} none (site popCount) = .model ∧
-    siteClaim loweredCallFamily {} none (site ulongPopCount) = .model ∧
-    siteClaim loweredCallFamily {} none (site reverseUlong) = .model := by decide +kernel
+    siteClaim {} none (site popCount) = .model ∧
+    siteClaim {} none (site ulongPopCount) = .model ∧
+    siteClaim {} none (site reverseUlong) = .model := by decide +kernel
 
 #print axioms bitClaims
 
