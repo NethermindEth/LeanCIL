@@ -26,7 +26,7 @@ internal static class ModelOperandChecks
                 open CIL CIL.Extraction
                 /-- The decoder keeps this live call and rejects each altered operand at the same opcode. -/
                 theorem operand_checked :
-                    (match fixtureOperandCode[{{pc}}]? with
+                    (match (fixtureOperandCode[{{pc}}]? : Option RawInstruction) with
                     | some { operand := .call site, .. } =>
                       let decode := fun (operand : CallSite) =>
                         let raw := RawInstruction.mk 0 40 (.call operand)
@@ -60,7 +60,7 @@ internal static class ModelOperandChecks
                 #print axioms operand_checked
                 /-- The generated model fact names the expected checked operation and all its operands. -/
                 theorem checked_model :
-                    (match fixtureOperandCode[{{pc}}]? with
+                    (match (fixtureOperandCode[{{pc}}]? : Option RawInstruction) with
                     | some { operand := .call site, .. } => runtimeModel environment .call site.method
                     | _ => none) = some ({{model}}) := method0_model{{pc}}
                 #print axioms checked_model
