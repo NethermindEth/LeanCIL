@@ -177,7 +177,7 @@ foreach (var name in new[] { "ReadWord", "ReadPointerWord", "ReadAlignedWord" }
     var generated = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
     var source = NarrowEvidence(generated, "method0_body_validated");
     Reject(name, source, "def method0Original", "target := .external externalIdentity0",
-        "target := .external \"forged\"", "BodyDecodes");
+        "target := .external \"forged\"", "the decoded method does not match its body bytes or metadata");
 }
 rejected.Check();
 

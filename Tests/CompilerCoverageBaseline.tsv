@@ -134,6 +134,9 @@ Examples:System.Boolean Examples.ComputedFlags::get_NotOff()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ComputedFlags::get_Outer()	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.ComputedFlags::get_Ping()	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.ComputedFlags::get_Pong()	B	B	B	B	B	B	B	B
+Examples:System.Boolean Examples.DivisionIntrinsics::EqualBytes256(System.Runtime.Intrinsics.Vector256`1<System.Byte>,System.Runtime.Intrinsics.Vector256`1<System.Byte>)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.DivisionIntrinsics::EqualSigned512(System.Runtime.Intrinsics.Vector512`1<System.Int64>,System.Runtime.Intrinsics.Vector512`1<System.Int64>)	A	A	A	A	A	A	A	A
+Examples:System.Boolean Examples.DivisionIntrinsics::EqualWords128(System.UInt32,System.UInt32,System.UInt32,System.UInt32,System.Runtime.Intrinsics.Vector128`1<System.UInt32>)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.DivisionIntrinsics::UnsafeEquals(System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.Boolean Examples.DoublingAllowance::Examples.IAllowance<Examples.DoublingAllowance>.Spend(Examples.DoublingAllowance&)	B	B	B	B	B	B	B	B
 Examples:System.Boolean Examples.DoublingAllowance::Spend(Examples.DoublingAllowance&,System.UInt64)	A	A	A	A	A	A	A	A
@@ -248,6 +251,8 @@ Examples:System.Int32 Examples.Arithmetic::AtLeastFive(System.Int32)	A	A	A	A	A	A
 Examples:System.Int32 Examples.Arithmetic::FiveToOne(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Arithmetic::Larger(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Arithmetic::Unsupported(System.Int32)	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.Arithmetic::WordAdjusted(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Arithmetic::WordSized(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ArrayElementReferences::Read(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ArrayElementReferences::Write(System.Int32[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.BinarySpans::TryWriteBig(System.Span`1<System.Byte>)	A	A	A	A	A	A	A	A
