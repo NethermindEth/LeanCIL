@@ -36,9 +36,10 @@ compile.
 The kernel decides a method's instruction checks once per site. A body of 4,006 arithmetic
 instructions spends 60 heartbeats per instruction in the unit of `maxHeartbeats`, and a body of
 802 instructions with a linked call at every second one spends 168, of which the model agreement
-check takes 104. `Extracted.lean` therefore states `set_option maxHeartbeats` on those checks for
-a method of more than 500 instructions, at 400 per instruction; a shorter method keeps Lean's
-default of 200,000. At the default, the checks of the 4,006-instruction body run out.
+check takes 104, so a call site adds 216. `Extracted.lean` therefore states
+`set_option maxHeartbeats` on those checks when 120 per instruction plus 432 per call, newobj,
+callvirt or calli exceeds Lean's default of 200,000; any other method keeps the default. At the
+default, the checks of the 4,006-instruction body run out.
 
 ## The `lookups` suite
 
