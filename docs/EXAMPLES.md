@@ -23,10 +23,10 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `DecodedAdd`: the `Add` contract for the program `Extraction.decodedProgram?` reads from the
   extraction's body bytes, proved by evaluating the decoded method without the translator's output.
   Its instruction-region proof states the stack result of `add` at pc 2 and preserves the frame and memory.
-- `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over
-  arbitrary caller memory, with exact memory preservation. The checked automation follows generated
-  instruction lookups; the same contract is tested after inserting NOPs and rejected for
-  subtraction.
+- `CheckedArithmetic.Add` and `Add64` return the unsigned sum whenever it fits and preserve
+  arbitrary caller memory. The 64-bit proof also holds with NOPs inserted before each instruction.
+  In each width, replacing addition with subtraction returns one for inputs two and one. The
+  verifier certifies that result as a counterexample to the contract, which requires three.
 - `Choose`: universal checked selection for both Boolean inputs and every pair of 64-bit values,
   preserving arbitrary caller memory exactly.
 - `GenericIdentity`: universal identity through direct, repeated and nested generic calls in C#, and

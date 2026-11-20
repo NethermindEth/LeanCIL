@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
+#:include ContractVariants.cs
 #:include ../scripts/Verification.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -20,11 +21,6 @@ var root = At("artifacts/CheckedArithmetic");
 Directory.CreateDirectory(root);
 var queue = new GeneratedQueue(verification, assembly);
 var cases = 0;
-
-// The universal contracts require no overflow, with no restriction beyond the sum fitting.
-foreach (var width in new[] { 32, 64 })
-    verification.Verify(assembly, "Examples", width == 32 ? "CheckedArithmetic::Add(uint,uint)" : "CheckedArithmetic::Add64(ulong,ulong)",
-        At($"Examples/Proofs/CheckedAdd{width}.lean"), Path.Combine(root, $"CheckedAdd{width}"));
 
 // The checked automation follows extracted instruction lookups, not fixed PCs.
 var shiftedOutput = Path.Combine(root, "ShiftedCheckedAdd64");
@@ -113,50 +109,51 @@ foreach (var operation in new[] { OpCodes.Add_Ovf, OpCodes.Add_Ovf_Un, OpCodes.S
 
 queue.Flush();
 
-// A different actual implementation must not satisfy the same universal contract.
-var wrongOutput = Path.Combine(root, "WrongCheckedAdd");
-Directory.CreateDirectory(wrongOutput);
-var wrongDll = Path.Combine(wrongOutput, "Examples.dll");
-using (var module = ModuleDefinition.ReadModule(assembly))
+// The same two inputs distinguish checked addition from the compiled subtraction at either width.
+foreach (var width in new[] { 32, 64 })
 {
-    var method = module.GetType("Examples.CheckedArithmetic").Methods.Single(m => m.Name == "Add");
-    method.Body.Instructions.Single(i => i.OpCode == OpCodes.Add_Ovf_Un).OpCode = OpCodes.Sub;
-    module.Write(wrongDll);
-}
-var rejected = false;
-try
-{
-    verification.Verify(wrongDll, "Examples", "CheckedArithmetic::Add(uint,uint)",
-        At("Examples/Proofs/CheckedAdd32.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect sum accepted");
+    var methodName = width == 32 ? "Add" : "Add64";
+    var selector = width == 32 ? "CheckedArithmetic::Add(uint,uint)" : "CheckedArithmetic::Add64(ulong,ulong)";
+    var wrongOutput = Path.Combine(root, width == 32 ? "WrongCheckedAdd" : "WrongCheckedAdd64");
+    Directory.CreateDirectory(wrongOutput);
+    var wrongDll = Path.Combine(wrongOutput, "Examples.dll");
+    using (var module = ModuleDefinition.ReadModule(assembly))
+    {
+        var method = module.GetType("Examples.CheckedArithmetic").Methods.Single(m => m.Name == methodName);
+        method.Body.Instructions.Single(i => i.OpCode == OpCodes.Add_Ovf_Un).OpCode = OpCodes.Sub;
+        module.Write(wrongDll);
+    }
 
-Console.WriteLine($"CheckedArithmetic passed: {cases} cases; universal contracts passed and incorrect sum rejected.");
-
-var wrong64Output = Path.Combine(root, "WrongCheckedAdd64");
-Directory.CreateDirectory(wrong64Output);
-var wrong64Dll = Path.Combine(wrong64Output, "Examples.dll");
-using (var module = ModuleDefinition.ReadModule(assembly))
-{
-    var method = module.GetType("Examples.CheckedArithmetic").Methods.Single(m => m.Name == "Add64");
-    method.Body.Instructions.Single(i => i.OpCode == OpCodes.Add_Ovf_Un).OpCode = OpCodes.Sub;
-    module.Write(wrong64Dll);
+    var contract = $$"""
+        /-- Every fitting unsigned sum returns its natural-number value and preserves caller memory. -/
+        def contract : MethodContract (W{{width}} × W{{width}}) where
+          args input := [.scalar (.i{{width}} input.1), .scalar (.i{{width}} input.2)]
+          pre input _ := input.1.toNat + input.2.toNat < 2^{{width}}
+          footprint _ := []
+          post input before after values := after = before ∧
+            values = [.scalar (.i{{width}} (BitVec.ofNat {{width}} (input.1.toNat + input.2.toNat)))]
+        """;
+    var fromExample = width == 32 ? "⟨4, ExampleProof.correctness_framed memory x y fits⟩" :
+        "ExampleProof.correctness memory x y fits";
+    var positive = $$"""
+        /-- The arbitrary-memory invocation theorem supplies the result and frame. -/
+        theorem correctness : contract.Holds Extracted.program 0 := by
+          rintro ⟨x, y⟩ memory fits
+          have returned : ∃ fuel, invoke Extracted.program fuel 0 (contract.args (x, y)) memory =
+              .ok (memory, [.scalar (.i{{width}} (BitVec.ofNat {{width}} (x.toNat + y.toNat)))]) :=
+            {{fromExample}}
+          obtain ⟨fuel, ran⟩ := returned
+          exact ⟨fuel, _, ran, Confined.refl _ _, _, rfl, rfl, rfl⟩
+        """;
+    const string counterexample = """
+        /-- Two minus one returns one where the checked addition contract requires three. -/
+        theorem correctness : contract.Refuted Extracted.program 0 :=
+          .of_return (input := (2, 1)) (initial := Memory.empty) (by dsimp [contract]; decide)
+            (rfl : invoke Extracted.program 4 0 (contract.args (2, 1)) Memory.empty = .ok _)
+            (by rintro ⟨-, _, rfl, -, wrong⟩; revert wrong; decide)
+        """;
+    verification.VerifyContractVariant(assembly, "Examples", selector, Path.Combine(root, $"CheckedAdd{width}"),
+        wrongDll, selector, wrongOutput, contract, positive, counterexample,
+        example: At($"Examples/Proofs/CheckedAdd{width}.lean"));
 }
-rejected = false;
-try
-{
-    verification.Verify(wrong64Dll, "Examples", "CheckedArithmetic::Add64(ulong,ulong)",
-        At("Examples/Proofs/CheckedAdd64.lean"), wrong64Output);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrong64Output, "verified.json")))
-    throw new InvalidOperationException("Checked automation accepted incorrect addition");
-Console.WriteLine("PASS checked automation rejects subtraction under the unchanged universal contract");
+Console.WriteLine($"CheckedArithmetic passed {cases} boundary cases and verified the two incorrect sums.");
