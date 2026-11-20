@@ -660,9 +660,10 @@ closed from `pre` by `cil_loop_obligation`. The outline handles these shapes:
   stores a field beside a test: the hole names the callee's method index and the `MethodContract`
   to write and prove with `Holds Extracted.program` at that index.
 
-Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
-names what it met and what that step needs, and gives the source line to continue from. The
-`Holes` line counts these apart from the obligations. The unedited file elaborates with only
+Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`
+and explains what that step needs. When the comment names the instruction, it gives the IL offset,
+CIL opcode and operand, for example `IL_0001: stloc.0`. Source lines are included when available.
+The `Holes` line counts these paths apart from the obligations. The unedited file elaborates with only
 warnings that a declaration uses `sorry`, and `leancil verify` rejects it at the theorem audit for
 `sorryAx` until every hole is filled.
 
@@ -1367,8 +1368,9 @@ Malformed documentation or stale extraction fails and removes an old lint report
 The report keeps potential modeled sites and XML declarations separate. It
 compares the selected entry's declarations with its profile-reachable method
 closure. It includes folded throws, integer divide/overflow, signed Abs, X86
-DivRem and span indexing faults. Clamp invalid bounds remain a model fault;
-this experiment does not map them to a CLR exception. Memory faults, invalid
+DivRem and span indexing faults. For an arithmetic or span fault, the site's origin includes the IL
+offset, opcode and operand. A call operand names the overload. Clamp invalid bounds remain a model
+fault without a CLR exception mapping. Memory faults, invalid
 states, unsupported operations and fuel exhaustion have no CLR name here.
 The lint is a conservative site analysis. It does not prove feasibility under a
 contract, exception conditions, or complete runtime behavior.

@@ -293,7 +293,7 @@ internal static partial class ProofOutline
                     return;
                 }
                 else throw Unsupported(
-                    $"A receiver loop does not yet outline `{op.ToLean()}` at {Location(spec.Method, pc)}");
+                    $"A receiver loop does not yet outline {InstructionAt(spec.Method, pc)}");
                 pc++;
             }
             throw Unsupported("A receiver loop path has no return or continuing head");

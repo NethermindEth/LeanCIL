@@ -4,8 +4,7 @@ namespace Nethermind.LeanCIL;
 
 /// <summary>
 /// What the translator decides for one CIL instruction: one sealed case per kind of interpreter operation.
-/// Consumers read the typed members; <see cref="ToLean()"/> renders the Lean `CIL.Instruction` term for emission
-/// and for diagnostics.
+/// Consumers read the typed members. Templates use <see cref="ToLean()"/> for the Lean `CIL.Instruction` term.
 /// </summary>
 internal abstract record Operation
 {

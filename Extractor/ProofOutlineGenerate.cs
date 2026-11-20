@@ -823,20 +823,35 @@ internal static partial class ProofOutline
         var pc = Array.FindIndex(ops, op => !Body.Pure(op, method, plainReturn));
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
+        var instruction = InstructionAt(method, pc);
         return ops[pc] is Call { ReturnsToCaller: true } call
-            ? $"`{ops[pc].ToLean()}` at {Location(method, pc)} calls method {call.Method}, which " +
-                "`cil_contract_steps` composes through a `MethodContract` you write and prove with " +
-                $"`Holds Extracted.program {call.Method}`"
-            : $"`{ops[pc].ToLean()}` at {Location(method, pc)} needs facts or a case split";
+            ? $"""
+                {instruction} calls method {call.Method}, which `cil_contract_steps` composes through a
+                `MethodContract` you write and prove with `Holds Extracted.program {call.Method}`
+                """.ReplaceLineEndings(" ")
+            : $"{instruction} needs facts or a case split";
     }
+
+    static string? SourceLine(MethodDefinition method, int offset) =>
+        Symbols.Location(method, offset, Path.GetFileName) is { } at ? at[..at.LastIndexOf(':')] : null;
 
     /// <summary>The source line of the instruction at `pc`, or its IL offset without a PDB.</summary>
     static string Location(MethodDefinition method, int pc)
     {
         var offset = method.Body.Instructions[pc].Offset;
-        return Symbols.Location(method, offset, Path.GetFileName) is { } at
-            ? at[..at.LastIndexOf(':')] : $"IL_{offset:x4}";
+        return SourceLine(method, offset) ?? $"IL_{offset:x4}";
     }
+
+    /// <summary>Cecil's instruction and its source line, with embedded line breaks escaped for a comment.</summary>
+    static string InstructionAt(MethodDefinition method, int pc)
+    {
+        var instruction = method.Body.Instructions[pc];
+        var raw = instruction.ToString().ReplaceLineEndings(@"\n");
+        return SourceLine(method, instruction.Offset) is { } at ? $"`{raw}` at {at}" : $"`{raw}`";
+    }
+
+    static string StopAt(MethodDefinition method, int pc, string reason, bool showInstruction) =>
+        showInstruction ? $"{InstructionAt(method, pc)}{reason}" : $"{reason} at {Location(method, pc)}";
 
     // `tags` names the goals the generated tactics leave, or is null when the proof is one hole.
     static void Header(Writer lean, Specification spec, IEnumerable<string> imports, string? tags)
@@ -969,9 +984,19 @@ internal static partial class ProofOutline
                 if (current.Length + word.Length + 1 > Limit && current.Length > first.Length)
                 {
                     Line(current);
-                    current = rest + word;
+                    current = rest;
                 }
-                else current += (current == first ? "" : " ") + word;
+                else if (current != first) current += " ";
+                // A single metadata name or string literal can exceed a whole comment line.
+                var remaining = word.AsSpan();
+                while (current.Length + remaining.Length > Limit)
+                {
+                    var count = Limit - current.Length;
+                    Line(string.Concat(current, remaining[..count]));
+                    current = rest;
+                    remaining = remaining[count..];
+                }
+                current = string.Concat(current, remaining);
             }
             Line(current);
         }

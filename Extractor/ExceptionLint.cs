@@ -62,8 +62,8 @@ internal static partial class ExceptionLint
                 if (folded.Raises.TryGetValue(instruction, out var exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
                 if (Faults(method, instruction, profile) is not { } faults) continue;
-                var origin = $"interpreter operation: {faults.Origin}";
-                foreach (var named in RuntimeExceptions(faults.Kind))
+                var origin = $"interpreter operation: {instruction}";
+                foreach (var named in RuntimeExceptions(faults))
                     sites.Add(new(method.FullName, instruction.Offset, named, origin));
             }
         }
@@ -115,16 +115,10 @@ internal static partial class ExceptionLint
             yield return ExceptionType.IndexOutOfRange;
     }
 
-    static (string Origin, FaultKind Kind)? Faults(MethodDefinition method, Instruction instruction,
-        FeatureProfile profile)
+    static FaultKind? Faults(MethodDefinition method, Instruction instruction, FeatureProfile profile)
     {
         var code = instruction.OpCode.Code;
-        if (InstructionOperands.CheckedConversion(code) is { } conversion)
-        {
-            var suffix = conversion.Unsigned ? "_un" : "";
-            var target = conversion.Target.ToString().ToLowerInvariant();
-            return ($".conv_ovf{suffix} .{target}", FaultKind.Overflow);
-        }
+        if (InstructionOperands.CheckedConversion(code) is not null) return FaultKind.Overflow;
         FaultKind? kind = code switch
         {
             Code.Div or Code.Rem => FaultKind.DivideByZeroAndOverflow,
@@ -133,17 +127,16 @@ internal static partial class ExceptionLint
                 Code.Add_Ovf_Un or Code.Sub_Ovf_Un or Code.Mul_Ovf_Un => FaultKind.Overflow,
             _ => null
         };
-        if (kind is { } fault) return ($".{instruction.OpCode.Name.Replace('.', '_')}", fault);
+        if (kind.HasValue) return kind;
         if (code != Code.Call || instruction.Previous?.OpCode.Code == Code.Constrained ||
             instruction.Operand is not MethodReference reference) return null;
         var typeTests = TypeTests.Analyze(method);
         if (typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction)) return null;
-        var model = RuntimeModels.CallModel(reference, profile);
-        return model switch
+        return RuntimeModels.CallModel(reference, profile) switch
         {
-            ScalarIntrinsic { Function: ScalarFunction.Abs } => (model.ToLean(), FaultKind.Overflow),
-            X86BaseDivRem64 => (model.ToLean(), FaultKind.DivideByZeroAndOverflow),
-            Memory { Operation: SpanItem } => (model.ToLean(), FaultKind.IndexOutOfRange),
+            ScalarIntrinsic { Function: ScalarFunction.Abs } => FaultKind.Overflow,
+            X86BaseDivRem64 => FaultKind.DivideByZeroAndOverflow,
+            Memory { Operation: SpanItem } => FaultKind.IndexOutOfRange,
             _ => null
         };
     }

@@ -1110,9 +1110,9 @@ internal static partial class ProofOutline
                 var pc = state.Pc;
                 var happened = Step(state);
                 if (happened == Event.Continue) continue;
-                var what = happened == Event.Stop ? stopReason : "a branch or call";
+                var what = happened == Event.Stop ? stopReason : $"a branch or call at {Location(pc)}";
                 lean.Noted("    ", "sorry",
-                    $"{NotOutlined}the entry path meets {what} at {Location(pc)}; step it to the loop by hand");
+                    $"{NotOutlined}the entry path meets {what}; step it to the loop by hand");
                 return;
             }
             if (Values(state) is not { } values)
@@ -1193,7 +1193,7 @@ internal static partial class ProofOutline
                     case Event.Continue:
                         continue;
                     case Event.Stop:
-                        Hole(lean, indent, state, $"{stopReason} at {Location(pc)}");
+                        Hole(lean, indent, state, stopReason);
                         return;
                     case Event.Return:
                         lean.Line($"{indent}cil_loop_finish{Facts(state)}");
@@ -1438,9 +1438,9 @@ internal static partial class ProofOutline
                 stack.RemoveAt(stack.Count - 1);
                 return top;
             }
-            Event Stop(string reason)
+            Event Stop(string reason, bool showInstruction = false)
             {
-                stopReason = reason;
+                stopReason = StopAt(method, state.Pc, reason, showInstruction);
                 return Event.Stop;
             }
             if (op is Local { Index: var loaded })
@@ -1685,9 +1685,12 @@ internal static partial class ProofOutline
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
             else if (op is Arg { Index: var narrow })
-                return Stop($"`{op.ToLean()}`, a read of the narrow argument " +
-                    $"`{spec.Parameters[narrow].Name}`, which the outline does not step");
-            else return Stop($"`{op.ToLean()}`, which the outline does not step");
+            {
+                var name = spec.Parameters[narrow].Name;
+                return Stop($", a read of the narrow argument `{name}`, which the outline does not step",
+                    showInstruction: true);
+            }
+            else return Stop(", which the outline does not step", showInstruction: true);
             state.Pc++;
             return Event.Continue;
         }

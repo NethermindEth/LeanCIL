@@ -60,9 +60,9 @@ internal static partial class ProofOutline
         var receiver = spec.Parameters[0];
         var stack = new Stack<string?>();
         const string Receiver = "\u0000receiver";
-        StructWalk Stop(string reason, int pc)
+        StructWalk Stop(string reason, int pc, bool showInstruction = false)
         {
-            walk.Stopped = $"{reason} at {Location(spec.Method, pc)}";
+            walk.Stopped = StopAt(spec.Method, pc, reason, showInstruction);
             return walk;
         }
         StructScalar? Field(int pc, int offset, int width)
@@ -99,10 +99,10 @@ internal static partial class ProofOutline
             }
             else if (op is StackOperation { IsArithmetic: true } arithmetic)
             {
-                if (stack.Count < 2) return Stop($"`{op.ToLean()}` on a short stack", pc);
+                if (stack.Count < 2) return Stop(" on a short stack", pc, showInstruction: true);
                 var (right, left) = (stack.Pop(), stack.Pop());
                 if (left is null or Receiver || right is null or Receiver)
-                    return Stop($"`{op.ToLean()}` on a value the outline does not name", pc);
+                    return Stop(" on a value the outline does not name", pc, showInstruction: true);
                 var symbol = arithmetic.Symbol;
                 stack.Push($"{Operand(left)} {symbol} {Operand(right)}");
             }
@@ -152,7 +152,7 @@ internal static partial class ProofOutline
                 }
                 return walk;
             }
-            else return Stop($"`{op.ToLean()}`, which the outline does not step through a struct", pc);
+            else return Stop(", which the outline does not step through a struct", pc, showInstruction: true);
         }
         return Stop("the end of the body without a return", ops.Length - 1);
     }

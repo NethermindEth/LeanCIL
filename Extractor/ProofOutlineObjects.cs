@@ -309,9 +309,9 @@ internal static partial class ProofOutline
                     stack.RemoveAt(stack.Count - 1);
                     return top;
                 }
-                bool Stop(string reason)
+                bool Stop(string reason, bool showInstruction = false)
                 {
-                    Stopped = $"{reason} at {location(pc)}";
+                    Stopped = StopAt(spec.Method, pc, reason, showInstruction);
                     return false;
                 }
                 // Walks each side of a test from where it continues, with what the path holds so far.
@@ -387,7 +387,7 @@ internal static partial class ProofOutline
                 else if (linear && op is Jump jump)
                 {
                     for (var operand = 0; operand < jump.Operands; operand++)
-                        if (Pop() is null) return Stop($"`{op.ToLean()}` on an empty stack");
+                        if (Pop() is null) return Stop(" on an empty stack", showInstruction: true);
                 }
                 else if (op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } nullTest &&
                     stack.Count > 0 && stack[^1] is Opaque)
@@ -402,7 +402,7 @@ internal static partial class ProofOutline
                 {
                     var right = Pop();
                     var left = Pop();
-                    if (Compared(left, right) is not { } condition) return Stop(Uncompared(op));
+                    if (Compared(left, right) is not { } condition) return Stop(Uncompared, showInstruction: true);
                     return Branch(condition, equalityTest.Kind == JumpKind.Equal, equalityTest.Target);
                 }
                 else if (op is StackOperation { Kind: StackOpcode.Ceq or StackOpcode.CgtUn } comparison
@@ -413,7 +413,7 @@ internal static partial class ProofOutline
                     var left = Pop();
                     // `cgt.un` on references is defined only against null.
                     if (Compared(left, right) is null || comparison.Kind == StackOpcode.CgtUn && right is not Null)
-                        return Stop(Uncompared(op));
+                        return Stop(Uncompared, showInstruction: true);
                     stack.Add(new Word(null, 4));
                 }
                 else if (op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } objectTest &&
@@ -430,7 +430,7 @@ internal static partial class ProofOutline
                         operands[position] = Pop() as Word;
                     if (operands.Any(operand => operand?.Term is null) ||
                         operands.Any(operand => operand!.Width != operands[0]!.Width))
-                        return Stop($"`{op.ToLean()}` on a value the outline does not name");
+                        return Stop(" on a value the outline does not name", showInstruction: true);
                     var terms = operands.Select(operand => new Body.Operand(operand!.Term!,
                         operand.Origin is { Numeral: true } origin ? origin.Value : null)).ToArray();
                     var (condition, takenWhenTrue) = Body.Test(test, terms, 8 * operands[0]!.Width);
@@ -462,7 +462,7 @@ internal static partial class ProofOutline
                     StackOpcode.CgtUn or StackOpcode.Clt or StackOpcode.CltUn } unnamed)
                 {
                     if (Pop() is not Word || Pop() is not Word left)
-                        return Stop($"`{op.ToLean()}` on a value that is not a word");
+                        return Stop(" on a value that is not a word", showInstruction: true);
                     stack.Add(new Word(null, unnamed.Kind is StackOpcode.Ceq or StackOpcode.Cgt or StackOpcode.CgtUn
                         or StackOpcode.Clt or StackOpcode.CltUn
                         ? 4 : left.Width));
@@ -471,7 +471,7 @@ internal static partial class ProofOutline
                     or StackOpcode.ConvI4 or
                     StackOpcode.ConvU1 or StackOpcode.ConvU2 or StackOpcode.ConvU4 } unary)
                 {
-                    if (Pop() is not Word word) return Stop($"`{op.ToLean()}` on a value that is not a word");
+                    if (Pop() is not Word word) return Stop(" on a value that is not a word", showInstruction: true);
                     stack.Add(new Word(null, unary.Kind == StackOpcode.Neg ? word.Width : 4));
                 }
                 else if (op is ClassField { Field: { Store: false, Kind: ClassViews.FieldKind.Word } load })
@@ -807,7 +807,7 @@ internal static partial class ProofOutline
                     }
                     if (!linear) return true;
                 }
-                else return Stop($"`{op.ToLean()}`, which the outline does not step");
+                else return Stop(", which the outline does not step", showInstruction: true);
             }
             if (linear) return true;
             Stopped = "the end of the body without a return";
@@ -983,8 +983,7 @@ internal static partial class ProofOutline
             return name;
         }
 
-        static string Uncompared(Operation op) =>
-            $"`{op.ToLean()}` of a reference with a value the outline cannot name";
+        const string Uncompared = " of a reference with a value the outline cannot name";
 
         /// <summary>The equation a reference test decides, or null when an operand is not a reference the outline
         /// names or a store has come first, since the statement forms each reference in the caller's memory.

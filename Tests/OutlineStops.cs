@@ -168,7 +168,7 @@ var wrapped = Outline("WrappedObject",
         code.Add(Instruction.Create(OpCodes.Ret));
     });
 if (wrapped.Code != 0 || !wrapped.Proof.Contains("not outlined: ", StringComparison.Ordinal) ||
-    !wrapped.Proof.Contains(".blt", StringComparison.Ordinal))
+    !wrapped.Proof.Contains("`IL_0003: blt IL_000f`", StringComparison.Ordinal))
     throw new Exception("A mixed native branch did not leave a hole naming it in the object outline:\n" +
         wrapped.Output + wrapped.Proof);
 Console.WriteLine("PASS a mixed native and int32 branch is a hole that names it in the object outline");
@@ -217,17 +217,37 @@ foreach (var atLatch in new[] { true, false })
 }
 
 // The element a span read loads must be as wide as the span's elements.
+string readInstruction = "";
 var read = Outline("WrongWidth",
     "System.Boolean Examples.Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)", module =>
 {
     var method = module.GetType("Examples.Loops").Methods.Single(candidate => candidate.Name == "AllZero");
     var load = method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldind_U4);
     load.OpCode = OpCodes.Ldind_I8;
+    readInstruction = $"not outlined: `{load}`";
 });
-if (read.Code != 0 || !read.Proof.Contains("not outlined: `.ldind .i8`", StringComparison.Ordinal))
+if (read.Code != 0 || !read.Proof.Contains(readInstruction, StringComparison.Ordinal))
     throw new Exception("A read wider than the span's elements was outlined as a read of its element:\n" +
         read.Output + read.Proof);
 Console.WriteLine("PASS a span read of another width than its elements is a hole");
+
+// A long operand with a line break must stay inside the generated comment.
+var literal = Outline("Literal", "System.Int32 Examples.NativeIntegers::Literal()", module =>
+{
+    var code = Added(module, "Literal", module.TypeSystem.Int32).Body.Instructions;
+    var operand = $"""first{Environment.NewLine}{new string('x', 150)}last""";
+    code.Add(Instruction.Create(OpCodes.Ldstr, operand));
+    code.Add(Instruction.Create(OpCodes.Pop));
+    code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+    code.Add(Instruction.Create(OpCodes.Ret));
+});
+var literalLines = literal.Proof.Split('\n');
+if (literal.Code != 0 || !literal.Proof.Contains("IL_0000: ldstr", StringComparison.Ordinal) ||
+    !literal.Proof.Contains(@"first\n", StringComparison.Ordinal) ||
+    !literalLines.Any(line => line.Contains("last", StringComparison.Ordinal)) ||
+    literalLines.Where(line => line.Contains("xxxx", StringComparison.Ordinal))
+        .Any(line => !line.TrimStart().StartsWith("--", StringComparison.Ordinal) || line.TrimEnd().Length > 100))
+    throw new Exception($"Expected the raw string instruction in wrapped comments.\n{literal.Output}{literal.Proof}");
 
 // A local of a narrow integer type stays the author's in every outline family, which reads it from the local's
 // type: the straight-line outline does not step its store, the loop outline refuses its kind and the object
@@ -249,7 +269,7 @@ var straight = Outline("NarrowStraight", "System.Int32 Examples.NativeIntegers::
     code.Add(Instruction.Create(OpCodes.Ldloc_0));
     code.Add(Instruction.Create(OpCodes.Ret));
 });
-if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `.stloc 0` at IL_0001", StringComparison.Ordinal))
+if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `IL_0001: stloc.0`", StringComparison.Ordinal))
     throw new Exception("A store to a byte local was stepped by the straight-line outline:\n" +
         straight.Output + straight.Proof);
 Console.WriteLine("PASS a store to a byte local is a hole in the straight-line outline");
