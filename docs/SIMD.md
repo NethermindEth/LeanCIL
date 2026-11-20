@@ -166,7 +166,7 @@ Byte `i` of the vector is AES state byte `i` (row `i % 4`, column `i / 4`), as w
 | `AdvSimd.ReverseElement8` | `V128<ulong>` -> `V128<ulong>` | `AdvSimd` | REV64 on bytes: reverse the bytes of each 64-bit lane, as `BinaryPrimitives.ReverseEndianness` does, without moving the lanes |
 | `ArmBase.Arm64.MultiplyHigh` | `ulong, ulong` -> `ulong` | `ArmBase64` | High 64 bits of the unsigned 128-bit product |
 
-No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. No ARM64 host runs the REV64 check; the intrinsics suite compares it with `ReverseEndianness` of each lane. Portable Vector128 operations can be used under an ARM profile when their signatures match the first table.
+No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh` overload or ARM ISA family besides [AES](#aes) is mapped. The intrinsics suite checks REV64 against `ReverseEndianness` within each lane and runs the compiled method on hosts that support AdvSimd. Portable Vector128 operations can be used under an ARM profile when their signatures match the first table.
 
 ## Feature getters, profiles and execution restrictions
 

@@ -259,6 +259,113 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["And"], Path.
     """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
 Console.WriteLine("PASS AVX2 AND contract and certified OR replacement at (1, 2)");
 
+// Keep the broadcasts, vector local and MoveMask while reversing the unsigned comparison.
+var wrongLess = Path.Combine(root, "GreaterInsteadOfLess");
+Directory.CreateDirectory(wrongLess);
+var wrongLessAssembly = Path.Combine(wrongLess, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
+    static Instruction Comparison(MethodDefinition method, string name) =>
+        method.Body.Instructions.Single(site => site.Operand is MethodReference target &&
+            target.DeclaringType.FullName == "System.Runtime.Intrinsics.X86.Avx512F" && target.Name == name);
+    Comparison(methods.Single(method => method.Name == "Less"), "CompareLessThan").Operand =
+        Comparison(methods.Single(method => method.Name == "Greater"), "CompareGreaterThan").Operand;
+    variant.Write(wrongLessAssembly);
+}
+if (Avx512F.IsSupported && Avx512DQ.IsSupported)
+{
+    const ulong high = 1UL << 63;
+    var changedType = Assembly.LoadFile(wrongLessAssembly).GetType("Examples.DivisionIntrinsics")!;
+    var original = runtime.GetMethod("Less")!.CreateDelegate<Func<ulong, ulong, int>>();
+    var changed = changedType.GetMethod("Less")!.CreateDelegate<Func<ulong, ulong, int>>();
+    if (original(1, high) != 255 || changed(1, high) != 0)
+        throw new InvalidOperationException("AVX-512 comparison masks differ from the unsigned high-bit witness.");
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["Less"], Path.Combine(root, "LessContract"),
+    wrongLessAssembly, selectors["Less"], wrongLess, """
+    /-- An unsigned comparison returns eight identical mask bits in well-formed caller memory. -/
+    def unsignedMask : MethodContract (W64 × W64) W32 where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.i32 value)]
+      pre _ memory := memory.WellFormed
+      footprint _ := []
+      post input _ _ value := value = if input.1.ult input.2 then 255 else 0
+    """, """
+    open CIL
+    /-- The same unsigned word in all eight lanes. -/
+    private abbrev splat (word : W64) := Vector.pack512 word word word word word word word word
+    /-- The comparison sets every mask bit precisely when the left word is smaller. -/
+    private theorem mask (left right : W64) :
+        Vector.moveMask512 (Vector.zip512 (fun x y => Vector.mask64 (x.ult y))
+          (splat left) (splat right)) = (if left.ult right then 255 else 0) := by
+      simp only [splat, Vector.zip512, Vector.lane512_0, Vector.lane512_1,
+        Vector.lane512_2, Vector.lane512_3, Vector.lane512_4, Vector.lane512_5,
+        Vector.lane512_6, Vector.lane512_7]
+      cases left.ult right <;> rfl
+
+    #print axioms mask
+
+    set_option maxRecDepth 8192
+    set_option exponentiation.threshold 1024
+    /-- The compiled method initializes one 512-bit vector local. -/
+    private def localSpec : NumericLocalSpec := ⟨.vector512, .v512 0, 0, rfl⟩
+    /-- The checked call returns the comparison mask and confines its write to the fresh local. -/
+    theorem correctness : unsignedMask.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory formed
+      let args : List CIL.Safety.Value := [.scalar (.i64 left), .scalar (.i64 right)]
+      obtain ⟨frame, entered, setup, homes, prior, _⟩ :=
+        numeric_frame_setup Extracted.method0 [localSpec] rfl rfl rfl rfl memory args formed
+      obtain ⟨home, slot, fresh, _, writable⟩ := homes.home_at 0 localSpec rfl
+      obtain ⟨after, stored, written, readback⟩ := step_store_numeric_local
+        (body := Extracted.method0) (pc := 10) (args := args) (rest := [.scalar (.v512 (splat left))])
+        .vector512 (.v512 (splat right)) (splat right).toNat rfl slot writable
+      have loaded := step_load_numeric_local (body := Extracted.method0) (pc := 11)
+        (args := args) (stack := [.scalar (.v512 (splat left))]) .vector512
+        (.v512 (splat right)) (splat right).toNat rfl slot readback
+      have frameFresh := enterFrame_fresh _ _ _ _ _ setup
+      have confined := (Confined.refl [] memory).then_below prior frameFresh.1.1
+      have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh written
+      have frameWritten := confined.then_below preserved
+        (Nat.le_of_eq (write_nextIdentity written).symm)
+      have final := frameWritten.after_leaveFrame (frame := frame)
+        (fun id member => (frameFresh.2 id member).1)
+      apply MethodContract.Holds.intro (c := unsignedMask) (input := (left, right)) (leaveFrame frame after)
+        (if left.ult right then 255 else 0) ?_ final rfl
+      refine ⟨64, invoke_of_run Extracted.program_method0 rfl setup ?_⟩
+      cil_checked_steps []
+      refine (run_next (fuel := 53) Extracted.program_method0 (by rfl) stored).trans ?_
+      refine (run_next (fuel := 52) Extracted.program_method0 (by rfl) loaded).trans ?_
+      rw [← mask left right]
+      rfl
+    """, """
+    set_option maxRecDepth 8192
+    set_option exponentiation.threshold 1024
+    /-- Returning zero violates the postcondition regardless of the final memory. -/
+    private theorem wrongMask (after : Memory) :
+        ¬ unsignedMask.Returns (1, 0x8000000000000000) Memory.empty after [.scalar (.i32 0)] := by
+      rintro ⟨value, encoded, rfl⟩
+      exact (by decide : ¬ ([Value.scalar (.i32 0)] = [.scalar (.i32 255)])) encoded
+
+    #print axioms wrongMask
+
+    /-- Reversing the comparison clears every mask bit on this unsigned input. -/
+    theorem correctness : unsignedMask.Refuted Extracted.program 0 := by
+      let high : W64 := 0x8000000000000000
+      let call := invoke Extracted.program 64 0 [.scalar (.i64 1), .scalar (.i64 high)] Memory.empty
+      have observed : call.map Prod.snd = .ok [.scalar (.i32 0)] := by decide +kernel
+      cases ran : call with
+      | error fault => simp [ran, Except.map] at observed
+      | ok result =>
+        obtain ⟨after, values⟩ := result
+        have actual : values = [.scalar (.i32 0)] := by simpa [ran, Except.map] using observed
+        subst values
+        exact MethodContract.Refuted.of_return (c := unsignedMask) (input := (1, high))
+          (program := Extracted.program) (fuel := 64) (method := 0) (final := after)
+          (values := [.scalar (.i32 0)]) Memory.empty_wellFormed ran (fun h => wrongMask after h.2)
+    """, profile: "x64-v4", imports: "import CIL.Safety.LocalSnapshots\nimport CIL.SIMD.PackedLanes");
+Console.WriteLine("PASS AVX-512 unsigned comparison contract and certified greater-than replacement");
+
 string rejectedEncoding = Path.Combine(root, "Reject-Vector512Encoding");
 Directory.CreateDirectory(rejectedEncoding);
 string malformedAssembly = Path.Combine(rejectedEncoding, "Examples.dll");
