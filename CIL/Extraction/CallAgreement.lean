@@ -168,6 +168,27 @@ theorem RuntimeModelsAgree.siteClaimTotal {closed : RawMethod} {reachable : List
 
 #print axioms RuntimeModelsAgree.siteClaimTotal
 
+/-- At a live pc that a fold owns, a validated body emits exactly the instruction the fold role
+    fixes, so a call inside a fold cannot emit anything else. -/
+theorem RuntimeModelsAgree.foldOwnedSite {closed : RawMethod} {reachable : List Bool}
+    {method : Method} (agree : RuntimeModelsAgree closed reachable method)
+    {pc : Nat} {raw : RawInstruction} {emitted : Instruction}
+    (atRaw : closed.code[pc]? = some raw) (atLive : reachable[pc]? = some true)
+    (atCode : method.code[pc]? = some emitted)
+    (owned : foldOwnsSite ((foldRoles closed.code)[pc]?.join) = true) :
+    ((foldRoles closed.code)[pc]?.join).bind (Instruction.ofRole? · none raw) =
+      some emitted := by
+  have live := List.contains_iff_mem.mpr (List.mem_of_getElem? atLive)
+  simp only [RuntimeModelsAgree, live, ite_true] at agree
+  obtain ⟨_, _, checks⟩ := agree
+  have zipped : closed.code.zipIdx[pc]? = some (raw, pc) := by
+    simp [List.getElem?_zipIdx, atRaw]
+  have checked := all3_at checks zipped atLive atCode
+  simp only [ModelCatalog.emissionAgrees, ite_true] at checked
+  simpa [owned] using checked
+
+#print axioms RuntimeModelsAgree.foldOwnedSite
+
 /-- An ordinary static field belongs to a closed type in the method's assembly. -/
 private def localStaticOwner (methodOwner : String) (owner : TypeExpr) : Bool :=
   let scope := String.ofList ((metadataChars methodOwner).takeWhile (· != ':'))

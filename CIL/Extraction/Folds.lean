@@ -194,7 +194,7 @@ private def raisedType (count : Nat) (arguments : List RawInstruction)
         signature == runtimeScope ++ "::System.Void " ++ name ++ "::.ctor(" ++
           ",".intercalate (site.parameterTypes.map fun type =>
             match type with | .atom _ name | .object _ name => name | _ => "") ++ ")" &&
-        site.name == ".ctor" && site.hasThis && !site.returnsValue &&
+        site.method.name == name!".ctor" && site.hasThis && !site.returnsValue &&
         site.returnType == .void && site.typeArguments.isEmpty &&
         site.parameterCount == count then some raised else none
     | _, _ => none

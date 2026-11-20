@@ -1,5 +1,6 @@
 import CIL.Extraction.Scalars
 import CIL.Extraction.DecodedMethod
+import Tests.Support.RawDecoding
 
 set_option maxRecDepth 4096
 
@@ -257,5 +258,31 @@ theorem decodedTypeEquality :
       some (.ldc_i4 0) := ⟨rfl, rfl⟩
 
 #print axioms decodedTypeEquality
+
+/-- The call operand with one field of its site changed. -/
+private def changeSite (operand : RawOperand) (change : CallSite → CallSite) : RawOperand :=
+  match operand with
+  | .call site => .call (change site)
+  | other => other
+
+/-- A same-named GetTypeFromHandle or op_Equality outside the runtime's System.Type folds no
+    type test, so the live ldtoken at pc 0 refuses the method. -/
+theorem foreign_type_members :
+    let foreignOwner := changeSite fromHandle fun site =>
+      { site with method.owner := .atom "Fixture" "System.Type" }
+    let signature := "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)"
+    let foreignTarget := changeSite fromHandle fun site =>
+      { site with target := .external ("Fixture::" ++ signature) }
+    let forwarded := changeSite equality fun site =>
+      { site with method.owner := .atom "Forwarder" "System.Type" }
+    let control := test marker marker
+    [control.set 1 (i 40 foreignOwner), control.set 1 (i 40 foreignTarget),
+      control.set 4 (i 40 forwarded)].all (fun code =>
+        decide (foldRoles code = List.replicate 5 none) &&
+          decide ((decodeRaw .scalar {} [] (List.replicate 5 true) (raw code) []).map
+            Method.code = liveHoleAt 0 208)) = true := by
+  decide +kernel
+
+#print axioms foreign_type_members
 
 end Tests.TypeTestEvidence

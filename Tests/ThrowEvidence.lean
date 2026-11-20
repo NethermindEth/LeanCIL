@@ -90,8 +90,39 @@ private def wrongParameter : RawOperand := .call {
     System.Int32)"),
   typeArguments := [], parameterCount := 1, returnsValue := false }
 
-theorem rejects_wrong_signature : throwFold [i 114 (.text "a"), i 115 wrongParameter, i 122] = none := by decide
-#print axioms rejects_wrong_signature
+/-- A constructor whose declared parameter count differs from its closed parameters is refused. -/
+theorem rejects_parameter_count :
+    throwFold [i 114 (.text "a"), i 115 wrongParameter, i 122] = none := by decide
+#print axioms rejects_parameter_count
+
+/-- The call operand with one field of its site changed. -/
+private def changeSite (operand : RawOperand) (change : CallSite → CallSite) : RawOperand :=
+  match operand with
+  | .call site => .call (change site)
+  | other => other
+
+/-- An Int32 parameter outside the allowlisted constructor signatures is refused. -/
+theorem rejects_int32_parameter :
+    throwFold [i 114 (.text "a"), i 115 (changeSite wrongParameter fun site =>
+      { site with method.parameters := [intType] }), i 122] = none := by decide
+#print axioms rejects_int32_parameter
+
+/-- An allowlisted exception name in another scope raises nothing, whether the owner or the
+    external target names the other scope. -/
+theorem rejects_foreign_exception :
+    throwFold [i 115 (ctor "Fixture" "System.DivideByZeroException" 0), i 122] = none ∧
+    throwFold [i 115 (changeSite divide fun site =>
+      { site with method.owner := .atom "Fixture" "System.DivideByZeroException" }), i 122] =
+      none := by decide
+#print axioms rejects_foreign_exception
+
+/-- The constructor is identified by its metadata name, so a site whose display text alone says
+    .ctor raises nothing. -/
+theorem rejects_named_other_member :
+    throwFold [i 115 divide, i 122] = some (0, .divideByZero) ∧
+    throwFold [i 115 (changeSite divide fun site =>
+      { site with method.name := name!"Other" }), i 122] = none := by decide
+#print axioms rejects_named_other_member
 
 theorem accepts_two_strings :
     throwFold [i 20, i 114 (.text "message"), i 115 (ctor runtime "System.ArgumentOutOfRangeException" 2), i 122] =

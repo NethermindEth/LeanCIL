@@ -464,6 +464,22 @@ theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
 
 #print axioms MethodEvidenceValid.siteClaimTotal
 
+/-- At a reachable pc that a fold owns, validated evidence emits the instruction its role fixes. -/
+theorem MethodEvidenceValid.foldOwnedSite {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
+    {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
+    {pc : Nat} {raw : RawInstruction} {emitted : Instruction}
+    (atRaw : item.closed.code[pc]? = some raw) (atLive : item.reachable[pc]? = some true)
+    (atCode : method.code[pc]? = some emitted)
+    (owned : foldOwnsSite ((foldRoles item.closed.code)[pc]?.join) = true) :
+    ((foldRoles item.closed.code)[pc]?.join).bind
+      (Instruction.ofRole? · none raw) = some emitted := by
+  obtain ⟨-, -, -, -, -, -, -, -, -, agree, -⟩ := valid
+  exact agree.foldOwnedSite atRaw atLive atCode owned
+
+#print axioms MethodEvidenceValid.foldOwnedSite
+
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
