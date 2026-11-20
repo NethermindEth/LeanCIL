@@ -584,6 +584,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Cpblk, Code.Initblk, Code.Unaligned
     }).ToFrozenSet();
 
+    /// <summary>The opcodes extraction takes the decoder to read: `DecodedOpcodes`, unless a test narrows the set in
+    /// its own process to drive a decoder refusal through the extractor.</summary>
+    internal static IReadOnlySet<Code> ExtractedOpcodes { get; set; } = DecodedOpcodes;
+
     /// <summary>Why the decoder gives no instruction at a live pc: its opcode has no decoder, or its translation
     /// differs from its decoded instruction.</summary>
     internal enum RefusalKind { Hole, Translated }
@@ -633,7 +637,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 instruction.OpCode.Code == Code.Ldtoken && instruction.Operand is FieldReference)
                 continue;
             var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
-            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
+            if (!ExtractedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(pc, instruction, RefusalKind.Hole);
             var translated = instruction.OpCode.Code switch
             {
