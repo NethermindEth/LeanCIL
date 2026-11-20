@@ -563,39 +563,39 @@ if (unfinishedJson.Code != 1 || WithoutStageProgress(unfinishedJson.Stderr).Leng
         unfinishedJson.Output);
 
 // `verify-batch --format json` prints one document with each request's `verify --format json` report, and
-// `--trace` adds each request's steps; the rejected request is last, so the output keeps its settings.
+// `--trace` adds each request's steps; the failing request is last, so the output keeps its settings.
 var batchManifest = Path.Combine(consumerRoot, "requests.json");
 File.WriteAllText(batchManifest, JsonSerializer.Serialize(new
 {
     schema = 1, proofRoot = consumerPackage, requests = new object[]
     {
         new { output = consumerOutput, proof = consumerProof, theorem = "ExampleProof.correctness" },
-        new { output = consumerOutput, proof = unfinishedProof, theorem = "ExampleProof.correctness",
-            expect = "rejected" }
+        new { output = consumerOutput, proof = unfinishedProof, theorem = "ExampleProof.correctness" }
     }
 }));
 var batch = Execute([.. cli, "verify-batch", batchManifest, "--format", "json", "--trace"]);
 var batchReport = JsonNode.Parse(batch.Stdout) as JsonObject;
 var batchRequests = batchReport?["requests"]?.AsArray();
-if (batch.Code != 0 || WithoutStageProgress(batch.Stderr).Length != 0 || batchReport?["schema"]?.GetValue<int>() != 1 ||
-    batchReport["passed"]?.GetValue<int>() != 2 || batchRequests is not { Count: 2 } ||
+if (batch.Code != 1 || WithoutStageProgress(batch.Stderr).Length != 0 ||
+    batchReport?["schema"]?.GetValue<int>() != 1 ||
+    batchReport["passed"]?.GetValue<int>() != 1 || batchRequests is not { Count: 2 } ||
     batchRequests[0]!["status"]!.GetValue<string>() != "verified" ||
     batchRequests[0]!["report"]!["result"]!.GetValue<string>() != "verified" ||
     batchRequests[0]!["report"]!["trace"] is not JsonArray { Count: > 0 } verifiedSteps ||
     !verifiedSteps.All(step => step!["text"]!.GetValue<string>().StartsWith("[CIL.step] ", StringComparison.Ordinal)) ||
-    batchRequests[1]!["status"]!.GetValue<string>() != "rejected" ||
+    batchRequests[1]!["status"]!.GetValue<string>() != "failed" ||
     batchRequests[1]!["report"]!["result"]!.GetValue<string>() != "failed" ||
     batchRequests[1]!["report"]!["failures"]?[0]?["source"]?["file"]?.GetValue<string>() !=
         Path.GetFullPath(unfinishedProof) ||
-    // The verified request's report carries its certificate's binding section; the rejected one issued none.
+    // The verified request's report carries its certificate's binding section; the failing one issued none.
     batchRequests[0]!["report"]!["binding"]?["facts"] is not JsonArray { Count: 12 } batchFacts ||
     batchFacts.Any(fact => fact!["status"]!.GetValue<string>() != "trusted") ||
     batchRequests[1]!["report"]!["binding"] is not null)
     throw new InvalidOperationException("verify-batch --format json --trace did not print one report per request: " +
         batch.Output);
 var batchText = Execute([.. cli, "verify-batch", batchManifest, "--trace"]);
-if (batchText.Code != 0 || !batchText.Stdout.Contains("PASS verified") || !batchText.Stdout.Contains("  Trace (") ||
-    !batchText.Stdout.Contains("Batch: 2 passed, 0 failed of 2 requests."))
+if (batchText.Code != 1 || !batchText.Stdout.Contains("PASS verified") || !batchText.Stdout.Contains("  Trace (") ||
+    !batchText.Stdout.Contains("Batch: 1 passed, 1 failed of 2 requests."))
     throw new InvalidOperationException("verify-batch --trace did not print each request's trace: " + batchText.Output);
 Console.WriteLine("PASS CLI verify-batch reports each request as JSON and traces each request's steps");
 Console.WriteLine("PASS CLI shows Lean messages, with control characters escaped, when a --proof-root proof fails");

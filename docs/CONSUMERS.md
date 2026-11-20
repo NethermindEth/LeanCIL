@@ -657,15 +657,16 @@ leancil verify-batch requests.json [--check] [--fresh] [--rebuild-library] [--tr
   "proofRoot": ".",
   "requests": [
     { "output": "artifacts/Add", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness" },
-    { "output": "artifacts/Mutant", "proof": "proofs/Refutation.lean", "theorem": "Mutant.refuted" },
-    { "output": "artifacts/Mutant", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness", "expect": "rejected" }
+    { "output": "artifacts/Mutant", "proof": "proofs/Refutation.lean", "theorem": "Mutant.refuted",
+      "expect": "rejected", "refutes": 0 }
   ]
 }
 ```
 
 Paths are relative to the manifest. Each `output` is an extraction directory written by
 `leancil extract` and must lie outside the consumer sources (for example under `artifacts/`).
-A request's optional `expect` is `verified` (the default) or `rejected`. Unknown manifest
+A request's optional `expect` is `verified` (the default) or `rejected`; a `rejected` request
+names in `refutes` the index, from 0, of a `verified` request of the same manifest. Unknown manifest
 properties are rejected. `verify-batch` does not extract again: an output whose assembly changed
 is reported as a stale input.
 
@@ -693,9 +694,15 @@ expectation.
   workspace cleanup. Requests that share work can finish together, so do not sum these times as
   independent costs. Normal verification and compile checks report the same measure.
 
-A request with `"expect": "rejected"` passes only when its proof fails during proof checking
-with unchanged inputs and an intact extraction. It stops there, never writes a certificate,
-removes any earlier `verified.json` and writes `failed.json` describing the rejection.
+A request with `"expect": "rejected"` passes only when its theorem is a verified refutation of the
+contract that the request it `refutes` proves: the counterexample predicate
+(`MethodContract.Refuted`) of that request's `Holds` statement, accepted by the kernel and bound
+to a method of the rejected request's own extraction. Requests it refutes run first, in the same
+session. Its line reads `PASS rejected` with the refuted contract and method signature. A failed
+extraction, a proof that does not build, a refutation of another contract, a theorem that states
+no counterexample predicate or a target that did not verify fails it, and the `FAIL` line ends
+with `no verified refutation of request N`. A failed refutation removes its `verified.json` and
+writes `failed.json`.
 
 The session takes one source snapshot, restores certified support once and checks each
 extraction's integrity. Requests share work as follows:

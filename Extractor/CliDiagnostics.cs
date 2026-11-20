@@ -82,8 +82,8 @@ internal static class CliDiagnostics
             "program comparison" => "Fix the fixture case, or the variant's program if the change is intended.",
             "refutation template" or "proof template" =>
                 "Give every template placeholder a value and every value a placeholder.",
-            "statement identity" => "State the variant's theorem as production's statement, or its refutation as " +
-                "that statement's negation; name only declarations both proofs import.",
+            "statement identity" => "State the theorem as the statement it is compared with, or a refutation as " +
+                "that statement's counterexample predicate (Refuted); name only declarations both proofs import.",
             "binding generation" => "Correct the catalog entry the diagnostic names, then rerun leancil bindings.",
             _ => "Check the diagnostic and the input paths, then retry."
         };

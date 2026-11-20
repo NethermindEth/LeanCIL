@@ -157,9 +157,13 @@ partial class Program
             schema = 1, proofRoot = package,
             requests = new[]
             {
-                new { output, proof = replaceArtifact ? proof : cleanProof,
-                    theorem = "ExampleProof.correctness", expect = expectRejection ? "rejected" : "verified" },
-                new { output = other, proof = cleanProof, theorem = "ExampleProof.correctness", expect = "verified" }
+                expectRejection
+                    ? new { output, proof, theorem = "ExampleProof.correctness", expect = "rejected",
+                        refutes = (int?)1 }
+                    : new { output, proof = replaceArtifact ? proof : cleanProof,
+                        theorem = "ExampleProof.correctness", expect = "verified", refutes = (int?)null },
+                new { output = other, proof = cleanProof, theorem = "ExampleProof.correctness", expect = "verified",
+                    refutes = (int?)null }
             }
         }, Json));
         Requests(replaceArtifact: false);
@@ -182,7 +186,7 @@ partial class Program
         foreach (string[] options in new string[][] { [], ["--fresh"] })
         {
             var preparation = options.Length == 0 ? "restored" : "built";
-            // Expected rejections require an audit wrapper absent from the verified warmup.
+            // An expected rejection runs after the request it refutes, and still fails on the changed artifact.
             Requests(replaceArtifact: true, expectRejection: options.Length != 0);
             File.WriteAllText(Path.Combine(output, "verified.json"), "stale report");
             var replaced = Execute([.. cli, "verify-batch", batch, "--parallel", "2",

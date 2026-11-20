@@ -560,7 +560,8 @@ partial class Program
                 requests.Add(new(row.Output, row.RefutationProof, row.RefutationTheorem!, "verified"));
             }
             requestIndex[row] = (refutation, requests.Count);
-            requests.Add(new(row.Output, row.Proof, row.Theorem, row.Expect));
+            // A rejected variant's own proof must fail at proof checking; its refutation is the request above.
+            requests.Add(new(row.Output, row.Proof, row.Theorem, row.Expect == "rejected" ? "unproved" : row.Expect));
         }
         foreach (var row in selected.Except(compared).Concat(origins.Distinct())
             .Where(row => !row.Failed && row.Expect != "unchanged"))
@@ -603,7 +604,8 @@ partial class Program
                 return (new("independent", null, own is null ? null : StatementOf(own)), null);
             var origin = production[(row.Gate, row.Profile)];
             var verified = requestIndex.TryGetValue(origin, out var at);
-            return CompareGateStatement(row, origin, origin.Stage ?? (verified ? run.Results[at.Proof].stage : "build"),
+            return CompareStatement(row.Expect == "rejected", own?.theorem ?? row.Theorem,
+                $"Production {origin.Name}", origin.Stage ?? (verified ? run.Results[at.Proof].stage : "build"),
                 verified ? Verified(at.Proof) : null, own);
         }
         var results = selected.Select(row => GateOutcome(row, options.CheckOnly,
@@ -1093,8 +1095,9 @@ partial class Program
         var refutation = requested.Refutation is { } at ? results[at] : null;
         var passed = proof.status != "failed" && refutation?.status is null or "verified";
         var mismatch = passed && statement.Error is not null;
-        return new(row.Name, proof.output, proof.proof, proof.theorem, proof.expect,
-            passed && !mismatch ? proof.status : "failed", mismatch ? StatementIdentityStage : proof.stage,
+        var expect = checkOnly ? "checked" : row.Expect;
+        return new(row.Name, proof.output, proof.proof, proof.theorem, expect,
+            passed && !mismatch ? expect : "failed", mismatch ? StatementIdentityStage : proof.stage,
             mismatch ? statement.Error : proof.error, proof.axioms, proof.libraryBuild, proof.failure,
             proof.elapsedSeconds, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus,
             row.ProgramStatus, refutation is null ? null : new(refutation.proof, refutation.theorem, refutation.status,
@@ -1102,41 +1105,43 @@ partial class Program
     }
 
     /// <summary>
-    /// How the statement `row` verified relates to production's statement `T`: `T` must state a contract's `Holds`
-    /// for a `rejected` variant, whose refutation the kernel must accept at that contract's counterexample predicate
-    /// with `T`'s arguments, and the kernel must accept any other variant's theorem at `T`, in the variant's own
-    /// environment. No
-    /// statement is compared when the variant's own leg did not verify; that leg reports why.
+    /// How the statement of `report`, a verified theorem, relates to the statement `T` of `originReport`, the
+    /// theorem `origin` names: `T` must state a contract's `Holds` when the theorem `refutes` it, and the kernel
+    /// must accept the theorem at that contract's counterexample predicate with `T`'s arguments; otherwise the
+    /// kernel must accept it at `T`, in the theorem's own environment. No statement is compared when the theorem
+    /// did not verify; its own failure reports why.
     /// </summary>
-    static (GateStatement?, string?) CompareGateStatement(GateRow row, GateRow production, string productionStage,
-        Report? productionReport, Report? variantReport)
+    static (GateStatement?, string?) CompareStatement(bool refutes, string theorem, string origin, string originStage,
+        Report? originReport, Report? report)
     {
-        if (variantReport is null) return (null, null);
-        var refutes = row.Expect == "rejected";
-        var shown = StatementOf(variantReport);
-        var expected = productionReport?.statementIdentity;
-        var identity = variantReport.statementIdentity;
-        const string requirement = "a rejected variant needs production's theorem to state";
+        if (report is null) return (null, null);
+        var shown = StatementOf(report);
+        var expected = originReport?.statementIdentity;
+        var identity = report.statementIdentity;
+        const string requirement = "an expected rejection needs the refuted theorem to state";
         const string predicates = "MethodContract.Holds, OutcomeContract.Holds or OutcomeContract.HoldsCLR";
-        const string counterexample = "the counterexample predicate of production's contract";
-        var reason = productionReport is null
-            ? $"""Production {production.Name} did not verify (stage: {productionStage}), so the statement of {
-                row.Name} has nothing to match."""
+        var reason = originReport is null
+            ? $"""{origin} did not verify (stage: {originStage}), so the statement of {theorem
+                } has nothing to match."""
             : expected?.term is null
-            ? $"""Production {production.Name} has no statement to compare: {expected?.termError ?? "none reported"}"""
+            ? $"""{origin} has no statement to compare: {expected?.termError ?? "none reported"}"""
             : refutes && !StatesContract(expected.term.Value)
-            ? $"""Production {production.Name} does not state a contract's Holds, so {
-                row.Name} has no refutation to state: {requirement} {predicates}"""
-            : identity?.matches is null ? $"""{variantReport.theorem} was not compared with production's statement."""
+            ? $"""{origin} does not state a contract's Holds, so {theorem} has no refutation to state: {
+                requirement} {predicates}"""
+            : identity?.matches is null ? $"""{theorem} was not compared with the statement of {origin}."""
             : identity.matches == true ? null
-            : refutes ? $"""Refutation {variantReport.theorem} does not state {counterexample}: {identity.mismatch}"""
-            : $"""{variantReport.theorem} does not state production's statement: {identity.mismatch}""";
-        var productionText = productionReport is null ? null : StatementOf(productionReport);
+            : refutes && report.refutation is null
+            ? $"""{theorem} states no counterexample predicate, so it refutes nothing: {identity.mismatch}"""
+            : refutes
+            ? $"""Refutation {theorem} does not state the counterexample predicate of the contract of {
+                origin}, so it refutes another contract: {identity.mismatch}"""
+            : $"""{theorem} does not state the statement of {origin}: {identity.mismatch}""";
+        var originText = originReport is null ? null : StatementOf(originReport);
         var status = reason is null ? "same" : identity?.matches == false ? "different" : "unavailable";
         var label = refutes ? "Refutation" : "Variant";
         var error = reason is null ? null
-            : $"""{reason}{'\n'}  Production: {productionText ?? "unavailable"}{'\n'}  {label}: {shown}""";
-        return (new(status, productionText, shown), error);
+            : $"""{reason}{'\n'}  {origin}: {originText ?? "unavailable"}{'\n'}  {label}: {shown}""";
+        return (new(status, originText, shown), error);
     }
 
     /// <summary>

@@ -168,7 +168,8 @@ Run `leancil extract` for each method first, then list the requests:
   "proofRoot": ".",
   "requests": [
     { "output": "artifacts/Add", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness" },
-    { "output": "artifacts/Mutant", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness", "expect": "rejected" }
+    { "output": "artifacts/Mutant", "proof": "proofs/Refutation.lean", "theorem": "Mutant.refuted",
+      "expect": "rejected", "refutes": 0 }
   ]
 }
 ```
@@ -178,6 +179,9 @@ leancil verify-batch requests.json --results results.json
 ```
 
 Paths are relative to the manifest. `expect` is `verified` (the default) or `rejected`.
+A `rejected` request names in `refutes` the index, from 0, of a `verified` request of the same
+manifest. Its theorem must state the counterexample predicate (`MethodContract.Refuted`) of the
+contract that request's theorem proves, about the request's own extraction.
 `verify-batch` does not extract again: an output whose assembly changed fails as a stale input.
 
 | Option | Meaning |
@@ -195,17 +199,20 @@ Each request prints one line when its outcome is final, in completion order:
 
 ```text
 PASS verified artifacts/Add MyProof.correctness (12.345s batch-to-result latency)
-PASS rejected artifacts/Mutant MyProof.correctness (proof checking)
+PASS rejected artifacts/Mutant Mutant.refuted (refutes CIL.Safety.MethodContract.Holds for System.UInt64 Examples.Arithmetic::WrongAdd(System.UInt64,System.UInt64))
 FAIL artifacts/Other MyProof.other (stage: proof checking)
 ```
 
-A `FAIL` line is followed by the diagnostic `verify` prints, and the request's output gets a
+A `rejected` request passes only when its refutation verifies. A failed extraction, a proof that
+does not build, a refutation the kernel rejects, a theorem that refutes another contract or a
+target that did not verify fails it, and its `FAIL` line ends with
+`no verified refutation of request N`. A `FAIL` line is followed by the diagnostic `verify` prints, and the request's output gets a
 `failed.json` ([failures.md](failures.md)). The exit code is `0` only when every request met its
 expectation. A verified request writes `verified.json` into its output; when several requests
 share one output, only the last writes `verification.json` and `verified.json`.
 
-Audit each verified statement as "Reporting a result" in SKILL.md describes. A request passes
-when its named theorem verifies, whatever that theorem states.
+Audit each verified statement as "Reporting a result" in SKILL.md describes. A `verified`
+request passes when its named theorem verifies, whatever that theorem states.
 
 ## Compile check
 

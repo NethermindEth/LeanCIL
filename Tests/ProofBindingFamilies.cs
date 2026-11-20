@@ -84,38 +84,89 @@ foreach (var result in results)
         throw new InvalidOperationException("Generated binding lost source identity or ordinary audit.");
 }
 
-// Each mutation binds a family's proof with one wrong field, or the right proof to a changed body.
+// The negative catalog binds a family's proof with a wrong width or signedness to the production method.
 foreach (var file in new[] { "lean-toolchain", "lakefile.toml", "Support.lean", "Binding.lean.in" })
     File.Copy(Path.Combine(package, file), Path.Combine(negativePackage, file), overwrite: true);
 File.Copy(At("Tests/BindingFamilies/Negative.json"), Path.Combine(negativePackage, "Negative.json"), overwrite: true);
 Run(["lake", "update"], negativePackage);
 Run([.. cli, "bindings", Path.Combine(negativePackage, "Negative.json")]);
+// A wrong width or signedness is a claim about the managed signature, which the binding's `signature` theorem
+// decides; a wrong polarity or a changed body is a wrong result, which a verified refutation shows at an input.
 var mutations = new[]
 {
-    (Name: "WrongWidth", Method: "Equal(uint,uint)", Assembly: assembly),
-    (Name: "WrongSignedness", Method: "Equal(uint,uint)", Assembly: assembly),
-    (Name: "WrongPolarity", Method: "Equal(uint,uint)", Assembly: assembly),
-    (Name: "ChangedBody", Method: "Xor(ulong,ulong)", Assembly: changedAssembly)
+    (Name: "WrongWidth", Method: "Equal(uint,uint)", Assembly: assembly, Refutation: (string?)null),
+    (Name: "WrongSignedness", Method: "Equal(uint,uint)", Assembly: assembly, Refutation: null),
+    (Name: "WrongPolarity", Method: "Equal(uint,uint)", Assembly: assembly,
+        Refutation: Refutation("32", ".i32 (if input.1 ≠ input.2 then 1 else 0)", 0, 0)),
+    (Name: "ChangedBody", Method: "Xor(ulong,ulong)", Assembly: changedAssembly,
+        Refutation: Refutation("64", ".i64 (input.1 ^^^ input.2)", 1, 1))
 };
+Directory.CreateDirectory(Path.Combine(negativePackage, "Refutation"));
 var negativeRequests = mutations.Select(mutation =>
 {
     var output = Path.Combine(directory, mutation.Name);
     ExtractBatch("extract", null, [new(mutation.Assembly, "BindingMethods::" + mutation.Method, output, "scalar")],
         cli[1]);
-    return new
-    {
-        output, proof = Path.Combine(negativePackage, "Negative", mutation.Name + ".lean"),
-        theorem = "Generated.correctness", expect = "rejected"
-    };
+    if (mutation.Refutation is null)
+        return new { output, proof = Path.Combine(negativePackage, "Negative", mutation.Name + ".lean"),
+            theorem = "Generated.correctness" };
+    var refutation = Path.Combine(negativePackage, "Refutation", mutation.Name + ".lean");
+    File.WriteAllText(refutation, mutation.Refutation);
+    return new { output, proof = refutation, theorem = "Refutation.refuted" };
 }).ToArray();
 var requests = Path.Combine(directory, "requests.json");
 File.WriteAllText(requests, JsonSerializer.Serialize(new
 {
     schema = 1, proofRoot = negativePackage, requests = negativeRequests
 }));
-Run([.. cli, "verify-batch", requests, "--results", Path.Combine(directory, "negative-results.json")]);
-if (negativeRequests.Any(request => File.Exists(Path.Combine(request.output, "verified.json"))))
-    throw new InvalidOperationException("A rejected catalog binding retained a certificate.");
+var negativeResults = Path.Combine(directory, "negative-results.json");
+var negative = Execute([.. cli, "verify-batch", requests, "--results", negativeResults]);
+var outcomes = JsonDocument.Parse(File.ReadAllText(negativeResults)).RootElement.EnumerateArray().ToArray();
+foreach (var ((name, _, _, refuting), outcome) in mutations.Zip(outcomes))
+{
+    var output = outcome.GetProperty("output").GetString()!;
+    var failure = outcome.GetProperty("failure");
+    var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json"))).RootElement
+        .GetProperty("entry").GetString();
+    var met = refuting is not null
+        ? outcome.GetProperty("status").GetString() == "verified" &&
+            failure.GetProperty("kind").GetString() == "refutation" &&
+            failure.GetProperty("method").GetProperty("entry").GetString() == entry
+        : outcome.GetProperty("status").GetString() == "failed" &&
+            outcome.GetProperty("stage").GetString() == "proof checking" &&
+            failure.GetProperty("diagnostics")[0].GetProperty("message").GetString()!
+                .Contains("Extracted.method0Signature\nis not definitionally equal", StringComparison.Ordinal) &&
+            !File.Exists(Path.Combine(output, "verified.json"));
+    if (!met)
+        throw new InvalidOperationException($"{name} was not refuted or rejected at its signature: {outcome}\n{
+            negative.Output}");
+}
+if (negative.Code != 1)
+    throw new InvalidOperationException("The batch of wrong bindings did not fail its signature checks: " +
+        negative.Output);
+
+// The claim a mutated binding makes about `width`-bit arguments, refuted where the method returns another value.
+static string Refutation(string width, string value, int left, int right) => $$"""
+    import Extracted
+    import CIL.Safety.MethodContract
+    open CIL.Safety
+    namespace Refutation
+    /-- The result the mutated binding claims for every pair of words. -/
+    def contract : MethodContract (CIL.W{{width}} × CIL.W{{width}}) where
+      args input := [.scalar (.i{{width}} input.1), .scalar (.i{{width}} input.2)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final values := final = initial ∧ values = [.scalar ({{value}})]
+    /-- The extracted method returns another value at `({{left}}, {{right}})`. -/
+    theorem refuted : contract.Refuted Extracted.program 0 :=
+      .of_return (input := ({{left}}, {{right}})) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 16 0 [.scalar (.i{{width}} {{left}}), .scalar (.i{{width}} {{right}})]
+          Memory.empty = .ok _)
+        (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
+    #print axioms refuted
+    end Refutation
+
+    """;
 
 int Lines(string path) => File.ReadLines(path).Count();
 var generatedFiles = Directory.GetFiles(Path.Combine(package, "Bindings"), "*.lean");
@@ -138,4 +189,4 @@ var sizes = new
 File.WriteAllText(Path.Combine(directory, "sizes.json"),
     JsonSerializer.Serialize(sizes, new JsonSerializerOptions { WriteIndented = true }) + "\n");
 Console.WriteLine(JsonSerializer.Serialize(sizes));
-Console.WriteLine("PASS equality/bitwise bindings, exact signed widths, polarity and changed-body rejection");
+Console.WriteLine("PASS equality/bitwise bindings, exact signed widths, refuted polarity and changed body");

@@ -44,7 +44,7 @@ starts it with `Error:`. Each Lean error cites `file:line:column` in the file yo
 | `extraction` | Extracting the variant's method failed | Read `error`; run `leancil extract` on the built assembly |
 | `program comparison` | The variant's program does not relate to production's, or to its `programOf` variant's, as its `program` says | Fix the fixture case, or `program` if the change is intended |
 | `refutation template`, `proof template` | The template is missing, or its placeholders and `values` differ | Add the missing values or placeholders |
-| `statement identity` | The kernel did not accept the variant's theorem at production's statement, or its refutation at that statement's `Refuted` form, production states no contract's `Holds`, or production did not verify | Read both statements in `error`; state the variant's theorem as production's, naming declarations from a module both proofs import |
+| `statement identity` | The kernel did not accept the variant's theorem at production's statement, or a refutation (a variant's, or a `verify-batch` request's) at the `Refuted` form of the statement it refutes, that statement states no contract's `Holds`, or its request did not verify | Read both statements in `error`; state the theorem as the statement it is compared with, or a refutation as that statement's counterexample predicate, naming declarations from a module both proofs import |
 | `binding generation` | A binding catalog is invalid: a variable no placeholder uses, a placeholder without a value, a duplicate gate, conflicting sources at one path or an unsafe path | Correct the catalog entry the diagnostic names |
 
 ## failed.json
