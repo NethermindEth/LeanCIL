@@ -75,17 +75,15 @@ var sites = Activator.CreateInstance(sitesType)!;
 sitesType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(sites, [call, callee]);
 object Operation(Instruction instruction) => translate.Invoke(null,
     [instruction, caller, methods, 0, Index(caller), sites, null, null, null, null, null])!;
-string? Link(Instruction instruction)
-{
-    var operation = Operation(instruction);
-    return (string?)operation.GetType().GetMethod("Link", BindingFlags.Instance | BindingFlags.NonPublic |
-        BindingFlags.Public)!.Invoke(operation, [(Func<int, string>)(index => $"{index}")]);
-}
-// A call renders over its method operand, which the emitter supplies; the operation holds only the callee index.
-if (!((IEnumerable<int>)Property(Operation(call), "Methods")).SequenceEqual([1]))
-    throw new Exception("Incorrect call index");
-// The template link uses the target recorded for this site in the admitted graph.
-if (Link(call) != ".direct 1") throw new Exception("Incorrect call link");
+List<(int Pc, string Link)> Links(SortedSet<int> targets) =>
+    (List<(int, string)>)sitesType.GetMethod("Links", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .Invoke(sites, [caller, caller.Body.Instructions.ToHashSet(), methods, null, null, targets])!;
+
+// Proof outlines keep the callee index; templates take the link at its pc and its target from the admitted graph.
+if (!Equals(Property(Operation(call), "Method"), 1)) throw new Exception("Incorrect call index");
+var linked = new SortedSet<int>();
+if (!Links(linked).SequenceEqual([(0, ".direct 1")]) || !linked.SetEquals([1]))
+    throw new Exception("Incorrect call link or target");
 methods.Remove(callee);
 try
 {
@@ -103,7 +101,8 @@ caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
 if (!((IEnumerable<int>)Property(Operation(choose), "Targets")).SequenceEqual([2, 2]))
     throw new Exception("Switch target order or duplicates changed");
-if (Link(choose) is not null) throw new Exception("A branch carries a call link");
+linked.Clear();
+if (Links(linked).Count != 0 || linked.Count != 0) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
 var runtimeScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
 module.TypeSystem.UInt64.Scope = runtimeScope;
@@ -318,8 +317,8 @@ object NoTypes() =>
 var siteName = Model("MetadataName").GetMethod("OfText", Declared)!.Invoke(null, ["Site"])!;
 var site = Make("MethodRef", ".void", siteName, false, 0, ".void", NoTypes(), NoTypes());
 Assign(renumbered, "Site", site);
-if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) ||
-    !((IEnumerable<int>)Property(renumbered, "Methods")).SequenceEqual([1]) ||
+if (!Equals(Property(tail, "Method"), 3) ||
+    !Equals(Property(renumbered, "Method"), 1) ||
     !Equals(Property(renumbered, "Site"), site) || !Equals(Property(renumbered, "Kind"), Named("CallKind", "Tail")))
     throw new Exception("Renumbering changed the method operand or prefix of a tail call");
 try
