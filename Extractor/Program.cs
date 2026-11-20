@@ -47,13 +47,12 @@ internal static partial class Program
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
-    /// <summary>The extracted methods and, at the same index, why each is a literal, or null when its decoder
-    /// defines it.</summary>
-    internal sealed record MethodDefinitions(MethodDefinition[] Methods, GenericEvidence.DecodeRefusal?[] Refusals);
+    /// <summary>The extracted methods, each defined from its decoder.</summary>
+    internal sealed record MethodDefinitions(MethodDefinition[] Methods);
 
     /// <summary>Runs <c>extract</c> or <c>check</c> in this process without printing its report;
     /// a rejection throws instead of returning an exit code. A batch shares the files read by earlier runs, and
-    /// `definitions` receives each extracted method with why it is a literal, or null when its decoder defines it.
+    /// `definitions` receives the extracted methods.
     /// </summary>
     internal static void RunQuietly(string[] args, ExtractionBatch? batch = null,
         Action<MethodDefinitions>? definitions = null)
@@ -505,7 +504,7 @@ internal static partial class Program
                 var frames = global::Program.TemplateVectorFrames(source, emitted.Templates);
                 checkedTemplate(new(output, assemblyHash, profile, frames));
             }
-            definitions?.Invoke(new(methods, emitted.Refusals));
+            definitions?.Invoke(new(methods));
             if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Templates, emitted.Views,
                     profile.Architecture, emitted.Layouts));

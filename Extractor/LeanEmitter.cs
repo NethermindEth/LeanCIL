@@ -6,11 +6,9 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
-    /// <summary>An extraction's Lean source and what it is built from; `Refusals` holds, per method, why it is
-    /// written as a literal, or null for a method defined from its decoder.</summary>
+    /// <summary>An extraction's Lean source and what it is built from.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts,
-        GenericEvidence.DecodeRefusal?[] Refusals);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -167,7 +165,6 @@ internal static class LeanEmitter
             .ToDictionary(pair => pair.method, pair => pair.index);
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
-        var refusals = new GenericEvidence.DecodeRefusal?[methods.Length];
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
             import CIL.Extraction.DecodedDefinition
@@ -201,7 +198,7 @@ internal static class LeanEmitter
         }
         LayoutEvidence layoutEvidence = new(types, layoutContext);
         layoutEvidence.EmitLayouts(lean);
-        // One shared constant, so a method literal names the tables instead of repeating them.
+        // One shared constant, so each method and its evidence name the tables instead of repeating them.
         lean.AppendLine($"@[cil_code] def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := " +
             "{ rawLayouts := rawLayouts, layouts := computedLayouts }");
         // The shape facts are written here once every method has been translated, so admission reports its own
@@ -260,7 +257,6 @@ internal static class LeanEmitter
                     profile))];
             var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, [], homes, sites,
                 genericEvidence.Declared(m));
-            var opaqueLocals = $"Extraction.rawOpaqueLocals method{n}Closed method{n}Reachable";
             var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution, layoutContext);
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
@@ -274,8 +270,8 @@ internal static class LeanEmitter
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)
                 lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
-            // One named table, which the literal and the decoder both take, so a decoded method's links are the
-            // extractor's and its link facts name the same definitions as a literal's.
+            // One named table, which the decoder takes, so a decoded method's links are the extractor's and its
+            // link facts name these definitions.
             var linkTable = $"method{n}Links";
             lean.AppendLine($"@[cil_code] def {linkTable} : List (Nat × Link) := [" + string.Join(", ",
                 linkEntries.Select(entry => $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]");
@@ -319,59 +315,40 @@ internal static class LeanEmitter
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
             operandShapes.Add(m, reachable, genericEvidence);
             var objectProof = operandShapes.AdmissionProof(m, n, ops);
-            refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);
-            var decoded = refusals[n] is null;
-            // Only a literal method or a template renders the static instruction in C#.
-            if (!decoded || collectTemplates)
+            if (GenericEvidence.FirstDecodeRefusal(m, reachable, ops) is { } refusal)
+                throw new GenericEvidence.UndecodedInstruction(m, refusal);
+            // Only a template renders the static instruction in C#.
+            if (collectTemplates)
                 foreach (var site in sites)
                     if (ops[site.Pc] is StaticFieldInstruction access)
                         ops[site.Pc] = access with { Field = site.Field };
-            if (decoded)
+            // The decoder's raw definition is the method's only source; the command states its field facts and
+            // writes each field operand as the definition the operand shapes name.
+            var naming = string.Join(", ", ops.Select(op => op switch
             {
-                // The decoder's raw definition is the method's only source; the command states its field facts and
-                // writes each field operand as the definition the literal form names.
-                var naming = string.Join(", ", ops.Select(op => op switch
-                {
-                    INamedField { Reference: { } field } => operandShapes.FieldName(field),
-                    ObjectInstruction { Operand: { } type } => operandShapes.TypeName(type),
-                    _ => null
-                }).OfType<string>().Distinct(StringComparer.Ordinal));
-                var fields = naming.Length == 0 ? "" : $"[{naming}] ";
-                var method = $"method{n}";
-                var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable} {method}Reachable";
-                var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
-                var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
-                const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
-                var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
-                var evidence = $"{method}_specialization_validated profile {linkTable} {method}Reachable";
-                var closedProof = $"(congrArg Except.toOption {method}_decoder_eq)";
-                var proof = $"Eq.trans ({equality} {environment} {evidence}) {closedProof}";
-                var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
-                var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
-                var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
-                lean.AppendLine($"""
-                    cil_decoded_method {method} {fields}:= {closedDecoder}
-                    theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
-                    theorem {method}_decoded_code : {method}.code = {code} := {codeProof}
-                    """);
-            }
-            else
-            {
-                // Links stay out of the frame: templates share it across profiles, but call indices differ.
-                var fields = frame.ToLean(LeanText.MethodNumber, opaqueLocals);
-                lean.AppendLine($$"""
-                    def method{{n}} : Method := { profile := profile, {{fields}}, links := {{linkTable}}, code := [
-                    """);
-                lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
-                    (op switch
-                    {
-                        INamedField { Reference: { } field } access => access.Naming(operandShapes.FieldName(field)),
-                        ObjectInstruction { Operand: { } type } access =>
-                            (access with { Operand = operandShapes.TypeName(type) }).ToLean(),
-                        _ => op.ToLean()
-                    }))) + "] }");
-            }
-            // Both selected forms use these operations, including the raw opcode hole at every dead pc.
+                INamedField { Reference: { } field } => operandShapes.FieldName(field),
+                ObjectInstruction { Operand: { } type } => operandShapes.TypeName(type),
+                _ => null
+            }).OfType<string>().Distinct(StringComparer.Ordinal));
+            var namedOperands = naming.Length == 0 ? "" : $"[{naming}] ";
+            var method = $"method{n}";
+            var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable} {method}Reachable";
+            var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
+            var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
+            const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
+            var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
+            var evidence = $"{method}_specialization_validated profile {linkTable} {method}Reachable";
+            var closedProof = $"(congrArg Except.toOption {method}_decoder_eq)";
+            var proof = $"Eq.trans ({equality} {environment} {evidence}) {closedProof}";
+            var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
+            var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
+            var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
+            lean.AppendLine($"""
+                cil_decoded_method {method} {namedOperands}:= {closedDecoder}
+                theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
+                theorem {method}_decoded_code : {method}.code = {code} := {codeProof}
+                """);
+            // A template uses these operations, with the raw opcode hole at every dead pc.
             if (collectTemplates)
                 templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
@@ -380,32 +357,12 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
                 $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
-            if (!decoded)
-            {
-                var field = $"method{n}.opaqueVectorLocals";
-                lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : {field} = {opaqueLocals} := rfl");
-            }
-            ScalarEvidence.Emit(lean, m, n, scalarCertificate, decoded, objectProof);
-            if (!decoded)
-                lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
-                    $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
+            ScalarEvidence.Emit(lean, m, n, scalarCertificate, objectProof);
             // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
             // in time linear in the body, so a stepping proof reads a link without evaluating the table lookup.
             lean.AppendLine($"cil_instruction_equations method{n}");
             // A modelled call's step reads its model from the fact the command states for its pc.
             if (ops.Any(op => op is ModelCall)) lean.AppendLine($"cil_runtime_models method{n}");
-            if (!decoded)
-            {
-                (string Field, string Value)[] facts =
-                [
-                    ("profile", "profile"), ("locals", $"[{frame.LocalsLean}]"),
-                    ("localKinds", $"[{frame.LocalKindsLean}]"), ("returnsValue", frame.ReturnsValueLean),
-                    ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
-                    ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
-                ];
-                foreach (var (field, value) in facts)
-                    lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
-            }
             lean.AppendLine($"cil_resolution_facts method{n}");
         }
         lean.Insert(shapeFactsAt, operandShapes.Lean());
@@ -425,7 +382,7 @@ internal static class LeanEmitter
                 $"layoutUses := {method}LayoutUses", $"dispatchTypes := {method}DispatchTypes",
                 $"links := {method}Links",
                 $"assembly := assembly{pinned.Index(methods[n].Module)}", $"signature := {method}Signature",
-                $"decoded := {LeanText.Bool(refusals[n] is null)}");
+                "decoded := true");
             return $$"""{ {{fields}} }""";
         });
         lean.AppendLine($"""def methodEvidence : List Extraction.MethodEvidence := [{string.Join(", ", records)}]""");
@@ -468,9 +425,7 @@ internal static class LeanEmitter
                 $"method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            var statics = refusals[n] is null
-                ? $"fun _ => (Method.ofClosed?_fields method{n}_decoder_eq).2"
-                : "fun h => False.elim (Bool.false_ne_true h)";
+            var statics = $"fun _ => (Method.ofClosed?_fields method{n}_decoder_eq).2";
             lean.AppendLine(
                 $"    method{n}_environment_validated, method{n}_declared_validated, rfl, {statics}\u27e9");
         }
@@ -510,7 +465,7 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, refusals);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts);
     }
 
     /// <summary>

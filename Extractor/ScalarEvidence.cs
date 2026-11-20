@@ -19,7 +19,7 @@ internal static class ScalarEvidence
     };
 
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,
-        NativeOperands.Certificate certificate, bool decoded, string? objectProof)
+        NativeOperands.Certificate certificate, string? objectProof)
     {
         IEnumerable<string> states = method.Body.Instructions.Select(instruction =>
             certificate.Incoming.TryGetValue(instruction, out NativeOperands.StackType[]? stack)
@@ -27,21 +27,21 @@ internal static class ScalarEvidence
         lean.AppendLine($"def method{number}ScalarStates : Extraction.ScalarCertificate := [{string.Join(", ", states)}]");
         var calls = method.Body.Instructions.Count(instruction =>
             instruction.OpCode.Code is Code.Call or Code.Callvirt or Code.Newobj or Code.Calli);
-        EmitInstructionChecks(lean, number, method.Body.Instructions.Count, calls, decoded, objectProof);
+        EmitInstructionChecks(lean, number, method.Body.Instructions.Count, calls, objectProof);
     }
 
-    // The checks share the closed operands. Decoded methods already prove their code equality.
-    static void EmitInstructionChecks(StringBuilder lean, int number, int instructions, int calls, bool decoded,
+    // The checks share the closed operands. Every method is decoded, so it already proves its code equality.
+    static void EmitInstructionChecks(StringBuilder lean, int number, int instructions, int calls,
         string? objectProof)
     {
         var method = $"method{number}";
-        var flag = LeanText.Bool(decoded);
+        const string flag = "true";
         var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code {flag}";
         var scalar = $"Extraction.ScalarFlowValid {flow}";
         var context = $"{method}.profile {method}.environment {method}.links";
         var code = $"Extraction.methodCode {context} {method}Reachable {method}Closed";
         var binding = $"{flag} = true -> {method}.code = {code}";
-        var witness = decoded ? $"fun _ => {method}_decoded_code" : "fun h => False.elim (Bool.false_ne_true h)";
+        var witness = $"fun _ => {method}_decoded_code";
         var scalarEvidence = $"And ({scalar}) ({binding})";
         var unsafeCalls = $"Extraction.UnsafeCallsValid {method}Closed {method}Reachable {method}.code";
         var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";

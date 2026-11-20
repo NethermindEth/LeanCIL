@@ -33,6 +33,7 @@ for (var index = 0; index < args.Length; index++)
     }
 
 CheckInspection();
+CheckRefusalReport();
 var timer = Stopwatch.StartNew();
 var assemblyPath = Path.Combine(root, "Extractor/bin/Nethermind.LeanCIL.dll");
 var bytes = File.ReadAllBytes(assemblyPath);
@@ -177,6 +178,44 @@ static void CheckInspection()
     if (!Rows(result).SequenceEqual(expected, StringComparer.Ordinal))
         throw new InvalidOperationException("Incorrect argument or prefix position:\n" +
             string.Join('\n', Rows(result)));
+}
+
+// A live instruction the decoder refuses blocks its entry at the refusing method's instruction, with its opcode,
+// pc and IL offset in the report, while the same instruction dead refuses nothing.
+static void CheckRefusalReport()
+{
+    using var module = ModuleDefinition.CreateModule("RefusalChecks", ModuleKind.Dll);
+    var owner = new TypeDefinition("", "Receiver", TypeAttributes.Public, module.TypeSystem.Object);
+    module.Types.Add(owner);
+    foreach (var name in new[] { "Entry", "Body" })
+        owner.Methods.Add(new(name, MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void));
+    owner.Methods[0].Body.GetILProcessor().Emit(OpCodes.Ret);
+    var il = owner.Methods[1].Body.GetILProcessor();
+    il.Emit(OpCodes.Ldc_I4, 5);
+    foreach (var opcode in new[] { OpCodes.Pop, OpCodes.Arglist, OpCodes.Pop, OpCodes.Ret }) il.Emit(opcode);
+    // Written and read back, so the refused instruction's IL offset differs from its pc.
+    using var image = new MemoryStream();
+    module.Write(image);
+    image.Position = 0;
+    using var decoded = ModuleDefinition.ReadModule(image);
+    var methods = decoded.Types.Single(type => type.Name == owner.Name).Methods;
+    var entry = methods.Single(method => method.Name == "Entry");
+    var body = methods.Single(method => method.Name == "Body");
+    var instructions = body.Body.Instructions;
+    var operations = new Operation[instructions.Count];
+    var refusal = GenericEvidence.FirstDecodeRefusal(body, instructions.ToHashSet(), operations) ??
+        throw new InvalidOperationException("The decoder accepted a live arglist.");
+    var failure = Blockers.Rejection(entry, new GenericEvidence.UndecodedInstruction(body, refusal));
+    var site = Blockers.SiteOf(failure);
+    var construct = Blockers.Construct(site.Message);
+    if (failure.Method != body || !failure.Chain.SequenceEqual([entry]) ||
+        site != site with { Method = body.FullName, IlOffset = 6, Instruction = "IL_0006: arglist", Source = null } ||
+        !site.Message.EndsWith($"at pc 2 of {body.FullName}", StringComparison.Ordinal) ||
+        construct != "Unsupported instruction: the decoder has no form for arglist")
+        throw new InvalidOperationException($"Incorrect decode refusal site {site} in {construct}");
+    var live = instructions.Where(instruction => instruction.OpCode != OpCodes.Arglist).ToHashSet();
+    if (GenericEvidence.FirstDecodeRefusal(body, live, operations) is { } dead)
+        throw new InvalidOperationException($"The decoder refused a dead {dead.At}.");
 }
 
 sealed record MethodHoles(string Method, int[] Arguments, DeadPrefix[] Prefixes);

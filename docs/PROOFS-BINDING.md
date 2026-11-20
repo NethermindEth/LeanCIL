@@ -730,7 +730,7 @@ field resolves to the model slot of its index. `valueShape` gives runtime models
 of integer and floating-point vectors. A vector operand on a raw object instruction must have a
 supported integer element.
 
-Decoded and literal object instructions name the same `valueType{k}` constant. A primitive
+Every object instruction names the `valueType{k}` constant of its type operand. A primitive
 load or store steps through its width and signedness, a struct through its checked size, and
 an integer vector through its transfer width. A span load forwards a span view and steps as
 `nop` when the stack's top is one; a null reference faults as a null dereference and any other
@@ -756,7 +756,7 @@ raw site. Compiled code evaluates the decoder, and the command writes the result
 over numerals, except that a field whose type is that of a constant passed to the decoder, such as
 the profile, the environment and the link table, is written as that constant, and a
 zero-initialized struct local is written as `.aggregate (List.replicate size 0)`, the term an
-extraction's literal and `make_fitting_local` hypotheses name. In a method with a constrained call or a dead site,
+template's frame and `make_fitting_local` hypotheses name. In a method with a constrained call or a dead site,
 the command writes aggregate identities with the expressions from the environment's raw layouts.
 The kernel then checks by reduction the theorem, named with the suffix `_decoder_eq`, that
 `decoder = .ok name` for a closed method or `decoder = some name` for an optional method,
@@ -774,8 +774,9 @@ evaluated method. Admission checks the instructions at live positions. The form
 operand as its listed constant. The method can then use the facts from `cil_field_shape` or
 `cil_value_shape`. The command rejects a listed constant that names no operand.
 
-The extractor defines a method this way when every live instruction decodes and each live call
-or construction has the operation its decoder gives. A constrained prefix decodes with its
+The extractor defines every method this way. It refuses a method with a live instruction that does
+not decode, or with a live call or construction whose operation differs from the one its decoder
+gives, and names that instruction's IL offset, opcode and pc. A constrained prefix decodes with its
 adjacent instance `callvirt` or static `call`. A bare `ldstr` decodes to a string literal with
 the text bound to its metadata token. The decoder refuses backspace, form feed and characters
 that require UTF-16 surrogate pairs. A recognized throw erases its message and constructor,
@@ -792,9 +793,7 @@ cil_decoded_method method0 := Method.ofClosed? profile environment method0Links 
   method0Closed method0RawArguments
 ```
 
-in place of a `def method0 : Method` literal. The optional list before `:=` names the operands
-used by the decoded instructions, for example `[fieldRef0, valueType0]` for a field access
-and an object instruction. The extractor follows the definition with
-`cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
-its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.program_method{n}`
-equations.
+The optional list before `:=` names the operands used by the decoded instructions, for example
+`[fieldRef0, valueType0]` for a field access and an object instruction. The extractor follows the
+definition with `cil_instruction_equations method0` and `cil_resolution_facts method0`. Stepping
+reads the method through its `cil_code` facts and `Extracted.program_method{n}` equations.

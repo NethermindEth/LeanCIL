@@ -25,10 +25,9 @@ partial class Program
     [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
     private static partial Regex ResolutionFactsCommand { get; }
 
-    const string LiteralMethodDefinition = """def method(?<number>\d+) : Method""";
     const string DecodedMethodDefinition = """cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?""";
 
-    [GeneratedRegex($"""(?m)^(?:{LiteralMethodDefinition}|{DecodedMethodDefinition}) :=""")]
+    [GeneratedRegex($"""(?m)^{DecodedMethodDefinition} :=""")]
     private static partial Regex DefinedMethod { get; }
 
     // A decoded method's definition line: its options, then its decoder over the method's own definitions.
@@ -206,7 +205,7 @@ partial class Program
 
     /// <summary>
     /// `source` with the link of the call at `pc` of method `method` changed to `link`: the definition the method's
-    /// link table names, whether the method is decoded or kept as a literal.
+    /// link table names.
     /// </summary>
     static string ForgeLink(string source, int method, int pc, string link)
     {
