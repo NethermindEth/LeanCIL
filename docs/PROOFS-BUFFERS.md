@@ -98,8 +98,8 @@ shape gives, which `arrayLoad_of_element` rewrites from the same two facts.
 `step_ldelem_any_of_element` steps that typed `ldelem` from the two facts and the shape fact
 `cil_resolution_facts` declares for its type, and `step_ldelem_any_of_transfer` steps one of a
 struct or vector element from the shape fact and its `arrayTransferInstruction` fact. An outline
-of a generic read specialized to a word cites that fact by name, as
-`Extracted.method0_elementShape0` for the first element type of method 0.
+of a generic read specialized to a word uses `cil_element_shape% Extracted.method0 2` for a
+typed load at pc 2. Lean reads the element type from that instruction's checked equation.
 `step_ldelema_of_element` steps an `ldelema` whose type the method's layouts give that element
 shape from the address, writable or read-only as a `readonly.` prefix records, and
 `arrayAddress_of_element` gives the same reference once it steps to `arrayAddress`;

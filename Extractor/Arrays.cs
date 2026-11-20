@@ -143,16 +143,13 @@ internal static class Arrays
         string Typed => Shape ?? throw new InvalidOperationException("A typed element access has no shape fact");
     }
 
-    /// <summary>The numeric element access <paramref name="op"/> performs, or null when it performs none. A typed
-    /// access names the shape fact <paramref name="shapeOf"/> gives its element type, and is null when that gives
-    /// none.</summary>
-    internal static NumericAccess? Numeric(Operation op, Func<string, string?>? shapeOf = null) => op switch
+    /// <summary>A numeric access uses the method's checked shape for its closed element type.</summary>
+    internal static NumericAccess? Numeric(Operation op, int pc, int method = 0) => op switch
     {
         ArrayElementAccess access => new(access.Width, access.Signed, access.Store, access.Kind),
         TypedElementAccess { Storage: { Kind: not NativeOperands.Kind.ArrayComposite } storage } typed =>
-            (typed.Element is { } element ? shapeOf?.Invoke(element) : null) is var shape &&
-                (shapeOf is null || shape is not null)
-                ? new(storage.Width, storage.Signed, typed.Store, null, shape) : null,
+            new(storage.Width, storage.Signed, typed.Store, null,
+                $"(cil_element_shape% Extracted.method{method} {pc})"),
         _ => null
     };
 

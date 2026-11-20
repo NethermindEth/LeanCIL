@@ -18,8 +18,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     readonly Dictionary<MethodReference, string> declaredSignatures = new();
     int methodParameterCount;
-    // Operand terms of the closed code, by instruction, kept while its definition is written.
-    Dictionary<Instruction, string>? closedOperands;
+    // Closed type operands are shared by the decoder, template descriptors and proof outlines.
+    readonly Dictionary<Instruction, string> closedTypes = [];
 
     // Type serialization needs no method bodies; only method and dispatch evidence read originals.
     PinnedAssemblies Pinned => pinned ??
@@ -340,27 +340,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         };
     }
 
-    /// <summary>The type operand of <paramref name="instruction"/> in <paramref name="method"/>, as its raw operand
-    /// states it.</summary>
-    internal string TypeOperandOf(MethodDefinition method, Instruction instruction)
-    {
-        methodParameterCount = method.GenericParameters.Count;
-        return Type((TypeReference)instruction.Operand);
-    }
-
-    /// <summary>The element type of the <c>newarr</c> <paramref name="instruction"/> in <paramref name="method"/>, as
-    /// its raw operand states it; the executed allocation must carry the same term.</summary>
-    internal string ArrayElementOf(MethodDefinition method, Instruction instruction)
-    {
-        methodParameterCount = method.GenericParameters.Count;
-        return ArrayElement((TypeReference)instruction.Operand);
-    }
-
     // An element class outside the model is named as an object, as the array's reference slots hold it.
     string ArrayElement(TypeReference type) => ReferenceArrays.Element(type) ? ObjectType(type) : Type(type);
 
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
-        Instruction original, Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
+        Instruction original, Instruction admittedInstruction, IReadOnlySet<Instruction> reachable,
+        Dictionary<Instruction, string>? typeOperands = null)
     {
         switch (instruction.Operand)
         {
@@ -374,11 +359,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
                 return $".argument {argument}";
             case VariableDefinition local: return $".local {local.Index}";
-            case TypeReference type when instruction.OpCode.Code == Code.Newarr:
-                return $".type ({ArrayElement(type)})";
             case TypeReference type:
-                var term = Type(type);
-                closedOperands?.TryAdd(admittedInstruction, term);
+                var term = instruction.OpCode.Code == Code.Newarr ? ArrayElement(type) : Type(type);
+                typeOperands?.Add(admittedInstruction, term);
                 return $".type ({term})";
             case MethodReference callee:
                 return $".call {Call(callee, (MethodReference)original.Operand, admittedInstruction, reachable)}";
@@ -399,14 +382,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         }
     }
 
-    Dictionary<Instruction, string> closedCalls = [];
-
     /// <summary>
     /// The type term of the type operand of <paramref name="instruction"/>, as the last method's
     /// <c>method{n}Closed</c> states it; the emitted instruction must carry the same term.
     /// </summary>
     internal string ClosedOperandOf(Instruction instruction) =>
-        closedCalls.TryGetValue(instruction, out var term) ? term
+        closedTypes.TryGetValue(instruction, out var term) ? term
             : throw new InvalidDataException("No closed operand term for the instruction at " + instruction.Offset);
 
     internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
@@ -438,7 +419,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
 
     string Method(MethodDefinition method, MethodDefinition original, MethodDefinition admitted,
-        IReadOnlySet<Instruction> reachable, string staticInput)
+        IReadOnlySet<Instruction> reachable, string staticInput, Dictionary<Instruction, string>? typeOperands = null)
     {
         methodParameterCount = method.GenericParameters.Count;
         var instructions = new InstructionIndex(method);
@@ -454,7 +435,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (instruction.Offset != selected.Offset || instruction.OpCode.Value != selected.OpCode.Value)
                 throw new InvalidDataException("Specialization instruction mapping changed an offset or opcode.");
             var operand = Operand(method, instructions, instruction, original.Body.Instructions[index],
-                selected, reachable);
+                selected, reachable, typeOperands);
             return $"{{ offset := {instruction.Offset}, opcode := {Unadmitted.RawOpcode(instruction)}, " +
                 $"operand := {operand} }}";
         });
@@ -513,10 +494,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var originalEvidence = Method(original, original, method, reachable, staticInput);
         // Token operands are spelled in the original's generic context, as its code is.
         var body = Body(original, method, reachable, number);
-        closedOperands = [];
-        var closedEvidence = Method(method, original, method, reachable, staticInput);
-        closedCalls = closedOperands;
-        closedOperands = null;
+        closedTypes.Clear();
+        var closedEvidence = Method(method, original, method, reachable, staticInput, closedTypes);
         externalIdentities.Emit(lean, decoderInputs);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);

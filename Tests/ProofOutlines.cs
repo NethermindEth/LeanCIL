@@ -211,6 +211,19 @@ var elaborated = outlined.AsParallel().WithDegreeOfParallelism(Environment.Proce
     Directory.CreateDirectory(scratch);
     var extraction = Path.Combine(scratch, "Extraction");
     var sourceAssembly = name == "WordByte" ? At("Extractor/bin/Nethermind.LeanCIL.dll") : assembly;
+    if (name == "TypedReadUInt32")
+    {
+        // The live generic read and the unreachable byte allocation have different closed element types.
+        sourceAssembly = Path.Combine(scratch, "Examples.dll");
+        using var image = ModuleDefinition.ReadModule(assembly);
+        var read = image.GetType("Examples.PrimitiveArrays").Methods.Single(method => method.Name == "ReadGeneric");
+        var il = read.Body.GetILProcessor();
+        il.Emit(OpCodes.Ldc_I4_0);
+        il.Emit(OpCodes.Newarr, image.TypeSystem.Byte);
+        il.Emit(OpCodes.Pop);
+        il.Emit(OpCodes.Br, read.Body.Instructions[0]);
+        image.Write(sourceAssembly);
+    }
     Run([.. Extract("extract", sourceAssembly, name == "WordByte" ? null : "Examples", selector, extraction),
         .. typeArguments.GetValueOrDefault(name, [])]);
     var outline = Path.Combine(scratch, "Proof.lean");
@@ -1629,6 +1642,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
         ("    sorry -- Precondition excludes an empty `target1`",
             "    simp [Precondition, target1Count] at assumed"),
         ("    case postcondition => sorry", "    case postcondition => exact target1Filled")]),
+    ("TypedReadUInt32", ArrayReadSpecification("W32", "")),
+    ("TypedReadUInt64", ArrayReadSpecification("W64", "")),
     ("ArrayReadInt32", ArrayReadSpecification("W32", "")),
     ("ArrayReadUInt64", ArrayReadSpecification("W64", "")),
     ("ArrayRead", ArrayReadSpecification("W32", ", leaveFrame")),

@@ -19,7 +19,9 @@ internal static partial class ProofOutline
     /// returns it, or null for any other body.</summary>
     static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, Operation[] all)
     {
-        var ops = all.Where(op => !op.IsNop).ToArray();
+        // Instructions after the return cannot affect a straight-line read.
+        var end = Array.FindIndex(all, op => op is Return);
+        var ops = all.Take(end + 1).Where(op => !op.IsNop).ToArray();
         if (LeanEmitter.Narrow(spec.Method.ReturnType) is not null || spec.Method.HasThis ||
             spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
             Argument(ops[0]) is not { Shape: ParameterShape.WordArray } array ||
@@ -27,7 +29,7 @@ internal static partial class ProofOutline
             spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return)
             return null;
         if (ops.Length == 4 &&
-            Arrays.Numeric(ops[2], ShapeFacts(extraction, 0)) is { Store: false, Signed: false } load &&
+            Arrays.Numeric(ops[2], Array.IndexOf(all, ops[2])) is { Store: false, Signed: false } load &&
             load.Width == array.Width)
             return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.

@@ -254,37 +254,7 @@ internal static class LeanEmitter
                 ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? InitialValue.NullRef :
                     Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext)
                 : InitialValue.Unmodeled)];
-            List<Operation>? templateOperations = null;
-            if (collectTemplates)
-            {
-                var instructions = new InstructionIndex(m);
-                var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
-                templateOperations = new List<Operation>(m.Body.Instructions.Count);
-                foreach (var site in m.Body.Instructions)
-                {
-                    if (!reachable.Contains(site))
-                    {
-                        templateOperations.Add(Unadmitted.At(site));
-                        continue;
-                    }
-                    var pc = templateOperations.Count;
-                    var operation = InstructionTranslation.Translate(site, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
-                    // Templates compare operand identities across method bodies.
-                    templateOperations.Add(operation switch
-                    {
-                        ObjectInstruction access => access with { Operand = genericEvidence.TypeOperandOf(m, site) },
-                        NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, site) },
-                        TypedElementAccess access => access with { Element = genericEvidence.ArrayElementOf(m, site) },
-                        ElementAddress address => address with { Element = genericEvidence.ArrayElementOf(m, site) },
-                        ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
-                        StructField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
-                        Newobj construction =>
-                            construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
-                        _ => operation
-                    });
-                }
-            }
+
             fieldAccesses.AddRange(m.Body.Instructions.Select((site, pc) => reachable.Contains(site)
                 ? ClassViews.Of(site, n, pc, profile.Architecture) : null).OfType<ClassViews.Access>());
             LocalKind[] kinds =
@@ -343,34 +313,54 @@ internal static class LeanEmitter
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)
                 throw new GenericEvidence.UndecodedInstruction(m, refusal);
-            if (templateOperations is not null)
+            if (collectTemplates)
             {
-                // A call names the method its raw operand names; a constrained one also the type the definition just
-                // written spells for its prefix.
-                for (var pc = 0; pc < templateOperations.Count; pc++)
-                    templateOperations[pc] = templateOperations[pc] switch
+                var instructions = new InstructionIndex(m);
+                var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
+                var templateOperations = new List<Operation>(m.Body.Instructions.Count);
+                foreach (var site in m.Body.Instructions)
+                {
+                    if (!reachable.Contains(site))
                     {
+                        templateOperations.Add(Unadmitted.At(site));
+                        continue;
+                    }
+                    var pc = templateOperations.Count;
+                    var operation = InstructionTranslation.Translate(site, m, methodIndices, n, instructions, profile,
+                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
+                    // Each descriptor reads the operand of the closed instruction the decoder checks.
+                    templateOperations.Add(operation switch
+                    {
+                        ObjectInstruction access => access with { Operand = genericEvidence.ClosedOperandOf(site) },
+                        NewArray allocation => allocation with { Element = genericEvidence.ClosedOperandOf(site) },
+                        TypedElementAccess access => access with { Element = genericEvidence.ClosedOperandOf(site) },
+                        ElementAddress address => address with { Element = genericEvidence.ClosedOperandOf(site) },
+                        ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
+                        StructField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
+                        Newobj construction =>
+                            construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
                         Call call => call with
                         {
                             Site = genericEvidence.MethodReferenceOf(m, pc),
                             ConstrainedType = call.Constrained
-                                ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
+                                ? genericEvidence.ClosedOperandOf(site.Previous) : null
                         },
                         CallVirtual slot => slot with { Site = genericEvidence.MethodReferenceOf(m, pc) },
                         ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
-                        var operation => operation
-                    };
+                        _ => operation
+                    });
+                }
                 foreach (var site in sites)
                     if (templateOperations[site.Pc] is StaticFieldInstruction access)
                         templateOperations[site.Pc] = access with { Field = site.Field };
+                templates.Add(new(m.FullName, frame, [.. templateOperations],
+                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.
             var namedOperands = naming.Length == 0 ? "" : $"[{naming}] ";
             EmitDecodedMethod(lean, n, namedOperands, inputs);
-            if (templateOperations is not null)
-                templates.Add(new(m.FullName, frame, [.. templateOperations],
-                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
+
             const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
             var layoutCheck = $"{layoutTables} method{n} method{n}LayoutUses";
             lean.AppendLine($"theorem method{n}_layouts_validated : {layoutCheck} := ⟨layouts_validated, {Decide}⟩");
@@ -517,7 +507,7 @@ internal static class LeanEmitter
                     Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj or Code.Sizeof)
                 {
                     var type = (TypeReference)instruction.Operand;
-                    var name = RecordType(evidence.TypeOperandOf(method, instruction));
+                    var name = RecordType(evidence.ClosedOperandOf(instruction));
                     names.Add(name);
                     operands.Add((Unadmitted.RawOpcode(instruction), name));
                     needsLayout |= !Spans.Is(type) && MetadataValidation.IsAggregate(type, method.Module);

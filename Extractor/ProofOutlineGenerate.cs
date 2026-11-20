@@ -172,8 +172,9 @@ internal static partial class ProofOutline
     static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Operation[] ops, int loops)
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
-        if (loops == 0 || arrays.Length == 0 || !ops.Any(op => Arrays.Numeric(op) is { Store: true } ||
-            Body.ArrayView(op) is { Element.Compound: false, Writable: true })) return parameters;
+        if (loops == 0 || arrays.Length == 0 || !Enumerable.Range(0, ops.Length).Any(pc =>
+            Arrays.Numeric(ops[pc], pc) is { Store: true } ||
+            Body.ArrayView(ops[pc]) is { Element.Compound: false, Writable: true })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
                 "new-proof follows a loop's stores into a method's one array argument");
@@ -640,7 +641,7 @@ internal static partial class ProofOutline
         // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
         var walk = new ObjectWalk(spec, body.Operations, views, summarized, numericHomes: numericHomes,
-            stubs: Stubbed, shapes: ShapeFacts(extraction, 0));
+            stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.Object or ParameterShape.Array or ParameterShape.ValueArray or ParameterShape.WordArray) &&
             walk.Run(pc => Location(spec.Method, pc));

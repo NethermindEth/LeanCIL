@@ -603,6 +603,25 @@ def declareElementFacts (body : Body) (simpSet : SimpExtension) : TermElabM Unit
       addSimpTheorem simpSet (body.name.appendAfter s!"_elementShape{position}") (post := false)
         (inv := false) .global (eval_prio default)
 
+/-- The checked element shape of the decoded array instruction at `pc` in a named method. -/
+elab "cil_element_shape% " body:ident ppSpace pc:num : term => do
+  let method ← Term.elabTermEnsuringType body (mkConst ``CIL.Method)
+  let lookup ← Term.elabTermAndSynthesize (← `(term| (CIL.Method.code $body)[$pc]?)) none
+  let some ext ← getSimpExtension? `cil_code | throwError "Missing cil_code simp set"
+  let ctx ← Simp.mkContext (simpTheorems := #[← ext.getTheorems])
+    (congrTheorems := ← getSimpCongrTheorems)
+  let (found, _) ← simp (← instantiateMVars lookup) ctx
+  let (``Option.some, #[_, op]) := found.expr.getAppFnArgs
+    | throwError "Expected an instruction at pc {pc}, found {found.expr}"
+  let (head, args) := op.getAppFnArgs
+  unless #[``CIL.Instruction.newarr, ``CIL.Instruction.ldelem_any, ``CIL.Instruction.stelem_any,
+      ``CIL.Instruction.ldelema].contains head do
+    throwError "The instruction at pc {pc} has no array element type"
+  let lhs := mkApp2 (mkConst ``CIL.Method.elementShape) method args[0]!
+  let (result, _) ← simp lhs ctx
+  let some proof := result.proof? | throwError "No checked element shape at pc {pc}"
+  return proof
+
 /-- Declares a method's kernel-checked return narrowing from its named signature facts, how it
     reads each declared argument, the descriptor bound to each static site and the shape of each
     array element type its raw method names. -/

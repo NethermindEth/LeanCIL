@@ -213,7 +213,6 @@ internal static partial class ProofOutline
             index == 0 ? "" : (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         readonly MethodDefinition method = extraction.Methods[0];
-        readonly Func<string, string?> shapes = ShapeFacts(extraction, 0);
         readonly FieldViews views = new(extraction);
         readonly List<Slot> slots = [];
         readonly List<Component> components = [];
@@ -1618,7 +1617,7 @@ internal static partial class ProofOutline
                 stack.Add(new Number($"(BitVec.ofNat 32 {count})", 4,
                     Stacked: $".scalar (.i32 ((BitVec.ofNat 64 {count}).setWidth 32))"));
             }
-            else if (Arrays.Numeric(op, shapes) is { Store: false, Signed: false } arrayLoad &&
+            else if (Arrays.Numeric(op, state.Pc) is { Store: false, Signed: false } arrayLoad &&
                 stack.Count >= 2 && stack[^2] is WordArrayArgument read)
             {
                 if (stack[^1] is not Number { Width: 4, Narrow: false } index || current is null ||
@@ -1632,7 +1631,7 @@ internal static partial class ProofOutline
                 stack.Add(new Number(ElementRead(read.Array, arrayLoad, index.Term, state.Facts),
                     read.Array.Width));
             }
-            else if (Arrays.Numeric(op, shapes) is { Store: true } arrayStore &&
+            else if (Arrays.Numeric(op, state.Pc) is { Store: true } arrayStore &&
                 stack.Count >= 3 && stack[^3] is WordArrayArgument stores)
             {
                 var width = arrayStore.Width;
