@@ -9,6 +9,7 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 #:include SavedSummaries.cs
+#:include ContractVariants.cs
 #:include ../scripts/ProofCostReport.cs
 #:include ../scripts/CertifiedLibraryDonor.cs
 #:include ../scripts/ExportVerificationSuites.cs

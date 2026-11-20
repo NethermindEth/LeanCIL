@@ -9,7 +9,7 @@ partial class Program
         const string addition = "System.UInt64 Examples.Arithmetic" + signature;
         Directory.CreateDirectory(directory);
         var changed = Path.Combine(directory, "Examples.dll");
-        WriteSubtraction(assembly, changed);
+        WriteInstructionChange(assembly, changed, "Add", [0x02, 0x03, 0x58, 0x2a], 2, 0x59);
         CheckSavedSummary(Path.Combine(directory, "Addition"), assembly, addition,
             At("Tests/SummaryModules/SavedSummary.lean"),
             ("OtherToken", assembly, "System.UInt64 SelectorExamples.One.Collision" + signature, "token"),
@@ -20,23 +20,83 @@ partial class Program
         CheckSavedSummary(Path.Combine(directory, "Memory"), assembly,
             "System.Void Examples.Arithmetic::Mutate(System.UInt64&)",
             At("Tests/SummaryModules/Memory/SavedSummary.lean"));
+        CheckSavedBranches(Path.Combine(directory, "Branch"), assembly);
     }
 
-    void CheckSavedSummary(string directory, string assembly, string entry, string summarySource,
-        params (string Name, string Image, string Entry, string Mismatch)[] variants)
+    void CompileSummaryModule(string source, string destination, string search)
+    {
+        var module = Path.GetFileNameWithoutExtension(source);
+        var result = Run([LeanExecutable, "--root=" + Path.GetDirectoryName(source), "-o",
+            Path.Combine(destination, module + ".olean"), source], leanPath: search);
+        if (result.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidDataException($"The compiled module {module} depends on sorryAx.");
+    }
+
+    // Publish only compiled modules. A consumer must discharge the target's own byte and metadata checks.
+    string PublishSummary(string directory, string assembly, string entry, string summarySource)
     {
         var published = Path.Combine(directory, "Published");
         Directory.CreateDirectory(published);
-        var libraryPath = CheckoutLeanPath();
         var producer = Path.Combine(directory, "Producer");
         Run(Extract("extract", assembly, "Examples", entry, producer));
         var reference = Path.Combine(producer, "Reference.lean");
         var generated = File.ReadAllText(Path.Combine(producer, "Extracted.lean"));
         File.WriteAllText(reference, generated.Replace("Extracted", "Reference", StringComparison.Ordinal));
+        var search = published + Path.PathSeparator + CheckoutLeanPath();
+        CompileSummaryModule(reference, published, search);
+        CompileSummaryModule(summarySource, published, search);
+        return published;
+    }
+
+    void CheckSavedBranches(string directory, string assembly)
+    {
+        const string entry = "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)";
+        var published = PublishSummary(directory, assembly, entry, At("Tests/SummaryModules/Branch/SavedArms.lean"));
+        var changed = Path.Combine(directory, "Examples.dll");
+        WriteInstructionChange(assembly, changed, "Choose", [0x02, 0x2d, 0x02, 0x04, 0x2a, 0x03, 0x2a], 1, 0x2c);
+        var consumer = Path.Combine(directory, "Reversed");
+        Run(Extract("extract", changed, "Examples", entry, consumer));
+        var search = string.Join(Path.PathSeparator, consumer, published, CheckoutLeanPath());
+        CompileSummaryModule(Path.Combine(consumer, "Extracted.lean"), consumer, search);
+        CompileSummaryModule(At("Tests/SummaryModules/Branch/ReversedBranch.lean"), consumer, search);
+        ReplayCheckedModules(["Reference", "SavedArms", "Extracted", "ReversedBranch"], search,
+            "Kernel replay of both saved return regions and the reversed branch");
+        Console.WriteLine("PASS reversing the branch reuses both return regions and refutes the original result");
+
+        VerifyContractVariant(assembly, "Examples", entry, Path.Combine(directory, "OriginalContract"), changed,
+            entry, Path.Combine(directory, "WrongContract"), """
+            /-- Choose returns the requested argument and preserves every caller memory. -/
+            def choose : MethodContract (Bool × W64 × W64) W64 where
+              args := fun (flag, x, y) =>
+                [.scalar (.i32 (if flag then 1 else 0)), .scalar (.i64 x), .scalar (.i64 y)]
+              results word := [.scalar (.i64 word)]
+              pre _ _ := True
+              footprint _ := []
+              post := fun (flag, x, y) initial final result =>
+                final = initial ∧ result = (if flag then x else y)
+            """, """
+            /-- Both input choices satisfy the original compiled entry's contract. -/
+            theorem correctness : choose.Holds Extracted.program 0 := by
+              rintro ⟨flag, x, y⟩ memory _
+              obtain ⟨fuel, ran⟩ := ExampleProof.correctness memory flag x y
+              exact MethodContract.Holds.intro memory (if flag then x else y) ⟨fuel, ran⟩
+                (Confined.refl [] memory) ⟨rfl, rfl⟩
+            """, """
+            /-- The changed condition selects 22 on an input requiring 11. -/
+            theorem correctness : choose.Refuted Extracted.program 0 := by
+              apply MethodContract.Refuted.of_return (input := (true, 11, 22)) (initial := Memory.empty)
+                (fuel := 4) (final := Memory.empty) (values := [.scalar (.i64 22)]) trivial rfl
+              rintro ⟨_, result, encoded, _, rfl⟩
+              exact (by decide : ¬ ([CIL.Safety.Value.scalar (.i64 22)] = [.scalar (.i64 11)])) encoded
+            """, example: At("Examples/Proofs/Choose.lean"));
+    }
+
+    void CheckSavedSummary(string directory, string assembly, string entry, string summarySource,
+        params (string Name, string Image, string Entry, string Mismatch)[] variants)
+    {
+        var published = PublishSummary(directory, assembly, entry, summarySource);
         var consumerSource = At("Tests/SummaryModules/SummaryConsumer.lean");
-        var producerPath = published + Path.PathSeparator + libraryPath;
-        Compile(reference, published, producerPath);
-        Compile(summarySource, published, producerPath);
+        var producerPath = published + Path.PathSeparator + CheckoutLeanPath();
         var savedProof = Path.Combine(published, "SavedSummary.olean");
         var savedHash = Sha(savedProof);
         CheckConsumer("SameEntry", assembly, entry);
@@ -45,24 +105,15 @@ partial class Program
         if (savedHash != Sha(savedProof))
             throw new InvalidDataException($"The published summary for {entry} changed during reuse.");
 
-        void Compile(string source, string destination, string search)
-        {
-            var module = Path.GetFileNameWithoutExtension(source);
-            var result = Run([LeanExecutable, "--root=" + Path.GetDirectoryName(source), "-o",
-                Path.Combine(destination, module + ".olean"), source], leanPath: search);
-            if (result.Contains("sorryAx", StringComparison.Ordinal))
-                throw new InvalidDataException($"The compiled module {module} depends on sorryAx.");
-        }
-
         void CheckConsumer(string name, string image, string entry, string? mismatch = null)
         {
             var consumer = Path.Combine(directory, name);
             Run(Extract("extract", image, "Examples", entry, consumer, "x64-v3"));
             var search = consumer + Path.PathSeparator + producerPath;
-            Compile(Path.Combine(consumer, "Extracted.lean"), consumer, search);
+            CompileSummaryModule(Path.Combine(consumer, "Extracted.lean"), consumer, search);
             if (mismatch is null)
             {
-                Compile(consumerSource, consumer, search);
+                CompileSummaryModule(consumerSource, consumer, search);
                 ReplayCheckedModules(["Reference", "SavedSummary", "Extracted", "SummaryConsumer"], search,
                     $"Joint kernel replay of the saved summary and x64-v3 consumer of {entry}");
                 Console.WriteLine($"PASS the x64-v3 extraction reuses the compiled scalar summary of {entry}");
@@ -84,8 +135,9 @@ partial class Program
         }
     }
 
-    // Change only the add byte. The image retains the assembly identity, MVID, MethodDef token and metadata.
-    static void WriteSubtraction(string assembly, string output)
+    // Replace one opcode in a known tiny method, preserving its token, operands, metadata and image length.
+    static void WriteInstructionChange(string assembly, string output, string name, byte[] expected,
+        int position, byte opcode)
     {
         var bytes = File.ReadAllBytes(assembly);
         using var pe = new PEReader(new MemoryStream(bytes));
@@ -93,14 +145,14 @@ partial class Program
         var type = metadata.TypeDefinitions.Select(metadata.GetTypeDefinition).Single(type =>
             metadata.StringComparer.Equals(type.Namespace, "Examples") && metadata.StringComparer.Equals(type.Name, "Arithmetic"));
         var method = type.GetMethods().Select(metadata.GetMethodDefinition).Single(method =>
-            metadata.StringComparer.Equals(method.Name, "Add") &&
-            pe.GetMethodBody(method.RelativeVirtualAddress).GetILBytes() is [0x02, 0x03, 0x58, 0x2a]);
+            metadata.StringComparer.Equals(method.Name, name) &&
+            pe.GetMethodBody(method.RelativeVirtualAddress).GetILBytes().AsSpan().SequenceEqual(expected));
         int rva = method.RelativeVirtualAddress;
         var section = pe.PEHeaders.SectionHeaders[pe.PEHeaders.GetContainingSectionIndex(rva)];
         int body = section.PointerToRawData + rva - section.VirtualAddress;
-        if (bytes[body] != (4 << 2 | 2) || bytes[body + 3] != 0x58)
-            throw new InvalidDataException("Expected a tiny method containing ldarg.0, ldarg.1, add, ret.");
-        bytes[body + 3] = 0x59;
+        if (bytes[body] != (expected.Length << 2 | 2) || !bytes.AsSpan(body + 1, expected.Length).SequenceEqual(expected))
+            throw new InvalidDataException($"Unexpected tiny method body for {name}.");
+        bytes[body + 1 + position] = opcode;
         File.WriteAllBytes(output, bytes);
     }
 }
