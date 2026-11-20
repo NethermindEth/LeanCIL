@@ -470,7 +470,10 @@ certified method record. Its `holds` field gives the segment contract with its o
 stack, footprint and exits. Use `DecodedSegmentSummary.congr_region` with a checked binding for
 the destination, agreement on the closed region and a proof that every permitted continuation
 lies inside it. Code before the region may differ. The agreement includes method metadata,
-links and every instruction the region can execute.
+links and every instruction the region can execute. Use `DecodedSegmentSummary.then` for
+adjacent regions when the first reaches the second's precondition. Supply a footprint covering
+both regions' writes. The result binds their concatenated instructions and relates the initial
+and final states through the state at the join.
 
 A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
 Instructions that read the method's declared signature, environment, links or runtime profile

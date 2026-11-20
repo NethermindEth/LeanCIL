@@ -84,4 +84,38 @@ theorem DecodedSegmentSummary.congr_region {program other : Program} {method sta
 
 #print axioms DecodedSegmentSummary.congr_region
 
+/-- Adjacent decoded regions compose when the first reaches the second's precondition and
+    their permitted writes fit the combined footprint. The final state satisfies both
+    postconditions through the same intermediate state. -/
+theorem DecodedSegmentSummary.then {program : Program} {evidence : List MethodEvidence}
+    {profile : FeatureProfile} {environment : LayoutEnvironment} {method start finish : Nat}
+    {pin : AssemblyPin} {token : Nat} {arguments : List TypeExpr}
+    {first second : Instruction} {left right : List Instruction}
+    {firstPre secondPre : List Value → SegmentState → Prop}
+    {firstPost secondPost : List Value → SegmentState → SegmentState → Prop}
+    {firstFoot secondFoot footprint : List Value → SegmentState → List (Reference × Nat)}
+    (head : DecodedSegmentSummary program evidence profile environment method start pin token
+      arguments first left (.continuing (start + (first :: left).length) firstPre firstPost
+        firstFoot))
+    (tail : DecodedSegmentSummary program evidence profile environment method
+      (start + (first :: left).length) pin token arguments second right
+      (.continuing finish secondPre secondPost secondFoot))
+    (links : ∀ args before after, firstPre args before → firstPost args before after →
+      secondPre args after)
+    (covers : ∀ args before after, firstPre args before → firstPost args before after →
+      (∀ entry ∈ firstFoot args before, entry ∈ footprint args before) ∧
+      (∀ entry ∈ secondFoot args after, entry ∈ footprint args before)) :
+    DecodedSegmentSummary program evidence profile environment method start pin token arguments
+      first (left ++ second :: right) (.continuing finish firstPre
+        (fun args before final =>
+          ∃ after, firstPost args before after ∧ secondPost args after final)
+        footprint) := by
+  obtain ⟨body, found, leftPlaced⟩ := head.placed
+  obtain ⟨other, same, rightPlaced⟩ := tail.placed
+  cases found.symm.trans same
+  exact ⟨head.bound, ⟨body, found, leftPlaced.append rightPlaced⟩,
+    head.holds.then tail.holds links covers⟩
+
+#print axioms DecodedSegmentSummary.then
+
 end CIL.Safety

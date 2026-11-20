@@ -95,4 +95,50 @@ theorem changed_return_shape_refused :
 
 #print axioms changed_return_shape_refused
 
+/-- The right operand is the second argument. Loading it leaves the incoming frame and memory
+    intact and places it above the left operand. -/
+private def loadRight (left right : W64) : SegmentContract :=
+  .continuing 2
+    (fun args before => args = [.scalar (.i64 left), .scalar (.i64 right)] ∧
+      before.stack = [.scalar (.i64 left)])
+    (fun _ before after => after =
+      { before with stack := [.scalar (.i64 right), .scalar (.i64 left)] }) (fun _ _ => [])
+
+/-- The decoded load at pc 1 meets the arithmetic region's stack precondition at pc 2. -/
+private theorem load_region (left right : W64) :
+    DecodedSegmentSummary [addMethod] [addItem] testProfile testEnvironment 0 1 pin
+      addItem.original.token [] (.ldarg 1) [] (loadRight left right) := by
+  refine ⟨decoded_summary.bound, ⟨addMethod, rfl, rfl⟩, ?_⟩
+  rintro args ⟨frame, stack, memory⟩ ⟨rfl, rfl⟩
+  let after : SegmentState := ⟨frame, [.scalar (.i64 right), .scalar (.i64 left)], memory⟩
+  refine ⟨.reaches 2 after, ⟨1, by decide, SegmentRun.reaches ?_⟩, Confined.refl _ _,
+    rfl, rfl⟩
+  intro fuel
+  rfl
+
+#print axioms load_region
+
+/-- Joining the two summaries certifies the load and add at pcs 1 and 2. The sum replaces the
+    left operand at pc 3, with the incoming frame and memory. -/
+theorem load_then_add (left right : W64) :
+    DecodedSegmentSummary [addMethod] [addItem] testProfile testEnvironment 0 1 pin
+      addItem.original.token [] (.ldarg 1) [.add]
+      (.continuing 3 (loadRight left right).pre
+        (fun _ before final => final = { before with stack := [.scalar (.i64 (left + right))] })
+        (fun _ _ => [])) := by
+  have joined := (load_region left right).then (footprint := fun _ _ => [])
+    (add_region left right) (by intro args before after _ same; subst after; rfl)
+      (by intros; exact ⟨fun _ h => h, fun _ h => h⟩)
+  refine ⟨joined.bound, joined.placed, ?_⟩
+  intro args before permitted
+  obtain ⟨exit, ran, framed, post⟩ := joined.holds args before permitted
+  refine ⟨exit, ran, framed, ?_⟩
+  cases exit with
+  | reaches pc final =>
+    obtain ⟨rfl, after, rfl, rfl⟩ := post
+    exact ⟨rfl, rfl⟩
+  | returns | faults | diverges => exact post
+
+#print axioms load_then_add
+
 end Tests.DecodedSegment
