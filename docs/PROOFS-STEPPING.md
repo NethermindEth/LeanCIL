@@ -288,7 +288,8 @@ field's shape gives, so it takes the facts that instruction takes.
   method, as any instruction that continues there. `step_call_intrinsic` rewrites such a call
   whose model is an intrinsic to the step of that intrinsic, since a call without a link checks
   only the operands its model observes; the stepper uses it, with the supplied intrinsic facts,
-  when the kernel cannot evaluate the model's step.
+  when the kernel cannot evaluate the model's step. For a checked call to `Unsafe.SkipInit<T>`, the
+  stepper uses the caller's address-formation fact to pop the byref argument and preserve memory.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies

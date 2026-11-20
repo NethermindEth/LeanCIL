@@ -1528,6 +1528,8 @@ elab_rules : tactic
         `(tactic| cil_strict (first
           | (refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
              rfl)
+          | (apply CIL.Safety.step_call_skipInit_address _ _ _ _ _ $link $model rfl
+             assumption)
           | (refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
              cil_checked_step_equations [$[$stepFacts:term],*])
           | (refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_

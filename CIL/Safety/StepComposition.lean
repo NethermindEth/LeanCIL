@@ -405,6 +405,19 @@ theorem step_call_skipInit_reference {method : Extraction.MethodRef} {prefixes :
 
 #print axioms step_call_skipInit_reference
 
+/-- A checked SkipInit call on a formed address pops the reference without writing to it. -/
+theorem step_call_skipInit_address {method : Extraction.MethodRef} {prefixes : CallPrefixes}
+    (link : body.linkAt pc = none)
+    (found : Extraction.runtimeModel body.environment .call method = some .skipInit)
+    (direct : prefixes.tail = false) {address : Reference} {rest : List Value}
+    (formed : form memory address = .ok address) :
+    step body (.call method prefixes) pc args frame (.reference (.address address) :: rest) memory =
+      .ok (.next (pc + 1) rest frame memory) := by
+  rw [step_call_skipInit_reference (link := link) (found := found) (direct := direct)]
+  simp [formValue, checkedAt, formed, Except.mapError, Bind.bind, Except.bind, pure, Except.pure]
+
+#print axioms step_call_skipInit_address
+
 /-- An unaligned transfer call has the same result as its typed instruction on every stack. -/
 theorem step_call_typedTransfer {method : Extraction.MethodRef} {prefixes : CallPrefixes}
     {kind : CIL.TransferKind} {store : Bool} (link : body.linkAt pc = none)

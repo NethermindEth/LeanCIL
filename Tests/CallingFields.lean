@@ -17,14 +17,59 @@ open CIL.Safety
 /-- A four-word argument range. -/
 def words (reference : Reference) : ArgumentView := ⟨reference, 32⟩
 
+/-- `T::Words`, four `UInt64` fields. -/
+def wordsLayouts : List CIL.Extraction.RawLayout := [
+  { identity := "T::Words", explicit := false, packing := 0, declaredSize := 0,
+    fields := List.replicate 4 { type := .unsigned64 } }]
+
+/-- The layout CoreCLR computes for `T::Words`: the fields at offsets 0, 8, 16 and 24. -/
+def wordsComputed : Array CIL.Extraction.ComputedLayout := #[
+  ⟨{ size := 32, fields := [{ offset := 0, width := 8 }, { offset := 8, width := 8 },
+    { offset := 16, width := 8 }, { offset := 24, width := 8 }] }, 8⟩]
+
+theorem words_valid : CIL.Extraction.LayoutsValid wordsLayouts wordsComputed .x64 := by
+  decide +kernel
+#print axioms words_valid
+
+/-- The layout environment both methods use to resolve the four words. -/
+@[cil_code] def wordsEnvironment : CIL.LayoutEnvironment :=
+  { rawLayouts := wordsLayouts, layouts := wordsComputed }
+
+/-- The field of `T::Words` at `index`. -/
+def wordField (index : Nat) : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "T::Words" 0, index, name := name!"word",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
+/-- The first, second, third and fourth words. -/
+def word0 : CIL.Extraction.FieldRef := wordField 0
+/-- The output word at byte offset 8. -/
+def word1 : CIL.Extraction.FieldRef := wordField 1
+/-- The output word at byte offset 16. -/
+def word2 : CIL.Extraction.FieldRef := wordField 2
+/-- The output word at byte offset 24. -/
+def word3 : CIL.Extraction.FieldRef := wordField 3
+
+cil_field_shape wordsEnvironment word0
+cil_field_shape wordsEnvironment word1
+cil_field_shape wordsEnvironment word2
+cil_field_shape wordsEnvironment word3
+
+/-- The instantiated byref argument of Unsafe.SkipInit<T::Words>. -/
+def skipWords : CIL.Extraction.MethodRef :=
+  { owner := CIL.Extraction.unsafeOwner, name := name!"SkipInit", hasThis := false,
+    genericArity := 1, returnType := .void, parameters := [.byref (.aggregate "T::Words" 0)],
+    methodArguments := [.aggregate "T::Words" 0] }
+
 /-- Read every input field before any output could be written. -/
 @[cil_code] def reader : CIL.Method :=
-  { locals := [], returnsValue := true, code := [
-    .ldarg 2, .skipInit,
-    .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .add,
-    .ldarg 0, .fieldAt 8 8, .ldarg 1, .fieldAt 8 8, .add, .add,
-    .ldarg 0, .fieldAt 16 8, .ldarg 1, .fieldAt 16 8, .add, .add,
-    .ldarg 0, .fieldAt 24 8, .ldarg 1, .fieldAt 24 8, .add, .add, .ret] }
+  { locals := [], returnsValue := true, environment := wordsEnvironment, code := [
+    .ldarg 2, .call skipWords {},
+    .ldarg 0, .ldfld word0, .ldarg 1, .ldfld word0, .add,
+    .ldarg 0, .ldfld word1, .ldarg 1, .ldfld word1, .add, .add,
+    .ldarg 0, .ldfld word2, .ldarg 1, .ldfld word2, .add, .add,
+    .ldarg 0, .ldfld word3, .ldarg 1, .ldfld word3, .add, .add, .ret] }
+
+cil_instruction_equations Tests.CallingFields.reader
+cil_runtime_models Tests.CallingFields.reader
 
 /-- Field evidence is gathered with no per-field hypotheses or stepper arguments. -/
 theorem reads_four_words (memory : Memory) (left right output : Reference)
@@ -54,8 +99,11 @@ theorem overlapping_read (memory : Memory) (left right : Reference)
 
 /-- Sum all input words and write the result only after reading every input. -/
 @[cil_code] def writer : CIL.Method :=
-  { locals := [], returnsValue := false,
+  { locals := [], returnsValue := false, environment := wordsEnvironment,
     code := [.ldarg 2] ++ reader.code.dropLast ++ [.stind .i8, .ret] }
+
+cil_instruction_equations Tests.CallingFields.writer
+cil_runtime_models Tests.CallingFields.writer
 
 /-- The checksum uses the original input snapshots, including when output overlaps an input. -/
 def checksum (memory : Memory) (left right : Reference) : CIL.W64 :=
@@ -102,42 +150,6 @@ theorem reads_after_writes (memory : Memory) (left right output : Reference)
   exact ⟨rfl, readback_3, storedCall_3⟩
 
 #print axioms reads_after_writes
-
-/-- `T::Words`, four `UInt64` fields. -/
-def wordsLayouts : List CIL.Extraction.RawLayout := [
-  { identity := "T::Words", explicit := false, packing := 0, declaredSize := 0,
-    fields := List.replicate 4 { type := .unsigned64 } }]
-
-/-- The layout CoreCLR computes for `T::Words`: the fields at offsets 0, 8, 16 and 24. -/
-def wordsComputed : Array CIL.Extraction.ComputedLayout := #[
-  ⟨{ size := 32, fields := [{ offset := 0, width := 8 }, { offset := 8, width := 8 },
-    { offset := 16, width := 8 }, { offset := 24, width := 8 }] }, 8⟩]
-
-theorem words_valid : CIL.Extraction.LayoutsValid wordsLayouts wordsComputed .x64 := by
-  decide +kernel
-#print axioms words_valid
-
-/-- The environment the decoded writer resolves its fields in. -/
-@[cil_code] def wordsEnvironment : CIL.LayoutEnvironment :=
-  { rawLayouts := wordsLayouts, layouts := wordsComputed }
-
-/-- The field of `T::Words` at `index`. -/
-def wordField (index : Nat) : CIL.Extraction.FieldRef :=
-  { owner := .aggregate "T::Words" 0, index, name := name!"word",
-    type := .atom CIL.Extraction.runtimeScope "System.UInt64" }
-/-- The first, second, third and fourth words. -/
-def word0 : CIL.Extraction.FieldRef := wordField 0
-/-- The output word at byte offset 8. -/
-def word1 : CIL.Extraction.FieldRef := wordField 1
-/-- The output word at byte offset 16. -/
-def word2 : CIL.Extraction.FieldRef := wordField 2
-/-- The output word at byte offset 24. -/
-def word3 : CIL.Extraction.FieldRef := wordField 3
-
-cil_field_shape wordsEnvironment word0
-cil_field_shape wordsEnvironment word1
-cil_field_shape wordsEnvironment word2
-cil_field_shape wordsEnvironment word3
 
 /-- `repeatedWriter` with its field accesses decoded: each store and the load name a field. -/
 @[cil_code] def decodedWriter : CIL.Method :=
