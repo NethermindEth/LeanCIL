@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
 #:include ExceptionMembers.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -69,21 +70,15 @@ foreach (var variant in new[] { "Nops", "Reordered", "Stuttering" })
         }
         module.Write(dll);
     }
-    Run(Extract("extract", dll, "Examples", "Loops::Countdown(uint)", output));
     if (variant == "Stuttering")
     {
-        var refused = false;
-        try { verification.Verify(dll, "Examples", "Loops::Countdown(uint)", contract, output, existingArtifacts: true); }
-        catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-        {
-            refused = true;
-        }
-        if (!refused || File.Exists(Path.Combine(output, "verified.json")))
-            throw new InvalidOperationException("Nondecreasing loop satisfied the termination contract");
-        Console.WriteLine("PASS unchanged universal contract rejects nondecreasing loop");
+        VerifyNondecreasing(assembly, "Loops::Countdown(uint)", contract,
+            Path.Combine(root, "CountdownContract"), dll, output, "0",
+            "Tests/LoopVariants/CountdownStuttering.lean.in");
     }
     else
     {
+        Run(Extract("extract", dll, "Examples", "Loops::Countdown(uint)", output));
         var actual = Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Loops")!.GetMethod("Countdown")!;
         foreach (var input in new uint[] { 0, 1, 7 })
             if ((uint)actual.Invoke(null, [input])! != 0)
@@ -102,7 +97,6 @@ var helperEnd = helperStart < 0 ? -1 : countProof.IndexOf("bind_entry entry", he
 var loopStart = countProof.IndexOf("theorem terminates", StringComparison.Ordinal);
 if (helperEnd < 0 || loopStart < helperEnd)
     throw new InvalidDataException("Examples/Proofs/CountCalls.lean has no helper section before its loop proof");
-var loopLine = countProof[..loopStart].Count(c => c == '\n') + 1;
 verification.Verify(assembly, "Examples", CountCalls, At("Examples/Proofs/CountCalls.lean"), Path.Combine(root, "CountCalls"));
 Console.WriteLine("PASS counted loop returns its iteration count for every uint through the helper contract");
 
@@ -265,16 +259,12 @@ File.WriteAllText(replacedProof, countProof[..helperStart] + ReplacedHelper + co
 verification.Verify(replacedCount, "Examples", CountCalls, replacedProof, Path.Combine(root, "CountCallsReplaced"), existingArtifacts: true);
 Console.WriteLine("PASS unchanged loop proof after reimplementing the helper and re-proving only its contract");
 
-// The unchanged proof fails inside the loop proof of a build that discards the helper result, so the
-// measure never decreases; a build that counts twice is refuted where it returns another count.
+// Discarding the helper result keeps the guard true. Counting twice returns the wrong value.
 var discarded = CountVariant("CountCallsDiscarded", (caller, _) => caller.Body.Instructions.Single(i =>
     i.OpCode == OpCodes.Stloc_0 && i.Previous.OpCode == OpCodes.Call).OpCode = OpCodes.Pop);
-var discardedLines = RejectedLines(discarded, At("Examples/Proofs/CountCalls.lean"), "CountCallsDiscarded",
-    existingArtifacts: true);
-if (discardedLines.Length == 0 || discardedLines.Any(line => line < loopLine))
-    throw new InvalidOperationException(
-        $"CountCallsDiscarded was not rejected by the loop proof: lines {string.Join(", ", discardedLines)}");
-Console.WriteLine("PASS unchanged loop proof rejects CountCallsDiscarded");
+VerifyNondecreasing(assembly, CountCalls, At("Examples/Proofs/CountCalls.lean"),
+    Path.Combine(root, "CountCallsContract"), discarded, Path.Combine(root, "CountCallsDiscarded"),
+    "input", "Tests/LoopVariants/CountCallsDiscarded.lean.in");
 var overcount = CountVariant("CountCallsOvercount", (caller, _) =>
     caller.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_2);
 if (Invoke(overcount, "CountCalls", 3) != 6)
@@ -869,6 +859,28 @@ foreach (var mutation in new[] { "stack-height", "stack-type", "local-fact", "st
     if (result.Code == 0 || !result.Output.Contains(marker) || File.Exists(Path.Combine(output, "Extracted.lean")))
         throw new InvalidOperationException("Incorrect loop rejection: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS rejection: " + mutation);
+}
+
+void VerifyNondecreasing(string assembly, string selector, string example, string positive, string wrongAssembly,
+    string output, string result, string witness)
+{
+    verification.VerifyContractVariant(assembly, "Examples", selector, positive, wrongAssembly, selector, output, $$"""
+        /-- The loop's universal result from empty memory. -/
+        def contract : MethodContract W32 where
+          args input := [.scalar (.i32 input)]
+          pre _ memory := memory = Memory.empty
+          footprint _ := []
+          post input _ _ values := values = [.scalar (.i32 {{result}})]
+        """, """
+        /-- The universal invocation theorem supplies a framed return from empty memory. -/
+        theorem correctness : contract.Holds Extracted.program 0 := by
+          rintro value _ rfl
+          obtain ⟨fuel, final, values, ran, result⟩ := ExampleProof.correctness _ _ ⟨value, rfl, rfl⟩
+          exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
+        """, File.ReadAllText(At(witness)), example: example, imports: """
+        import CIL.Safety.LoopScaffold
+        import CIL.Safety.SegmentContract
+        """);
 }
 
 delegate void FillWordsDelegate(ref ulong destination, ulong value, int count);

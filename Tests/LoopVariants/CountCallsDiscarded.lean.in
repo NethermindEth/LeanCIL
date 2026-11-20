@@ -1,0 +1,42 @@
+bind_entry entry (value : W32) := Extracted.method0
+  with [.scalar (.i32 value)] from Memory.empty allocating Memory.empty_wellFormed
+
+/-- Discarding Decrement's result keeps the guard true for every value of the count. -/
+theorem correctness : contract.Refuted Extracted.program 0 := by
+  apply MethodContract.Refuted.of_diverges (input := 1) (initial := Memory.empty) rfl
+  obtain ⟨remaining, count, entered, enter⟩ := entry.checked 1
+  obtain ⟨first, wroteFirst, firstFacts, -⟩ := (enter.frame []).store 0 (.i32 1) rfl
+  obtain ⟨started, wroteCount, facts, -⟩ := firstFacts.store 1 (.i32 0) rfl
+  let frame := entry.frame remaining count
+  let state (stack : List CIL.Safety.Value) (memory : Memory) : SegmentState :=
+    ⟨frame, stack, memory⟩
+  apply Diverges.of_reaches (pc := 12) (cost := 5) (head := state [] started)
+    Extracted.program_method0 rfl enter.setup
+  · apply SegmentRun.reaches
+    intro fuel
+    cil_checked_steps [state, frame, entry.frame, wroteFirst, wroteCount] <;> rfl
+  let invariant (pc : Nat) (s : SegmentState) := pc = 12 ∧ s = state [] s.memory ∧
+    ∃ n : W32, LoopFrame [] Memory.empty s.memory [.word32, .word32]
+      [.bytes .word32 remaining, .bytes .word32 count] (knownLocals [some (.i32 1), some (.i32 n)])
+  apply SegmentExit.diverges_of_recurrent (invariant := invariant) _ ⟨rfl, rfl, 0, facts⟩
+  rintro _ ⟨currentFrame, stack, current⟩ ⟨rfl, same, n, known⟩
+  cases same
+  obtain ⟨updated, wrote, next, -⟩ := known.store 1 (.i32 (n + 1)) rfl
+  let args := contract.args 1
+  have head : SegmentRun Extracted.program 0 12 6 3 args (state [] current)
+      (state [.scalar (.i32 1)] current) := by
+    intro fuel
+    cil_checked_steps [args, contract, state, frame, entry.frame, known.load 0] <;> rfl
+  have call : ReachesRun Extracted.program 0 6 7 1 args (state [.scalar (.i32 1)] current)
+      (state [.scalar (.i32 0)] current) := by
+    apply ReachesRun.call (callee := 1) (values := [.scalar (.i32 1)])
+      (results := [.scalar (.i32 0)]) (rest := []) (updated := current) (entered := current)
+      (childFrame := ⟨current.nextIdentity, [], [], 0⟩) (calleeFuel := 4)
+      Extracted.program_method0 Extracted.method0_instruction6 _ Extracted.program_method1
+    all_goals rfl
+  have tail : SegmentRun Extracted.program 0 7 12 5 args (state [.scalar (.i32 0)] current)
+      (state [] updated) := by
+    intro fuel
+    cil_checked_steps [args, contract, state, frame, entry.frame, known.load 1, wrote] <;> rfl
+  exact ⟨12, state [] updated, 9, by decide, (head.reaches.trans call).trans tail.reaches,
+    rfl, rfl, n + 1, next⟩

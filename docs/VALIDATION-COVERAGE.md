@@ -703,13 +703,14 @@ The `loops` suite checks cyclic control flow and termination:
 
 - A universal checked countdown proof holds for every `uint`, including zero and the maximum
   value, with 17 runtime comparisons, and holds unchanged after inserted NOPs and reordered
-  blocks. The countdown contract is refuted for an incorrect implementation at 1, where it
-  returns 1; a build that never decreases its counter is rejected, and an infinite loop is proved to exhaust every fuel budget. Backward switch, native arithmetic and
-  fixed-feature loops are checked, and eight malformed or unsupported fixtures are rejected.
+  blocks. On input 1, one incorrect implementation returns 1 and another subtracts zero
+  on every iteration. The latter exhausts every fuel budget. Each refutation binds the
+  compiled entry. The suite also checks backward switch, native arithmetic and fixed-feature
+  loops, and rejects eight malformed or unsupported fixtures.
 - `CountCalls` is proved through its helper's contract, unchanged for a helper reimplemented as
-  `value + 0xFFFFFFFF` with only its contract re-proved; a build that discards the helper result is
-  rejected, and the counting contract is refuted for a build that counts twice at 3, where it
-  returns 6. On the correct build, measuring by the count fails the decrease
+  `value + 0xFFFFFFFF` with only its contract re-proved. Discarding the helper result keeps the
+  guard true on input 1 and exhausts every fuel budget. Counting twice returns 6 on input 3.
+  Both counterexamples refute the counting contract. On the correct build, measuring by the count fails the decrease
   obligation, and the non-inductive invariant `count + remaining = value + count * remaining`
   fails only its preservation.
 - `CountUntil`, which returns or raises its helper's exception after earlier calls, is proved for

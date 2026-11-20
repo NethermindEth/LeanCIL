@@ -186,7 +186,7 @@ internal static class VerificationSelection
                 if (!File.Exists(source)) continue;
                 var text = File.ReadAllText(source);
                 var references = new HashSet<string>(
-                    Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean))"""), StringComparer.Ordinal);
+                    Matches(text, @"""((?:Tests|Examples)/[^""{}\n]+\.(?:cs|lean(?:\.in)?))"""), StringComparer.Ordinal);
                 foreach (var pattern in Matches(text, @"""(Examples/Proofs/[^""\n]*\{[^""\n]+\.lean)"""))
                 {
                     var glob = Regex.Replace(pattern, @"\{[^}]+\}", "*");
