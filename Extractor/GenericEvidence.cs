@@ -594,9 +594,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>The extraction refusal of a method whose decoder refuses a live pc; an admitted method is always
     /// defined from its decoder, so no extraction is written for it.</summary>
-    internal sealed class UndecodedInstruction(MethodDefinition method, DecodeRefusal refusal) : Exception(
-        $"IL_{refusal.At.Offset:x4}: Unsupported instruction: {Reason(refusal)}\n" +
-        $"  at pc {refusal.Pc} of {method.FullName}")
+    internal sealed class UndecodedInstruction(MethodDefinition method, DecodeRefusal refusal) : Exception($"""
+        IL_{refusal.At.Offset:x4}: Unsupported instruction: {Reason(refusal)}
+          at pc {refusal.Pc} of {method.FullName}
+        """)
     {
         /// <summary>The method whose decoder refuses the instruction.</summary>
         internal MethodDefinition Method { get; } = method;
