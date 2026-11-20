@@ -464,4 +464,20 @@ theorem composed_return : contract.Holds [body] 0 0 := by
 
 end StoredReturn
 
+/-- A two-instruction backedge with an empty stack. -/
+private def repeatBody : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.nop, .br 0] }
+
+/-- Running out of fuel at either instruction witnesses divergence at every budget. -/
+theorem repeat_diverges (frame : Frame) (memory : Memory) :
+    SegmentExit.Exhibited [repeatBody] 0 0 [] ⟨frame, [], memory⟩ .diverges := by
+  apply SegmentExit.diverges_of_recurrent
+    (invariant := fun pc state => pc = 0 ∧ state = ⟨frame, [], memory⟩) _ ⟨rfl, rfl⟩
+  rintro _ _ ⟨rfl, rfl⟩
+  refine ⟨0, ⟨frame, [], memory⟩, 2, by decide, SegmentRun.reaches ?_, rfl, rfl⟩
+  intro fuel
+  rfl
+
+#print axioms repeat_diverges
+
 end Tests.SegmentContract

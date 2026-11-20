@@ -460,6 +460,11 @@ success; `SegmentContract.Holds.raises` consumes a named exception or a raising 
 justifies the footprint. `ReachesRun.congr_region` transports reaching through the existing
 closed-region agreement rule.
 
+`SegmentExit.diverges_of_recurrent` proves divergence when each state satisfying a loop invariant
+reaches another such state at a positive fuel cost. The counter, frame, stack and memory may
+change between visits. `Diverges.of_reaches` carries this result from a reachable instruction
+back to method entry so `MethodContract.Refuted.of_diverges` can use it.
+
 A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
 Instructions that read the method's declared signature, environment, links or runtime profile
 require the corresponding facts in the theorem. Branch targets depend on the placement pc.

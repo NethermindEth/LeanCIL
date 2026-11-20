@@ -206,6 +206,35 @@ def SegmentExit.Exhibited (program : CIL.Program) (method start : Nat)
       (run program fuel method start arguments before.frame before.stack before.memory =
         .error fault)
 
+/-- A loop exhausts every fuel budget if each state in its invariant reaches another such
+    state and consumes positive fuel. Both the program counter and memory can vary. -/
+theorem SegmentExit.diverges_of_recurrent {program : CIL.Program} {method : Nat}
+    {arguments : List Value} {invariant : Nat → SegmentState → Prop}
+    (advance : ∀ pc state, invariant pc state → ∃ next after cost,
+      0 < cost ∧ ReachesRun program method pc next cost arguments state after ∧
+        invariant next after)
+    {pc : Nat} {state : SegmentState} (valid : invariant pc state) :
+    SegmentExit.Exhibited program method pc arguments state .diverges := by
+  have unstable (fuel pc : Nat) (state : SegmentState) (valid : invariant pc state)
+      (outcome : Except LocatedFault (Memory × List Value)) (stable : Stable outcome) :
+      run program fuel method pc arguments state.frame state.stack state.memory ≠ outcome := by
+    induction fuel using Nat.strongRecOn generalizing pc state with
+    | ind fuel smaller =>
+      intro ran
+      obtain ⟨next, after, cost, positive, reached, preserved⟩ := advance pc state valid
+      obtain ⟨bound, continued⟩ := reached.spends fuel outcome stable ran
+      exact smaller (fuel - cost) (by omega) next after preserved continued
+  intro fuel
+  cases observed : run program fuel method pc arguments state.frame state.stack state.memory with
+  | ok result => exact False.elim (unstable fuel pc state valid (.ok result) trivial observed)
+  | error fault =>
+    refine ⟨fault, ?_, rfl⟩
+    by_cases exhausted : fault.fault = .fuelExhausted
+    · exact exhausted
+    · exact False.elim (unstable fuel pc state valid (.error fault) exhausted observed)
+
+#print axioms SegmentExit.diverges_of_recurrent
+
 /-- Continuing and returned memories preserve existing storage outside the footprint. -/
 def SegmentExit.Confined (footprint : List (Prod Reference Nat)) (before : SegmentState) :
     SegmentExit -> Prop
@@ -440,6 +469,23 @@ theorem ReachesRun.exhibited {program : CIL.Program} {method start finish cost :
       exact settled ((congrArg LocatedFault.fault (Except.error.inj failed)).trans exhausted)
 
 #print axioms ReachesRun.exhibited
+
+/-- An entered method diverges if its prefix reaches a cutpoint that exhausts every budget. -/
+theorem Diverges.of_reaches {program : CIL.Program} {method pc cost : Nat} {body : CIL.Method}
+    {arguments : List Value} {memory : Memory} {frame : Frame} {entered : Memory}
+    {head : SegmentState} (found : program[method]? = some body)
+    (checked : arguments.mapM (checkedValue memory) = .ok arguments)
+    (setup : enterFrame body arguments memory = .ok (frame, entered))
+    (reached : ReachesRun program method 0 pc cost arguments ⟨frame, [], entered⟩ head)
+    (recurrent : SegmentExit.Exhibited program method pc arguments head .diverges) :
+    Diverges program method arguments memory := by
+  intro fuel
+  obtain ⟨fault, exhausted, ran⟩ := reached.exhibited recurrent fuel
+  refine ⟨fault, ?_, exhausted⟩
+  simpa only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+    using ran
+
+#print axioms Diverges.of_reaches
 
 /-- Joined contracts preserve every stopping exit and compose each reachable successor. -/
 theorem SegmentContract.Holds.seq {head : SegmentContract} {next : Nat -> SegmentContract}
