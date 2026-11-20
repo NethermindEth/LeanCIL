@@ -332,8 +332,11 @@ rebuild. Each request must explicitly supply the option; saved verification sett
 deep-check input. Batch verification, gates, watch and workspace reject the option.
 
 The report lists twelve binding facts. Default verification lists them as `trusted` and performs
-no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows` and the
-digests of pinned images; the other ten facts remain `not covered`, with a reason for each. A fact
+no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows`, `static-data` and the
+digests of pinned images. For RVA fields the audit reads the field signature, packing, class
+size and relative virtual address, then compares the entire byte range in the mapped section.
+Constructor-initialized fields must have no RVA. The other nine facts have status `not covered`.
+A fact
 is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
 pin or checked claim uses are listed as unused and not covered. Successful reports include the
 digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.

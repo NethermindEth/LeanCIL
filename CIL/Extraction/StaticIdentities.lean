@@ -29,14 +29,17 @@ def identityCode (identity : List Nat) : Option Nat :=
 def BodyEvidence.sliceCodes (body : BodyEvidence) : List (Option Nat) :=
   body.identities.map identityCode
 
+/-- The metadata slice and Field token a recorded static operand resolves to. -/
+def BodyEvidence.staticFieldRow (body : BodyEvidence) (token : Nat) : Option (Nat × Nat) := do
+  if metadataTableOf token == Table.field then return (0, token)
+  (← body.tables.head?).link linkDefinition token
+
 /-- The field a recorded static token names, packed as its assembly's code times `tokenSpace`
     plus its `Field` row token: a `Field` token is a row of the body's own assembly, and a
     `MemberRef` names the row its own slice links it to, the link the token's binding checked. -/
 def BodyEvidence.staticField (body : BodyEvidence) (codes : List (Option Nat)) (token : Nat) :
     Option Nat := do
-  let (position, row) ←
-    if metadataTableOf token == Table.field then some (0, token)
-    else (← body.tables.head?).link linkDefinition token
+  let (position, row) ← body.staticFieldRow token
   let code ← (← codes[position]?)
   if row < tokenSpace then some (code * tokenSpace + row) else none
 

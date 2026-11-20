@@ -606,7 +606,7 @@ void CheckExportMutation(bool originalProofMutation = false)
 
 static void CheckDeep(Report report)
 {
-    BindingFact[] audited = [BindingFact.BodyBytes, BindingFact.MetadataRows];
+    BindingFact[] audited = [BindingFact.BodyBytes, BindingFact.MetadataRows, BindingFact.StaticData];
     if (report.binding.mode != BindingMode.Deep || report.binding.facts.Length != 12 ||
         report.binding.facts.Any(fact => fact.status !=
             (audited.Contains(fact.id) ? BindingStatus.Reconfirmed : BindingStatus.NotCovered)))

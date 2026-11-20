@@ -122,9 +122,9 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
         ordinary.Output.Contains("BindingAudit", StringComparison.Ordinal))
         throw new InvalidOperationException("Default binding output or work changed: " + ordinary.Output);
     var deep = Execute([.. verify, "--deep-checks", digestFile]);
-    string[] reconfirmed = ["body-bytes", "metadata-rows"];
+    string[] reconfirmed = ["body-bytes", "metadata-rows", "static-data"];
     if (deep.Code != 0 || !deep.Stdout.Contains("StrictBinding sources:", StringComparison.Ordinal) ||
-        deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 11)
+        deep.Stdout.Split(": not covered", StringSplitOptions.None).Length != 10)
         throw new InvalidOperationException("Deep binding text is incomplete: " + deep.Output);
     string[] factNames =
     [
@@ -138,6 +138,61 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
                 StringComparison.Ordinal))
             throw new InvalidOperationException("Binding text omitted wire name " + fact);
     Console.WriteLine("PASS default and deep binding text");
+
+    var tables = fixture.Build("Table", "DeepCli.Table", """
+        public static class Table {
+            static System.ReadOnlySpan<uint> Words => [11, 13, 17, 19, 23, 29, 31, 37];
+            public static uint Third() => Words[2];
+        }
+        """);
+    var tableOutput = fixture.Artifact("Third");
+    Run([.. cli, "extract", tables, "Table::Third()", tableOutput]);
+    var tableDigest = Path.Combine(fixture.Root, "table.sha256");
+    File.WriteAllText(tableDigest, Sha(tables) + "  " + Path.GetRelativePath(fixture.Root, tables) + "\n");
+    var tableProof = Path.Combine(fixture.Root, "Third.lean");
+    File.WriteAllText(tableProof, """
+        import Extracted
+        import CIL.Safety.Execution
+
+        open CIL CIL.Safety
+        namespace ExampleProof
+
+        example : Extracted.methodEvidence.any (fun item => item.closed.staticFields.any
+            (fun site => site.2.rvaSize == some 32)) = true := by decide +kernel
+
+        theorem correctness : (invoke Extracted.program 64 0 [] Memory.empty).map Prod.snd =
+            .ok [.scalar (.i32 17)] := by rfl
+        #print axioms correctness
+        end ExampleProof
+
+        """);
+    Run([.. cli, "verify", tableOutput, "--proof", tableProof, "--deep-checks", tableDigest]);
+    var binding = JsonSerializer.Deserialize<JsonElement>(
+        File.ReadAllText(Path.Combine(tableOutput, "verified.json"))).GetProperty("binding");
+    var data = binding.GetProperty("facts").EnumerateArray().Single(fact =>
+        fact.GetProperty("id").GetString() == "static-data");
+    if (data.GetProperty("status").GetString() != "reconfirmed" ||
+        data.GetProperty("theorem").GetString() != "BindingAudit.staticData")
+        throw new InvalidOperationException("The compiled table has no audited physical-data theorem.");
+    Console.WriteLine("PASS the third word comes from a 32-byte RVA field in the pinned table assembly");
+
+    Run(["lake", "build", "StrictBinding.StaticData"], preparation.CheckoutPackage());
+    var leanPath = tableOutput + Path.PathSeparator + preparation.CheckoutLeanPath();
+    File.WriteAllText(Path.Combine(tableOutput, "RvaImage.lean"),
+        "import StrictBinding.Image\nimport CIL.Extraction.FixedDigits\nnamespace RvaImage\n" +
+        BindingImage.Definitions(File.ReadAllBytes(tables)) + "\nend RvaImage\n");
+    File.Copy(At("Tests/StrictBinding/StaticSiteCases.lean"), Path.Combine(tableOutput, "StaticSiteCases.lean"), true);
+    string[] modules = ["Extracted", "RvaImage", "StaticSiteCases"];
+    foreach (var module in modules)
+    {
+        var log = Run([preparation.LeanExecutable, "--root=" + tableOutput, "-o",
+            Path.Combine(tableOutput, module + ".olean"), Path.Combine(tableOutput, module + ".lean")],
+            leanPath: leanPath);
+        if (log.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidDataException(module + " depends on sorryAx");
+    }
+    preparation.ReplayCheckedModules(modules, leanPath, "Kernel replay of static field descriptor checks");
+    Console.WriteLine("PASS the pinned FieldRVA rejects a matching prefix, changed bytes and a missing RVA marker");
 }
 if (args is ["--text"]) return;
 if (args is ["--mutations"])

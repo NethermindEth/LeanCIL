@@ -5,6 +5,7 @@ import Tests.StrictBinding.Rows
 import Tests.StrictBinding.Slice
 import Tests.StrictBinding.Metadata
 import Tests.StrictBinding.TypeDefs
+import Tests.StrictBinding.StaticData
 
 /-!
 # Strict binding tests: digests

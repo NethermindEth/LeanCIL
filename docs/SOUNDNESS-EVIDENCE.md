@@ -354,9 +354,10 @@ content, dispatch catalog completeness, static data bytes and generic parameter 
 [Deep verification](CLI.md#deep-verification) reconfirms each body at its RVA and each carried
 row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets per heap and with
 MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
-`Module` table and the RVAs of MethodDefs outside the evidence are not part of that check. It does
-not reconfirm public key tokens or import identities: it reports both as not covered. `check` hashes each assembly and regenerates
-the extraction, so the rows are a deterministic function of hashed inputs.
+`Module` table and the RVAs of MethodDefs outside the evidence are not part of that check. The audit also
+reconfirms the initial bytes of RVA fields by checking the physical field signature, class size,
+packing and mapped file range. Public key tokens and import identities are reported as not
+covered. `check` hashes each assembly and regenerates the extraction from those inputs.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler

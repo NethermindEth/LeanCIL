@@ -492,7 +492,7 @@ partial class Program
         BindingFact.ObjectFields => "no check reads System.Object fields from an image",
         BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
         BindingFact.DispatchCatalogs => "no check reads the types of an image",
-        BindingFact.StaticData => "no check reads static data from the image",
+        BindingFact.StaticData => "no checked theorem binds the static field data to the pinned images",
         BindingFact.GenericConstraints => "no check reads constraints from the image",
         BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
         BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
@@ -500,6 +500,7 @@ partial class Program
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string StaticDataModule = "BindingAudit.StaticData";
     const string BodiesModule = "BindingAudit.Bodies";
     const string MetadataRowsModule = "BindingAudit.MetadataRows";
 
@@ -670,6 +671,21 @@ partial class Program
         foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
+        File.WriteAllText(ModuleSource(plan.Output, StaticDataModule), """
+            import BindingAudit.Images
+            import Extracted
+            import StrictBinding.StaticData
+
+            namespace BindingAudit
+
+            set_option debug.skipKernelTC true in
+            /-- The complete RVA data of each static site agrees with the pinned assembly. -/
+            theorem staticData : StrictBinding.StaticDataBound images Extracted.methodEvidence := by
+              decide +kernel
+
+            end BindingAudit
+
+            """);
         foreach (var fact in PagedFacts)
             File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
                 plan.Methods, BindingPageSize(plan.Methods)));
@@ -846,6 +862,9 @@ partial class Program
                 item.Paged.Module, new("BindingAudit." + item.Paged.Theorem, App(Const(item.Paged.Proposition),
                     Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
                 new BindingSubject.Fact(item.Fact))),
+            new(StaticDataModule, new("BindingAudit.staticData", App(Const("StrictBinding.StaticDataBound"),
+                Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
+                new BindingSubject.Fact(BindingFact.StaticData)),
             .. plan.Images.DistinctBy(image => image.Digest).Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
                 App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Digest)),
@@ -873,7 +892,7 @@ partial class Program
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        foreach (var module in PagedFacts.Select(fact => PagedFact(fact).Module))
+        foreach (var module in PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule))
             if (failures.ContainsKey(ImagesModule)) failures[module] = "build: " + ImagesModule + " did not build";
             else if (Build(module) is { } pagedError) failures[module] = "build: " + pagedError;
         return failures;

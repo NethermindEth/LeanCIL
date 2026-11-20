@@ -12,6 +12,7 @@ import StrictBinding.Rows
 import StrictBinding.Slice
 import StrictBinding.Sorted
 import StrictBinding.TypeDefs
+import StrictBinding.StaticData
 
 /-!
 # Deep verification

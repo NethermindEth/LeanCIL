@@ -84,6 +84,16 @@ inductive AuditError where
   | noIlBody (token : Nat)
   /-- The bytes at the mapped position of the row's relative virtual address are not the body. -/
   | bodyMismatch (token rva offset : Nat)
+  /-- A FieldRVA or ClassLayout row names an absent or repeated Field or TypeDef. -/
+  | invalidDataTableKey (table row key : Nat)
+  /-- The static sites do not match the program counters recorded by the body decoder. -/
+  | staticSiteMismatch (method : Nat)
+  /-- The static site of a decoded method has no corresponding field in the evidence. -/
+  | unresolvedStaticField (method pc : Nat)
+  /-- A field, its RVA or its mapped file position does not permit the claimed data access. -/
+  | invalidFieldData (token : Nat)
+  /-- The claimed static data differs from the bytes at the field's mapped RVA. -/
+  | fieldDataMismatch (token rva offset : Nat)
   /-- The Assembly row does not spell the identity the image is pinned under. -/
   | identityMismatch (identity : String)
   /-- No pinned image has this identity. -/

@@ -103,7 +103,8 @@ if (args is ["--support-mutation"]) return;
 var report = verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs);
 // Each audited fact names the theorem that states it; every other fact stays not covered.
 (BindingFact Fact, string Theorem)[] auditedFacts =
-    [(BindingFact.BodyBytes, "BindingAudit.bodies"), (BindingFact.MetadataRows, "BindingAudit.metadataRows")];
+    [(BindingFact.BodyBytes, "BindingAudit.bodies"), (BindingFact.MetadataRows, "BindingAudit.metadataRows"),
+     (BindingFact.StaticData, "BindingAudit.staticData")];
 if (report.binding.mode != BindingMode.Deep ||
     report.binding.facts.Any(fact => auditedFacts.Any(audited => audited.Fact == fact.id)
         ? fact.status != BindingStatus.Reconfirmed ||

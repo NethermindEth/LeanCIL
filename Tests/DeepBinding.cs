@@ -20,7 +20,7 @@ partial class Program
                 binding.GetProperty("facts").GetArrayLength() != 12 ||
                 binding.GetProperty("images").GetArrayLength() != 2 ||
                 binding.GetProperty("facts").EnumerateArray().Count(fact =>
-                    fact.GetProperty("status").GetString() == "reconfirmed") != 2)
+                    fact.GetProperty("status").GetString() == "reconfirmed") != 3)
                 throw new InvalidOperationException("Unexpected joint binding report: " + result.Stdout);
             Console.WriteLine("PASS joint CLI verification reports image digests and all twelve facts");
         }
