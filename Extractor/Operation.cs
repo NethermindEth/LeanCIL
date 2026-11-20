@@ -290,21 +290,14 @@ internal sealed record FeatureTest(Feature Feature) : Operation;
 
 internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address }
 
-/// <summary>An emitted field instruction that names its raw field operand.</summary>
-internal interface INamedField
-{
-    /// <summary>The field operand, which the extraction sets from the raw operand the scalar check compares.</summary>
-    FieldRef? Reference { get; }
-}
-
 /// <summary>
 /// A struct field access at byte <paramref name="Offset"/> of
 /// the layout the extraction computed. <paramref name="Width"/> is the field's size and <paramref name="Signed"/>
 /// says a load sign-extends; the step takes all three from the checked layouts, so only proof outlines read them.
 /// </summary>
-internal sealed record StructField(FieldAccess Access, int Offset, int Width, bool Signed) : Operation, INamedField
+internal sealed record StructField(FieldAccess Access, int Offset, int Width, bool Signed) : Operation
 {
-    /// <inheritdoc/>
+    /// <summary>The metadata identity used to compare field operands across templates.</summary>
     public FieldRef? Reference { get; init; }
 
     Code Opcode => Access switch
@@ -325,7 +318,7 @@ internal sealed record StructField(FieldAccess Access, int Offset, int Width, bo
 /// A load or store of a class instance field of an admitted class, naming the field operand
 /// <paramref name="Reference"/>, which the extraction sets from the raw operand the scalar check compares it with.
 /// </summary>
-internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Reference) : Operation, INamedField
+internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Reference) : Operation
 {
     // Class field instructions agree when they access the same field in the same direction.
     public bool Equals(ClassField? other) =>

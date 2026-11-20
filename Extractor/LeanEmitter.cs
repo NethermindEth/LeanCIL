@@ -260,7 +260,8 @@ internal static class LeanEmitter
             {
                 var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                     scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
-                // An allocation and a field access name the element or field their raw operand names.
+                if (!collectTemplates) return operation;
+                // Templates compare operand identities across method bodies.
                 return operation switch
                 {
                     ObjectInstruction access => access with { Operand = genericEvidence.TypeOperandOf(m, i) },
@@ -331,39 +332,33 @@ internal static class LeanEmitter
             }
             inputs?.Append(lean, inputStart, lean.Length - inputStart);
             genericEvidence.EmitMethod(lean, m, n, reachable, staticInput, inputs);
-            // A call names the method its raw operand names; a constrained one also the type the definition just
-            // written spells for its prefix.
-            for (var pc = 0; pc < ops.Count; pc++)
-                ops[pc] = ops[pc] switch
-                {
-                    Call call => call with
-                    {
-                        Site = genericEvidence.MethodReferenceOf(m, pc),
-                        ConstrainedType = call.Constrained
-                            ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
-                    },
-                    CallVirtual slot => slot with { Site = genericEvidence.MethodReferenceOf(m, pc) },
-                    ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
-                    var operation => operation
-                };
             // A field access names its operand's definition, so stepping reads that operand's shape fact.
-            operandShapes.Add(m, reachable, genericEvidence);
-            var objectProof = operandShapes.AdmissionProof(m, n, ops);
+            var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, ops) is { } refusal)
                 throw new GenericEvidence.UndecodedInstruction(m, refusal);
-            // Template inputs share the same static field descriptors as the decoded method.
             if (collectTemplates)
+            {
+                // A call names the method its raw operand names; a constrained one also the type the definition just
+                // written spells for its prefix.
+                for (var pc = 0; pc < ops.Count; pc++)
+                    ops[pc] = ops[pc] switch
+                    {
+                        Call call => call with
+                        {
+                            Site = genericEvidence.MethodReferenceOf(m, pc),
+                            ConstrainedType = call.Constrained
+                                ? genericEvidence.ClosedOperandOf(m.Body.Instructions[pc].Previous) : null
+                        },
+                        CallVirtual slot => slot with { Site = genericEvidence.MethodReferenceOf(m, pc) },
+                        ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
+                        var operation => operation
+                    };
                 foreach (var site in sites)
                     if (ops[site.Pc] is StaticFieldInstruction access)
                         ops[site.Pc] = access with { Field = site.Field };
+            }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.
-            var naming = string.Join(", ", ops.Select(op => op switch
-            {
-                INamedField { Reference: { } field } => operandShapes.FieldName(field),
-                ObjectInstruction { Operand: { } type } => operandShapes.TypeName(type),
-                _ => null
-            }).OfType<string>().Distinct(StringComparer.Ordinal));
             var namedOperands = naming.Length == 0 ? "" : $"[{naming}] ";
             EmitDecodedMethod(lean, n, namedOperands, inputs);
             if (collectTemplates)
@@ -492,67 +487,62 @@ internal static class LeanEmitter
     /// </summary>
     internal sealed class OperandShapes(LayoutEvidence layouts)
     {
-        readonly Dictionary<FieldRef, int> fields = [];
+        readonly Dictionary<FieldRef, string> fields = [];
         // TypeExpr has no typed C# form, so a type operand is keyed by its rendered term.
-        readonly Dictionary<string, int> types = new(StringComparer.Ordinal);
+        readonly Dictionary<string, string> types = new(StringComparer.Ordinal);
         readonly StringBuilder text = new();
 
-        /// <summary>
-        /// Records the operands of <paramref name="method"/>'s reachable instructions not seen before.
-        /// </summary>
-        internal void Add(MethodDefinition method, IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
+        /// <summary>Records the reachable raw operands and names the shape facts used by this method.</summary>
+        internal (string Names, string? ObjectProof) RecordMethod(MethodDefinition method, int index,
+            IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
         {
+            var names = new List<string>();
+            var operands = new List<(int Opcode, string Type)>();
+            var needsLayout = false;
             for (var pc = 0; pc < method.Body.Instructions.Count; pc++)
             {
                 var instruction = method.Body.Instructions[pc];
                 if (!reachable.Contains(instruction)) continue;
                 if (instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld)
-                {
-                    var field = evidence.FieldReferenceOf(method, pc);
-                    if (!fields.TryAdd(field, fields.Count)) continue;
-                    var name = $"fieldRef{fields[field]}";
-                    var operand = field with
-                    {
-                        Owner = layouts.NamedOperandType(field.Owner), Type = layouts.NamedOperandType(field.Type)
-                    };
-                    text.AppendLine($"def {name} : Extraction.FieldRef := {operand.ToLean()}");
-                    text.AppendLine($"cil_field_shape {FrameMetadata.EnvironmentLean} {name}");
-                }
+                    names.Add(RecordField(evidence.FieldReferenceOf(method, pc)));
                 else if (instruction.OpCode.Code is
                     Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj or Code.Sizeof)
                 {
-                    var type = evidence.TypeOperandOf(method, instruction);
-                    if (!types.TryAdd(type, types.Count)) continue;
-                    var name = $"valueType{types[type]}";
-                    text.AppendLine($"def {name} : Extraction.TypeExpr := {layouts.NamedOperandType(type)}");
-                    text.AppendLine($"cil_value_shape {FrameMetadata.EnvironmentLean} {name}");
+                    var type = (TypeReference)instruction.Operand;
+                    var name = RecordType(evidence.TypeOperandOf(method, instruction));
+                    names.Add(name);
+                    operands.Add((Unadmitted.RawOpcode(instruction), name));
+                    needsLayout |= !Spans.Is(type) && MetadataValidation.IsAggregate(type, method.Module);
                 }
             }
+            // The method names each operand once, but its admission proof checks every object instruction in order.
+            var proof = needsLayout ? ObjectOperandProof.Render($"method{index}", operands) : null;
+            return (string.Join(", ", names.Distinct(StringComparer.Ordinal)), proof);
         }
 
-        /// <summary>The definition that names the recorded field operand <paramref name="field"/>.</summary>
-        internal string FieldName(FieldRef field) => $"fieldRef{fields[field]}";
-
-        /// <summary>The checked live operand list and the shared shape facts for its types.</summary>
-        internal string? AdmissionProof(MethodDefinition method, int index, IReadOnlyList<Operation> operations)
+        string RecordField(FieldRef field)
         {
-            var operands = new List<(int Opcode, string Type)>();
-            var needsLayout = false;
-            for (var pc = 0; pc < operations.Count; pc++)
+            if (fields.TryGetValue(field, out var name)) return name;
+            name = $"fieldRef{fields.Count}";
+            fields.Add(field, name);
+            var operand = field with
             {
-                if (operations[pc] is not ObjectInstruction { Operand: { } type }) continue;
-                var instruction = method.Body.Instructions[pc];
-                var operand = (TypeReference)instruction.Operand;
-                needsLayout |= !Spans.Is(operand) && MetadataValidation.IsAggregate(operand, method.Module);
-                operands.Add((Unadmitted.RawOpcode(instruction), TypeName(type)));
-            }
-            // A struct shape fact reuses its checked layout entry. Other shapes reduce directly.
-            if (!needsLayout) return null;
-            return ObjectOperandProof.Render($"method{index}", operands);
+                Owner = layouts.NamedOperandType(field.Owner), Type = layouts.NamedOperandType(field.Type)
+            };
+            text.AppendLine($"def {name} : Extraction.FieldRef := {operand.ToLean()}");
+            text.AppendLine($"cil_field_shape {FrameMetadata.EnvironmentLean} {name}");
+            return name;
         }
 
-        /// <summary>The definition of a recorded closed type operand.</summary>
-        internal string TypeName(string type) => $"valueType{types[type]}";
+        string RecordType(string type)
+        {
+            if (types.TryGetValue(type, out var name)) return name;
+            name = $"valueType{types.Count}";
+            types.Add(type, name);
+            text.AppendLine($"def {name} : Extraction.TypeExpr := {layouts.NamedOperandType(type)}");
+            text.AppendLine($"cil_value_shape {FrameMetadata.EnvironmentLean} {name}");
+            return name;
+        }
 
         /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
         internal string Lean() => text.ToString();
