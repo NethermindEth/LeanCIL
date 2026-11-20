@@ -7,9 +7,9 @@ internal static class InstructionTranslation
 {
     internal static Operation Translate(Instruction i, MethodDefinition m,
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
-        FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
+        ResolvedCallSites callSites, FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
         IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
-        MetadataValidation.LayoutContext? layouts = null, ConstrainedCalls.TargetIndex? constrainedTargets = null)
+        MetadataValidation.LayoutContext? layouts = null)
     {
         InstructionPrefixes.ValidatePrefix(m, i);
         if (i.Previous is { } previous) InstructionPrefixes.ValidatePrefix(m, previous);
@@ -28,9 +28,9 @@ internal static class InstructionTranslation
         // Element loads of a handler table emit their decoded instructions with every other array.
         if (i.OpCode.Code == Code.Ldelem_Any && InstructionOperands.MethodTableLoad(i, nativeOperands))
             return new TypedElementAccess(false, null);
-        if (i.OpCode.Code == Code.Ldftn && i.Operand is MethodReference address)
+        if (i.OpCode.Code == Code.Ldftn)
         {
-            var (target, targetIndex) = InstructionOperands.AddressTarget(address, methods);
+            var (target, targetIndex) = callSites.Target(i, methods);
             return new MethodAddress(ManagedPointers.Target(target, targetIndex),
                 ManagedPointers.SignatureEvidence(target));
         }
@@ -39,13 +39,13 @@ internal static class InstructionTranslation
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         return TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
-            layouts, constrainedTargets);
+            layouts, callSites);
     }
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
         FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext layouts,
-        ConstrainedCalls.TargetIndex? constrainedTargets)
+        ResolvedCallSites callSites)
     {
         var typeTests = TypeTests.Analyze(m);
         if (i.OpCode.Code == Code.Tail)
@@ -61,18 +61,12 @@ internal static class InstructionTranslation
         }
         if (typeTests.Operands.Contains(i)) return StackOperation.Nop;
         var throws = Throws.Analyze(m);
-        if (i.OpCode.Code == Code.Constrained)
-        {
-            if (i.Next is null) throw new InvalidDataException("Constrained prefix has no call");
-            ConstrainedCalls.Resolve(m, i.Next, instructions, profile.Architecture);
-            return StackOperation.Nop;
-        }
+        if (i.OpCode.Code == Code.Constrained) return StackOperation.Nop;
         var receiverCall = ObjectTypes.ReceiverCall(i);
         if (!receiverCall &&
             (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained }))
         {
-            var (resolved, index) = InstructionOperands.ConstrainedTarget(m, i, instructions, profile,
-                constrainedTargets ?? new(methods.Keys), methods);
+            var (resolved, index) = callSites.Target(i, methods);
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0),
                 Constrained: true);
         }
@@ -100,10 +94,10 @@ internal static class InstructionTranslation
             return new ObjectInstruction(i.OpCode.Code, ScalarWidth: shape.ScalarWidth,
                 Signed: shape.Signed, ByteSize: shape.Bytes);
         }
-        if (VirtualDispatch.Is(i))
+        if (callSites.VirtualTargets(i) is { } targets)
         {
             var slot = (MethodReference)i.Operand;
-            var entries = VirtualDispatch.Table(slot)
+            var entries = targets
                 .Select(entry => InstructionOperands.VirtualTarget(entry, methods, methodIndex)).ToArray();
             return new CallVirtual(entries, slot.Parameters.Count + 1);
         }
@@ -114,8 +108,7 @@ internal static class InstructionTranslation
                 return new ModelCall(model);
             if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
                 return new ModelCall(MemoryOperation.Of(source)) { Constructs = true };
-            RuntimeModels.ValidateCallScope(r);
-            var (resolved, index) = InstructionOperands.DirectTarget(r, TailCalls.IsCall(i), methodIndex, methods);
+            var (resolved, index) = callSites.Target(i, methods);
             if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
                 return new Newobj(index, ObjectTypes.AllocationOf(resolved), null);
             if (i.OpCode.Code == Code.Newobj)

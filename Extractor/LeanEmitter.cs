@@ -186,7 +186,6 @@ internal static class LeanEmitter
     {
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
-        var constrainedTargets = collectTemplates ? new ConstrainedCalls.TargetIndex(methods) : null;
         var templates = new List<TemplateEmitter.Method>();
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
@@ -326,8 +325,8 @@ internal static class LeanEmitter
                         continue;
                     }
                     var pc = templateOperations.Count;
-                    var operation = InstructionTranslation.Translate(site, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
+                    var operation = InstructionTranslation.Translate(site, m, methodIndices, n, instructions, callSites,
+                        profile, scalarCertificate, parameterHomes, importResolution, layoutContext);
                     // Each descriptor reads the operand of the closed instruction the decoder checks.
                     templateOperations.Add(operation switch
                     {

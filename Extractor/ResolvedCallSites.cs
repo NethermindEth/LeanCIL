@@ -23,6 +23,15 @@ internal sealed class ResolvedCallSites
 
     internal bool IsModel(Instruction site) => modelCalls.Contains(site);
 
+    /// <summary>The closed managed target selected for this site and its extraction index.</summary>
+    internal (MethodDefinition Method, int Index) Target(Instruction site,
+        IReadOnlyDictionary<MethodDefinition, int> indices) =>
+        direct.TryGetValue(site, out var target) && indices.TryGetValue(target, out var index)
+            ? (target, index) : throw new InvalidDataException($"Unsupported or unresolved call: {site.Operand}");
+
+    /// <summary>The validated receiver cases of a virtual slot, in dispatch order.</summary>
+    internal VirtualDispatch.Entry[]? VirtualTargets(Instruction site) => virtualSlots.GetValueOrDefault(site);
+
     /// <summary>The admitted target kind for this raw call, address or constructor, including its prefixes.</summary>
     internal bool BindsOperand(Instruction site, ImportResolution? imports)
     {

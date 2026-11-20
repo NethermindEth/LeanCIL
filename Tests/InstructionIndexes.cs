@@ -70,8 +70,11 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", true)!
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
+var sitesType = extractor.GetType("Nethermind.LeanCIL.ResolvedCallSites", true)!;
+var sites = Activator.CreateInstance(sitesType)!;
+sitesType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(sites, [call, callee]);
 object Operation(Instruction instruction) => translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
+    [instruction, caller, methods, 0, Index(caller), sites, null, null, null, null, null])!;
 string? Link(Instruction instruction)
 {
     var operation = Operation(instruction);
@@ -81,7 +84,7 @@ string? Link(Instruction instruction)
 // A call renders over its method operand, which the emitter supplies; the operation holds only the callee index.
 if (!((IEnumerable<int>)Property(Operation(call), "Methods")).SequenceEqual([1]))
     throw new Exception("Incorrect call index");
-// The link is read from the same operation as the instruction, so the two cannot name different callees.
+// The template link uses the target recorded for this site in the admitted graph.
 if (Link(call) != ".direct 1") throw new Exception("Incorrect call link");
 methods.Remove(callee);
 try
@@ -241,7 +244,7 @@ foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeA
     argumentMethod.Body.Instructions.Add(instruction);
 object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), null, null, positions, null, null, null])!;
+        0, Index(argumentMethod), sites, null, null, positions, null, null])!;
 if (!Equals(TranslateArgument(storeArgument, homePositions), Make("Starg", 1)) ||
     !Equals(TranslateArgument(loadArgument, homePositions), Make("Arg", 1)) ||
     !Equals(TranslateArgument(addressArgument, homePositions), Make("Ldarga", 1)))
