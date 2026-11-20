@@ -57,6 +57,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
     readonly Dictionary<ModuleDefinition, ModuleDefinition> working = [];
     readonly Dictionary<ModuleDefinition, int> indices = [];
+    readonly Dictionary<TypeDefinition, TypeDefinition[]> dispatchHierarchies = [];
     readonly Dictionary<MetadataName, ModuleDefinition> byName = [];
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
@@ -78,6 +79,14 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
 
     /// <summary>Every pinned module, the selected assembly first, in the order of <see cref="Pins"/>.</summary>
     internal IEnumerable<ModuleDefinition> Modules => [Selected, .. references.Select(reference => reference.Module)];
+
+    /// <summary>Classes deriving from the slot's declarer across this fixed set of pinned images.</summary>
+    internal TypeDefinition[] DispatchHierarchy(TypeDefinition declaring)
+    {
+        if (!dispatchHierarchies.TryGetValue(declaring, out var classes))
+            dispatchHierarchies.Add(declaring, classes = VirtualDispatch.DerivedClasses(Modules, declaring).ToArray());
+        return classes;
+    }
 
     /// <summary>Pins <paramref name="selected"/> and each source; <paramref name="readReference"/> reads a
     /// referenced assembly's bytes and hash, so a batch of extractions reads each reference once.</summary>
