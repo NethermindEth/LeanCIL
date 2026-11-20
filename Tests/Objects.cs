@@ -11,6 +11,7 @@
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
+#:include ContractVariants.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -46,7 +47,6 @@ foreach (var (proof, entry) in new[]
     ("OpaqueTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
     ("BaseField", "Objects::IdOf(Examples.Shape)"),
     ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)"),
-    ("AnimalLegs", "VirtualCalls::LegsOf(Examples.Animal)"),
     ("AnimalLoudness", "VirtualCalls::LoudnessOf(Examples.Animal)"),
     ("FreshDogLegs", "VirtualCalls::DogLegs()"),
     ("DogTest", "ClassTests::IsDog(Examples.Animal)"),
@@ -72,6 +72,57 @@ foreach (var (proof, entry) in new[]
     queue.Add(new(entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof)),
         () => Console.WriteLine($"PASS {proof}: {entry}"));
 queue.Flush();
+
+const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
+const string legsSelector = "VirtualCalls::LegsOf(Examples.Animal)";
+var wrongLegs = Path.Combine(root, "TwoLeggedDog");
+Directory.CreateDirectory(wrongLegs);
+var wrongLegsAssembly = Path.Combine(wrongLegs, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var dogLegs = variant.GetType("Examples.Dog").Methods.Single(method => method.Name == "Legs");
+    dogLegs.Body.Instructions.Single(site => site.OpCode == OpCodes.Ldc_I4_4).OpCode = OpCodes.Ldc_I4_2;
+    variant.Write(wrongLegsAssembly);
+}
+verification.VerifyContractVariant(assembly, "Examples", legsSelector, Path.Combine(root, "AnimalLegs"),
+    wrongLegsAssembly, legsSelector, wrongLegs, $$"""
+    /-- Both runtime classes have the same abstract base in the selected assembly. -/
+    private def animalClass (isDog : Bool) : RuntimeType :=
+      ⟨.object "{{animalScope}}" (if isDog then "Examples.Dog" else "Examples.Bird"),
+        [.object "{{animalScope}}" "Examples.Animal"]⟩
+
+    /-- The virtual call returns the leg count of its live receiver and preserves caller memory. -/
+    def legs : MethodContract (Bool × Reference) W64 where
+      args input := [.object (.address input.2)]
+      results value := [.scalar (.i64 value)]
+      pre input memory := formObject memory (.address input.2) = .ok (.object (.address input.2)) ∧
+        runtimeTypeOf memory input.2 = .ok (animalClass input.1)
+      footprint _ := []
+      post input before after value := before = after ∧ value = (if input.1 then 4 else 2)
+    """, """
+    /-- Dispatch selects the corresponding override for every formed dog or bird. -/
+    theorem correctness : legs.Holds Extracted.program 0 := by
+      rintro ⟨isDog, receiver⟩ memory ⟨formed, typed⟩
+      cases isDog
+      · exact MethodContract.Holds.intro (c := legs) (input := (false, receiver)) memory 2
+          (ExampleProof.bird_legs memory receiver formed typed) (Confined.refl _ _) ⟨rfl, rfl⟩
+      · exact MethodContract.Holds.intro (c := legs) (input := (true, receiver)) memory 4
+          (ExampleProof.dog_legs memory receiver formed typed) (Confined.refl _ _) ⟨rfl, rfl⟩
+    """, """
+    /-- Allocation zero contains a live dog whose virtual override the caller must select. -/
+    private def dogMemory : Memory := { Memory.empty with
+      allocations := fun id => if id = 0 then some
+        ⟨.object (animalClass true), ⟨1, 1, []⟩, true, []⟩ else none
+      nextIdentity := 1 }
+
+    /-- The compiled caller returns two for this dog after its override is changed. -/
+    theorem correctness : legs.Refuted Extracted.program 0 :=
+      .of_return (input := (true, ⟨0, 0⟩)) (initial := dogMemory) ⟨rfl, rfl⟩
+        (rfl : invoke Extracted.program 16 0 (legs.args (true, ⟨0, 0⟩)) dogMemory =
+          .ok (dogMemory, [.scalar (.i64 2)]))
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """, example: At("Examples/Proofs/AnimalLegs.lean"));
+Console.WriteLine("PASS virtual caller contract and certified two-legged Dog override");
 
 // Each named field is checked against the operation it names, so a view with another offset, width or
 // element fails its own theorem instead of naming storage the code never touches.
@@ -101,7 +152,6 @@ foreach (var (name, proof, view, forged, marker) in new[]
 // Lean re-resolves every dispatch table entry from the catalog and requires every concrete class
 // deriving from the slot's class, so a table that swaps bodies or omits a class fails its check.
 var dispatched = File.ReadAllText(Path.Combine(root, "AnimalLegs", "Extracted.lean"));
-const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
 var birdEntry = $"(.object \"{animalScope}\" \"Examples.Bird\", ";
 var dogEntry = $"(.object \"{animalScope}\" \"Examples.Dog\", ";
 var table = DispatchPatterns.Table.Match(dispatched).Value;
