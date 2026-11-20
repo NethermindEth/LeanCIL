@@ -10,7 +10,7 @@ internal static class ExportVerificationSuites
              "core.internal", "core.instance", "core.generic", "core.virtual", "core.static-values",
              "core.initialized", "core.imports", "core.profile", "core.reference",
              "core.bundle-location", "core.framework-change", "core.interface-text", "core.duplicate",
-             "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post"]),
+             "core.partial-publication", "core.body-rebuild", "core.published-closure", "core.incorrect-post", "core.revised-contract"]),
         Entry("exportsaudit", "audit", "post-callback export integrity",
             ["audit.proof-source", "audit.wrapper-artifact"]),
         Entry("exportsprotected", "protected", "protected static export and separately compiled derived caller",

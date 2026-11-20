@@ -196,11 +196,16 @@ if (inventory["frameworkKey"]?.GetValue<string>() != first["frameworkKey"]!.GetV
     inventory["leanCilRevision"]?.GetValue<string>() != revision)
     throw new InvalidOperationException("Source bundle did not record its framework key and LeanCIL revision: " + inventory.ToJsonString());
 
-string CallerVerify()
+void ExtractCaller()
 {
     Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", callerArtifact, "--import", sidecar,
         "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library),
         "--import-interface-sha256", "ImportFixture.Lib=" + interfaceDigest]);
+}
+
+string CallerVerify()
+{
+    ExtractCaller();
     return Run([.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage]);
 }
 
@@ -497,6 +502,59 @@ File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("outp
 RejectExport(ProducerManifest(), "unsolved goals", prior);
 Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");
 completed.CompleteCase("core.incorrect-post");
+
+// Verify the caller's fixed postcondition under the original interface and warm its proof cache.
+File.WriteAllText(contractSource, originalContractSource);
+string callerSource = File.ReadAllText(callerProof);
+File.AppendAllText(callerProof, """
+
+    namespace IncrementClient
+    open CIL.Safety
+    def exactIncrement : MethodContract CIL.W64 CIL.W64 :=
+      { ImportFixture.addOne with post := fun input _ _ output => output = input + 1 }
+    theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
+        (fun linked => exactIncrement.Holds linked 0) := ExampleProof.correctness
+    end IncrementClient
+    """);
+string[] fixedCaller = [.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage,
+    "--theorem", "IncrementClient.correctness"];
+ExtractCaller();
+Run(fixedCaller);
+Run(fixedCaller);
+string callerReport = Path.Combine(callerArtifact, "verified.json");
+if (JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(callerReport))
+        .GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
+    throw new InvalidOperationException("The fixed-postcondition caller did not warm its proof cache.");
+
+string unchangedImplementation = Sha(library);
+File.WriteAllText(contractSource, originalContractSource.Replace("output = input + 1",
+    "output = input + 1 ∨ output = input + 2", StringComparison.Ordinal));
+File.WriteAllText(proof, File.ReadAllText(proof).Replace("case post => simp only [ImportFixture.addOne, CIL.importedPost]",
+    "case post => exact Or.inl rfl", StringComparison.Ordinal));
+Export(ProducerManifest());
+JsonObject revised = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
+var revisedInterface = revised["interfaceDigest"]!.GetValue<string>();
+if (revisedInterface == interfaceDigest || revised["exports"]![0]!["closureDigest"]!.GetValue<string>() == closureDigest ||
+    revised["implementationSha256"]!.GetValue<string>() != unchangedImplementation)
+    throw new InvalidOperationException("The revised postcondition must change both contract digests for the same DLL.");
+interfaceDigest = revisedInterface;
+ExtractCaller();
+var incompatible = Execute(fixedCaller);
+if (incompatible.Code != 1 || !incompatible.Output.Contains("ExampleProof.correctness", StringComparison.Ordinal) ||
+    !incompatible.Output.Contains("exactIncrement", StringComparison.Ordinal) || File.Exists(callerReport))
+    throw new InvalidOperationException("Unexpected fixed caller result under the revised postcondition: " +
+        incompatible.Output);
+File.WriteAllText(callerProof, callerSource);
+Run([.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage,
+    "--theorem", "ExampleProof.correctness"]);
+var revisedReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(callerReport));
+var import = revisedReport.GetProperty("imports").EnumerateArray().Single();
+if (revisedReport.GetProperty("theorem").GetString() != "ExampleProof.correctness" ||
+    import.GetProperty("interfaceDigest").GetString() != revisedInterface ||
+    import.GetProperty("implementationSha256").GetString() != unchangedImplementation)
+    throw new InvalidOperationException("The weaker caller receipt did not bind the revised contract and unchanged DLL.");
+Console.WriteLine("PASS a revised imported contract invalidates the cached exact increment and admits the weaker caller");
+completed.CompleteCase("core.revised-contract");
 
 completed.Finish();
 

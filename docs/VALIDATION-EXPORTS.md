@@ -17,7 +17,7 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 
 | Name | Cases |
 | --- | --- |
-| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
+| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions, caller reuse after a body-only rebuild and rejection of a cached exact postcondition after its imported contract is weakened |
 | `exportsprotected` | SDK-built protected static export, separately compiled derived caller and rehashed visibility mismatch rejection |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
 | `exportsresolution` | Same loaded files, changed loaded module and same-length caller artifact rewrite |
@@ -46,7 +46,7 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 ### Case ledger
 
-- The base ledger has 50 cases: 22 core, 3 protected, 2 callback, 3 resolution and 20 full cases.
+- The base ledger covers 51 cases across 23 core, 3 protected, 2 callback, 3 resolution and 20 full cases.
   Each partition rejects an omitted, repeated or unexpected completion.
 - The artifact-mode rejection runs after consumer requests that succeed, so it checks removal of
   a successful report that a request wrote.
@@ -56,11 +56,11 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   standalone and discovery partitions cannot enter it.
 - `exportsstatics`, `exportsfullstatics`, `exportstransitive`, `exportstransitiveoutcomes`,
   `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with
-  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 50
+  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 51
   base case IDs, and a standalone fixture cannot use an empty base completion ledger to claim
   coverage.
 - `exportsdiscovery` records one separate `discovery.fixture` completion after the child
-  succeeds; the child's behaviors are outside the 50 base cases. The partition builds the
+  succeeds; the child's behaviors are outside the 51 base cases. The partition builds the
   producer library and creates its proof packages and publication. The child builds, extracts
   and verifies its own caller and needs no baseline caller artifact or verified report. The
   partition runs no core caller verification, restrictions, callbacks or full cases.
