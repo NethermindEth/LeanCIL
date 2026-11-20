@@ -219,37 +219,10 @@ internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address 
 /// the layout the extraction computed. <paramref name="Width"/> is the field's size and <paramref name="Signed"/>
 /// says a load sign-extends; the step takes all three from the checked layouts, so only proof outlines read them.
 /// </summary>
-internal sealed record StructField(FieldAccess Access, int Offset, int Width, bool Signed) : Operation
-{
-    /// <summary>The metadata identity used to compare field operands across templates.</summary>
-    public FieldRef? Reference { get; init; }
+internal sealed record StructField(FieldAccess Access, int Offset, int Width, bool Signed) : Operation;
 
-    Code Opcode => Access switch
-    {
-        FieldAccess.Address => Code.Ldflda,
-        FieldAccess.Load or FieldAccess.LoadAggregate => Code.Ldfld,
-        _ => Code.Stfld
-    };
-
-    // Access size and sign come from the field layout. The opcode and field reference identify the instruction.
-    public bool Equals(StructField? other) =>
-        other is not null && Opcode == other.Opcode && Reference == other.Reference;
-
-    public override int GetHashCode() => HashCode.Combine(Opcode, Reference);
-}
-
-/// <summary>
-/// A load or store of a class instance field of an admitted class, naming the field operand
-/// <paramref name="Reference"/>, which the extraction sets from the raw operand the scalar check compares it with.
-/// </summary>
-internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Reference) : Operation
-{
-    // Class field instructions agree when they access the same field in the same direction.
-    public bool Equals(ClassField? other) =>
-        other is not null && Field.Store == other.Field.Store && Reference == other.Reference;
-
-    public override int GetHashCode() => HashCode.Combine(Field.Store, Reference);
-}
+/// <summary>The class layout entry used by a field load or store in a proof outline.</summary>
+internal sealed record ClassField(ClassViews.FieldOperation Field) : Operation;
 
 /// <summary>An object instruction names the closed type whose shape determines its memory access.</summary>
 internal sealed record ObjectInstruction(Code Opcode, string? Operand = null, int? ScalarWidth = null,

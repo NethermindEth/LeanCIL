@@ -739,6 +739,10 @@ compiled evaluation to the literal shape a fact would state, which the kernel ch
 `cil_contract_steps` and the loop steppers use the same resolved field shape. For a field address, supply the
 pointer-addition fact directly.
 
+The extraction lists a `LayoutUse` for each struct construction, local and parameter home that
+requires one. A field operand identifies its owner, field index, metadata name and held type.
+`Method.fieldShape` reads the offset and width from the checked layout for the selected profile.
+
 For a closed generic struct, including a runtime value tuple, `Extracted.layoutIdentity{k}`
 stores the checked UTF-8 bytes of its fully scoped name at layout index `k`. The layout row
 and decoded operands, including call signatures, share that definition. Decoded owners and

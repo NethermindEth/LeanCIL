@@ -4,18 +4,13 @@ import CIL.Instructions
 /-!
 # Layout uses
 
-Emitted instructions carry concrete field offsets, widths and struct sizes. A `LayoutUse`
-names one such site by raw type and field identity only; `MethodLayoutsValid` then checks
-each named site's emitted operands against the independently computed layout table.
-`LayoutCoverage` separately proves that the list of uses names every such site.
+A `LayoutUse` names a struct construction, local or parameter home. `MethodLayoutsValid`
+checks its size against the computed layout for the method's architecture. Instance field
+instructions carry a typed field reference and read their offset and width from that layout.
+`LayoutUsesComplete` derives the required uses from the raw method.
 -/
 
 namespace CIL.Extraction
-
-/-- How an instruction uses a struct field. -/
-inductive FieldAccess where
-  | load | store | address
-  deriving DecidableEq, Repr
 
 /-- The native-width negative stride used to subtract an element offset. -/
 def subtractionStride (width : Nat) : Nat := (-(BitVec.ofNat 64 width)).toNat
@@ -30,39 +25,17 @@ theorem subtractionStride_mul (width : Nat) (offset : BitVec 64) :
     narrow signed integers do. -/
 def signedField (kind : FieldType) : Bool := kind == .signed8 || kind == .signed16
 
-/-- Raw type/field identities at layout-dependent uses; no computed offsets or sizes. -/
+/-- The site and raw layout index of a struct construction or frame slot. -/
 inductive LayoutUse where
-  | field (pc type field : Nat) (access : FieldAccess)
   /-- A `newobj` of the struct, whose link states the size it allocates. -/
   | size (pc type : Nat)
   | local (slot type : Nat)
   | parameter (slot type : Nat)
   deriving DecidableEq, Repr
 
-/-- The emitted field operation uses exactly the computed offset and width, and the
-    aggregate form exactly when the field is a nested struct. -/
-private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → Instruction → Bool
-  | .load, .fieldAt offset width actualSigned =>
-    !layout.aggregate && offset == layout.offset && width == layout.width &&
-      actualSigned == signed
-  | .store, .setFieldAt offset width =>
-    !layout.aggregate && offset == layout.offset && width == layout.width
-  | .load, .aggregateFieldAt offset width =>
-    layout.aggregate && offset == layout.offset && width == layout.width
-  | .store, .setAggregateFieldAt offset width =>
-    layout.aggregate && offset == layout.offset && width == layout.width
-  | _, _ => false
-
 /-- Bind independently computed layout data to actual instructions and frame slots. -/
 def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
     (method : Method) : LayoutUse → Bool
-  | .field pc type index access => (do
-      let metadata ← raw[type]?
-      let field ← metadata.fields[index]?
-      let layout ← layouts[type]?
-      let computed ← layout.layout.fields[index]?
-      let operation ← method.code[pc]?
-      return checkField computed (signedField field.type) access operation).getD false
   | .size pc type => (do
       let _ ← raw[type]?
       let layout ← layouts[type]?

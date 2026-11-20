@@ -1,5 +1,6 @@
 import CIL.Safety.InstructionMemory
 import CIL.Extraction.LayoutCoverage
+import CIL.Resolution
 import Tests.Support
 
 namespace Tests.VectorFields
@@ -66,7 +67,7 @@ example : computeLayouts [{
     some #[⟨⟨32, [⟨0, 1, false⟩, ⟨16, 16, false⟩]⟩, 16⟩] := by decide
 
 def defaultVector256 : List RawLayout := [{
-  explicit := false, packing := 0, declaredSize := -1,
+  identity := "VectorHolder", explicit := false, packing := 0, declaredSize := -1,
   fields := [⟨.unsigned8, none⟩, ⟨.vector256 .unsigned64, none⟩] }]
 
 def x64Layout : Array ComputedLayout := #[⟨⟨64, [⟨0, 1, false⟩, ⟨32, 32, false⟩]⟩, 32⟩]
@@ -77,11 +78,28 @@ example : LayoutsValid defaultVector256 arm64Layout .arm64 := by decide
 example : ¬ LayoutsValid defaultVector256 x64Layout .arm64 := by decide
 example : ¬ LayoutsValid defaultVector256 arm64Layout .x64 := by decide
 
-example : MethodLayoutsValid defaultVector256 x64Layout
-    { profile := { architecture := .x64 }, locals := [], returnsValue := true, code := [.fieldAt 32 32] } [.field 0 0 1 .load] := by decide
+/-- A typed vector field has the same instruction operand under both runtime profiles. -/
+private def lanes : FieldRef := {
+  owner := .aggregate "VectorHolder" 0, index := 1, name := name!"lanes",
+  type := .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
+    (.atom runtimeScope "System.UInt64") }
 
-example : ¬ MethodLayoutsValid defaultVector256 x64Layout
-    { profile := { architecture := .arm64 }, locals := [], returnsValue := true, code := [.fieldAt 32 32] } [.field 0 0 1 .load] := by decide
+private def vectorLoad (architecture : Architecture) (layouts : Array ComputedLayout) : Method :=
+  { profile := { architecture }, environment := { rawLayouts := defaultVector256, layouts },
+    locals := [], returnsValue := true, code := [.ldfld lanes] }
+
+/-- The same load resolves byte 32 on x64 and byte 16 on ARM64. Swapping the checked table
+    invalidates the method layout for each profile. -/
+theorem vector_load_profiles :
+    let x64 := vectorLoad .x64 x64Layout
+    let arm := vectorLoad .arm64 arm64Layout
+    MethodLayoutsValid defaultVector256 x64Layout x64 [] ∧
+      MethodLayoutsValid defaultVector256 arm64Layout arm [] ∧
+      x64.fieldShape lanes = .value 32 32 false ∧ arm.fieldShape lanes = .value 16 32 false ∧
+      ¬ MethodLayoutsValid defaultVector256 x64Layout (vectorLoad .arm64 x64Layout) [] ∧
+      ¬ MethodLayoutsValid defaultVector256 arm64Layout (vectorLoad .x64 arm64Layout) [] := by
+  decide +kernel
+#print axioms vector_load_profiles
 
 def nestedVector256 : List RawLayout := defaultVector256 ++
   [{ explicit := false, packing := 0, declaredSize := -1, fields := [⟨.unsigned8, none⟩, ⟨.aggregate 0, none⟩] }]

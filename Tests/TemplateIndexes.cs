@@ -245,16 +245,12 @@ object Scalar(string function, int width, bool signed, int result, int arguments
 object Named(Type type, string value) => Enum.Parse(type, value);
 object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!
     .Invoke(null, ["value"])!;
-object ClassWord(bool store, int width, bool signed) => Create("ClassField", Create("ClassViews+FieldOperation",
-    store, "T", 0, Named(Model("ClassViews+FieldKind"), "Word"), width, signed, null),
-    Create("FieldRef", "T", 0, "U", ValueName()));
 var merged = new (string Identity, object Left, object Right, string Code)[]
 {
     ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
         ".intrinsic (.scalar (.bigMul32 true)) 2"),
     ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
-        ".intrinsic (.scalar (.popCount 32 .word32)) 1"),
-    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false), ".setFieldAt 0 4")
+        ".intrinsic (.scalar (.popCount 32 .word32)) 1")
 };
 foreach (var (identity, left, right, code) in merged)
 {
@@ -263,6 +259,18 @@ foreach (var (identity, left, right, code) in merged)
         !Equals(left, right) || left.GetHashCode() != right.GetHashCode())
         throw new Exception($"The {identity} alternatives must agree and share one decoded body.");
 }
+// A decoded field reference carries the whole operand, including its metadata name.
+string Store(int index, string name) =>
+    $".stfld {{ owner := .object \"Fixture\" \"Owner\", index := {index}, " +
+    $"type := .atom Extraction.runtimeScope \"System.UInt32\", name := name!\"{name}\" }}";
+var store = Store(0, "word");
+var sharedStore = Merge("Store", [".nop", store, ".ret"], [".nop", $"id ({store} : Instruction)", ".ret"]);
+if (!sharedStore.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal))
+    throw new Exception("Equal decoded field stores failed to share a template body.");
+foreach (var (identity, different) in new[] { ("FieldIndex", Store(1, "word")), ("FieldName", Store(0, "other")) })
+    if (!Rejected(() => Merge(identity, [".nop", store, ".ret"], [".nop", different, ".ret"]))
+        .Contains($"Profiles with identical observed flags emit different instructions: {identity} at pc 1"))
+        throw new Exception("A store to a different field shared the template body.");
 if (!Rejected(() => Merge("Rotate", [".intrinsic (.scalar (.rotateLeft 32)) 2", ".ret"],
         [".intrinsic (.scalar (.rotateLeft 64)) 2", ".ret"]))
     .Contains("Profiles with identical observed flags emit different instructions: Rotate at pc 0"))
