@@ -10,6 +10,17 @@
 using System.Reflection;
 using System.Text.Json;
 
+const string holeCorpus = "Tests/HoleCorpus.cs";
+string[] holeArguments = ["--admission-report", At("artifacts/SelfAdmission/blockers.json")];
+var holeCommand = PreparedFixtureCommand(holeCorpus, holeArguments);
+if (holeCommand is null)
+{
+    // Build before admission. The project reference can replace the extractor whose hash the report records.
+    Run(["dotnet", "build", holeCorpus, "-c", "Release",
+        "-p:EnforceCodeStyleInBuild=true", "-p:GenerateDocumentationFile=true"]);
+    holeCommand = FixtureCommand(holeCorpus, holeArguments, prepared: true);
+}
+
 // Admission report: shared blockers are deduplicated with every chain, excluded branches stay silent.
 var directory = At("artifacts/Blockers");
 var source = Path.Combine(directory, "Assembly");
@@ -348,7 +359,7 @@ Require(asyncExtract.Code != 0 && asyncExtract.Output.Contains("Unsupported meth
     "extract does not name the runtime-async refusal:\n" + asyncExtract.Output);
 
 // Distinct arrays and sites are compared by content, while output keeps first discovery order.
-var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;
+var blockersType = Assembly.Load(File.ReadAllBytes(ExtractorPath)).GetType("Nethermind.LeanCIL.Blockers", true)!;
 var findingType = blockersType.GetNestedType("Finding", BindingFlags.NonPublic)!;
 var siteType = blockersType.GetNestedType("Site", BindingFlags.NonPublic)!;
 const BindingFlags instanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -376,8 +387,7 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
 const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
 Run(["dotnet", "run", "--file", "Tests/CanonicalMethods.cs"], streamOutput: true, progress: "Canonical methods");
-Run(["dotnet", "run", "--file", "Tests/HoleCorpus.cs", "--", "--admission-report",
-    At("artifacts/SelfAdmission/blockers.json")], streamOutput: true, progress: "Hole corpus");
+Run(holeCommand, streamOutput: true, progress: "Hole corpus");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
 // Source-named methods, so the gate's stable names equal the report's.
