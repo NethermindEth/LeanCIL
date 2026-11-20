@@ -53,8 +53,9 @@ private theorem bodyMap_getElem {profile : FeatureProfile} {environment : Layout
       (evidence.mapM fun entry => Method.ofBody? profile environment entry.links entry.reachable
         entry.body entry.original entry.arguments) = some program →
       evidence[index]? = some item →
-        Method.ofBody? profile environment item.links item.reachable item.body item.original
-          item.arguments = program[index]?
+        ∃ method, program[index]? = some method ∧
+          Method.ofBody? profile environment item.links item.reachable item.body item.original
+            item.arguments = some method
   | [], _, _, _, _, found => by simp at found
   | head :: items, program, index, item, decoded, found => by
     simp only [List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
@@ -64,7 +65,7 @@ private theorem bodyMap_getElem {profile : FeatureProfile} {environment : Layout
     | zero =>
       simp only [List.getElem?_cons_zero, Option.some.injEq] at found
       subst found
-      simpa using decodes
+      exact ⟨method, rfl, decodes⟩
     | succ index =>
       simp only [List.getElem?_cons_succ] at found ⊢
       exact bodyMap_getElem rest found
@@ -78,8 +79,10 @@ theorem decodedProgram?_getElem {profile : FeatureProfile} {environment : Layout
       some program)
     (found : evidence[index]? = some item) :
     Method.ofBody? profile environment item.links item.reachable item.body item.original
-      item.arguments = program[index]? :=
-  bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
+      item.arguments = program[index]? := by
+  obtain ⟨method, present, decodes⟩ :=
+    bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
+  exact decodes.trans present.symm
 
 #print axioms decodedProgram?_getElem
 
@@ -110,9 +113,9 @@ def DecodedAt (program : CIL.Program) (evidence : List MethodEvidence)
   ∃ item, evidence[index]? = some item ∧ item.assembly = pin ∧ item.original.token = token ∧
     item.arguments = arguments ∧
     instantiateMethod environment.rawLayouts item.original arguments = some item.closed ∧
-    Method.ofBody? profile environment item.links item.reachable item.body item.original
-      item.arguments = program[index]? ∧
-    ∀ method, program[index]? = some method → item.MaskValid evidence method
+    ∃ method, program[index]? = some method ∧
+      Method.ofBody? profile environment item.links item.reachable item.body item.original
+        item.arguments = some method ∧ item.MaskValid evidence method
 
 /-- `contract` holds for the method at `index`, and `bound` names that method by pinned
     assembly, metadata token and type arguments and ties it to the bytes it decodes from.
@@ -139,9 +142,11 @@ theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContra
       instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed)
     (holds : contract.Holds program index) :
     DecodedSummary program evidence profile environment index item.assembly item.original.token
-      item.arguments contract :=
-  ⟨holds, item, found, rfl, rfl, rfl, instantiated, decodedProgram?_getElem decoded found,
-    fun _ => decodedProgram?_maskValid decoded found⟩
+      item.arguments contract := by
+  obtain ⟨method, present, decodes⟩ :=
+    bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
+  exact ⟨holds, item, found, rfl, rfl, rfl, instantiated, method, present, decodes,
+    decodedProgram?_maskValid decoded found present⟩
 
 #print axioms DecodedSummary.of_decoded
 

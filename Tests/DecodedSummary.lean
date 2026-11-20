@@ -1,6 +1,7 @@
 import CIL.Safety.DecodedSummary
 import CIL.Safety.SymbolicExecution
 import Tests.DecodedMethod
+import Tests.ProfileContract
 
 /-!
 # Decoded summary tests
@@ -96,11 +97,26 @@ theorem hidden_add_rejected :
     decodedProgram? testProfile testEnvironment [hiddenAdd] = none ∧
     ¬ DecodedAt [hiddenMethod] [hiddenAdd] testProfile testEnvironment 0 pin tokens.main [] := by
   refine ⟨by cil_kernel_rfl, by decide +kernel, ?_⟩
-  rintro ⟨record, found, _, _, _, _, _, valid⟩
+  rintro ⟨record, found, _, _, _, _, method, present, _, valid⟩
   simp only [List.getElem?_cons_zero, Option.some.injEq] at found
   subst record
-  exact (by decide +kernel : ¬ hiddenAdd.MaskValid [hiddenAdd] hiddenMethod) (valid _ rfl)
+  cases present
+  exact (by decide +kernel : ¬ hiddenAdd.MaskValid [hiddenAdd] hiddenMethod) valid
 #print axioms hidden_add_rejected
+
+/-- An empty body fails to decode even though the adder's definition still instantiates. -/
+private def emptyBody := { addItem with body.bytes := [] }
+
+/-- A failed body decode and an absent program entry cannot bind the adder's record. -/
+theorem missing_method_rejected :
+    instantiateMethod testEnvironment.rawLayouts emptyBody.original [] = some emptyBody.closed ∧
+    Method.ofBody? testProfile testEnvironment emptyBody.links emptyBody.reachable emptyBody.body
+      emptyBody.original emptyBody.arguments = none ∧
+    ¬ DecodedAt [] [emptyBody] testProfile testEnvironment 0 pin tokens.main [] := by
+  refine ⟨by cil_kernel_rfl, by cil_kernel_rfl, ?_⟩
+  rintro ⟨_, _, _, _, _, _, _, present, _⟩
+  cases present
+#print axioms missing_method_rejected
 
 /-- `(left, right)` returns `left + right` and changes no memory. -/
 def addContract : MethodContract (W64 × W64) W64 where
@@ -127,8 +143,8 @@ theorem add_holds_alone : addContract.Holds [addMethod] 0 := by
 /-- The adder's contract, bound to its record at index 1. -/
 theorem addSummary : DecodedSummary program evidence testProfile testEnvironment 1 pin
     tokens.main [] addContract :=
-  ⟨add_holds, addItem, rfl, rfl, rfl, rfl, by cil_kernel_rfl, add_body_decodes,
-    by rintro method found; cases found; decide +kernel⟩
+  ⟨add_holds, addItem, rfl, rfl, rfl, rfl, by cil_kernel_rfl, addMethod, rfl,
+    add_body_decodes, by decide +kernel⟩
 #print axioms addSummary
 
 /-- A summary of the decoded one-record program is bound to the adder's identity. -/
@@ -136,6 +152,15 @@ theorem decoded_summary : DecodedSummary [addMethod] [addItem] testProfile testE
     tokens.main [] addContract :=
   .of_decoded (index := 0) adder_program_decodes rfl (by cil_kernel_rfl) add_holds_alone
 #print axioms decoded_summary
+
+/-- The scalar adder's summary also certifies the same body and contract under x86-64-v3. -/
+theorem add_summary_x64 :
+    DecodedSummary (reprofile [addMethod] Tests.ProfileContract.avx2Profile) [addItem]
+      Tests.ProfileContract.avx2Profile testEnvironment 0 pin tokens.main [] addContract :=
+  decoded_summary.reprofile (by decide +kernel)
+    (Program.ProfileAgreement.of_flags _ _ _ (by decide +kernel))
+    (imports := []) (by cil_kernel_rfl)
+#print axioms add_summary_x64
 
 /-- The caller's call check, against the records' method table. -/
 theorem caller_calls_valid :

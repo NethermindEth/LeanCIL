@@ -1,3 +1,4 @@
+import CIL.Safety.DecodedSummary
 import CIL.Safety.ProfileCertificate
 import CIL.Safety.RuntimeExceptions
 
@@ -33,6 +34,26 @@ theorem MethodContract.Holds.reprofile {Input Output : Type} {c : MethodContract
   unfold MethodContract.Holds
   rw [invoke_uniform_reprofile_fun program p q uniform agreement]
   exact holds
+
+open CIL.Extraction in
+/-- A decoded summary carries to an agreeing profile when the same evidence decodes to the
+    reprofiled program. The target summary retains the pinned assembly, token and arguments. -/
+theorem DecodedSummary.reprofile {Input Output : Type} {contract : MethodContract Input Output}
+    {program : CIL.Program} {evidence : List MethodEvidence} {source target : CIL.FeatureProfile}
+    {environment : LayoutEnvironment} {index token : Nat} {pin : AssemblyPin}
+    {arguments : List TypeExpr} {imports : List CIL.ImportSlot}
+    (summary : DecodedSummary program evidence source environment index pin token arguments
+      contract)
+    (uniform : ∀ body ∈ program, body.profile = source)
+    (agreement : program.ProfileAgreement source target)
+    (decoded : decodedProgram? target environment evidence imports =
+      some (CIL.reprofile program target)) :
+    DecodedSummary (CIL.reprofile program target) evidence target environment index pin token
+      arguments contract := by
+  obtain ⟨item, found, rfl, rfl, rfl, instantiated, _⟩ := summary.bound
+  exact .of_decoded decoded found instantiated (summary.holds.reprofile source uniform agreement)
+
+#print axioms DecodedSummary.reprofile
 
 /-- `MethodContract.Holds.reprofile` for a contract that reads the program's static
     descriptors: reprofiling keeps them, so the same contract certifies the target. `contract`

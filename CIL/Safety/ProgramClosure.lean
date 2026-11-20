@@ -535,12 +535,10 @@ theorem DecodedSummary.relocate {Input Output : Type} {contract : MethodContract
   obtain ⟨item, recorded, assembly, sameToken, sameArguments, instantiated, -⟩ := summary.bound
   obtain ⟨moved, placed, movedAssembly, movedOriginal, movedArguments, movedClosed⟩ :=
     record item recorded
-  refine ⟨summary.holds.relocate closed relocates, moved, placed, movedAssembly.trans assembly,
-    movedOriginal ▸ sameToken, movedArguments.trans sameArguments, ?_,
-    decodedProgram?_getElem targetDecoded placed,
-    fun _ => decodedProgram?_maskValid targetDecoded placed⟩
-  rw [movedOriginal, movedClosed]
-  exact instantiated
+  rw [← movedAssembly.trans assembly, ← movedArguments.trans sameArguments,
+    ← sameToken, ← movedOriginal]
+  apply DecodedSummary.of_decoded targetDecoded placed _ (summary.holds.relocate closed relocates)
+  simpa only [movedOriginal, movedArguments, sameArguments, movedClosed] using instantiated
 
 #print axioms DecodedSummary.relocate
 
