@@ -12,6 +12,7 @@
 #:include RejectedEvidence.cs
 #:include ModelOperandChecks.cs
 #:include HardwareExamples.cs
+#:include ContractVariants.cs
 
 using System.Buffers.Binary;
 using System.Reflection;
@@ -214,6 +215,48 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
 }
 
 Flush();
+
+// Change only the AVX2 member reference in the compiled AND entry, keeping its broadcast and lane.
+var wrongAnd = Path.Combine(root, "OrInsteadOfAnd");
+Directory.CreateDirectory(wrongAnd);
+var wrongAndAssembly = Path.Combine(wrongAnd, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
+    var andMethod = methods.Single(method => method.Name == "And");
+    var orMethod = methods.Single(method => method.Name == "Or");
+    static bool IsAvx2Member(object? operand) => operand is MethodReference target &&
+        target.DeclaringType.FullName == "System.Runtime.Intrinsics.X86.Avx2";
+    andMethod.Body.Instructions.Single(site => IsAvx2Member(site.Operand)).Operand =
+        orMethod.Body.Instructions.Single(site => IsAvx2Member(site.Operand)).Operand;
+    variant.Write(wrongAndAssembly);
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["And"], Path.Combine(root, "AndContract"),
+    wrongAndAssembly, selectors["And"], wrongAnd, """
+    /-- Every pair of words returns its bitwise intersection and preserves caller memory. -/
+    def intersection : MethodContract (W64 × W64) W64 where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧ value = (input.1 &&& input.2)
+    """, """
+    /-- The selected lane of the compiled AVX2 broadcast returns the intersection. -/
+    theorem correctness : intersection.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      apply MethodContract.Holds.intro (c := intersection) (input := (left, right))
+        memory (left &&& right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨256, invoke_broadcastBinary_word Extracted.profile .band 0 left right _ memory
+        rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_and left right)⟩
+    """, """
+    /-- On disjoint words one and two the replacement returns three. The intersection is zero. -/
+    theorem correctness : intersection.Refuted Extracted.program 0 :=
+      .of_return (input := (1, 2)) (initial := Memory.empty) trivial
+        (invoke_broadcastBinary_word Extracted.profile .bor 0 1 2 3 Memory.empty
+          rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_or 1 2))
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
+Console.WriteLine("PASS AVX2 AND contract and certified OR replacement at (1, 2)");
 
 string rejectedEncoding = Path.Combine(root, "Reject-Vector512Encoding");
 Directory.CreateDirectory(rejectedEncoding);
