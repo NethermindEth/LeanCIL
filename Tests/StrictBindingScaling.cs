@@ -650,11 +650,10 @@ partial class Program
             var baseType = definition.BaseType;
             var (baseNamespace, baseName) = baseType.IsNil ? ("", "") : NamesOf(baseType);
             var isInterface = (definition.Attributes & TypeAttributes.Interface) != 0;
-            var isEnumItself = (metadata.GetString(definition.Namespace), metadata.GetString(definition.Name)) ==
-                ("System", "Enum");
+            // Synthetic defines no core library types, including its own type named System.Enum.
             var kind = isInterface ? "interface"
                 : (baseNamespace, baseName) == ("System", "Enum") ? "enum"
-                : (baseNamespace, baseName) == ("System", "ValueType") && !isEnumItself ? "valueType"
+                : (baseNamespace, baseName) == ("System", "ValueType") ? "valueType"
                 : "classType";
             var declaring = definition.GetDeclaringType();
             int? enclosing = declaring.IsNil ? null : MetadataTokens.GetRowNumber(declaring);
@@ -673,7 +672,7 @@ partial class Program
     /// <summary>
     /// Rejections that each change one part of a claim that holds: a nested class claimed at the top level, at
     /// another NestedClass row and inside another row, the first class claimed nested, `System.Enum` claimed between
-    /// other NestedClass rows and claimed a value type, the interface claimed a class, the class over a generic
+    /// other NestedClass rows and claimed a core library class, the interface claimed a class, the class over a generic
     /// instantiation claimed to extend another TypeSpec row, and the last row claimed to extend another TypeDef.
     /// The image whose NestedClass row before the last names the last row's type too refuses the last nested class.
     /// </summary>
@@ -683,7 +682,7 @@ partial class Program
         var nested = Array.FindIndex(claims, claim => claim.Name == "Inner");
         var lastNested = Array.FindIndex(claims, claim => claim.Name == "Inner2");
         var face = Array.FindIndex(claims, claim => claim.Kind == "interface");
-        var enumItself = Array.FindIndex(claims, claim => claim.Name == "Enum");
+        var localEnum = Array.FindIndex(claims, claim => claim.Name == "Enum");
         var instantiated = Array.FindIndex(claims, claim => claim.Name == "Numbers");
         var last = claims.Length - 1;
         string Rejects(string name, int index, string change, string part) => $$"""
@@ -704,7 +703,7 @@ partial class Program
             Rejects("rejects_another_enclosing_row", nested,
                 $"nesting := .nested {nestedRow} {claims[nested].Enclosing + 1}", "nesting") +
             Rejects("rejects_a_top_level_class_claimed_nested", 0, "nesting := .nested 1 2", "nesting") +
-            Rejects("rejects_a_bracket_that_does_not_hold", enumItself,
+            Rejects("rejects_a_bracket_that_does_not_hold", localEnum,
                 $"nesting := .topLevel {lastRow + 1}", "nesting") +
             $$"""
             namespace Duplicated
@@ -719,7 +718,7 @@ partial class Program
 
             """ +
             Rejects("rejects_an_interface_claimed_a_class", face, "kind := .classType", "kind") +
-            Rejects("rejects_system_enum_claimed_a_value_type", enumItself, "kind := .valueType", "kind") +
+            Rejects("rejects_local_system_enum_claimed_a_class", localEnum, "kind := .classType", "kind") +
             Rejects("rejects_another_type_spec", instantiated,
                 $"base := .spec {MetadataTokens.GetToken(MetadataTokens.TypeSpecificationHandle(2))}", "base") +
             Rejects("rejects_another_base_definition", last,
@@ -740,8 +739,9 @@ partial class Program
             AssemblyHashAlgorithm.Sha1);
         metadata.AddModule(0, metadata.GetOrAddString("Synthetic.dll"), metadata.GetOrAddGuid(Guid.Empty), default,
             default);
+        var runtimeToken = metadata.GetOrAddBlob(Convert.FromHexString("b03f5f7f11d50a3a"));
         var runtime = metadata.AddAssemblyReference(metadata.GetOrAddString("System.Runtime"),
-            new Version(10, 0, 0, 0), default, default, default, default);
+            new Version(10, 0, 0, 0), default, runtimeToken, default, default);
         TypeReferenceHandle SystemType(string name) =>
             metadata.AddTypeReference(runtime, metadata.GetOrAddString("System"), metadata.GetOrAddString(name));
         var objectType = SystemType("Object");
