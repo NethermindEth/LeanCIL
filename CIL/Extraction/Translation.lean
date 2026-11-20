@@ -2,7 +2,7 @@ import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.OpaqueLocals
-import CIL.Extraction.CallAgreement
+import CIL.Extraction.ClosedMethod
 import CIL.Extraction.ObjectOperands
 import CIL.Extraction.StaticValues
 import CIL.Extraction.StaticIdentities
@@ -36,6 +36,13 @@ Generated modules prove each method's evidence separately and assemble it with
 namespace CIL.Extraction
 
 deriving instance DecidableEq for CIL.Instruction
+deriving instance DecidableEq for CIL.Method
+
+private instance (result : Except MethodDecodeError Method) (method : Method) :
+    Decidable (result = .ok method) := by
+  cases result with
+  | error failure => exact isFalse (by intro same; cases same)
+  | ok candidate => exact decidable_of_iff (candidate = method) ⟨congrArg Except.ok, Except.ok.inj⟩
 
 /-- Every extracted method has exactly one record, in emitted program order. -/
 structure MethodEvidence where
@@ -72,21 +79,6 @@ def specializationTable (evidence : List MethodEvidence) : List SpecializedMetho
     shows. An index past the program, such as a contract import, has none. -/
 def evidenceConstants (evidence : List MethodEvidence) (index : Nat) : Option W32 :=
   evidence[index]?.bind fun item => constantReturn item.closed item.featureStates
-
-/-- The zero value of each local kind, used when the method zero-initializes its locals. -/
-private def initialLocal : LocalKind → Value
-  | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object => .nullRef
-  | .byte => .i8 0
-  | .narrow _ | .word32 => .i32 0
-  | .word64 => .i64 0
-  | .vector128 => .v128 0
-  | .vector256 => .v256 0
-  | .vector512 => .v512 0
-  | .aggregate size => .aggregate (List.replicate size.val 0)
-
-/-- The value a local of `kind` starts with: its zero when the body initializes locals. -/
-def _root_.CIL.LocalKind.initialValue (initLocals : Bool) (kind : LocalKind) : Value :=
-  if initLocals then initialLocal kind else .unmodeled
 
 /-- A readonly scalar load has exactly the width and extension of its raw field type. -/
 private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstruction)
@@ -157,16 +149,6 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
   rfl
 
 #print axioms methodShapeInstructions_eq_scan
-/-- The declared signature a closed raw method implies: its receiver kind, parameter types,
-    return type and localsinit flag. Instantiation and metadata binding refuse explicit receiver
-    signatures. -/
-def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature where
-  receiver :=
-    if closed.hasThis then some (if closed.objectReceiver then .object else .reference) else none
-  parameters := closed.parameters
-  returnType := closed.returnType
-  initLocals := closed.initLocals
-
 /-- Bind frame and return metadata, static-field instructions and all raw prefix sequences. -/
 def MethodShapeValid (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
@@ -397,7 +379,8 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid item.closed method ∧
   UnsafeCallsValid item.closed item.reachable method.code ∧
-  RuntimeModelsAgree item.closed item.reachable method ∧
+  Method.ofClosed? method.profile method.environment item.links item.reachable item.closed
+    item.parameterInput = .ok method ∧
   OpaqueLocalsValid item.closed method ∧
   ObjectOperandsValid item.closed item.reachable method ∧
   (ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
@@ -407,31 +390,39 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
   MethodEnvironmentValid rawLayouts layouts method ∧
-  DeclaredValid item.closed method ∧ item.links = method.links ∧
-  method.staticSites = item.closed.staticDescriptors
+  DeclaredValid item.closed method ∧ item.links = method.links
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧
-    _ ∧ _))
+    _))
 
 /-- The record supplies exactly the executable links checked for its method. -/
 theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
     item.links = method.links := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links, -⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links⟩ := valid
   exact links
 #print axioms MethodEvidenceValid.links_eq
+
+/-- Validated evidence decodes at its own links and mask to the complete executable method. -/
+theorem MethodEvidenceValid.decoded {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    Method.ofClosed? method.profile method.environment item.links item.reachable item.closed
+      item.parameterInput = .ok method := by
+  obtain ⟨-, -, -, -, -, -, -, -, decoded, -⟩ := valid
+  exact decoded
+
+#print axioms MethodEvidenceValid.decoded
 
 /-- A validated method retains the identities, bytes and initializers of its checked static
     sites. -/
 theorem MethodEvidenceValid.staticSites_eq {rawLayouts layouts pins all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
     method.staticSites = item.closed.staticDescriptors := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, fields⟩ := valid
-  exact fields
+  exact (Method.ofClosed?_fields valid.decoded).2
 
 #print axioms MethodEvidenceValid.staticSites_eq
 
@@ -454,6 +445,17 @@ theorem MethodEvidenceValid.code_eq {rawLayouts : List RawLayout}
 
 #print axioms MethodEvidenceValid.code_eq
 
+/-- The runtime catalog agrees with every call of a validated method. -/
+theorem MethodEvidenceValid.modelsAgree {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    RuntimeModelsAgree item.closed item.reachable method := by
+  have decoded := valid.decoded
+  rw [valid.links_eq] at decoded
+  obtain ⟨-, -, -, features, -⟩ := valid
+  exact RuntimeModelsAgree.of_closed decoded features
+
+#print axioms MethodEvidenceValid.modelsAgree
+
 /-- Every reachable method-token call outside a fold in validated evidence has a raw claim. -/
 theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
@@ -463,8 +465,7 @@ theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
     (atLive : item.reachable[pc]? = some true) :
     SiteClaimTotal method.environment (method.linkAt pc) raw true
       ((foldRoles item.closed.code)[pc]?.join) := by
-  obtain ⟨-, -, -, -, -, -, -, -, agree, -⟩ := valid
-  exact agree.siteClaimTotal atRaw atLive
+  exact valid.modelsAgree.siteClaimTotal atRaw atLive
 
 #print axioms MethodEvidenceValid.siteClaimTotal
 
@@ -479,8 +480,7 @@ theorem MethodEvidenceValid.foldOwnedSite {rawLayouts : List RawLayout}
     (owned : foldOwnsSite ((foldRoles item.closed.code)[pc]?.join) = true) :
     ((foldRoles item.closed.code)[pc]?.join).bind
       (Instruction.ofRole? · none raw) = some emitted := by
-  obtain ⟨-, -, -, -, -, -, -, -, agree, -⟩ := valid
-  exact agree.foldOwnedSite atRaw atLive atCode owned
+  exact valid.modelsAgree.foldOwnedSite atRaw atLive atCode owned
 
 #print axioms MethodEvidenceValid.foldOwnedSite
 

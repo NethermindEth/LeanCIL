@@ -64,6 +64,24 @@ theorem all3_congr_getElem? {left right : α → β → γ → Bool} :
 
 #print axioms all3_congr_getElem?
 
+/-- Equal-length lists pass a lockstep check when the triple at every index passes. -/
+theorem all3_of_getElem? {check : α → β → γ → Bool} {as : List α} {bs : List β} {cs : List γ}
+    (lenB : as.length = bs.length) (lenC : as.length = cs.length)
+    (each : ∀ (pc : Nat) a b c, as[pc]? = some a → bs[pc]? = some b →
+      cs[pc]? = some c → check a b c = true) : all3 check as bs cs = true := by
+  induction as generalizing bs cs with
+  | nil => cases bs <;> cases cs <;> simp_all [all3]
+  | cons a rest ih =>
+    cases bs with
+    | nil => simp at lenB
+    | cons b bs =>
+      cases cs with
+      | nil => simp at lenC
+      | cons c cs =>
+        exact Bool.and_eq_true_iff.mpr ⟨each 0 a b c rfl rfl rfl,
+          ih (Nat.succ.inj lenB) (Nat.succ.inj lenC) (fun pc => each (pc + 1))⟩
+
+#print axioms all3_of_getElem?
 /-- Mapping the middle list changes nothing when the two checks agree on each of its entries. -/
 theorem all3_map {check : α → β → γ → Bool} {mapped : α → δ → γ → Bool} (f : β → δ) :
     ∀ (as : List α) (bs : List β) (cs : List γ),

@@ -405,6 +405,9 @@ internal static class LeanEmitter
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
+            lean.AppendLine($"theorem method{n}_models_validated : " +
+                $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := " +
+                $"Extraction.RuntimeModelsAgree.of_closed method{n}_decoder_eq method{n}_features_validated");
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
                 $"specializedMethods imports (Extraction.callModelled method{n}) " +
                 $"(Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
@@ -438,12 +441,10 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
-                $"method{n}_models_validated, method{n}_opaque_validated, " +
+                $"method{n}_decoder_eq, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            var statics = $"(Method.ofClosed?_fields method{n}_decoder_eq).2";
-            lean.AppendLine(
-                $"    method{n}_environment_validated, method{n}_declared_validated, rfl, {statics}\u27e9");
+            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated, rfl\u27e9");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");

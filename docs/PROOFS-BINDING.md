@@ -759,6 +759,10 @@ each shape and the kernel checks it; a fact that misstates a shape fails to elab
 
 ### Methods defined from their decoder
 
+For every method with valid evidence, `MethodEvidenceValid.decoded` states that closed decoding
+produces that method, including its frame, code, links and static sites. The theorem
+`MethodEvidenceValid.ofBody?` gives the same result from the pinned body and metadata.
+
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
 method returned by a closed decoder. `Method.ofClosed?` returns a typed error for an invalid
 frame or prefix, or the pc and opcode of the first reachable hole. `Method.ofRaw?` returns an

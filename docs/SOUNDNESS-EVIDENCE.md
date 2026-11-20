@@ -45,9 +45,10 @@ site checks.
 Closed method construction refuses the first reachable hole with its pc and raw opcode.
 Dead sites retain their opcode-tagged holes.
 
-At each decoded position, `RuntimeModelsAgree.of_decoded_site` proves the runtime
-agreement check from the instruction lookup, the reachability bit and the absence of a
-live hole. The unsafe-call certificate also requires equal code and mask lengths. A span
+`MethodEvidenceValid.modelsAgree` derives runtime call agreement for the whole method.
+Closed decoding rules out reachable holes. The feature certificate fixes the mask and code
+lengths, and `RuntimeModelsAgree.of_decoded_site` relates each instruction to its catalog entry.
+A span
 reset must have its matching local address for the decoder to produce an initialization.
 
 Lean derives opaque vector locals from the closed raw body and the reachability mask.

@@ -56,8 +56,8 @@ theorem low_summary : ∃ record, Extracted.methodEvidence[low]? = some record �
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment low record.assembly record.original.token record.arguments
       lowContract :=
-  ⟨_, rfl, .of_decoded bodies_decode rfl Extracted.method1_specialization_validated.1
-    low_holds⟩
+  ⟨_, rfl, .of_translation Extracted.translation_valid ⟨low, by decide⟩
+    (method := Extracted.method1) rfl low_holds⟩
 #print axioms low_summary
 
 /-- The caller returns its argument plus one and keeps the caller memory, applying the summary

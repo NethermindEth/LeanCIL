@@ -526,10 +526,15 @@ body. A summary also names the metadata method and the bytes.
 | `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
 | `decodedProgram?_eq_some` | Proves the decoded program from `programBindingsValid evidence program = true` and `BodiesDecode` |
 | `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
+| `DecodedSummary.of_translation` | Binds a proved contract to its record using the translation certificate and the method lookup at the contract index |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
 | `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
 | `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |
+
+For an extracted method, `DecodedSummary.of_translation` takes `Extracted.translation_valid`, the
+record index, the method lookup and the contract proof. The certificate supplies the body decode
+and the feature mask used by the summary.
 
 Use `Extracted.translation_valid.programBindingsValid` for the mask and call checks. Each record's
 feature certificate describes its pinned, instantiated body. The decoder checks managed and

@@ -150,6 +150,21 @@ theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContra
 
 #print axioms DecodedSummary.of_decoded
 
+/-- A contract proved over a validated translation is a summary of its method's pinned record. -/
+theorem DecodedSummary.of_translation {Input Output : Type} {contract : MethodContract Input Output}
+    {program : CIL.Program} {evidence : List MethodEvidence} {rawLayouts layouts pins imports}
+    (valid : TranslationValid rawLayouts layouts pins evidence imports program)
+    (index : Fin evidence.length) {method : Method} (present : program[index.val]? = some method)
+    (holds : contract.Holds program index) :
+    DecodedSummary program evidence method.profile method.environment index evidence[index].assembly
+      evidence[index].original.token evidence[index].arguments contract := by
+  have checked := translation_method_checked valid index method present
+  have mask := checked.maskValid
+  exact ⟨holds, evidence[index], List.getElem?_eq_getElem index.isLt, rfl, rfl, rfl, mask.2.1,
+    method, present, checked.ofBody?, mask⟩
+
+#print axioms DecodedSummary.of_translation
+
 /-- At a live `call` whose link enters `index`, a summary of `index` is for the method the
     raw site names: the site's managed token and type arguments are the summary's. -/
 theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Input Output}

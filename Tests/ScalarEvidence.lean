@@ -182,6 +182,20 @@ private def addMethod : Method :=
 example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide +kernel
 example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
+/-- A method with the adder’s code and an extra home cannot be the result of its body decode. -/
+theorem addition_rejects_extra_home :
+    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence
+      { addMethod with parameterHomes := [(0, .word64)] } := by
+  intro valid
+  have body := valid.ofBody?
+  have original : Method.ofBody? addMethod.profile addMethod.environment addEvidence.links
+      addEvidence.reachable addEvidence.body addEvidence.original addEvidence.arguments =
+      some addMethod := by decide +kernel
+  rw [original] at body
+  cases body
+
+#print axioms addition_rejects_extra_home
+
 -- The declared signature and the layout environment are conjuncts of their own.
 example : ¬ DeclaredValid addRaw { addMethod with declared := {} } := by decide
 example : ¬ TranslationValid [] #[] [] [addEvidence] [] [{ addMethod with declared := {} }] := by
@@ -194,20 +208,19 @@ example : ¬ TranslationValid [] #[] [] [addEvidence] []
 /-- `addMethod` declaring `signature` instead of the `wordPair` its metadata implies. -/
 private def declaring (signature : DeclaredSignature) : Method :=
   { addMethod with declared := signature }
-/-- Only `DeclaredValid` reads the declared signature: the shape check accepts the method, and the
-    evidence check rejects it through that conjunct alone. -/
-private def declaredRejectedAlone (signature : DeclaredSignature) : Prop :=
+/-- A changed declaration passes the shape check and fails the signature and evidence checks. -/
+private def wrongDeclarationRejected (signature : DeclaredSignature) : Prop :=
   MethodShapeValid addRaw (declaring signature) ∧ ¬ DeclaredValid addRaw (declaring signature) ∧
     ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence (declaring signature)
-instance (signature : DeclaredSignature) : Decidable (declaredRejectedAlone signature) :=
+instance (signature : DeclaredSignature) : Decidable (wrongDeclarationRejected signature) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
 -- One component of the signature differs in each case.
-example : declaredRejectedAlone { wordPair with returnType := intType } := by decide +kernel
-example : declaredRejectedAlone { wordPair with parameters := [word, intType] } := by
+example : wrongDeclarationRejected { wordPair with returnType := intType } := by decide +kernel
+example : wrongDeclarationRejected { wordPair with parameters := [word, intType] } := by
   decide +kernel
-example : declaredRejectedAlone { wordPair with receiver := some .reference } := by decide +kernel
-example : declaredRejectedAlone { wordPair with parameters := [word] } := by decide +kernel
+example : wrongDeclarationRejected { wordPair with receiver := some .reference } := by decide +kernel
+example : wrongDeclarationRejected { wordPair with parameters := [word] } := by decide +kernel
 
 example : ¬ TranslationValid [] #[] []
     [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []

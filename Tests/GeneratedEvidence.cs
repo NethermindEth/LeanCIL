@@ -259,6 +259,7 @@ partial class Program
                 // Isolated layout, object and scalar checks decide the fixture's complete obligation.
                 if (match.Value.Contains(" : Extraction.MethodLayoutsValid ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : Extraction.ObjectOperandsValid ", StringComparison.Ordinal) ||
+                      match.Value.Contains(" : Extraction.RuntimeModelsAgree ", StringComparison.Ordinal) ||
                     match.Value.Contains(" : And (Extraction.ScalarFlowValid ", StringComparison.Ordinal))
                     return TheoremHead.Replace(match.Value, "$1 := by decide +kernel");
                 return InstructionCheckProjection.Replace(match.Value, " := by decide +kernel");

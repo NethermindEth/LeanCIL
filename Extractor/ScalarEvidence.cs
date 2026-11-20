@@ -43,11 +43,9 @@ internal static class ScalarEvidence
         var witness = $"{method}_decoded_code";
         var scalarEvidence = $"And ({scalar}) ({binding})";
         var unsafeCalls = $"Extraction.UnsafeCallsValid {method}Closed {method}Reachable {method}.code";
-        var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";
-        var otherChecks = $"And ({unsafeCalls}) ({models})";
         var objects = $"Extraction.ObjectOperandsValid {method}Closed {method}Reachable {method}";
-        var remaining = $"And ({otherChecks}) ({objects})";
-        var decided = objectProof is null ? remaining : otherChecks;
+        var remaining = $"And ({unsafeCalls}) ({objects})";
+        var decided = objectProof is null ? remaining : unsafeCalls;
         var checkedTail = objectProof is null ? "checks.2" : $"(And.intro checks.2 ({objectProof}))";
         var heartbeats = LeanEmitter.InstructionCheckHeartbeats(instructions, calls);
         if (heartbeats > LeanEmitter.InstructionCheckHeartbeats(0, 0))
@@ -58,8 +56,7 @@ internal static class ScalarEvidence
               exact And.intro (And.intro checks.1 ({witness})) {checkedTail}
             #print axioms {method}_instruction_checks
             theorem {method}_scalars_validated : {scalarEvidence} := {method}_instruction_checks.1
-            theorem {method}_unsafe_validated : {unsafeCalls} := {method}_instruction_checks.2.1.1
-            theorem {method}_models_validated : {models} := {method}_instruction_checks.2.1.2
+            theorem {method}_unsafe_validated : {unsafeCalls} := {method}_instruction_checks.2.1
             theorem {method}_object_operands_validated : {objects} := {method}_instruction_checks.2.2
             """);
     }

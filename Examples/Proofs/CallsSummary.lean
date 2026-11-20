@@ -99,8 +99,8 @@ theorem increment_summary : ∃ record, Extracted.methodEvidence[increment]? = s
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment increment record.assembly record.original.token record.arguments
       incrementContract :=
-  ⟨_, rfl, .of_decoded bodies_decode rfl Extracted.method2_specialization_validated.1
-    increment_holds⟩
+  ⟨_, rfl, .of_translation Extracted.translation_valid ⟨increment, by decide⟩
+    (method := Extracted.method2) rfl increment_holds⟩
 #print axioms increment_summary
 
 /-- The contract of `Mutate`, bound to its record and the bytes it decodes from. -/
@@ -108,8 +108,8 @@ theorem mutate_summary : ∃ record, Extracted.methodEvidence[mutate]? = some re
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment mutate record.assembly record.original.token record.arguments
       mutateContract :=
-  ⟨_, rfl, .of_decoded bodies_decode rfl Extracted.method1_specialization_validated.1
-    mutate_holds⟩
+  ⟨_, rfl, .of_translation Extracted.translation_valid ⟨mutate, by decide⟩
+    (method := Extracted.method1) rfl mutate_holds⟩
 #print axioms mutate_summary
 
 /-- The caller returns `x + 3` and keeps all memory below its entry, applying each callee's

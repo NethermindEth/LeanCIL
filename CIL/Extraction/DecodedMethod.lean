@@ -20,45 +20,6 @@ translator output.
 
 namespace CIL.Extraction
 
-/-- A closed body fails at a live opcode or cannot supply its declared frame or prefixes. -/
-inductive MethodDecodeError where
-  | liveHole (pc opcode : Nat)
-  | invalidFrame
-  | invalidPrefixes
-  deriving DecidableEq, Repr
-
-/-- The first reachable hole carries its instruction index and raw opcode. -/
-def firstLiveHole : Nat → List Bool → List Instruction → Option MethodDecodeError
-  | pc, live :: rest, instruction :: code =>
-    match live, instruction with
-    | true, .unadmitted opcode => some (.liveHole pc opcode)
-    | _, _ => firstLiveHole (pc + 1) rest code
-  | _, _, _ => none
-
-/-- The method denoted by a closed definition and its argument storage. Its code contains
-    one instruction per raw site and a hole carrying the opcode at each dead site. The frame
-    requires supported local kinds, valid argument homes and accesses, and valid prefixes. -/
-def _root_.CIL.Method.ofClosed? (profile : FeatureProfile) (environment : LayoutEnvironment)
-    (links : List (Nat × Link)) (reachable : List Bool) (closed : RawMethod)
-    (storage : RawArguments) : Except MethodDecodeError Method :=
-  let code := methodCode profile environment links reachable closed
-  if let some failure := firstLiveHole 0 reachable code then .error failure else
-  match storage.locals.mapM (storageKind environment.layouts),
-      expectedHomes environment.layouts storage reachable with
-  | some localKinds, some parameterHomes =>
-    let homes := requiredHomeIndices storage reachable
-    if !rawPrefixesValid closed.returnType closed.code then .error .invalidPrefixes else
-    if !argumentInstructionsValid storage homes reachable code then .error .invalidFrame else
-    .ok {
-      profile := profile, code := code, localKinds := localKinds,
-      locals := localKinds.map (LocalKind.initialValue closed.initLocals),
-      opaqueVectorLocals := rawOpaqueLocals closed reachable,
-      parameterHomes := parameterHomes, declared := DeclaredSignature.ofRaw closed,
-      environment := environment, links := links,
-      staticSites := closed.staticDescriptors,
-      returnsValue := closed.returnType != .void }
-  | _, _ => .error .invalidFrame
-
 /-- The method a raw definition denotes at its type arguments, with the supplied link table. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (links : List (Nat × Link)) (reachable : List Bool) (source : RawMethod)
@@ -96,6 +57,17 @@ abbrev MethodEvidence.MaskValid (item : MethodEvidence) (all : List MethodEviden
   FeatureFlowValid method.environment.rawLayouts.toArray (evidenceConstants all) (linkIndex method)
     item.closed method.profile item.featureStates item.reachable method.code
 
+/-- A validated record checks the mask against the method and its pinned, specialized body. -/
+theorem MethodEvidenceValid.maskValid {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    item.MaskValid all method := by
+  obtain ⟨specialized, -, -, features, -, -, -, -, -, -, -, -, -, body, environment, -⟩ := valid
+  unfold MethodEvidence.MaskValid
+  rw [show method.environment = _ from environment]
+  exact ⟨body.2.2.2.2.2.2, specialized.1, features⟩
+
+#print axioms MethodEvidenceValid.maskValid
+
 /-- The program binds each static identity and value and each method's mask and call targets. -/
 def programBindingsValid (evidence : List MethodEvidence) (program : Program)
     (imports : List ImportSlot := []) : Bool :=
@@ -119,13 +91,9 @@ theorem TranslationValid.programBindingsValid {rawLayouts layouts pins evidence 
   obtain ⟨recorded, compiled⟩ := List.getElem?_zip_eq_some.mp found
   obtain ⟨bound, rfl⟩ := List.getElem?_eq_some_iff.mp recorded
   have checked := translation_method_checked valid ⟨index, bound⟩ method compiled
-  obtain ⟨specialized, -, -, features, calls, -, -, -, -, -, -, -, dispatch, body, env, -⟩ :=
-    checked
-  apply decide_eq_true
-  refine ⟨?_, calls, dispatch⟩
-  unfold MethodEvidence.MaskValid
-  rw [show method.environment = _ from env]
-  exact ⟨body.2.2.2.2.2.2, specialized.1, features⟩
+  have mask := checked.maskValid
+  obtain ⟨-, -, -, -, calls, -, -, -, -, -, -, -, dispatch, -⟩ := checked
+  exact decide_eq_true ⟨mask, calls, dispatch⟩
 
 #print axioms TranslationValid.programBindingsValid
 
@@ -215,20 +183,21 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 
 #print axioms Method.ofBody?_of_decodes
 
-/-- Closed decoding binds the code and every static descriptor to the same raw method. -/
-theorem _root_.CIL.Method.ofClosed?_fields {profile : FeatureProfile}
-    {environment : LayoutEnvironment} {links : List (Nat × Link)} {reachable : List Bool}
-    {closed : RawMethod} {storage : RawArguments} {method : Method}
-    (decoded : Method.ofClosed? profile environment links reachable closed storage = .ok method) :
-    method.code = methodCode profile environment links reachable closed ∧
-      method.staticSites = closed.staticDescriptors := by
-  unfold Method.ofClosed? at decoded
-  cases failure : firstLiveHole 0 reachable (methodCode profile environment links reachable closed)
-    <;> simp only [failure] at decoded
-  repeat' split at decoded
-  all_goals first | contradiction | (cases decoded; exact ⟨rfl, rfl⟩)
+/-- The pinned body and metadata of a validated record decode to the entire executable method. -/
+theorem MethodEvidenceValid.ofBody? {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    Method.ofBody? method.profile method.environment item.links item.reachable item.body
+      item.original item.arguments = some method := by
+  have decoded := valid.decoded
+  obtain ⟨specialized, -, -, -, -, -, -, -, -, -, -, -, -, body, environment, -⟩ := valid
+  have storage : SpecializationValid method.environment.rawLayouts item.original item.arguments
+      item.closed item.parameterInput := by
+    rw [show method.environment = _ from environment]
+    exact specialized
+  rw [Method.ofBody?_of_decodes body, storage.ofRaw?_eq_ofClosed?, decoded]
+  rfl
 
-#print axioms Method.ofClosed?_fields
+#print axioms MethodEvidenceValid.ofBody?
 
 /-- A decoded method contains exactly the instructions of its closed definition. -/
 theorem _root_.CIL.Method.ofClosed?_code {profile : FeatureProfile}
