@@ -21,6 +21,7 @@ partial class Program
             "System.Void Examples.Arithmetic::Mutate(System.UInt64&)",
             At("Tests/SummaryModules/Memory/SavedSummary.lean"));
         CheckSavedBranches(Path.Combine(directory, "Branch"), assembly);
+        CheckSavedLoop(Path.Combine(directory, "Loop"), assembly);
     }
 
     void CompileSummaryModule(string source, string destination, string search)
@@ -91,6 +92,55 @@ partial class Program
             """, example: At("Examples/Proofs/Choose.lean"));
     }
 
+    void CheckSavedLoop(string directory, string assembly)
+    {
+        const string entry = "System.UInt32 Examples.Loops::CountCalls(System.UInt32)";
+        var published = Path.Combine(directory, "Published");
+        Directory.CreateDirectory(published);
+        var producer = Path.Combine(directory, "Producer");
+        Run(Extract("extract", assembly, "Examples", entry, producer));
+        var search = published + Path.PathSeparator + CheckoutLeanPath();
+        CompileSummaryModule(Path.Combine(producer, "Extracted.lean"), published, search);
+        CompileSummaryModule(At("Examples/Proofs/CountCallsSummary.lean"), published, search);
+
+        var changed = Path.Combine(directory, "Examples.dll");
+        WriteInstructionChange(assembly, changed, "CountCalls", [0x02, 0x0a, 0x16, 0x0b], 2, 0x17,
+            typeName: "Loops", matchPrefix: true);
+        var consumer = Path.Combine(directory, "Consumer");
+        Run(Extract("extract", changed, "Examples", entry, consumer));
+        var changedSource = Path.Combine(consumer, "Changed.lean");
+        File.WriteAllText(changedSource, File.ReadAllText(Path.Combine(consumer, "Extracted.lean"))
+            .Replace("Extracted", "Changed", StringComparison.Ordinal));
+        CompileSummaryModule(changedSource, published, search);
+        CompileSummaryModule(At("Tests/SummaryModules/Loop/ChangedLoop.lean"), published, search);
+        ReplayCheckedModules(["Extracted", "CountCallsSummary", "Changed", "ChangedLoop"], search,
+            "Kernel replay of the saved loop, its callee and the changed accumulator");
+        Console.WriteLine("PASS the changed entry reuses the compiled CountCalls invariant and termination proof");
+
+        VerifyContractVariant(assembly, "Examples", entry, Path.Combine(directory, "OriginalContract"), changed,
+            entry, Path.Combine(directory, "WrongContract"), """
+            /-- CountCalls returns its input from empty memory. -/
+            def count : MethodContract W32 where
+              args input := [.scalar (.i32 input)]
+              pre _ memory := memory = Memory.empty
+              footprint _ := []
+              post input _ _ values := values = [.scalar (.i32 input)]
+            """, """
+            /-- The original loop returns the number of calls for every input. -/
+            theorem correctness : count.Holds Extracted.program 0 := by
+              rintro value _ rfl
+              obtain ⟨fuel, final, values, ran, result⟩ := ExampleProof.correctness _ _ ⟨value, rfl, rfl⟩
+              exact ⟨fuel, (final, values), ran, by constructor <;> simp [Memory.empty], values, rfl, result⟩
+            """, """
+            /-- The changed initializer returns one for zero calls. -/
+            theorem correctness : count.Refuted Extracted.program 0 := by
+              apply MethodContract.Refuted.of_return (input := 0) (initial := Memory.empty)
+                (fuel := 12) (values := [.scalar (.i32 1)]) rfl rfl
+              rintro ⟨_, values, rfl, wrong⟩
+              exact (by decide : ¬ ([CIL.Safety.Value.scalar (.i32 1)] = [.scalar (.i32 0)])) wrong
+            """, example: At("Examples/Proofs/CountCalls.lean"));
+    }
+
     void CheckSavedSummary(string directory, string assembly, string entry, string summarySource,
         params (string Name, string Image, string Entry, string Mismatch)[] variants)
     {
@@ -135,24 +185,28 @@ partial class Program
         }
     }
 
-    // Replace one opcode in a known tiny method, preserving its token, operands, metadata and image length.
+    // Replace one opcode in the selected method, preserving its header, operands, token and image length.
     static void WriteInstructionChange(string assembly, string output, string name, byte[] expected,
-        int position, byte opcode)
+        int position, byte opcode, string typeName = "Arithmetic", bool matchPrefix = false)
     {
         var bytes = File.ReadAllBytes(assembly);
         using var pe = new PEReader(new MemoryStream(bytes));
         var metadata = pe.GetMetadataReader();
         var type = metadata.TypeDefinitions.Select(metadata.GetTypeDefinition).Single(type =>
-            metadata.StringComparer.Equals(type.Namespace, "Examples") && metadata.StringComparer.Equals(type.Name, "Arithmetic"));
+            metadata.StringComparer.Equals(type.Namespace, "Examples") && metadata.StringComparer.Equals(type.Name, typeName));
         var method = type.GetMethods().Select(metadata.GetMethodDefinition).Single(method =>
             metadata.StringComparer.Equals(method.Name, name) &&
-            pe.GetMethodBody(method.RelativeVirtualAddress).GetILBytes().AsSpan().SequenceEqual(expected));
+            Matches(pe.GetMethodBody(method.RelativeVirtualAddress).GetILBytes()!));
+        bool Matches(byte[] code) => matchPrefix ? code.AsSpan().StartsWith(expected) :
+            code.AsSpan().SequenceEqual(expected);
         int rva = method.RelativeVirtualAddress;
         var section = pe.PEHeaders.SectionHeaders[pe.PEHeaders.GetContainingSectionIndex(rva)];
         int body = section.PointerToRawData + rva - section.VirtualAddress;
-        if (bytes[body] != (expected.Length << 2 | 2) || !bytes.AsSpan(body + 1, expected.Length).SequenceEqual(expected))
-            throw new InvalidDataException($"Unexpected tiny method body for {name}.");
-        bytes[body + 1 + position] = opcode;
+        var header = (bytes[body] & 3) == 2 ? 1 : (bytes[body + 1] >> 4) * 4;
+        var il = pe.GetMethodBody(rva).GetILBytes()!;
+        if ((uint)position >= expected.Length || !bytes.AsSpan(body + header, il.Length).SequenceEqual(il))
+            throw new InvalidDataException($"Unexpected method body for {name}.");
+        bytes[body + header + position] = opcode;
         File.WriteAllBytes(output, bytes);
     }
 }
