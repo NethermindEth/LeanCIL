@@ -86,7 +86,7 @@ using (Scope())
         var call = new GenericInstanceMethod(create.ElementMethod);
         call.GenericArguments.Add(type);
         var createsStaticSpan = staticSpan.Invoke(null, [call, "scalar"]) is not null;
-        var createsArraySpan = constructor.Invoke(null, [arrayCall, "scalar"])?.GetType().Name == "ArraySpan";
+        var createsArraySpan = constructor.Invoke(null, [arrayCall, "scalar", true])?.GetType().Name == "ArraySpan";
         if (createsStaticSpan != admitted || !createsArraySpan)
             throw new InvalidOperationException("Static and supplied array span admission were conflated: " + type.FullName);
     }
