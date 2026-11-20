@@ -6,6 +6,9 @@ namespace Nethermind.LeanCIL;
 /// <summary>The storage and managed targets admitted for raw instruction operands.</summary>
 internal static class InstructionOperands
 {
+    /// <summary>The encoded CIL opcode, including the 0xFE prefix on two-byte opcodes.</summary>
+    internal static int RawOpcode(Instruction instruction) => (ushort)instruction.OpCode.Value;
+
     internal static bool MethodTableLoad(Instruction site, NativeOperands.Certificate native) =>
         native.Incoming.TryGetValue(site, out var stack) && stack.Length >= 2 &&
         stack[^2].Kind == NativeOperands.Kind.MethodTable;
@@ -142,13 +145,12 @@ internal static class InstructionOperands
         return (method, index);
     }
 
-    internal static (string Class, int Method) VirtualTarget(VirtualDispatch.Entry entry,
+    internal static void ValidateVirtualTarget(VirtualDispatch.Entry entry,
         IReadOnlyDictionary<MethodDefinition, int> methods, int caller)
     {
         var index = methods.GetValueOrDefault(entry.Body, -1);
         if (index <= caller)
             throw new InvalidDataException($"Unresolved virtual implementation: {entry.Body.FullName}");
-        return (GenericEvidence.ObjectType(entry.Class), index);
     }
 
     internal static void ValidateLiteral(string text)

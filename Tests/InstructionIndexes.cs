@@ -74,7 +74,7 @@ var sitesType = extractor.GetType("Nethermind.LeanCIL.ResolvedCallSites", true)!
 var sites = Activator.CreateInstance(sitesType)!;
 sitesType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(sites, [call, callee]);
 object Operation(Instruction instruction) => translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), sites, null, null, null, null, null])!;
+    [instruction, caller, methods, Index(caller), sites, null, null, null, null, null])!;
 List<(int Pc, string Link)> Links(SortedSet<int> targets) =>
     (List<(int, string)>)sitesType.GetMethod("Links", BindingFlags.Instance | BindingFlags.NonPublic)!
         .Invoke(sites, [caller, caller.Body.Instructions.ToHashSet(), methods, null, null, targets])!;
@@ -249,7 +249,7 @@ foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeA
     argumentMethod.Body.Instructions.Add(instruction);
 object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), sites, null, null, positions, null, null])!;
+        Index(argumentMethod), sites, null, null, positions, null, null])!;
 if (!Equals(TranslateArgument(storeArgument, homePositions), Make("Starg", 1)) ||
     !Equals(TranslateArgument(loadArgument, homePositions), Make("Arg", 1)) ||
     !Equals(TranslateArgument(addressArgument, homePositions), Make("Ldarga", 1)))

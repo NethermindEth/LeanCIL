@@ -6,7 +6,7 @@ namespace Nethermind.LeanCIL;
 internal static class InstructionTranslation
 {
     internal static Operation Translate(Instruction i, MethodDefinition m,
-        IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
+        IReadOnlyDictionary<MethodDefinition, int> methods, InstructionIndex instructions,
         ResolvedCallSites callSites, FeatureProfile? profile = null, NativeOperands.Certificate? nativeOperands = null,
         IReadOnlyDictionary<int, int>? parameterHomes = null, ImportResolution? imports = null,
         MetadataValidation.LayoutContext? layouts = null)
@@ -19,31 +19,20 @@ internal static class InstructionTranslation
         layouts.Require(m.Module, profile.Architecture);
         var reachable = nativeOperands is null || parameterHomes is null ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
-        if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
-        {
-            var tail = i.Previous?.OpCode.Code == Code.Tail;
-            var signature = ManagedPointers.SignatureEvidence(indirect);
-            return new IndirectCall(signature, ManagedPointers.Catalog(indirect, methods, methodIndex, tail), tail);
-        }
+        if (i.OpCode.Code is Code.Calli or Code.Ldftn) return Unoutlined.Site;
         // Element loads of a handler table emit their decoded instructions with every other array.
         if (i.OpCode.Code == Code.Ldelem_Any && InstructionOperands.MethodTableLoad(i, nativeOperands))
             return new TypedElementAccess(false, null);
-        if (i.OpCode.Code == Code.Ldftn)
-        {
-            var (target, targetIndex) = callSites.Target(i, methods);
-            return new MethodAddress(ManagedPointers.Target(target, targetIndex),
-                ManagedPointers.SignatureEvidence(target));
-        }
         InstructionOperands.ValidateTailStack(i, nativeOperands);
         if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
-        return TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
+        return TranslateCore(i, m, methods, instructions, profile, parameterHomes,
             layouts, callSites);
     }
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,
-        IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
+        IReadOnlyDictionary<MethodDefinition, int> methods, InstructionIndex instructions,
         FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext layouts,
         ResolvedCallSites callSites)
     {
@@ -93,13 +82,7 @@ internal static class InstructionTranslation
             return new ObjectInstruction(i.OpCode.Code, ScalarWidth: shape.ScalarWidth,
                 Signed: shape.Signed, ByteSize: shape.Bytes);
         }
-        if (callSites.VirtualTargets(i) is { } targets)
-        {
-            var slot = (MethodReference)i.Operand;
-            var entries = targets
-                .Select(entry => InstructionOperands.VirtualTarget(entry, methods, methodIndex)).ToArray();
-            return new CallVirtual(entries, slot.Parameters.Count + 1);
-        }
+        if (callSites.VirtualTargets(i) is not null) return Unoutlined.Site;
         if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
         {
             var r = (MethodReference)i.Operand;
@@ -107,14 +90,8 @@ internal static class InstructionTranslation
                 return model;
             if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
                 return MemoryOperation.Of(source);
+            if (i.OpCode.Code == Code.Newobj) return Unoutlined.Site;
             var (resolved, index) = callSites.Target(i, methods);
-            if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
-                return new Newobj(index, ObjectTypes.AllocationOf(resolved));
-            if (i.OpCode.Code == Code.Newobj)
-            {
-                var size = layouts.Size(MethodSpecialization.DeclaringType(resolved));
-                return new Newobj(index, new Allocation.Aggregate(size));
-            }
             var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
             return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
@@ -169,7 +146,7 @@ internal static class InstructionTranslation
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
-                StaticField(i, m.Module, profile.Architecture),
+                Unoutlined.Site,
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
             Code.Ldarg_0 => new Arg(0),
             Code.Ldarg_1 => new Arg(1),
@@ -239,19 +216,6 @@ internal static class InstructionTranslation
             Code.Ret => new Return(),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
-    }
-
-    // Profile templates render the same validated field operand as the decoder.
-    static Operation StaticField(Instruction instruction, ModuleDefinition module, string architecture)
-    {
-        StaticData.FieldOf(instruction, module, architecture);
-        var opcode = instruction.OpCode.Code switch
-        {
-            Code.Ldsfld => StaticFieldOpcode.Ldsfld,
-            Code.Ldsflda => StaticFieldOpcode.Ldsflda,
-            _ => StaticFieldOpcode.Ldtoken
-        };
-        return new StaticFieldInstruction(opcode, null);
     }
 
     // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.

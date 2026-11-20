@@ -176,14 +176,14 @@ internal static class ObjectTypes
     /// <summary>
     /// A concrete class allocation includes its base classes and one slot per inherited or declared instance field.
     /// </summary>
-    internal static Allocation.Instance AllocationOf(MethodDefinition constructor)
+    internal static (string[] Bases, int Size) AllocationOf(MethodDefinition constructor)
     {
         var owner = Validate(constructor.DeclaringType);
         if (owner.IsAbstract)
             throw new InvalidDataException("Unsupported construction of an abstract class: " + owner.FullName +
                 "\n  newobj of an abstract class fails at run time; only its derived classes have instances.");
         var size = FieldSlot * Fields(owner).Length;
-        return new([.. Bases(owner).Select(GenericEvidence.ObjectType)], size);
+        return ([.. Bases(owner).Select(GenericEvidence.ObjectType)], size);
     }
 
     /// <summary>

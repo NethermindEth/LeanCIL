@@ -12,6 +12,12 @@ internal abstract record Operation
     internal bool IsNop => this is StackOperation { Kind: StackOpcode.Nop };
 }
 
+/// <summary>A site with no proof-outline rule. Diagnostics use the original instruction at its PC.</summary>
+internal sealed record Unoutlined : Operation
+{
+    internal static readonly Unoutlined Site = new();
+}
+
 /// <summary>An instruction that only moves the evaluation stack or does scalar arithmetic.</summary>
 internal enum StackOpcode
 {
@@ -34,22 +40,6 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
     };
 
     internal static readonly StackOperation Nop = new(StackOpcode.Nop);
-}
-
-/// <summary>
-/// A hole carrying the raw opcode at its pc, which faults when stepped. The extractor writes one at each pc outside
-/// the selected profile's reachable code and at each profile combination a template does not select.
-/// </summary>
-internal sealed record Unadmitted(int Opcode) : Operation
-{
-    /// <summary>The hole at <paramref name="instruction"/>.</summary>
-    internal static Unadmitted At(Instruction instruction) => new(RawOpcode(instruction));
-
-    /// <summary>
-    /// The opcode as <c>RawInstruction</c> numbers it: a one-byte opcode is its byte and <c>0xFE nn</c> is
-    /// <c>0xFE00 + nn</c>.
-    /// </summary>
-    internal static int RawOpcode(Instruction instruction) => (ushort)instruction.OpCode.Value;
 }
 
 /// <summary>The jump kinds; a conditional jump pops one (zero tests) or two operands.</summary>
@@ -182,32 +172,6 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operatio
     /// <summary>The call enters one body with a caller continuation for contract composition.</summary>
     internal bool ReturnsToCaller => Kind is CallKind.Static or CallKind.Instance;
 }
-
-/// <summary>What a <c>newobj</c> allocates, as its link states it.</summary>
-internal abstract record Allocation
-{
-    /// <summary>A zeroed value-type temporary of the layout's <paramref name="Size"/> bytes.</summary>
-    internal sealed record Aggregate(int Size) : Allocation;
-
-    /// <summary>A class instance with its base classes (Lean type terms), nearest first, and its field bytes.
-    /// </summary>
-    internal sealed record Instance(ValueList<string> Bases, int Size) : Allocation;
-}
-
-/// <summary>A constructor invoked on a fresh allocation.</summary>
-internal sealed record Newobj(int Method, Allocation Allocated) : Operation;
-
-/// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>
-internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets, int Arguments) : Operation;
-
-/// <summary>The CIL instruction of a static field access.</summary>
-internal enum StaticFieldOpcode { Ldsfld, Ldsflda, Ldtoken }
-
-/// <summary>
-/// A static field load, address load or field token over the field its raw operand names; the field is null
-/// until the emitter resolves it.
-/// </summary>
-internal sealed record StaticFieldInstruction(StaticFieldOpcode Opcode, FieldRef? Field) : Operation;
 
 /// <summary>A boolean read of a runtime feature of the selected profile.</summary>
 internal sealed record FeatureTest(Feature Feature) : Operation;
@@ -366,17 +330,6 @@ internal sealed record IsInstance(string Type) : Operation;
 /// names then holds the span <paramref name="Source"/> builds. It renders as the Lean runtime model.
 /// </summary>
 internal sealed record SpanInPlace(SpanSource Source) : Operation;
-
-/// <summary>
-/// An operation of the managed callable pointer model; the signatures are Lean terms and the targets are typed.
-/// </summary>
-internal abstract record ManagedPointer : Operation;
-
-/// <summary>An indirect call through a callable pointer of the given signature and target catalog.</summary>
-internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> Catalog, bool Tail) : ManagedPointer;
-
-/// <summary>The address of the managed method <paramref name="Target"/> of the given signature.</summary>
-internal sealed record MethodAddress(ManagedTarget Target, string Signature) : ManagedPointer;
 
 /// <summary>A runtime memory operation.</summary>
 internal sealed record Memory(MemoryOperation Operation) : Operation;

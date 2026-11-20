@@ -322,7 +322,7 @@ internal static class LeanEmitter
                     .Select(site => FeatureProfile.Getter((MethodReference)site.Operand)).OfType<Feature>()
                     .Distinct().Order().ToArray();
                 templates.Add(new(m.FullName, frame, features,
-                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)], linkedMethods!.ToArray()));
+                    [.. m.Body.Instructions.Select(InstructionOperands.RawOpcode)], linkedMethods!.ToArray()));
             }
             if (collectOutlines)
             {
@@ -333,10 +333,10 @@ internal static class LeanEmitter
                 {
                     if (!reachable.Contains(site))
                     {
-                        outlineOperations.Add(Unadmitted.At(site));
+                        outlineOperations.Add(Unoutlined.Site);
                         continue;
                     }
-                    var operation = InstructionTranslation.Translate(site, m, methodIndices, n, instructions, callSites,
+                    var operation = InstructionTranslation.Translate(site, m, methodIndices, instructions, callSites,
                         profile, scalarCertificate, parameterHomes, importResolution, layoutContext);
                     // Each descriptor reads the operand of the closed instruction the decoder checks.
                     outlineOperations.Add(operation switch
@@ -348,9 +348,6 @@ internal static class LeanEmitter
                         _ => operation
                     });
                 }
-                foreach (var site in sites)
-                    if (outlineOperations[site.Pc] is StaticFieldInstruction access)
-                        outlineOperations[site.Pc] = access with { Field = site.Field };
                 outlines.Add(new(frame, [.. outlineOperations]));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
@@ -506,7 +503,7 @@ internal static class LeanEmitter
                     var type = (TypeReference)instruction.Operand;
                     var name = RecordType(evidence.ClosedOperandOf(instruction));
                     names.Add(name);
-                    operands.Add((Unadmitted.RawOpcode(instruction), name));
+                    operands.Add((InstructionOperands.RawOpcode(instruction), name));
                     needsLayout |= !Spans.Is(type) && MetadataValidation.IsAggregate(type, method.Module);
                 }
             }

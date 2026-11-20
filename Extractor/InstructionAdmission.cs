@@ -169,7 +169,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
         if (VirtualDispatch.Is(site))
         {
             foreach (var entry in VirtualDispatch.Table(reference))
-                InstructionOperands.VirtualTarget(entry, methods, methods[method]);
+                InstructionOperands.ValidateVirtualTarget(entry, methods, methods[method]);
             return;
         }
         if (code == Code.Call && RuntimeModels.CallModel(reference, profile) is not null ||
