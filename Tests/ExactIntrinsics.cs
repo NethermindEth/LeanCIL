@@ -20,6 +20,7 @@ using System.Text.Json;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 using Program verification = new();
@@ -611,14 +612,19 @@ foreach ((string name, string[] claims) in new[]
         () => Console.WriteLine($"PASS {name} extraction matches its reference on {claims.Length} inputs")));
 }
 
-// No host here runs AdvSimd, so REV64 is checked against BinaryPrimitives.ReverseEndianness of each lane. The
-// halves are checked against the host's own Load/StoreUnsafe; a destination one byte short faults on the second store.
+// The compiled REV64 result is checked against BinaryPrimitives.ReverseEndianness of each lane.
 var reverseClaims = new[] { (0x0706050403020100UL, 0x0f0e0d0c0b0a0908UL), (WindowWord(), WindowWord()) }
     .Select(input =>
     {
         var bytes = new byte[16];
         Vector128.Create(BinaryPrimitives.ReverseEndianness(input.Item1),
             BinaryPrimitives.ReverseEndianness(input.Item2)).AsByte().CopyTo(bytes);
+        if (System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported)
+        {
+            var observed = (Vector128<ulong>)runtime.GetMethod("ReverseLimbs")!.Invoke(null, [input.Item1, input.Item2])!;
+            if (observed.AsByte() != Vector128.Create((ReadOnlySpan<byte>)bytes))
+                throw new InvalidOperationException("Host REV64 differs from byte reversal within each input lane.");
+        }
         return Invocation([$".scalar (.i64 {input.Item1})", $".scalar (.i64 {input.Item2})"],
             $".v128 {VectorBits(bytes)}");
     }).ToArray();
@@ -638,6 +644,54 @@ File.WriteAllText(reverseProof, $$"""
     """);
 pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64-advsimd",
     () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd")));
+// Swapping only the two compiled argument loads preserves the REV64 call and exchanges its lanes.
+var swapped = Path.Combine(root, "SwappedReverseLimbs");
+Directory.CreateDirectory(swapped);
+var swappedAssembly = Path.Combine(swapped, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
+    var reverse = methods.Single(method => method.Name == "ReverseLimbs");
+    var code = reverse.Body.Instructions;
+    if (code[0].OpCode != OpCodes.Ldarg_0 || code[1].OpCode != OpCodes.Ldarg_1)
+        throw new InvalidDataException("ReverseLimbs must load the low limb followed by the high limb.");
+    (code[0].OpCode, code[1].OpCode) = (code[1].OpCode, code[0].OpCode);
+    variant.Write(swappedAssembly);
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["ReverseLimbs"],
+    Path.Combine(root, "ReverseContract"), swappedAssembly, selectors["ReverseLimbs"], swapped, """
+    open CIL (reverseBytes)
+    open CIL.Vector (pack128 map128_pack128)
+
+    /-- Both limbs stay in their original lanes, with the bytes in each limb reversed. -/
+    def reversed : MethodContract (W64 × W64) (BitVec 128) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.v128 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧
+        value = pack128 (reverseBytes input.1) (reverseBytes input.2)
+    """, """
+    /-- REV64 reverses each input limb and preserves the caller's memory. -/
+    theorem correctness : reversed.Holds Extracted.program 0 := by
+      rintro ⟨low, high⟩ memory -
+      apply MethodContract.Holds.intro (c := reversed) (input := (low, high)) memory
+        (pack128 (reverseBytes low) (reverseBytes high)) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      refine ⟨64, ?_⟩
+      change invoke Extracted.program 64 0 [.scalar (.i64 low), .scalar (.i64 high)] memory =
+        .ok (memory, [.scalar (.v128 (pack128 (reverseBytes low) (reverseBytes high)))])
+      rw [← map128_pack128]
+      rfl
+    """, """
+    /-- Distinct limbs expose the swapped argument loads on a successful execution. -/
+    theorem correctness : reversed.Refuted Extracted.program 0 := by
+      have ran : invoke Extracted.program 64 0 [.scalar (.i64 1), .scalar (.i64 2)] Memory.empty =
+          .ok (Memory.empty, [.scalar (.v128 (pack128 (reverseBytes 2) (reverseBytes 1)))]) := rfl
+      exact .of_return (input := (1, 2)) trivial ran
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """, profile: "arm64-advsimd", imports: "import CIL.SIMD.PackedLanes");
+Console.WriteLine("PASS ARM64 REV64 contract and certified swapped lanes at (1, 2)");
+
 var halves = new byte[32];
 windowRandom.NextBytes(halves);
 var swappedHalves = new byte[32];
