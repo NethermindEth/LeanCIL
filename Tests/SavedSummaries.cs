@@ -3,31 +3,47 @@ using System.Reflection.PortableExecutable;
 
 partial class Program
 {
-    void CheckSavedAdditionSummary(string directory, string assembly)
+    void CheckSavedSummaries(string directory, string assembly)
     {
         const string signature = "::Add(System.UInt64,System.UInt64)";
         const string addition = "System.UInt64 Examples.Arithmetic" + signature;
+        Directory.CreateDirectory(directory);
+        var changed = Path.Combine(directory, "Examples.dll");
+        WriteSubtraction(assembly, changed);
+        CheckSavedSummary(Path.Combine(directory, "Addition"), assembly, addition,
+            At("Tests/SummaryModules/SavedSummary.lean"),
+            ("OtherToken", assembly, "System.UInt64 SelectorExamples.One.Collision" + signature, "token"),
+            ("OtherBody", changed, addition, "program"));
+        CheckSavedSummary(Path.Combine(directory, "Vector"), assembly,
+            "System.UInt64 Examples.DivisionIntrinsics::UnsafeLow(System.UInt64)",
+            At("Tests/SummaryModules/Vector/SavedSummary.lean"));
+        CheckSavedSummary(Path.Combine(directory, "Memory"), assembly,
+            "System.Void Examples.Arithmetic::Mutate(System.UInt64&)",
+            At("Tests/SummaryModules/Memory/SavedSummary.lean"));
+    }
+
+    void CheckSavedSummary(string directory, string assembly, string entry, string summarySource,
+        params (string Name, string Image, string Entry, string Mismatch)[] variants)
+    {
         var published = Path.Combine(directory, "Published");
         Directory.CreateDirectory(published);
         var libraryPath = CheckoutLeanPath();
         var producer = Path.Combine(directory, "Producer");
-        Run(Extract("extract", assembly, "Examples", addition, producer));
+        Run(Extract("extract", assembly, "Examples", entry, producer));
         var reference = Path.Combine(producer, "Reference.lean");
         var generated = File.ReadAllText(Path.Combine(producer, "Extracted.lean"));
         File.WriteAllText(reference, generated.Replace("Extracted", "Reference", StringComparison.Ordinal));
         var consumerSource = At("Tests/SummaryModules/SummaryConsumer.lean");
         var producerPath = published + Path.PathSeparator + libraryPath;
         Compile(reference, published, producerPath);
-        Compile(At("Tests/SummaryModules/SavedSummary.lean"), published, producerPath);
+        Compile(summarySource, published, producerPath);
         var savedProof = Path.Combine(published, "SavedSummary.olean");
         var savedHash = Sha(savedProof);
-        CheckConsumer("SameEntry", assembly, addition);
-        CheckConsumer("OtherToken", assembly, "System.UInt64 SelectorExamples.One.Collision" + signature, "token");
-        var changed = Path.Combine(directory, "Examples.dll");
-        WriteSubtraction(assembly, changed);
-        CheckConsumer("OtherBody", changed, addition, "program");
+        CheckConsumer("SameEntry", assembly, entry);
+        foreach (var variant in variants)
+            CheckConsumer(variant.Name, variant.Image, variant.Entry, variant.Mismatch);
         if (savedHash != Sha(savedProof))
-            throw new InvalidDataException("The published addition summary changed during reuse.");
+            throw new InvalidDataException($"The published summary for {entry} changed during reuse.");
 
         void Compile(string source, string destination, string search)
         {
@@ -48,8 +64,8 @@ partial class Program
             {
                 Compile(consumerSource, consumer, search);
                 ReplayCheckedModules(["Reference", "SavedSummary", "Extracted", "SummaryConsumer"], search,
-                    "Joint kernel replay of the saved addition summary and x64-v3 consumer");
-                Console.WriteLine("PASS the x64-v3 extraction reuses the compiled scalar addition summary");
+                    $"Joint kernel replay of the saved summary and x64-v3 consumer of {entry}");
+                Console.WriteLine($"PASS the x64-v3 extraction reuses the compiled scalar summary of {entry}");
                 return;
             }
 

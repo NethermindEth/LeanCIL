@@ -8,7 +8,7 @@ open CIL CIL.Safety CIL.Extraction
 /-- The destination contains the reprofiled instructions and the same defining record. -/
 theorem checked :
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile Extracted.environment
-      0 Extracted.assembly0 Extracted.method0Original.token [] SavedSummary.addition := by
+      0 Extracted.assembly0 Extracted.method0Original.token [] SavedSummary.contract := by
   have decoded : decodedProgram? Extracted.profile Extracted.environment Extracted.methodEvidence =
       some Extracted.program :=
     decodedProgram?_eq_some Extracted.translation_valid.programBindingsValid

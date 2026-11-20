@@ -548,10 +548,12 @@ record index, the method lookup and the contract proof. The certificate supplies
 and the feature mask used by the summary.
 
 A separate Lean module can import a compiled `DecodedSummary` and apply `reprofile` to an
-independently extracted program. `Tests/SummaryModules/SummaryConsumer.lean` applies the scalar
-addition summary to the same MethodDef under `x64-v3`. The consumer checks its token, decoded
-program and method evidence before using the saved theorem. A different MethodDef with the same
-instructions, or a changed instruction at the same MethodDef, fails those checks.
+independently extracted program. Compile the producer's extraction and summary, then put both
+compiled modules on the consumer's Lean search path. Prove that the consumer's MethodDef token
+and method evidence agree with the producer's, that its program equals the reprofiled program,
+and that the profiles agree on the features the program observes. Replay the two extractions,
+the saved summary and the consumer proof together. This works for scalar and vector returns
+and for a by-reference write with a proved footprint.
 
 Use `Extracted.translation_valid.programBindingsValid` for the mask and call checks. Each record's
 feature certificate describes its pinned, instantiated body. The decoder checks managed and
