@@ -40,6 +40,12 @@ def prefixAlignment : RawOperand → Option Nat
   | .integer 4 => some 4
   | _ => none
 
+/-- The alignment of a `cpblk` or `initblk` after `previous`: the operand of an `unaligned.`
+    before it, and otherwise `defaultBlockAlignment`. -/
+def blockAlignment : Option RawInstruction → Nat
+  | some ⟨_, 0xFE12, operand⟩ => (prefixAlignment operand).getD defaultBlockAlignment
+  | _ => defaultBlockAlignment
+
 /-- The call opcode for a constrained instance or static slot. -/
 def constrainedCallOpcode (site : CallSite) : Nat := if site.hasThis then 111 else 40
 

@@ -115,8 +115,8 @@ external enum dependencies are not supported.
 | `calli` | Partial | Static default-managed signatures over admitted integer/enum, reference-free aggregate and integer-vector values, and managed references to these types. The pointer must identify an authenticated catalog entry with the exact signature. Ordinary indirect calls select a forward target; tail calls permit cycles. Supplied immutable native tables also admit checked byte offsets and `ldind.i` with authenticated target provenance. No unmanaged conventions or arbitrary numeric targets. |
 | `tail.` | Partial | Every tail call must return the enclosing method's result type and immediately precede `ret`. Reachable `call` and `calli` transfers take exactly their arguments and optional function pointer, retire caller storage and revalidate argument lifetimes. Admitted same-assembly transfers may form cycles. A reachable virtual, imported or intrinsic tail call is unsupported. An unreachable `tail. callvirt ret` with an instance target is admitted with a hole at each dead instruction. |
 | `ret` | Partial | Return from an admitted method with exactly zero or one result according to its signature. Narrow integer results are truncated and sign- or zero-extended to `i32`. The checked model validates returned references and rejects references that escape expired local storage. |
-| `initblk`, `cpblk` | Partial | Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
-| `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses; malformed prefix sequences and interior branch targets are rejected. |
+| `initblk`, `cpblk` | Partial | Decoded from the body to the block operation at the alignment of an immediately preceding `unaligned.`, or eight without one. Managed references and unsigned 32-bit counts; checked block alignment and access rules. Nonempty overlapping copies are rejected. |
+| `unaligned.` | Partial | Values 1, 2 and 4 before supported ordinary or block memory accesses, where it decodes to `nop`; any other value, an instruction it does not modify, a body ending in it, malformed prefix sequences and interior branch targets are rejected. |
 | `localloc` | Partial | Frame-owned storage within an explicit per-activation quota; checked initialization, alignment and expiry. See [dynamic stack allocation](#dynamic-stack-allocation). |
 
 ## Typed indirect dispatch
@@ -218,12 +218,12 @@ memory and permit null references. The lifetime, bounds and authority checks are
 Unprefixed block operations require eight-byte alignment. Model-owned 32-bit and 64-bit scalar
 local and parameter homes have four- and eight-byte alignment, so aligned block access can
 succeed on a 64-bit scalar home; aggregate, vector and narrow homes have byte alignment. An
-immediately preceding `unaligned. 1`, `2` or `4` selects that requirement. A branch cannot enter
-between a prefix and its instruction, and prefix combinations with unsupported modifiers are
-rejected.
+immediately preceding `unaligned. 1`, `2` or `4` selects that requirement, and the decoder reads
+it from the raw instruction before the block opcode. A branch cannot enter between a prefix and
+its instruction, and prefix combinations with unsupported modifiers are rejected.
 
 `unaligned.` is also accepted before supported integer `ldind.*`/`stind.*`, `ldobj`/`stobj` and
-`ldfld`/`stfld`. These accesses already use byte alignment, so the prefix lowers to a no-op and
+`ldfld`/`stfld`. These accesses already use byte alignment, so the prefix decodes to a no-op and
 bypasses no safety check: `ldfld` and `stfld` after it decode to the same field instruction as
 without it. `ldflda` after `unaligned.`, and any field instruction after `volatile.`, are
 rejected.

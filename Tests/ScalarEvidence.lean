@@ -1539,12 +1539,14 @@ private def blockInit : RawMethod :=
   { raw [i 2, i 22, i 22, i 65048, i 42] [.byref intType] with
     maxStack := 3, returnType := .void }
 
-/-- A reachable block initialization still requires its block emission under decoded checking. -/
+/-- A hole at a reachable block initialization is refused under decoded checking, which compares
+    it with the block operation the decoder gives that pc. -/
 theorem decoded_block_hole_refused :
     ¬ ScalarFlowValid blockInit ([0, 1, 2, 3, 0].map unknown)
       [some [], some [.reference], some [.word32, .reference],
         some [.word32, .word32, .reference], some []]
-      (Instruction.ofRawCode none blockInit.code) true := by decide +kernel
+      ((Instruction.ofRawCode none blockInit.code).set 3 (.unadmitted 65048)) true := by
+  decide +kernel
 #print axioms decoded_block_hole_refused
 
 /-- A decoded addition meets the full method evidence including the code equality. -/

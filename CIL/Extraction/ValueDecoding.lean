@@ -5,8 +5,9 @@ import CIL.Extraction.Prefixes
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
 shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
-conversions, comparisons, integer indirect loads and stores, array allocations, lengths and element
-loads and stores, dynamic frame storage, the class type tests `castclass` and `isinst`, the
+conversions, comparisons, integer indirect loads and stores, block copies and fills, array
+allocations, lengths and element loads and stores, dynamic frame storage, the `readonly.` and
+`unaligned.` prefixes, the class type tests `castclass` and `isinst`, the
 instance field accesses `ldfld`, `ldflda` and `stfld` of a class or a struct, direct and
 constrained calls, and construction by `newobj`, with every short and macro form folded into its
 constructor. `valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded
@@ -126,7 +127,8 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
     opcode == 224 || (65025 <= opcode && opcode <= 65030) ||
     (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
-    opcode == 0xfe1c || opcode == 0xfe1e
+    opcode == 0xfe1c || opcode == 0xfe1e || opcode == 0xfe12 || opcode == 0xfe17 ||
+    opcode == 0xfe18
 
 /-- `ldelema` (143) of the element type `type` after `previous`: a read-only address after
     `readonly.`, which it takes, and nothing after any other prefix. -/
@@ -243,6 +245,12 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldnull => (emitted matches .ldnull)
   | .memory (.stringLiteral text) => match emitted with
     | .memory (.stringLiteral actual) => decide (text = actual)
+    | _ => false
+  | .memory (.copyBlock expected) => match emitted with
+    | .memory (.copyBlock actual) => expected == actual
+    | _ => false
+  | .memory (.initBlock expected) => match emitted with
+    | .memory (.initBlock actual) => expected == actual
     | _ => false
   | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
   | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
@@ -479,9 +487,14 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   | 65028, .none => emit .clt | 65029, .none => emit .clt_un
   -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
   | 65039, .none => emit .localloc
-  -- The prefix its consumer records.
+  -- Block copies and fills, at the alignment an `unaligned.` before them gives.
+  | 65047, .none => emit (.memory (.copyBlock (blockAlignment previous)))
+  | 65048, .none => emit (.memory (.initBlock (blockAlignment previous)))
+  -- The prefixes their consumers record; `invalidPredecessor` refuses a consumer that takes
+  -- neither, and `rawPrefixesValid` a prefix with no consumer.
   | 65054, .none => if previous.any fun before => isPrefixOpcode before.opcode then none
     else emit .nop
+  | 65042, operand => if (prefixAlignment operand).isSome then emit .nop else none
   | _, _ => none
 
 
@@ -497,9 +510,12 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
     `previous` is the raw instruction before `raw`, `none` at the first pc. An instruction
     after a prefix it does not take does not decode. `ldelema` takes `readonly.` and records
     it, so after `readonly.` only `ldelema` decodes, and `ldelema` after any other prefix does
-    not. `readonly.` decodes to `nop`, and not after any prefix. The integer `ldind` and `stind`
-    forms take `unaligned.` and decode as without it, since the model accesses memory at
-    alignment 1. A constrained prefix decodes to `nop` and its call records the receiver. -/
+    not. `readonly.` decodes to `nop`, and not after any prefix. `unaligned.` with an operand of
+    1, 2 or 4 decodes to `nop`, and only the takers `prefixTakes` names decode after it. The
+    integer `ldind` and `stind` forms decode as without it, since the model accesses memory at
+    alignment 1; `cpblk` and `initblk` decode to the block operation at the alignment it gives,
+    or `defaultBlockAlignment` without it (`blockAlignment`). A constrained prefix decodes to
+    `nop` and its call records the receiver. -/
 def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction) :
     Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|

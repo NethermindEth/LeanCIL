@@ -580,7 +580,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldstr, Code.Newarr, Code.Ldelem_Any,
         Code.Stelem_Any, Code.Ldelema, Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
         Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Constrained,
-        Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli, Code.Switch
+        Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli, Code.Switch,
+        Code.Cpblk, Code.Initblk, Code.Unaligned
     }).ToFrozenSet();
 
     /// <summary>A live instruction requires a literal when its opcode has no decoder or its

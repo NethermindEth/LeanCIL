@@ -3,12 +3,12 @@ import CIL.Extraction.ValueDecoding
 /-!
 # Indirect accesses
 
-`Instruction.ofRaw?` decodes integer `ldind` and `stind`. A raw `cpblk` or `initblk` determines
-its block alignment, which an `unaligned.` prefix lowers. `indirectAccessMatches` checks the
-emitted instruction against the opcode, operand type and preceding instruction. It reserves
-block operations for the two block opcodes. Lowered calls can also emit typed transfers.
-`FeatureFlowValid` and `ScalarFlowValid` apply `indirectSiteWindow` at every reachable pc,
-reading the neighbouring raw instructions through an index of the body built once.
+`Instruction.ofRaw?` decodes integer `ldind` and `stind`, and `cpblk` and `initblk` at the block
+alignment `blockAlignment` reads from an `unaligned.` before them. `indirectAccessMatches`
+checks the emitted instruction against the opcode, operand type and preceding instruction. It
+reserves block operations for the two block opcodes. Lowered calls can also emit typed
+transfers. `FeatureFlowValid` and `ScalarFlowValid` apply `indirectSiteWindow` at every
+reachable pc, reading the neighbouring raw instructions through an index of the body built once.
 -/
 
 namespace CIL.Extraction

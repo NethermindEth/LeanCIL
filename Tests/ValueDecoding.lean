@@ -84,9 +84,13 @@ private def accountConstruction : CallSite := {
 /-- An instance slot callable with or without a constrained prefix. -/
 private def instanceSite : CallSite := { callSite with method.hasThis := true }
 
-/-- The prefix carried by a named decode-table row. -/
+/-- The prefix carried by a named decode-table row: a constrained receiver before the call at
+    offset 6, and `unaligned. 2` before the block operations at offset 2. -/
 private def predecessor (raw : RawInstruction) : Option RawInstruction :=
-  if raw.opcode == 111 && raw.offset == 6 then some ⟨0, 0xFE16, .type int32⟩ else none
+  if raw.opcode == 111 && raw.offset == 6 then some ⟨0, 0xFE16, .type int32⟩
+  else if (raw.opcode == 65047 || raw.opcode == 65048) && raw.offset == 2 then
+    some ⟨0, 0xFE12, .integer 2⟩
+  else none
 
 /-- One raw instruction per value opcode, every short, long and macro form, with the instruction
     ECMA-335 assigns it; constants include the extremes of each form's range and locals the largest
@@ -189,13 +193,17 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 0xfe1c, .type int32⟩, .sizeof int32),
   -- Dynamic frame storage.
   (⟨0, 65039, .none⟩, .localloc),
+  -- Block copies and fills, at the default alignment and after `unaligned. 2`.
+  (⟨0, 65047, .none⟩, .memory (.copyBlock 8)), (⟨0, 65048, .none⟩, .memory (.initBlock 8)),
+  (⟨2, 65047, .none⟩, .memory (.copyBlock 2)), (⟨2, 65048, .none⟩, .memory (.initBlock 2)),
   -- Class type tests.
   (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog),
   -- Array allocations and element accesses that name their element type.
   (⟨0, 141, .type int32⟩, .newarr int32), (⟨0, 163, .type int32⟩, .ldelem_any int32),
   (⟨0, 164, .type int32⟩, .stelem_any int32), (⟨0, 143, .type int32⟩, .ldelema int32 false),
-  -- Prefixes recorded by the following address or call.
-  (⟨0, 65054, .none⟩, .nop),
+  -- Prefixes recorded by the following access, address or call.
+  (⟨0, 65054, .none⟩, .nop), (⟨0, 65042, .integer 1⟩, .nop), (⟨0, 65042, .integer 2⟩, .nop),
+  (⟨0, 65042, .integer 4⟩, .nop),
   (⟨0, 0xFE16, .type int32⟩, .nop),
   -- Calls and constructions, whose target the link at their pc gives.
   (⟨0, 40, .call callSite⟩, .call callSite.method),

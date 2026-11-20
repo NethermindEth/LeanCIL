@@ -839,4 +839,85 @@ theorem aggregate_local_unfolds : aggregateLocalMethod.code = [CIL.Instruction.r
   simp only [aggregateLocalMethod]
 #print axioms aggregate_local_unfolds
 
+/-- The closed method of `code` under the `live` mask, with no arguments, locals or result. -/
+private def prefixedResult (code : List RawInstruction)
+    (live : List Bool := code.map fun _ => true) : Except MethodDecodeError Method :=
+  let source := { addRaw with code }
+  let arguments : RawArguments :=
+    { arguments := [], locals := [], code := code.map fun _ => .other }
+  Method.ofClosed? .scalar {} [] live source arguments
+
+/-- `unaligned. n` decodes to `nop` and gives the block operation after it its alignment, an
+    unprefixed block operation has the default alignment, and a load after the prefix decodes as
+    without it. -/
+theorem blockOperationsDecode :
+    let copy := [instr 0 0xfe12 (.integer 2), instr 2 0xfe17, instr 4 0x2a]
+    let fill := [instr 0 0xfe18, instr 2 0x2a]
+    let load := [instr 0 0xfe12 (.integer 1), instr 2 0x4b, instr 3 0x2a]
+    (match prefixedResult copy, prefixedResult fill, prefixedResult load with
+     | .ok copied, .ok filled, .ok loaded =>
+       copied.code == [.nop, .memory (.copyBlock 2), .ret] &&
+         filled.code == [.memory (.initBlock defaultBlockAlignment), .ret] &&
+         loaded.code == [.nop, .ldind .u4, .ret]
+     | _, _, _ => false) = true := by
+  decide +kernel
+
+#print axioms blockOperationsDecode
+
+/-- Whether the closed method of `code` is refused at a live hole of `opcode` at `pc`. -/
+private def refusedAt (code : List RawInstruction) (pc opcode : Nat) : Bool :=
+  match prefixedResult code with
+  | .error (.liveHole site found) => site == pc && found == opcode
+  | _ => false
+
+/-- `volatile.` is a hole before an access or a block operation, an `unaligned.` alignment
+    other than 1, 2 or 4 is a hole at the prefix, and an instruction `unaligned.` does not
+    modify, a second prefix included, is a hole after it. -/
+theorem prefixHoles :
+    refusedAt [instr 0 0xfe13, instr 2 0x4a, instr 3 0x2a] 0 0xfe13 &&
+    refusedAt [instr 0 0xfe13, instr 2 0xfe17, instr 4 0x2a] 0 0xfe13 &&
+    refusedAt [instr 0 0xfe12 (.integer 3), instr 2 0x4a, instr 3 0x2a] 0 0xfe12 &&
+    refusedAt [instr 0 0xfe12 (.integer 8), instr 2 0xfe17, instr 4 0x2a] 0 0xfe12 &&
+    refusedAt [instr 0 0xfe12 (.integer 1), instr 2 0x58, instr 3 0x2a] 1 0x58 &&
+    refusedAt [instr 0 0xfe12 (.integer 1), instr 2 0xfe13, instr 4 0x4a, instr 5 0x2a] 1 0xfe13 &&
+    refusedAt [instr 0 0xfe12 (.integer 1), instr 2 0xfe12 (.integer 1), instr 4 0x4a,
+      instr 5 0x2a] 1 0xfe12 &&
+    refusedAt [instr 0 0xfe13, instr 2 0xfe12 (.integer 1), instr 4 0x4a, instr 5 0x2a]
+      0 0xfe13 = true := by
+  decide +kernel
+
+#print axioms prefixHoles
+
+/-- `unaligned.` next to any other prefix is a hole at the second of the two, or at the first
+    when that one decodes to nothing: `readonly.`, `constrained.`, `tail.` and `no.` in
+    either order. -/
+theorem prefixCombinationsRefused :
+    let load := [instr 6 0x4b, instr 7 0x2a]
+    let aligned := instr 0 0xfe12 (.integer 1)
+    refusedAt ([aligned, instr 2 0xfe1e] ++ load) 1 0xfe1e &&
+    refusedAt ([instr 0 0xfe1e, instr 2 0xfe12 (.integer 1)] ++ load) 1 0xfe12 &&
+    refusedAt ([aligned, instr 2 0xfe16 (.type int32)] ++ load) 1 0xfe16 &&
+    refusedAt ([instr 0 0xfe16 (.type int32), instr 2 0xfe12 (.integer 1)] ++ load) 1 0xfe12 &&
+    refusedAt ([aligned, instr 2 0xfe14] ++ load) 1 0xfe14 &&
+    refusedAt ([instr 0 0xfe14, instr 2 0xfe12 (.integer 1)] ++ load) 0 0xfe14 &&
+    refusedAt ([aligned, instr 2 0xfe19 (.integer 1)] ++ load) 1 0xfe19 &&
+    refusedAt ([instr 0 0xfe19 (.integer 1), instr 2 0xfe12 (.integer 1)] ++ load)
+      0 0xfe19 = true := by
+  decide +kernel
+
+#print axioms prefixCombinationsRefused
+
+/-- A decoded `unaligned.` with no instruction after it, and a branch into the instruction it
+    modifies from a live pc, fail the prefix check. -/
+theorem prefixStructureRefused :
+    let trailing := [instr 0 0x16, instr 1 0xfe12 (.integer 1)]
+    let entered :=
+      [instr 0 0x38 (.target 2), instr 5 0xfe12 (.integer 1), instr 7 0x4b, instr 8 0x2a]
+    (match prefixedResult trailing, prefixedResult entered [true, false, true, true] with
+     | .error .invalidPrefixes, .error .invalidPrefixes => true
+     | _, _ => false) = true := by
+  decide +kernel
+
+#print axioms prefixStructureRefused
+
 end Tests.DecodedMethod
