@@ -19,8 +19,8 @@ internal static partial class ProofOutline
         ClassViews.View[] Views, string Architecture,
         ComputedLayout[] Layouts);
 
-    /// <summary>The outline reads homed arguments through their frame slots and modelled calls through
-    /// their runtime operations. Each entry retains its instruction's program counter.</summary>
+    /// <summary>The outline reads homed arguments through their frame slots. Each entry retains its
+    /// instruction's program counter.</summary>
     internal static Operation[] SlotOperations(Method emitted)
     {
         var frame = emitted.Frame;
@@ -34,7 +34,6 @@ internal static partial class ProofOutline
             Arg load when slots.ContainsKey(load.Index) => new Local(Home(load.Index)) { Argument = load },
             Starg store => new SetLocal(Home(store.Index)) { Argument = store },
             Ldarga address => new LocalAddress(Home(address.Index)) { Argument = address },
-            ModelCall call => call.Model,
             _ => operation
         })];
     }

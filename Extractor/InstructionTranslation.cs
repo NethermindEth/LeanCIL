@@ -67,8 +67,7 @@ internal static class InstructionTranslation
             (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained }))
         {
             var (resolved, index) = callSites.Target(i, methods);
-            return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0),
-                Constrained: true);
+            return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
         if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         if (throws.Operands.Contains(i)) return StackOperation.Nop;
@@ -105,16 +104,16 @@ internal static class InstructionTranslation
         {
             var r = (MethodReference)i.Operand;
             if (i.OpCode.Code == Code.Call && RuntimeModels.CallModel(r, profile) is { } model)
-                return new ModelCall(model);
+                return model;
             if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
-                return new ModelCall(MemoryOperation.Of(source)) { Constructs = true };
+                return MemoryOperation.Of(source);
             var (resolved, index) = callSites.Target(i, methods);
             if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
-                return new Newobj(index, ObjectTypes.AllocationOf(resolved), null);
+                return new Newobj(index, ObjectTypes.AllocationOf(resolved));
             if (i.OpCode.Code == Code.Newobj)
             {
                 var size = layouts.Size(MethodSpecialization.DeclaringType(resolved));
-                return new Newobj(index, new Allocation.Aggregate(size), null);
+                return new Newobj(index, new Allocation.Aggregate(size));
             }
             var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
             return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));

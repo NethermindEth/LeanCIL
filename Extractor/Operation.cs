@@ -176,35 +176,11 @@ internal sealed record Constant : Operation
 
 internal enum CallKind { Static, Instance, Tail }
 
-/// <summary>
-/// A call of the method at index <paramref name="Method"/> with the given operand count. A static or tail call
-/// names the method its raw operand names, <see cref="Site"/>, and takes its target from its link; a constrained
-/// one also names the type its prefix resolves the method on, <see cref="ConstrainedType"/>.
-/// </summary>
-internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Constrained = false) : Operation
+/// <summary>A resolved call target and its stack argument count for the proof outline.</summary>
+internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operation
 {
-    /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
-    internal MethodRef? Site { get; init; }
-
     /// <summary>The call enters one body with a caller continuation for contract composition.</summary>
     internal bool ReturnsToCaller => Kind is CallKind.Static or CallKind.Instance;
-
-    /// <summary>The type term of the <c>constrained.</c> prefix's closed operand.</summary>
-    internal string? ConstrainedType { get; init; }
-}
-
-/// <summary>
-/// A call of a runtime method that the Lean model table models from its raw operand, <see cref="Site"/>: it keeps
-/// the CIL call and states no link, so the interpreter runs the model the operand names. The extractor's analyses
-/// read <paramref name="Model"/>, the operation the model runs as, in place of the call.
-/// </summary>
-internal sealed record ModelCall(Operation Model) : Operation
-{
-    /// <summary>A constructor consumes its explicit arguments and pushes the constructed value.</summary>
-    internal bool Constructs { get; init; }
-
-    /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
-    internal MethodRef? Site { get; init; }
 }
 
 /// <summary>What a <c>newobj</c> allocates, as its link states it.</summary>
@@ -218,19 +194,11 @@ internal abstract record Allocation
     internal sealed record Instance(ValueList<string> Bases, int Size) : Allocation;
 }
 
-/// <summary>
-/// <c>newobj</c> entering the constructor at method index <paramref name="Method"/> with a fresh
-/// <paramref name="Allocated"/>. <paramref name="Constructor"/> is the typed reference its raw operand names,
-/// which the extraction sets; rendering the instruction before it is set fails.
-/// </summary>
-internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Constructor) : Operation;
+/// <summary>A constructor invoked on a fresh allocation.</summary>
+internal sealed record Newobj(int Method, Allocation Allocated) : Operation;
 
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>
-internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets, int Arguments) : Operation
-{
-    /// <summary>The method reference of the virtual slot named at the call site.</summary>
-    internal MethodRef? Site { get; init; }
-}
+internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets, int Arguments) : Operation;
 
 /// <summary>The CIL instruction of a static field access.</summary>
 internal enum StaticFieldOpcode { Ldsfld, Ldsflda, Ldtoken }

@@ -348,16 +348,6 @@ internal static class LeanEmitter
                         ElementAddress address => address with { Element = genericEvidence.ClosedOperandOf(site) },
                         ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
                         StructField access => access with { Reference = genericEvidence.FieldReferenceOf(m, pc) },
-                        Newobj construction =>
-                            construction with { Constructor = genericEvidence.MethodReferenceOf(m, pc) },
-                        Call call => call with
-                        {
-                            Site = genericEvidence.MethodReferenceOf(m, pc),
-                            ConstrainedType = call.Constrained
-                                ? genericEvidence.ClosedOperandOf(site.Previous) : null
-                        },
-                        CallVirtual slot => slot with { Site = genericEvidence.MethodReferenceOf(m, pc) },
-                        ModelCall model => model with { Site = genericEvidence.MethodReferenceOf(m, pc) },
                         _ => operation
                     });
                 }

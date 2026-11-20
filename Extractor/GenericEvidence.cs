@@ -222,16 +222,6 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             methodArguments), name, owners.Length, extracted, typeArguments);
     }
 
-    /// <summary>
-    /// The typed constructor or method the call operand at <paramref name="pc"/> in <paramref name="method"/> names,
-    /// as its raw operand states it; the executed instruction must carry the same reference.
-    /// </summary>
-    internal MethodRef MethodReferenceOf(MethodDefinition method, int pc)
-    {
-        methodParameterCount = method.GenericParameters.Count;
-        return MethodOperand((MethodReference)method.Body.Instructions[pc].Operand).Method;
-    }
-
     // An open owner spells caller parameters by position, so the certificate can instantiate it;
     // closed owners keep Cecil's spelling byte for byte.
     static string ExternalSignature(MethodReference definition)
