@@ -61,7 +61,7 @@ CallWitness[] witnesses =
     new("throwConstructor", "Throws::Inner(System.UInt32)",
         0, 4, ".refused"),
     new("typeTest", "TypeTests::Marker(System.Int32)",
-        1, 4, ".refused"),
+        1, 4, ".refused", Refusal: "0 208"),
     new("feature", "Capabilities::AesFlags()",
         0, 0, ".model"),
     new("aesX64", "Capabilities::AesFlags()", 0, 3, ".model"),
@@ -183,12 +183,15 @@ void Check(string dll, string identity, IEnumerable<CallWitness> sites)
     }
 }
 
-sealed record CallWitness(string Name, string Entry, int Method, int Pc, string Claim, string Profile = "scalar")
+sealed record CallWitness(string Name, string Entry, int Method, int Pc, string Claim, string Profile = "scalar",
+    string? Refusal = null)
 {
     // Every different instruction, including every instruction with the same stack effect, is refused.
     public string Proof()
     {
         var method = $"method{Method}";
+        // A changed operand that breaks a fold refuses the method at the fold's first live hole.
+        var refusal = Refusal ?? $"{Pc} raw.opcode";
         var change = Name switch
         {
             "typeTest" => "method.owner := .atom runtimeScope \"MyType\"",
@@ -240,9 +243,13 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
                 let code := {{method}}Closed.code.set {{Pc}} changed
                 let source := { {{method}}Closed with code }
                 let decoded := Method.ofRaw? profile environment {{method}}Links {{method}}Reachable source []
+                let refusal := match Method.ofClosed? profile environment {{method}}Links {{method}}Reachable source
+                    {{method}}RawArguments with
+                  | .error error => some error
+                  | .ok _ => none
                 And (runtimeCatalog.callRequirement environment.callLayouts profile link changed =
-                  .hole raw.opcode) (decoded = none) := by
-              constructor <;> cil_kernel_rfl
+                  .hole raw.opcode) (And (decoded = none) (refusal = some (.liveHole {{refusal}}))) := by
+              refine ⟨?_, ?_, ?_⟩ <;> cil_kernel_rfl
             #print axioms unresolvedOverload
             end Extracted.{{Name}}
             """;

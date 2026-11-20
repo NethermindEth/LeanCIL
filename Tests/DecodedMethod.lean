@@ -76,9 +76,9 @@ private def fieldSite (opcode : Nat) (field : FieldRef) : RawInstruction :=
 /-- The decoder binds a single field instruction under its profile and RVA evidence. -/
 private def fieldCode (opcode : Nat) (field : FieldRef)
     (sites : List (Nat × StaticFieldSite) := []) (profile := FeatureProfile.scalar) :
-    Option (List Instruction) :=
+    Except RawDecodeError (List Instruction) :=
   let source := { addRaw with code := [fieldSite opcode field], staticFields := sites }
-  (Method.ofRaw? profile {} [] [true] source []).map Method.code
+  (decodeRaw profile {} [] [true] source []).map Method.code
 
 /-- The constant requires the exact runtime field and a little-endian profile. -/
 theorem endianFieldDecodes :
@@ -86,9 +86,9 @@ theorem endianFieldDecodes :
     let wrong := [{ field with owner := .atom "Foreign" "System.BitConverter" },
       { field with owner := .atom runtimeScope "System.Other" },
       { field with name := name!"Other" }, { field with type := int32 }]
-    fieldCode 126 field = some [.ldc_i4 1] ∧
-      wrong.all (fun other => decide (fieldCode 126 other = none)) ∧
-      fieldCode 126 field [] { littleEndian := false } = none := by
+    fieldCode 126 field = .ok [.ldc_i4 1] ∧
+      wrong.all (fun other => decide (fieldCode 126 other = liveHoleAt 0 126)) ∧
+      fieldCode 126 field [] { littleEndian := false } = liveHoleAt 0 126 := by
   decide +kernel
 
 #print axioms endianFieldDecodes
@@ -103,11 +103,11 @@ theorem rvaFieldsDecode :
       let wrong := [{ field with owner := .object "Other" "Tables" },
         { field with owner := .object "Fixture" "Other" }, { field with name := name!"Other" },
         { field with type := int32 }, { field with index := 0 }]
-      decide (fieldCode opcode field sites = some [op]) &&
-      wrong.all (fun other => decide (fieldCode opcode other sites = none)) &&
-      decide (fieldCode opcode field [] = none) &&
+      decide (fieldCode opcode field sites = .ok [op]) &&
+      wrong.all (fun other => decide (fieldCode opcode other sites = liveHoleAt 0 opcode)) &&
+      decide (fieldCode opcode field [] = liveHoleAt 0 opcode) &&
       decide (fieldCode opcode field [(0, { data with rvaSize := some 3 })] =
-        none)) = true := by
+        liveHoleAt 0 opcode)) = true := by
   decide +kernel
 
 #print axioms rvaFieldsDecode
@@ -237,7 +237,7 @@ theorem staticSpanDecodes :
     Tests.ModelOperands.checks site ∧
       runtimeModel {} .call site.method = some (.memory (.createSpan 4)) ∧
       Tests.ModelOperands.decoded { site with method.methodArguments := [wide] } =
-        none := by
+        liveHoleAt 0 40 := by
   decide +kernel
 
 #print axioms staticSpanDecodes

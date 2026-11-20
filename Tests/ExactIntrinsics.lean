@@ -3,6 +3,7 @@ import CIL.Extraction.DecodedMethod
 import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import Tests.Support
+import Tests.Support.RawDecoding
 
 open CIL CIL.Extraction
 
@@ -26,13 +27,13 @@ private def raw (site : CallSite) : RawMethod := {
 /-- A resolving call keeps its reference and executes the expected operation. -/
 private def keeps (site : CallSite) (expected : RuntimeModel) (features := profile) : Bool :=
   runtimeModel {} .call site.method == some expected &&
-    decide ((Method.ofRaw? features {} [] [true] (raw site) []).map Method.code =
-      some [.call site.method {}])
+    decide ((decodeRaw features {} [] [true] (raw site) []).map Method.code =
+      .ok [.call site.method {}])
 
 /-- A live unresolved operand produces its own opcode's hole and prevents method construction. -/
 private def refuses (site : CallSite) (features := profile) : Bool :=
   methodCode features {} [] [true] (raw site) == [.unadmitted 40] &&
-    (Method.ofRaw? features {} [] [true] (raw site) []).isNone
+    decide ((decodeRaw features {} [] [true] (raw site) []).map Method.code = liveHoleAt 0 40)
 
 private def call0 : CallSite := {
   declared := {
@@ -252,9 +253,9 @@ theorem equalityElements :
       ["System.Byte", "System.Int32", "System.UInt32", "System.Int64", "System.UInt64",
        "System.Single", "System.Double"].all fun element =>
         let site := equalitySite width element
-        let expected := if element ∈ ["System.Single", "System.Double"] then none
-          else some [Instruction.call site.method {}]
-        decide ((Method.ofRaw? .scalar {} [] [true] (raw site) []).map Method.code =
+        let expected := if element ∈ ["System.Single", "System.Double"] then liveHoleAt 0 40
+          else .ok [Instruction.call site.method {}]
+        decide ((decodeRaw .scalar {} [] [true] (raw site) []).map Method.code =
           expected)) = true := by decide +kernel
 
 #print axioms equalityElements
@@ -621,8 +622,9 @@ theorem exact_identity_boundaries :
 /-- A dead call is its opcode's hole even if the closed signature or opcode is unmodelled. -/
 theorem unreachable_call :
     let source := { raw call0 with code := [⟨0, 111, .call { call0 with name := "Other" }⟩] }
-    (Method.ofRaw? profile {} [] [false] source []).map Method.code = some [.unadmitted 111] ∧
-      (Method.ofRaw? profile {} [] [true] source []).isNone := by decide +kernel
+    (decodeRaw profile {} [] [false] source []).map Method.code = .ok [.unadmitted 111] ∧
+      (decodeRaw profile {} [] [true] source []).map Method.code = liveHoleAt 0 111 := by
+  decide +kernel
 
 #print axioms unreachable_call
 

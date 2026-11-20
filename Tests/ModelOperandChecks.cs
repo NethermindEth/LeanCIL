@@ -26,7 +26,7 @@ internal static class ModelOperandChecks
 
                 namespace Extracted.Site{{pc}}
                 open CIL CIL.Extraction
-                /-- The decoder keeps this live call and rejects each altered operand at the same opcode. -/
+                /-- The decoder keeps this live call and refuses each altered operand as a live hole at pc 0. -/
                 theorem operand_checked :
                     (match (fixtureOperandCode[{{pc}}]? : Option RawInstruction) with
                     | some { operand := .call site, .. } =>
@@ -34,8 +34,14 @@ internal static class ModelOperandChecks
                         { method0Closed with code := [RawInstruction.mk 0 40 (.call operand)] }
                       let decode := fun features operand =>
                         (Method.ofRaw? features environment [] [true] (source operand) []).map Method.code
+                      let refusal := fun features operand =>
+                        match Method.ofClosed? features environment [] [true] (source operand)
+                          method0RawArguments with
+                        | .error error => some error
+                        | .ok _ => none
                       let refusedUnder := fun features operand =>
                         decide (decode features operand = none) &&
+                          decide (refusal features operand = some (.liveHole 0 40)) &&
                           decide (methodCode features environment [] [true] (source operand) = [.unadmitted 40])
                       let foreign := match site.method.owner with
                         | .atom _ name => TypeExpr.atom "Foreign" name

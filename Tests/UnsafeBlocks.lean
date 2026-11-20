@@ -1,4 +1,5 @@
 import CIL.Extraction.DecodedMethod
+import Tests.Support.RawDecoding
 
 /-! Decoder, operand binding and execution checks for the eight Unsafe block overloads. -/
 
@@ -27,7 +28,7 @@ private def decoded (call : CallSite) :=
     { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
       attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
       initLocals := true, maxStack := 3, genericParameters := [], code := [⟨0, 40, .call call⟩] }
-  (Method.ofRaw? .scalar {} [] [true] raw []).map Method.code
+  (decodeRaw .scalar {} [] [true] raw []).map Method.code
 
 /-- Each overload with the copy or fill operation and alignment required by its declaration. -/
 private def cases : List (CallSite × MemoryOp) := [false, true].flatMap fun pointer =>
@@ -38,7 +39,7 @@ private def cases : List (CallSite × MemoryOp) := [false, true].flatMap fun poi
 
 /-- The decoder keeps each call and the interpreter resolves its exact operation. -/
 theorem block_emission : cases.all (fun (call, operation) =>
-    decoded call == some [.call call.method {}] &&
+    decide (decoded call = .ok [.call call.method {}]) &&
     runtimeModel {} .call call.method == some (.memory operation)) = true := by decide +kernel
 
 #print axioms block_emission
@@ -60,7 +61,7 @@ theorem block_refusals : cases.all (fun (call, _) =>
     other.any fun (overload, _) =>
       let crossed := [{ call with target := overload.target },
         { call with declared := overload.declared }]
-      (invalid ++ crossed).all (fun changed => decoded changed == none)) =
+      (invalid ++ crossed).all (fun changed => decide (decoded changed = liveHoleAt 0 40))) =
     true := by
   decide +kernel
 

@@ -1302,7 +1302,7 @@ theorem guard_decoding :
     (binary.all (fun name => Tests.ModelOperands.checks (guardSite name uint true))) = true ∧
     (unary ++ binary).all (fun name => decide (Tests.ModelOperands.decoded
       (guardSite name (.atom runtimeScope "System.Double") (binary.contains name)) =
-        none)) = true ∧
+        liveHoleAt 0 40)) = true ∧
     runtimeModel {} .call (guardSite "ThrowIfNegative" uint).method =
       some (.memory (.zeroGuard .negative 32 false)) ∧
     runtimeModel {} .call (guardSite "ThrowIfNegative" (.atom runtimeScope "System.Int32")).method =

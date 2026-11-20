@@ -1,6 +1,7 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
 import Tests.Support
+import Tests.Support.RawDecoding
 
 /-!
 # Checked Unsafe transfer calls
@@ -34,14 +35,14 @@ private def site (name : MetadataName) (store : Bool) (element : TypeExpr)
       parameterCount := method.parameters.length, returnsValue := !store }
   ⟨0, 40, .call call⟩
 
-/-- The decoder's instruction at one reachable, unlinked raw site. -/
+/-- The decoder's instruction at one reachable, unlinked raw site, or the stage that refuses it. -/
 private def decoded (environment : LayoutEnvironment) (profile : FeatureProfile)
-    (raw : RawInstruction) : Option (List Instruction) :=
+    (raw : RawInstruction) : Except RawDecodeError (List Instruction) :=
   let method : RawMethod :=
     { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
       attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
       initLocals := true, maxStack := 2, genericParameters := [], code := [raw] }
-  (Method.ofRaw? profile environment [] [true] method []).map Method.code
+  (decodeRaw profile environment [] [true] method []).map Method.code
 
 /-- Floating vectors fail resolution and cannot emit their width's transfer at any Unsafe site. -/
 theorem rejectedFloatingSites :
@@ -62,7 +63,7 @@ theorem rejectedFloatingSites :
                 let raw := site name store element byref 0x10
                 match raw.operand with
                 | .call call => (runtimeModel {} .call call.method).isNone &&
-                  decide (decoded {} .scalar raw = none) &&
+                  decide (decoded {} .scalar raw = liveHoleAt 0 40) &&
                   !runtimeCatalog.siteAgrees {} .scalar raw op none true
                 | _ => false) = true := by decide +kernel
 
@@ -90,7 +91,7 @@ private def resolves (environment : LayoutEnvironment) (element : TypeExpr)
       | .call call =>
         let model := runtimeModel environment .call call.method
         if aligned && byref then
-          model.isNone && decide (decoded environment .scalar raw = none)
+          model.isNone && decide (decoded environment .scalar raw = liveHoleAt 0 40)
         else
         let expected := if aligned then RuntimeModel.memory (.pointerTransfer kind alignment store)
           else .typedTransfer kind store
@@ -104,7 +105,7 @@ private def resolves (environment : LayoutEnvironment) (element : TypeExpr)
           { architecture := .arm64, armBase64 := true, advSimd := true,
             vector128Accelerated := true }
         model == some expected && [FeatureProfile.scalar, x64, arm].all fun profile =>
-          decide (decoded environment profile raw = some [.call call.method {}]) &&
+          decide (decoded environment profile raw = .ok [.call call.method {}]) &&
           runtimeCatalog.siteAgrees environment profile raw (.call call.method {}) &&
           !runtimeCatalog.siteAgrees environment profile raw emitted
       | _ => false
@@ -160,8 +161,10 @@ theorem refusedElementsAndReferences :
           let changed := change call.method
           let raw := site name store type false 0x10
           let changedRaw := { raw with operand := .call { call with method := changed } }
+          let expected : Except RawDecodeError (List Instruction) :=
+            if type == .parameter 0 then .error .instantiation else liveHoleAt 0 40
           (runtimeModel {} .call changed).isNone &&
-            decide (decoded {} .scalar changedRaw = none)
+            decide (decoded {} .scalar changedRaw = expected)
         | _ => false
       [TypeExpr.apply (.constructor runtimeScope "System.Span`1") word,
        .apply (.constructor runtimeScope "System.ReadOnlySpan`1") word, .parameter 0,
@@ -190,8 +193,8 @@ theorem refusedDeclarations :
           let changed := { raw with operand := .call { call with declared } }
           let op := if aligned then Instruction.memory (.pointerTransfer (.scalar 8 false) 8 store)
             else typedTransferInstruction (.scalar 8 false) store
-          decide (decoded {} .scalar raw = some [.call call.method {}]) &&
-            decide (decoded {} .scalar changed = none) &&
+          decide (decoded {} .scalar raw = .ok [.call call.method {}]) &&
+            decide (decoded {} .scalar changed = liveHoleAt 0 40) &&
             !runtimeCatalog.siteAgrees {} .scalar changed (.call call.method {}) &&
             !runtimeCatalog.siteAgrees {} .scalar changed op
         let byteAddress := TypeExpr.byref (.atom runtimeScope "System.Byte")
@@ -216,8 +219,8 @@ theorem crossedOverloads :
         | .call call, .call other =>
           let hole := fun (changed : CallSite) =>
             let changedRaw := { raw with operand := .call changed }
-            decide (decoded {} .scalar changedRaw = none)
-          decide (decoded {} .scalar raw = some [.call call.method {}]) &&
+            decide (decoded {} .scalar changedRaw = liveHoleAt 0 40)
+          decide (decoded {} .scalar raw = .ok [.call call.method {}]) &&
             hole { call with target := other.target } &&
             hole { call with declared := other.declared }
         | _, _ => false) = true := by decide +kernel
@@ -233,8 +236,8 @@ theorem reservedEmissions :
       .memory .store128, .memory .store256, .memory .store512,
       .memory (.pointerTransfer (.scalar 8 false) 8 false)]
     (match control.operand with
-     | .call call => decide (decoded {} .scalar control = some [.call call.method {}])
-     | _ => false) = true ∧ decoded {} .scalar other = none ∧
+     | .call call => decide (decoded {} .scalar control = .ok [.call call.method {}])
+     | _ => false) = true ∧ decoded {} .scalar other = liveHoleAt 0 40 ∧
       operations.any (fun op => runtimeCatalog.siteAgrees {} .scalar other op none true)
         = false ∧
       runtimeCatalog.siteAgrees {} .scalar other (.unadmitted 40) none false = true ∧
@@ -260,13 +263,13 @@ theorem unresolvedTransfers :
     let byte := TypeExpr.atom runtimeScope "System.Byte"
     let control := site name!"ReadUnaligned" false byte false 0x10
     (match control.operand with
-     | .call call => decide (decoded {} .scalar control = some [.call call.method {}]) &&
+     | .call call => decide (decoded {} .scalar control = .ok [.call call.method {}]) &&
          !runtimeCatalog.siteAgrees {} .scalar control (.memory .bitcastByteBool) none true
      | _ => false) = true ∧
       [TypeExpr.pointer .void, .apply (.constructor runtimeScope "System.Span`1") byte].all
         (fun element =>
           let raw := site name!"ReadUnaligned" false element false 0x10
-          decide (decoded {} .scalar raw = none) &&
+          decide (decoded {} .scalar raw = liveHoleAt 0 40) &&
             !runtimeCatalog.siteAgrees {} .scalar raw (.memory .bitcastByteBool) none true &&
             runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none false) = true := by
   decide +kernel

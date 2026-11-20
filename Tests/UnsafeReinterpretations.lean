@@ -1,6 +1,7 @@
 import CIL.Extraction.RuntimeModels
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
+import Tests.Support.RawDecoding
 
 /-! # Runtime model admission and execution of Unsafe reinterpretations
 
@@ -93,12 +94,12 @@ private def accepts (call : CallSite) (emitted : Instruction) : Bool :=
 
 /-- One live call as the public raw-method decoder emits it. -/
 private def decoded (call : CallSite) (env := environment 2) :=
-  (Method.ofRaw? .scalar env [] [true] (caller call) []).map Method.code
+  (decodeRaw .scalar env [] [true] (caller call) []).map Method.code
 
 /-- A single mutation of a resolving operand leaves precisely its opcode's hole. -/
 private def refuses (control changed : CallSite) : Bool :=
-  decide (decoded control = some [.call control.method {}]) &&
-    decide (decoded changed = none)
+  decide (decoded control = .ok [.call control.method {}]) &&
+    decide (decoded changed = liveHoleAt 0 40)
 
 /-- Every pair of snapshot classes and the scalar overload, in a 16-byte layout. -/
 private def values : List (CallSite × MemoryOp) :=
@@ -185,7 +186,7 @@ theorem indexedStorage :
     let env := { environment 2 with layouts := #[] }
     [asRefSite packet false, asRefSite packet true,
       nullSite packet false, nullSite packet true].all
-      (fun call => decide (decoded call env = some [.call call.method {}])) := by decide +kernel
+      (fun call => decide (decoded call env = .ok [.call call.method {}])) := by decide +kernel
 #print axioms indexedStorage
 
 /-- Recognized reference storage and unsupported elements both refuse the two null helpers. -/

@@ -1,5 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
+import Tests.Support.RawDecoding
 
 /-! Decoder evidence and checked execution of Unsafe reference offsets. -/
 
@@ -35,13 +36,13 @@ private def decoded (site : CallSite) (environment : LayoutEnvironment := {}) :=
     { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
       attributes := 0, implementation := 0, returnType := native, parameters := [], locals := [],
       initLocals := true, maxStack := 2, genericParameters := [], code := [operand site] }
-  (Method.ofRaw? .scalar environment [] [true] raw []).map Method.code
+  (decodeRaw .scalar environment [] [true] raw []).map Method.code
 
 /-- The decoder keeps a well-formed ByteOffset and refuses either competing live emission. -/
 theorem byteOffset_emission :
     let method := byteOffset native
     let site := byteSite method
-    decoded site = some [.call method {}] ∧
+    decoded site = .ok [.call method {}] ∧
       runtimeCatalog.siteAgrees {} .scalar (operand site) (.memory .byteOffset) none true =
         false ∧
       runtimeCatalog.siteAgrees {} .scalar (operand site) .sub none true = false := by
@@ -60,7 +61,7 @@ theorem byteOffset_bad_site :
       { site with declared.returnType := .parameter 0 }]
     let conventions := [0x00, 0x11, 0x30, 0x50, 0x70].map fun convention =>
       { site with declared.convention := convention }
-    (invalid ++ conventions).all (fun changed => decoded changed == none) =
+    (invalid ++ conventions).all (fun changed => decide (decoded changed = liveHoleAt 0 40)) =
       true := by decide +kernel
 
 #print axioms byteOffset_bad_site
@@ -71,15 +72,16 @@ theorem byteOffset_unsized :
       .pointer native, .byref native, .array native,
       .object runtimeScope "System.String", .atom runtimeScope "System.Single",
       .aggregate "Fixture::Pair" 0]
-    elements.all (fun element => decoded (byteSite (byteOffset element)) ==
-      none) = true := by decide +kernel
+    elements.all (fun element => decide (decoded (byteSite (byteOffset element)) =
+      liveHoleAt 0 40)) = true := by decide +kernel
 
 #print axioms byteOffset_unsized
 
 /-- A free method parameter has no model and prevents the raw body from closing. -/
 theorem byteOffset_free_parameter :
     let method := byteOffset (.parameter 0)
-    runtimeModel {} .call method = none ∧ decoded (byteSite method) = none := by decide +kernel
+    runtimeModel {} .call method = none ∧ decoded (byteSite method) = .error .instantiation := by
+  decide +kernel
 
 #print axioms byteOffset_free_parameter
 
@@ -93,8 +95,8 @@ theorem byteOffset_sized :
     let elements : List TypeExpr := [native, .aggregate layout.identity 0,
       .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
         (.atom runtimeScope "System.Byte")]
-    elements.all (fun element => decoded (byteSite (byteOffset element)) environment ==
-      some [.call (byteOffset element) {}]) = true := by decide +kernel
+    elements.all (fun element => decide (decoded (byteSite (byteOffset element)) environment =
+      .ok [.call (byteOffset element) {}])) = true := by decide +kernel
 
 #print axioms byteOffset_sized
 
@@ -203,7 +205,7 @@ private def loweredOffset : RuntimeModel → Instruction
 /-- All twelve declarations retain their exact closed call and reject competing emissions. -/
 theorem displacement_emissions :
     (offsetSites int 4).all (fun (site, model) =>
-      decoded site == some [.call site.method {}] &&
+      decide (decoded site = .ok [.call site.method {}]) &&
       !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none true &&
       !runtimeCatalog.siteAgrees {} .scalar (operand site) .add none true) = true := by
   decide +kernel
@@ -212,7 +214,7 @@ theorem displacement_emissions :
 
 /-- An altered operand produces the call opcode's hole and refuses the former live lowering. -/
 private def refusesOffset (site : CallSite) (model : RuntimeModel) : Bool :=
-  decoded site == none &&
+  decide (decoded site = liveHoleAt 0 40) &&
     !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none true
 
 /-- Forging the open signature, convention, identity or receiver invalidates a resolving site. -/
@@ -261,7 +263,8 @@ theorem unsized_displacement_code :
       .aggregate "Fixture::Absent" 0]
     excluded.all (fun element => (offsetSites element 0).all fun (site, model) =>
       refusesOffset site model) = true ∧
-      (offsetSites (.parameter 0) 0).all (fun (site, _) => (decoded site).isNone) = true := by
+      (offsetSites (.parameter 0) 0).all (fun (site, _) =>
+        decide (decoded site = .error .instantiation)) = true := by
   decide +kernel
 
 #print axioms unsized_displacement_code
@@ -270,9 +273,9 @@ theorem unsized_displacement_code :
 theorem unknown_offset_name :
     let control := byteSite (byteOffset native)
     let unknown := { control with method.name := name!"UnknownOffset", name := "UnknownOffset" }
-    decoded control = some [.call control.method {}] ∧
+    decoded control = .ok [.call control.method {}] ∧
       siteClaim {} none (operand unknown) = .refused ∧
-      decoded unknown = none ∧
+      decoded unknown = liveHoleAt 0 40 ∧
       runtimeCatalog.siteAgrees {} .scalar (operand unknown) (.unadmitted 40) = true ∧
       runtimeCatalog.siteAgrees {} .scalar (operand unknown) (.call unknown.method {})
         none true = false := by decide +kernel

@@ -1,4 +1,5 @@
 import CIL.Extraction.DecodedMethod
+import Tests.Support.RawDecoding
 
 /-! Exact runtime operands, modelled reference helpers and the opcodes that can emit null. -/
 
@@ -29,14 +30,14 @@ private def nonCall : RawMethod := { raw call with code := [⟨0, 0x26, .none⟩
 /-- Changing a redundant call field or the typed reference cannot retain the SkipInit call. -/
 theorem skipInitOperand :
     let decode := fun operand =>
-      (Method.ofRaw? .scalar {} [] [true] (raw operand) []).map Method.code
-    decode call = some [.call call.method {}] ∧
+      (decodeRaw .scalar {} [] [true] (raw operand) []).map Method.code
+    decode call = .ok [.call call.method {}] ∧
       [{ call with name := "Other" }, { call with target := .external "forged" },
        { call with method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe" },
        { call with method.hasThis := true }, { call with parameterCount := 2 },
        { call with returnsValue := true }, { call with typeArguments := [.byref word] },
        { call with typeArguments := [] }, { call with method.genericArity := 2 }].all
-        (fun changed => decide (decode changed = none)) = true := by
+        (fun changed => decide (decode changed = liveHoleAt 0 40)) = true := by
   decide +kernel
 
 #print axioms skipInitOperand

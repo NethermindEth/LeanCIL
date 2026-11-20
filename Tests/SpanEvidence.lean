@@ -1,6 +1,7 @@
 import CIL.Extraction.Features
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
+import Tests.Support.RawDecoding
 
 set_option maxRecDepth 4096
 
@@ -73,7 +74,7 @@ private def arraySpanCall (range : ArraySpanRange) (element : TypeExpr) : CallSi
 
 /-- Decode a single live call under the production model table. -/
 private def decodeArrayCall (site : CallSite) (layouts : LayoutEnvironment := {}) :=
-  (Method.ofRaw? .scalar layouts [] [true] (raw [] [i 40 (.call site)]) []).map Method.code
+  (decodeRaw .scalar layouts [] [true] (raw [] [i 40 (.call site)]) []).map Method.code
 
 /-- Each range retains its call and rejects a mismatched raw or closed field. -/
 theorem exact_array_span_call :
@@ -89,11 +90,11 @@ theorem exact_array_span_call :
         { site with declared.parameters := wrongOpen }, { site with target := .external "Another" },
         arraySpanCall range (.atom runtime "System.Double"),
         arraySpanCall range (.aggregate "Missing::Layout" 0) ]
-      decide (decodeArrayCall site = some [.call method {}]) &&
+      decide (decodeArrayCall site = .ok [.call method {}]) &&
         (runtimeModel {} .call method == some (.memory (.arraySpan .signed32 true range))) &&
         !runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
           (.memory (.arraySpan .signed32 true range)) none true &&
-        refused.all (fun other => decide (decodeArrayCall other = none))) := by
+        refused.all (fun other => decide (decodeArrayCall other = liveHoleAt 0 40))) := by
   decide +kernel
 #print axioms exact_array_span_call
 
@@ -108,7 +109,7 @@ theorem arraySpanLayouts :
       ({ rawLayouts := rows, layouts := (computeLayouts rows).getD #[] } : LayoutEnvironment)
     [ArraySpanRange.whole, .fromStart, .counted].all (fun range =>
       let site := arraySpanCall range element
-      decide (decodeArrayCall site (env 1 true) = none) &&
+      decide (decodeArrayCall site (env 1 true) = liveHoleAt 0 40) &&
         [1, 3].all (fun count =>
           let storage := ArrayElement.aggregate "Fixture::Words" (count * 4)
           runtimeModel (env count false) .call site.method ==
@@ -152,13 +153,13 @@ private def constructors (writable : Bool) (element : TypeExpr) (name : String) 
 
 /-- The production decoder keeps a resolving constructor in the method body. -/
 private def decodeConstructor (site : CallSite) (layouts : LayoutEnvironment := {}) :=
-  (Method.ofRaw? .scalar layouts [] [true] (raw [] [i 115 (.call site)]) []).map Method.code
+  (decodeRaw .scalar layouts [] [true] (raw [] [i 115 (.call site)]) []).map Method.code
 
 /-- A refused constructor leaves a newobj hole and prevents admission of the live method. -/
 private def refusesConstructor (site : CallSite) (layouts : LayoutEnvironment := {}) : Bool :=
   let source := raw [] [i 115 (.call site)]
   methodCode .scalar layouts [] [true] source == [.unadmitted 115] &&
-    (decodeConstructor site layouts).isNone
+    decide (decodeConstructor site layouts = liveHoleAt 0 115)
 
 /-- Both owners bind the eight declarations, the exact external target and the closed arguments. -/
 theorem constructor_models :
@@ -174,7 +175,7 @@ theorem constructor_models :
           { site with method.returnType := intType }, { site with method.parameters := [intType] },
           { site with declared.parameters := [] }, { site with declared.convention := 0 },
           { site with target := .external "Other" }]
-        decide (decodeConstructor site = some [.newobj method]) &&
+        decide (decodeConstructor site = .ok [.newobj method]) &&
           (runtimeModel {} .newobj method == some (.memory op)) &&
           (method.parameters.length == op.argumentCount) &&
           !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.memory op) none true &&
@@ -296,9 +297,9 @@ private def bulkSites (element : TypeExpr) (elementName : String) : List CallSit
     copies ++ arrays
 
 /-- The instruction at the sole reachable call in the fixture. -/
-private def bulkCode (site : CallSite) : Option (List Instruction) :=
+private def bulkCode (site : CallSite) : Except RawDecodeError (List Instruction) :=
   let body := { raw [] [i 40 (.call site)] with parameters := [] }
-  (Method.ofRaw? .scalar {} [] [true] body []).map Method.code
+  (decodeRaw .scalar {} [] [true] body []).map Method.code
 
 /-- Every genuine overload retains its call. One incorrect operand field refuses the method. -/
 theorem bulk_call_operands :
@@ -310,7 +311,7 @@ theorem bulk_call_operands :
       let wrongResult := if method.returnType == .void then intType else .void
       let wrongParams := match method.parameters with
         | [] => [intType] | _ :: rest => TypeExpr.void :: rest
-      decide (bulkCode site = some [.call method {}]) &&
+      decide (bulkCode site = .ok [.call method {}]) &&
         [{ site with method.owner := wrongOwner }, { site with method.name := name!"Other" },
          { site with method.genericArity := method.genericArity + 1 },
          { site with method.parameters := wrongParams },
@@ -321,7 +322,7 @@ theorem bulk_call_operands :
          { site with parameterCount := site.parameterCount + 1 },
          { site with returnsValue := !site.returnsValue },
          { site with ownerArgumentCount := 1 }, { site with typeArguments := [TypeExpr.void] }].all
-          fun changed => decide (bulkCode changed = none)) := by
+          fun changed => decide (bulkCode changed = liveHoleAt 0 40)) := by
   decide +kernel
 
 #print axioms bulk_call_operands
@@ -329,7 +330,7 @@ theorem bulk_call_operands :
 /-- A well-formed overload over a floating-point element has no bulk memory model. -/
 theorem bulk_call_elements :
     ((bulkSites (.atom runtime "System.Single") "System.Single").all fun site =>
-      decide (bulkCode site = none)) := by
+      decide (bulkCode site = liveHoleAt 0 40)) := by
   decide +kernel
 
 #print axioms bulk_call_elements
@@ -354,7 +355,7 @@ theorem bulk_vector_models :
     let vector := TypeExpr.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1"
     let element := TypeExpr.apply vector intType
     (bulkSites element "System.Runtime.Intrinsics.Vector128`1<System.Int32>").all fun site =>
-      let expected := if site.hasThis then some [.call site.method {}] else none
+      let expected := if site.hasThis then .ok [.call site.method {}] else liveHoleAt 0 40
       decide (bulkCode site = expected)
     := by decide +kernel
 

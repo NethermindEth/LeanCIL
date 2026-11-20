@@ -2,6 +2,7 @@ import CIL.Extraction.DecodedMethod
 import CIL.Extraction.BitModels
 import CIL.Safety.StepComposition
 import Tests.MetadataWorld
+import Tests.Support.RawDecoding
 
 /-! Call-site checks for the MemoryMarshal overloads in the example assembly. -/
 
@@ -213,8 +214,8 @@ private def refused (raw : RawInstruction) (alternative : Instruction) : Bool :=
   let required := runtimeCatalog.callRequirement (LayoutEnvironment.callLayouts {})
     .scalar none raw
   siteClaim {} none raw == .refused &&
-    decide ((Method.ofRaw? .scalar {} [] [true] (marshalCaller raw) []).map Method.code =
-      none) &&
+    decide ((decodeRaw .scalar {} [] [true] (marshalCaller raw) []).map Method.code =
+      liveHoleAt 0 40) &&
     required.accepts false (.unadmitted 40) && !required.accepts true (.unadmitted 40) &&
     !required.accepts true alternative && !required.accepts false alternative
 

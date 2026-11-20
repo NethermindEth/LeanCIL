@@ -1,5 +1,6 @@
 import CIL.Extraction.DecodedDefinition
 import CIL.Extraction.DecodedMethod
+import Tests.Support.RawDecoding
 
 /-! Decoder refusal tests for incomplete method-token operands. -/
 
@@ -26,8 +27,8 @@ private def withoutLink (opcode : Nat) (member : MetadataName) (name : String) :
   let requirement := fun link => runtimeCatalog.callRequirement
     (LayoutEnvironment.callLayouts {}) .scalar link raw
   return (requirement (some (.direct 0)) matches .linked) &&
-    decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
-      none) &&
+    decide ((decodeRaw .scalar {} [] [true] source []).map Method.code =
+      liveHoleAt 0 opcode) &&
     (requirement none).accepts false (.unadmitted opcode) &&
     !(requirement none).accepts true (.unadmitted opcode)
 
@@ -86,7 +87,7 @@ theorem integerVectorTransfers :
 
 /-- The one-instruction decoder requires a model for its live arithmetic call. -/
 private def arithmeticCode (env : LayoutEnvironment) (site : CallSite) :=
-  (Method.ofRaw? .scalar env [] [true]
+  (decodeRaw .scalar env [] [true]
     { body 40 .void name!"Run" "Run" with code := [⟨0, 40, .call site⟩] } []).map Method.code
 
 /-- Both arithmetic members bind the raw operand and the closed signature independently. -/
@@ -103,8 +104,8 @@ private def arithmeticChecks (env : LayoutEnvironment) (site : CallSite)
     { site with method.returnType := wrong }, { site with declared.convention := 0x20 },
     { site with target := .external "Wrong" }, unsupported]
   runtimeModel env .call method == some expected &&
-    decide (arithmeticCode env site = some [.call method {}]) &&
-    refusals.all fun changed => decide (arithmeticCode env changed = none)
+    decide (arithmeticCode env site = .ok [.call method {}]) &&
+    refusals.all fun changed => decide (arithmeticCode env changed = liveHoleAt 0 40)
 
 /-- A signed widening multiply accepts int32 input and rejects an int16 widening signature. -/
 theorem bigMulBinding :
@@ -164,7 +165,7 @@ theorem divRemTupleLayout :
       ({ rawLayouts := [{ row with identity := "Fixture" }, raw],
          layouts := #[computed, computed] } : LayoutEnvironment)
     let refused := fun raw alignment =>
-      arithmeticCode (env raw alignment) site = none
+      arithmeticCode (env raw alignment) site = liveHoleAt 0 40
     let boolean := TypeExpr.atom runtimeScope "System.Boolean"
     let result := "System.ValueTuple`2<System.Boolean,System.Boolean>"
     let invalid := { method with
@@ -176,7 +177,7 @@ theorem divRemTupleLayout :
       target := .external (runtimeScope ++ "::" ++ target) }
     arithmeticChecks (env row 8) site unsupported (.intrinsic (.scalar (.divRem 64 false)) 2) ∧
       arithmeticCode (env row 8) { site with declared.returnType := .aggregate identity 0 } =
-        none ∧
+        liveHoleAt 0 40 ∧
       refused { row with fields := row.fields.set 0 ⟨.signed64, none⟩ } 8 ∧
       refused { row with fields := row.fields.set 1 ⟨.signed64, none⟩ } 8 ∧
       refused { row with fields := List.replicate 512 ⟨.unsigned64, none⟩ } 8 ∧
@@ -199,9 +200,9 @@ theorem sumDeclaration :
         convention := 0x10, returnType := .parameter 0, parameters := [vector (.parameter 0)] }
       target := .external s!"{intrinsicsScope}::!!0 {owner}::Sum({owner}`1<!!0>)" }
     runtimeModel {} .call site.method = some (.intrinsic (.vector (.sum64 128)) 1) ∧
-      arithmeticCode {} site = some [.call site.method {}] ∧
+      arithmeticCode {} site = .ok [.call site.method {}] ∧
       arithmeticCode {} { site with declared.parameters := [vector (.ownerParameter 0)] } =
-        none := by decide +kernel
+        liveHoleAt 0 40 := by decide +kernel
 
 #print axioms sumDeclaration
 
@@ -232,8 +233,8 @@ theorem spanClaims :
       source.code.all fun raw => siteClaim {} none raw == claim &&
         !(runtimeCatalog.siteAgrees {} .scalar raw .pop none true) &&
         runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none false &&
-        decide ((Method.ofRaw? .scalar {} [] [true] source []).map Method.code =
-          none)
+        decide ((decodeRaw .scalar {} [] [true] source []).map Method.code =
+          liveHoleAt 0 40)
     (lengthBody.code.all fun raw => Id.run do
       let .call site := raw.operand | return false
       return siteClaim full none raw == .model &&
@@ -269,9 +270,9 @@ theorem constrainedLinkCode :
     let source := { body 111 constrainedSlot.declaringType name!"Read" "Read" with
       code := [⟨0, 0xFE16, .type receiver⟩, ⟨6, 111, .call constrainedSlot⟩] }
     let decode := fun links =>
-      (Method.ofRaw? .scalar {} links [true, true] source []).map Method.code
-    decode [(1, .direct 1)] = some [.nop, .call constrainedSlot.method
-      { constrained := some receiver }] ∧ decode [] = none := by
+      (decodeRaw .scalar {} links [true, true] source []).map Method.code
+    decode [(1, .direct 1)] = .ok [.nop, .call constrainedSlot.method
+      { constrained := some receiver }] ∧ decode [] = liveHoleAt 1 111 := by
   exact ⟨rfl, rfl⟩
 
 #print axioms constrainedLinkCode

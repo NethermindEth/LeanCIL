@@ -1,5 +1,6 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
+import Tests.Support.RawDecoding
 
 /-!
 # Core span call agreement
@@ -126,15 +127,16 @@ private def Overload.raw (row : Overload) (declared : OpenSignature) : RawInstru
     target := .external s!"{runtimeScope}::{result} {owner}::{row.name}({params})",
     parameterCount := row.method.parameters.length, returnsValue := true }⟩
 
-/-- The single decoded instruction in a caller of the given runtime member. -/
+/-- The single decoded instruction in a caller of the given runtime member, or the stage that
+    refuses the caller. -/
 private def decoded (raw : RawInstruction) (layouts : LayoutEnvironment := {}) :
-    Option (List Instruction) :=
+    Except RawDecodeError (List Instruction) :=
   let body : RawMethod := {
     token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
     callingConvention := 0,
     attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
     initLocals := false, maxStack := 3, genericParameters := [], code := [raw] }
-  (Method.ofRaw? .scalar layouts [] [true] body []).map Method.code
+  (decodeRaw .scalar layouts [] [true] body []).map Method.code
 
 /-- Only array conversions reject an otherwise valid byref-like aggregate layout. -/
 theorem byRefLikeArrays :
@@ -142,9 +144,9 @@ theorem byRefLikeArrays :
       let raw := row.raw row.declared
       let call := Instruction.call row.method {}
       let expected := match row.operation with
-        | .arraySpan .. => none
-        | _ => some [call]
-      decide (decoded raw (environment 1) = some [call]) &&
+        | .arraySpan .. => liveHoleAt 0 40
+        | _ => .ok [call]
+      decide (decoded raw (environment 1) = .ok [call]) &&
         decide (decoded raw (environment 1 true) = expected)) = true := by
   decide +kernel
 
@@ -187,8 +189,8 @@ theorem liveAgreement :
 /-- Changing only the declaration of a resolving call yields an opcode-tagged hole. -/
 theorem decodedOverloads :
     ((rows int32 4).all fun row =>
-      decide (decoded (row.raw row.declared) = some [.call row.method {}]) &&
-        decide (decoded (row.raw row.forged) = none)) := by
+      decide (decoded (row.raw row.declared) = .ok [.call row.method {}]) &&
+        decide (decoded (row.raw row.forged) = liveHoleAt 0 40)) := by
   decide +kernel
 
 #print axioms decodedOverloads
@@ -203,7 +205,7 @@ theorem operandRefusals :
         { site with returnsValue := false },
         { site with typeArguments := [int32] }, { site with ownerArgumentCount := 1 }].all
           fun changed => decide (decoded { raw with operand := .call changed } =
-            none)) := by
+            liveHoleAt 0 40)) := by
   decide +kernel
 
 #print axioms operandRefusals

@@ -1,6 +1,7 @@
 import CIL.Extraction.DecodedMethod
 import CIL.Safety.StepComposition
 import CIL.Safety.ResolutionFacts
+import Tests.Support.RawDecoding
 
 /-!
 # Unsafe helper model tests
@@ -283,10 +284,10 @@ example : ¬ RuntimeModelsAgree (method skipSite) [true]
 private def refuses (control changed : RawInstruction) (reference : MethodRef)
     (layouts : LayoutEnvironment) (replacement : Instruction) : Bool :=
   let decode := fun environment raw =>
-    (Method.ofRaw? .scalar environment [] [true] (method raw) []).map Method.code
-  decide (decode (sized 3) control = some [.call reference {}]) &&
+    (decodeRaw .scalar environment [] [true] (method raw) []).map Method.code
+  decide (decode (sized 3) control = .ok [.call reference {}]) &&
     decide (siteClaim layouts none changed = .model) &&
-    decide (decode layouts changed = none) &&
+    decide (decode layouts changed = liveHoleAt 0 changed.opcode) &&
     !runtimeCatalog.siteAgrees layouts .scalar changed replacement none true
 
 /-- Substituting a method parameter for the declared Int32 result refuses SizeOf. -/
