@@ -340,7 +340,8 @@ theorem Memory.Renamed.structFieldAddressResult {mapping : AllocationRenaming}
 theorem Memory.Renamed.loadAggregateFieldResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
-    (offset size : Nat) (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (offset size : Nat) (stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow (loadAggregateField offset size stack source)) :
     ResultRenamed mapping
       (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
@@ -356,6 +357,28 @@ theorem Memory.Renamed.loadAggregateFieldResult {mapping : AllocationRenaming}
     split at observable
     rename_memory_arm
 #print axioms Memory.Renamed.loadAggregateFieldResult
+
+/-- Writing a nested struct preserves the allocation correspondence of the resulting memories. -/
+theorem Memory.Renamed.storeAggregateFieldResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (offset size : Nat) (stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (storeAggregateField offset size stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map (indices.value mapping))
+      (storeAggregateField offset size stack source)
+      (storeAggregateField offset size (stack.map (indices.value mapping)) target) := by
+  unfold storeAggregateField at observable ⊢
+  rw [indices.unspecifiedOperands mapping]
+  split at observable
+  · cases observable
+  · rename_i guard
+    rw [ite_eq_right guard, ite_eq_right guard]
+    split at observable
+    rename_memory_arm
+#print axioms Memory.Renamed.storeAggregateFieldResult
 
 set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/

@@ -73,7 +73,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .stelem _ | .stelem_ref | .stelem_any _ => some (3, 0)
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .stind _ | .cpobj _ | .stobj _
-  | .setFieldAt .. | .setAggregateFieldAt .. | .stfld _ => some (2, 0)
+  | .setFieldAt .. | .stfld _ => some (2, 0)
   | .initobj _ | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.

@@ -330,12 +330,30 @@ theorem high_load_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step]
 #print axioms high_load_is_lowered
 
-theorem inner_store_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+theorem inner_store_uses_checked_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :
     Safety.step body (.stfld innerField) 0 [] frame stack memory =
-      Safety.step body (.setAggregateFieldAt 8 4) 0 [] frame stack memory := by
+      (do let (after, values) ← Safety.storeAggregateField 8 4 stack memory
+          return .next 1 values frame after) := by
   simp only [cil_step]
-#print axioms inner_store_is_lowered
+#print axioms inner_store_uses_checked_offset
+
+/-- A readonly receiver rejects the write before a malformed field value can reach memory. -/
+theorem inner_store_readonly (frame : Safety.Frame) (memory : Safety.Memory) :
+    Safety.step body (.stfld innerField) 0 [] frame
+      [.scalar (.aggregate []), .readOnlyReference .null] memory =
+      .error (.memory .unwritable .null 4) := by
+  rw [inner_store_uses_checked_offset]
+  rfl
+#print axioms inner_store_readonly
+
+/-- On a writable receiver the value width is checked before dereferencing its address. -/
+theorem inner_store_wrong_width (frame : Safety.Frame) (memory : Safety.Memory) :
+    Safety.step body (.stfld innerField) 0 [] frame
+      [.scalar (.snapshot (.aggregate 4) []), .reference .null] memory = .error .invalidState := by
+  rw [inner_store_uses_checked_offset]
+  rfl
+#print axioms inner_store_wrong_width
 
 theorem inner_load_uses_checked_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :

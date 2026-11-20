@@ -442,6 +442,8 @@ For a nested struct, `ldfld` uses the offset and size in the method's checked fi
 `step_ldfld_aggregate_value_eq` reads initialized bytes from a struct on the stack.
 `step_ldfld_aggregate_snapshot_eq` also preserves the initialization state of padding.
 `step_ldfld_aggregate_reference_eq` reads the field through a reference to the containing struct.
+`step_stfld_aggregate_reference_eq` and `step_stfld_aggregate_snapshot_eq` write initialized bytes
+and snapshots through a writable reference. Both require the stored width to match the field.
 
 The loop tactics gather the field reads and the home's `form` from each frame in scope and take
 the zeroing, field stores and numeric local stores themselves (see [loop

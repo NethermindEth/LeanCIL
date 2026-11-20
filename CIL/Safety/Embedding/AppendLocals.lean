@@ -601,18 +601,6 @@ theorem step_appendLocals_setFieldAt (offset width : Nat) :
 #print axioms step_appendLocals_setFieldAt
 
 
-/-- `setAggregateFieldAt` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_setAggregateFieldAt (offset size : Nat) :
-    StepAppendLocals (.setAggregateFieldAt offset size) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.setAggregateFieldAt offset size)
-    pc stack frame extra memory
-
-#print axioms step_appendLocals_setAggregateFieldAt
 
 /-- `ldarg` preserves outcomes under trailing local slots: a homed argument's slot precedes
     them, and an argument value does not involve the frame. -/
@@ -1691,8 +1679,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_fieldAt offset width signed
     case setFieldAt offset width =>
       exact step_appendLocals_setFieldAt offset width
-    case setAggregateFieldAt offset size =>
-      exact step_appendLocals_setAggregateFieldAt offset size
     case ldarg index =>
       exact step_appendLocals_ldarg index
     case starg index =>

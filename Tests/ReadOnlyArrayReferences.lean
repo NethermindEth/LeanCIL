@@ -89,7 +89,7 @@ theorem restricted_field_reads :
 theorem restricted_field_stores_rejected :
     instruction (.setFieldAt 4 4) [.scalar (.i32 7), .readOnlyReference (.address ⟨0, 0⟩)]
       memory = .error (.memory .unwritable (.address ⟨0, 0⟩) 4) ∧
-    instruction (.setAggregateFieldAt 4 4)
+    storeAggregateField 4 4
       [.scalar (.aggregate [7, 0, 0, 0]), .readOnlyReference (.address ⟨0, 0⟩)] memory =
       .error (.memory .unwritable (.address ⟨0, 0⟩) 4) := ⟨rfl, rfl⟩
 #print axioms restricted_field_stores_rejected

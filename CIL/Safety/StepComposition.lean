@@ -931,11 +931,6 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
 
-@[cil_step] theorem step_setAggregateFieldAt_eq {offset size} (stack : List Value) :
-    step body (.setAggregateFieldAt offset size) pc args frame stack memory =
-      instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
 
 /-! A struct field instruction steps as the lowered instruction of its checked shape, so the
 equations of the lowered forms state what it does on every stack. -/
@@ -990,18 +985,16 @@ theorem step_stfld_value_eq (field : CIL.Extraction.FieldRef) (offset width : Na
     rfl
 #print axioms step_stfld_value_eq
 
-/-- `stfld` of a nested struct field steps as `setAggregateFieldAt` of its offset and size on
-    every stack, faults included. -/
+/-- A nested struct store writes at the offset and width from the checked field shape. -/
 theorem step_stfld_aggregate_eq (field : CIL.Extraction.FieldRef) (offset size : Nat)
     (shape : body.fieldShape field = .aggregate offset size) (stack : List Value) :
-    step body (.stfld field) pc args frame stack memory =
-      step body (.setAggregateFieldAt offset size) pc args frame stack memory := by
-  rw [step_stfld_eq, step_setAggregateFieldAt_eq]
-  simp only [fieldStore, shape, instructionStep]
-  cases observed : unspecifiedOperands 2 stack
-  · rfl
-  · rw [instruction_guarded memory (operation := .setAggregateFieldAt offset size) observed]
-    rfl
+    step body (.stfld field) pc args frame stack memory = (do
+      let (memory, stack) ← storeAggregateField offset size stack memory
+      return .next (pc + 1) stack frame memory) := by
+  rw [step_stfld_eq]
+  simp only [fieldStore, shape]
+  unfold storeAggregateField
+  split <;> rfl
 #print axioms step_stfld_aggregate_eq
 
 /-- A struct ldflda computes its checked field offset and preserves the receiver's writability. -/

@@ -186,8 +186,6 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
     observerCount (.fieldAt offset width signed) = 1 := rfl
 @[cil_guard] theorem guard_setFieldAt (offset width : Nat) :
     observerCount (.setFieldAt offset width) = 2 := rfl
-@[cil_guard] theorem guard_setAggregateFieldAt (offset size : Nat) :
-    observerCount (.setAggregateFieldAt offset size) = 2 := rfl
 @[cil_guard] theorem guard_ldind (kind : CIL.NumericKind) : observerCount (.ldind kind) = 1 := rfl
 @[cil_guard] theorem guard_stind (kind : CIL.NumericKind) : observerCount (.stind kind) = 2 := rfl
 @[cil_guard] theorem guard_ldlen : observerCount .ldlen = 1 := rfl

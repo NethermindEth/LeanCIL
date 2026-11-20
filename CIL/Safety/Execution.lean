@@ -542,7 +542,7 @@ def fieldStore (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : Li
   match body.fieldShape field with
   | .classSlot offset slot => classFieldStore field.owner offset slot stack memory
   | .value offset width _ => instruction (.setFieldAt offset width) stack memory
-  | .aggregate offset size => instruction (.setAggregateFieldAt offset size) stack memory
+  | .aggregate offset size => storeAggregateField offset size stack memory
   | .unsupported reason => .error (.unsupported reason)
 
 /-- `ldflda` of `field` as `body` resolves it: the address of a struct field at its checked

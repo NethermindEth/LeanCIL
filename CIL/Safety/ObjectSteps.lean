@@ -868,9 +868,7 @@ def storageLowering? (body op : Expr) (stack : Option Expr := none) :
   | ``CIL.Instruction.stfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
     lowering ``step_stfld_value_eq (mkApp2 (mkConst ``CIL.Instruction.setFieldAt) offset width)
       #[offset, width, signed, proof]
-  | ``CIL.Instruction.stfld, (``CIL.FieldShape.aggregate, #[offset, size]) =>
-    lowering ``step_stfld_aggregate_eq
-      (mkApp2 (mkConst ``CIL.Instruction.setAggregateFieldAt) offset size) #[offset, size, proof]
+
   | _, _ => return none
 
 open Lean Meta in
@@ -930,10 +928,8 @@ simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expressi
   | none => equationStep generic
 
 open Lean Meta in
-/-- A field store steps by the equation for the field's shape, as `fieldShapeIn` finds it: a
-    struct field as the lowered store of its shape, and a class field by the equation for its
-    slot and the stored value and receiver on the stack. A store whose shape stays unknown steps
-    to `fieldStore`. -/
+/-- Step a field store using its checked shape. Nested structs write at the field displacement.
+    A class slot uses the stored value and receiver on the stack. -/
 simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun expression => do
   let_expr CIL.Safety.step body operation pc args frame stack memory := expression
     | return .continue

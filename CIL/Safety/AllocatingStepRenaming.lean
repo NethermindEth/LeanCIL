@@ -295,8 +295,10 @@ theorem Memory.Renamed.stepFieldLoad {indices : LocalIndexMap} {mapping : Alloca
     all_goals simp only [resolved] at observable ⊢
     all_goals first
       | exact .error _
-      | apply (related.classFieldLoadResult _ _ _ sourceFormed stack bounds observable.bind_left).bind
-      | apply (related.loadAggregateFieldResult sourceFormed _ _ stack bounds observable.bind_left).bind
+      | apply (related.classFieldLoadResult _ _ _ sourceFormed stack bounds
+          observable.bind_left).bind
+      | apply (related.loadAggregateFieldResult sourceFormed _ _ stack bounds
+          observable.bind_left).bind
       | apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
     all_goals
       intro first second result
@@ -333,24 +335,20 @@ theorem Memory.Renamed.stepFieldStore {indices : LocalIndexMap} {mapping : Alloc
     unfold fieldStore at observable ⊢
     rw [shape]
     cases resolved : sourceBody.fieldShape field
-    case classSlot offset slot =>
-      simp only [resolved] at observable ⊢
-      apply (related.classFieldStoreResult field.owner offset slot sourceFormed stack bounds
-        observable.bind_left).bind
+    all_goals simp only [resolved] at observable ⊢
+    all_goals first
+      | exact .error _
+      | apply (related.classFieldStoreResult _ _ _ sourceFormed stack bounds
+          observable.bind_left).bind
+      | apply (related.storeAggregateFieldResult sourceFormed _ _ stack bounds
+          observable.bind_left).bind
+      | apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+    all_goals
       intro first second result
       rcases first with ⟨sourceAfter, values⟩
       rcases second with ⟨targetAfter, targetValues⟩
       rcases result with ⟨memories, rfl⟩
       exact .ok (.next memories frames)
-    all_goals simp only [resolved] at observable ⊢
-    all_goals first
-      | exact .error _
-      | (apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
-         intro first second result
-         rcases first with ⟨sourceAfter, values⟩
-         rcases second with ⟨targetAfter, targetValues⟩
-         rcases result with ⟨memories, rfl⟩
-         exact .ok (.next memories frames))
 #print axioms Memory.Renamed.stepFieldStore
 
 /-- An instance field address forms the related address, which both bodies resolve alike. -/

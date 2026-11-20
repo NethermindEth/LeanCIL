@@ -325,7 +325,7 @@ theorem Memory.Equivalent.fieldStore {m n : Memory} (same : m.Equivalent n) (bod
   split
   · exact same.classFieldStore _ _ _ _
   · exact same.instruction _ _
-  · exact same.instruction _ _
+  · exact same.storeAggregateField _ _ _
   · exact .error _
 #print axioms Memory.Equivalent.fieldStore
 

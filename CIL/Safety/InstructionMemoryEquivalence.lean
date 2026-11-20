@@ -589,6 +589,26 @@ theorem Memory.Equivalent.loadAggregateField {m n : Memory} (same : m.Equivalent
     | split
 #print axioms Memory.Equivalent.loadAggregateField
 
+/-- A nested struct write produces equivalent memories for initialized bytes and snapshots. -/
+theorem Memory.Equivalent.storeAggregateField {m n : Memory} (same : m.Equivalent n)
+    (offset size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (storeAggregateField offset size stack m)
+      (storeAggregateField offset size stack n) := by
+  unfold CIL.Safety.storeAggregateField
+  simp only [same.add]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.storeAggregateField
+
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.Instruction) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)

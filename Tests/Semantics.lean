@@ -424,16 +424,17 @@ theorem nested_of_snapshot :
 /-- Storing a nested struct snapshot requires both its declared size and its byte count to
     match the field width. -/
 theorem nested_snapshot_store_size :
-    (instruction (.setAggregateFieldAt 0 8) [.scalar (.snapshot (.aggregate 8) [(1, false)]),
+    (storeAggregateField 0 8 [.scalar (.snapshot (.aggregate 8) [(1, false)]),
       Tests.reference] Tests.caller).map Prod.snd = .error .invalidState ∧
-    (instruction (.setAggregateFieldAt 0 8)
+    (storeAggregateField 0 8
       [.scalar (.snapshot (.aggregate 1) (List.replicate 8 (1, false))), Tests.reference]
       Tests.caller).map Prod.snd = .error .invalidState := ⟨rfl, rfl⟩
 #print axioms nested_of_snapshot
 #print axioms nested_snapshot_store_size
 
 theorem nested_store_size :
-    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate [1]), Tests.reference] Tests.caller).map Prod.snd =
+    (storeAggregateField 0 8 [.scalar (.aggregate [1]), Tests.reference]
+      Tests.caller).map Prod.snd =
       .error .invalidState := rfl
 
 theorem nested_null :
@@ -498,7 +499,7 @@ theorem nested_bounds :
       .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 8) := rfl
 
 theorem nested_unwritable :
-    (instruction (.setAggregateFieldAt 0 8) [.scalar (.aggregate (List.replicate 8 0)), Tests.reference]
+    (storeAggregateField 0 8 [.scalar (.aggregate (List.replicate 8 0)), Tests.reference]
       { Tests.caller with views := [⟨0, 0, 8, true, false⟩] }).map Prod.snd =
       .error (.memory .unwritable (.address ⟨0, 0⟩) 8) := rfl
 

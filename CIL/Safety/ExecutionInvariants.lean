@@ -549,7 +549,7 @@ theorem fieldStore_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef
   split at executed
   · exact classFieldStore_contract _ _ _ _ _ _ _ executed
   · exact instruction_contract _ _ _ _ _ executed
-  · exact instruction_contract _ _ _ _ _ executed
+  · exact storeAggregateField_contract _ _ _ _ _ _ executed
   · cases executed
 #print axioms fieldStore_contract
 

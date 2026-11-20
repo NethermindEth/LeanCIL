@@ -248,8 +248,9 @@ theorem vector_and_nested_store_then_load {entered memory : Memory} {boundary : 
         step body (.setFieldAt 8 16) pc args frame
           (.scalar (.v128 bits) :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame vectored)) ∧
-      (∀ body pc args frame rest,
-        step body (.setAggregateFieldAt 24 12) pc args frame
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .aggregate 24 12 → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar (.aggregate inner) :: .reference (.address home) :: rest) vectored =
           .ok (.next (pc + 1) rest frame nested)) ∧
       (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),

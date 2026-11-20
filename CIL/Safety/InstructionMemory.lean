@@ -106,7 +106,7 @@ def observerCount : CIL.Instruction → Nat
   | .loadAggregate _ | .loadScalar .. | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
-  | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
+  | .storeAggregate _ | .storeScalar _ | .setFieldAt ..
   | .stind _ | .cpobj _ | .stobj _ => 2
   | .ldlen => 1
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
@@ -1330,6 +1330,29 @@ def loadAggregateField (offset size : Nat) (stack : List Value) (memory : Memory
     return (memory, .scalar (.aggregate bytes) :: rest)
   | _ => .error (.unsupported "Not a memory instruction")
 
+/-- Write a nested struct or snapshot at the checked field displacement.
+    The copied bytes retain their initialization flags and the receiver must be writable. -/
+def storeAggregateField (offset size : Nat) (stack : List Value) (m : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands 2 stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
+  match stack with
+  | .scalar (.aggregate bytes) :: .reference reference :: rest =>
+    if bytes.length != size then .error .invalidState else
+      let r ← referenceAt reference
+      let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+      return (← checkedAt (.address address) size
+        (write m address bytes ordinaryAccessAlignment), rest)
+  | .scalar (.snapshot (.aggregate width) bytes) :: .reference reference :: rest =>
+    if bytes.length != size || width != size then .error .invalidState else
+      let r ← referenceAt reference
+      let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
+      return (← checkedAt (.address address) size
+        (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
+  | _ :: .readOnlyReference r :: _ =>
+    .error (.memory .unwritable r size)
+  | _ => .error (.unsupported "Not a memory instruction")
+
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
@@ -1402,19 +1425,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
           | _ => .error (.unsupported "Snapshot field width")
         return (m, .scalar value :: rest)
       else .error (.unsupported "Uninitialized snapshot field")
-  | .setAggregateFieldAt offset size, .scalar (.aggregate bytes) :: .reference reference :: rest =>
-    if bytes.length != size then .error .invalidState else
-      let r ← referenceAt reference
-      let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
-      return (← checkedAt (.address address) size
-        (write m address bytes ordinaryAccessAlignment), rest)
-  | .setAggregateFieldAt offset size,
-      .scalar (.snapshot (.aggregate width) bytes) :: .reference reference :: rest =>
-    if bytes.length != size || width != size then .error .invalidState else
-      let r ← referenceAt reference
-      let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
-      return (← checkedAt (.address address) size
-        (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
   | .fieldAt offset width signed, .reference (.address r) :: rest
   | .fieldAt offset width signed, .readOnlyReference (.address r) :: rest =>
     let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
@@ -1441,8 +1451,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
       (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
   -- Field stores need write permission, however the backing allocation may be written.
   | .setFieldAt _ width, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r width)
-  | .setAggregateFieldAt _ size, _ :: .readOnlyReference r :: _ =>
-    .error (.memory .unwritable r size)
   -- Field accesses through null fault like `referenceAt`, before any offset is formed.
   | .fieldAt .., .reference .null :: _
   | .fieldAt .., .readOnlyReference .null :: _
