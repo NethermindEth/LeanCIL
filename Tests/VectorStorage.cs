@@ -270,9 +270,11 @@ File.WriteAllText(controlPath, $"""
     {CheckedEvidenceControl(baseline, NarrowEvidence(baseline, shapes), [shapes], 0)}
     """);
 Run(["lake", "env", "lean", controlPath], cwd: verification.CheckoutPackage());
-var literalControl = Path.Combine(root, "Roundtrip128uint/LiteralControl.lean");
-File.WriteAllText(literalControl, LiteralScalars(baseline));
-Run(["lake", "env", "lean", literalControl], cwd: verification.CheckoutPackage());
+// At these ordinary value sites the scalar check leaves the emitted operand to the code equation.
+const string codeEquation = "method0.code = Extraction.methodCode";
+var scalarControl = Path.Combine(root, "Roundtrip128uint/ScalarControl.lean");
+File.WriteAllText(scalarControl, DecodedScalars(baseline));
+Run(["lake", "env", "lean", scalarControl], cwd: verification.CheckoutPackage());
 var rejected = new RejectedEvidence(root);
 const string widerFamily = ".constructor Extraction.intrinsicsScope \"System.Runtime.Intrinsics.Vector256`1\"";
 const string wordElement = ".atom Extraction.runtimeScope \"System.UInt32\"";
@@ -281,14 +283,14 @@ foreach (var (name, changed, obligation, marker) in new[]
     ("float-element", baseline.Replace("\"System.UInt32\"", "\"System.Double\""), shapes, "ObjectOperandsValid"),
     ("element-token", baseline.Replace("\"System.UInt32\"", "\"System.Int16\""), shapes, "ObjectOperandsValid"),
     ("vector-token", ForgeTransfer("ldobj", $""".ldobj (.apply ({widerFamily}) ({wordElement}))"""),
-        scalars, "ScalarFlowValid"),
+        scalars, codeEquation),
     ("store-width", ForgeTransfer("stobj", ".stobj (.atom Extraction.runtimeScope \"System.UInt64\")"),
-        scalars, "ScalarFlowValid"),
+        scalars, codeEquation),
     ("load-width", ForgeTransfer("ldobj", ".ldobj (.atom Extraction.runtimeScope \"System.Int32\")"),
-        scalars, "ScalarFlowValid"),
+        scalars, codeEquation),
     ("init-width", ForgeTransfer("initobj", ".initobj (.atom Extraction.runtimeScope \"System.Byte\")"),
-        scalars, "ScalarFlowValid"),
-    ("init-missing", ForgeTransfer("initobj", ".nop"), scalars, "ScalarFlowValid")
+        scalars, codeEquation),
+    ("init-missing", ForgeTransfer("initobj", ".nop"), scalars, codeEquation)
 })
 {
     if (changed == baseline) throw new InvalidOperationException($"Ineffective vector mutation: {name}");
@@ -310,17 +312,23 @@ foreach (var (name, changed, obligation, marker) in new[]
         continue;
     }
     var path = Path.Combine(root, $"{name}.lean");
-    File.WriteAllText(path, LiteralScalars(changed));
+    File.WriteAllText(path, DecodedScalars(changed));
     rejected.Add(path, $"PASS independently rejected vector evidence: {name}", marker, "is false");
 }
 
-string LiteralScalars(string source)
+// The scalar obligation with the scalar check and the code equation decided apart, so a rejection names the
+// conjunct that refuses it.
+string DecodedScalars(string source)
 {
     var narrowed = NarrowEvidence(source, scalars);
-    const string decoded = "method0.code true) (true = true ->";
-    if (!narrowed.Contains(decoded, StringComparison.Ordinal))
+    var statement = $"{scalars} : And (Extraction.ScalarFlowValid method0Closed method0FeatureStates " +
+        $"method0ScalarStates method0.code) ({codeEquation} ";
+    const string decided = ") := by decide +kernel";
+    var start = narrowed.IndexOf(statement, StringComparison.Ordinal);
+    var end = start < 0 ? -1 : narrowed.IndexOf(decided, start, StringComparison.Ordinal);
+    if (end < 0 || narrowed.IndexOf('\n', start, end - start) >= 0)
         throw new InvalidOperationException("Missing decoded scalar obligation");
-    return narrowed.Replace(decoded, "method0.code false) (false = true ->", StringComparison.Ordinal);
+    return narrowed[..end] + ") := ⟨by decide +kernel, by decide +kernel⟩" + narrowed[(end + decided.Length)..];
 }
 
 string ForgeTransfer(string opcode, string replacement) => ForgeDecodedMethod(baseline, 0,
