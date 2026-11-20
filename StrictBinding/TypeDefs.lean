@@ -137,7 +137,7 @@ def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError
   if !(← image.layout.stringAt image.view (← cell (first + 7))).isEmpty then return false
   let flags ← cell (first + 4)
   let key ← image.layout.blobAt image.view (← cell (first + 5))
-  return (← assemblyKeyToken flags key) == some publisher
+  return (← rowKeyToken row flags key) == some publisher
 
 /-- A local base uses the defining image's Assembly row. A referenced base must point directly
     to an AssemblyRef through its ResolutionScope column (II.24.2.6). -/

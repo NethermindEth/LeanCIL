@@ -1,4 +1,5 @@
 import StrictBinding.Dump
+import StrictBinding.PublicKeys
 import Tests.StrictBinding.Fixture
 import Tests.StrictBinding.Mutation
 
@@ -227,9 +228,9 @@ theorem rejects_an_address_in_two_sections :
 
 /-! ## Heap entries and identity -/
 
-/-- The fixture identity with selected Assembly flags and key bytes in its blob heap. -/
-private def identityWithKey (flags : Nat) (key : List Nat) :
-    Except AuditError (List Nat) := do
+/-- The fixture row and blob heap with the selected Assembly flags and key bytes. -/
+private def fixtureWithKey (flags : Nat) (key : List Nat) :
+    Except AuditError (ImageView × MetadataLayout) := do
   let (view, layout) ← fixtureLayout
   let (flagsOffset, _) ← layout.cellAt (tokenOf 0x20 1) 5
   let (keyOffset, keyWidth) ← layout.cellAt (tokenOf 0x20 1) 6
@@ -241,56 +242,58 @@ private def identityWithKey (flags : Nat) (key : List Nat) :
   let blob := key.length :: key
   let changed ← ImageView.ofImage (ImageBytes.ofBytes (bytes ++ blob))
   let pe := { layout.pe with blobs := { start := bytes.length, size := blob.length } }
-  assemblyIdentity changed { layout with pe := pe }
+  return (changed, { layout with pe := pe })
 
-/-- An unflagged eight-byte key is already a token, in display byte order. -/
-theorem assembly_uses_unflagged_token :
-    (identityWithKey 0 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
-      some (asciiOf
-        "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=00ab0000000000cd") := by
-  decide +kernel
-#print axioms assembly_uses_unflagged_token
+/-- The assembly identity spelled by the fixture's key bytes and public-key flag. -/
+private def identityWithKey (flags : Nat) (key : List Nat) : Except AuditError (List Nat) := do
+  let (view, layout) ← fixtureWithKey flags key
+  assemblyIdentity view layout
 
-/-- Empty key blobs have no token with either PublicKey flag value. -/
-theorem assembly_empty_key_has_no_token :
-    (identityWithKey 0 []).toOption = some (asciiOf
-      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=null") ∧
-    (identityWithKey 1 []).toOption = (identityWithKey 0 []).toOption := by
-  decide +kernel
-#print axioms assembly_empty_key_has_no_token
+/-- The publisher token that the definition's key establishes for callers. -/
+private def definitionWithKey (flags : Nat) (key : List Nat) : Except AuditError (Option Nat) := do
+  let (view, layout) ← fixtureWithKey flags key
+  let image ← prepareOne ⟨StrictFixture.identity, StrictFixture.image⟩
+  definitionKeyToken { image with view, layout }
 
-/-- A flagged full key uses the reversed low eight SHA-1 digest bytes. -/
-theorem assembly_hashes_flagged_key :
-    (identityWithKey 1 (asciiOf "abc")).toOption = some (asciiOf
-      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=9dd8d09c6cc25078") := by
-  decide +kernel
-#print axioms assembly_hashes_flagged_key
+/-- The definition hashes its complete key. An unsigned assembly has no publisher token. -/
+theorem definition_key_and_unsigned :
+    (definitionWithKey 1 (asciiOf "abc")).toOption = some (some 0x9dd8d09c6cc25078) ∧
+      (definitionWithKey 0 []).toOption = some none := by decide +kernel
+#print axioms definition_key_and_unsigned
 
-/-- Flags other than PublicKey preserve both key interpretations. -/
-theorem assembly_ignores_other_key_flags :
-    (identityWithKey 0x8100 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
-      (identityWithKey 0 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption ∧
-    (identityWithKey 0x8101 (asciiOf "abc")).toOption =
-      (identityWithKey 1 (asciiOf "abc")).toOption := by
-  decide +kernel
-#print axioms assembly_ignores_other_key_flags
+/-- Eight key bytes in a definition are hashed even when a reference would read them as a token. -/
+theorem definition_hashes_key_bytes :
+    let key := [0x9d, 0xd8, 0xd0, 0x9c, 0x6c, 0xc2, 0x50, 0x78]
+    (definitionWithKey 0 key).toOption = some (some (CIL.Crypto.Sha1.keyToken key)) ∧
+    (identityWithKey 0 key).toOption = (identityWithKey 1 key).toOption ∧
+    (definitionWithKey 1 []).toOption = some none := by decide +kernel
+#print axioms definition_hashes_key_bytes
 
-/-- Nonempty unflagged blobs must have exactly eight bytes. -/
-theorem assembly_rejects_invalid_token_widths :
-    failsWith (identityWithKey 0 [1]) (.tables (.invalidPublicKeyToken 1)) = true ∧
-    failsWith (identityWithKey 0 (List.replicate 7 0))
+/-- Full and unsigned definition names come from the Assembly row regardless of the flags. -/
+theorem assembly_definition_keys :
+    (identityWithKey 0x8100 (asciiOf "abc")).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=9dd8d09c6cc25078") ∧
+    (identityWithKey 1 []).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=null") := by decide +kernel
+#print axioms assembly_definition_keys
+
+/-- AssemblyRef accepts an absent key, a full key or a token including an all-zero token. -/
+theorem reference_key_encodings :
+    (assemblyKeyToken 0 []).toOption = some none ∧
+    (assemblyKeyToken 0x8101 (asciiOf "abc")).toOption = some (some 0x9dd8d09c6cc25078) ∧
+    (assemblyKeyToken 0x8100 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
+      some (some 0x00ab0000000000cd) ∧
+    (assemblyKeyToken 0 (List.replicate 8 0)).toOption = some (some 0) := by decide +kernel
+#print axioms reference_key_encodings
+
+/-- Nonempty unflagged AssemblyRef blobs must have exactly eight bytes. -/
+theorem reference_rejects_invalid_token_widths :
+    failsWith (assemblyKeyToken 0 [1]) (.tables (.invalidPublicKeyToken 1)) = true ∧
+    failsWith (assemblyKeyToken 0 (List.replicate 7 0))
       (.tables (.invalidPublicKeyToken 7)) = true ∧
-    failsWith (identityWithKey 0 (List.replicate 9 0))
-      (.tables (.invalidPublicKeyToken 9)) = true := by
-  decide +kernel
-#print axioms assembly_rejects_invalid_token_widths
-
-/-- An eight-byte zero token remains distinct from an absent token. -/
-theorem assembly_preserves_zero_token :
-    (identityWithKey 0 (List.replicate 8 0)).toOption = some (asciiOf
-      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=0000000000000000") := by
-  decide +kernel
-#print axioms assembly_preserves_zero_token
+    failsWith (assemblyKeyToken 0 (List.replicate 9 0))
+      (.tables (.invalidPublicKeyToken 9)) = true := by decide +kernel
+#print axioms reference_rejects_invalid_token_widths
 
 theorem spells_version_components :
     decimal 0 = asciiOf "0" ∧ decimal 7 = asciiOf "7" ∧ decimal 10 = asciiOf "10" ∧

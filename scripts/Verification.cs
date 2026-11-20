@@ -4531,12 +4531,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         Pinned,
         /// <summary>A platform reference assembly a binding fact's claims name.</summary>
         Platform,
+        /// <summary>An additional image whose definition key is compared with a direct AssemblyRef.</summary>
+        Reference,
         /// <summary>An image of the digest file that no pin and no claim names.</summary>
         Unused
     }
 
     sealed class ImageRoleNames() : ExactNames<ImageRole>((ImageRole.Pinned, "pinned"),
-        (ImageRole.Platform, "platform"), (ImageRole.Unused, "unused"));
+        (ImageRole.Platform, "platform"), (ImageRole.Reference, "reference"), (ImageRole.Unused, "unused"));
 
     /// <summary>The digest file a deep run read, by its path and its own SHA-256.</summary>
     internal sealed record DigestFile([property: JsonRequired] string path, [property: JsonRequired] string sha256);

@@ -353,6 +353,13 @@ and reads the instance fields in declaration order: `Item1` has type `T1` and `I
 type `T2`. The object and pair can have different forwarding destinations. A missing pair
 destination leaves this fact uncovered. Runtime byte offsets remain a layout assumption.
 
+For `public-key-tokens`, include the image for each direct assembly reference of the selected
+assembly and its pinned references. Lean reads each physical AssemblyRef, compares the tokens
+carried by the extraction with those rows, and computes each publisher token from the full key
+in the referenced image. An empty definition key denotes an unsigned assembly. A missing
+target leaves the fact `not covered`. The report records additional images
+used for this check with role `reference`.
+
 A fact is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
 pin or checked claim uses are listed as unused and not covered. Successful reports include the
 digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.

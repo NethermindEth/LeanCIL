@@ -44,7 +44,7 @@ partial class Program
         readonly FailureReports.BindingFailureDigest digests;
         readonly (string Identity, Sha256Digest Digest)[] images;
         readonly HashSet<Sha256Digest> imageDigests;
-        readonly DeepCheckInputs.Pin[] platformPins;
+        readonly DeepCheckInputs.Pin[] checkedPins;
         readonly Dictionary<Sha256Digest, string> rejectedImages = [];
         readonly Dictionary<BindingFact, string> rejectedFacts = [];
         internal string IdentitySha256 { get; }
@@ -54,7 +54,7 @@ partial class Program
         {
             digests = new(inputs.Path, inputs.Digest.ToString());
             IdentitySha256 = identitySha256;
-            platformPins = [.. pins.Where(pin => pin.ObjectCoverage.HasValue || pin.TupleCoverage.HasValue)];
+            checkedPins = [.. pins];
             images = [.. pins.Select(pin => (pin.Identity, pin.Image.Digest))];
             imageDigests = [.. images.Select(image => image.Digest)];
         }
@@ -82,9 +82,10 @@ partial class Program
                 var detail = fact switch
                 {
                     BindingFact.ObjectFields => DeepCheckInputs.ObjectFieldDiagnostic(
-                        platformPins.Where(pin => pin.ObjectCoverage.HasValue)),
+                        checkedPins.Where(pin => pin.ObjectCoverage.HasValue)),
                     BindingFact.ValueTupleFieldOrder => DeepCheckInputs.TupleFieldDiagnostic(
-                        platformPins.Where(pin => pin.TupleCoverage.HasValue)),
+                        checkedPins.Where(pin => pin.TupleCoverage.HasValue)),
+                    BindingFact.PublicKeyTokens => DeepCheckInputs.ReferenceKeyDiagnostic(checkedPins),
                     _ => null
                 };
                 if (detail is not null) reason += ". " + detail;
@@ -130,7 +131,7 @@ partial class Program
 
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
     sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods,
-        bool? ObjectFields = null, bool? TupleFields = null);
+        bool? ObjectFields = null, bool? TupleFields = null, bool? PublicKeys = null);
 
     /// <summary>
     /// Artifacts and requests that must join the caller's extraction and proof audit. A contribution with a result
@@ -268,7 +269,8 @@ partial class Program
         BindingPlan plan = new(session, pins,
             identity.Root.GetProperty("methods").GetArrayLength(), matchedPins.FirstOrDefault(pin =>
                 pin.ObjectCoverage.HasValue)?.ObjectCoverage, matchedPins.FirstOrDefault(pin =>
-                pin.TupleCoverage.HasValue)?.TupleCoverage);
+                pin.TupleCoverage.HasValue)?.TupleCoverage, matchedPins.FirstOrDefault(pin =>
+                pin.KeyCoverage.HasValue)?.KeyCoverage);
         var directory = Path.Combine(session, "BindingAudit");
         if (Directory.Exists(directory))
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
@@ -481,14 +483,15 @@ partial class Program
         var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet();
         ImageResult[] images =
         [
-            .. pins.Select(pin => imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
-                ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(),
-                    pin.Platform ? ImageRole.Platform : ImageRole.Pinned,
-                    BindingStatus.Reconfirmed, theorem, null)
-                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(),
-                    pin.Platform ? ImageRole.Platform : ImageRole.Pinned,
-                    BindingStatus.NotCovered, null,
-                    "no checked theorem states the digest of this image")),
+            .. pins.Select(pin =>
+            {
+                var role = pin.Platform ? ImageRole.Platform : pin.Reference ? ImageRole.Reference : ImageRole.Pinned;
+                return imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
+                    ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(), role,
+                        BindingStatus.Reconfirmed, theorem, null)
+                    : new ImageResult(pin.Identity, pin.Image.Digest.ToString(), role,
+                        BindingStatus.NotCovered, null, "no checked theorem states the digest of this image");
+            }),
             .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
                 new ImageResult(image.Path, image.Digest.ToString(), ImageRole.Unused, BindingStatus.NotCovered, null,
                     "no extraction pin or checked binding claim names this image"))
@@ -514,12 +517,13 @@ partial class Program
         BindingFact.DispatchCatalogs => "no check reads the types of an image",
         BindingFact.StaticData => "no checked theorem binds the static field data to the pinned images",
         BindingFact.GenericConstraints => "no check reads constraints from the image",
-        BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
+        BindingFact.PublicKeyTokens => "the supplied images do not cover the extraction pins' AssemblyRef targets",
         BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
         _ => throw new InvalidOperationException("Missing binding fact reason: " + fact)
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string PublicKeysModule = "BindingAudit.PublicKeys";
     const string TupleFieldsModule = "BindingAudit.TupleFields";
     const string ObjectFieldsModule = "BindingAudit.ObjectFields";
     const string StaticDataModule = "BindingAudit.StaticData";
@@ -740,10 +744,28 @@ partial class Program
                 end BindingAudit
 
                 """);
+        if (plan.PublicKeys is { } keysComplete)
+            File.WriteAllText(ModuleSource(plan.Output, PublicKeysModule), $$"""
+                import BindingAudit.Images
+                import Extracted
+                import StrictBinding.PublicKeys
+
+                namespace BindingAudit
+
+                set_option debug.skipKernelTC true in
+                /-- The supplied reference images carry the keys named by the extraction pins. -/
+                theorem publicKeyTokens : StrictBinding.{{KeyProposition(keysComplete)}} images
+                    Extracted.assemblies Extracted.methodEvidence := by decide +kernel
+
+                end BindingAudit
+
+                """);
         foreach (var fact in PagedFacts)
             File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
                 plan.Methods, BindingPageSize(plan.Methods)));
     }
+
+    static string KeyProposition(bool complete) => complete ? "PublicKeysBound" : "SuppliedPublicKeysValid";
 
     static string TupleProposition(bool complete) => complete ? "TupleFieldsBound" : "SuppliedTupleFieldsValid";
 
@@ -927,6 +949,13 @@ partial class Program
             platform.Add(new(TupleFieldsModule, new("BindingAudit.tupleFields", statement, ApprovedAxioms),
                 new BindingSubject.Fact(BindingFact.ValueTupleFieldOrder, pairComplete)));
         }
+        if (plan.PublicKeys is { } keysComplete)
+        {
+            var statement = App(Const("StrictBinding." + KeyProposition(keysComplete)), Const("BindingAudit.images"),
+                Const("Extracted.assemblies"), Const("Extracted.methodEvidence"));
+            platform.Add(new(PublicKeysModule, new("BindingAudit.publicKeyTokens", statement, ApprovedAxioms),
+                new BindingSubject.Fact(BindingFact.PublicKeyTokens, keysComplete)));
+        }
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
@@ -969,6 +998,7 @@ partial class Program
         var facts = PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
+        if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);
         foreach (var module in facts)
             if (failures.ContainsKey(ImagesModule)) failures[module] = "build: " + ImagesModule + " did not build";
             else if (Build(module) is { } pagedError) failures[module] = "build: " + pagedError;

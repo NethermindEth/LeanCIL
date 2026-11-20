@@ -15,6 +15,7 @@ import StrictBinding.TypeDefs
 import StrictBinding.StaticData
 import StrictBinding.ObjectFields
 import StrictBinding.TupleFields
+import StrictBinding.PublicKeys
 
 /-!
 # Deep verification

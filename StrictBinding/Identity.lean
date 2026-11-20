@@ -7,8 +7,8 @@ import CIL.Crypto.Sha1
 Reads entries of the `#Strings` and `#Blob` heaps and spells the identity of the assembly an
 image defines from its Assembly row, in the form the extractor records:
 `Name, Version=a.b.c.d, Culture=neutral, PublicKeyToken=0123456789abcdef`. The token is the
-strong-name token of a flagged public key (`CIL.Crypto.Sha1.keyToken`), the eight-byte token
-of an unflagged key, or `null` for an unsigned assembly.
+strong-name token computed from the full key of a definition, or `null` for an unsigned assembly.
+An AssemblyRef may instead store an eight-byte token.
 -/
 
 namespace StrictBinding
@@ -94,13 +94,21 @@ def hexDigits (count value : Nat) : List Nat :=
     let digit := value / 16 ^ (count - 1 - place) % 16
     if digit < 10 then 48 + digit else 87 + digit
 
-/-- The token of key bytes read from an image, respecting the Assembly PublicKey flag. -/
+/-- A definition has its full public key in Assembly.PublicKey, or no publisher key. -/
+def publisherToken (key : List Nat) : Option Nat :=
+  if key.isEmpty then none else some (CIL.Crypto.Sha1.keyToken key)
+
+/-- AssemblyRef.PublicKeyOrToken contains a full key, an eight-byte token, or no key. -/
 def assemblyKeyToken (flags : Nat) (key : List Nat) : Except AuditError (Option Nat) := do
   if key.isEmpty then return none
   if flags % 2 == 1 then return some (CIL.Crypto.Sha1.keyToken key)
   let width := key.length
   if width != 8 then throw (.tables (.invalidPublicKeyToken width))
   pure (some (CIL.Crypto.bytesValue key))
+
+/-- The key column of an Assembly row holds a full key. AssemblyRef flags select its encoding. -/
+def rowKeyToken (row flags : Nat) (key : List Nat) : Except AuditError (Option Nat) :=
+  if row == tokenOf 0x20 1 then .ok (publisherToken key) else assemblyKeyToken flags key
 
 /-- The identity columns shared by Assembly and AssemblyRef, starting at the major version. -/
 def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
@@ -116,7 +124,7 @@ def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first :
   let culture ← layout.stringText view (← cell 7)
   let version := decimal major ++ [46] ++ decimal minor ++ [46] ++ decimal build ++ [46] ++
     decimal revision
-  let token ← assemblyKeyToken flags key
+  let token ← rowKeyToken row flags key
   let token := token.map (hexDigits 16) |>.getD (asciiOf "null")
   pure (name ++ asciiOf ", Version=" ++ version ++ asciiOf ", Culture=" ++
     (if culture.isEmpty then asciiOf "neutral" else culture) ++ asciiOf ", PublicKeyToken=" ++

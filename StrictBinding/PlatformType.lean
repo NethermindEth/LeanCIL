@@ -54,10 +54,8 @@ private def forwarder (image : PreparedImage) (name : String) (invalid : AuditEr
   return target
 
 /-- The platform Assembly row carries a full public key that hashes to the recognized token. -/
-def platformAssembly (image : PreparedImage) : Except AuditError Bool := do
-  let row := tokenOf 0x20 1
-  let flags ← image.layout.cell image.view row 5
-  return flags &&& 1 != 0 && (← coreAssemblyAt image row 1)
+def platformAssembly (image : PreparedImage) : Except AuditError Bool :=
+  coreAssemblyAt image (tokenOf 0x20 1) 1
 
 /-- Resolve a public System type through authenticated platform images and check its definition.
     A missing destination leaves coverage incomplete. A cycle or competing definition fails. -/

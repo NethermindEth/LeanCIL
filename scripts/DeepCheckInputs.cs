@@ -82,7 +82,8 @@ internal sealed class DeepCheckInputs
 
     /// <summary>An extraction pin matched by digest; its display identity does not select the image.</summary>
     internal sealed record Pin(string Identity, Image Image, bool Platform = false,
-        bool? ObjectCoverage = null, bool? TupleCoverage = null);
+        bool? ObjectCoverage = null, bool? TupleCoverage = null, bool? KeyCoverage = null,
+        bool Reference = false);
 
     readonly Dictionary<Sha256Digest, Image> byDigest;
 
@@ -151,7 +152,9 @@ internal sealed class DeepCheckInputs
         Add(identity, "assemblySha256");
         if (identity.TryGetProperty("references", out var references))
             foreach (var reference in references.EnumerateArray()) Add(reference, "sha256");
+        var sourceCount = pins.Count;
         AddPlatformImages(pins, identity);
+        AddReferenceImages(pins, sourceCount);
         return pins.AsReadOnly();
 
         void Add(JsonElement record, string digestProperty)
@@ -164,6 +167,57 @@ internal sealed class DeepCheckInputs
             pins.Add(new(name, image));
         }
     }
+
+    /// <summary>Match direct AssemblyRefs of the extraction pins to digest-checked images.
+    /// The kernel checks the physical rows, the carried tokens and the definition keys.</summary>
+    void AddReferenceImages(List<Pin> pins, int sourceCount)
+    {
+        HashSet<string> required = new(StringComparer.Ordinal);
+        var malformed = false;
+        foreach (var pin in pins.Take(sourceCount).DistinctBy(pin => pin.Image.Digest))
+        {
+            try
+            {
+                using var pe = pin.Image.OpenPe();
+                var metadata = pe.GetMetadataReader();
+                foreach (var handle in metadata.AssemblyReferences)
+                {
+                    var reference = metadata.GetAssemblyReference(handle);
+                    if (InvalidTokenWidth(metadata, reference))
+                        malformed = true;
+                    else
+                        required.Add(reference.GetAssemblyName().FullName);
+                }
+            }
+            catch (BadImageFormatException) { return; } // The image audit diagnoses malformed extraction pins.
+        }
+        if (required.Count == 0 && !malformed) return;
+        var digests = pins.Select(pin => pin.Image.Digest).ToHashSet();
+        var pinnedNames = pins.Select(pin => pin.Identity).ToHashSet(StringComparer.Ordinal);
+        var matched = required.Where(pinnedNames.Contains).ToHashSet(StringComparer.Ordinal);
+        foreach (var image in byDigest.Values.Where(image => !digests.Contains(image.Digest)))
+        {
+            string identity;
+            try
+            {
+                using var pe = image.OpenPe();
+                if (!pe.HasMetadata) continue;
+                var metadata = pe.GetMetadataReader();
+                if (!metadata.IsAssembly) continue;
+                identity = metadata.GetAssemblyDefinition().GetAssemblyName().FullName;
+            }
+            catch (BadImageFormatException) { continue; }
+            if (!required.Contains(identity) || pinnedNames.Contains(identity)) continue;
+            if (!matched.Add(identity)) throw new ArgumentException($"More than one image for {identity} in {Path}.");
+            pins.Add(new(identity, image, Reference: true));
+        }
+        if (matched.Count > 0 || malformed)
+            pins[0] = pins[0] with { KeyCoverage = !malformed && matched.Count == required.Count };
+    }
+
+    static bool InvalidTokenWidth(MetadataReader reader, AssemblyReference reference) =>
+        (reference.Flags & AssemblyFlags.PublicKey) == 0 &&
+        reader.GetBlobReader(reference.PublicKeyOrToken).Length is not (0 or 8);
 
     /// <summary>Find platform inputs by full assembly identity in the retained bytes. The kernel independently
     /// resolves every scope from method evidence and checks the defining image and its physical fields.</summary>
@@ -261,6 +315,24 @@ internal sealed class DeepCheckInputs
             return CoreLibrary(assembly) ? assembly.FullName : null;
         }
         catch (BadImageFormatException) { return null; } // A digest list can include arbitrary unused files.
+    }
+
+    /// <summary>The physical AssemblyRef and token width of a rejected publisher-token check.</summary>
+    internal static string? ReferenceKeyDiagnostic(IEnumerable<Pin> pins)
+    {
+        foreach (var pin in pins.Where(pin => !pin.Platform && !pin.Reference))
+        {
+            using var pe = pin.Image.OpenPe();
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.AssemblyReferences)
+            {
+                var reference = metadata.GetAssemblyReference(handle);
+                if (InvalidTokenWidth(metadata, reference))
+                    return $"{pin.Identity}, AssemblyRef {metadata.GetString(reference.Name)} has a " +
+                        $"{metadata.GetBlobReader(reference.PublicKeyOrToken).Length}-byte public key token.";
+            }
+        }
+        return null;
     }
 
     /// <summary>Physical field details for an already rejected kernel theorem.</summary>

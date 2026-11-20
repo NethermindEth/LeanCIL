@@ -39,12 +39,14 @@ File.WriteAllText(digestFile, digests);
 // Each fixture carries the actual platform identity and public key. A forwarded object has an
 // ExportedType and an AssemblyRef. A defined object has one physical Field row.
 static void WritePlatformImage(string path, AssemblyName name, FieldAttributes field, AssemblyName? forward = null,
-    AssemblyName? pairForward = null, bool definePair = false, bool reverseSlots = false)
+    AssemblyName? pairForward = null, bool definePair = false, bool reverseSlots = false,
+    bool definitionKeyFlag = true)
 {
     var rows = new MetadataBuilder();
     rows.AddModule(0, rows.GetOrAddString(name.Name + ".dll"), rows.GetOrAddGuid(Guid.Empty), default, default);
     rows.AddAssembly(rows.GetOrAddString(name.Name!), name.Version!, default,
-        rows.GetOrAddBlob(name.GetPublicKey()!), AssemblyFlags.PublicKey, AssemblyHashAlgorithm.Sha1);
+        rows.GetOrAddBlob(name.GetPublicKey()!), definitionKeyFlag ? AssemblyFlags.PublicKey : 0,
+        AssemblyHashAlgorithm.Sha1);
     var firstField = MetadataTokens.FieldDefinitionHandle(1);
     var firstMethod = MetadataTokens.MethodDefinitionHandle(1);
     rows.AddTypeDefinition(default, default, rows.GetOrAddString("<Module>"), default, firstField, firstMethod);
@@ -122,8 +124,12 @@ void CheckPlatformObject()
         if (result.Code != 0) throw new InvalidOperationException(result.Output);
         var binding = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")))
             .GetProperty("binding");
-        var fact = binding.GetProperty("facts").EnumerateArray()
-            .Single(f => f.GetProperty("id").GetString() == "object-fields");
+        var facts = binding.GetProperty("facts").EnumerateArray().ToArray();
+        var keyFact = facts.Single(f => f.GetProperty("id").GetString() == "public-key-tokens");
+        if (keyFact.GetProperty("status").GetString() != "reconfirmed" ||
+            keyFact.GetProperty("theorem").GetString() != "BindingAudit.publicKeyTokens")
+            throw new InvalidOperationException("Signed and unsigned AssemblyRefs were not checked: " + keyFact);
+        var fact = facts.Single(f => f.GetProperty("id").GetString() == "object-fields");
         if (fact.GetProperty("status").GetString() != expected ||
             fact.GetProperty("theorem").GetString() != (expected == "reconfirmed" ? "BindingAudit.objectFields" : null))
             throw new InvalidOperationException("Incorrect object-fields certificate: " + fact);
@@ -193,7 +199,11 @@ void CheckPlatformPair()
             expected == "reconfirmed" && pair.GetProperty("theorem").GetString() != "BindingAudit.tupleFields")
             throw new InvalidOperationException("Incorrect tuple field-order report: " + pair);
         var count = facts.Count(fact => fact.GetProperty("status").GetString() == "reconfirmed");
-        if (expected == "reconfirmed" && count != 5 || expected == "not covered" && count != 4)
+        var publicKeys = facts.Single(f => f.GetProperty("id").GetString() == "public-key-tokens");
+        if (expected != "failed" && (publicKeys.GetProperty("status").GetString() != "reconfirmed" ||
+            publicKeys.GetProperty("theorem").GetString() != "BindingAudit.publicKeyTokens"))
+            throw new InvalidOperationException("Missing publisher token proof for the pair assembly: " + publicKeys);
+        if (expected == "reconfirmed" && count != 6 || expected == "not covered" && count != 5)
             throw new InvalidOperationException($"Unexpected number of reconfirmed facts: {count} ({expected}).");
         if (expected == "failed" &&
             !pair.GetProperty("reason").GetString()!.Contains("Item1, signature 061301", StringComparison.Ordinal))
@@ -212,11 +222,71 @@ void CheckPlatformPair()
     previousCore.Version = new Version(core.Version!.Major - 1, 0, 0, 0);
     WritePlatformImage(destination, previousCore, FieldAttributes.Static, definePair: true);
     Check("not covered", facade, destination);
-    WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true);
+    WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true, definitionKeyFlag: false);
     Check("reconfirmed", facade, destination);
     WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true, reverseSlots: true);
     Check("failed", facade, destination);
     Console.WriteLine("PASS tuple forwarding, missing destination and swapped physical generic field signatures");
+}
+
+void CheckPublisherKey()
+{
+    var identity = JsonSerializer.SerializeToElement(new
+    {
+        assemblySha256 = Sha(app),
+        assemblyIdentity = AssemblyName.GetAssemblyName(app).FullName
+    });
+    var inputs = DeepCheckInputs.Read(digestFile);
+    var planned = inputs.MatchPins(identity);
+    if (planned.Count != 2 || planned[0].KeyCoverage != false || !planned[1].Reference ||
+        planned[1].Platform || planned[1].Identity != AssemblyName.GetAssemblyName(lib).FullName)
+        throw new InvalidOperationException("The digest-listed library did not match the unpinned AssemblyRef.");
+
+    var unusedReference = fixture.Build("ReferenceProbe", libName,
+        "namespace MultiFixture; public static class Mix { public static ulong Step(ulong x) => x * 3 + 1; " +
+        "public static void Print() => System.Console.WriteLine(); }");
+    var bytes = File.ReadAllBytes(unusedReference);
+    using (var pe = new PEReader(new MemoryStream(bytes, writable: false)))
+    {
+        var metadata = pe.GetMetadataReader();
+        var handle = metadata.AssemblyReferences.Single(h =>
+            metadata.StringComparer.Equals(metadata.GetAssemblyReference(h).Name, "System.Console"));
+        var signature = metadata.GetMethodDefinition(metadata.MethodDefinitions.First()).Signature;
+        var width = metadata.GetBlobReader(signature).Length;
+        if (width is 0 or 8 || metadata.GetHeapSize(HeapIndex.Blob) >= 65536)
+            throw new InvalidOperationException("Expected a short non-token signature and two-byte blob indices.");
+        // AssemblyRef.PublicKeyOrToken follows the four version components and the flags.
+        var row = metadata.GetTableMetadataOffset(TableIndex.AssemblyRef) +
+            (MetadataTokens.GetRowNumber(handle) - 1) * metadata.GetTableRowSize(TableIndex.AssemblyRef);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
+            bytes.AsSpan(pe.PEHeaders.MetadataStartOffset + row + 12),
+            checked((ushort)MetadataTokens.GetHeapOffset(signature)));
+    }
+    var changed = Path.Combine(fixture.Root, "short-token.dll");
+    File.WriteAllBytes(changed, bytes);
+    var extraction = fixture.Artifact("ShortToken");
+    Run([.. cli, "extract", app, "MultiFixture.Application::Direct(System.UInt64)", extraction,
+        "--reference", changed]);
+    var digestPath = Path.Combine(fixture.Root, "short-token.sha256");
+    File.WriteAllText(digestPath, $"{Sha(app)}  {Path.GetRelativePath(fixture.Root, app)}\n" +
+        $"{Sha(changed)}  {Path.GetFileName(changed)}\n");
+    var result = Execute([.. cli, "verify", extraction, "--proof", proof, "--theorem",
+        "MultiAssemblyProof.correctness", "--deep-checks", digestPath, "--format", "json"]);
+    if (result.Code == 0 || File.Exists(Path.Combine(extraction, "verified.json")))
+        throw new InvalidOperationException("A malformed token in a supplied assembly was certified.");
+    var failure = JsonSerializer.Deserialize<JsonElement>(result.Stdout).GetProperty("binding");
+    var rejected = failure.GetProperty("facts").EnumerateArray()
+        .Single(fact => fact.GetProperty("id").GetString() == "public-key-tokens");
+    if (rejected.GetProperty("status").GetString() != "failed" ||
+        !rejected.GetProperty("reason").GetString()!.Contains("AssemblyRef System.Console", StringComparison.Ordinal))
+        throw new InvalidOperationException("Missing publisher-key rejection: " + result.Output);
+    Console.WriteLine("PASS an invalid AssemblyRef token outside the method slice fails with partial reference inputs");
+}
+
+if (args is ["--keys"])
+{
+    CheckPublisherKey();
+    return;
 }
 
 if (args is ["--pair"])
@@ -339,6 +409,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     Console.WriteLine("PASS default and deep binding text");
     CheckPlatformObject();
     CheckPlatformPair();
+    CheckPublisherKey();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {

@@ -347,7 +347,7 @@ copy cannot be detected without the whole stream; every row must still have the 
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
 platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
-instance fields), public key tokens (the hash of a key is not computed in the kernel), the
+instance fields), public key tokens of referenced assemblies, the
 implementation, interface and closure digests that a generic import identity carries (no check
 recomputes them from the library image), imported implementation definitions, raw layout
 content, dispatch catalog completeness, static data bytes and generic parameter constraints.
@@ -362,7 +362,10 @@ against each platform image's public key, and checks that every field the root c
 static. For the selected `System.ValueTuple<T1,T2>` layout, the audit follows its own scoped
 TypeRef and forwarding chain. It checks the defining TypeDef's two generic parameters and
 the names and signatures of its two instance fields in physical declaration order.
-The general public-key-token and import-identity facts remain uncovered. `check` hashes each assembly and regenerates the extraction from those inputs.
+With all direct reference images supplied, the audit checks each AssemblyRef against its target's
+full publisher key or unsigned definition. It also compares each carried AssemblyRef token with
+the physical row in its source assembly. Generic import identities remain uncovered. `check` hashes
+each assembly and regenerates the extraction from those inputs.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler

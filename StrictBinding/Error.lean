@@ -70,6 +70,9 @@ inductive TypeDefPart where
 inductive AuditError where
   /-- The image constant has the wrong chunk count, an oversized chunk or nonzero padding. -/
   | malformedImage
+
+  /-- An AssemblyRef's key or token differs from the physical definition or the carried row. -/
+  | referenceKeyMismatch (identity : String) (token : Nat)
   /-- A read of `count` bytes at `offset` leaves the image. -/
   | outsideImage (offset count : Nat)
   | pe (error : PeError)

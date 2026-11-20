@@ -279,8 +279,7 @@ theorem rejects_two_keys_for_one_offset :
 
 /-! ## A public key at a nonzero offset -/
 
-/-- The key the variant carries: eight bytes without the `PublicKey` flag, so they are its
-    token. -/
+/-- The eight bytes of the key in the fixture's Assembly definition. -/
 private def keyBytes : List Nat := [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]
 
 /-- The fixture with its key blob, length prefix and key, written at `#Blob` offset 1 and named
@@ -299,7 +298,7 @@ private def keyedImage : ImageBytes :=
 /-- The variant, prepared under the identity its key spells. -/
 private def keyed : Except AuditError PreparedImage :=
   prepareOne { image := keyedImage, identity :=
-    "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=0123456789abcdef" }
+    "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=4705f121e18edfe3" }
 
 /-- The block an extraction carries for the variant: its key is the only blob, ranked 1. -/
 private def keyedBlock : AssemblyMetadata :=
