@@ -33,6 +33,8 @@ inductive MetadataError where
   | rowLength (token expected actual : Nat)
   | badCodedIndex (value : Nat)
   | rowOverflow (table row : Nat)
+  /-- An enclosing TypeDef is nil or does not precede its nested TypeDef (II.22). -/
+  | invalidNesting (nested enclosing : Nat)
   | missingHeap (heap offset : Nat)
   | malformedHeap (heap offset : Nat)
   | malformedUserString (offset : Nat)
@@ -760,13 +762,16 @@ def MetadataIndex.assemblyRef (index : MetadataIndex) (token : Nat) :
     .ok { major, minor, build, revision, flags, publicKeyOrToken, name, culture }
   | _ => .error (.unsupportedTable token)
 
-/-- The `NestedClass` row of a token. -/
+/-- A `NestedClass` row names a TypeDef and an earlier, nonzero enclosing TypeDef. -/
 def MetadataIndex.nestedClass (index : MetadataIndex) (token : Nat) :
     Except MetadataError NestedClassRow := do
   match ← index.columnsOf Table.nestedClass token with
   | [nested, enclosing] =>
-    .ok { nested := ← checkedTokenOf Table.typeDef nested .rowOverflow,
-          enclosing := ← checkedTokenOf Table.typeDef enclosing .rowOverflow }
+    let nestedToken ← checkedTokenOf Table.typeDef nested .rowOverflow
+    let enclosingToken ← checkedTokenOf Table.typeDef enclosing .rowOverflow
+    if nested > index.header.rows Table.typeDef then throw (.tokenOutOfScope nestedToken)
+    if enclosing == 0 || enclosing ≥ nested then throw (.invalidNesting nestedToken enclosingToken)
+    .ok { nested := nestedToken, enclosing := enclosingToken }
   | _ => .error (.unsupportedTable token)
 
 /-- The `GenericParam` row of a token. -/

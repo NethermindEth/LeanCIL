@@ -382,22 +382,36 @@ theorem signature_rows_fit_token :
 #print axioms signature_rows_fit_token
 
 /-- The nested and enclosing tokens from a NestedClass row with four-byte TypeDef indices. -/
-private def wideNestedClass (nested enclosing : List Nat) : Except MetadataError (Nat × Nat) := do
+private def wideNestedClass (nested enclosing : List Nat) (typeDefs : Nat := 0xffffff) :
+    Except MetadataError (Nat × Nat) := do
   let index ← examplesSlice.index
   let rows ← indexEntries [(0x29000001, nested ++ enclosing)]
-  let index := { index with rows, header.widths.typeDef := 4 }
+  let header := { index.header with
+    widths.typeDef := 4
+    rowCounts := [(Table.typeDef, typeDefs), (Table.nestedClass, 1)] }
+  let index := { index with rows, header }
   let entry ← index.nestedClass 0x29000001
   return (entry.nested, entry.enclosing)
 
-/-- Both simple indices retain rows zero and 0xffffff and reject a carry into another table. -/
+/-- A type can occupy the final representable row. Neither index can carry into another table. -/
 theorem nested_class_rows_fit_token :
     let oversized := [1, 0, 0, 1]
     let zero := [0, 0, 0, 0]
-    gives (wideNestedClass zero [255, 255, 255, 0]) (0x02000000, 0x02ffffff) ∧
+    gives (wideNestedClass [255, 255, 255, 0] [254, 255, 255, 0]) (0x02ffffff, 0x02fffffe) ∧
       failsWith (wideNestedClass oversized zero) (.rowOverflow Table.typeDef 0x1000001) ∧
       failsWith (wideNestedClass zero oversized) (.rowOverflow Table.typeDef 0x1000001) := by
   decide +kernel
 #print axioms nested_class_rows_fit_token
+
+/-- A nested type cannot be owned by a nil row, itself or a later type. -/
+theorem rejects_invalid_enclosing_type_rows :
+    let nested := [6, 0, 0, 0]
+    failsWith (wideNestedClass nested [0, 0, 0, 0]) (.invalidNesting 0x02000006 0x02000000) ∧
+      failsWith (wideNestedClass nested nested) (.invalidNesting 0x02000006 0x02000006) ∧
+      failsWith (wideNestedClass nested [7, 0, 0, 0]) (.invalidNesting 0x02000006 0x02000007) ∧
+      failsWith (wideNestedClass nested [5, 0, 0, 0] 5) (.tokenOutOfScope 0x02000006) := by
+  decide +kernel
+#print axioms rejects_invalid_enclosing_type_rows
 
 /-! ## Slices that must be refused -/
 

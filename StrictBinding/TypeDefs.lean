@@ -175,7 +175,8 @@ def fieldsEnd (image : PreparedImage) (row : Nat) : Except AuditError Nat :=
 
 /-- A row at the top level has a top-level visibility and the stated NestedClass rows bracket it;
     a nested row has a nested visibility, the stated NestedClass row pairs it with the stated
-    enclosing row, and the rows beside that row name other types. -/
+    enclosing row, and the rows beside that row name other types. The enclosing TypeDef is a
+    nonzero row strictly before the nested type (II.22). -/
 def NestingAt (image : PreparedImage) (row flags : Nat) : Nesting → Prop
   | .topLevel next =>
     visibilityOf flags < nestedVisibility ∧ 1 ≤ next ∧ next ≤ nestedCount image + 1 ∧
@@ -183,6 +184,7 @@ def NestingAt (image : PreparedImage) (row flags : Nat) : Nesting → Prop
   | .nested nestedRow enclosing =>
     nestedVisibility ≤ visibilityOf flags ∧ 1 ≤ nestedRow ∧ nestedRow ≤ nestedCount image ∧
       nestedTypeOf image nestedRow = .ok row ∧ enclosingOf image nestedRow = .ok enclosing ∧
+      (1 ≤ enclosing ∧ enclosing < row) ∧
       NamesBelow image (nestedRow - 1) row ∧ NamesAbove image (nestedRow + 1) row
 
 /-- The `Extends` value `baseValue` names the stated base type, with its namespace and name. -/
@@ -251,7 +253,8 @@ def nestingBound (image : PreparedImage) (row flags : Nat) : Nesting → Except 
       nestedRow ≤ nestedCount image))
     let nested ← nestedTypeOf image nestedRow
     let outer ← enclosingOf image nestedRow
-    requirePart row .nesting (nested == row && outer == enclosing)
+    requirePart row .nesting
+      (nested == row && outer == enclosing && decide (1 ≤ enclosing ∧ enclosing < row))
     requirePart row .nesting (← namesBelow image (nestedRow - 1) row)
     requirePart row .nesting (← namesAbove image (nestedRow + 1) row)
 
@@ -389,14 +392,14 @@ theorem nestingAt_of_nestingBound {image : PreparedImage} {row flags : Nat} {nes
     obtain ⟨above, aboveOk, aboveHolds⟩ := except_bind_ok checked
     have bounds := of_decide_eq_true (requirePart_ok visibleOk)
     have same := requirePart_ok pairedOk
-    simp only [Bool.and_eq_true, beq_iff_eq] at same
-    obtain ⟨rfl, rfl⟩ := same
+    simp only [Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at same
+    obtain ⟨⟨rfl, rfl⟩, precedes⟩ := same
     have belowTrue := requirePart_ok placedOk
     have aboveTrue := requirePart_ok aboveHolds
     subst belowTrue
     subst aboveTrue
-    exact ⟨bounds.1, bounds.2.1, bounds.2.2, readNested, readOuter, namesBelow_ok belowOk,
-      namesAbove_ok aboveOk⟩
+    exact ⟨bounds.1, bounds.2.1, bounds.2.2, readNested, readOuter, precedes,
+      namesBelow_ok belowOk, namesAbove_ok aboveOk⟩
 
 #print axioms nestingAt_of_nestingBound
 
@@ -442,7 +445,7 @@ theorem only_row_of_nested {image : PreparedImage} {row flags nestedRow enclosin
     ∀ other, 1 ≤ other → other ≤ nestedCount image → nestedTypeOf image other = .ok row →
       other = nestedRow := by
   intro other low high read
-  obtain ⟨_, first, last, _, _, below, above⟩ := placed
+  obtain ⟨_, first, last, _, _, _, below, above⟩ := placed
   by_cases before : other < nestedRow
   · rcases below with zero | ⟨bound, readBound, less⟩
     · omega

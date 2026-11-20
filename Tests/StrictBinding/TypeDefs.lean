@@ -65,11 +65,12 @@ theorem every_fixture_type_definition_is_found_at_its_row : TypeDefsBound pinned
   decide +kernel
 #print axioms every_fixture_type_definition_is_found_at_its_row
 
-/-- The file offset of TypeDef row `row`, from the reader's table position and row size. -/
-private def typeDefRowStart (row : Nat) : Nat :=
+/-- The file offset of a row, from the reference reader's table position and row size. -/
+private def rowStart (table row : Nat) : Nat :=
   (StrictFixture.expectedFacts.filterMap fun fact =>
     match fact with
-    | .table 0x02 _ size offset => some (offset + (row - 1) * size)
+    | .table number _ size offset =>
+      if number == table then some (offset + (row - 1) * size) else none
     | _ => none).headD 0
 
 /-- The result of checking one claim against the fixture. -/
@@ -124,7 +125,7 @@ theorem rejects_a_class_claimed_as_a_struct :
 theorem rejects_a_class_whose_row_is_an_interface :
     failsWith (checkAll typeDefClaimBound
         [{ identity := StrictFixture.identity,
-           image := flipByte StrictFixture.image (typeDefRowStart 5) interfaceFlag }] [shape])
+           image := flipByte StrictFixture.image (rowStart 0x02 5) interfaceFlag }] [shape])
       (.typeDefMismatch 5 .kind) = true := by decide +kernel
 #print axioms rejects_a_class_whose_row_is_an_interface
 
@@ -177,7 +178,7 @@ theorem rejects_a_row_above_24_bits :
 /-- The fixture uses two-byte heap and table indexes. The base, field list and method list
     follow the four flag bytes and the two name indexes in each TypeDef row. -/
 private def checkChanged (claim : TypeDefClaim) (row columnOffset before after : Nat) :=
-  let image := flipByte StrictFixture.image (typeDefRowStart row + columnOffset) (before ^^^ after)
+  let image := flipByte StrictFixture.image (rowStart 0x02 row + columnOffset) (before ^^^ after)
   checkAll typeDefClaimBound [{ identity := StrictFixture.identity, image }] [claim]
 
 /-- A matching base specification can name the fixture's existing TypeSpec row. -/
@@ -209,5 +210,30 @@ theorem rejects_fields_past_the_table :
     failsWith (checkChanged { shape with fields := (6, 3) } 6 10 6 9)
       (.typeDefMismatch 5 .fields) := by decide +kernel
 #print axioms rejects_fields_past_the_table
+
+/-- Put one NestedClass row in the fixture's final table slot. Its AssemblyRef row starts with
+    major version 11 and minor version 0. Triangle (row 6) and its base Shape are both local. -/
+private def checkEnclosing (enclosing : Nat) : Except AuditError Unit :=
+  let tables := StrictFixture.expectedFacts.findSome? fun fact =>
+    match fact with
+    | .stream "tables" offset _ => some offset
+    | _ => none
+  let validMask := tables.getD 0 + 8
+  let lastTable := rowStart 0x23 1
+  let image := flipBytes StrictFixture.image
+    [(validMask + 4, 0x08), (validMask + 5, 0x02), (rowStart 0x02 6, 1 ^^^ 2),
+     (lastTable, 11 ^^^ 6), (lastTable + 2, enclosing)]
+  checkAll typeDefClaimBound [{ identity := StrictFixture.identity, image }]
+    [{ triangle with nesting := .nested 1 enclosing }]
+
+/-- The checked row can nest Triangle inside Shape. -/
+theorem accepts_an_earlier_enclosing_type : (checkEnclosing 5).isOk := by decide +kernel
+#print axioms accepts_an_earlier_enclosing_type
+
+/-- Even when the claim repeats the row's bytes, its owner must exist and precede Triangle. -/
+theorem rejects_an_invalid_enclosing_type :
+    [0, 6, 7, 9].all (fun enclosing =>
+      failsWith (checkEnclosing enclosing) (.typeDefMismatch 6 .nesting)) := by decide +kernel
+#print axioms rejects_an_invalid_enclosing_type
 
 end Tests.StrictBinding.TypeDefs
