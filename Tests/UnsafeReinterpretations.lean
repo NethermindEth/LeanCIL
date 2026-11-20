@@ -324,8 +324,9 @@ theorem spanReceiversFault : [(MemoryOp.spanLength, ([] : List CIL.Safety.Value)
   decide +kernel
 #print axioms spanReceiversFault
 
-/-- Object instructions fault on a null or plain reference to span, array, class or
-    method-pointer storage, so a reference NullRef forms for them is never read as a value. -/
+/-- Object instructions fault on a null or plain reference to span, array or class storage, and
+    a native-integer load, which reads a method pointer, faults on a null reference, so a reference
+    NullRef forms for them is never read as a value. -/
 theorem objectOperandsFault :
     let body : Method :=
       { code := [], locals := [], returnsValue := true, environment := environment 2 }

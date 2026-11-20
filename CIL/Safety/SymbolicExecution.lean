@@ -1247,6 +1247,12 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
       (mkConst ``CIL.Link) value))
   | _ => return none
 
+open Lean Meta in
+/-- Whether `fact` is an equation whose right side is `none`: a link fact for a pc with no link,
+    or a model fact for a method with no runtime model. -/
+def statesNone (fact : Expr) : MetaM Bool :=
+  return ((← inferType fact).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
+
 open Lean Elab Tactic Meta in
 /-- The runtime model of a call of `method` in `body` as a fact: the `cil_runtime_models` fact
     of a named body, or the table's evaluation for a literal one, which may give no model. Nothing
@@ -1476,7 +1482,7 @@ elab_rules : tactic
           replaceMainGoal [goal]
           let linkFact ← goal.withContext (Term.exprToSyntax (mkFVar link))
           -- A call whose pc states no link runs its method's model, which a fact states.
-          let unlinked := ((← inferType proof).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
+          let unlinked ← statesNone proof
           let body ← entryAt "cil_checked_step_normalized" args 0
           let model ← if !unlinked then pure none else
             match argumentsOf? args[1]! ``CIL.Instruction.call 2,
@@ -2085,7 +2091,7 @@ open Lean Elab Tactic Meta in
 /-- The link lookup for this instruction proves that it has no callee. -/
 def unlinkedPc (body pc : Expr) : TacticM Bool := withMainContext do
   let some fact ← stepLinkFact? body pc | return false
-  return ((← inferType fact).eq?.map (·.2.2.isAppOf ``Option.none)).getD false
+  statesNone fact
 
 open Lean Elab Tactic Meta in
 /-- A known empty link selects runtime model lookup for a call or constructor at the fetched pc. -/

@@ -1983,6 +1983,49 @@ theorem contract_steps_modelled_call (program : CIL.Program)
   exact continuation
 #print axioms contract_steps_modelled_call
 
+/-- `IntPtr.get_Size`, a call the runtime table models. -/
+def nativeSizeGetter : CIL.Extraction.MethodRef :=
+  { owner := .atom CIL.Extraction.runtimeScope "System.IntPtr", name := name!"get_Size",
+    hasThis := false, genericArity := 0, parameters := [],
+    returnType := .atom CIL.Extraction.runtimeScope "System.Int32" }
+
+/-- Two calls of the modelled size getter. Only the second has a link, which enters method 1. -/
+def linkedModelCalls : CIL.Method :=
+  { locals := [], returnsValue := true, links := [(2, .direct 1)],
+    code := [.call nativeSizeGetter {}, .pop, .call nativeSizeGetter {}, .ret] }
+cil_instruction_equations linkedModelCalls
+cil_runtime_models linkedModelCalls
+/-- The method the linked getter call enters; it returns 4, where the model pushes 8. -/
+def fourWord : CIL.Method := { locals := [], returnsValue := true, code := [.ldc_i4 4, .ret] }
+cil_instruction_equations fourWord
+
+/-- A linked site enters its callee although its method has a model, so the run returns the
+    callee's 4 rather than the model's native size. -/
+theorem linked_model_site (memory : Memory) :
+    invoke [linkedModelCalls, fourWord] 10 0 [] memory = .ok (memory, [.scalar (.i32 4)]) := by
+  cil_checked_steps []
+#print axioms linked_model_site
+
+/-- The callee of the linked getter call returns 4 and touches no memory. -/
+def fourContract : MethodContract Unit CIL.W32 where
+  args _ := []
+  results value := [.scalar (.i32 value)]
+  pre _ _ := True
+  footprint _ := []
+  post _ _ _ value := value = 4
+
+/-- Contract stepping runs the unlinked call's model and crosses the linked call with its callee's
+    contract, so the result is the contract's 4 rather than the model's native size. -/
+theorem contract_steps_linked_model_site (program : CIL.Program) (memory : Memory)
+    (caller : program[0]? = some linkedModelCalls) (holds : fourContract.Holds program 1) :
+    ∃ fuel final returned,
+      run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (final, returned) ∧
+        returned = [.scalar (.i32 4)] := by
+  cil_contract_steps [caller, holds, fourContract]
+  obtain rfl := call.post
+  rfl
+#print axioms contract_steps_linked_model_site
+
 -- The stepper enters the model call by its one equation, not by `step_call_eq`, whose rewrite
 -- under the call's continuation the kernel rechecks at every call.
 open Lean in

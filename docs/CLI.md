@@ -1280,7 +1280,8 @@ imports `ExtractedSymbols`; an extraction without a matching PDB has no
 `Symbols.lean`, and `unknown` says so. `missing.shape` names the kind of fact the step
 lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, `calleeContract` at a
 `call` or `callvirt` that enters a callee, the shape of its runtime model's step at a `call`
-without a link, or on a class instance `objectForm`, `objectSlot` or
+or `newobj` without a link, `linkOrModel` at a `call` or `newobj` with neither a link nor a
+runtime model, or on a class instance `objectForm`, `objectSlot` or
 `objectAllocation`, and `residual` the terms it must prove: the step rewritten by
 the proof's step equations and the `_ = .ok _` and `_ = .error _` facts in scope.
 A side condition, such as an unfolded step a tactic could not close, has a shape when it names one

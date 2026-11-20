@@ -560,7 +560,9 @@ The tactics of [LoopFrameSteps](../CIL/Safety/LoopFrameSteps.lean), which
 All gather facts as the other loop tactics do, so their lists are optional:
 
 - `cil_loop_advance [facts]` steps through runtime-model calls and stops at a linked call or
-  return. `cil_loop_finish [facts]` steps through a return to its postcondition.
+  return. Where the step of a `call` or `newobj` without a link does not close, it shows the
+  step of the site's runtime model, and at a site with neither a link nor a runtime model it fails,
+  naming the pc. `cil_loop_finish [facts]` steps through a return to its postcondition.
   Each takes a struct zeroing, field store or numeric local store on
   the way as `cil_loop_recurse` does and fails as `cil_loop_steps` does on anything else. At the
   return `cil_loop_finish` names what leaving the frame keeps, `exitConfined` and `exitBelow`

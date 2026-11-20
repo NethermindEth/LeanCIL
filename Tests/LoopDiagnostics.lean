@@ -533,6 +533,78 @@ theorem advance_size_call (frame : Frame) (memory : Memory) (post : Memory → L
 
 #print axioms advance_size_call
 
+-- A call without a link runs its model, so `cil_loop_call` refuses it and names the tactic that
+-- steps it.
+/-- error: cil_loop_call: pc 0 has no callee link; step it with `cil_loop_advance` -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop) (sum : W32) :
+    LoopTerminates [sizeCalls, sizeCalls] 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_call addTwo_holds sum
+
+/-- A call without a link of a method the runtime table does not model. -/
+@[cil_code] private def modelessCall : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.call (Tests.callee 0) {}, .ret] }
+
+/-- The modeless call as method 0 of a program. -/
+@[cil_code] private def modelessProgram : CIL.Program := [modelessCall]
+
+/-- The modeless call after a `nop`, so a run stops at it after one step. -/
+@[cil_code] private def lateModeless : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.nop, .call (Tests.callee 0) {}, .ret] }
+
+/-- The late modeless call as method 0 of a program. -/
+@[cil_code] private def lateModelessProgram : CIL.Program := [lateModeless]
+
+-- No step crosses a call with neither a link nor a model, and the walk says so.
+/-- error: cil_loop_advance: pc 0 (CIL.Instruction.call (callee 0)) has neither a link nor a
+runtime model, so no step crosses it -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop) :
+    LoopTerminates [modelessCall] 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_advance
+
+-- The failure record names the same gap instead of a callee contract.
+/-- "missing":"linkOrModel" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop) :
+    LoopTerminates modelessProgram 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_advance
+
+-- A run stopped at the modeless call reports the same gap.
+/-- "missing":"linkOrModel","obligation":null,"pc":1 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (frame : Frame) (memory : Memory)
+    (result : Except LocatedFault (Memory × List Value)) :
+    run lateModelessProgram 100 0 0 [] frame [] memory = result := by
+  cil_checked_steps 1
+
+/-- `new Span<int>(ref value)` without a link, a construction the runtime table models. -/
+@[cil_code] private def spanOfReference : CIL.Method :=
+  let int := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  { returnsValue := true, locals := [], code := [.ldarg 0, .newobj {
+      owner := .apply (.constructor CIL.Extraction.runtimeScope "System.Span`1") int,
+      name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
+      parameters := [.byref int] }, .ret] }
+
+cil_runtime_models spanOfReference
+
+-- A construction without a link stops at its model's step, not at the raw constructor's.
+/-- (CIL.Instruction.memory (CIL.MemoryOp.spanSingleReference 4 true)) 1 -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (frame : Frame) (memory : Memory) (value : Value) (post : Memory → List Value → Prop) :
+    LoopTerminates [spanOfReference] 0 [value] post ⟨1, frame, [value], memory⟩ := by
+  cil_loop_advance
+
+-- The failure record at the construction reads the model's step, not the raw constructor's.
+/-- "missing":"spanValidity","obligation":null,"pc":1 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (frame : Frame) (memory : Memory) (value : Value) (post : Memory → List Value → Prop) :
+    LoopTerminates [spanOfReference] 0 [value] post ⟨1, frame, [value], memory⟩ := by
+  cil_loop_advance
+
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
   returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .storeScalar 4, .ret] }

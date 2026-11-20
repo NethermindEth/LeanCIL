@@ -147,24 +147,50 @@ def missingFactHint (residual : Array Expr) : MessageData := Id.run do
   return fact.hint
 
 open Lean Elab Tactic Meta in
-/-- The step goal `step` of a `call` whose pc has no link, rewritten to the step of its method's
-    runtime model, as a memory operation where the model is one, so its residual shows what the
-    model reads. Nothing when the call is linked or no fact decides its link or model. -/
-def modelledCallStep? (step : MVarId) : TacticM (Option MVarId) := do
+/-- The body, method, opcode and link fact of the step goal `step` when it steps a `call` or
+    `newobj` whose pc a fact shows has no link. Nothing for any other step. -/
+private def unlinkedSite? (step : MVarId) : TacticM (Option (Expr × Expr × Name × Expr)) := do
   let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | return none
   let some #[body, op, pc, _, _, _, _] := argumentsOf? action ``CIL.Safety.step 7 | return none
-  let some #[method, _] := argumentsOf? op ``CIL.Instruction.call 2 | return none
+  let some (method, opcode) := (match argumentsOf? op ``CIL.Instruction.call 2,
+      argumentsOf? op ``CIL.Instruction.newobj 1 with
+    | some #[method, _], _ => some (method, ``CIL.CallOpcode.call)
+    | _, some #[method] => some (method, ``CIL.CallOpcode.newobj)
+    | _, _ => none) | return none
   let some link ← stepLinkFact? body pc | return none
-  unless ((← inferType link).eq?.map (·.2.2.isAppOf ``Option.none)).getD false do return none
-  let some model ← stepModelFact? body method | return none
+  unless ← statesNone link do return none
+  return some (body, method, opcode, link)
+
+open Lean Elab Tactic Meta in
+/-- Whether the step goal `step` steps a call or construction that has neither a link nor a
+    runtime model, so no step crosses it. -/
+def unmodelledCall (step : MVarId) : TacticM Bool := do
+  let some (body, method, opcode, _) ← unlinkedSite? step | return false
+  let some model ← stepModelFact? body method opcode | return false
+  statesNone model
+
+open Lean Elab Tactic Meta in
+/-- The step goal `step` of a `call` or `newobj` whose pc has no link, rewritten to the step of
+    its method's runtime model, as a memory operation where the model is one, so its residual
+    shows what the model reads. Nothing when the site is linked or no fact decides its link or
+    model. -/
+def modelledCallStep? (step : MVarId) : TacticM (Option MVarId) := do
+  let some (body, method, opcode, link) ← unlinkedSite? step | return none
+  let some model ← stepModelFact? body method opcode | return none
   let saved ← saveState
   try
     let remaining ← step.withContext do
       let link ← Term.exprToSyntax link
       let model ← Term.exprToSyntax model
-      Tactic.run step <| evalTactic (← `(tactic| first
-        | rewrite [CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl]
-        | rewrite [CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl]))
+      let rewrite ← if opcode == ``CIL.CallOpcode.call then
+          `(tactic| first
+            | rewrite [CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl]
+            | rewrite [CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl])
+        else
+          `(tactic| first
+            | rewrite [CIL.Safety.step_newobj_memory _ _ _ _ _ $link $model rfl]
+            | rewrite [CIL.Safety.step_newobj_model _ _ _ _ _ $link $model])
+      Tactic.run step <| evalTactic rewrite
     let [goal] := remaining | saved.restore; return none
     return some goal
   catch _ =>

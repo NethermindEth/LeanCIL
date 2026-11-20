@@ -154,8 +154,8 @@ def residualOf (step : MVarId) : MetaM (Option (Array Expr)) := step.withContext
     result.set (← stepResidual step (← facts.mapM fun fact => Term.exprToSyntax fact))
   result.get
 
-/-- The step goal `step` of a call that runs its runtime model, rewritten to that model's step;
-    nothing for a call that enters a callee. -/
+/-- The step goal `step` of a call or construction that runs its runtime model, rewritten to
+    that model's step; nothing for one that enters a callee. -/
 def modelledStepOf (step : MVarId) : MetaM (Option MVarId) := step.withContext do
   let result ← IO.mkRef none
   discard <| Term.TermElabM.run' <| Tactic.run step do result.set (← modelledCallStep? step)
@@ -174,6 +174,13 @@ def viewedStepGoal (step : MVarId) : MetaM MVarId := step.withContext do
   let stepTerm ← mkAppM `CIL.Safety.step #[body, op, pc, args, frame, viewed, memory]
   let goal ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar (← inferType stepTerm)))
   return goal.mvarId!
+
+/-- Whether the step goal `step` is of a call or construction with neither a link nor a
+    runtime model, which no step crosses. -/
+def unmodelledStepOf (step : MVarId) : MetaM Bool := step.withContext do
+  let result ← IO.mkRef false
+  discard <| Term.TermElabM.run' <| Tactic.run step do result.set (← unmodelledCall step)
+  result.get
 
 /-! ## Failure records -/
 
@@ -267,7 +274,11 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
     missing := some "calleeContract",
     suggestions := #[m!"cross the call with the call tactic of its stepping family and the \
       callee's contract"] }
+  let unmodelled := { record with
+    missing := some "linkOrModel",
+    suggestions := #[m!"the site has neither a link nor a runtime model, so no step crosses it"] }
   let entersCallee := isCall && !calling
+  let constructs := (← whnfR op).isAppOf ``CIL.Instruction.newobj
   let unread := if entersCallee then callee else record
   let some frame := stepping.parts.find? (·.1 == "frame") | return unread
   let some stack := stepping.parts.find? (·.1 == "stack") | return unread
@@ -278,11 +289,15 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
   let step ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar resultType))
   let .mvar stepGoal := step
     | throwError "analyze: expected a fresh metavariable, but found{indentExpr step}"
-  -- A call without a link runs its runtime model in this method, so its residual is the model's.
-  let stepGoal ← if entersCallee then
+  -- A call or construction without a link runs its runtime model in this method, so its residual
+  -- is the model's; with no model either, nothing steps it.
+  let stepGoal ← if entersCallee || constructs then
       match ← modelledStepOf stepGoal with
       | some modelled => pure modelled
-      | none => return callee
+      | none =>
+        if ← unmodelledStepOf stepGoal then return unmodelled
+        if entersCallee then return callee
+        pure stepGoal
     else pure stepGoal
   -- Reading a home's slot needs only the view's validity, which the stepping facts give, so the
   -- operation's own missing fact is read from the step on the view the slot holds.
