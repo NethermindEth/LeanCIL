@@ -196,7 +196,8 @@ def BaseAt (image : PreparedImage) (baseValue : Nat) : BaseType → Prop
       NameAt image token typeNamespaceColumn baseNamespace
   | .spec token =>
     tableOf token = CIL.Extraction.Table.typeSpec ∧
-      Column.typeDefOrRef.valueOf token = some baseValue
+      Column.typeDefOrRef.valueOf token = some baseValue ∧
+      ∃ position, image.layout.rowAt token = .ok position
 
 /-- The claimed TypeDef row of the image defines the claimed type: its names, nesting, Field
     rows and base type are the row's, and its kind is the one the row's flags and base type
@@ -209,6 +210,8 @@ def TypeDefAt (image : PreparedImage) (claim : TypeDefClaim) : Prop :=
     NestingAt image claim.row flags claim.nesting ∧
     image.layout.cell image.view token typeDefFieldListColumn = .ok claim.fields.1 ∧
     fieldsEnd image claim.row = .ok (claim.fields.1 + claim.fields.2) ∧
+    1 ≤ claim.fields.1 ∧ claim.fields.1 + claim.fields.2 ≤
+      image.layout.rowCount CIL.Extraction.Table.field + 1 ∧
     image.layout.cell image.view token typeDefExtendsColumn = .ok baseValue ∧
     BaseAt image baseValue claim.base ∧
     claim.kind = kindOf flags claim.typeNamespace claim.typeName claim.base
@@ -263,10 +266,12 @@ def baseBound (image : PreparedImage) (row baseValue : Nat) :
         Column.typeDefOrRef.valueOf token == some baseValue)
     nameBound image token typeNameColumn baseName row .base
     nameBound image token typeNamespaceColumn baseNamespace row .base
-  | .spec token =>
+  | .spec token => do
     requirePart row .base
       (tableOf token == CIL.Extraction.Table.typeSpec &&
         Column.typeDefOrRef.valueOf token == some baseValue)
+    let _ ← image.layout.rowAt token
+    pure ()
 
 /-- The claimed TypeDef row defines the claimed type. The check reads the row's five columns,
     one NestedClass row, the next TypeDef row's field list, the base row's two names and the
@@ -280,7 +285,8 @@ def typeDefBound (image : PreparedImage) (claim : TypeDefClaim) : Except AuditEr
   let first ← image.layout.cell image.view token typeDefFieldListColumn
   let next ← fieldsEnd image claim.row
   requirePart claim.row .fields
-    (first == claim.fields.1 && next == claim.fields.1 + claim.fields.2)
+    (first == claim.fields.1 && next == claim.fields.1 + claim.fields.2 &&
+      decide (1 ≤ first ∧ next ≤ image.layout.rowCount CIL.Extraction.Table.field + 1))
   let baseValue ← image.layout.cell image.view token typeDefExtendsColumn
   baseBound image claim.row baseValue claim.base
   requirePart claim.row .kind
@@ -473,9 +479,13 @@ theorem baseAt_of_baseBound {image : PreparedImage} (bounded : image.view.Bounde
     exact ⟨holds.1, holds.2, nameAt_of_nameBound bounded nameOk,
       nameAt_of_nameBound bounded namespaceOk⟩
   | spec token =>
-    have holds := requirePart_ok checked
+    unfold baseBound at checked
+    obtain ⟨checkedBase, matched, checked⟩ := except_bind_ok checked
+    cases checkedBase
+    obtain ⟨position, found, _⟩ := except_bind_ok checked
+    have holds := requirePart_ok matched
     simp only [Bool.and_eq_true, beq_iff_eq] at holds
-    exact holds
+    exact ⟨holds.1, holds.2, position, found⟩
 
 #print axioms baseAt_of_baseBound
 
@@ -500,12 +510,13 @@ theorem typeDefAt_of_typeDefBound {image : PreparedImage} (bounded : image.view.
   obtain ⟨based, baseOk, kindOk⟩ := except_bind_ok checked
   cases based
   have fields := requirePart_ok fieldsOk
-  simp only [Bool.and_eq_true, beq_iff_eq] at fields
+  simp only [Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at fields
+  obtain ⟨⟨rfl, rfl⟩, lower, upper⟩ := fields
   have kind := requirePart_ok kindOk
   simp only [beq_iff_eq] at kind
   exact ⟨token, flags, baseValue, readToken, readFlags, nameAt_of_nameBound bounded nameOk,
     nameAt_of_nameBound bounded namespaceOk, nestingAt_of_nestingBound nestingOk,
-    fields.1 ▸ readFirst, fields.2 ▸ readNext, readBase, baseAt_of_baseBound bounded baseOk,
+    readFirst, readNext, lower, upper, readBase, baseAt_of_baseBound bounded baseOk,
     kind.symm⟩
 
 #print axioms typeDefAt_of_typeDefBound

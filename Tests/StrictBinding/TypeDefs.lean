@@ -174,4 +174,40 @@ theorem rejects_a_row_above_24_bits :
   decide +kernel
 #print axioms rejects_a_row_above_24_bits
 
+/-- The fixture uses two-byte heap and table indexes. The base, field list and method list
+    follow the four flag bytes and the two name indexes in each TypeDef row. -/
+private def checkChanged (claim : TypeDefClaim) (row columnOffset before after : Nat) :=
+  let image := flipByte StrictFixture.image (typeDefRowStart row + columnOffset) (before ^^^ after)
+  checkAll typeDefClaimBound [{ identity := StrictFixture.identity, image }] [claim]
+
+/-- A matching base specification can name the fixture's existing TypeSpec row. -/
+theorem accepts_an_existing_base_specification :
+    (checkChanged { shape with base := .spec (tokenOf 0x1B 1) } 5 8 37 6).isOk := by
+  decide +kernel
+#print axioms accepts_an_existing_base_specification
+
+/-- A matching coded index still has to select an existing TypeSpec row. The fixture owns one. -/
+theorem rejects_a_missing_base_specification :
+    failsWith (checkChanged { shape with base := .spec (tokenOf 0x1B 2) } 5 8 37 10)
+      (.tokenOutOfScope (tokenOf 0x1B 2)) := by decide +kernel
+#print axioms rejects_a_missing_base_specification
+
+/-- A nil TypeSpec token cannot designate a generic base. -/
+theorem rejects_a_nil_base_specification :
+    failsWith (checkChanged { shape with base := .spec (tokenOf 0x1B 0) } 5 8 37 2)
+      (.tokenOutOfScope (tokenOf 0x1B 0)) := by decide +kernel
+#print axioms rejects_a_nil_base_specification
+
+/-- The range cannot start at row zero, even if the claim copies the malformed range. -/
+theorem rejects_a_nil_field_list :
+    failsWith (checkChanged { shape with fields := (0, 6) } 5 10 6 0)
+      (.typeDefMismatch 5 .fields) := by decide +kernel
+#print axioms rejects_a_nil_field_list
+
+/-- The next type cannot extend its predecessor's range past the fixture's six Field rows. -/
+theorem rejects_fields_past_the_table :
+    failsWith (checkChanged { shape with fields := (6, 3) } 6 10 6 9)
+      (.typeDefMismatch 5 .fields) := by decide +kernel
+#print axioms rejects_fields_past_the_table
+
 end Tests.StrictBinding.TypeDefs
