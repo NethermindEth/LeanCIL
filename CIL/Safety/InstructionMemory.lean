@@ -103,7 +103,7 @@ def observerCount : CIL.Instruction → Nat
   | .ldfld _ | .ldflda _ => 1
   | .stfld _ => 2
   -- Memory and fields
-  | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .aggregateFieldAt ..
+  | .loadAggregate _ | .loadScalar .. | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
@@ -1306,6 +1306,30 @@ def structFieldAddress (offset : Nat) (stack : List Value) (memory : Memory) :
     .error (.memory .nullDereference .null 0)
   | _ => .error (.unsupported "Not a memory instruction")
 
+/-- Read the nested field of a struct value, snapshot or reference at the checked offset.
+    A copy preserves the initialization flags of padding bytes. -/
+def loadAggregateField (offset size : Nat) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands 1 stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
+  match stack with
+  | .scalar (.aggregate bytes) :: rest =>
+    if offset + size > bytes.length then .error .invalidState else
+      return (memory, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
+  | .scalar (.snapshot (.aggregate total) bytes) :: rest =>
+    if bytes.length != total || offset + size > total then .error .invalidState else
+      return (memory, .scalar (snapshotValue (.aggregate size) ((bytes.drop offset).take size)) :: rest)
+  | .reference reference :: rest
+  | .readOnlyReference reference :: rest =>
+    let r ← referenceAt reference
+    let address ← checkedAt (.address r) 0 (add memory r 1 (BitVec.ofNat 64 offset))
+    -- Padding stays uninitialized in the copy, as `loadAggregate` keeps it.
+    if let .error .uninitialized := read memory address size ordinaryAccessAlignment then
+      return (memory, .scalar (← loadSnapshot memory (.address address) (.aggregate size)) :: rest)
+    let bytes ← checkedAt (.address address) size (read memory address size ordinaryAccessAlignment)
+    return (memory, .scalar (.aggregate bytes) :: rest)
+  | _ => .error (.unsupported "Not a memory instruction")
+
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
@@ -1378,21 +1402,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
           | _ => .error (.unsupported "Snapshot field width")
         return (m, .scalar value :: rest)
       else .error (.unsupported "Uninitialized snapshot field")
-  | .aggregateFieldAt offset size, .scalar (.aggregate bytes) :: rest =>
-    if offset + size > bytes.length then .error .invalidState else
-      return (m, .scalar (.aggregate ((bytes.drop offset).take size)) :: rest)
-  | .aggregateFieldAt offset size, .scalar (.snapshot (.aggregate total) bytes) :: rest =>
-    if bytes.length != total || offset + size > total then .error .invalidState else
-      return (m, .scalar (snapshotValue (.aggregate size) ((bytes.drop offset).take size)) :: rest)
-  | .aggregateFieldAt offset size, .reference reference :: rest
-  | .aggregateFieldAt offset size, .readOnlyReference reference :: rest =>
-    let r ← referenceAt reference
-    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
-    -- Padding stays uninitialized in the copy, as `loadAggregate` keeps it.
-    if let .error .uninitialized := read m address size ordinaryAccessAlignment then
-      return (m, .scalar (← loadSnapshot m (.address address) (.aggregate size)) :: rest)
-    let bytes ← checkedAt (.address address) size (read m address size ordinaryAccessAlignment)
-    return (m, .scalar (.aggregate bytes) :: rest)
   | .setAggregateFieldAt offset size, .scalar (.aggregate bytes) :: .reference reference :: rest =>
     if bytes.length != size then .error .invalidState else
       let r ← referenceAt reference

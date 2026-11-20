@@ -221,7 +221,7 @@ def undecoded : List Name := [
   ``Instruction.loadAggregate, ``Instruction.storeAggregate,
   ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.setFieldAt,
-  ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
+  ``Instruction.setAggregateFieldAt,
   ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
@@ -741,7 +741,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 92, undecoded 16 of 108 constructors -/
+/-- info: decoded 92, undecoded 15 of 107 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

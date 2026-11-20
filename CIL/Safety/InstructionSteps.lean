@@ -279,27 +279,35 @@ theorem step_fieldAt_aggregate_8_eq (offset : Nat) (signed : Bool)
 
 /-- A nested struct field of a struct value is the field's bytes, after a bounds check. -/
 @[cil_instruction_step high]
-theorem step_aggregateFieldAt_aggregate_eq (offset size : Nat)
+theorem step_ldfld_aggregate_value_eq (field : Extraction.FieldRef) (offset size : Nat)
+    (shape : body.fieldShape field = .aggregate offset size)
     (bytes : List (BitVec 8)) (rest : List Value) :
-    step body (.aggregateFieldAt offset size) pc args frame (.scalar (.aggregate bytes) :: rest)
+    step body (.ldfld field) pc args frame (.scalar (.aggregate bytes) :: rest)
       memory =
       if offset + size > bytes.length then .error .invalidState
       else .ok (.next (pc + 1)
         (.scalar (.aggregate ((bytes.drop offset).take size)) :: rest) frame memory) := by
-  instruction_step_proof step_aggregateFieldAt_eq
+  rw [step_ldfld_aggregate_eq body pc args frame memory field offset size shape]
+  simp only [loadAggregateField, cil_guard, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    Bool.or_false, Bool.false_eq_true, ite_false]
+  split <;> rfl
 
 /-- A nested struct field of a struct snapshot is the slice of its bytes and flags, a plain struct
     value when all of them are initialized, after a bounds check. -/
 @[cil_instruction_step high]
-theorem step_aggregateFieldAt_snapshot_eq (offset size total : Nat)
+theorem step_ldfld_aggregate_snapshot_eq (field : Extraction.FieldRef) (offset size : Nat)
+    (shape : body.fieldShape field = .aggregate offset size) (total : Nat)
     (bytes : List (BitVec 8 × Bool)) (rest : List Value) :
-    step body (.aggregateFieldAt offset size) pc args frame
+    step body (.ldfld field) pc args frame
       (.scalar (.snapshot (.aggregate total) bytes) :: rest) memory =
       if bytes.length != total || offset + size > total then .error .invalidState
       else .ok (.next (pc + 1)
         (.scalar (snapshotValue (.aggregate size) ((bytes.drop offset).take size)) :: rest)
         frame memory) := by
-  instruction_step_proof step_aggregateFieldAt_eq
+  rw [step_ldfld_aggregate_eq body pc args frame memory field offset size shape]
+  simp only [loadAggregateField, cil_guard, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    Bool.or_false, Bool.false_eq_true, ite_false]
+  split <;> rfl
 
 -- Reference checks and struct initialization.
 /-- `initobj` zeroes `size` bytes behind a writable reference. -/
@@ -373,8 +381,8 @@ simproc [cil_instruction_step] reduceObjectSize (step _ (.sizeof _) _ _ _ _ _) :
 #print axioms step_setFieldAt_i64_eq
 #print axioms step_fieldAt_aggregate_4_eq
 #print axioms step_fieldAt_aggregate_8_eq
-#print axioms step_aggregateFieldAt_aggregate_eq
-#print axioms step_aggregateFieldAt_snapshot_eq
+#print axioms step_ldfld_aggregate_value_eq
+#print axioms step_ldfld_aggregate_snapshot_eq
 #print axioms step_initobj_reference_eq
 
 end CIL.Safety

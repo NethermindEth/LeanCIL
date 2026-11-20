@@ -405,19 +405,19 @@ theorem scalar_helper_zero_counts :
 #print axioms scalar_helper_zero_counts
 
 theorem nested_snapshot_bounds :
-    (instruction (.aggregateFieldAt 3 2) [.scalar (.aggregate [1, 2, 3, 4])] Memory.empty).map Prod.snd =
+    (loadAggregateField 3 2 [.scalar (.aggregate [1, 2, 3, 4])] Memory.empty).map Prod.snd =
       .error .invalidState := rfl
 
 -- A nested struct of a snapshot is its slice: a plain value when initialized, else a snapshot.
 theorem nested_of_snapshot :
-    (instruction (.aggregateFieldAt 0 2)
+    (loadAggregateField 0 2
       [.scalar (.snapshot (.aggregate 4) [(1, true), (2, true), (3, false), (4, true)])]
       Memory.empty).map Prod.snd = .ok [.scalar (.aggregate [1, 2])] ∧
-    (instruction (.aggregateFieldAt 1 2)
+    (loadAggregateField 1 2
       [.scalar (.snapshot (.aggregate 4) [(1, true), (2, true), (3, false), (4, true)])]
       Memory.empty).map Prod.snd =
         .ok [.scalar (.snapshot (.aggregate 2) [(2, true), (3, false)])] ∧
-    (instruction (.aggregateFieldAt 3 2)
+    (loadAggregateField 3 2
       [.scalar (.snapshot (.aggregate 4) [(1, true), (2, true), (3, false), (4, true)])]
       Memory.empty).map Prod.snd = .error .invalidState := ⟨rfl, rfl, rfl⟩
 
@@ -437,7 +437,7 @@ theorem nested_store_size :
       .error .invalidState := rfl
 
 theorem nested_null :
-    (instruction (.aggregateFieldAt 0 8) [.reference .null] Memory.empty).map Prod.snd =
+    (loadAggregateField 0 8 [.reference .null] Memory.empty).map Prod.snd =
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem null_reference_pushed :
@@ -488,13 +488,13 @@ theorem null_reference_accesses_fault :
 
 -- A nested struct copied from uninitialized bytes keeps them uninitialized instead of faulting.
 theorem nested_uninitialized :
-    (instruction (.aggregateFieldAt 0 8) [Tests.reference]
+    (loadAggregateField 0 8 [Tests.reference]
       { Tests.caller with cells := fun _ _ => ⟨0, false⟩ }).map Prod.snd =
       .ok [.scalar (.snapshot (.aggregate 8) (List.replicate 8 (0, false)))] := rfl
 #print axioms nested_uninitialized
 
 theorem nested_bounds :
-    (instruction (.aggregateFieldAt 4 8) [Tests.reference] Tests.caller).map Prod.snd =
+    (loadAggregateField 4 8 [Tests.reference] Tests.caller).map Prod.snd =
       .error (.memory .outsideAllocation (.address ⟨0, 4⟩) 8) := rfl
 
 theorem nested_unwritable :
@@ -503,7 +503,7 @@ theorem nested_unwritable :
       .error (.memory .unwritable (.address ⟨0, 0⟩) 8) := rfl
 
 theorem nested_expired :
-    (instruction (.aggregateFieldAt 0 8) [Tests.reference] { Tests.caller with
+    (loadAggregateField 0 8 [Tests.reference] { Tests.caller with
       allocations := fun _ => some ⟨.callerStack, ⟨8, 1, []⟩, false, []⟩ }).map Prod.snd =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
 

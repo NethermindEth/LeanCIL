@@ -930,11 +930,7 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
       instructionStep (.setFieldAt offset width) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
-@[cil_step] theorem step_aggregateFieldAt_eq {offset size} (stack : List Value) :
-    step body (.aggregateFieldAt offset size) pc args frame stack memory =
-      instructionStep (.aggregateFieldAt offset size) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
+
 @[cil_step] theorem step_setAggregateFieldAt_eq {offset size} (stack : List Value) :
     step body (.setAggregateFieldAt offset size) pc args frame stack memory =
       instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
@@ -967,18 +963,16 @@ theorem step_ldfld_value_eq (field : CIL.Extraction.FieldRef) (offset width : Na
     rfl
 #print axioms step_ldfld_value_eq
 
-/-- `ldfld` of a nested struct field steps as `aggregateFieldAt` of its offset and size on
-    every stack, faults included. -/
+/-- A nested struct field is read from its checked offset with its initialization flags. -/
 theorem step_ldfld_aggregate_eq (field : CIL.Extraction.FieldRef) (offset size : Nat)
     (shape : body.fieldShape field = .aggregate offset size) (stack : List Value) :
-    step body (.ldfld field) pc args frame stack memory =
-      step body (.aggregateFieldAt offset size) pc args frame stack memory := by
-  rw [step_ldfld_eq, step_aggregateFieldAt_eq]
-  simp only [fieldLoad, shape, instructionStep]
-  cases observed : unspecifiedOperands 1 stack
-  · rfl
-  · rw [instruction_guarded memory (operation := .aggregateFieldAt offset size) observed]
-    rfl
+    step body (.ldfld field) pc args frame stack memory = (do
+      let (memory, stack) ← loadAggregateField offset size stack memory
+      return .next (pc + 1) stack frame memory) := by
+  rw [step_ldfld_eq]
+  simp only [fieldLoad, shape]
+  unfold loadAggregateField
+  split <;> rfl
 #print axioms step_ldfld_aggregate_eq
 
 /-- `stfld` of a struct field of primitive or vector shape steps as `setFieldAt` of its

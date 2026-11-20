@@ -865,9 +865,6 @@ def storageLowering? (body op : Expr) (stack : Option Expr := none) :
   | ``CIL.Instruction.ldfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
     lowering ``step_ldfld_value_eq (mkApp3 (mkConst ``CIL.Instruction.fieldAt) offset width signed)
       #[offset, width, signed, proof]
-  | ``CIL.Instruction.ldfld, (``CIL.FieldShape.aggregate, #[offset, size]) =>
-    lowering ``step_ldfld_aggregate_eq
-      (mkApp2 (mkConst ``CIL.Instruction.aggregateFieldAt) offset size) #[offset, size, proof]
   | ``CIL.Instruction.stfld, (``CIL.FieldShape.value, #[offset, width, signed]) =>
     lowering ``step_stfld_value_eq (mkApp2 (mkConst ``CIL.Instruction.setFieldAt) offset width)
       #[offset, width, signed, proof]

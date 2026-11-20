@@ -221,7 +221,6 @@ inductive Instruction where
   | ldelema (element : Extraction.TypeExpr) (readOnly : Bool)
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | setFieldAt (offset width : Nat)
-  | aggregateFieldAt (offset size : Nat)
   | setAggregateFieldAt (offset size : Nat)
   -- Arguments and locals.
   /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/

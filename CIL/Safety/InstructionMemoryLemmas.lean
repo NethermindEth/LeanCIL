@@ -1361,6 +1361,19 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact comparisonGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
+/-- A successful nested struct read preserves memory and returns a valid field value. -/
+theorem loadAggregateField_contract (offset size : Nat) (stack values : List Value)
+    (memory result : Memory)
+    (executed : loadAggregateField offset size stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold loadAggregateField at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms loadAggregateField_contract
+
 /-- A successful field displacement preserves memory and returns a valid reference. -/
 theorem structFieldAddress_contract (offset : Nat) (stack values : List Value) (m result : Memory)
     (h : structFieldAddress offset stack m = .ok (result, values)) :

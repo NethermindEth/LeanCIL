@@ -337,12 +337,13 @@ theorem inner_store_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step]
 #print axioms inner_store_is_lowered
 
-theorem inner_load_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+theorem inner_load_uses_checked_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :
     Safety.step body (.ldfld innerField) 0 [] frame stack memory =
-      Safety.step body (.aggregateFieldAt 8 4) 0 [] frame stack memory := by
+      (do let (after, values) ← Safety.loadAggregateField 8 4 stack memory
+          return .next 1 values frame after) := by
   simp only [cil_step]
-#print axioms inner_load_is_lowered
+#print axioms inner_load_uses_checked_offset
 
 theorem inner_address_uses_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :

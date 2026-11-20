@@ -532,7 +532,7 @@ def fieldLoad (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : Lis
   match body.fieldShape field with
   | .classSlot offset slot => classFieldLoad field.owner offset slot stack memory
   | .value offset width signed => instruction (.fieldAt offset width signed) stack memory
-  | .aggregate offset size => instruction (.aggregateFieldAt offset size) stack memory
+  | .aggregate offset size => loadAggregateField offset size stack memory
   | .unsupported reason => .error (.unsupported reason)
 
 /-- `stfld` of `field` as `body` resolves it: a class slot through the receiver, or a struct

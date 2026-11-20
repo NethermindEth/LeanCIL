@@ -536,7 +536,7 @@ theorem fieldLoad_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
   split at executed
   · exact classFieldLoad_contract _ _ _ _ _ _ _ executed
   · exact instruction_contract _ _ _ _ _ executed
-  · exact instruction_contract _ _ _ _ _ executed
+  · exact loadAggregateField_contract _ _ _ _ _ _ executed
   · cases executed
 #print axioms fieldLoad_contract
 

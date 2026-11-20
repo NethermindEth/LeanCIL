@@ -575,6 +575,20 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.comparisonGuardInstruction _ _ _ _
     · exact same.otherMemoryInstruction _ _
 
+/-- Equivalent memories read the same nested field from a struct or a reference. -/
+theorem Memory.Equivalent.loadAggregateField {m n : Memory} (same : m.Equivalent n)
+    (offset size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (loadAggregateField offset size stack m)
+      (loadAggregateField offset size stack n) := by
+  unfold CIL.Safety.loadAggregateField
+  simp only [same.add, same.read, same.loadSnapshot]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.loadAggregateField
+
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.Instruction) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)

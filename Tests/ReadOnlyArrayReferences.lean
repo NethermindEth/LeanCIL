@@ -80,7 +80,7 @@ theorem restricted_field_reads :
       .ok (memory, [.scalar (.i32 0)]) ∧
     structFieldAddress 4 [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.readOnlyReference (.address ⟨0, 4⟩)]) ∧
-    instruction (.aggregateFieldAt 4 4) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
+    loadAggregateField 4 4 [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.scalar (.aggregate [0, 0, 0, 0])]) := ⟨rfl, rfl, rfl⟩
 #print axioms restricted_field_reads
 

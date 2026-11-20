@@ -438,6 +438,11 @@ A by-value read, `ldloc` then `ldfld`, loads the struct and reads the field with
 and zero or sign extended, as `narrowLoad width signed bits`: `step_fieldAt_encode_narrow` reads
 it by value and `load_narrow_field` through the address.
 
+For a nested struct, `ldfld` uses the offset and size in the method's checked field shape.
+`step_ldfld_aggregate_value_eq` reads initialized bytes from a struct on the stack.
+`step_ldfld_aggregate_snapshot_eq` also preserves the initialization state of padding.
+`step_ldfld_aggregate_reference_eq` reads the field through a reference to the containing struct.
+
 The loop tactics gather the field reads and the home's `form` from each frame in scope and take
 the zeroing, field stores and numeric local stores themselves (see [loop
 tactics](PROOFS-STEPPING.md#compose-a-helper-call-inside-a-loop)), so a proof names none of them.

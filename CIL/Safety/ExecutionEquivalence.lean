@@ -312,7 +312,7 @@ theorem Memory.Equivalent.fieldLoad {m n : Memory} (same : m.Equivalent n) (body
   split
   · exact same.classFieldLoad _ _ _ _
   · exact same.instruction _ _
-  · exact same.instruction _ _
+  · exact same.loadAggregateField _ _ _
   · exact .error _
 #print axioms Memory.Equivalent.fieldLoad
 
