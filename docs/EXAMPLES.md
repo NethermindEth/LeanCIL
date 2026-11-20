@@ -22,6 +22,7 @@ sentences name the wrong implementations that each unchanged proof rejects.
   that the method returns the model's result, without re-proving the model theorem.
 - `DecodedAdd`: the `Add` contract for the program `Extraction.decodedProgram?` reads from the
   extraction's body bytes, proved by evaluating the decoded method without the translator's output.
+  Its instruction-region proof states the stack result of `add` at pc 2 and preserves the frame and memory.
 - `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over
   arbitrary caller memory, with exact memory preservation. The checked automation follows generated
   instruction lookups; the same contract is tested after inserting NOPs and rejected for

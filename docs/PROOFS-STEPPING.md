@@ -465,6 +465,13 @@ reaches another such state at a positive fuel cost. The counter, frame, stack an
 change between visits. `Diverges.of_reaches` carries this result from a reachable instruction
 back to method entry so `MethodContract.Refuted.of_diverges` can use it.
 
+`DecodedSegmentSummary` binds a nonempty instruction sequence to its starting position and
+certified method record. Its `holds` field gives the segment contract with its original frame,
+stack, footprint and exits. Use `DecodedSegmentSummary.congr_region` with a checked binding for
+the destination, agreement on the closed region and a proof that every permitted continuation
+lies inside it. Code before the region may differ. The agreement includes method metadata,
+links and every instruction the region can execute.
+
 A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
 Instructions that read the method's declared signature, environment, links or runtime profile
 require the corresponding facts in the theorem. Branch targets depend on the placement pc.
