@@ -38,6 +38,11 @@ overload or layout leaves an opcode-tagged hole that the validator accepts only 
 site. At a linked site the decoder keeps the call, and `ManagedCallsValid` refuses the method
 because no import slot binds a generic `MemoryMarshal` member.
 
+The extractor binds reachable managed calls from the resolved target graph. It records runtime
+model sites during metadata validation and reads class field descriptors from their CIL operands.
+Ordinary extraction emits the decoder inputs and evidence. Shared templates and proof outlines
+also use per-instruction descriptors to compare methods and name their operands.
+
 The evidence proves that each method's entire instruction list equals the decoding of its closed
 body. At a reachable instruction outside a fold, the scalar validator uses this equality for
 value encodings when the decoder supplies an instruction. Folded sites retain their explicit

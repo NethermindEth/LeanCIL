@@ -827,9 +827,13 @@ internal static class MetadataValidation
                                   followed by at most three simple argument pushes and no branch target.
                                 """);
                         if (instruction.OpCode.Code == Code.Call &&
-                            RuntimeModels.CallModel(reference, profile) is not null) return;
-                        if (instruction.OpCode.Code == Code.Newobj &&
-                            Spans.ConstructorOperation(reference, profile.Architecture) is not null) return;
+                            RuntimeModels.CallModel(reference, profile) is not null ||
+                            instruction.OpCode.Code == Code.Newobj &&
+                            Spans.ConstructorOperation(reference, profile.Architecture) is not null)
+                        {
+                            callSites?.AddModel(instruction);
+                            return;
+                        }
                         RuntimeModels.ValidateCallScope(reference);
                         CallSite(instruction, reference);
                     }))
@@ -848,7 +852,7 @@ internal static class MetadataValidation
                     failure.Error.Message == "Unsupported type: " + modified);
         }
         ordered.Reverse();
-        // Validate translation before producing any artifact.
+        // Validate the reachable operands and targets before emitting the method evidence.
         var methods = ordered.ToArray();
         // Proofs bind methods by unscoped signature, so one signature must name one assembly's body.
         foreach (var group in methods.GroupBy(method => method.FullName, StringComparer.Ordinal))

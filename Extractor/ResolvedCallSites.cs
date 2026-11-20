@@ -9,6 +9,7 @@ internal sealed class ResolvedCallSites
     readonly Dictionary<Instruction, MethodDefinition> direct = [];
     readonly Dictionary<Instruction, VirtualDispatch.Entry[]> virtualSlots = [];
     readonly Dictionary<MethodDefinition, string> instanceLinks = [];
+    readonly HashSet<Instruction> modelCalls = [];
 
     internal void Add(Instruction site, MethodDefinition target)
     {
@@ -17,6 +18,29 @@ internal sealed class ResolvedCallSites
     }
 
     internal void AddVirtual(Instruction site, VirtualDispatch.Entry[] targets) => virtualSlots.Add(site, targets);
+
+    internal void AddModel(Instruction site) => modelCalls.Add(site);
+
+    internal bool IsModel(Instruction site) => modelCalls.Contains(site);
+
+    /// <summary>The admitted target kind for this raw call, address or constructor, including its prefixes.</summary>
+    internal bool BindsOperand(Instruction site, ImportResolution? imports)
+    {
+        var code = site.OpCode.Code;
+        if (imports?.Slot(site) is not null)
+            return code == Code.Call && site.Previous?.OpCode.Code != Code.Constrained && !TailCalls.IsCall(site);
+        return code switch
+        {
+            Code.Call or Code.Callvirt when site.Previous?.OpCode.Code == Code.Constrained => direct.ContainsKey(site),
+            Code.Call when TailCalls.IsCall(site) => direct.ContainsKey(site),
+            Code.Call or Code.Newobj => direct.ContainsKey(site) || IsModel(site),
+            Code.Callvirt => site.Previous?.OpCode.OpCodeType != OpCodeType.Prefix && ObjectTypes.ReceiverCall(site) &&
+                (direct.ContainsKey(site) || virtualSlots.ContainsKey(site)),
+            Code.Ldftn => direct.ContainsKey(site),
+            Code.Calli => site.Operand is CallSite,
+            _ => true
+        };
+    }
 
     /// <summary>Each occupied pc names its managed targets in program order. Model calls have no link.</summary>
     internal List<(int Pc, string Link)> Links(MethodDefinition method, IReadOnlySet<Instruction> reachable,

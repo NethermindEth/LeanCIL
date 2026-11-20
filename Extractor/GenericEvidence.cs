@@ -590,9 +590,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// its own process to drive a decoder refusal through the extractor.</summary>
     internal static IReadOnlySet<Code> ExtractedOpcodes { get; set; } = DecodedOpcodes;
 
-    /// <summary>Why the decoder gives no instruction at a live pc: its opcode has no decoder, or its translation
-    /// differs from its decoded instruction.</summary>
-    internal enum RefusalKind { Hole, Translated }
+    /// <summary>A reachable opcode has no decoder, or its call operand has no matching resolved target.</summary>
+    internal enum RefusalKind { Hole, UnboundCall }
 
     /// <summary>The first live pc, in body order, at which the decoder gives no instruction, with that
     /// instruction.</summary>
@@ -613,15 +612,14 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
         static string Reason(DecodeRefusal refusal) => refusal.Kind == RefusalKind.Hole
             ? $"the decoder has no form for {refusal.At.OpCode.Name}"
-            : $"the decoder reads {refusal.At.OpCode.Name} differently from its translation";
+            : $"the decoder cannot bind the {refusal.At.OpCode.Name} operand with its prefixes";
     }
 
     /// <summary>
-    /// The first live instruction the decoder refuses: its opcode has no decoder or its translation differs from
-    /// the decoded instruction. Every dead site is a hole tagged with its raw opcode.
+    /// The first live instruction without an admitted opcode, field or call binding. Dead sites keep their raw opcode.
     /// </summary>
     internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
-        IReadOnlyList<Operation> operations)
+        ResolvedCallSites calls, ImportResolution? imports)
     {
         var instructions = method.Body.Instructions;
         var throws = Throws.Analyze(method);
@@ -638,23 +636,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (instruction.OpCode.Code is Code.Ldsfld or Code.Ldsflda ||
                 instruction.OpCode.Code == Code.Ldtoken && instruction.Operand is FieldReference)
                 continue;
-            var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
             if (!ExtractedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(pc, instruction, RefusalKind.Hole);
-            var translated = instruction.OpCode.Code switch
-            {
-                Code.Call or Code.Callvirt when constrained => operations[pc] is Call { Constrained: true },
-                Code.Callvirt => instruction.Previous?.OpCode.OpCodeType != OpCodeType.Prefix &&
-                    operations[pc] is Call { Kind: CallKind.Instance, Constrained: false } or CallVirtual,
-                Code.Ldftn => operations[pc] is MethodAddress,
-                Code.Calli => operations[pc] is IndirectCall,
-                Code.Call when TailCalls.IsCall(instruction) => operations[pc] is Call { Kind: CallKind.Tail },
-                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or
-                    ModelCall { Constructs: false },
-                Code.Newobj => operations[pc] is Newobj or ModelCall { Constructs: true },
-                _ => true
-            };
-            if (!translated) return new(pc, instruction, RefusalKind.Translated);
+            if (!calls.BindsOperand(instruction, imports)) return new(pc, instruction, RefusalKind.UnboundCall);
         }
         return null;
     }

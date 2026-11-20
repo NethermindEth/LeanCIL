@@ -203,8 +203,8 @@ static void CheckRefusalReport()
     var entry = methods.Single(method => method.Name == "Entry");
     var body = methods.Single(method => method.Name == "Body");
     var instructions = body.Body.Instructions;
-    var operations = new Operation[instructions.Count];
-    var refusal = GenericEvidence.FirstDecodeRefusal(body, instructions.ToHashSet(), operations) ??
+    var calls = new ResolvedCallSites();
+    var refusal = GenericEvidence.FirstDecodeRefusal(body, instructions.ToHashSet(), calls, null) ??
         throw new InvalidOperationException("The decoder accepted a live arglist.");
     var failure = Blockers.Rejection(entry, new GenericEvidence.UndecodedInstruction(body, refusal));
     var site = Blockers.SiteOf(failure);
@@ -215,17 +215,27 @@ static void CheckRefusalReport()
         construct != "Unsupported instruction: the decoder has no form for arglist")
         throw new InvalidOperationException($"Incorrect decode refusal site {site} in {construct}");
     var live = instructions.Where(instruction => instruction.OpCode != OpCodes.Arglist).ToHashSet();
-    if (GenericEvidence.FirstDecodeRefusal(body, live, operations) is { } dead)
+    if (GenericEvidence.FirstDecodeRefusal(body, live, calls, null) is { } dead)
         throw new InvalidOperationException($"The decoder refused a dead {dead.At}.");
-    // A call whose translation is not the call the decoder reads is refused as translated differently.
+    // The same raw call needs a target from the admitted graph.
     var call = Instruction.Create(OpCodes.Call, entry);
     body.Body.Instructions.Insert(0, call);
-    var translated = GenericEvidence.FirstDecodeRefusal(body, new HashSet<Instruction> { call },
-        new Operation[body.Body.Instructions.Count]);
-    if (translated != new GenericEvidence.DecodeRefusal(0, call, GenericEvidence.RefusalKind.Translated) ||
-        Blockers.Construct(new GenericEvidence.UndecodedInstruction(body, translated).Message) !=
-            "Unsupported instruction: the decoder reads call differently from its translation")
-        throw new InvalidOperationException($"Incorrect translated refusal {translated}");
+    var liveCall = new HashSet<Instruction> { call };
+    var unbound = GenericEvidence.FirstDecodeRefusal(body, liveCall, calls, null);
+    if (unbound != new GenericEvidence.DecodeRefusal(0, call, GenericEvidence.RefusalKind.UnboundCall) ||
+        Blockers.Construct(new GenericEvidence.UndecodedInstruction(body, unbound).Message) !=
+            "Unsupported instruction: the decoder cannot bind the call operand with its prefixes")
+        throw new InvalidOperationException($"Incorrect call refusal {unbound}");
+    calls.Add(call, entry);
+    if (GenericEvidence.FirstDecodeRefusal(body, liveCall, calls, null) is { } bound)
+        throw new InvalidOperationException($"The decoder refused the bound call: {bound}");
+    var models = new ResolvedCallSites();
+    models.AddModel(call);
+    if (!models.BindsOperand(call, null))
+        throw new InvalidOperationException("The decoder refused an ordinary runtime model call.");
+    body.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Tail));
+    if (!calls.BindsOperand(call, null) || models.BindsOperand(call, null))
+        throw new InvalidOperationException("A tail call must enter a managed target.");
 }
 
 // The blockers command, run on an assembly whose callee the extractor admits, blocks the entry at the callee's add

@@ -35,11 +35,16 @@ internal static partial class ClassViews
     /// <summary>A class's `Extracted.Classes` namespace: its full name, Lean path and named fields.</summary>
     internal sealed record View(string FullName, string Path, string Type, Field[] Fields);
 
-    /// <summary>The access a <c>ldfld</c> or <c>stfld</c> on a class instance field emitted, or none.</summary>
-    internal static Access? Of(Instruction instruction, int method, int pc, Operation op) =>
-        instruction is { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } &&
-        op is ClassField { Field: var operation } && field.Resolve() is { } resolved
-            ? new(resolved, field.DeclaringType, method, pc, operation) : null;
+    /// <summary>The named class field accessed by a reachable load or store.</summary>
+    internal static Access? Of(Instruction instruction, int method, int pc, string architecture)
+    {
+        if (instruction is not { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } ||
+            !ObjectTypes.Candidate(field.DeclaringType)) return null;
+        var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
+        var operation = ObjectTypes.FieldOperation(field, resolved, instruction.OpCode.Code == Code.Stfld,
+            address: false, architecture);
+        return new(resolved, field.DeclaringType, method, pc, operation);
+    }
 
     /// <summary>The views of the classes whose fields the accesses touch, each field named once per class.
     /// </summary>
