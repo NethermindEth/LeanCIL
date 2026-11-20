@@ -110,13 +110,18 @@ def userStringMatches (index : MetadataIndex) (token : Nat) (text : String) :
 
 /-! ## Types -/
 
-/-- The scope an extractor type spells for its head: the atom's, object's or generic
-    definition's, or the scope an aggregate or enum identity starts with. -/
-def TypeExpr.headScope : TypeExpr → Option String
+/-- The separate assembly name on a metadata type head. Flat owners carry it inside the name. -/
+def TypeExpr.explicitHeadScope : TypeExpr → Option String
   | .atom scope _ | .object scope _ | .constructor scope _ | .objectConstructor scope _ =>
     some scope
-  | .apply applied _ => applied.headScope
+  | .apply head _ => head.explicitHeadScope
   | _ => none
+
+/-- The assembly of the declaring type, including a scope embedded in an aggregate or enum name. -/
+def TypeExpr.headScope : TypeExpr → Option String
+  | .aggregate identity _ | .enum identity _ => flatOwnerScope? identity
+  | .apply head _ => head.headScope
+  | type => type.explicitHeadScope
 
 /-- Check a `.type` operand: the token's type is the one the extractor spells. -/
 def checkTypeOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (expr : TypeExpr) :
@@ -482,7 +487,8 @@ def checkCallReference (env : MetadataEnv) (frame : Frame) (token : Nat) (site :
   if call.method.genericArity != site.genericArity ||
       call.method.methodArguments != siteMethodArguments call then
     throw (.genericMismatch token)
-  if call.declaringType.headScope.any (bytesOf · != head.scope) then
+  -- The full flat identity is checked by located.admits below.
+  if call.declaringType.explicitHeadScope.any (bytesOf · != head.scope) then
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }
   if !(located.admits site.owner call.declaringType) then throw (.operandMismatch token)

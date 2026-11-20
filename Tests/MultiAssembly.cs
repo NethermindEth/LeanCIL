@@ -103,6 +103,17 @@ public interface IAppScale : IScale { static ulong IScale.Scale(ulong x) => x * 
 public struct AppDerived : IAppScale { }
 public struct Marked : IScale, MultiFixture.Other.IMarker { }
 public struct AppGenericOff<T> : IFlag where T : unmanaged { public static bool IsActive => false; }
+public static class CounterCaller { public static ulong Read(ulong x) => Counter.Next(x); }
+public struct Counter
+{
+    public ulong Value;
+    public static ulong Next(ulong x)
+    {
+        Counter cell = default;
+        cell.Value = x;
+        return Mix.Step(cell.Value);
+    }
+}
 """);
 Run(["dotnet", "build", Path.Combine(appDirectory, "App.csproj"), "-c", "Release"]);
 string app = Path.Combine(appDirectory, "bin", "MultiFixture.App.dll");
@@ -164,6 +175,7 @@ void Decided(params (string Name, bool Stepped)[] runs)
 }
 
 Verified("Direct", "MultiFixture.Application::Direct(ulong)", "Tests/MultiAssembly/Direct.lean", referencedBody: true);
+Proved("Counter", "MultiFixture.CounterCaller::Read(ulong)", "Tests/MultiAssembly/Counter.lean", referencedBody: true);
 // A refutation of a callee from the reference names that callee with its own assembly and digest.
 _ = Extract("StepRefuted", "MultiFixture.Application::Direct(ulong)", referencedBody: true, []);
 string stepRefutation = Path.Combine(root, "StepRefuted.lean");

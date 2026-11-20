@@ -566,8 +566,8 @@ for a method defined from its decoder, and `site` its `ManagedCallsValid` premis
 `bind_call` site's `call` and `link` facts. For a call into a reference assembly, pass
 `Extracted.attribution_validated` to `DecodedAt.direct_site` and identify the declaring type's
 `headScope`. The scope must be nonempty and contain no colon. This distinguishes definitions in
-different assemblies even when both use the same MethodDef token. A flat aggregate identity has
-no separate `headScope`.
+different assemblies even when both use the same MethodDef token. For an aggregate, Lean reads
+the assembly scope before the first `::`, even when generic arguments name types in another assembly.
 
 The proof of `decodedProgram?_eq_some` adds one
 constructor per record, so its cost is linear in the methods of the extraction

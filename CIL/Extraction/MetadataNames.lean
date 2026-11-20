@@ -94,6 +94,41 @@ theorem metadataChars_eq (value : String) : metadataChars value = value.toList :
 
 #print axioms metadataChars_eq
 
+/-- Splitting a metadata identity consumes exactly the first double colon. -/
+private theorem splitIdentity_parts {reversed input scope name : List Char}
+    (split : splitIdentity reversed input = some (scope, name)) :
+    reversed.reverse ++ input = scope ++ ':' :: ':' :: name := by
+  fun_induction splitIdentity reversed input <;> simp_all [List.append_assoc]
+
+#print axioms splitIdentity_parts
+
+/-- The assembly prefix of a flat metadata identity. Generic arguments may carry further scopes. -/
+def flatOwnerScope? (identity : String) : Option String := do
+  let (scope, name) ← splitIdentity [] (metadataChars identity)
+  if plainScope scope && !name.isEmpty then return String.ofList scope else none
+
+/-- Every scope returned by the parser is followed by the metadata ownership separator. -/
+theorem flatOwnerScope?_prefix {identity scope : String}
+    (found : flatOwnerScope? identity = some scope) :
+    (metadataChars scope ++ [':', ':']).isPrefixOf (metadataChars identity) = true := by
+  unfold flatOwnerScope? at found
+  cases split : splitIdentity [] (metadataChars identity) with
+  | none => simp [split] at found
+  | some pair =>
+    obtain ⟨assembly, suffix⟩ := pair
+    simp only [split] at found
+    change (if plainScope assembly && !suffix.isEmpty then some (String.ofList assembly)
+      else none) = some scope at found
+    split at found
+    · cases found
+      have parts := splitIdentity_parts split
+      simp only [List.reverse_nil, List.nil_append] at parts
+      rw [parts, metadataChars_eq]
+      simp [List.isPrefixOf_iff_prefix, List.IsPrefix, List.append_assoc]
+    · contradiction
+#print axioms flatOwnerScope?_prefix
+
+
 /-- A named type as its referencing scope and full name. -/
 def namedType : TypeExpr → Option (List Char × List Char)
   | .atom scope name | .constructor scope name | .objectConstructor scope name =>

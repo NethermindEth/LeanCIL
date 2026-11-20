@@ -266,8 +266,13 @@ private theorem managedOwner_scoped {owner : TypeExpr} {scope identity : String}
       obtain ⟨base, parameters⟩ := pair
       simp [managedOwner, headOwner] at named
       exact named.1 ▸ ih hasScope headOwner
+  | aggregate flat _ =>
+    change flatOwnerScope? flat = some scope at hasScope
+    change some (flat, []) = some (identity, arguments) at named
+    cases named
+    exact flatOwnerScope?_prefix hasScope
   | _ =>
-    simp_all [TypeExpr.headScope, managedOwner]
+    simp_all [TypeExpr.headScope, TypeExpr.explicitHeadScope, managedOwner]
     all_goals
       rw [← named.1]
       simp [ownedBy, metadataChars_eq, List.isPrefixOf_iff_prefix, List.IsPrefix]
