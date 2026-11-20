@@ -830,7 +830,8 @@ internal static class MetadataValidation
                             RuntimeModels.CallModel(reference, profile) is not null) return;
                         if (instruction.OpCode.Code == Code.Newobj &&
                             Spans.ConstructorOperation(reference, profile.Architecture) is not null) return;
-                        if (RuntimeModels.Translate(reference, profile) is null) CallSite(instruction, reference);
+                        RuntimeModels.ValidateCallScope(reference);
+                        CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);
             }
@@ -859,11 +860,8 @@ internal static class MetadataValidation
             .ToDictionary(pair => pair.method, pair => pair.index);
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var layoutContext = new LayoutContext(module, profile.Architecture);
-        for (int i = 0; i < methods.Length; i++)
+        foreach (var method in methods)
         {
-            var index = i;
-            var method = methods[index];
-            var instructions = new InstructionIndex(method);
             NativeOperands.Certificate? nativeOperands = null;
             Dictionary<int, int>? parameterHomes = null;
             HashSet<Instruction>? reachable = null;
@@ -874,11 +872,11 @@ internal static class MetadataValidation
                     parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
                 }), named: true))
                 continue;
-            foreach (Instruction instruction in reachable!)
+            var admission = new InstructionAdmission(method, profile, methodIndices, constrainedTargets,
+                layoutContext, imports, nativeOperands!, parameterHomes!);
+            foreach (var instruction in reachable!)
                 if (!skipped.Contains(instruction))
-                    Check(method, instruction, () =>
-                        InstructionTranslation.Translate(instruction, method, methodIndices, index, instructions,
-                            profile, nativeOperands, parameterHomes, imports, layoutContext, constrainedTargets), named: true);
+                    Check(method, instruction, () => admission.Check(instruction), named: true);
         }
         return methods;
     }

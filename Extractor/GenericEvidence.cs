@@ -537,54 +537,51 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             " by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
     }
 
-    /// <summary>
-    /// The opcodes Lean's `Instruction.ofRaw?` decodes for some operand, the set `Instruction.valueOpcode` holds;
-    /// `Instruction.ofRaw` writes a hole for every other one. Tests/DecodedOpcodes.cs compares the two.
-    /// </summary>
-    internal static readonly FrozenSet<Code> DecodedOpcodes = new[]
+    /// <summary>The decoded value opcodes whose operands need no storage, model or target resolution.</summary>
+    internal static readonly FrozenSet<Code> SimpleOpcodes = new[]
     {
-        // Stack shuffling, return, arguments and locals.
         Code.Nop, Code.Dup, Code.Pop, Code.Ret,
-        Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3, Code.Ldarg_S, Code.Ldarg,
-        Code.Ldarga_S, Code.Ldarga, Code.Starg_S, Code.Starg,
-        Code.Ldloc_0, Code.Ldloc_1, Code.Ldloc_2, Code.Ldloc_3, Code.Ldloc_S, Code.Ldloc,
-        Code.Stloc_0, Code.Stloc_1, Code.Stloc_2, Code.Stloc_3, Code.Stloc_S, Code.Stloc,
-        Code.Ldloca_S, Code.Ldloca, Code.Localloc,
-        // Constants.
+        Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3,
+        Code.Ldloc_0, Code.Ldloc_1, Code.Ldloc_2, Code.Ldloc_3,
+        Code.Stloc_0, Code.Stloc_1, Code.Stloc_2, Code.Stloc_3,
+        Code.Localloc,
         Code.Ldc_I4_M1, Code.Ldc_I4_0, Code.Ldc_I4_1, Code.Ldc_I4_2, Code.Ldc_I4_3, Code.Ldc_I4_4, Code.Ldc_I4_5,
-        Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldnull,
-        Code.Ldstr,
-        // Indirect loads and stores of integers and native integers.
+        Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldnull,
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
-        // Array allocations, lengths, element loads and stores by kind or by element type, and element
-        // addresses with the readonly prefix they take.
         Code.Ldlen, Code.Ldelem_I1, Code.Ldelem_U1, Code.Ldelem_I2, Code.Ldelem_U2, Code.Ldelem_I4, Code.Ldelem_U4,
         Code.Ldelem_I8, Code.Ldelem_I, Code.Ldelem_Ref, Code.Stelem_I, Code.Stelem_I1, Code.Stelem_I2,
-        Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref, Code.Newarr, Code.Ldelem_Any, Code.Stelem_Any,
-        Code.Ldelema, Code.Readonly,
-        // Class type tests and instance fields, direct and constrained calls, and constructions.
-        Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
-        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
-        Code.Call, Code.Constrained, Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli,
-        // Branches.
+        Code.Stelem_I4, Code.Stelem_I8, Code.Stelem_Ref,
+        Code.Readonly,
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
         Code.Br, Code.Brfalse, Code.Brtrue, Code.Beq, Code.Bge, Code.Bgt, Code.Ble, Code.Blt,
-        Code.Bne_Un, Code.Bge_Un, Code.Bgt_Un, Code.Ble_Un, Code.Blt_Un, Code.Switch,
-        // Integer arithmetic, bitwise operations and comparisons.
+        Code.Bne_Un, Code.Bge_Un, Code.Bgt_Un, Code.Ble_Un, Code.Blt_Un,
         Code.Add, Code.Sub, Code.Mul, Code.Div, Code.Div_Un, Code.Rem, Code.Rem_Un, Code.And, Code.Or, Code.Xor,
         Code.Shl, Code.Shr, Code.Shr_Un, Code.Neg, Code.Not,
         Code.Add_Ovf, Code.Add_Ovf_Un, Code.Mul_Ovf, Code.Mul_Ovf_Un, Code.Sub_Ovf, Code.Sub_Ovf_Un,
         Code.Ceq, Code.Cgt, Code.Cgt_Un, Code.Clt, Code.Clt_Un,
-        // Conversions.
         Code.Conv_I1, Code.Conv_I2, Code.Conv_I4, Code.Conv_I8, Code.Conv_I,
         Code.Conv_U1, Code.Conv_U2, Code.Conv_U4, Code.Conv_U8, Code.Conv_U,
         Code.Conv_Ovf_I1, Code.Conv_Ovf_I2, Code.Conv_Ovf_I4, Code.Conv_Ovf_I8, Code.Conv_Ovf_I,
         Code.Conv_Ovf_U1, Code.Conv_Ovf_U2, Code.Conv_Ovf_U4, Code.Conv_Ovf_U8, Code.Conv_Ovf_U,
         Code.Conv_Ovf_I1_Un, Code.Conv_Ovf_I2_Un, Code.Conv_Ovf_I4_Un, Code.Conv_Ovf_I8_Un, Code.Conv_Ovf_I_Un,
-        Code.Conv_Ovf_U1_Un, Code.Conv_Ovf_U2_Un, Code.Conv_Ovf_U4_Un, Code.Conv_Ovf_U8_Un, Code.Conv_Ovf_U_Un
+        Code.Conv_Ovf_U1_Un, Code.Conv_Ovf_U2_Un, Code.Conv_Ovf_U4_Un, Code.Conv_Ovf_U8_Un, Code.Conv_Ovf_U_Un,
     }.ToFrozenSet();
+
+    /// <summary>
+    /// The opcodes Lean's `Instruction.ofRaw?` decodes for some operand, the set `Instruction.valueOpcode` holds;
+    /// `Instruction.ofRaw` writes a hole for every other one. Tests/DecodedOpcodes.cs compares the two.
+    /// </summary>
+    internal static readonly FrozenSet<Code> DecodedOpcodes = SimpleOpcodes.Concat(new[]
+    {
+        Code.Ldarg_S, Code.Ldarg, Code.Ldarga_S, Code.Ldarga, Code.Starg_S, Code.Starg,
+        Code.Ldloc_S, Code.Ldloc, Code.Stloc_S, Code.Stloc, Code.Ldloca_S, Code.Ldloca,
+        Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldstr, Code.Newarr, Code.Ldelem_Any,
+        Code.Stelem_Any, Code.Ldelema, Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Constrained,
+        Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli, Code.Switch
+    }).ToFrozenSet();
 
     /// <summary>A live instruction requires a literal when its opcode has no decoder or its
     /// translation differs from its decoded instruction.</summary>

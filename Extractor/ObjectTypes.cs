@@ -134,8 +134,8 @@ internal static class ObjectTypes
     /// value-array field holds the origin of a whole array of its element type there, a struct element taking its
     /// width from the layout for <paramref name="architecture"/>.
     /// </summary>
-    internal static Operation FieldOperation(FieldReference field, FieldDefinition resolved, bool store, bool address,
-        string architecture)
+    internal static ClassViews.FieldOperation FieldOperation(FieldReference field, FieldDefinition resolved,
+        bool store, bool address, string architecture)
     {
         var owner = field.DeclaringType;
         Validate(owner);
@@ -152,11 +152,11 @@ internal static class ObjectTypes
                 " is another array, a generic parameter or a modified type.");
         var offset = FieldSlot * FieldIndex(owner, resolved);
         if (valueArray is not null)
-            return new ClassField(new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Array,
-                null, false, valueArray), null);
+            return new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Array,
+                null, false, valueArray);
         if (holdsReference)
-            return new ClassField(new(store, GenericEvidence.ObjectType(owner), offset,
-                ClassViews.FieldKind.Reference, null, false, null), null);
+            return new(store, GenericEvidence.ObjectType(owner), offset,
+                ClassViews.FieldKind.Reference, null, false, null);
         int width;
         try { width = MetadataValidation.PrimitiveWidth(type); }
         catch (InvalidDataException)
@@ -165,8 +165,8 @@ internal static class ObjectTypes
                 "\n  Only integer, Boolean, Char and enum fields of class instances are modelled.");
         }
         var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
-        return new ClassField(new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Word, width,
-            !store && signed, null), null);
+        return new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Word, width,
+            !store && signed, null);
     }
 
     /// <summary>The emitted list of an admitted class's base classes, nearest first.</summary>
@@ -199,7 +199,7 @@ internal static class ObjectTypes
     /// class. An instance records only its own and its admitted base classes, so a test against an interface or
     /// System.Object is rejected, naming why.
     /// </summary>
-    internal static Operation Test(Instruction instruction)
+    internal static string TestOperand(Instruction instruction)
     {
         var target = (TypeReference)instruction.Operand;
         var site = $"Unsupported type test: {instruction.OpCode.Name} {target.FullName}\n  ";
@@ -218,8 +218,7 @@ internal static class ObjectTypes
             throw new InvalidDataException(
                 site + error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
         }
-        var type = GenericEvidence.ObjectType(target);
-        return instruction.OpCode.Code == Code.Castclass ? new CastClass(type) : new IsInstance(type);
+        return GenericEvidence.ObjectType(target);
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.

@@ -100,9 +100,7 @@ internal static class Arrays
         Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
             { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
         Code.Ldlen => new ArrayLength(),
-        Code.Ldelema => new ElementAddress(
-            Storage((TypeReference)instruction.Operand, architecture) ??
-                throw new InvalidDataException("Unsupported array element token: " + instruction.Operand),
+        Code.Ldelema => new ElementAddress(ElementStorage(instruction, architecture),
             instruction.Previous?.OpCode.Code == Code.Readonly),
         Code.Ldelem_I1 => new ArrayElementAccess(NumericKind.I1, false),
         Code.Ldelem_U1 => new ArrayElementAccess(NumericKind.U1, false),
@@ -159,6 +157,20 @@ internal static class Arrays
     };
 
     static TypedElementAccess Typed(Instruction instruction, bool store, string architecture) =>
-        new(store, Storage((TypeReference)instruction.Operand, architecture) ??
-            throw new InvalidDataException("Unsupported array element token: " + instruction.Operand));
+        new(store, ElementStorage(instruction, architecture));
+
+    internal static Element ElementStorage(Instruction instruction, string architecture)
+    {
+        var element = (TypeReference)instruction.Operand;
+        if (ObjectTypes.Candidate(element) || ReferenceArrays.Element(element))
+        {
+            var operand = $"{instruction.OpCode.Name} {element.FullName}";
+            throw new InvalidDataException($"""
+                Unsupported typed element access on an array of class references: {operand}
+                  Element addresses would expose a reference slot; only ldelem.ref and stelem.ref are modelled.
+                """.ReplaceLineEndings("\n"));
+        }
+        return Storage(element, architecture) ??
+            throw new InvalidDataException($"Unsupported array element token: {element}");
+    }
 }

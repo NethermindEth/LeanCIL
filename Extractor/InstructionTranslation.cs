@@ -15,9 +15,9 @@ internal static class InstructionTranslation
         if (i.Previous is { } previous) InstructionPrefixes.ValidatePrefix(m, previous);
         if (imports is not null && imports.TryTranslate(i, methods.Count, out Operation? imported)) return imported;
         profile ??= FeatureProfile.Scalar;
-        layouts?.Require(m.Module, profile.Architecture);
-        var reachable = nativeOperands is null || parameterHomes is null
-            ? Reachability.Analyze(m, profile) : null;
+        layouts ??= new(m.Module, profile.Architecture);
+        layouts.Require(m.Module, profile.Architecture);
+        var reachable = nativeOperands is null || parameterHomes is null ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
         if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
         {
@@ -26,22 +26,15 @@ internal static class InstructionTranslation
             return new IndirectCall(signature, ManagedPointers.Catalog(indirect, methods, methodIndex, tail), tail);
         }
         // Element loads of a handler table emit their decoded instructions with every other array.
-        if (i.OpCode.Code is Code.Ldelem_Any &&
-            nativeOperands.Incoming.TryGetValue(i, out var tableStack) && tableStack.Length >= 2 &&
-            tableStack[^2] is { Kind: NativeOperands.Kind.MethodTable })
+        if (i.OpCode.Code == Code.Ldelem_Any && InstructionOperands.MethodTableLoad(i, nativeOperands))
             return new TypedElementAccess(false, null);
         if (i.OpCode.Code == Code.Ldftn && i.Operand is MethodReference address)
         {
-            var target = address.Resolve() ?? throw new InvalidDataException("Unresolved managed pointer target");
-            var targetIndex = methods.GetValueOrDefault(target, -1);
-            if (targetIndex < 0) throw new InvalidDataException("Managed pointer target is outside the catalog");
+            var (target, targetIndex) = InstructionOperands.AddressTarget(address, methods);
             return new MethodAddress(ManagedPointers.Target(target, targetIndex),
                 ManagedPointers.SignatureEvidence(target));
         }
-        if (TailCalls.IsCall(i) && i.Operand is MethodReference tailTarget &&
-            nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
-            tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
-            throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
+        InstructionOperands.ValidateTailStack(i, nativeOperands);
         if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
@@ -51,10 +44,9 @@ internal static class InstructionTranslation
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,
         IReadOnlyDictionary<MethodDefinition, int> methods, int methodIndex, InstructionIndex instructions,
-        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext? layouts,
+        FeatureProfile profile, IReadOnlyDictionary<int, int> parameterHomes, MetadataValidation.LayoutContext layouts,
         ConstrainedCalls.TargetIndex? constrainedTargets)
     {
-        profile ??= FeatureProfile.Scalar;
         var typeTests = TypeTests.Analyze(m);
         if (i.OpCode.Code == Code.Tail)
         {
@@ -79,10 +71,8 @@ internal static class InstructionTranslation
         if (!receiverCall &&
             (i.OpCode.Code == Code.Callvirt || i is { OpCode.Code: Code.Call, Previous.OpCode.Code: Code.Constrained }))
         {
-            var resolved = (constrainedTargets ?? new ConstrainedCalls.TargetIndex(methods.Keys))
-                .Find(ConstrainedCalls.Resolve(m, i, instructions, profile.Architecture));
-            var index = methods.GetValueOrDefault(resolved, -1);
-            if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
+            var (resolved, index) = InstructionOperands.ConstrainedTarget(m, i, instructions, profile,
+                constrainedTargets ?? new(methods.Keys), methods);
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0),
                 Constrained: true);
         }
@@ -93,76 +83,28 @@ internal static class InstructionTranslation
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
-        // A store or address names the argument, which must have a home; the step reaches the home's slot.
-        Operation Parameter(Func<int, Operation> operation)
-        {
-            var argument = MethodArguments.Index(m, (ParameterDefinition)i.Operand);
-            if (!parameterHomes.ContainsKey(argument)) throw new InvalidDataException("Missing parameter storage");
-            return operation(argument);
-        }
-        int Layout(TypeReference type) => layouts?.Size(type) ??
-            MetadataValidation.Layout(type, m.Module, profile.Architecture);
         Operation Field(FieldAccess access)
         {
-            var f = (FieldReference)i.Operand;
-            FieldDefinition resolved = f.Resolve() ?? throw new InvalidDataException("Unresolved field");
-            if (ObjectTypes.Candidate(f.DeclaringType))
-                return ObjectTypes.FieldOperation(f, resolved, store: access == FieldAccess.Store,
-                    address: access == FieldAccess.Address, profile.Architecture);
-            Layout(f.DeclaringType);
-            var actual = MetadataValidation.InstanceFieldOf(f);
-            var fieldType = actual.Type;
-            RuntimeModels.ValidateTypeIdentity(fieldType, m.Module, profile.Architecture);
-            var aggregate = MetadataValidation.IsAggregate(fieldType, m.Module);
-            int width = layouts?.FieldSize(fieldType) ??
-                MetadataValidation.FieldSize(fieldType, m.Module, profile.Architecture);
-            var owner = f.DeclaringType;
-            int offset = layouts?.FieldOffset(owner, resolved) ??
-                MetadataValidation.FieldOffset(owner, resolved, m.Module, profile.Architecture);
-            if (aggregate && access != FieldAccess.Address)
-                return new StructField(access == FieldAccess.Load ? FieldAccess.LoadAggregate :
-                    FieldAccess.StoreAggregate, offset, width, false);
-            var signed = access == FieldAccess.Load &&
-                EnumTypes.Storage(fieldType).FullName is "System.SByte" or "System.Int16";
-            return new StructField(access, offset, width, signed);
+            var field = (FieldReference)i.Operand;
+            var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
+            if (ObjectTypes.Candidate(field.DeclaringType))
+                return new ClassField(ObjectTypes.FieldOperation(field, resolved, access == FieldAccess.Store,
+                    access == FieldAccess.Address, profile.Architecture), null);
+            var shape = InstructionOperands.StructField(field, resolved, access, m, profile, layouts);
+            return new StructField(shape.Access, shape.Offset, shape.Width, shape.Signed);
         }
         if (i.OpCode.Code is Code.Ldobj or Code.Stobj or Code.Initobj or Code.Sizeof or Code.Cpobj &&
             i.Operand is TypeReference operand)
         {
-            RuntimeModels.ValidateTypeIdentity(operand, m.Module, profile.Architecture);
-            if (Spans.Is(operand))
-            {
-                if (i.OpCode.Code == Code.Initobj) SpanReferences.ValidateReset(i, instructions);
-                else if (i.OpCode.Code != Code.Ldobj)
-                    throw new InvalidDataException($"Unsupported store to a span home: {i}");
-                else SpanReferences.ValidateCopy(m, i, instructions);
-            }
-            else if (i.OpCode.Code == Code.Sizeof)
-            {
-                var size = MetadataValidation.IsAggregate(operand, m.Module)
-                    ? layouts?.Size(operand) ?? MetadataValidation.Layout(operand, m.Module, profile.Architecture)
-                    : MetadataValidation.IntegerVectorWidth(operand) ?? MetadataValidation.PrimitiveWidth(operand);
-                return new ObjectInstruction(Code.Sizeof, ByteSize: size);
-            }
-            else if (!MetadataValidation.IsAggregate(operand, m.Module) &&
-                MetadataValidation.IntegerVectorWidth(operand) is null)
-            {
-                var width = MetadataValidation.PrimitiveWidth(operand);
-                var signed = EnumTypes.Storage(operand).MetadataType is MetadataType.SByte or MetadataType.Int16;
-                return new ObjectInstruction(i.OpCode.Code, ScalarWidth: width, Signed: signed);
-            }
-            return new ObjectInstruction(i.OpCode.Code);
+            var shape = InstructionOperands.ObjectStorage(m, i, operand, instructions, layouts, profile);
+            return new ObjectInstruction(i.OpCode.Code, ScalarWidth: shape.ScalarWidth,
+                Signed: shape.Signed, ByteSize: shape.Bytes);
         }
         if (VirtualDispatch.Is(i))
         {
             var slot = (MethodReference)i.Operand;
-            var entries = VirtualDispatch.Table(slot).Select(entry =>
-            {
-                var index = methods.GetValueOrDefault(entry.Body, -1);
-                if (index <= methodIndex)
-                    throw new InvalidDataException("Unresolved virtual implementation: " + entry.Body.FullName);
-                return (Class: GenericEvidence.ObjectType(entry.Class), Method: index);
-            }).ToArray();
+            var entries = VirtualDispatch.Table(slot)
+                .Select(entry => InstructionOperands.VirtualTarget(entry, methods, methodIndex)).ToArray();
             return new CallVirtual(entries, slot.Parameters.Count + 1);
         }
         if (i.OpCode.Code is Code.Call or Code.Newobj || receiverCall)
@@ -173,20 +115,19 @@ internal static class InstructionTranslation
             if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
                 return new ModelCall(MemoryOperation.Of(source)) { Constructs = true };
             if (RuntimeModels.Translate(r, profile) is { } modeled) return modeled;
-            MethodDefinition resolved = r.Resolve() ?? throw new InvalidDataException($"Unresolved method: {r.FullName}");
-            int index = methods.GetValueOrDefault(resolved, -1);
-            if (index > methodIndex || index >= 0 && TailCalls.IsCall(i))
+            var (resolved, index) = InstructionOperands.DirectTarget(r, TailCalls.IsCall(i), methodIndex, methods);
+            if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
+                return new Newobj(index, ObjectTypes.AllocationOf(resolved), null);
+            if (i.OpCode.Code == Code.Newobj)
             {
-                if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
-                    return new Newobj(index, ObjectTypes.AllocationOf(resolved), null);
-                if (i.OpCode.Code == Code.Newobj)
-                    return new Newobj(index, new Allocation.Aggregate(
-                        Layout(MethodSpecialization.DeclaringType(resolved))), null);
-                var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
-                return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
+                var size = layouts.Size(MethodSpecialization.DeclaringType(resolved));
+                return new Newobj(index, new Allocation.Aggregate(size), null);
             }
-            throw new InvalidDataException($"Unsupported or unresolved call: {r.FullName} [{r.DeclaringType.Scope.Name}]");
+            var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
+            return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
+        if (InstructionOperands.CheckedConversion(i.OpCode.Code) is { } conversion)
+            return new CheckedConvert(conversion.Target, conversion.Unsigned);
         return i.OpCode.Code switch
         {
             Code.Nop or Code.Readonly => StackOperation.Nop,
@@ -196,36 +137,11 @@ internal static class InstructionTranslation
             Code.Localloc => new Localloc(),
             Code.Cpblk => MemoryOperation.Other($"(.copyBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
-            Code.Starg or Code.Starg_S => Parameter(index => new Starg(index)),
-            Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
-                ObjectTypes.Candidate(m.DeclaringType) =>
-                throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
-                throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S => Parameter(index => new Ldarga(index)),
+            Code.Starg or Code.Starg_S => new Starg(InstructionOperands.HomedArgument(m, i, parameterHomes)),
+            Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
             Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
             Code.Stind_I => new IndirectAccess(NumericKind.I, true),
-            Code.Conv_Ovf_I1 => new CheckedConvert(ConvTarget.I1, false),
-            Code.Conv_Ovf_I1_Un => new CheckedConvert(ConvTarget.I1, true),
-            Code.Conv_Ovf_U1 => new CheckedConvert(ConvTarget.U1, false),
-            Code.Conv_Ovf_U1_Un => new CheckedConvert(ConvTarget.U1, true),
-            Code.Conv_Ovf_I2 => new CheckedConvert(ConvTarget.I2, false),
-            Code.Conv_Ovf_I2_Un => new CheckedConvert(ConvTarget.I2, true),
-            Code.Conv_Ovf_U2 => new CheckedConvert(ConvTarget.U2, false),
-            Code.Conv_Ovf_U2_Un => new CheckedConvert(ConvTarget.U2, true),
-            Code.Conv_Ovf_I4 => new CheckedConvert(ConvTarget.I4, false),
-            Code.Conv_Ovf_I4_Un => new CheckedConvert(ConvTarget.I4, true),
-            Code.Conv_Ovf_U4 => new CheckedConvert(ConvTarget.U4, false),
-            Code.Conv_Ovf_U4_Un => new CheckedConvert(ConvTarget.U4, true),
-            Code.Conv_Ovf_I8 => new CheckedConvert(ConvTarget.I8, false),
-            Code.Conv_Ovf_I8_Un => new CheckedConvert(ConvTarget.I8, true),
-            Code.Conv_Ovf_U8 => new CheckedConvert(ConvTarget.U8, false),
-            Code.Conv_Ovf_U8_Un => new CheckedConvert(ConvTarget.U8, true),
-            Code.Conv_Ovf_I => new CheckedConvert(ConvTarget.I, false),
-            Code.Conv_Ovf_I_Un => new CheckedConvert(ConvTarget.I, true),
-            Code.Conv_Ovf_U => new CheckedConvert(ConvTarget.U, false),
-            Code.Conv_Ovf_U_Un => new CheckedConvert(ConvTarget.U, true),
             Code.Add_Ovf => new CheckedArithmetic(CheckedOperator.Add, true),
             Code.Add_Ovf_Un => new CheckedArithmetic(CheckedOperator.Add, false),
             Code.Sub_Ovf => new CheckedArithmetic(CheckedOperator.Sub, true),
@@ -251,7 +167,8 @@ internal static class InstructionTranslation
             Code.Conv_U2 => new StackOperation(StackOpcode.ConvU2),
             Code.Neg => new StackOperation(StackOpcode.Neg),
             Code.Ldnull => new LoadNull(),
-            Code.Castclass or Code.Isinst => ObjectTypes.Test(i),
+            Code.Castclass => new CastClass(ObjectTypes.TestOperand(i)),
+            Code.Isinst => new IsInstance(ObjectTypes.TestOperand(i)),
             Code.Ldstr => StringOperation((string)i.Operand),
             Code.Cgt => new StackOperation(StackOpcode.Cgt),
             Code.Bgt or Code.Bgt_S => JumpTo(JumpKind.Greater),
@@ -272,10 +189,7 @@ internal static class InstructionTranslation
             Code.Ldloc_2 => LoadLocal(2),
             Code.Ldloc_3 => LoadLocal(3),
             Code.Ldloc or Code.Ldloc_S => LoadLocal(LocalIndex()),
-            Code.Ldloca or Code.Ldloca_S when ObjectTypes.Rooted(((VariableDefinition)i.Operand).VariableType) ||
-                ReferenceArrays.Is(((VariableDefinition)i.Operand).VariableType) =>
-                throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
-            Code.Ldloca or Code.Ldloca_S => AddressLocal(LocalIndex()),
+            Code.Ldloca or Code.Ldloca_S => AddressLocal(InstructionOperands.AddressedLocal(m, i)),
             Code.Stloc_0 => StoreLocal(0),
             Code.Stloc_1 => StoreLocal(1),
             Code.Stloc_2 => StoreLocal(2),
@@ -351,9 +265,7 @@ internal static class InstructionTranslation
     // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.
     static Operation StringOperation(string text)
     {
-        var unrepresentable = text.Any(c => char.IsSurrogate(c) || c is '\b' or '\f');
-        if (unrepresentable)
-            throw new InvalidDataException("Unsupported string literal: a surrogate, backspace or form feed");
+        InstructionOperands.ValidateLiteral(text);
         return MemoryOperation.Of(new StringLiteral(text));
     }
 }

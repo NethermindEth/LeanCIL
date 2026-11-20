@@ -218,17 +218,23 @@ internal static class RuntimeModels
             ? MemoryOperation.Other($"(.createSpan {width})") : null;
     }
 
-    internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
+    internal static void ValidateCallScope(MethodReference reference)
     {
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            reference.HasThis != (reference.Name == ".ctor")) return null;
-        string scope = reference.DeclaringType.Scope.Name;
+            reference.HasThis != (reference.Name == ".ctor")) return;
         if (PlatformAssemblies.Claimed(AssemblyName.OfScope(
                 reference.DeclaringType, IdentityImage(reference.DeclaringType))) is { } platform &&
             !ExactScope(reference.DeclaringType, platform))
             throw new InvalidDataException(
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
-        Operation? op = scope switch
+    }
+
+    internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
+    {
+        if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
+            reference.HasThis != (reference.Name == ".ctor")) return null;
+        ValidateCallScope(reference);
+        Operation? op = reference.DeclaringType.Scope.Name switch
         {
             "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture),
             _ => null

@@ -29,12 +29,6 @@ internal static class ReferenceArrays
             new NewArray(new(LayoutEvidence.Scope(element), element.FullName)),
         Code.Ldelem_Ref => new ReferenceElementAccess(false),
         Code.Stelem_Ref => new ReferenceElementAccess(true),
-        Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any
-            when instruction.Operand is TypeReference element &&
-                (ObjectTypes.Candidate(element) || Element(element)) =>
-            throw new InvalidDataException("Unsupported typed element access on an array of class references: " +
-                instruction.OpCode.Name + " " + element.FullName +
-                "\n  Element addresses would expose a reference slot; only ldelem.ref and stelem.ref are modelled."),
         _ => null
     };
 }
