@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:package Mono.Cecil
+#:include ContractVariants.cs
 #:include ../scripts/Verification.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
@@ -11,8 +12,8 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
-// Framework argument guards as checked runtime contracts: proofs that each raises its exception exactly when its .NET
-// condition holds, a proof that fails once the guard is swapped, and named rejection of uncatalogued guard overloads.
+// Check normal and exceptional outcomes for integer and null guards. The swapped guard has a certified
+// counterexample, and unsupported overloads must fail extraction with the expected member identity.
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Guards");
@@ -20,7 +21,6 @@ Directory.CreateDirectory(root);
 
 foreach (var (source, entry) in new[]
 {
-    ("Examples/Proofs/GuardCount.lean", "Guards::Count(System.Int32)"),
     ("Examples/Proofs/GuardIndex.lean", "Guards::Index(System.UInt32,System.UInt32)"),
     ("Examples/Proofs/GuardRequired.lean", "Guards::Required(System.String)")
 })
@@ -30,19 +30,52 @@ foreach (var (source, entry) in new[]
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 
-// The guard method decides the proof: with ThrowIfNegativeOrZero, zero raises and GuardCount no longer holds.
+// Zero returns under ThrowIfNegative and raises ArgumentOutOfRangeException under ThrowIfNegativeOrZero.
 var swapped = Mutate("swapped", "Count",
     (module, call) => Guard(module, call, "ThrowIfNegativeOrZero", module.TypeSystem.Int32));
-var refuted = Execute(["dotnet", ExtractorPath, "extract", swapped, "Examples.Guards::Count(System.Int32)",
-    Path.Combine(root, "Reject-swapped")]);
-if (refuted.Code != 0)
-    throw new InvalidOperationException("The swapped guard should extract\n" + refuted.Output);
-var checkedSwap = Execute(["dotnet", ExtractorPath, "verify", Path.Combine(root, "Reject-swapped"), "--proof",
-    At("Examples/Proofs/GuardCount.lean")]);
-if (checkedSwap.Code == 0 ||
-    !checkedSwap.Output.Contains("Lean could not prove the selected theorem", StringComparison.Ordinal))
-    throw new InvalidOperationException("GuardCount must fail for ThrowIfNegativeOrZero\n" + checkedSwap.Output);
-Console.WriteLine("PASS swapped guard refutes GuardCount");
+const string countSelector = "Guards::Count(System.Int32)";
+const string countContract = """
+    /-- Negative counts raise, and a nonnegative count returns unchanged in the caller's memory. -/
+    def contract : OutcomeContract W32 where
+      args count := [.scalar (.i32 count)]
+      pre _ memory := ∃ literal, memory.literals.lookup "count" = some literal ∧
+        formObject memory (.address literal) = .ok (.object (.address literal))
+      footprint _ := []
+      post count before after values := after = before ∧ values = [.scalar (.i32 count)]
+      raises count _ := if count.toInt < 0 then some .argumentOutOfRange else none
+    """;
+const string positive = """
+    /-- The compiled guard satisfies both branches for every count and bound parameter name. -/
+    theorem correctness : contract.HoldsCLR Extracted.program 0 := by
+      rintro count memory ⟨literal, bound, formed⟩
+      obtain ⟨fuel, ran⟩ := ExampleProof.correctness memory literal count bound formed
+      by_cases negative : count.toInt < 0
+      · simp only [negative, ite_true] at ran
+        simpa only [contract, negative, ite_true] using
+          (RaisesCLR.of_invoke ran (exception := .argumentOutOfRange) rfl)
+      · simp only [negative, ite_false] at ran
+        simp only [contract, negative, ite_false]
+        exact ⟨fuel, _, _, ran, Confined.refl _ _, _, rfl, rfl, rfl⟩
+    """;
+const string counterexample = """
+    /-- The caller binds the parameter name to a live string object at allocation zero. -/
+    private def literalMemory : Memory := { Memory.empty with
+      allocations := fun id => if id = 0 then some
+        ⟨.object ⟨.object CIL.Extraction.runtimeScope "System.String", []⟩, ⟨1, 1, []⟩, true, []⟩
+        else none
+      nextIdentity := 1
+      literals := [("count", ⟨0, 0⟩)] }
+
+    /-- The substituted guard throws at pc 2 on zero, which the contract requires to return. -/
+    theorem correctness : contract.RefutedCLR Extracted.program 0 :=
+      .of_fault (input := 0) (initial := literalMemory) ⟨⟨0, 0⟩, rfl, rfl⟩ (by decide)
+        (rfl : invoke Extracted.program 8 0 (contract.args 0) literalMemory =
+          .error ⟨0, 2, .thrown .argumentOutOfRange⟩) trivial
+    """;
+verification.VerifyContractVariant(assembly, "Examples", countSelector, Path.Combine(root, "GuardCount"),
+    swapped, countSelector, Path.Combine(root, "Reject-swapped"), countContract, positive, counterexample,
+    example: At("Examples/Proofs/GuardCount.lean"), imports: "import CIL.Safety.RuntimeExceptions");
+Console.WriteLine("PASS GuardCount returns zero and its replacement is certified to throw at the guard");
 
 // Floating-point and pointer guards are not modeled: NaN and pointer comparison are outside the integer contract.
 foreach (var (name, method, rewrite, expected) in

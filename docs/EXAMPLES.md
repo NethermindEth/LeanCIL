@@ -128,8 +128,9 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `Guards` calls the framework argument guards. `GuardCount.lean` proves `ThrowIfNegative` raises
   `ArgumentOutOfRangeException` exactly for a negative count, `GuardIndex.lean` proves the unsigned
   `ThrowIfGreaterThanOrEqual` compares as unsigned, and `GuardRequired.lean` proves `ThrowIfNull`
-  raises `ArgumentNullException` exactly for null. The `guards` test shows `GuardCount.lean`
-  fails once the guard becomes `ThrowIfNegativeOrZero`.
+  raises `ArgumentNullException` exactly for null. Replacing the compiled guard with
+  `ThrowIfNegativeOrZero` raises `ArgumentOutOfRangeException` at zero. The refutation certificate
+  binds that counterexample to the changed entry and its assembly.
 
 Concrete example proofs establish their displayed inputs. Only explicitly universally quantified
 theorems claim arbitrary-input correctness. `CheckedAdd64`, `Choose` and `GenericIdentity` quantify
