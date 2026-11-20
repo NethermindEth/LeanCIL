@@ -751,20 +751,71 @@ File.WriteAllText(reverseProof, $$"""
     """);
 pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64-advsimd",
     () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd")));
-// Swapping only the two compiled argument loads preserves the REV64 call and exchanges its lanes.
-var swapped = Path.Combine(root, "SwappedReverseLimbs");
-Directory.CreateDirectory(swapped);
-var swappedAssembly = Path.Combine(swapped, "Examples.dll");
-using (var variant = ModuleDefinition.ReadModule(assembly))
+// Exchange the two leading loads and preserve the intrinsic and the rest of the body.
+(string Assembly, string Output) SwapFirstArguments(string methodName)
 {
-    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
-    var reverse = methods.Single(method => method.Name == "ReverseLimbs");
-    var code = reverse.Body.Instructions;
+    var output = Path.Combine(root, "Swapped" + methodName);
+    Directory.CreateDirectory(output);
+    var image = Path.Combine(output, "Examples.dll");
+    using var variant = ModuleDefinition.ReadModule(assembly);
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == methodName);
+    var code = method.Body.Instructions;
     if (code[0].OpCode != OpCodes.Ldarg_0 || code[1].OpCode != OpCodes.Ldarg_1)
-        throw new InvalidDataException("ReverseLimbs must load the low limb followed by the high limb.");
+        throw new InvalidDataException($"{methodName} must load arguments zero and one first.");
     (code[0].OpCode, code[1].OpCode) = (code[1].OpCode, code[0].OpCode);
-    variant.Write(swappedAssembly);
+    variant.Write(image);
+    return (image, output);
 }
+
+var wordArguments = SwapFirstArguments("CreateWords");
+verification.VerifyContractVariant(assembly, "Examples", selectors["CreateWords"], Path.Combine(root, "WordsContract"),
+    wordArguments.Assembly, selectors["CreateWords"], wordArguments.Output, """
+    /-- The eight input words in argument order. -/
+    structure Words where
+      a : W32
+      b : W32
+      c : W32
+      d : W32
+      e : W32
+      f : W32
+      g : W32
+      h : W32
+
+    /-- Lane zero contains the first word, and lane seven contains the last. -/
+    def lanes (w : Words) : BitVec 256 :=
+      ((w.h ++ w.g) ++ (w.f ++ w.e)) ++ ((w.d ++ w.c) ++ (w.b ++ w.a))
+
+    /-- Creating the vector packs all eight words and preserves caller memory. -/
+    def createWords : MethodContract Words (BitVec 256) where
+      args w := [.scalar (.i32 w.a), .scalar (.i32 w.b), .scalar (.i32 w.c), .scalar (.i32 w.d),
+        .scalar (.i32 w.e), .scalar (.i32 w.f), .scalar (.i32 w.g), .scalar (.i32 w.h)]
+      results v := [.scalar (.v256 v)]
+      pre _ _ := True
+      footprint _ := []
+      post w before after v := after = before ∧ v = lanes w
+    """, """
+    set_option maxRecDepth 8192 in
+    /-- The compiled method puts every word in its declared lane. -/
+    theorem correctness : createWords.Holds Extracted.program 0 := by
+      intro w memory _
+      apply MethodContract.Holds.intro (c := createWords) (input := w) memory (lanes w)
+        ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨64, rfl⟩
+    """, """
+    private def input : Words := ⟨1, 0, 0, 0, 0, 0, 0, 0⟩
+
+    set_option maxRecDepth 8192 in
+    /-- Swapping the leading loads puts the only nonzero word in lane one. -/
+    theorem correctness : createWords.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (input := input) (initial := Memory.empty)
+        (fuel := 64) (values := [.scalar (.v256 4294967296)]) trivial rfl
+      rintro ⟨_, v, encoded, _, rfl⟩
+      exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 4294967296)] =
+        [.scalar (.v256 (lanes input))])) encoded
+    """);
+Console.WriteLine("PASS vector creation packs every input lane and refutes swapped low words");
+
+var (swappedAssembly, swapped) = SwapFirstArguments("ReverseLimbs");
 verification.VerifyContractVariant(assembly, "Examples", selectors["ReverseLimbs"],
     Path.Combine(root, "ReverseContract"), swappedAssembly, selectors["ReverseLimbs"], swapped, """
     open CIL (reverseBytes)
