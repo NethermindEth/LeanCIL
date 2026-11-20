@@ -523,6 +523,33 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
       .error (.operandMismatch token)
     else .ok {}
 
+/-- A checked managed operand resolves to a definition in a carried slice. The MethodDef token
+    in that slice is the target of the call, and its signature checks the same typed reference. -/
+theorem checkCallOperand_managed {env : MetadataEnv} {frame : Frame} {token target : Nat}
+    {call : CallSite} {facts : TokenFacts}
+    (checked : checkCallOperand env frame token call = .ok facts)
+    (managed : call.target = .managed target) :
+    ∃ site position, env.methodSite token = .ok site ∧
+      checkCallReference env frame token site call = .ok () ∧
+      site.definition = some (position, target) := by
+  unfold checkCallOperand at checked
+  cases resolved : env.methodSite token with
+  | error fault => simp [resolved, bind, Except.bind] at checked
+  | ok site =>
+    cases reference : checkCallReference env frame token site call with
+    | error fault => simp [resolved, reference, bind, Except.bind] at checked
+    | ok result =>
+      cases result
+      cases definition : site.definition with
+      | none => simp [resolved, reference, managed, definition, bind, Except.bind] at checked
+      | some pair =>
+        obtain ⟨position, method⟩ := pair
+        by_cases same : target = method
+        · exact ⟨site, position, rfl, reference, same ▸ definition⟩
+        · simp [resolved, reference, managed, definition, same, bind, Except.bind] at checked
+
+#print axioms checkCallOperand_managed
+
 /-- The same member binds the typed reference and both permitted external identity spellings. -/
 theorem checkCallOperand_external {env : MetadataEnv} {frame : Frame} {token : Nat}
     {call : CallSite} {identity : String} {facts : TokenFacts}

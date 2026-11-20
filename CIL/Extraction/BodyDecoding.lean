@@ -735,18 +735,14 @@ private theorem decodeBody_checkedTable {env : MetadataEnv} {arity ownerArity : 
 
 #print axioms decodeBody_checkedTable
 
-/-- A bound body checks each token's call reference and external identity against one member. -/
-theorem BodyDecodes.externalTarget {pins : List AssemblyPin} {pin : AssemblyPin}
-    {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
-    (decodes : BodyDecodes pins pin body method arguments signature) {token : Nat}
-    {call : CallSite} {identity : String} (listed : (token, .call call) ∈ body.tokens.operands)
-    (externalTarget : call.target = .external identity) :
-    ∃ env frame site,
+/-- A bound body validates every call reference listed in its token table in its own type frame. -/
+private theorem BodyDecodes.checkedCall {pins pin body method arguments signature}
+    (decodes : BodyDecodes pins pin body method arguments signature) {token : Nat} {call : CallSite}
+    (listed : (token, RawOperand.call call) ∈ body.tokens.operands) :
+    ∃ env frame facts,
       body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
       env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
-      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
-      site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
-        site.contractName frame = some (bytesOf identity)) := by
+      checkCallOperand env frame token call = .ok facts := by
   have matched := decodes.2.2.2.2.2.2
   unfold bodyMatches at matched
   split at matched
@@ -759,11 +755,28 @@ theorem BodyDecodes.externalTarget {pins : List AssemblyPin} {pin : AssemblyPin}
       | (obtain ⟨frame, table, frameEq, tableEq⟩ := decodeBody_checkedTable
            (show decodeBody _ _ _ body = .ok _ from by assumption)
          obtain ⟨facts, accepted⟩ := checkTable_calls tableEq listed
-         obtain ⟨site, bound⟩ := checkCallOperand_external accepted externalTarget
-         refine ⟨_, frame, site, ?_, frameEq, bound⟩
+         refine ⟨_, frame, facts, ?_, frameEq, accepted⟩
          cases envEq : body.metadata.environmentWith body.identities body.tables body.pinned <;>
            simp_all [Except.mapError])
   · contradiction
+
+#print axioms BodyDecodes.checkedCall
+
+/-- A bound body checks each token's call reference and external identity against one member. -/
+theorem BodyDecodes.externalTarget {pins : List AssemblyPin} {pin : AssemblyPin}
+    {body : BodyEvidence} {method : RawMethod} {arguments : List TypeExpr} {signature : String}
+    (decodes : BodyDecodes pins pin body method arguments signature) {token : Nat}
+    {call : CallSite} {identity : String} (listed : (token, .call call) ∈ body.tokens.operands)
+    (externalTarget : call.target = .external identity) :
+    ∃ env frame site,
+      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
+      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
+      site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
+        site.contractName frame = some (bytesOf identity)) := by
+  obtain ⟨env, frame, _, built, localFrame, checked⟩ := decodes.checkedCall listed
+  obtain ⟨site, target⟩ := checkCallOperand_external checked externalTarget
+  exact ⟨env, frame, site, built, localFrame, target⟩
 
 #print axioms BodyDecodes.externalTarget
 
@@ -870,6 +883,29 @@ private theorem decodeBody_call {env arity ownerArity body decoded}
 
 #print axioms decodeBody_call
 
+/-- Each call instruction of the decoded method reads an operand from this body's token table. -/
+private theorem BodyDecodes.callOperand {pins pin body method arguments signature}
+    (decodes : BodyDecodes pins pin body method arguments signature)
+    {pc : Nat} {instruction : RawInstruction} {call : CallSite}
+    (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call) :
+    ∃ token, (token, RawOperand.call call) ∈ body.tokens.operands := by
+  have matched := decodes.2.2.2.2.2.2
+  unfold bodyMatches at matched
+  split at matched
+  · rename_i decoded checked
+    simp only [Bool.and_eq_true, beq_iff_eq] at matched
+    rw [← matched.1.2] at fetched
+    unfold checkBody at checked
+    simp only [bind, Except.bind] at checked
+    repeat' split at checked
+    all_goals first
+      | contradiction
+      | (cases checked
+         exact decodeBody_call (by assumption) fetched called)
+  · contradiction
+
+#print axioms BodyDecodes.callOperand
+
 /-- Every decoded external call names the metadata member of its own reference. -/
 theorem BodyDecodes.callExternalTarget {pins pin body method arguments signature}
     (decodes : BodyDecodes pins pin body method arguments signature)
@@ -883,23 +919,30 @@ theorem BodyDecodes.callExternalTarget {pins pin body method arguments signature
       env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
       site.definition = none ∧ (site.externalName = some (bytesOf identity) ∨
         site.contractName frame = some (bytesOf identity)) := by
-  have matched := decodes.2.2.2.2.2.2
-  unfold bodyMatches at matched
-  split at matched
-  · rename_i decoded checked
-    simp only [Bool.and_eq_true, beq_iff_eq] at matched
-    rw [← matched.1.2] at fetched
-    unfold checkBody at checked
-    simp only [bind, Except.bind] at checked
-    repeat' split at checked
-    all_goals first
-      | contradiction
-      | (cases checked
-         obtain ⟨token, member⟩ := decodeBody_call (by assumption) fetched called
-         obtain ⟨env, frame, site, same⟩ := decodes.externalTarget member externalTarget
-         exact ⟨token, env, frame, site, member, same⟩)
-  · contradiction
+  obtain ⟨token, listed⟩ := decodes.callOperand fetched called
+  obtain ⟨env, frame, site, resolved⟩ := decodes.externalTarget listed externalTarget
+  exact ⟨token, env, frame, site, listed, resolved⟩
 
 #print axioms BodyDecodes.callExternalTarget
+
+/-- Each managed call in the decoded body resolves its operand to a MethodDef in a particular
+    metadata slice. A MemberRef in the caller may have a different token from that definition. -/
+theorem BodyDecodes.callManagedTarget {pins pin body method arguments signature}
+    (decodes : BodyDecodes pins pin body method arguments signature)
+    {pc target : Nat} {instruction : RawInstruction} {call : CallSite}
+    (fetched : method.code[pc]? = some instruction) (called : instruction.operand = .call call)
+    (managed : call.target = .managed target) :
+    ∃ token env frame site position,
+      (token, RawOperand.call call) ∈ body.tokens.operands ∧
+      body.metadata.environmentWith body.identities body.tables body.pinned = .ok env ∧
+      env.frame method.genericParameters.length method.ownerParameters.length = .ok frame ∧
+      env.methodSite token = .ok site ∧ checkCallReference env frame token site call = .ok () ∧
+      site.definition = some (position, target) := by
+  obtain ⟨token, listed⟩ := decodes.callOperand fetched called
+  obtain ⟨env, frame, _, built, localFrame, checked⟩ := decodes.checkedCall listed
+  obtain ⟨site, position, resolved⟩ := checkCallOperand_managed checked managed
+  exact ⟨token, env, frame, site, position, listed, built, localFrame, resolved⟩
+
+#print axioms BodyDecodes.callManagedTarget
 
 end CIL.Extraction

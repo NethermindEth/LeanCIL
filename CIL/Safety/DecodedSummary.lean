@@ -9,8 +9,8 @@ evidence record that names the method there: the pinned assembly, the metadata t
 type arguments, and the body bytes, links and certified reachability mask used to decode it.
 `decodedProgram?_eq_some` combines each record's body equation in `BodiesDecode` with the
 program's mask and call-binding checks to identify the program the summary ranges over. At a call
-site, `DecodedSummary.site` shows that the summary at the index the call's link enters is
-for the method the site's metadata names.
+site, `DecodedSummary.site` identifies the callee's token and type arguments. For a declaring type
+with an explicit scope, `DecodedAt.direct_site` also identifies the callee's assembly pin.
 -/
 
 namespace CIL.Safety
@@ -252,5 +252,65 @@ theorem DecodedSummary.site {Input Output : Type} {contract : MethodContract Inp
   exact calleeToken
 
 #print axioms DecodedSummary.site
+
+/-- A declaring type with an explicit assembly scope keeps that scope in the closed owner
+    identity, including when the type is instantiated. -/
+private theorem managedOwner_scoped {owner : TypeExpr} {scope identity : String}
+    {arguments : List TypeExpr} (hasScope : owner.headScope = some scope)
+    (named : managedOwner owner = some (identity, arguments)) : ownedBy scope identity = true := by
+  induction owner generalizing identity arguments with
+  | apply head argument ih _ =>
+    cases headOwner : managedOwner head with
+    | none => simp [managedOwner, headOwner] at named
+    | some pair =>
+      obtain ⟨base, parameters⟩ := pair
+      simp [managedOwner, headOwner] at named
+      exact named.1 ▸ ih hasScope headOwner
+  | _ =>
+    simp_all [TypeExpr.headScope, managedOwner]
+    all_goals
+      rw [← named.1]
+      simp [ownedBy, metadataChars_eq, List.isPrefixOf_iff_prefix, List.IsPrefix]
+
+#print axioms managedOwner_scoped
+
+/-- At a live direct managed call whose declaring type carries an assembly scope, the method
+    entered by its link has that assembly identity, definition token and type arguments. -/
+theorem DecodedAt.direct_site {program : Program} {evidence : List MethodEvidence}
+    {profile : FeatureProfile} {environment : LayoutEnvironment} {index token : Nat}
+    {pin : AssemblyPin} {arguments : List TypeExpr}
+    (bound : DecodedAt program evidence profile environment index pin token arguments)
+    (attributed : AttributionValid (bodyOwners evidence) = true) {imports : List ImportSlot}
+    {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod} {reachable : List Bool}
+    {caller : Method} {pc siteToken : Nat} {method : MethodRef} {prefixes : CallPrefixes}
+    {instruction : RawInstruction} {site : CallSite} {scope : String}
+    (calls : ManagedCallsValid (specializationTable evidence) imports modelled raw reachable caller)
+    (found : caller.code[pc]? = some (.call method prefixes))
+    (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
+    (operand : instruction.operand = .call site) (managed : site.target = .managed siteToken)
+    (linked : caller.linkAt pc = some (.direct index))
+    (hasScope : site.declaringType.headScope = some scope) (validScope : pinIdentityValid scope) :
+    pin.identity = scope ∧ token = siteToken ∧ arguments = site.typeArguments := by
+  obtain ⟨item, recorded, rfl, rfl, rfl, instantiated, _⟩ := bound
+  obtain ⟨_, callee, selected, fits⟩ :=
+    calls.direct_callee found live rawFound operand managed linked
+  simp only [specializationTable, List.getElem?_map, recorded, Option.map_some,
+    Option.some.injEq] at selected
+  subst selected
+  simp only [calleeMatchesSite, Bool.and_eq_true, beq_iff_eq, and_assoc] at fits
+  obtain ⟨owner, sameToken, sameArguments, _⟩ := fits
+  refine ⟨?_, (instantiateMethod_token instantiated).symm.trans sameToken, sameArguments⟩
+  have listed : (item.assembly, item.closed.owner) ∈ bodyOwners evidence := by
+    exact List.mem_flatMap.mpr ⟨item, List.mem_of_getElem? recorded, by simp⟩
+  have assigned := Bool.and_eq_true_iff.mp (List.all_eq_true.mp attributed _ listed)
+  cases named : managedOwner site.declaringType with
+  | none => simp [managedOwnerMatches, named] at owner
+  | some pair =>
+    obtain ⟨identity, params⟩ := pair
+    simp only [managedOwnerMatches, named, Bool.and_eq_true, beq_iff_eq, and_assoc] at owner
+    exact ownedBy_unique assigned.1 validScope assigned.2
+      (owner.1 ▸ managedOwner_scoped hasScope named)
+
+#print axioms DecodedAt.direct_site
 
 end CIL.Safety

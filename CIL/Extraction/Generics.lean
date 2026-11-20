@@ -863,9 +863,9 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
 
 #print axioms ManagedCallsValid.linkFits
 
-/-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
-    link enters has that token and the site's type arguments. Its operand passes the name check. -/
-theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
+/-- A direct managed call enters a method whose owner, signature, definition token and type
+    arguments all match its checked operand. -/
+theorem ManagedCallsValid.direct_callee {methods : List SpecializedMethod}
     {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
     {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
@@ -876,8 +876,7 @@ theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
     (operand : instruction.operand = .call site) (managed : site.target = .managed token)
     (linked : emitted.linkAt pc = some (.direct target)) :
     callOperandMatches site (.call method prefixes) = true ∧
-    ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
-      callee.arguments = site.typeArguments := by
+    ∃ callee, methods[target]? = some callee ∧ calleeMatchesSite site token callee = true := by
   obtain ⟨_, _, _, _, checks⟩ := (ManagedCallsValid_iff_original _ _ _ _ _ _).mp valid
   have inside : pc < emitted.code.length := (List.getElem?_eq_some_iff.mp found).1
   have paired : (reachable.zip ((List.range emitted.code.length).map emitted.linkAt))[pc]? =
@@ -893,9 +892,31 @@ theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
     cases selected : methods[target]? with
     | none => simp [selected] at checked
     | some callee =>
-      simp only [selected, calleeMatchesSite, Bool.and_eq_true, beq_iff_eq] at checked
-      exact ⟨checked.2, callee, rfl, checked.1.1.1.1.1.1.1.1.1.2, checked.1.1.1.1.1.1.1.1.2⟩
+      simp only [selected, Bool.and_eq_true] at checked
+      exact ⟨checked.2, callee, rfl, checked.1.1.1⟩
   · simp [opcode] at checked
+
+#print axioms ManagedCallsValid.direct_callee
+
+/-- At a live `call` whose raw operand names managed token `token`, the method its `.direct`
+    link enters has that token and the site's type arguments. Its operand passes the name check. -/
+theorem ManagedCallsValid.direct_operand {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {modelled : CallOpcode × MethodRef → Bool} {raw : RawMethod}
+    {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports modelled raw reachable emitted)
+    {pc target token : Nat} {method : MethodRef} {prefixes : CallPrefixes}
+    {instruction : RawInstruction} {site : CallSite}
+    (found : emitted.code[pc]? = some (.call method prefixes))
+    (live : reachable[pc]? = some true) (rawFound : raw.code[pc]? = some instruction)
+    (operand : instruction.operand = .call site) (managed : site.target = .managed token)
+    (linked : emitted.linkAt pc = some (.direct target)) :
+    callOperandMatches site (.call method prefixes) = true ∧
+    ∃ callee, methods[target]? = some callee ∧ callee.closed.token = token ∧
+      callee.arguments = site.typeArguments := by
+  obtain ⟨reference, callee, selected, agrees⟩ := valid.direct_callee found live rawFound operand
+    managed linked
+  simp only [calleeMatchesSite, Bool.and_eq_true, beq_iff_eq, and_assoc] at agrees
+  exact ⟨reference, callee, selected, agrees.2.1, agrees.2.2.1⟩
 
 #print axioms ManagedCallsValid.direct_operand
 
