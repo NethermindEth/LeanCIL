@@ -241,6 +241,30 @@ theorem wrong_followers_refused :
   decide +kernel
 #print axioms wrong_followers_refused
 
+/-- A body whose `readonly.` is followed by `follower`, then `ldelema int32` and `ret`. -/
+private def followedBody (follower : RawInstruction) : RawMethod :=
+  body [prefixRaw, follower, addressRaw 5, retRaw 10]
+
+/-- The code a forger writes for `followedBody`: the prefix and its `nop` follower as `nop`. -/
+private def followedCode : List CIL.Instruction :=
+  [.ldarg 0, .ldarg 1, .nop, .nop, .ldelema intType false, .ret]
+
+/-- With the prefix emitted as `nop`, which the scalar check does not compare at an ordinary
+    site, the scalar check still refuses a `readonly.` that ends the body, whose fall-through
+    successor does not exist, and one that no `ldelema` follows, at the follower through
+    `invalidPredecessor`; `readOnlyPrefixMatches` refuses both as well. The decoder gives such a
+    prefix no instruction, so the code equation refuses the same code. -/
+theorem misplaced_prefix_refused :
+    ¬ ScalarFlowValid (body [prefixRaw]) (depthsOf [0, 1, 2])
+      [some [], some [.array .signed32], some [.word32, .array .signed32]]
+      [.ldarg 0, .ldarg 1, .nop] ∧
+    ¬ ScalarFlowValid (followedBody ⟨4, 0, .none⟩) (depthsOf [0, 1, 2, 2, 2, 1]) (addressStates 3)
+      followedCode ∧
+    methodCode .scalar {} [] (List.replicate 4 true) (followedBody ⟨4, 0, .none⟩) ≠
+      followedCode := by
+  decide +kernel
+#print axioms misplaced_prefix_refused
+
 /-- `ldelema` takes no prefix but `readonly.`: after `unaligned.` it has no decoding. -/
 theorem unaligned_address_refused :
     !accepted (body [⟨2, 65042, .integer 1⟩, addressRaw 5, retRaw 10]) (depthsOf [0, 1, 2, 2, 1])

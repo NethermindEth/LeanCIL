@@ -928,8 +928,8 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
 /-- A `readonly.` site requires the raw instruction after it, `next`, to be `ldelema` (143), so a
     `readonly.` that ends the body is refused. This is the rule that only `ldelema` follows
     `readonly.`: a reachable `readonly.` falls through to the instruction after it, which
-    `PrefixEntryFree` keeps every branch out of. The evidence binds code to `methodCode`, which
-    does not check prefixes, so the scalar check applies this rule at every reachable site. -/
+    `PrefixEntryFree` keeps every branch out of. Within the scalar check, `invalidPredecessor`
+    at the follower and the successor rule refuse the same sites. -/
 def readOnlyPrefixMatches (next : Option RawInstruction) (instruction : RawInstruction) : Bool :=
   instruction.opcode != 65054 || next.any (prefixTakes instruction)
 
