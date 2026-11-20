@@ -242,20 +242,43 @@ Console.WriteLine($"PASS new-proof outlines {outlined.Length} methods that elabo
 
 if (Selected("PairLength"))
 {
-    // The element definition must read back as the extraction's own element, or the outline states another array type,
-    // and a body the outline does not step may write the array, so its footprint is the author's to state.
-    var pairOutline = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Proof.lean"));
+    // The element definition must read back as the element the constructor call's model resolves from the
+    // extraction's layouts, or the outline states another array type; a changed width must be refused.
+    // A body the outline does not step may write the array, so its footprint is the author's to state.
+    var pairScratch = Path.Combine(outlineRoot, "PairLength");
+    var pairOutline = File.ReadAllText(Path.Combine(pairScratch, "Proof.lean"));
     var pairElement = Regex.Match(pairOutline,
         @"@\[reducible\] def sourceElement : CIL\.ArrayElement :=\n  (?<term>(?:[^\n]*\\\n)+[^\n]*)\n");
-    var pairExtraction = File.ReadAllText(Path.Combine(outlineRoot, "PairLength", "Extraction", "Extracted.lean"));
     if (!pairElement.Success ||
-        !pairExtraction.Contains($"({Regex.Replace(pairElement.Groups["term"].Value, @"\\\n\s*", "")})",
-            StringComparison.Ordinal) ||
         !pairOutline.Contains("  sorry -- caller memory the method may write", StringComparison.Ordinal))
         throw new InvalidOperationException("The PairLength outline does not name its struct element across lines " +
             "or leaves its footprint stated:\n" + pairOutline);
-    Console.WriteLine("PASS a struct element wider than a line reads back as the extraction's element, and an " +
-        "unstepped body over a value array leaves its footprint to the author");
+    var pairTerm = Regex.Replace(pairElement.Groups["term"].Value, @"\\\n\s*", "");
+    var widened = Regex.Replace(pairTerm, @"\d+$", digits => (int.Parse(digits.Value) + 1).ToString());
+    (int Code, string Output) ResolvedElement(string element)
+    {
+        var check = Path.Combine(pairScratch, "Element.lean");
+        File.WriteAllText(check, pairOutline + $"""
+
+            open CIL in
+            /-- The constructor call's resolved model builds spans of the outline's element. -/
+            example : (Extracted.program[0]?.bind fun body => body.code.findSome? fun
+                | .call method _ => Extraction.runtimeModel body.environment .call method
+                | _ => none) = some (.spanInPlace (.array {element} true .counted)) := by
+              decide +kernel
+
+            """);
+        var result = Execute([verification.LeanExecutable, check],
+            leanPath: pairScratch + Path.PathSeparator + libraryPath);
+        return (result.Code, result.Output);
+    }
+    var resolved = ResolvedElement("ExampleProof.sourceElement");
+    var changed = ResolvedElement($"({widened})");
+    if (resolved.Code != 0 || changed.Code == 0 || !changed.Output.Contains("is false", StringComparison.Ordinal))
+        throw new InvalidOperationException("The PairLength element is not the one its constructor resolves:\n" +
+            resolved.Output + "\n" + changed.Output);
+    Console.WriteLine("PASS a struct element wider than a line reads back as the element its constructor resolves, " +
+        "and an unstepped body over a value array leaves its footprint to the author");
 }
 
 string[] sizeCases = ["SizeOfInt", "SizeOfBranch", "SizeOfEqual"];

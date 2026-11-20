@@ -740,7 +740,7 @@ The outline suites check `new-proof` outlines:
     including element facts carried across element and field stores and an array the method
     allocates;
   - methods over value arrays of words, structs and vectors that class fields hold, including a
-    struct element named across lines;
+    struct element named across lines that equals the element its span constructor resolves;
   - struct instance methods storing fields.
 - The countdown outline is rejected for `sorryAx` and verifies once only its holes are filled, as
   do filled outlines for array/class composition, multiple struct-field stores, signed and
