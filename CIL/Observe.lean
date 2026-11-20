@@ -161,6 +161,20 @@ def modelledStepOf (step : MVarId) : MetaM (Option MVarId) := step.withContext d
   discard <| Term.TermElabM.run' <| Tactic.run step do result.set (← modelledCallStep? step)
   result.get
 
+/-- The step goal `step` of a memory operation with each home among its view operands read as
+    the view its literal frame slot holds, as `viewedStack` reads them for operation facts;
+    `step` itself when no operand is such a home. -/
+def viewedStepGoal (step : MVarId) : MetaM MVarId := step.withContext do
+  let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | return step
+  let some #[body, op, pc, args, frame, stack, memory] :=
+      argumentsOf? action `CIL.Safety.step 7 | return step
+  let some #[operation] := argumentsOf? (← whnfR op) `CIL.Instruction.memory 1 | return step
+  let viewed ← viewedStack frame operation stack
+  if viewed == stack then return step
+  let stepTerm ← mkAppM `CIL.Safety.step #[body, op, pc, args, frame, viewed, memory]
+  let goal ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar (← inferType stepTerm)))
+  return goal.mvarId!
+
 /-! ## Failure records -/
 
 /-- The non-null object references among the literal arguments `args`. -/
@@ -270,6 +284,9 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
       | some modelled => pure modelled
       | none => return callee
     else pure stepGoal
+  -- Reading a home's slot needs only the view's validity, which the stepping facts give, so the
+  -- operation's own missing fact is read from the step on the view the slot holds.
+  let stepGoal ← viewedStepGoal stepGoal
   let residual := (← residualOf stepGoal).getD #[← instantiateMVars (← stepGoal.getType)]
   let missing := missingFactOf residual
   return { record with
