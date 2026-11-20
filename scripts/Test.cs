@@ -295,22 +295,13 @@ verification.Verify(At("Examples/Hardware/bin/Examples.Hardware.dll"),
     At("Examples/Proofs/Hardware.lean"), At("artifacts/Hardware"));
 Passed("independent hardware assembly");
 
-// The unchanged addition contract must reject the subtraction implementation.
-var failed = false;
+// The addition contract is refuted for the subtraction implementation by a kernel-checked counterexample.
+var wrongAdd = verification.Verify(assembly, identity, signatures["WrongAdd"], At("Examples/Proofs/WrongAdd.lean"),
+    At("artifacts/WrongAdd"), theorem: CoreExampleTheorems["WrongAdd"], check: true);
+if (wrongAdd.refutation?.method.signature != signatures["WrongAdd"])
+    throw new InvalidOperationException("Subtraction has no verified refutation of the addition contract");
 
-try
-{
-    verification.Verify(assembly, identity, signatures["WrongAdd"], At("Examples/Proofs/Add.lean"), At("artifacts/WrongContract"));
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Tactic `rfl` failed"))
-{
-    failed = true;
-}
-
-if (!failed || File.Exists(At("artifacts/WrongContract/verified.json")))
-    throw new InvalidOperationException("Incorrect arithmetic accepted or failed proof left a certificate");
-
-Passed("incorrect addition rejected against unchanged universal contract");
+Passed("incorrect addition refuted against the addition contract");
 
 // Unsupported instructions and malformed metadata must fail during extraction.
 Rejected(Extract("extract", assembly, identity, "System.Int32 Examples.Arithmetic::Unsupported(System.Int32)", At("artifacts/Unsupported")), "Unsupported instruction");
@@ -372,7 +363,7 @@ Passed("tampered generated CIL rejected");
 Rejected(Extract("check", staticDll, identity, signatures["Add"], addOutput), "Stale or mismatched");
 Passed("different compiled assembly rejected");
 
-failed = false;
+var failed = false;
 
 try
 {

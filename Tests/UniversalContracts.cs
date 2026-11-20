@@ -10,6 +10,7 @@
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
+using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -29,10 +30,8 @@ foreach (var (_, name, selector, proofName) in contracts)
         () => Console.WriteLine($"PASS universal {name}: arbitrary inputs and caller memory with preservation"));
 positives.Flush();
 
-foreach (var (owner, name, selector, proofName) in contracts)
+foreach (var (owner, name, selector, _) in contracts)
 {
-    var proof = At($"Examples/Proofs/{proofName}.lean");
-
     var wrong = Path.Combine(root, "Wrong" + name);
     Directory.CreateDirectory(wrong);
     var dll = Path.Combine(wrong, "Examples.dll");
@@ -65,19 +64,58 @@ foreach (var (owner, name, selector, proofName) in contracts)
     if ((ulong)runtime.Invoke(null, inputs)! == ulong.MaxValue)
         throw new InvalidOperationException("Mutation did not change the result: " + name);
 
-    // Extraction must succeed: the unchanged contract must reject supported, incorrect CIL.
+    // Extraction must succeed: the contract is refuted for supported, incorrect CIL by a verified counterexample.
     Run(Extract("extract", dll, "Examples", selector, wrong));
-    File.WriteAllText(Path.Combine(wrong, "verified.json"), "stale report");
-    var rejected = false;
-    try
+    var refutation = Path.Combine(wrong, "Refutation.lean");
+    File.WriteAllText(refutation, Refutation(name));
+    var refuted = verification.Verify(dll, "Examples", selector, refutation, wrong, theorem: "ExampleProof.refuted",
+        existingArtifacts: true).refutation;
+    var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(wrong, "identity.json"))).RootElement
+        .GetProperty("entry").GetString();
+    if (refuted?.method.signature != entry)
+        throw new InvalidOperationException("Incorrect implementation has no verified refutation: " + name);
+    Console.WriteLine($"PASS universal {name} contract refuted for incorrect compiled CIL at the runtime witness");
+}
+
+// The contract each positive proof states, and the input on which the mutant returns another value.
+static string Refutation(string name)
+{
+    const string maximum = "18446744073709551615";
+    var (input, witness, args, arguments, violation) = name switch
     {
-        verification.Verify(dll, "Examples", selector, proof, wrong, existingArtifacts: true);
-    }
-    catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-    {
-        rejected = true;
-    }
-    if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
-        throw new InvalidOperationException("Incorrect implementation accepted: " + name);
-    Console.WriteLine($"PASS unchanged universal {name} contract rejects incorrect compiled CIL");
+        "Choose" => ("Bool × CIL.W64 × CIL.W64", $"(true, {maximum}, 0)",
+            "[.scalar (.i32 (if input.1 then 1 else 0)), .scalar (.i64 input.2.1), .scalar (.i64 input.2.2)]",
+            $"[.scalar (.i32 1), .scalar (.i64 {maximum}), .scalar (.i64 0)]", "-, out, rfl, -, wrong"),
+        "Identity64" => ("CIL.W64", maximum, "[.scalar (.i64 input)]", $"[.scalar (.i64 {maximum})]",
+            "-, out, rfl, -, wrong"),
+        _ => ("CIL.W64", maximum, "[.scalar (.i64 input)]", $"[.scalar (.i64 {maximum})]", "-, out, rfl, wrong, -")
+    };
+    var (pre, post) = name == "Struct"
+        ? ("pre _ memory := memory.WellFormed",
+            "values = [.scalar (.i64 input)] ∧ MemoryBelow initial.nextIdentity initial final")
+        : ("pre _ _ := True", name == "Choose"
+            ? "final = initial ∧ values = [.scalar (.i64 (if input.1 then input.2.1 else input.2.2))]"
+            : "final = initial ∧ values = [.scalar (.i64 input)]");
+    var permitted = name == "Struct" ? "Memory.empty_wellFormed" : "trivial";
+    return $$"""
+        import Extracted
+        import CIL.Safety.MethodContract
+        import CIL.Safety.MemoryBelow
+        open CIL.Safety
+        namespace ExampleProof
+        /-- The statement the universal proof of `{{name}}` makes, as a contract. -/
+        def contract : MethodContract ({{input}}) where
+          args input := {{args}}
+          {{pre}}
+          footprint _ := []
+          post input initial final values := {{post}}
+        /-- The mutant returns another value at the runtime witness. -/
+        theorem refuted : contract.Refuted Extracted.program 0 :=
+          .of_return (input := {{witness}}) (initial := Memory.empty) {{permitted}}
+            (rfl : invoke Extracted.program 64 0 {{arguments}} Memory.empty = .ok _)
+            (by rintro ⟨{{violation}}⟩; revert wrong; decide)
+        #print axioms refuted
+        end ExampleProof
+
+        """;
 }

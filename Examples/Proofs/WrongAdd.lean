@@ -1,22 +1,26 @@
 import Extracted
-import CIL.ExecutionLemmas
-import CIL.Safety.FuelLemmas
-open CIL
+import CIL.Safety.MethodContract
+
+/-! A counterexample to the addition contract for the subtracting `WrongAdd`: at `(0, 1)` it
+    returns the wrapped difference, not the sum. -/
+
+open CIL.Safety
 namespace ExampleProof
 
-theorem correctness (fuel : Nat) (memory : CIL.Safety.Memory) :
-    CIL.Safety.invoke Extracted.program fuel 0 [.scalar (.i64 1), .scalar (.i64 1)]
-      Safety.Memory.empty ≠
-        .ok (memory, [.scalar (.i64 2)]) := by
-  intro alleged
-  have observed : CIL.Safety.invoke Extracted.program 4 0
-      [.scalar (.i64 1), .scalar (.i64 1)] Safety.Memory.empty =
-      .ok (Safety.Memory.empty, [.scalar (.i64 0)]) := rfl
-  have first := CIL.Safety.invoke_mono _ 4 fuel _ _ _ (.ok _) trivial observed
-  have second := CIL.Safety.invoke_mono _ fuel 4 _ _ _ (.ok _) trivial alleged
-  rw [Nat.add_comm] at second
-  rw [first] at second
-  simp at second
+/-- The addition contract `Add` meets: every pair of words returns their wrapping sum and leaves
+    memory unchanged. -/
+def addContract : MethodContract (CIL.W64 × CIL.W64) where
+  args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  pre _ _ := True
+  footprint _ := []
+  post input initial final values :=
+    final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
 
-#print axioms correctness
+/-- The extracted method returns `0 - 1` for `(0, 1)`, which is not the sum `1`. -/
+theorem refuted : addContract.Refuted Extracted.program 0 :=
+  .of_return (input := (0, 1)) (initial := Memory.empty) trivial
+    (rfl : invoke Extracted.program 16 0 [.scalar (.i64 0), .scalar (.i64 1)] Memory.empty = .ok _)
+    (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
+
+#print axioms refuted
 end ExampleProof

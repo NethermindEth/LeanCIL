@@ -25,7 +25,7 @@ partial class Program
     // The theorem of each core example that does not prove ExampleProof.correctness.
     static readonly Dictionary<string, string> CoreExampleTheorems = new()
     {
-        ["DecodedAdd"] = "ExampleProof.correctness_decoded"
+        ["DecodedAdd"] = "ExampleProof.correctness_decoded", ["WrongAdd"] = "ExampleProof.refuted"
     };
 
     // Each output retains its own checked extraction, proof identity and certificate.

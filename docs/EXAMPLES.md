@@ -73,7 +73,7 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `PastEnd`: a permitted end sentinel whose dereference is rejected as outside the allocation, for
   every fuel budget.
 - `Escape`: a reference to an expired local is rejected on return, for every fuel budget.
-- `WrongAdd`: a mathematical counterexample to the intended addition contract.
+- `WrongAdd`: a verified refutation of the addition contract at inputs `(0, 1)`.
 - A separate `Examples.Hardware` assembly, built from the file-based library
   `Examples/Hardware/Hardware.cs`, tests runtime capability extraction.
 - A Cecil-generated independent fixture tests extraction-bound static RVA bytes.
@@ -173,7 +173,8 @@ and `cil_loop_call`, which names the returned count and keeps both locals of the
 across the call through `LoopFrame.after_confined`; `cil_loop_recurse` stores them and steps back to
 the head, and the invariant states only `count + remaining = value`. The suite verifies the
 unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only
-the helper contract, and rejects builds that discard the helper result or count twice.
+the helper contract. It rejects a build that discards the helper result and refutes the counting
+contract for a build that counts twice.
 
 [The struct-local loop proof](../Examples/Proofs/TallyTwice.lean) shows that `Loops.TallyTwice`
 returns twice its input for every `uint` and allocates nothing the caller sees. Its loop state is a

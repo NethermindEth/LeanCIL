@@ -669,7 +669,7 @@ These tests cover preparation:
 | Installed `leancil verify`: explicit proof, printed theorem, portable settings, source mutation, failure/recovery, memory fault theorem and stdout/stderr | Four CLI regression stages |
 | Method discovery includes canonical selectors and unsupported candidates without claiming support | Regression checks |
 | Malformed settings, missing proof, unsupported CIL, changed assembly and missing Lake produce stage-specific guidance | Regression checks |
-| Subtraction rejected by the unchanged universal addition contract | Rejects the implementation and removes any successful report |
+| Subtraction refuted against the addition contract | Verifies `MethodContract.Refuted` at inputs `(0, 1)`, bound to the subtracting method's extraction |
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
@@ -702,12 +702,13 @@ The `loops` suite checks cyclic control flow and termination:
 
 - A universal checked countdown proof holds for every `uint`, including zero and the maximum
   value, with 17 runtime comparisons, and holds unchanged after inserted NOPs and reordered
-  blocks. An incorrect implementation is rejected under the unchanged contract, and an infinite
-  loop is proved to exhaust every fuel budget. Backward switch, native arithmetic and
+  blocks. The countdown contract is refuted for an incorrect implementation at 1, where it
+  returns 1; a build that never decreases its counter is rejected, and an infinite loop is proved to exhaust every fuel budget. Backward switch, native arithmetic and
   fixed-feature loops are checked, and eight malformed or unsupported fixtures are rejected.
 - `CountCalls` is proved through its helper's contract, unchanged for a helper reimplemented as
-  `value + 0xFFFFFFFF` with only its contract re-proved; builds that discard the helper result or
-  count twice are rejected. On the correct build, measuring by the count fails the decrease
+  `value + 0xFFFFFFFF` with only its contract re-proved; a build that discards the helper result is
+  rejected, and the counting contract is refuted for a build that counts twice at 3, where it
+  returns 6. On the correct build, measuring by the count fails the decrease
   obligation, and the non-inductive invariant `count + remaining = value + count * remaining`
   fails only its preservation.
 - `CountUntil`, which returns or raises its helper's exception after earlier calls, is proved for
@@ -764,8 +765,8 @@ The outline suites check `new-proof` outlines:
 The addition theorem proves modular arithmetic correctness for arbitrary 64-bit inputs in the
 checked execution model. The unsigned-short theorem proves reduction modulo 65,536 for arbitrary
 32-bit inputs. The invalid-access and expired-reference theorems classify faults and rule out
-successful execution for every fuel budget. The subtraction theorem independently refutes the
-intended addition result. Other example claims have the quantifiers and inputs displayed in their
+successful execution for every fuel budget. The subtraction theorem proves the addition contract
+`Refuted` at inputs `(0, 1)`. Other example claims have the quantifiers and inputs displayed in their
 theorem statements; concrete examples do not establish universal method correctness.
 
 Audited example theorems meet the axiom rules of the
@@ -863,8 +864,8 @@ These fixtures cover constrained and constant calls, all in the `dispatch` suite
 
 The core and universal-contract suites cover checked execution and memory preservation. Choose
 and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller
-memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect
-compiled implementation. IdentitySummary and RepeatedSummary prove the statement of
+memory under its well-formedness hypothesis. A verified refutation of each contract, at an input
+where a mutant returns another value, is bound to that incorrect compiled implementation. IdentitySummary and RepeatedSummary prove the statement of
 GenericIdentity for one and two calls twice: by stepping `Identity<ulong>`, and from a
 `DecodedSummary` of it bound to its pinned bytes, metadata token and type arguments.
 CallsSummary does the same for `Calls`, whose second callee writes through a reference, and

@@ -104,8 +104,8 @@ leancil check artifacts/Add
 ```
 
 `Examples/Proofs/Add.lean` derives execution from the generated program for all inputs.
-`Examples/Proofs/WrongAdd.lean` proves a counterexample to the addition contract for a subtracting
-implementation, for every successful fuel budget.
+`Examples/Proofs/WrongAdd.lean` proves the addition contract `Refuted` for a subtracting
+implementation: at inputs `(0, 1)` it returns `2^64 - 1`, not `1`.
 
 ## Break the implementation
 

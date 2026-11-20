@@ -379,8 +379,8 @@ validates.
 Direct Lean mutations exercise validators independently of hashes/regeneration: scalar meanings,
 stack kinds/joins, layouts, homes, generic substitution, pruning, call slots and folds. Positive
 controls establish that fixtures reach the intended obligation. See
-[validation](VALIDATION-COVERAGE.md). Wrong-addition has an execution witness and an
-all-successful-fuel refutation; bounds/lifetime examples use `invoke_fault_refutes_success`, which
+[validation](VALIDATION-COVERAGE.md). Wrong-addition is refuted by `MethodContract.Refuted` at a
+concrete input; bounds/lifetime examples use `invoke_fault_refutes_success`, which
 takes only a definite fault. A failed positive proof, fuel exhaustion or an `unsupported` fault
 alone is not a semantic counterexample.
 

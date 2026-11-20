@@ -13,6 +13,7 @@
 using System.Reflection;
 using System.Buffers.Binary;
 using System.Reflection.PortableExecutable;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -264,19 +265,22 @@ File.WriteAllText(replacedProof, countProof[..helperStart] + ReplacedHelper + co
 verification.Verify(replacedCount, "Examples", CountCalls, replacedProof, Path.Combine(root, "CountCallsReplaced"), existingArtifacts: true);
 Console.WriteLine("PASS unchanged loop proof after reimplementing the helper and re-proving only its contract");
 
-// Both builds keep the helper, so the unchanged proof must fail inside the loop proof:
-// a discarded helper result never decreases the measure; counting twice breaks the invariant.
-foreach (var (name, opcode, replacement) in new[] { ("CountCallsDiscarded", OpCodes.Stloc_0, OpCodes.Pop), ("CountCallsOvercount", OpCodes.Ldc_I4_1, OpCodes.Ldc_I4_2) })
-{
-    var dll = CountVariant(name, (caller, _) => caller.Body.Instructions.Single(i => i.OpCode == opcode &&
-        (opcode != OpCodes.Stloc_0 || i.Previous.OpCode == OpCodes.Call)).OpCode = replacement);
-    if (name == "CountCallsOvercount" && Invoke(dll, "CountCalls", 3) != 6)
-        throw new InvalidOperationException("The overcounting fixture did not change the result");
-    var lines = RejectedLines(dll, At("Examples/Proofs/CountCalls.lean"), name, existingArtifacts: true);
-    if (lines.Length == 0 || lines.Any(line => line < loopLine))
-        throw new InvalidOperationException($"{name} was not rejected by the loop proof: lines {string.Join(", ", lines)}");
-    Console.WriteLine($"PASS unchanged loop proof rejects {name}");
-}
+// The unchanged proof fails inside the loop proof of a build that discards the helper result, so the
+// measure never decreases; a build that counts twice is refuted where it returns another count.
+var discarded = CountVariant("CountCallsDiscarded", (caller, _) => caller.Body.Instructions.Single(i =>
+    i.OpCode == OpCodes.Stloc_0 && i.Previous.OpCode == OpCodes.Call).OpCode = OpCodes.Pop);
+var discardedLines = RejectedLines(discarded, At("Examples/Proofs/CountCalls.lean"), "CountCallsDiscarded",
+    existingArtifacts: true);
+if (discardedLines.Length == 0 || discardedLines.Any(line => line < loopLine))
+    throw new InvalidOperationException(
+        $"CountCallsDiscarded was not rejected by the loop proof: lines {string.Join(", ", discardedLines)}");
+Console.WriteLine("PASS unchanged loop proof rejects CountCallsDiscarded");
+var overcount = CountVariant("CountCallsOvercount", (caller, _) =>
+    caller.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldc_I4_1).OpCode = OpCodes.Ldc_I4_2);
+if (Invoke(overcount, "CountCalls", 3) != 6)
+    throw new InvalidOperationException("The overcounting fixture did not change the result");
+Refute(overcount, CountCalls, "CountCallsOvercount", "input", 3, existingArtifacts: true);
+Console.WriteLine("PASS counting contract refuted for CountCallsOvercount at 3, where it returns 6");
 
 // On the correct build, the rule itself must refuse a nondecreasing measure and an invariant
 // that holds at entry and exit but is not preserved, each at exactly that obligation.
@@ -455,6 +459,40 @@ int[] RejectedLines(string dll, string proof, string name, bool existingArtifact
     return Regex.Matches(failure, @"Proof\.lean:(\d+):\d+: error").Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
 }
 
+// The result `selector` returns from empty memory for every `uint`, refuted where `dll` returns another value.
+void Refute(string dll, string selector, string name, string result, uint witness, bool existingArtifacts)
+{
+    var output = Path.Combine(root, name);
+    Directory.CreateDirectory(output);
+    var proof = Path.Combine(output, "Refutation.lean");
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.MethodContract
+        open CIL.Safety
+        namespace ExampleProof
+        /-- The result a correct build returns for every word from empty caller memory. -/
+        def contract : MethodContract CIL.W32 where
+          args input := [.scalar (.i32 input)]
+          pre _ memory := memory = Memory.empty
+          footprint _ := []
+          post input _ _ values := values = [.scalar (.i32 ({{result}}))]
+        /-- The incorrect build returns another value at `{{witness}}`. -/
+        theorem refuted : contract.Refuted Extracted.program 0 :=
+          .of_return (input := {{witness}}) (initial := Memory.empty) rfl
+            (rfl : invoke Extracted.program 256 0 [.scalar (.i32 {{witness}})] Memory.empty = .ok _)
+            (by rintro ⟨-, out, rfl, wrong⟩; revert wrong; dsimp only [contract]; decide)
+        #print axioms refuted
+        end ExampleProof
+
+        """);
+    var refutation = verification.Verify(dll, "Examples", selector, proof, output, theorem: "ExampleProof.refuted",
+        existingArtifacts: existingArtifacts).refutation;
+    var entry = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "identity.json"))).RootElement
+        .GetProperty("entry").GetString();
+    if (refutation?.method.signature != entry)
+        throw new InvalidOperationException($"{name} has no verified refutation of its method");
+}
+
 void Prove(string dll, string selector, string name, string source)
 {
     var output = Path.Combine(root, name);
@@ -500,21 +538,9 @@ if (feature.Code == 0 || !feature.Output.Contains("Unsupported instruction"))
     throw new InvalidOperationException("Feature loop failed to reject reachable array: " + feature.Output);
 Console.WriteLine("PASS fixed feature selection inside a loop");
 
-var wrong = Path.Combine(root, "WrongContract");
-Directory.CreateDirectory(wrong);
-File.Copy(Path.Combine(correct, "verified.json"), Path.Combine(wrong, "verified.json"), overwrite: true);
-bool rejected = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Loops::WrongCountdown(uint)", contract, wrong);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
-    throw new InvalidOperationException("Incorrect countdown passed or retained a verification report");
-Console.WriteLine("PASS unchanged universal contract rejects incorrect loop");
+// WrongCountdown stops at one, so the countdown contract is refuted where it returns 1.
+Refute(assembly, "Loops::WrongCountdown(uint)", "WrongContract", "0", 1, existingArtifacts: false);
+Console.WriteLine("PASS countdown contract refuted for the incorrect loop at 1");
 
 var constantMeasure = File.ReadAllText(contract).Replace("(fun s => s.values.toNat)", "(fun _ => 0)",
     StringComparison.Ordinal);
