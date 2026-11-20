@@ -182,24 +182,12 @@ def qualifiedName (namespace_ name : List Nat) : List Nat :=
 /-- The name of a type nested in an enclosing one. -/
 def nestedName (enclosing name : List Nat) : List Nat := enclosing ++ 47 :: name
 
-/-- The assemblies that define the primitive types. -/
-def corlibNames : List (List Nat) :=
-  -- `System.Runtime`, `netstandard`, `mscorlib` and `System.Private.CoreLib` as bytes, so the
-  -- kernel never evaluates their string literals.
-  [[83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101],
-   [110, 101, 116, 115, 116, 97, 110, 100, 97, 114, 100],
-   [109, 115, 99, 111, 114, 108, 105, 98],
-   [83, 121, 115, 116, 101, 109, 46, 80, 114, 105, 118, 97, 116, 101, 46, 67, 111, 114, 101, 76,
-    105, 98]]
-
-/-- Whether the `TypeRef` at `token` is scoped by a reference to an assembly of a core-library
-    name: the base of a type counts as `System.Enum`, `System.ValueType` or `System.Object` only
-    then. -/
+/-- A base TypeRef counts as a core-library type when its scope names the platform publisher. -/
 def MetadataIndex.coreLibraryReference (index : MetadataIndex) (token : Nat) :
     Except MetadataError Bool := do
   let row ← index.typeRef token
   if metadataTableOf row.scope != Table.assemblyRef then return false
-  .ok (corlibNames.contains (← index.string (← index.assemblyRef row.scope).name))
+  index.coreAssemblyRef row.scope
 
 /-- The identity of the assembly the slice's primitive types come from, or `none` when the
     slice names none. -/
@@ -208,8 +196,7 @@ def MetadataIndex.corlibIdentity (index : MetadataIndex) :
   if index.corlib == 0 then .ok none
   else do
     let token ← checkedTokenOf Table.assemblyRef index.corlib .rowOverflow
-    let row ← index.assemblyRef token
-    if !corlibNames.contains (← index.string row.name) then throw (.unsupportedAssemblyRef token)
+    if !(← index.coreAssemblyRef token) then throw (.unsupportedAssemblyRef token)
     .ok (some (← index.assemblyRefIdentity token))
 
 /-- The scope, full name and name parts a `TypeRef` spells: its assembly, or the outermost

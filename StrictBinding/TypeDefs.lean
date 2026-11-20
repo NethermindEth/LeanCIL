@@ -127,17 +127,40 @@ def enumName : List Nat := asciiOf "Enum"
 /-- The name `ValueType`. -/
 def valueTypeName : List Nat := asciiOf "ValueType"
 
-/-- The kind a row with these flags, names and base type has. -/
-def kindOf (flags : Nat) (typeNamespace typeName : List Nat) (base : BaseType) : TypeKind :=
-  if flags / interfaceFlag % 2 == 1 then .interface
-  else
-    match base with
-    | .named _ baseNamespace baseName =>
-      if baseNamespace == systemNamespace && baseName == enumName then .enum
-      else if baseNamespace == systemNamespace && baseName == valueTypeName &&
-          !(typeNamespace == systemNamespace && typeName == enumName) then .valueType
-      else .classType
-    | _ => .classType
+/-- Whether the Assembly or AssemblyRef row names a neutral core library with its publisher's
+    token. Both tables have the same identity columns after the Assembly's hash-algorithm column. -/
+private def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError Bool := do
+  let cell := image.layout.cell image.view row
+  let name ← image.layout.stringAt image.view (← cell (first + 6))
+  let some name := CIL.MetadataName.ofBytes? name | return false
+  let some publisher := CIL.Extraction.coreLibraryKey? name | return false
+  if !(← image.layout.stringAt image.view (← cell (first + 7))).isEmpty then return false
+  let flags ← cell (first + 4)
+  let key ← image.layout.blobAt image.view (← cell (first + 5))
+  return (← assemblyKeyToken flags key) == some publisher
+
+/-- A local base uses the defining image's Assembly row. A referenced base must point directly
+    to an AssemblyRef through its ResolutionScope column (II.24.2.6). -/
+private def coreBaseScope (image : PreparedImage) (token : Nat) : Except AuditError Bool := do
+  if tableOf token == CIL.Extraction.Table.typeDef then
+    return ← coreAssemblyAt image (tokenOf 0x20 1) 1
+  let scope ← image.layout.cell image.view token 0
+  if scope % 4 != 2 then return false
+  let row ← CIL.Extraction.checkedTokenOf CIL.Extraction.Table.assemblyRef (scope / 4) .rowOverflow
+  coreAssemblyAt image row 0
+
+/-- The kind determined by the flags and the qualified base type, including its assembly. -/
+def kindOf (image : PreparedImage) (flags : Nat) (typeNamespace typeName : List Nat)
+    (base : BaseType) : Except AuditError TypeKind := do
+  if flags / interfaceFlag % 2 == 1 then return .interface
+  let .named token baseNamespace baseName := base | return .classType
+  if baseNamespace != systemNamespace || (baseName != enumName && baseName != valueTypeName) then
+    return .classType
+  if !(← coreBaseScope image token) then return .classType
+  if baseName == enumName then return .enum
+  if typeNamespace == systemNamespace && typeName == enumName then
+    if ← coreAssemblyAt image (tokenOf 0x20 1) 1 then return .classType
+  return .valueType
 
 /-! ## Propositions -/
 
@@ -216,7 +239,7 @@ def TypeDefAt (image : PreparedImage) (claim : TypeDefClaim) : Prop :=
       image.layout.rowCount CIL.Extraction.Table.field + 1 ∧
     image.layout.cell image.view token typeDefExtendsColumn = .ok baseValue ∧
     BaseAt image baseValue claim.base ∧
-    claim.kind = kindOf flags claim.typeNamespace claim.typeName claim.base
+    kindOf image flags claim.typeNamespace claim.typeName claim.base = .ok claim.kind
 
 /-! ## Checks -/
 
@@ -293,7 +316,7 @@ def typeDefBound (image : PreparedImage) (claim : TypeDefClaim) : Except AuditEr
   let baseValue ← image.layout.cell image.view token typeDefExtendsColumn
   baseBound image claim.row baseValue claim.base
   requirePart claim.row .kind
-    (kindOf flags claim.typeNamespace claim.typeName claim.base == claim.kind)
+    ((← kindOf image flags claim.typeNamespace claim.typeName claim.base) == claim.kind)
 
 /-- The claim holds in the image pinned under the claim's identity. -/
 def typeDefClaimBound (prepared : List PreparedImage) (claim : TypeDefClaim) :
@@ -510,17 +533,18 @@ theorem typeDefAt_of_typeDefBound {image : PreparedImage} (bounded : image.view.
   obtain ⟨owned, fieldsOk, checked⟩ := except_bind_ok checked
   cases owned
   obtain ⟨baseValue, readBase, checked⟩ := except_bind_ok checked
-  obtain ⟨based, baseOk, kindOk⟩ := except_bind_ok checked
+  obtain ⟨based, baseOk, checked⟩ := except_bind_ok checked
   cases based
+  obtain ⟨kind, readKind, kindOk⟩ := except_bind_ok checked
   have fields := requirePart_ok fieldsOk
   simp only [Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at fields
   obtain ⟨⟨rfl, rfl⟩, lower, upper⟩ := fields
-  have kind := requirePart_ok kindOk
-  simp only [beq_iff_eq] at kind
+  have sameKind := requirePart_ok kindOk
+  simp only [beq_iff_eq] at sameKind
   exact ⟨token, flags, baseValue, readToken, readFlags, nameAt_of_nameBound bounded nameOk,
     nameAt_of_nameBound bounded namespaceOk, nestingAt_of_nestingBound nestingOk,
     readFirst, readNext, lower, upper, readBase, baseAt_of_baseBound bounded baseOk,
-    kind.symm⟩
+    sameKind ▸ readKind⟩
 
 #print axioms typeDefAt_of_typeDefBound
 

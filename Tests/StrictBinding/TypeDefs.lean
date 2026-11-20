@@ -111,6 +111,31 @@ theorem rejects_an_enum_claimed_as_a_struct :
   decide +kernel
 #print axioms rejects_an_enum_claimed_as_a_struct
 
+/-- The TypeRef still spells System.Enum when its ResolutionScope changes from the first
+    AssemblyRef (6) to the first Module (4). That scope cannot certify an enum. -/
+theorem rejects_an_enum_base_in_another_scope :
+    failsWith (checkAll typeDefClaimBound
+        [{ identity := StrictFixture.identity,
+           image := flipByte StrictFixture.image (rowStart 0x01 7) 2 }] [small])
+      (.typeDefMismatch 2 .kind) = true := by decide +kernel
+#print axioms rejects_an_enum_base_in_another_scope
+
+/-- Flip one byte of the token in the first AssemblyRef's public-key-or-token blob. -/
+private def changedPublisher : Except AuditError ImageBytes := do
+  let view ← ImageView.ofImage StrictFixture.image
+  let layout ← decodeMetadata view
+  let key ← layout.cell view (tokenOf 0x23 1) 5
+  let start := layout.pe.blobs.start + key
+  let (lengthBytes, _) ← blobPrefix view start
+  return flipByte StrictFixture.image (start + lengthBytes) 1
+
+/-- The enum name and scope row survive a publisher substitution in the physical image. -/
+theorem rejects_an_enum_base_from_another_publisher :
+    failsWith (changedPublisher >>= fun image =>
+      checkAll typeDefClaimBound [{ identity := StrictFixture.identity, image }] [small])
+      (.typeDefMismatch 2 .kind) = true := by decide +kernel
+#print axioms rejects_an_enum_base_from_another_publisher
+
 theorem rejects_a_struct_claimed_as_a_class :
     failsWith (check { overlay with kind := .classType }) (.typeDefMismatch 3 .kind) = true := by
   decide +kernel

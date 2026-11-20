@@ -859,6 +859,24 @@ private def MetadataIndex.assemblyRefParts (index : MetadataIndex) (token : Nat)
                              revision := row.revision }
   return { name, version, culture, publicKeyToken := publicToken }
 
+/-- The publisher token of each assembly family used for CLI primitive and base types. -/
+def coreLibraryKey? (name : MetadataName) : Option Nat :=
+  if name == name!"System.Runtime" then some 0xb03f5f7f11d50a3a
+  else if name == name!"System.Private.CoreLib" then some 0x7cec85d7bea7798e
+  else if name == name!"mscorlib" then some 0xb77a5c561934e089
+  else if name == name!"netstandard" then some 0xcc7b13ffcd2ddd51
+  else none
+
+/-- A supported core-library AssemblyRef has a neutral culture and its publisher's token.
+    Version is kept in the full identity used for binding a type or method. -/
+def MetadataIndex.coreAssemblyRef (index : MetadataIndex) (token : Nat) :
+    Except MetadataError Bool := do
+  let parts ← index.assemblyRefParts token
+  let some name := MetadataName.ofBytes? parts.name | return false
+  let some publisher := coreLibraryKey? name | return false
+  return parts.culture.isEmpty && parts.publicKeyToken.length == 8 &&
+    radixCode? 256 parts.publicKeyToken 0 == some publisher
+
 /-- The scoped assembly identity in the byte spelling used for slice lookup. -/
 def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
     Except MetadataError (List Nat) := do

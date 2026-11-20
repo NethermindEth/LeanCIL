@@ -236,10 +236,10 @@ What `MetadataResolution` and `MetadataBinding` check:
   type and of each type enclosing it stay apart in the comparison between a reference and its
   definition, so namespace `A.B` with name `C` is not namespace `A` with name `B.C`. A type defined
   in a carried slice has the value type, enum (with its integer type), class or interface kind its
-  flags and base give: the base counts as `System.ValueType` or `System.Enum`, and a class's base
-  chain ends at `System.Object`, only when the base's own `TypeRef` names a core-library assembly
-  (`System.Runtime`, `netstandard`, `mscorlib` or `System.Private.CoreLib`), whatever the slice's
-  `corlib` number says.
+  flags and base give. To recognize `System.ValueType`, `System.Enum` or the `System.Object` at
+  the end of a class hierarchy, Lean checks the base TypeRef's own AssemblyRef. It must name
+  `System.Runtime`, `netstandard`, `mscorlib` or `System.Private.CoreLib` with neutral culture
+  and the publisher token for that name. The full reference version is part of the type identity.
 - A reference whose scope has the name of a pinned assembly, at any version, culture or key token,
   needs the pinned assembly's slice among the method's slices; without it the check fails with
   `missingSlice`, so a pinned type or call, or one of another version of a pinned assembly, is

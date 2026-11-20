@@ -14,6 +14,9 @@ namespace Tests.MetadataBinding
 open CIL CIL.Extraction Tests.MetadataBuilder Tests.MetadataWorld
 
 
+/-- The publisher token in the framework's System.Runtime AssemblyRef rows. -/
+private def runtimePublisher : List Nat := [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+
 /-- Whether checking an operand against a pair of slices gives these facts. -/
 private def passes (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
     (arity : Nat := 0) : Bool :=
@@ -558,6 +561,48 @@ theorem decides_a_struct_without_the_corlib_number :
       (.operandMismatch tokens.pairRef) = true := by decide +kernel
 #print axioms decides_a_struct_without_the_corlib_number
 
+/-- Whether a physical AssemblyRef's name, culture and token identify a core-library family. -/
+private def coreReference (family culture : String) (publisher : List Nat) : Bool :=
+  let (slice, reference) := build (do
+    let name ← string family
+    let language ← string culture
+    let key ← blob publisher
+    row Table.assemblyRef [4, 0, 0, 0, 0, key, name, language, 0]) (bytesOf "T") ownIdentity
+  (slice.index >>= (·.coreAssemblyRef reference)).toOption == some true
+
+/-- Each core-library family retains its own publisher. An unsigned reference, a different
+    culture or another platform publisher cannot stand in for System.Runtime. -/
+theorem core_library_publishers :
+    let ecma := [0xb7, 0x7a, 0x5c, 0x56, 0x19, 0x34, 0xe0, 0x89]
+    coreReference "System.Runtime" "" runtimePublisher = true ∧
+    coreReference "mscorlib" "" ecma = true ∧
+    coreReference "netstandard" "" [0xcc, 0x7b, 0x13, 0xff, 0xcd, 0x2d, 0xdd, 0x51] = true ∧
+    coreReference "System.Private.CoreLib" "" [0x7c, 0xec, 0x85, 0xd7, 0xbe, 0xa7, 0x79, 0x8e] =
+      true ∧
+    coreReference "System.Runtime" "" ecma = false ∧ coreReference "System.Runtime" "" [] = false ∧
+    coreReference "System.Runtime" "fr" runtimePublisher = false := by decide +kernel
+#print axioms core_library_publishers
+
+/-- Changing the publisher of System.Runtime leaves the type and assembly names intact. -/
+private def libWithOtherPublisher : MetadataSlice :=
+  mutateBlob lib (blobOffset lib runtimePublisher) fun _ => [8, 0, 0, 0, 0, 0, 0, 0, 1]
+
+/-- Resolve the value-type marker of the caller's signature through its link to Lib.Pair. -/
+private def pairSignatureKind (slice : MetadataSlice) :
+    Except MetadataError Extraction.TypeKind := do
+  let env := MetadataEnv.ofSlices [← own.1.index, ← slice.index]
+  return (← namedOf env 0 tokens.pairRef (some true)).kind
+
+/-- A different publisher's System.ValueType cannot satisfy a value-type signature or serve
+    as the slice's primitive-type assembly. -/
+theorem rejects_another_publishers_value_type :
+    pairSignatureKind lib = .ok .valueType ∧
+    pairSignatureKind libWithOtherPublisher = .error (.operandMismatch tokens.pairRef) ∧
+    (libWithOtherPublisher.index >>= MetadataIndex.corlibIdentity) =
+      .error (.unsupportedAssemblyRef 0x23000001) := by
+  exact ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms rejects_another_publishers_value_type
+
 /-- A field of a struct in a pinned assembly is read from that assembly's slice: without the
     slice it is refused, not taken for a platform field. -/
 theorem rejects_a_pinned_struct_field_whose_slice_is_missing :
@@ -603,7 +648,7 @@ theorem checks_each_claim_of_a_struct_field :
     through `Pair<int>` and through a specification that gives `Pair` two arguments. -/
 private def genericPairWorld : Step (Nat × Nat) := do
   let runtimeName ← string "System.Runtime"
-  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let publicKeyToken ← blob runtimePublisher
   let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let valueTypeName ← string "ValueType"
@@ -740,7 +785,7 @@ private def receiverWorld (baseName : String) (interfaceType hasThis generic : B
   let parentName ← string baseName
   let program ← string "Program"
   let methodName ← string "Run"
-  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let publicKeyToken ← blob runtimePublisher
   let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtime, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let parent ← row Table.typeRef [6, parentName, system]
@@ -899,7 +944,7 @@ theorem reads_an_undeclared_method_run_from_its_signature :
     `int`; gives the tokens of `Holder`, its field, `Plain` and its field. -/
 private def arityWorld : Step (Nat × Nat × Nat × Nat) := do
   let runtimeName ← string "System.Runtime"
-  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let publicKeyToken ← blob runtimePublisher
   let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let objectName ← string "Object"
@@ -1450,7 +1495,8 @@ private def nestedLibWorld : Step Unit := do
   let innerName ← string "Inner"
   let first ← string "A"
   let second ← string "B"
-  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  let key ← blob runtimePublisher
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, key, runtimeName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let objectRef ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
   let base := (objectRef - 0x01000000) * 4 + 1
@@ -1490,7 +1536,8 @@ private def nestedOwnWorld (leaf inner : Nat) : Step (Nat × Nat) := do
   let midName ← string "Mid"
   let innerName ← string "Inner"
   let first ← string "A"
-  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  let key ← blob runtimePublisher
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, key, runtimeName, 0, 0]
   let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, libName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let outerRef ← row Table.typeRef [2 * 4 + 2, outerName, libName]
