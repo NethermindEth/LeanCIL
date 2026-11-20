@@ -182,6 +182,14 @@ included. Masking the code outside the region with holes (`.unadmitted`) makes i
 `run_refines` carries the suffix run on to a body with a different prefix, for example a suffix
 after inline code to the same suffix after a helper call, one pc earlier.
 
+A changed loop initializer can reuse a compiled termination proof. In `CountCalls`, the region
+starts after the accumulator is initialized and includes the whole `Decrement` callee. Check
+closure and agreement on that region, then apply `run_congr_region` at the loop guard with
+the fuel and return value from the original proof. The consumer must still step the new prefix
+and establish the invariant at the guard. Starting the accumulator at one establishes that
+the remaining count plus the accumulator equals the input plus one modulo 2³². The original
+decreasing measure proves termination for every input.
+
 For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
 `CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality:
 `actual.code.drop start
