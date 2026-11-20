@@ -38,10 +38,10 @@ overload or layout leaves an opcode-tagged hole that the validator accepts only 
 site. At a linked site the decoder keeps the call, and `ManagedCallsValid` refuses the method
 because no import slot binds a generic `MemoryMarshal` member.
 
-For a method defined by its decoder, the evidence proves that its entire instruction list equals
-the decoding of the closed body. At a reachable instruction outside a fold, the scalar validator
-uses this equality for value encodings when the decoder supplies an instruction. Folded
-sites and methods emitted as literals retain their explicit site checks.
+The evidence proves that each method's entire instruction list equals the decoding of its closed
+body. At a reachable instruction outside a fold, the scalar validator uses this equality for
+value encodings when the decoder supplies an instruction. Folded sites retain their explicit
+site checks.
 Closed method construction refuses the first reachable hole with its pc and raw opcode.
 Dead sites retain their opcode-tagged holes.
 
@@ -53,8 +53,8 @@ reset must have its matching local address for the decoder to produce an initial
 Lean derives opaque vector locals from the closed raw body and the reachability mask.
 A live call to the exact `Vector128.CreateScalarUnsafe(ulong)` overload selects
 unaddressed `Vector128<ulong>` slots in declaration order. Even a dead address
-instruction excludes its slot. Literal and decoded frames use the same rule, and
-`OpaqueLocalsValid` independently checks the result against the emitted code and slot kinds.
+instruction excludes its slot. `OpaqueLocalsValid` independently checks the result against the
+emitted code and slot kinds.
 
 Exact scalar matching covers integer literals, wrapping/checked add/subtract/multiply, signed and
 unsigned divide/remainder, bitwise operations, shifts, negation, integer comparisons, admitted
@@ -75,8 +75,8 @@ each `newarr`, `ldlen`, integer `ldelem.*` and `stelem.*`, typed `ldelem` and `s
 access or element address takes its element's width from the element shape of the method's checked
 layouts. An `ldelema` decodes read-only exactly when `readonly.` precedes it, and `readonly.`
 decodes to `nop`. Closed method construction requires the next raw instruction to be
-`ldelema` with a type operand, even at a dead site. The scalar check applies
-`readOnlyPrefixMatches` to reachable prefixes in literal methods. Object loads, stores, initializations, copies
+`ldelema` with a type operand, even at a dead site. The scalar check also applies
+`readOnlyPrefixMatches` to every reachable prefix. Object loads, stores, initializations, copies
 and sizes decode with their type tokens.
 `ObjectOperandsValid` checks the storage shape for each distinct live opcode and operand.
 For methods with aggregate object instructions, the extractor supplies the named shape fact at

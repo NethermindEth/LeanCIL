@@ -144,7 +144,8 @@ These regressions cover the extractor's own C# indexes:
   parameter, and an absent callee in an excluded profile gets a zero placeholder. Profiles merge when
   their renumbered instructions agree at every pc for the same observed flags. Lean reads the
   selected instruction lists from decoded methods and proves each selected leaf equals its input's
-  code. A literal-only input, differing frames, lengths or unflagged instructions cause rejection.
+  code. Each input must pass extraction checking. Differing frames, lengths or unflagged
+  instructions cause rejection.
   `Tests/TemplateIndexes.cs` checks reordered methods, each kind of callee, conditional absent
   callees, those merge rules, deterministic output, duplicate rejection and linear growth in the
   instructions without compiling Lean.

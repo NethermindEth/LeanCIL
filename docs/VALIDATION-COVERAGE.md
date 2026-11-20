@@ -475,10 +475,11 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   also checks alias updates, read access and rejection of an adapter that would remove the
   restriction, plus readonly `GetReference` results for nonempty, empty and out-of-extent views and
   field loads, field addresses and rejected field stores through restricted references. It shows
-  that `ScalarFlowValid` rejects a writable address under a prefix and a prefix with an operand,
+  that the equation of the emitted code with its decoding rejects a writable address under a
+  prefix, that `ScalarFlowValid` rejects a prefix with an operand,
   and leaves a branch into the prefixed address, or into a live instruction after a dead
-  `readonly.`, to `PrefixEntryFree`, which refuses it. Against a
-  readonly and a writable address body the check accepts, it shows that the check refuses a forged
+  `readonly.`, to `PrefixEntryFree`, which refuses it. Against a readonly and a writable address
+  body that the scalar check and that equation accept, it shows that the pair refuses a forged
   flag or element type, a final `readonly.`, a second `readonly.`, a `nop` or an `ldelem` after
   `readonly.`, and `ldelema` after `unaligned.`, and that a call after `readonly.` has no
   decoding and the `readonly.` before it is refused at its own site. Both run in the `evidence` suite.

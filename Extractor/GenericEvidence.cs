@@ -33,7 +33,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     static string List(IEnumerable<string> entries) => "[" + string.Join(", ", entries) + "]";
 
     /// <summary>The Lean term of a type's assembly scope; a platform scope is the named string the decoder
-    /// writes, so a literal method and a decoded method spell the same scope with the same term.</summary>
+    /// writes, so evidence and a decoded method spell the same scope with the same term.</summary>
     internal static string Scope(TypeReference type) => Scope(LayoutEvidence.Scope(type));
 
     /// <summary>The platform assembly scopes the Lean library names, with the term of each.</summary>
@@ -586,27 +586,39 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Cpblk, Code.Initblk, Code.Unaligned
     }).ToFrozenSet();
 
-    /// <summary>A live instruction requires a literal when its opcode has no decoder or its
-    /// translation differs from its decoded instruction.</summary>
+    /// <summary>The opcodes extraction takes the decoder to read: `DecodedOpcodes`, unless a test narrows the set in
+    /// its own process to drive a decoder refusal through the extractor.</summary>
+    internal static IReadOnlySet<Code> ExtractedOpcodes { get; set; } = DecodedOpcodes;
+
+    /// <summary>Why the decoder gives no instruction at a live pc: its opcode has no decoder, or its translation
+    /// differs from its decoded instruction.</summary>
     internal enum RefusalKind { Hole, Translated }
 
-    /// <summary>The part of the model that an opcode outside <see cref="DecodedOpcodes"/> needs before it
-    /// decodes.</summary>
-    internal enum HoleFamily
-    {
-        Calls, Fields, Arrays, Objects, Tokens, FloatingPoint, ReferenceIndirection, Exceptions, Prefixes, Other
-    }
+    /// <summary>The first live pc, in body order, at which the decoder gives no instruction, with that
+    /// instruction.</summary>
+    internal sealed record DecodeRefusal(int Pc, Instruction At, RefusalKind Kind);
 
-    /// <summary>The first pc, in body order, that keeps a method's literal definition, with its opcode.</summary>
-    internal sealed record DecodeRefusal(int Offset, OpCode Opcode, RefusalKind Kind)
+    /// <summary>The extraction refusal of a method whose decoder refuses a live pc; an admitted method is always
+    /// defined from its decoder, so no extraction is written for it.</summary>
+    internal sealed class UndecodedInstruction(MethodDefinition method, DecodeRefusal refusal) : Exception($"""
+        IL_{refusal.At.Offset:x4}: Unsupported instruction: {Reason(refusal)}
+          at pc {refusal.Pc} of {method.FullName}
+        """)
     {
-        /// <summary>The opcode family of a live hole.</summary>
-        internal HoleFamily? Family => Kind == RefusalKind.Hole ? FamilyOf(Opcode.Code) : null;
+        /// <summary>The method whose decoder refuses the instruction.</summary>
+        internal MethodDefinition Method { get; } = method;
+
+        /// <summary>The refused pc and instruction.</summary>
+        internal DecodeRefusal Refusal { get; } = refusal;
+
+        static string Reason(DecodeRefusal refusal) => refusal.Kind == RefusalKind.Hole
+            ? $"the decoder has no form for {refusal.At.OpCode.Name}"
+            : $"the decoder reads {refusal.At.OpCode.Name} differently from its translation";
     }
 
     /// <summary>
-    /// The first live instruction whose opcode or translation requires a literal method.
-    /// Both representations emit the raw opcode as a hole at every dead site.
+    /// The first live instruction the decoder refuses: its opcode has no decoder or its translation differs from
+    /// the decoded instruction. Every dead site is a hole tagged with its raw opcode.
     /// </summary>
     internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
         IReadOnlyList<Operation> operations)
@@ -627,8 +639,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 instruction.OpCode.Code == Code.Ldtoken && instruction.Operand is FieldReference)
                 continue;
             var constrained = instruction.Previous?.OpCode.Code == Code.Constrained;
-            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
-                return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
+            if (!ExtractedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
+                return new(pc, instruction, RefusalKind.Hole);
             var translated = instruction.OpCode.Code switch
             {
                 Code.Call or Code.Callvirt when constrained => operations[pc] is Call { Constrained: true },
@@ -642,7 +654,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 Code.Newobj => operations[pc] is Newobj or ModelCall { Constructs: true },
                 _ => true
             };
-            if (!translated) return new(instruction.Offset, instruction.OpCode, RefusalKind.Translated);
+            if (!translated) return new(pc, instruction, RefusalKind.Translated);
         }
         return null;
     }
@@ -653,28 +665,6 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld &&
         ((FieldReference)instruction.Operand).DeclaringType is GenericInstanceType owner &&
         ObjectTypes.Reference(owner);
-
-    static HoleFamily FamilyOf(Code opcode) => opcode switch
-    {
-        Code.Call or Code.Callvirt or Code.Calli or Code.Newobj or Code.Jmp or Code.Ldftn or Code.Ldvirtftn
-            or Code.Constrained or Code.Tail => HoleFamily.Calls,
-        Code.Ldfld or Code.Ldflda or Code.Stfld or Code.Ldsfld or Code.Ldsflda or Code.Stsfld => HoleFamily.Fields,
-        Code.Newarr or Code.Ldlen or Code.Ldelem_Any or Code.Stelem_Any
-            or Code.Ldelem_I1 or Code.Ldelem_U1 or Code.Ldelem_I2 or Code.Ldelem_U2 or Code.Ldelem_I4
-            or Code.Ldelem_U4 or Code.Ldelem_I8 or Code.Ldelem_I or Code.Ldelem_R4 or Code.Ldelem_R8
-            or Code.Ldelem_Ref or Code.Stelem_I or Code.Stelem_I1 or Code.Stelem_I2 or Code.Stelem_I4
-            or Code.Stelem_I8 or Code.Stelem_R4 or Code.Stelem_R8 or Code.Stelem_Ref => HoleFamily.Arrays,
-        Code.Box or Code.Unbox or Code.Unbox_Any or Code.Ldobj or Code.Stobj or Code.Cpobj or Code.Initobj
-            or Code.Sizeof or Code.Mkrefany or Code.Refanyval or Code.Refanytype => HoleFamily.Objects,
-        Code.Ldstr or Code.Ldtoken => HoleFamily.Tokens,
-        Code.Ldc_R4 or Code.Ldc_R8 or Code.Conv_R4 or Code.Conv_R8 or Code.Conv_R_Un or Code.Ckfinite
-            or Code.Ldind_R4 or Code.Ldind_R8 or Code.Stind_R4 or Code.Stind_R8 => HoleFamily.FloatingPoint,
-        Code.Ldind_Ref or Code.Stind_Ref => HoleFamily.ReferenceIndirection,
-        Code.Throw or Code.Rethrow or Code.Leave or Code.Leave_S or Code.Endfinally or Code.Endfilter =>
-            HoleFamily.Exceptions,
-        Code.Volatile or Code.No => HoleFamily.Prefixes,
-        _ => HoleFamily.Other
-    };
 
     static readonly HashSet<Instruction> EmptySet = [];
 

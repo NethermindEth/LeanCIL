@@ -147,13 +147,11 @@ A resolved call runs the corresponding memory instruction via `step_call_memory`
 
 The decoder reads the checked fold role before resolving a call. An exact runtime
 `System.Type` comparison supplies its Boolean result. The constructor of an allowlisted
-exception emits `nop` inside the matching throw sequence. Literal methods must emit the
-instruction prescribed by the same role.
+exception emits `nop` inside the matching throw sequence.
 
 At other unlinked sites, `siteClaim` refuses a call that no model claims, and the decoder emits
-a hole tagged with the raw opcode. A validated literal method must contain the same instruction
-at each live site. An unknown member or unsupported overload therefore cannot occur at a live
-site.
+a hole tagged with the raw opcode, which closed method construction refuses at a live site. An
+unknown member or unsupported overload therefore cannot occur at a live site.
 
 ### Arrays, views and bulk memory
 

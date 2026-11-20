@@ -8,11 +8,7 @@ namespace Nethermind.LeanCIL;
 internal static partial class TemplateEmitter
 {
     /// <summary>One extracted method: its identity, frame, operations and the raw opcode at each pc.</summary>
-    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes)
-    {
-        /// <summary>A reachable instruction that prevents a definition from the closed decoder.</summary>
-        internal GenericEvidence.DecodeRefusal? Refusal;
-    }
+    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods)
     {
         /// <summary>The closed decoder inputs for this extraction in method index order.</summary>
@@ -174,11 +170,6 @@ internal static partial class TemplateEmitter
     static Template Prepare(string identity, (Variant Variant, Method Method, string Body)[] selected)
     {
         var first = selected[0].Method;
-        foreach (var row in selected)
-            if (row.Method.Refusal is { } refusal)
-                throw new InvalidDataException($"""
-                    Template decoder refused {identity} at IL_{refusal.Offset:x4} ({refusal.Opcode.Name}).
-                    """);
         if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length ||
             !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +

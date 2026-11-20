@@ -67,7 +67,7 @@ Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")], cwd: Fi
 Console.WriteLine($"PASS {liveSites} live sites validate at the default heartbeat budget");
 
 // Each validator must still reach and reject a forged claim at the last pruned site it checks. A decoded method
-// decodes the mask it is given, so a pinned run decodes the extracted mask, as a literal method keeps its holes.
+// decodes the mask it is given, so a pinned run decodes the extracted mask and keeps its holes.
 void Reject(string name, string validator, string obligation, Func<int, bool> site, bool forgeState,
     bool pinnedCode = false)
 {

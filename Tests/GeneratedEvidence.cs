@@ -25,10 +25,9 @@ partial class Program
     [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
     private static partial Regex ResolutionFactsCommand { get; }
 
-    const string LiteralMethodDefinition = """def method(?<number>\d+) : Method""";
     const string DecodedMethodDefinition = """cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?""";
 
-    [GeneratedRegex($"""(?m)^(?:{LiteralMethodDefinition}|{DecodedMethodDefinition}) :=""")]
+    [GeneratedRegex($"""(?m)^{DecodedMethodDefinition} :=""")]
     private static partial Regex DefinedMethod { get; }
 
     // A decoded method's definition line: its options, then its decoder over the method's own definitions.
@@ -104,10 +103,10 @@ partial class Program
     static Match DecodedDefinition(string source, int method) => DecodedMethod.Matches(source)
         .FirstOrDefault(match => match.Groups["number"].Value == $"{method}") ?? Match.Empty;
 
-    /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
+    /// <summary>Whether an extraction defines method `method` with `cil_decoded_method`.</summary>
     static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
 
-    /// <summary>The numbers of the methods an extraction defines, by a literal or by its decoder.</summary>
+    /// <summary>The numbers of the methods an extraction defines.</summary>
     static int[] DefinedMethods(string source) => [.. DefinedMethod.Matches(source)
         .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
 
@@ -135,8 +134,8 @@ partial class Program
     }
 
     /// <summary>
-    /// The line defining the raw method a decoded method is decoded from, the decoder's input. A method kept as a
-    /// literal fails, so a reader never takes an absent body for an empty one.
+    /// The line defining the raw method a decoded method is decoded from, the decoder's input. A method the
+    /// extraction does not define fails, so a reader never takes an absent body for an empty one.
     /// </summary>
     static string DecodedOriginal(string source, int method)
     {
@@ -206,7 +205,7 @@ partial class Program
 
     /// <summary>
     /// `source` with the link of the call at `pc` of method `method` changed to `link`: the definition the method's
-    /// link table names, whether the method is decoded or kept as a literal.
+    /// link table names.
     /// </summary>
     static string ForgeLink(string source, int method, int pc, string link)
     {

@@ -121,12 +121,13 @@ private def code (readOnly : Bool) : List CIL.Instruction :=
 
 /-- A branch to the prefix itself does not bypass the restriction. -/
 theorem prefix_certificate :
-    CIL.Extraction.ScalarFlowValid (raw 2) features states (code true) := by decide +kernel
+    Tests.DecodedFlow (raw 2) features states (code true) := by decide +kernel
 #print axioms prefix_certificate
 
-/-- Independently forging a writable address under the same readonly raw CIL fails. -/
+/-- Independently forging a writable address under the same readonly raw CIL fails the code
+    equation. -/
 theorem writable_forgery_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid (raw 2) features states (code false) := by decide +kernel
+    ¬ Tests.DecodedFlow (raw 2) features states (code false) := by decide +kernel
 #print axioms writable_forgery_rejected
 
 /-- Changing only the branch target to skip the prefix is rejected, even for a dead branch:
@@ -185,10 +186,10 @@ theorem readonly_requires_element_address :
   exact ⟨rfl, rfl⟩
 #print axioms readonly_requires_element_address
 
-/-- Whether the scalar check accepts a body with no layouts. -/
+/-- Whether the scalar check and the code equation accept a body with no layouts. -/
 private def accepted (body : RawMethod) (features : FeatureCertificate)
     (states : ScalarCertificate) (code : List CIL.Instruction) : Bool :=
-  decide (ScalarFlowValid body features states code)
+  decide (Tests.DecodedFlow body features states code)
 
 /-- A readonly and a writable element address, each emitted as it decodes, pass the check. -/
 theorem decoded_addresses_accepted :
@@ -239,6 +240,30 @@ theorem wrong_followers_refused :
       [.ldarg 0, .ldarg 1, .nop, .ldelem .i4, .ret] := by
   decide +kernel
 #print axioms wrong_followers_refused
+
+/-- A body whose `readonly.` is followed by `follower`, then `ldelema int32` and `ret`. -/
+private def followedBody (follower : RawInstruction) : RawMethod :=
+  body [prefixRaw, follower, addressRaw 5, retRaw 10]
+
+/-- The code a forger writes for `followedBody`: the prefix and its `nop` follower as `nop`. -/
+private def followedCode : List CIL.Instruction :=
+  [.ldarg 0, .ldarg 1, .nop, .nop, .ldelema intType false, .ret]
+
+/-- With the prefix emitted as `nop`, which the scalar check does not compare at an ordinary
+    site, the scalar check still refuses a `readonly.` that ends the body, whose fall-through
+    successor does not exist, and one that no `ldelema` follows, at the follower through
+    `invalidPredecessor`; `readOnlyPrefixMatches` refuses both as well. The decoder gives such a
+    prefix no instruction, so the code equation refuses the same code. -/
+theorem misplaced_prefix_refused :
+    ¬ ScalarFlowValid (body [prefixRaw]) (depthsOf [0, 1, 2])
+      [some [], some [.array .signed32], some [.word32, .array .signed32]]
+      [.ldarg 0, .ldarg 1, .nop] ∧
+    ¬ ScalarFlowValid (followedBody ⟨4, 0, .none⟩) (depthsOf [0, 1, 2, 2, 2, 1]) (addressStates 3)
+      followedCode ∧
+    methodCode .scalar {} [] (List.replicate 4 true) (followedBody ⟨4, 0, .none⟩) ≠
+      followedCode := by
+  decide +kernel
+#print axioms misplaced_prefix_refused
 
 /-- `ldelema` takes no prefix but `readonly.`: after `unaligned.` it has no decoding. -/
 theorem unaligned_address_refused :

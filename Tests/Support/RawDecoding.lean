@@ -4,6 +4,8 @@ import CIL.Extraction.DecodedMethod
 Raw decoding that keeps the stage refusing a method. `Tests.decodeRaw` runs instantiation,
 argument storage and `Method.ofClosed?` as `Method.ofRaw?` does, so a refusal test can state
 the pc and opcode of a live hole and tell it apart from a refusal before closed decoding.
+`Tests.DecodedFlow` pairs the scalar check with the code equation, which refuses a forged
+emission at a site where the scalar check leaves the comparison to the decoder.
 -/
 
 namespace Tests
@@ -36,6 +38,13 @@ def decodeRaw (profile : FeatureProfile) (environment : LayoutEnvironment)
     | none => .error .arguments
     | some storage =>
       (Method.ofClosed? profile environment links reachable closed storage).mapError .method
+
+/-- The scalar check together with the code equation extraction proves for every method: `code`
+    is what the decoder gives `raw` at the pcs `features` reaches, with no layouts or links. -/
+abbrev DecodedFlow (raw : RawMethod) (features : FeatureCertificate)
+    (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
+  ScalarFlowValid raw features certificate code ∧
+    code = methodCode .scalar {} [] (features.map Option.isSome) raw
 
 /-- The refusal of closed decoding at the first live hole, at `pc` with raw `opcode`. -/
 abbrev liveHoleAt {α : Type} (pc opcode : Nat) : Except RawDecodeError α :=

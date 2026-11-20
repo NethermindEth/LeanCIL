@@ -645,7 +645,7 @@ theorem unreachable_call :
 
 #print axioms unreachable_call
 
-/-- A literal method cannot contain a standalone intrinsic at an unrelated instruction. -/
+/-- The shape check refuses a standalone intrinsic at an unrelated instruction. -/
 theorem standalone_intrinsic_refused :
     let source := { raw call0 with code := [⟨0, 0, .none⟩] }
     methodShapeInstructions source (body [.intrinsic (.avx2 .band) 2]) = false := rfl

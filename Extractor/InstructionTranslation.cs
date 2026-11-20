@@ -249,7 +249,7 @@ internal static class InstructionTranslation
         };
     }
 
-    // Literal methods and profile templates render the same validated field operand as the decoder.
+    // Profile templates render the same validated field operand as the decoder.
     static Operation StaticField(Instruction instruction, ModuleDefinition module, string architecture)
     {
         StaticData.FieldOf(instruction, module, architecture);

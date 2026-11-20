@@ -7,7 +7,7 @@ using Mono.Cecil;
 namespace Nethermind.LeanCIL;
 
 // Runs extraction and its validators over explicit method/profile pairs; it never checks a proof.
-internal static class Blockers
+internal static partial class Blockers
 {
     const string Usage = "Usage: leancil blockers assembly.dll --manifest manifest.json [--output blockers.json] " +
         "[--assembly 'assembly name or full identity'] [--reference Lib.dll]... [--import Lib.leancil.contracts]... " +
@@ -20,7 +20,9 @@ internal static class Blockers
     ];
     const string Disclaimer = "Admission only: admitted entries are extractable under their profile; nothing here is proved.";
 
-    sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
+    /// <summary>One occurrence of a blocker: the method and instruction it names, its source line and its
+    /// diagnostic.</summary>
+    internal sealed record Site(string Method, int? IlOffset, string? Instruction, string? Source, string Message);
 
     sealed class ChainComparer : IEqualityComparer<string[]>
     {
@@ -73,22 +75,10 @@ internal static class Blockers
         int? ReachableMethods, List<Finding> Findings)
     {
         internal string[] TypeArguments { get; init; } = [];
-        /// <summary>The full names of the extracted methods defined from their decoder.</summary>
+        // Names, not definitions: a definition holds its extraction's whole module alive across every later entry.
+        /// <summary>The full names of the extracted methods, each defined from its decoder.</summary>
         internal string[] DecodedMethods { get; init; } = [];
-        /// <summary>The full names of the extracted methods written as literals, with why.</summary>
-        internal LiteralMethod[] LiteralMethods { get; init; } = [];
     }
-
-    // Names, not definitions: a definition holds its extraction's whole module alive across every later entry.
-    sealed record LiteralMethod(string Method, GenericEvidence.DecodeRefusal Refusal);
-
-    // The report's text for a refusal; only a hole has a family.
-    static object Refusal(string method, GenericEvidence.DecodeRefusal refusal) => new
-    {
-        method, ilOffset = refusal.Offset, opcode = refusal.Opcode.Name,
-        refusal = JsonNamingPolicy.CamelCase.ConvertName(refusal.Kind.ToString()),
-        family = refusal.Family is { } family ? JsonNamingPolicy.CamelCase.ConvertName(family.ToString()) : null
-    };
 
     static string Option(string[] args, ref int index)
     {
@@ -244,29 +234,21 @@ internal static class Blockers
             if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
                     expectedAssembly, typeArguments, initializedTypes, references, imports,
                     extracted => definitions = extracted) is { } rejected)
-                blocked.Add(new(methods[0], null, rejected, [methods[0]]));
+                blocked.Add(Rejection(methods[0], rejected));
             if (blocked.Count == 0)
             {
-                var named = definitions!.Methods.Zip(definitions.Refusals).ToArray();
-                string[] decoded = [.. named.Where(pair => pair.Second is null).Select(pair => pair.First.FullName)];
-                LiteralMethod[] literals = [.. named.Where(pair => pair.Second is not null)
-                    .Select(pair => new LiteralMethod(pair.First.FullName, pair.Second!))];
+                string[] decoded = [.. definitions!.Methods.Select(method => method.FullName)];
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
-                    { TypeArguments = typeArguments, DecodedMethods = decoded, LiteralMethods = literals });
+                    { TypeArguments = typeArguments, DecodedMethods = decoded });
                 continue;
             }
             var entryFindings = new List<Finding>();
             var knownFindings = new HashSet<Finding>();
             foreach (var failure in blocked)
             {
-                var message = failure.Error.Message;
-                int? offset = failure.At?.Offset ?? (Regex.Match(message, @"\bIL_([0-9a-f]{4,})\b") is { Success: true } label
-                    ? Convert.ToInt32(label.Groups[1].Value, 16) : null);
-                // The construct is the diagnostic without its site, so every occurrence shares one blocker.
-                var construct = Regex.Replace(message.Split('\n')[0], @"\bIL_[0-9a-f]{4,}: ", "");
+                var construct = Construct(failure.Error.Message);
                 if (!findings.TryGetValue(construct, out var finding)) findings[construct] = finding = new(construct);
-                var site = new Site(failure.Method.FullName, offset, failure.At?.ToString(),
-                    offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, message);
+                var site = SiteOf(failure);
                 var chain = failure.Chain.Select(method => method.FullName).ToArray();
                 finding.Add(site, chain[0], profileName, chain);
                 if (knownFindings.Add(finding)) entryFindings.Add(finding);
@@ -307,7 +289,6 @@ internal static class Blockers
                 method = o.Method, reason = o.Reason,
                 reachableMethods = o.ReachableMethods,
                 decodedMethods = o.DecodedMethods,
-                literalMethods = o.LiteralMethods.Select(literal => Refusal(literal.Method, literal.Refusal)),
                 blockers = o.Findings.Select(f => f.Id)
             }),
             blockers = ordered.Select(f => new
@@ -323,8 +304,36 @@ internal static class Blockers
         return 0;
     }
 
+    /// <summary>The blocker of an entry whose extraction failed with `error`: an undecoded instruction names its
+    /// method and instruction, and any other failure names the entry.</summary>
+    internal static MetadataValidation.Blocked Rejection(MethodDefinition entry, Exception error) =>
+        error is GenericEvidence.UndecodedInstruction undecoded
+            ? new(undecoded.Method, undecoded.Refusal.At, error, [entry])
+            : new(entry, null, error, [entry]);
+
+    /// <summary>The construct a diagnostic reports: its first line without its site, so every occurrence of
+    /// one construct shares one blocker.</summary>
+    internal static string Construct(string message) =>
+        SiteLabel.Replace(message.Split('\n')[0], "");
+
+    /// <summary>The report site of a blocker, at its instruction or at the IL offset its message names.</summary>
+    internal static Site SiteOf(MetadataValidation.Blocked failure)
+    {
+        var message = failure.Error.Message;
+        int? offset = failure.At?.Offset ?? (OffsetLabel.Match(message) is { Success: true } label
+            ? Convert.ToInt32(label.Groups[1].Value, 16) : null);
+        return new(failure.Method.FullName, offset, failure.At?.ToString(),
+            offset is int at ? Symbols.Location(failure.Method, at, Path.GetFileName) : null, message);
+    }
+
+    [GeneratedRegex(@"\bIL_[0-9a-f]{4,}: ")]
+    private static partial Regex SiteLabel { get; }
+
+    [GeneratedRegex(@"\bIL_([0-9a-f]{4,})\b")]
+    private static partial Regex OffsetLabel { get; }
+
     // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any, and passes
-    // the extracted methods with their decode refusals to `definitions`.
+    // the extracted methods to `definitions`.
     static Exception? Extract(Program.ExtractionBatch batch, string assemblyPath, string signature, string profileName,
         string manifestDirectory, string? expectedAssembly, string[] typeArguments,
         IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports,

@@ -149,20 +149,6 @@ if (!Rejected(() => EmitTo(shaped, "--module", Path.Combine(root, "Outside.lean"
     throw new Exception("A module outside the output or an invalid namespace was accepted");
 Console.WriteLine("PASS template --check, LF output, namespace, module and omitted equations");
 
-var literal = Method("LiteralOnly", ".ret");
-var refusalType = Model("GenericEvidence+DecodeRefusal");
-var opcodeType = refusalType.GetConstructors().Single().GetParameters()[1].ParameterType;
-var opcode = opcodeType.Assembly.GetType("Mono.Cecil.Cil.OpCodes", true)!.GetField("Ldfld")!.GetValue(null);
-var hole = Enum.Parse(Model("GenericEvidence+RefusalKind"), "Hole");
-var refusal = Activator.CreateInstance(refusalType, 12, opcode, hole);
-literal.GetType().GetField("Refusal", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(literal, refusal);
-variants[second] = Variant(second, true, [literal]);
-var refusedOutput = Path.Combine(root, "Refused");
-if (Rejected(() => EmitTo(refusedOutput)) != "Template decoder refused LiteralOnly at IL_000c (ldfld)." ||
-    File.Exists(Path.Combine(refusedOutput, "Templates.lean")))
-    throw new Exception("The templates command accepted a literal input or lost its identity and IL site.");
-Console.WriteLine("PASS templates refuses a decoder refusal before writing the shared module");
-
 variants[second] = Variant(second, true, [Method("Caller", ".ret"), Method("Caller", ".ret")]);
 try { Emit(); throw new Exception("Duplicate managed identity was accepted"); }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&

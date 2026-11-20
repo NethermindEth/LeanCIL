@@ -13,9 +13,8 @@ using System.Text.Json;
 
 // The methods of the self-admission corpus, and of the examples assembly under each CI profile, whose extraction
 // defines them from their decoder, against checked-in lists that only grow: a listed method that is no longer
-// defined from its decoder fails, and so does an addition until --update records it. Prints, for the self-admitted
-// methods kept as literals, how many each first refusal keeps. Reads the extractions Tests/SelfAdmission.cs ran
-// with the current extractor and the report Tests/Blockers.cs writes for its fixture, and runs the examples'
+// extracted fails, and so does an addition until --update records it. Reads the extractions Tests/SelfAdmission.cs
+// ran with the current extractor and the report Tests/Blockers.cs writes for its fixture, and runs the examples'
 // admission itself.
 const string Usage = "Usage: CanonicalMethods.cs [--update]";
 const string UpdateCommand = "dotnet run --file Tests/CanonicalMethods.cs -- --update";
@@ -34,9 +33,8 @@ if (root.GetProperty("extractorSha256").GetString() != extractorHash)
     throw new InvalidOperationException(
         $"{reportPath} was written by another extractor; run Tests/SelfAdmission.cs again.");
 
-// The methods an admission report defines from their decoder, the first refusal of each method it keeps as a literal,
-// and its admitted entries.
-(HashSet<string> Decoded, Dictionary<string, JsonElement> Literals, int Admitted) Read(string path, JsonElement report)
+// The methods an admission report defines from their decoder, and its admitted entries.
+(HashSet<string> Decoded, int Admitted) Read(string path, JsonElement report)
 {
     if (report.GetProperty("extractorSha256").GetString() != extractorHash)
         throw new InvalidOperationException($"{path} was written by another extractor.");
@@ -46,15 +44,7 @@ if (root.GetProperty("extractorSha256").GetString() != extractorHash)
     var names = admitted
         .SelectMany(entry => entry.GetProperty("decodedMethods").EnumerateArray())
         .Select(method => method.GetString()!).ToHashSet(StringComparer.Ordinal);
-    var kept = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-    foreach (var refusal in admitted.SelectMany(entry => entry.GetProperty("literalMethods").EnumerateArray()))
-        kept.TryAdd(refusal.GetProperty("method").GetString()!, refusal);
-    // The decision reads only the method's own body and reachability, so no extraction may decide it differently.
-    var split = names.Where(kept.ContainsKey).Order(StringComparer.Ordinal).ToArray();
-    if (split.Length != 0)
-        throw new InvalidOperationException($"Methods defined from their decoder in one extraction of {path} and as " +
-            "a literal in another:\n" + string.Join('\n', split));
-    return (names, kept, admitted.Length);
+    return (names, admitted.Length);
 }
 string[] Excess(Dictionary<string, int> counts, Dictionary<string, int> bound) =>
     [.. counts.SelectMany(pair =>
@@ -69,37 +59,16 @@ string[] Excess(Dictionary<string, int> counts, Dictionary<string, int> bound) =
     return (Excess(listedCounts, nameCounts), Excess(nameCounts, listedCounts));
 }
 
-var (decodedNames, literals, admittedCount) = Read(reportPath, root);
+var (decodedNames, admittedCount) = Read(reportPath, root);
 // A generated method counts toward its source method.
 var decoded = decodedNames.Select(StableNames.Of).Order(StringComparer.Ordinal).ToArray();
 var (lost, added) = Compare(listPath, decoded);
 
-string Reason(JsonElement refusal) => refusal.GetProperty("refusal").GetString() switch
-{
-    "hole" => "hole: " + refusal.GetProperty("family").GetString(),
-    "translated" => "translated call or construction",
-    var kind => throw new InvalidDataException("Unknown refusal kind: " + kind)
-};
-string Opcodes(IEnumerable<JsonElement> refusals) => string.Join(", ", refusals
-    .GroupBy(refusal => refusal.GetProperty("opcode").GetString()!, StringComparer.Ordinal)
-    .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal)
-    .Select(group => $"{group.Key} {group.Count()}"));
-var summary = new List<string>
-{
-    $"{decoded.Length} of the {decoded.Length + literals.Count} methods extracted for the {admittedCount} " +
-        "admitted entries of the self-admission corpus are defined from their decoder.", "",
-    "| First refusal | Methods | Opcodes |", "| --- | ---: | --- |"
-};
-// Each literal method counts once, under the first pc that keeps its literal.
-summary.AddRange(literals.Values.GroupBy(Reason, StringComparer.Ordinal)
-    .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal)
-    .Select(group => $"| {group.Key} | {group.Count()} | {Opcodes(group)} |"));
-Console.WriteLine(string.Join('\n', summary));
-if (Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } stepSummary)
-    File.AppendAllLines(stepSummary, ["", .. summary]);
+Console.WriteLine($"{decoded.Length} methods extracted for the {admittedCount} admitted entries of the " +
+    "self-admission corpus, each defined from its decoder.");
 foreach (var method in added) Console.WriteLine("  added: " + method);
 if (lost.Length != 0)
-    throw new InvalidOperationException($"Methods listed in {listPath} are no longer defined from their decoder:\n" +
+    throw new InvalidOperationException($"Methods listed in {listPath} are no longer extracted:\n" +
         string.Join('\n', lost));
 
 // Every method of the examples assembly under each admitted profile, so a change that stops defining an example
@@ -147,10 +116,10 @@ var examplesDecoded = new List<string>();
 foreach (var (profile, path) in reports)
 {
     using var report = JsonDocument.Parse(File.ReadAllText(path));
-    var (names, kept, _) = Read(path, report.RootElement);
+    var (names, _) = Read(path, report.RootElement);
     examplesDecoded.AddRange(names.Select(name => profile + " " + StableNames.Of(name)));
-    Console.WriteLine($"{profile}: {names.Count} of the {names.Count + kept.Count} methods extracted for the " +
-        $"{methods.Length} methods of the examples assembly are defined from their decoder.");
+    Console.WriteLine($"{profile}: {names.Count} methods extracted for the {methods.Length} methods of the examples " +
+        "assembly, each defined from its decoder.");
     foreach (var example in decodedExamples)
         if (!names.Contains(example))
             throw new InvalidOperationException($"{example} is not defined from its decoder in {path}.");
@@ -162,11 +131,10 @@ var examples = examplesDecoded.Order(StringComparer.Ordinal).ToArray();
 var (examplesLost, examplesAdded) = Compare(examplesListPath, examples);
 foreach (var method in examplesAdded) Console.WriteLine("  added: " + method);
 if (examplesLost.Length != 0)
-    throw new InvalidOperationException($"Methods listed in {examplesListPath} are no longer defined from their " +
-        "decoder:\n" + string.Join('\n', examplesLost));
+    throw new InvalidOperationException($"Methods listed in {examplesListPath} are no longer extracted:\n" +
+        string.Join('\n', examplesLost));
 
-// The blockers fixture's admitted method decodes in full, so a fallback to a literal would leave its proof passing
-// over a method that no decoder produced.
+// The blockers fixture's admitted method is extracted, so its proof runs over the method its decoder produced.
 var fixtureReport = At("artifacts/Blockers/blockers.json");
 if (!File.Exists(fixtureReport))
     throw new InvalidOperationException($"Missing {fixtureReport}; run Tests/Blockers.cs, which writes it.");

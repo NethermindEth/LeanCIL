@@ -209,7 +209,7 @@ foreach (var (name, native, pointer) in additions)
             /-- The scalar checker validates emitted instructions against the commuted operands. -/
             private abbrev scalarFits (code : List CIL.Instruction) :=
               CIL.Extraction.ScalarFlowValid method0Closed method0FeatureStates
-                method0ScalarStates code false
+                method0ScalarStates code
 
             /-- The unchanged commuted addition satisfies the explicit scalar encoding. -/
             theorem original_add_valid : scalarFits method0.code := by decide +kernel

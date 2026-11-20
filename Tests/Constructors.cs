@@ -137,7 +137,7 @@ var classDll = Mutate("class", classOutput);
 var classExtraction = Path.Combine(classOutput, "Extraction");
 Run(Extract("extract", classDll, "Examples", "Constructors::Return(ulong)", classExtraction));
 var classLean = File.ReadAllText(Path.Combine(classExtraction, "Extracted.lean"));
-// Only a construction has an `.object` link, whether its method is a literal or decoded.
+// Only a construction has an `.object` link.
 if (!classLean.Contains(": Link := .object ", StringComparison.Ordinal) ||
     classLean.Contains(": Link := .aggregate ", StringComparison.Ordinal))
     throw new InvalidOperationException("Class construction was not extracted as a heap allocation:\n" + classLean);

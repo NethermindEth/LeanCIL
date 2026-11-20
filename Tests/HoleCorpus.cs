@@ -33,6 +33,8 @@ for (var index = 0; index < args.Length; index++)
     }
 
 CheckInspection();
+CheckRefusalReport();
+CheckUndecodedCallee(Path.Combine(root, "Extractor/bin/Nethermind.LeanCIL.dll"));
 var timer = Stopwatch.StartNew();
 var assemblyPath = Path.Combine(root, "Extractor/bin/Nethermind.LeanCIL.dll");
 var bytes = File.ReadAllBytes(assemblyPath);
@@ -177,6 +179,123 @@ static void CheckInspection()
     if (!Rows(result).SequenceEqual(expected, StringComparer.Ordinal))
         throw new InvalidOperationException("Incorrect argument or prefix position:\n" +
             string.Join('\n', Rows(result)));
+}
+
+// A live instruction the decoder refuses blocks its entry at the refusing method's instruction, with its opcode,
+// pc and IL offset in the report, while the same instruction dead refuses nothing.
+static void CheckRefusalReport()
+{
+    using var module = ModuleDefinition.CreateModule("RefusalChecks", ModuleKind.Dll);
+    var owner = new TypeDefinition("", "Receiver", TypeAttributes.Public, module.TypeSystem.Object);
+    module.Types.Add(owner);
+    foreach (var name in new[] { "Entry", "Body" })
+        owner.Methods.Add(new(name, MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void));
+    owner.Methods[0].Body.GetILProcessor().Emit(OpCodes.Ret);
+    var il = owner.Methods[1].Body.GetILProcessor();
+    il.Emit(OpCodes.Ldc_I4, 5);
+    foreach (var opcode in new[] { OpCodes.Pop, OpCodes.Arglist, OpCodes.Pop, OpCodes.Ret }) il.Emit(opcode);
+    // Written and read back, so the refused instruction's IL offset differs from its pc.
+    using var image = new MemoryStream();
+    module.Write(image);
+    image.Position = 0;
+    using var decoded = ModuleDefinition.ReadModule(image);
+    var methods = decoded.Types.Single(type => type.Name == owner.Name).Methods;
+    var entry = methods.Single(method => method.Name == "Entry");
+    var body = methods.Single(method => method.Name == "Body");
+    var instructions = body.Body.Instructions;
+    var operations = new Operation[instructions.Count];
+    var refusal = GenericEvidence.FirstDecodeRefusal(body, instructions.ToHashSet(), operations) ??
+        throw new InvalidOperationException("The decoder accepted a live arglist.");
+    var failure = Blockers.Rejection(entry, new GenericEvidence.UndecodedInstruction(body, refusal));
+    var site = Blockers.SiteOf(failure);
+    var construct = Blockers.Construct(site.Message);
+    if (failure.Method != body || !failure.Chain.SequenceEqual([entry]) ||
+        site != site with { Method = body.FullName, IlOffset = 6, Instruction = "IL_0006: arglist", Source = null } ||
+        !site.Message.EndsWith($"at pc 2 of {body.FullName}", StringComparison.Ordinal) ||
+        construct != "Unsupported instruction: the decoder has no form for arglist")
+        throw new InvalidOperationException($"Incorrect decode refusal site {site} in {construct}");
+    var live = instructions.Where(instruction => instruction.OpCode != OpCodes.Arglist).ToHashSet();
+    if (GenericEvidence.FirstDecodeRefusal(body, live, operations) is { } dead)
+        throw new InvalidOperationException($"The decoder refused a dead {dead.At}.");
+    // A call whose translation is not the call the decoder reads is refused as translated differently.
+    var call = Instruction.Create(OpCodes.Call, entry);
+    body.Body.Instructions.Insert(0, call);
+    var translated = GenericEvidence.FirstDecodeRefusal(body, new HashSet<Instruction> { call },
+        new Operation[body.Body.Instructions.Count]);
+    if (translated != new GenericEvidence.DecodeRefusal(0, call, GenericEvidence.RefusalKind.Translated) ||
+        Blockers.Construct(new GenericEvidence.UndecodedInstruction(body, translated).Message) !=
+            "Unsupported instruction: the decoder reads call differently from its translation")
+        throw new InvalidOperationException($"Incorrect translated refusal {translated}");
+}
+
+// The blockers command, run on an assembly whose callee the extractor admits, blocks the entry at the callee's add
+// when add is outside the opcodes the decoder reads, and admits it with the decoder's own opcodes. The fixture is a
+// copy of the extractor's assembly, which the extractor accepts as a module, with one added type.
+static void CheckUndecodedCallee(string template)
+{
+    var directory = Path.Combine(Path.GetTempPath(), "leancil-undecoded-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    try
+    {
+        using var assembly = AssemblyDefinition.ReadAssembly(template);
+        var module = assembly.MainModule;
+        var owner = new TypeDefinition("", "Receiver", TypeAttributes.Public | TypeAttributes.Abstract |
+            TypeAttributes.Sealed, module.TypeSystem.Object);
+        module.Types.Add(owner);
+        MethodDefinition Define(string name)
+        {
+            var method = new MethodDefinition(name, MethodAttributes.Public | MethodAttributes.Static,
+                module.TypeSystem.Int32);
+            method.Parameters.Add(new("value", ParameterAttributes.None, module.TypeSystem.Int32));
+            owner.Methods.Add(method);
+            return method;
+        }
+        var (entry, body) = (Define("Entry"), Define("Body"));
+        var il = body.Body.GetILProcessor();
+        foreach (var opcode in new[] { OpCodes.Ldarg_0, OpCodes.Ldc_I4_1, OpCodes.Add, OpCodes.Ret }) il.Emit(opcode);
+        il = entry.Body.GetILProcessor();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, body);
+        il.Emit(OpCodes.Ret);
+        var path = Path.Combine(directory, "Undecoded.dll");
+        assembly.Write(path);
+        var manifest = Path.Combine(directory, "manifest.json");
+        File.WriteAllText(manifest, """{ "entries": [ { "signature": "Receiver::Entry(int)", "profile": "scalar" } ] }""");
+        JsonElement Report(IReadOnlySet<Code> opcodes, string name)
+        {
+            var output = Path.Combine(directory, name);
+            GenericEvidence.ExtractedOpcodes = opcodes;
+            try
+            {
+                if (Blockers.Run([path, "--manifest", manifest, "--output", output]) != 0)
+                    throw new InvalidOperationException("The blockers command failed.");
+            }
+            finally { GenericEvidence.ExtractedOpcodes = GenericEvidence.DecodedOpcodes; }
+            return JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(output));
+        }
+        const string bodyName = "System.Int32 Receiver::Body(System.Int32)";
+        const string entryName = "System.Int32 Receiver::Entry(System.Int32)";
+        var admitted = Report(GenericEvidence.DecodedOpcodes, "admitted.json").GetProperty("entries")[0];
+        if (admitted.GetProperty("status").GetString() != "admitted" ||
+            admitted.GetProperty("reachableMethods").GetInt32() != 2)
+            throw new InvalidOperationException($"The decodable fixture was not admitted: {admitted}");
+        var refused = Report(GenericEvidence.DecodedOpcodes.Where(code => code != Code.Add).ToHashSet(),
+            "refused.json");
+        var outcome = refused.GetProperty("entries")[0];
+        var blocker = refused.GetProperty("blockers").EnumerateArray().Single();
+        var site = blocker.GetProperty("sites").EnumerateArray().Single();
+        var chains = blocker.GetProperty("entries").EnumerateArray().Single().GetProperty("chains");
+        if (outcome.GetProperty("status").GetString() != "blocked" ||
+            blocker.GetProperty("construct").GetString() !=
+                "Unsupported instruction: the decoder has no form for add" ||
+            site.GetProperty("method").GetString() != bodyName || site.GetProperty("ilOffset").GetInt32() != 2 ||
+            site.GetProperty("instruction").GetString() != "IL_0002: add" ||
+            !site.GetProperty("message").GetString()!.EndsWith($"at pc 2 of {bodyName}", StringComparison.Ordinal) ||
+            chains.GetArrayLength() != 1 || chains[0].GetArrayLength() != 1 ||
+            chains[0][0].GetString() != entryName)
+            throw new InvalidOperationException($"Incorrect undecoded callee report: {refused}");
+    }
+    finally { Directory.Delete(directory, recursive: true); }
 }
 
 sealed record MethodHoles(string Method, int[] Arguments, DeadPrefix[] Prefixes);

@@ -104,8 +104,6 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
 
     internal string ParameterHomesLean => string.Join(", ", ParameterHomes.Select(home => home.ToLean()));
 
-    internal string StaticSitesLean => StaticSitesLeanWith(LeanText.MethodNumber);
-
     /// <summary>The index of every method the static sites read initial values through.</summary>
     internal IEnumerable<int> Methods => StaticSites.SelectMany(site => site.Methods);
 
