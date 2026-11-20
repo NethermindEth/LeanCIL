@@ -12,6 +12,7 @@ import CIL.Identity
 import CIL.ExceptionType
 import CIL.Imports
 import CIL.InstructionEquations
+import CIL.Extraction.TemplateCode
 import CIL.Instructions
 import CIL.Layout
 import CIL.LiteralDisplay

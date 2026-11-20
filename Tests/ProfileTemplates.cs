@@ -88,22 +88,14 @@ var wrapper = Path.Combine(directory, "Wrapper");
 Run(Extract("extract", assembly, "Dispatch", "Dispatch::Wrapper(uint,uint)", wrapper, "x64-v3"));
 Run(["dotnet", ExtractorPath, "templates", shared, .. extractions, wrapper]);
 var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
-if (templates.Split("@[cil_code] def method").Length != 4 ||
+if (templates.Split("code := cil_template_code%").Length != 4 ||
     !templates.Contains("(sse42 : Bool) (avx2 : Bool) (callee0 : Nat)", StringComparison.Ordinal) ||
     !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
     throw new InvalidOperationException("Expected one generated body per method with flags, callees and equations.");
-// Each body that enters a method names its links, so the table never depends on a default.
-foreach (var body in templates.Split("@[cil_code] def method").Skip(1))
-{
-    string[] callForms = [".call ", ".callvirt ", ".newobj ", ".managed (.call "];
-    var emptyLinks = body.Contains("links := [],", StringComparison.Ordinal);
-    if (callForms.Any(form => body.Contains(form, StringComparison.Ordinal)) &&
-        (emptyLinks || !body.Contains("links := ", StringComparison.Ordinal)))
-        throw new InvalidOperationException("A template method with a call instruction has no links field.");
-}
-if (!templates.Contains("links := ([(", StringComparison.Ordinal) &&
-    !templates.Contains("links := [(", StringComparison.Ordinal))
-    throw new InvalidOperationException("Expected the Choose template to carry links naming callee0.");
+if (!templates.Contains("cil_decoded_method method0 := Method.ofClosed?", StringComparison.Ordinal) ||
+    !templates.Contains("code := cil_template_code%", StringComparison.Ordinal) ||
+    !templates.Contains(".direct callee0", StringComparison.Ordinal))
+    throw new InvalidOperationException("The Choose template needs decoded code and a parameterized call link.");
 var renamed = File.ReadAllText(Path.Combine(shared, "TemplateBindings3.lean"));
 if (!renamed.Contains("Templates.method0 Extracted.profile Extracted.environment true true 2",
         StringComparison.Ordinal))
@@ -189,7 +181,7 @@ var kinds = new (string Name, string Selector, string Spelling)[]
     ("Virtual", "Kinds::Virtual(Slot)", ".virtual [("),
     ("Address", "Kinds::Address(uint)", ".address callee"),
     ("Indirect", "Kinds::Indirect(method System.UInt32 *(System.UInt32)[],System.Int32,System.UInt32)",
-        ".managed (.call "),
+        ".indirect [{ identity := "),
     ("Initial", "Kinds::Initial()", "initializer := some { method := callee1")
 };
 foreach (var (name, selector, spelling) in kinds)
@@ -246,7 +238,7 @@ example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (ca
 var changed = Path.Combine(directory, "ChangedBranch");
 Directory.CreateDirectory(changed);
 File.WriteAllText(Path.Combine(changed, "Templates.lean"),
-    templates.Replace(".brfalse 5", ".brfalse 6", StringComparison.Ordinal));
+    templates.Replace("Input2.method0.code)", "(Input2.method0.code.set 1 (.brfalse 6)))", StringComparison.Ordinal));
 Compile(changed, "Templates", changed + Path.PathSeparator + library);
 RejectLean("WrongBranch", wideBinding, changed + Path.PathSeparator + widePath);
 
@@ -300,10 +292,6 @@ var constructed = Path.Combine(directory, "Constructor");
 Run(Extract("extract", assembly, "Dispatch", "Blank::.ctor()", constructed));
 var constructorShared = Path.Combine(directory, "ConstructorShared");
 Run(["dotnet", ExtractorPath, "templates", constructorShared, constructed]);
-var constructorTemplate = File.ReadAllText(Path.Combine(constructorShared, "Templates.lean"));
-if (!constructorTemplate.Contains(".call ({ owner := .atom Extraction.runtimeScope \"System.Object\"",
-        StringComparison.Ordinal) || !constructorTemplate.Contains("links := []", StringComparison.Ordinal))
-    throw new InvalidOperationException("The constructor template lost its unlinked System.Object constructor call.");
 var constructorPath = constructed + Path.PathSeparator + constructorShared + Path.PathSeparator + library;
 Compile(constructorShared, "Templates", constructorPath);
 File.WriteAllText(Path.Combine(constructorShared, "ConstructorProof.lean"), """
@@ -314,6 +302,15 @@ File.WriteAllText(Path.Combine(constructorShared, "ConstructorProof.lean"), """
     /-! A proof over a generated constructor template. -/
     namespace ConstructorProof
     open CIL CIL.Safety
+
+    example (profile : FeatureProfile) (environment : LayoutEnvironment) :
+        (Templates.method0 profile environment).links = [] := rfl
+
+    example (profile : FeatureProfile) (environment : LayoutEnvironment) :
+        (Templates.method0 profile environment).code[1]? = some (.call {
+          owner := .atom Extraction.runtimeScope "System.Object", name := name!".ctor",
+          hasThis := true, genericArity := 0, returnType := .void, parameters := [],
+          methodArguments := [] } {}) := rfl
 
     /-- The template constructor of a class deriving from `System.Object` returns, for any profile. -/
     theorem constructs (program : Program) (index : Nat) (profile : FeatureProfile)
@@ -369,18 +366,21 @@ var staticBinding = File.ReadAllText(Path.Combine(staticShared, "TemplateBinding
 var staticPath = staticOutputs[0] + Path.PathSeparator + library;
 var changedStatic = Path.Combine(directory, "ChangedStatic");
 Directory.CreateDirectory(changedStatic);
+var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
+if (siteStart < 0) throw new InvalidOperationException("Static template has no descriptor list.");
+var codeStart = staticTemplate.IndexOf("  code := cil_template_code%", siteStart, StringComparison.Ordinal);
+var descriptors = staticTemplate[siteStart..codeStart];
+var changedField = descriptors.Replace("name := name!\"Bias\" }, bytes", "name := name!\"Changed\" }, bytes",
+    StringComparison.Ordinal);
+if (descriptors == changedField) throw new InvalidOperationException("Missing static field identity.");
 File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
-    staticTemplate.Replace("name := name!\"Bias\" }, bytes", "name := name!\"Changed\" }, bytes",
-        StringComparison.Ordinal));
+    $"""{staticTemplate[..siteStart]}{changedField}{staticTemplate[codeStart..]}""");
 Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
 RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
-var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
-var siteEnd = staticTemplate.IndexOf("], declared := ", siteStart, StringComparison.Ordinal);
-if (siteStart < 0 || siteEnd < 0) throw new InvalidOperationException("Static template has no descriptor list.");
 var missingStatic = Path.Combine(directory, "MissingStatic");
 Directory.CreateDirectory(missingStatic);
 File.WriteAllText(Path.Combine(missingStatic, "Templates.lean"),
-    staticTemplate[..siteStart] + "staticSites := [" + staticTemplate[siteEnd..]);
+    $"""{staticTemplate[..siteStart]}staticSites := [],{"\n"}{staticTemplate[codeStart..]}""");
 Compile(missingStatic, "Templates", missingStatic + Path.PathSeparator + library);
 RejectLean("MissingStaticMetadata", staticBinding, missingStatic + Path.PathSeparator + staticPath);
 Console.WriteLine("PASS deterministic static metadata, exact profile bindings " +

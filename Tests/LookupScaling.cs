@@ -125,34 +125,38 @@ if (args.Contains("--prefix-entry-only", StringComparer.Ordinal))
     PrefixEntryCosts();
     return;
 }
-NativeTableCosts();
-if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
-ExceptionDecisionCosts();
-CheckNarrowedResolution();
-if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
-ReturnResolutionCosts();
-ArgumentResolutionCosts();
-ElementShapeCosts();
-ShapeResolutionCosts();
-LineageCosts();
-if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
-CallCheckCosts();
-DecodeCosts();
-MethodDecodeCosts();
-StaticFactCosts();
-StaticIdentityCosts();
-DecodedDefinitionCosts();
-DecodedProgramCosts();
-PrefixEntryCosts();
-ClosureCosts();
-RunCosts();
-ClosedArgumentsCosts();
+var instructionEquationsOnly = args.Contains("--instruction-equations-only", StringComparer.Ordinal);
+if (!instructionEquationsOnly)
+{
+    NativeTableCosts();
+    if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
+    ExceptionDecisionCosts();
+    CheckNarrowedResolution();
+    if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
+    ReturnResolutionCosts();
+    ArgumentResolutionCosts();
+    ElementShapeCosts();
+    ShapeResolutionCosts();
+    LineageCosts();
+    if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
+    CallCheckCosts();
+    DecodeCosts();
+    MethodDecodeCosts();
+    StaticFactCosts();
+    StaticIdentityCosts();
+    DecodedDefinitionCosts();
+    DecodedProgramCosts();
+    PrefixEntryCosts();
+    ClosureCosts();
+    RunCosts();
+    ClosedArgumentsCosts();
 
-LayoutIdentityCosts();
-Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
-BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
-    "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
-    "Tests.LayoutAccumulation", "Tests.LayoutProjectionIndexes");
+    LayoutIdentityCosts();
+    Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
+    BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
+        "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
+        "Tests.LayoutAccumulation", "Tests.LayoutProjectionIndexes");
+}
 
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations
@@ -1953,20 +1957,25 @@ Dictionary<string, long> TypeDecisionCosts()
     if (costs.Count != 4) throw new InvalidOperationException("Missing type identity decision costs:\n" + output);
     return costs;
 }
-var decisions = TypeDecisionCosts();
-foreach (var outcome in new[] { "equal", "unequal" })
+if (!instructionEquationsOnly)
 {
-    long shortName = decisions[outcome + " 20"], longName = decisions[outcome + " 80"];
-    var measured = $"{shortName} heartbeats at 20 characters and {longName} at 80";
-    if (Math.Min(shortName, longName) < KernelDecisionFloor || Math.Max(shortName, longName) > TypeDecisionLimit ||
-        longName > shortName * AllowedNameGrowth)
-        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
-            $"and {AllowedNameGrowth} times as many at 80 characters."));
-    Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+    var decisions = TypeDecisionCosts();
+    foreach (var outcome in new[] { "equal", "unequal" })
+    {
+        long shortName = decisions[outcome + " 20"], longName = decisions[outcome + " 80"];
+        var measured = $"{shortName} heartbeats at 20 characters and {longName} at 80";
+        if (Math.Min(shortName, longName) < KernelDecisionFloor || Math.Max(shortName, longName) > TypeDecisionLimit ||
+            longName > shortName * AllowedNameGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"""
+                Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats
+                and {AllowedNameGrowth} times as many at 80 characters.
+                """).ReplaceLineEndings(" "));
+        Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+    }
+    MetadataNameCosts();
+    ModelTableCosts();
 }
-MetadataNameCosts();
-ModelTableCosts();
 
 // The heartbeats `decide +kernel` adds to the name clause of the call and field operand checks, which reads a typed
 // name back and compares its bytes with the row's. Names of 20, 80 and 320 bytes share all but their last byte. The
@@ -2328,25 +2337,28 @@ string WithEvidenceCosts(string extracted)
     var shared = Path.Combine(output, "Shared");
     Run(["dotnet", ExtractorPath, "templates", shared, output]);
     var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
-    // The body decodes in full, so the extraction defines it from its decoder; the template still lists one
-    // instruction per line after its header, and the hand-written body copies that code.
-    const string Header =
-        "@[cil_code] def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := ";
-    var definition = LookupPatterns.FirstTemplate.Match(templates);
+    // Count the fixture's actual CIL sites independently of how the template spells its body.
+    var mask = extracted.Split('\n')
+        .Single(line => line.StartsWith("def method0Reachable :", StringComparison.Ordinal));
+    var instructions = mask.Count(character => character == ',') + 1;
     var depth = LookupPatterns.RecursionDepth.Match(extracted);
-    if (!definition.Success || !depth.Success ||
-        !IsDecodedMethod(extracted, 0) ||
-        !LookupPatterns.FirstEquations.IsMatch(extracted) ||
+    if (!depth.Success || !IsDecodedMethod(extracted, 0) || !LookupPatterns.FirstEquations.IsMatch(extracted) ||
+        !templates.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
         !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
-    var instructions = definition.Groups[1].Captures.Count;
+        throw new InvalidOperationException($"Missing the decoded body, equations or recursion depth of {name}.");
     var last = instructions - 1;
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
         WithEvidenceCosts(extracted) + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
-    var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := " +
-        definition.Value[Header.Length..];
+    var statements = name == "Short" ? ShortStatements : LongStatements;
+    var operations = string.Join(", ", Enumerable.Repeat(".ldarg 1, .mul, .ldarg 0, .add", statements));
+    var body = $$"""
+        def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method :=
+          { profile, environment, locals := [], returnsValue := true, code := [.ldarg 0, {{operations}}, .ret] }
+        """;
+    if (instructions != 4 * statements + 2)
+        throw new InvalidOperationException($"The CIL no longer matches the multiply-add fixture for {name}.");
     var command = Checked(Path.Combine(output, "Body.lean"), $"""
         import CIL.InstructionEquations
 
@@ -2388,6 +2400,8 @@ for (var producer = 0; producer < producers.Length; producer++)
             $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
+
+if (instructionEquationsOnly) return;
 
 // A body with no call at three lengths. Its call check reads every pc's link by one walk, so it costs the same per
 // instruction; its evidence theorem is assembled from the conjuncts' theorems and costs the same at every length.
@@ -3510,12 +3524,6 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"_instruction[0-9]+' depends on axioms: \[propext\]")]
     internal static partial Regex EquationAxioms { get; }
-
-    const string TemplateBinder = """\(profile : FeatureProfile\) \(environment : LayoutEnvironment\)""";
-
-    /// <summary>The template of method 0: its header line, then one indented instruction per line.</summary>
-    [GeneratedRegex($"""(?m)^@\[cil_code\] def method0 {TemplateBinder} : Method := [^\r\n]*(\r?\n  [^\r\n]*)+""")]
-    internal static partial Regex FirstTemplate { get; }
 
     [GeneratedRegex("""\(\d+, \.text "[^"]*"\)""")]
     internal static partial Regex StringToken { get; }

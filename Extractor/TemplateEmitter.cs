@@ -9,9 +9,15 @@ internal static partial class TemplateEmitter
 {
     /// <summary>One extracted method: its identity, frame, operations and the raw opcode at each pc.</summary>
     internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes);
-    internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods);
+    internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods)
+    {
+        internal required string DecoderInputs;
+    }
     /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
-    sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops);
+    sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops)
+    {
+        internal required string Body;
+    }
     sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
         int[] Opcodes);
 
@@ -62,7 +68,10 @@ internal static partial class TemplateEmitter
     }
 
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*\z")]
-    private static partial Regex LeanName { get; }
+    internal static partial Regex LeanName { get; }
+
+    [GeneratedRegex(@"\ATemplateBindings[0-9]+\.lean\z")]
+    internal static partial Regex BindingName { get; }
 
     /// <summary>
     /// Writes the shared template module, one binding per extraction and <c>templates.json</c>, with LF line endings,
@@ -80,15 +89,16 @@ internal static partial class TemplateEmitter
             throw new InvalidDataException("Template inputs contain ambiguous managed method identities.");
         if (variants.Any(variant => string.Equals(output, variant.Directory, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("Template output must be separate from its extraction inputs.");
-        var methods = variants.SelectMany(variant => variant.Methods.Select(method =>
-            (Variant: variant, Method: method))).ToLookup(row => row.Method.Identity, StringComparer.Ordinal);
+        var methods = variants.SelectMany((variant, input) => variant.Methods.Select((method, index) =>
+            (Variant: variant, Method: method, Body: $"Input{input}.method{index}")))
+            .ToLookup(row => row.Method.Identity, StringComparer.Ordinal);
         var templates = methods.OrderBy(group => group.Key, StringComparer.Ordinal)
             .Select(group => Prepare(group.Key, group.ToArray())).ToArray();
         var templateIndices = templates.Select((template, index) => (template.Identity, index))
             .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
         var files = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
-            [options.ModulePath] = EmitTemplates(templates, options.Namespace, options.OmitEquations)
+            [options.ModulePath] = EmitTemplates(templates, variants, options.Namespace, options.OmitEquations)
         };
         for (var index = 0; index < variants.Length; index++)
             files[Path.Combine(output, $"TemplateBindings{index}.lean")] =
@@ -142,7 +152,7 @@ internal static partial class TemplateEmitter
         }
         if (Directory.Exists(output))
             problems.AddRange(Directory.EnumerateFiles(output, "TemplateBindings*.lean")
-                .Where(path => Regex.IsMatch(Path.GetFileName(path), @"\ATemplateBindings[0-9]+\.lean\z") &&
+                .Where(path => BindingName.IsMatch(Path.GetFileName(path)) &&
                     !files.ContainsKey(Path.GetFullPath(path)))
                 .Order(StringComparer.Ordinal).Select(path => "Template output has no input: " + path));
         if (problems.Count > 0) throw new InvalidDataException(string.Join("\n", problems));
@@ -154,7 +164,7 @@ internal static partial class TemplateEmitter
         ? variant.Methods[index].Identity
         : throw new InvalidDataException("Templates do not support imported callee slots: method " + index);
 
-    static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
+    static Template Prepare(string identity, (Variant Variant, Method Method, string Body)[] selected)
     {
         var first = selected[0].Method;
         if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length ||
@@ -174,7 +184,7 @@ internal static partial class TemplateEmitter
         {
             int Renumbered(int index) => calleeIndices[CalleeIdentity(row.Variant, index)];
             return new Row(row.Variant, row.Method.Frame.Renumber(Renumbered),
-                [.. row.Method.Operations.Select(operation => operation.Renumber(Renumbered))]);
+                [.. row.Method.Operations.Select(operation => operation.Renumber(Renumbered))]) { Body = row.Body };
         }).ToArray();
         // Frames compare once their callees share the template's numbering, as each body does.
         if (rows.Any(row => row.Frame != rows[0].Frame))
@@ -183,41 +193,37 @@ internal static partial class TemplateEmitter
         return new(identity, rows[0].Frame, features, callees, rows, first.Opcodes);
     }
 
-    /// <summary>An instruction merged over profiles: the operation when every profile agrees, and its text.</summary>
-    readonly record struct Merged(Operation? Operation, string Text);
+    static string Callee(int index) => $"callee{index}";
 
-    static string Callee(int index) => "callee" + index;
-
-    // A missing combination is a hole with the pc's raw opcode, even where all selected rows share an instruction.
-    static Merged Instruction(Template template, Row[] rows, int pc, int featureIndex = 0)
+    /// <summary>The selected decoder's code, or the raw opcode holes of an unselected combination.</summary>
+    static string Code(Template template, Row[] rows, int featureIndex = 0)
     {
         if (rows.Length == 0)
-        {
-            var operation = new Unadmitted(template.Opcodes[pc]);
-            return new(operation, operation.ToLean());
-        }
-        if (featureIndex == template.Features.Length)
-        {
-            var values = rows.Select(row => row.Ops[pc]).Distinct().ToArray();
-            if (values.Length != 1)
-                throw new InvalidDataException("Profiles with identical observed flags emit different instructions: " +
-                    template.Identity + " at pc " + pc);
-            return new(values[0], values[0].ToLean(Callee));
-        }
+            return $"{template.Rows[0].Body}Closed.code.map (fun site => .unadmitted site.opcode)";
+        if (featureIndex == template.Features.Length) return $"{rows[0].Body}.code";
         var feature = template.Features[featureIndex];
-        var enabled = Instruction(template, rows.Where(row => row.Variant.Profile.Get(feature)).ToArray(),
-            pc, featureIndex + 1);
-        var disabled = Instruction(template, rows.Where(row => !row.Variant.Profile.Get(feature)).ToArray(),
-            pc, featureIndex + 1);
-        return enabled.Operation == disabled.Operation && enabled.Text == disabled.Text ? enabled
-            : new(null, $"if {Flag(feature)} then ({enabled.Text}) else ({disabled.Text})");
+        var enabled = Code(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], featureIndex + 1);
+        var disabled = Code(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], featureIndex + 1);
+        return $"if {Flag(feature)} then ({enabled}) else ({disabled})";
     }
+
+    /// <summary>Profiles with identical flags must agree on the operation and its callee at this pc.</summary>
+    static Operation Instruction(Template template, Row[] rows, int pc)
+    {
+        var values = rows.Select(row => row.Ops[pc]).Distinct().ToArray();
+        if (values.Length != 1)
+            throw new InvalidDataException($"""
+                Profiles with identical observed flags emit different instructions: {template.Identity} at pc {pc}
+                """);
+        return values[0];
+    }
+
     /// <summary>The table entries of one pc, as a list expression over the template's feature flags.</summary>
     static string LinkEntries(Template template, Row[] rows, int pc, int featureIndex = 0)
     {
         if (rows.Length == 0) return "[]";
         if (featureIndex == template.Features.Length)
-            return rows[0].Ops[pc].Link(Callee) is { } link ? $"[({pc}, {link})]" : "[]";
+            return Instruction(template, rows, pc).Link(Callee) is { } link ? $"[({pc}, {link})]" : "[]";
         var feature = template.Features[featureIndex];
         var enabled = LinkEntries(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], pc,
             featureIndex + 1);
@@ -229,19 +235,33 @@ internal static partial class TemplateEmitter
     /// <summary>The links field of a template: one entry per call site, in pc order, linear in the code.</summary>
     static string LinkTable(Template template)
     {
-        var entries = Enumerable.Range(0, template.Rows[0].Ops.Length)
+        var entries = Enumerable.Range(0, template.Opcodes.Length)
             .Select(pc => LinkEntries(template, template.Rows, pc)).Where(entry => entry != "[]").ToArray();
         return entries.Length == 0 ? "[]" : string.Join(" ++ ", entries.Select(entry => $"({entry})"));
     }
 
     // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
-    static string EmitTemplates(Template[] templates, string space, bool omitEquations)
+    static string EmitTemplates(Template[] templates, Variant[] variants, string space, bool omitEquations)
     {
-        var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Rows[0].Ops.Length));
-        var lean = new StringBuilder("import CIL.InstructionEquations\nimport CIL.Extraction.SpanCalls\n\n" +
-            "/-! Shared bodies for the selected extraction profiles; bindings establish their CIL identity. -/\n\n" +
-            $"namespace {space}\nopen CIL\n\nset_option maxRecDepth {depth}\n\n");
+        var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Opcodes.Length));
+        var lean = new StringBuilder();
         void Line(string text = "") => lean.Append(text).Append('\n');
+        Line("import CIL.InstructionEquations");
+        Line("import CIL.Extraction.TemplateCode");
+        Line();
+        Line("/-! Shared decoded bodies for the selected extraction profiles. -/");
+        Line();
+        Line($"namespace {space}");
+        Line("open CIL");
+        Line($"set_option maxRecDepth {depth}");
+        Line();
+        for (var input = 0; input < variants.Length; input++)
+        {
+            Line($"namespace Input{input}");
+            lean.Append(variants[input].DecoderInputs);
+            Line($"end Input{input}");
+            Line();
+        }
         for (var index = 0; index < templates.Length; index++)
         {
             var template = templates[index];
@@ -252,16 +272,16 @@ internal static partial class TemplateEmitter
                 $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            var opaqueLocals = $"[{string.Join(", ", template.Frame.OpaqueVectorLocals)}]";
-            var frame = template.Frame.ToLean(Callee, opaqueLocals);
-            Line($$""" : Method := { profile, {{frame}}, links := {{LinkTable(template)}}, code := [""");
-            Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
-                .Select(pc => "  " + Instruction(template, template.Rows, pc).Text)) + "] }");
+            var sites = template.Frame.StaticSitesLeanWith(Callee);
+            Line($$""" : Method := { {{template.Rows[0].Body}} with""");
+            Line("  profile, environment,");
+            Line($"  links := {LinkTable(template)}, staticSites := [{sites}],");
+            Line($$"""  code := cil_template_code% ({{Code(template, template.Rows)}}) }""");
             if (!omitEquations)
             {
                 Line($"cil_instruction_equations method{index}");
                 // The last equation's proof reaches every code suffix, so its axioms include every equation's.
-                if (template.Rows[0].Ops.Length is > 0 and var length)
+                if (template.Opcodes.Length is > 0 and var length)
                     Line($"#print axioms method{index}_instruction{length - 1}");
             }
             Line();
@@ -291,10 +311,24 @@ internal static partial class TemplateEmitter
                 // A callee absent from this extraction can occur only under an excluded branch.
                 arguments.Add(Math.Max(0, target).ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
+            var instance = $"{options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}";
+            var method = $"Extracted.method{index}";
+            var inputs = $"Extracted.profile Extracted.environment {method}Links {method}Reachable";
             Line("/-- This extracted method is exactly the instantiated shared template. -/");
             Line($"@[cil_code] theorem method{index}_template : Extracted.program[{index}]? =");
-            Line($"    some ({options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}) := rfl");
+            Line($"    some ({instance}) := rfl");
             Line($"#print axioms method{index}_template");
+            Line($"""
+                theorem method{index}_decoder_eq : Method.ofClosed? {inputs} {method}Closed {method}RawArguments =
+                    .ok ({instance}) := {method}_decoder_eq
+                #print axioms method{index}_decoder_eq
+                theorem method{index}_decoded : Method.ofRaw? {inputs} {method}Original {method}TypeArgumentsRaw =
+                    some ({instance}) := {method}_decoded
+                #print axioms method{index}_decoded
+                theorem method{index}_decoded_code : ({instance}).code =
+                    Extraction.methodCode {inputs} {method}Closed := {method}_decoded_code
+                #print axioms method{index}_decoded_code
+                """.ReplaceLineEndings("\n"));
         }
         Line("end TemplateBindings");
         return lean.ToString();

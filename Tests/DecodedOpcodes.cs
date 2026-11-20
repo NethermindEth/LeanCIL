@@ -263,9 +263,16 @@ var livePath = Path.Combine(liveOutput, "Extracted.lean");
 RequireDecoded(File.ReadAllText(livePath), "UnreachableTail::LiveVector");
 var vectorTemplate = Path.Combine(deadDirectory, "VectorTemplate");
 Run(["dotnet", ExtractorPath, "templates", vectorTemplate, liveOutput]);
-if (!File.ReadAllText(Path.Combine(vectorTemplate, "Templates.lean"))
-        .Contains("opaqueVectorLocals := [0],", StringComparison.Ordinal))
-    throw new InvalidOperationException("The live creator's template lost opaque local 0.");
+var vectorPath = Path.Combine(vectorTemplate, "Templates.lean");
+File.AppendAllText(vectorPath, """
+
+    /-- The decoded template retains the opaque slot needed by live vector creation. -/
+    theorem live_vector_template_frame (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) :
+        (Templates.method0 profile environment).opaqueVectorLocals = [0] := rfl
+    #print axioms live_vector_template_frame
+
+    """);
+CheckLean(vectorPath);
 File.AppendAllText(livePath, """
 
     namespace Extracted

@@ -51,8 +51,6 @@ object Operation(object operation) => operation is not string text ? operation :
 var site = Create("MethodRef", ".void",
     Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["Site"]),
     false, 0, ".void", Listed(typeof(string), []), Listed(typeof(string), []));
-var siteTerm = (string)site.GetType().GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic)!
-    .Invoke(site, [])!;
 object Call(string kind, int method)
 {
     return WithSite(Create("Call", Enum.Parse(Model("CallKind"), kind), method, 0, false));
@@ -95,7 +93,7 @@ Emit();
 var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
 var secondBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings1.lean"));
-if (!templates.Contains($"if avx2 then (.call ({siteTerm}) {{}}) else (.nop)", StringComparison.Ordinal) ||
+if (!templates.Contains("if avx2 then (Input1.method1.code) else (Input0.method0.code)", StringComparison.Ordinal) ||
     !templates.Contains("[(1, .direct callee0)]", StringComparison.Ordinal) ||
     !firstBinding.Contains("Templates.method0 Extracted.profile Extracted.environment false 0",
         StringComparison.Ordinal) ||
@@ -165,7 +163,7 @@ variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Metho
 variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", "tail call 1"), Method("Target", ".ret")]);
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
 var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
-if (!tailTemplate.Contains($".call ({siteTerm}) {{ tail := true }}", StringComparison.Ordinal) ||
+if (!tailTemplate.Contains("cil_template_code% (Input0.method1.code)", StringComparison.Ordinal) ||
     !tailTemplate.Contains("links := ([(0, .direct callee0)])", StringComparison.Ordinal))
     throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
@@ -232,8 +230,13 @@ var merged = new (string Identity, object Left, object Right, string Expected)[]
         ".stfld ({ owner := T, index := 0, type := U, name := name!\"value\" })")
 };
 foreach (var (identity, left, right, spelling) in merged)
-    if (!Merge(identity, [left, ".ret"], [right, ".ret"]).Contains(spelling, StringComparison.Ordinal))
-        throw new Exception($"A {identity} instruction that renders the same in both profiles did not merge");
+{
+    var body = Merge(identity, [left, ".ret"], [right, ".ret"]);
+    var render = Model("Operation").GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic, []);
+    if (!body.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
+        !Equals(render!.Invoke(left, []), spelling) || !Equals(render.Invoke(right, []), spelling))
+        throw new Exception($"The {identity} alternatives must agree and share one decoded body.");
+}
 if (!Rejected(() => Merge("Rotate", [Scalar("RotateLeft", 32, false, 32, 2), ".ret"],
         [Scalar("RotateLeft", 64, false, 32, 2), ".ret"]))
     .Contains("Profiles with identical observed flags emit different instructions: Rotate at pc 0"))

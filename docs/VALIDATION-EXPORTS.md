@@ -142,8 +142,9 @@ These regressions cover the extractor's own C# indexes:
   and rejects duplicate method identities before emission. Every method a body or frame names (calls,
   tail calls, virtual dispatch targets, callable pointer targets and static initializers) becomes a callee
   parameter, and an absent callee in an excluded profile gets a zero placeholder. Profiles merge when
-  every instruction renders the same Lean; differing frames, lengths or unflagged instructions are
-  rejected. `Tests/TemplateIndexes.cs` checks reordered methods, each kind of callee, conditional absent
+  their renumbered instructions agree at every pc for the same observed flags. Lean reads the
+  selected instruction lists from decoded methods. Differing frames, lengths or unflagged
+  instructions are rejected. `Tests/TemplateIndexes.cs` checks reordered methods, each kind of callee, conditional absent
   callees, those merge rules, deterministic output, duplicate rejection and linear growth in the
   instructions without compiling Lean.
 - Loaded contract libraries index exports by exact identity and certifications by exact

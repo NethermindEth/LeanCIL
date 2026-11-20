@@ -365,7 +365,8 @@ internal static partial class Program
             }
             stage = "metadata and CIL validation";
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, callSites, imports,
-                staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null);
+                staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null,
+                templateInputs: checkedTemplate is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture)).ToArray();
@@ -503,7 +504,7 @@ internal static partial class Program
             if (checkedTemplate is not null)
             {
                 var frames = global::Program.TemplateVectorFrames(source, emitted.Templates);
-                checkedTemplate(new(output, assemblyHash, profile, frames));
+                checkedTemplate(new(output, assemblyHash, profile, frames) { DecoderInputs = emitted.TemplateInputs });
             }
             definitions?.Invoke(new(methods, emitted.Refusals));
             if (args[0] == "check" && !refresh)

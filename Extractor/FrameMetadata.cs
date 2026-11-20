@@ -123,6 +123,6 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
         staticSites := [{StaticSitesLeanWith(calleeName)}], declared := {Declared}, environment := {EnvironmentLean}
         """.ReplaceLineEndings(" ");
 
-    string StaticSitesLeanWith(Func<int, string> calleeName) =>
+    internal string StaticSitesLeanWith(Func<int, string> calleeName) =>
         string.Join(", ", StaticSites.Select(site => site.ToLean(calleeName)));
 }

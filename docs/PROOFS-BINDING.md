@@ -609,14 +609,23 @@ leancil templates shared scalar sse42 v3
 The command reruns exact extraction checking for every input and requires the same assembly bytes.
 `shared/Templates.lean` defines each method once, with a profile parameter, an environment parameter
 for the extraction's layout tables, parameters for the feature flags it reads, and managed callee
-indices keyed by full method identity. Every original IL instruction keeps its pc. Conditional instructions and excluded paths become `if` expressions and
-unsupported padding; `cil_instruction_equations` generates kernel-checked equations for every pc.
+indices keyed by full method identity. Each `Templates.InputN` namespace contains the raw bodies,
+specialization evidence, links, layout environment and reachability masks for that input.
+Lean defines each input method with `cil_decoded_method` over `Method.ofClosed?`.
+Every selected method must decode for the shared module to elaborate.
+The shared method takes each instruction from those decoded bodies. Every IL instruction keeps
+its pc. At a missing flag combination each pc contains a hole with its original opcode.
+`cil_instruction_equations` generates kernel-checked equations for each position.
 
 `TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
 `Templates` and prove `Extracted.program[i]? = some (Templates.methodN ...)` by `rfl`, including
 all metadata and callee indices. The binding passes `Extracted.profile` and `Extracted.environment`,
 and the template writes its call links as a table over its callee parameters, so `rfl` also checks
-them against the extraction's link table. Compile a binding only against its corresponding extraction,
+them against the extraction's link table. The binding also proves the closed decoder equation,
+the raw decoder equation and the code equation for that template instantiation, under the
+names `TemplateBindings.method0_decoder_eq`, `TemplateBindings.method0_decoded` and
+`TemplateBindings.method0_decoded_code` for the entry method.
+Compile a binding only against its corresponding extraction,
 recorded in `templates.json`. Add the shared module and selected binding module to your proof
 package, import that binding from the consumer proof, and run `leancil verify` with that
 extraction and proof package. The templates command generates proof source; it does not replace

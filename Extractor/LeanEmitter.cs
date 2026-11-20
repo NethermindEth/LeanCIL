@@ -10,7 +10,7 @@ internal static class LeanEmitter
     /// written as a literal, or null for a method defined from its decoder.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
         TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts,
-        GenericEvidence.DecodeRefusal?[] Refusals);
+        GenericEvidence.DecodeRefusal?[] Refusals, string TemplateInputs);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -159,9 +159,31 @@ internal static class LeanEmitter
     internal static int InstructionCheckHeartbeats(int instructions, int calls) =>
         Math.Max(BaseHeartbeats, HeartbeatsPerInstruction * instructions + HeartbeatsPerCall * calls);
 
+    /// <summary>The closed decoder and its specialization determine the method and every code position.</summary>
+    static void EmitDecodedMethod(StringBuilder lean, int n, string fields)
+    {
+        var method = $"method{n}";
+        var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} method{n}Links {method}Reachable";
+        var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
+        var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
+        const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
+        var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
+        var evidence = $"{method}_specialization_validated profile method{n}Links {method}Reachable";
+        var closedProof = $"(congrArg Except.toOption {method}_decoder_eq)";
+        var proof = $"Eq.trans ({equality} {environment} {evidence}) {closedProof}";
+        var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
+        var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
+        var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
+        lean.AppendLine($"""
+            cil_decoded_method {method} {fields}:= {closedDecoder}
+            theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
+            theorem {method}_decoded_code : {method}.code = {code} := {codeProof}
+            """);
+    }
+
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
         ResolvedCallSites callSites, ImportResolution? importResolution = null,
-        StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
+        StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false, bool templateInputs = false)
     {
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
@@ -183,6 +205,8 @@ internal static class LeanEmitter
 
 
             """.ReplaceLineEndings("\n"));
+        StringBuilder? inputs = templateInputs ? new() : null;
+        int inputStart = lean.Length;
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
@@ -210,6 +234,7 @@ internal static class LeanEmitter
         var operandShapes = new OperandShapes(layoutEvidence);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
+        inputs?.Append(lean, inputStart, lean.Length - inputStart);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
@@ -262,6 +287,7 @@ internal static class LeanEmitter
                 genericEvidence.Declared(m));
             var opaqueLocals = $"Extraction.rawOpaqueLocals method{n}Closed method{n}Reachable";
             var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution, layoutContext);
+            inputStart = lean.Length;
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
@@ -301,6 +327,11 @@ internal static class LeanEmitter
                 staticInput = $"staticFields := {table}, ";
             }
             genericEvidence.EmitMethod(lean, m, n, reachable, staticInput);
+            if (inputs is not null)
+            {
+                inputs.Append(lean, inputStart, lean.Length - inputStart);
+                EmitDecodedMethod(inputs, n, "");
+            }
             // A call names the method its raw operand names; a constrained one also the type the definition just
             // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)
@@ -321,7 +352,6 @@ internal static class LeanEmitter
             var objectProof = operandShapes.AdmissionProof(m, n, ops);
             refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable, ops);
             var decoded = refusals[n] is null;
-            // Only a literal method or a template renders the static instruction in C#.
             if (!decoded || collectTemplates)
                 foreach (var site in sites)
                     if (ops[site.Pc] is StaticFieldInstruction access)
@@ -337,23 +367,7 @@ internal static class LeanEmitter
                     _ => null
                 }).OfType<string>().Distinct(StringComparer.Ordinal));
                 var fields = naming.Length == 0 ? "" : $"[{naming}] ";
-                var method = $"method{n}";
-                var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} {linkTable} {method}Reachable";
-                var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
-                var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
-                const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
-                var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
-                var evidence = $"{method}_specialization_validated profile {linkTable} {method}Reachable";
-                var closedProof = $"(congrArg Except.toOption {method}_decoder_eq)";
-                var proof = $"Eq.trans ({equality} {environment} {evidence}) {closedProof}";
-                var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
-                var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
-                var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
-                lean.AppendLine($"""
-                    cil_decoded_method {method} {fields}:= {closedDecoder}
-                    theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
-                    theorem {method}_decoded_code : {method}.code = {code} := {codeProof}
-                    """);
+                EmitDecodedMethod(lean, n, fields);
             }
             else
             {
@@ -510,7 +524,8 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, refusals);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, refusals,
+            inputs?.ToString().ReplaceLineEndings("\n") ?? "");
     }
 
     /// <summary>
