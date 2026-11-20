@@ -547,6 +547,12 @@ For an extracted method, `DecodedSummary.of_translation` takes `Extracted.transl
 record index, the method lookup and the contract proof. The certificate supplies the body decode
 and the feature mask used by the summary.
 
+A separate Lean module can import a compiled `DecodedSummary` and apply `reprofile` to an
+independently extracted program. `Tests/SummaryModules/SummaryConsumer.lean` applies the scalar
+addition summary to the same MethodDef under `x64-v3`. The consumer checks its token, decoded
+program and method evidence before using the saved theorem. A different MethodDef with the same
+instructions, or a changed instruction at the same MethodDef, fails those checks.
+
 Use `Extracted.translation_valid.programBindingsValid` for the mask and call checks. Each record's
 feature certificate describes its pinned, instantiated body. The decoder checks managed and
 constrained calls against the methods and links it returns. For a program with imports, pass

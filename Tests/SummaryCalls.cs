@@ -8,6 +8,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include SavedSummaries.cs
 #:include ../scripts/ProofCostReport.cs
 #:include ../scripts/CertifiedLibraryDonor.cs
 #:include ../scripts/ExportVerificationSuites.cs
@@ -171,6 +172,7 @@ File.WriteAllText(forgedLow, ForgeDecodedOriginal(File.ReadAllText(Path.Combine(
 rejected.Add(forgedLow, "PASS a forged original of UnsafeLow fails its body check and its decoded summary",
     "the decoded method does not match its body bytes or metadata", "low_summary depends on sorryAx");
 rejected.Check();
+verification.CheckSavedAdditionSummary(Path.Combine(directory, "Saved"), At("Examples/Assembly/bin/Examples.dll"));
 
 // How many times as much the caller costs per call between its last two sizes as between its first two. At 1, 4 and
 // 16 calls a cost a n^2 + b n grows (20a + b) / (5a + b) times, more than the limit once a > b / 20.
