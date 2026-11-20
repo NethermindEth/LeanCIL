@@ -92,6 +92,12 @@ inductive AuditError where
   | unresolvedStaticField (method pc : Nat)
   /-- A field, its RVA or its mapped file position does not permit the claimed data access. -/
   | invalidFieldData (token : Nat)
+  /-- The slice does not identify the platform scope of its primitive types. -/
+  | invalidObjectScope (identity : String)
+  /-- The platform image lacks a unique public, baseless System.Object class. -/
+  | invalidObjectDefinition (identity : String)
+  /-- A physical field declared by System.Object lacks the Static flag. -/
+  | objectInstanceField (identity : String) (field : Nat)
   /-- The claimed static data differs from the bytes at the field's mapped RVA. -/
   | fieldDataMismatch (token rva offset : Nat)
   /-- The Assembly row does not spell the identity the image is pinned under. -/

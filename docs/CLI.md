@@ -335,9 +335,18 @@ The report lists twelve binding facts. Default verification lists them as `trust
 no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows`, `static-data` and the
 digests of pinned images. For RVA fields the audit reads the field signature, packing, class
 size and relative virtual address, then compares the entire byte range in the mapped section.
-Constructor-initialized fields must have no RVA. The other nine facts have status `not covered`.
-A fact
-is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
+Constructor-initialized fields must have no RVA.
+
+To check `object-fields`, add the platform reference assembly used at compilation, such as
+`ref/net11.0/System.Runtime.dll`, to the digest file. The audit resolves the version, culture
+and public key token of the core scopes in the certified method evidence. In the corresponding
+image it finds the public `System.Object` class and checks the flags of each field the class
+declares. A facade that forwards the type also needs the destination image in the digest file.
+The audit follows the exact assembly reference recorded in each forwarding row. Static fields are allowed. An instance field fails verification even when the supplied
+image matches its stated digest. Without the required platform image, `object-fields` has
+status `not covered`.
+
+A fact is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
 pin or checked claim uses are listed as unused and not covered. Successful reports include the
 digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
 

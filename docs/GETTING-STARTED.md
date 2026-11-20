@@ -75,9 +75,9 @@ Verified: ExampleProof.correctness
     Examples/Proofs/Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]
 ```
 
-`Binding:` lists the facts about the assembly image that this run trusts; `verify --deep-checks`
-reconfirms `body-bytes`, `metadata-rows` and `static-data` in the kernel and reports the others as not covered
-([deep verification](CLI.md#deep-verification)).
+`Binding:` lists the facts this run trusts about the assembly image. With the assembly digests,
+`verify --deep-checks` reconfirms `body-bytes`, `metadata-rows` and `static-data`. Supplying the
+matching platform reference images also checks `object-fields`. See [deep verification](CLI.md#deep-verification).
 
 `Subject:` is the method the theorem's conclusion is about and `Extraction entry:` the method the
 extraction started from; see [reading the report](CLI.md#reading-the-report).

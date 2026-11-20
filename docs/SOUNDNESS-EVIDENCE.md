@@ -356,8 +356,10 @@ row and heap entry, under one numbering of the `#Strings` and `#Blob` offsets pe
 MethodDef RVAs zeroed; the assembly identity, key token, core library, links, `#GUID` heap,
 `Module` table and the RVAs of MethodDefs outside the evidence are not part of that check. The audit also
 reconfirms the initial bytes of RVA fields by checking the physical field signature, class size,
-packing and mapped file range. Public key tokens and import identities are reported as not
-covered. `check` hashes each assembly and regenerates the extraction from those inputs.
+packing and mapped file range. When supplied with the matching platform images, it resolves
+`System.Object` through the core AssemblyRef and any forwarding rows, checks the publisher token
+against each platform image's public key, and checks that every field the root class declares is
+static. The general public-key-token and import-identity facts remain uncovered. `check` hashes each assembly and regenerates the extraction from those inputs.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler

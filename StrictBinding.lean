@@ -13,6 +13,7 @@ import StrictBinding.Slice
 import StrictBinding.Sorted
 import StrictBinding.TypeDefs
 import StrictBinding.StaticData
+import StrictBinding.ObjectFields
 
 /-!
 # Deep verification

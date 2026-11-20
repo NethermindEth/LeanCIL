@@ -9,6 +9,10 @@
 #:include MultiAssemblyFixture.cs
 #:include DeepBinding.cs
 
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Text.Json;
 
 using Program preparation = new();
@@ -31,6 +35,116 @@ var digestFile = Path.Combine(fixture.Root, "inputs.sha256");
 var digests = Sha(app) + "  " + Path.GetRelativePath(fixture.Root, app) + "\n" +
     Sha(lib) + "  " + Path.GetRelativePath(fixture.Root, lib) + "\n";
 File.WriteAllText(digestFile, digests);
+
+// Each fixture carries the actual platform identity and public key. A forwarded object has an
+// ExportedType and an AssemblyRef. A defined object has one physical Field row.
+static void WritePlatformImage(string path, AssemblyName name, FieldAttributes field, AssemblyName? forward = null)
+{
+    var rows = new MetadataBuilder();
+    rows.AddModule(0, rows.GetOrAddString(name.Name + ".dll"), rows.GetOrAddGuid(Guid.Empty), default, default);
+    rows.AddAssembly(rows.GetOrAddString(name.Name!), name.Version!, default,
+        rows.GetOrAddBlob(name.GetPublicKey()!), AssemblyFlags.PublicKey, AssemblyHashAlgorithm.Sha1);
+    var firstField = MetadataTokens.FieldDefinitionHandle(1);
+    var firstMethod = MetadataTokens.MethodDefinitionHandle(1);
+    rows.AddTypeDefinition(default, default, rows.GetOrAddString("<Module>"), default, firstField, firstMethod);
+    var system = rows.GetOrAddString("System");
+    var objectName = rows.GetOrAddString("Object");
+    if (forward is null)
+    {
+        rows.AddTypeDefinition(TypeAttributes.Public, system, objectName, default, firstField, firstMethod);
+        var signature = new BlobBuilder();
+        new BlobEncoder(signature).Field().Type().Int32();
+        rows.AddFieldDefinition(field, rows.GetOrAddString("Value"), rows.GetOrAddBlob(signature));
+    }
+    else
+    {
+        var target = rows.AddAssemblyReference(rows.GetOrAddString(forward.Name!), forward.Version!, default,
+            rows.GetOrAddBlob(forward.GetPublicKeyToken()!), default, default);
+        const TypeAttributes forwarder = (TypeAttributes)0x00200000;
+        rows.AddExportedType(forwarder, system, objectName, target, 0);
+    }
+    var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(),
+        new MetadataRootBuilder(rows), new BlobBuilder());
+    var bytes = new BlobBuilder();
+    builder.Serialize(bytes);
+    File.WriteAllBytes(path, bytes.ToArray());
+}
+
+void CheckPlatformObject()
+{
+    var runtime = Assembly.Load("System.Runtime").GetName();
+    var core = typeof(object).Assembly.GetName();
+    var reference = Path.Combine(fixture.Root, "reference-image.dll");
+    var definition = Path.Combine(fixture.Root, "definition.dll");
+    var previous = Path.Combine(fixture.Root, "previous-version.dll");
+
+    void Check(string expected, params (string File, AssemblyName Name)[] platforms)
+    {
+        var extra = File.Exists(previous) ? Sha(previous) + "  " + Path.GetFileName(previous) + "\n" : "";
+        File.WriteAllText(digestFile, digests + extra + string.Concat(platforms.Select(p =>
+            Sha(p.File) + "  " + Path.GetFileName(p.File) + "\n")));
+        var result = Execute([.. verify, "--deep-checks", digestFile, "--format", "json"]);
+        if (expected == "failed")
+        {
+            if (result.Code == 0 || File.Exists(Path.Combine(output, "verified.json")))
+                throw new InvalidOperationException("The changed platform definition was certified.");
+            var failure = JsonSerializer.Deserialize<JsonElement>(result.Stdout).GetProperty("binding");
+            var rejected = failure.GetProperty("facts").EnumerateArray()
+                .Single(f => f.GetProperty("id").GetString() == "object-fields");
+            if (rejected.GetProperty("status").GetString() != "failed" ||
+                !rejected.GetProperty("reason").GetString()!.Contains("instance field 0x04000001", StringComparison.Ordinal))
+                throw new InvalidOperationException("Expected the physical field diagnostic: " + result.Output);
+            return;
+        }
+        if (result.Code != 0) throw new InvalidOperationException(result.Output);
+        var binding = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")))
+            .GetProperty("binding");
+        var fact = binding.GetProperty("facts").EnumerateArray()
+            .Single(f => f.GetProperty("id").GetString() == "object-fields");
+        if (fact.GetProperty("status").GetString() != expected ||
+            fact.GetProperty("theorem").GetString() != (expected == "reconfirmed" ? "BindingAudit.objectFields" : null))
+            throw new InvalidOperationException("Incorrect object-fields certificate: " + fact);
+        if (File.Exists(previous))
+        {
+            var unused = binding.GetProperty("images").EnumerateArray()
+                .Single(i => i.GetProperty("sha256").GetString() == Sha(previous));
+            if (unused.GetProperty("role").GetString() != "unused")
+                throw new InvalidOperationException("The facade selected the wrong version: " + unused);
+        }
+        foreach (var (file, assembly) in platforms)
+        {
+            var image = binding.GetProperty("images").EnumerateArray()
+                .Single(i => i.GetProperty("identity").GetString() == assembly.FullName);
+            if (image.GetProperty("role").GetString() != "platform" ||
+                image.GetProperty("sha256").GetString() != Sha(file) ||
+                image.GetProperty("status").GetString() != "reconfirmed")
+                throw new InvalidOperationException("Incorrect platform image: " + image);
+        }
+    }
+
+    WritePlatformImage(reference, runtime, FieldAttributes.Static);
+    Check("reconfirmed", (reference, runtime));
+    Console.WriteLine("PASS the exact platform reference permits a static field on System.Object");
+    WritePlatformImage(reference, runtime, default, core);
+    var older = typeof(object).Assembly.GetName();
+    older.Version = new Version(core.Version!.Major - 1, 0, 0, 0);
+    WritePlatformImage(previous, older, FieldAttributes.Public);
+    Check("not covered", (reference, runtime));
+    Console.WriteLine("PASS a facade with only an older destination leaves System.Object fields uncovered");
+    WritePlatformImage(definition, core, FieldAttributes.Static);
+    Check("reconfirmed", (reference, runtime), (definition, core));
+    Console.WriteLine("PASS the platform facade resolves System.Object in its exact destination");
+    WritePlatformImage(definition, core, FieldAttributes.Public);
+    Check("failed", (reference, runtime), (definition, core));
+    Console.WriteLine("PASS a rehashed instance field in the forwarded definition fails the object-fields check");
+    File.WriteAllText(digestFile, digests);
+}
+
+if (args is ["--platform"])
+{
+    CheckPlatformObject();
+    return;
+}
 
 void Refused(string name, string[] command, string? expectedStage = null)
 {
@@ -138,6 +252,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
                 StringComparison.Ordinal))
             throw new InvalidOperationException("Binding text omitted wire name " + fact);
     Console.WriteLine("PASS default and deep binding text");
+    CheckPlatformObject();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {

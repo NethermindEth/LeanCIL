@@ -44,6 +44,7 @@ partial class Program
         readonly FailureReports.BindingFailureDigest digests;
         readonly (string Identity, Sha256Digest Digest)[] images;
         readonly HashSet<Sha256Digest> imageDigests;
+        readonly DeepCheckInputs.Pin[] objectPins;
         readonly Dictionary<Sha256Digest, string> rejectedImages = [];
         readonly Dictionary<BindingFact, string> rejectedFacts = [];
         internal string IdentitySha256 { get; }
@@ -53,6 +54,7 @@ partial class Program
         {
             digests = new(inputs.Path, inputs.Digest.ToString());
             IdentitySha256 = identitySha256;
+            objectPins = [.. pins.Where(pin => pin.ObjectCoverage.HasValue)];
             images = [.. pins.Select(pin => (pin.Identity, pin.Image.Digest))];
             imageDigests = [.. images.Select(image => image.Digest)];
         }
@@ -75,6 +77,12 @@ partial class Program
         {
             if (!Enum.IsDefined(fact)) throw new ArgumentException("Unknown binding fact.");
             ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+            if (fact == BindingFact.ObjectFields && objectPins.Length > 0)
+                try
+                {
+                    if (DeepCheckInputs.ObjectFieldDiagnostic(objectPins) is { } detail) reason += ". " + detail;
+                }
+                catch (BadImageFormatException) { } // Preserve the kernel diagnostic for malformed metadata.
             rejectedFacts.TryAdd(fact, reason);
         }
 
@@ -100,7 +108,7 @@ partial class Program
     /// <summary>A generated request's optional subject; a request cannot name both kinds.</summary>
     abstract record BindingSubject
     {
-        internal sealed record Fact(BindingFact Value) : BindingSubject;
+        internal sealed record Fact(BindingFact Value, bool Complete = true) : BindingSubject;
         internal sealed record Image(Sha256Digest Digest) : BindingSubject;
     }
 
@@ -114,7 +122,7 @@ partial class Program
     }
 
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
-    sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods);
+    sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods, bool? ObjectFields = null);
 
     /// <summary>
     /// Artifacts and requests that must join the caller's extraction and proof audit. A contribution with a result
@@ -250,7 +258,8 @@ partial class Program
             return new BindingImagePin(pin.Identity, pin.Image.Digest, snapshot);
         }).ToArray();
         BindingPlan plan = new(session, pins,
-            identity.Root.GetProperty("methods").GetArrayLength());
+            identity.Root.GetProperty("methods").GetArrayLength(), matchedPins.FirstOrDefault(pin =>
+                pin.ObjectCoverage.HasValue)?.ObjectCoverage);
         var directory = Path.Combine(session, "BindingAudit");
         if (Directory.Exists(directory))
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
@@ -453,7 +462,7 @@ partial class Program
         {
             var distinct = request.Subject switch
             {
-                BindingSubject.Fact fact => factTheorems.TryAdd(fact.Value, request.Audit.name),
+                BindingSubject.Fact { Complete: true } fact => factTheorems.TryAdd(fact.Value, request.Audit.name),
                 BindingSubject.Image image => imageTheorems.TryAdd(image.Digest, request.Audit.name),
                 _ => true
             };
@@ -464,9 +473,11 @@ partial class Program
         ImageResult[] images =
         [
             .. pins.Select(pin => imageTheorems.TryGetValue(pin.Image.Digest, out var theorem)
-                ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
+                ? new ImageResult(pin.Identity, pin.Image.Digest.ToString(),
+                    pin.Platform ? ImageRole.Platform : ImageRole.Pinned,
                     BindingStatus.Reconfirmed, theorem, null)
-                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(), ImageRole.Pinned,
+                : new ImageResult(pin.Identity, pin.Image.Digest.ToString(),
+                    pin.Platform ? ImageRole.Platform : ImageRole.Pinned,
                     BindingStatus.NotCovered, null,
                     "no checked theorem states the digest of this image")),
             .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
@@ -489,7 +500,7 @@ partial class Program
         BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
         BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
         BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
-        BindingFact.ObjectFields => "no check reads System.Object fields from an image",
+        BindingFact.ObjectFields => "the supplied images do not cover the extraction's platform definition of System.Object",
         BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
         BindingFact.DispatchCatalogs => "no check reads the types of an image",
         BindingFact.StaticData => "no checked theorem binds the static field data to the pinned images",
@@ -500,6 +511,7 @@ partial class Program
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string ObjectFieldsModule = "BindingAudit.ObjectFields";
     const string StaticDataModule = "BindingAudit.StaticData";
     const string BodiesModule = "BindingAudit.Bodies";
     const string MetadataRowsModule = "BindingAudit.MetadataRows";
@@ -686,10 +698,28 @@ partial class Program
             end BindingAudit
 
             """);
+        if (plan.ObjectFields is { } complete)
+            File.WriteAllText(ModuleSource(plan.Output, ObjectFieldsModule), $$"""
+                import BindingAudit.Images
+                import Extracted
+                import StrictBinding.ObjectFields
+
+                namespace BindingAudit
+
+                set_option debug.skipKernelTC true in
+                /-- The supplied reference images agree with these methods about System.Object fields. -/
+                theorem objectFields :
+                    StrictBinding.{{ObjectProposition(complete)}} images Extracted.methodEvidence := by decide +kernel
+
+                end BindingAudit
+
+                """);
         foreach (var fact in PagedFacts)
             File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
                 plan.Methods, BindingPageSize(plan.Methods)));
     }
+
+    static string ObjectProposition(bool complete) => complete ? "ObjectFieldsBound" : "SuppliedObjectFieldsValid";
 
     static string ModuleSource(string directory, string module) =>
         Path.Combine(directory, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
@@ -854,6 +884,14 @@ partial class Program
             }
         };
         var imagesEq = App(Const("Eq", 1), App(Const("List", 0), pinned), Const("BindingAudit.images"), images);
+        List<BindingRequest> platform = [];
+        if (plan.ObjectFields is { } complete)
+        {
+            var statement = App(Const("StrictBinding." + ObjectProposition(complete)), Const("BindingAudit.images"),
+                Const("Extracted.methodEvidence"));
+            platform.Add(new(ObjectFieldsModule, new("BindingAudit.objectFields", statement, ApprovedAxioms),
+                new BindingSubject.Fact(BindingFact.ObjectFields, complete)));
+        }
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
@@ -865,6 +903,7 @@ partial class Program
             new(StaticDataModule, new("BindingAudit.staticData", App(Const("StrictBinding.StaticDataBound"),
                 Const("BindingAudit.images"), Const("Extracted.methodEvidence")), ApprovedAxioms),
                 new BindingSubject.Fact(BindingFact.StaticData)),
+            .. platform,
             .. plan.Images.DistinctBy(image => image.Digest).Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
                 App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Digest)),
@@ -892,7 +931,9 @@ partial class Program
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        foreach (var module in PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule))
+        var facts = PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule);
+        if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
+        foreach (var module in facts)
             if (failures.ContainsKey(ImagesModule)) failures[module] = "build: " + ImagesModule + " did not build";
             else if (Build(module) is { } pagedError) failures[module] = "build: " + pagedError;
         return failures;

@@ -102,18 +102,18 @@ def assemblyKeyToken (flags : Nat) (key : List Nat) : Except AuditError (Option 
   if width != 8 then throw (.tables (.invalidPublicKeyToken width))
   pure (some (CIL.Crypto.bytesValue key))
 
-/-- The code points of the identity the Assembly row spells. -/
-def assemblyIdentity (view : ImageView) (layout : MetadataLayout) :
+/-- The identity columns shared by Assembly and AssemblyRef, starting at the major version. -/
+def assemblyIdentityAt (view : ImageView) (layout : MetadataLayout) (row first : Nat) :
     Except AuditError (List Nat) := do
-  let row := tokenOf 0x20 1
-  let major ← layout.cell view row 1
-  let minor ← layout.cell view row 2
-  let build ← layout.cell view row 3
-  let revision ← layout.cell view row 4
-  let flags ← layout.cell view row 5
-  let key ← layout.blobAt view (← layout.cell view row 6)
-  let name ← layout.stringText view (← layout.cell view row 7)
-  let culture ← layout.stringText view (← layout.cell view row 8)
+  let cell := fun column => layout.cell view row (first + column)
+  let major ← cell 0
+  let minor ← cell 1
+  let build ← cell 2
+  let revision ← cell 3
+  let flags ← cell 4
+  let key ← layout.blobAt view (← cell 5)
+  let name ← layout.stringText view (← cell 6)
+  let culture ← layout.stringText view (← cell 7)
   let version := decimal major ++ [46] ++ decimal minor ++ [46] ++ decimal build ++ [46] ++
     decimal revision
   let token ← assemblyKeyToken flags key
@@ -121,5 +121,9 @@ def assemblyIdentity (view : ImageView) (layout : MetadataLayout) :
   pure (name ++ asciiOf ", Version=" ++ version ++ asciiOf ", Culture=" ++
     (if culture.isEmpty then asciiOf "neutral" else culture) ++ asciiOf ", PublicKeyToken=" ++
     token)
+
+/-- The code points of the identity the Assembly row spells. -/
+def assemblyIdentity (view : ImageView) (layout : MetadataLayout) : Except AuditError (List Nat) :=
+  assemblyIdentityAt view layout (tokenOf 0x20 1) 1
 
 end StrictBinding

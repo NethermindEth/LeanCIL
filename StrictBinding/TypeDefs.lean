@@ -129,7 +129,7 @@ def valueTypeName : List Nat := asciiOf "ValueType"
 
 /-- Whether the Assembly or AssemblyRef row names a neutral core library with its publisher's
     token. Both tables have the same identity columns after the Assembly's hash-algorithm column. -/
-private def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError Bool := do
+def coreAssemblyAt (image : PreparedImage) (row first : Nat) : Except AuditError Bool := do
   let cell := image.layout.cell image.view row
   let name ← image.layout.stringAt image.view (← cell (first + 6))
   let some name := CIL.MetadataName.ofBytes? name | return false

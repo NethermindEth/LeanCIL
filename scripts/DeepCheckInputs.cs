@@ -1,5 +1,9 @@
 using System.Buffers.Binary;
 using System.Collections.ObjectModel;
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -73,10 +77,11 @@ internal sealed class DeepCheckInputs
         internal string Path { get; }
         internal Sha256Digest Digest { get; }
         internal ReadOnlySpan<byte> Bytes => bytes;
+        internal PEReader OpenPe() => new(new MemoryStream(bytes, writable: false));
     }
 
     /// <summary>An extraction pin matched by digest; its display identity does not select the image.</summary>
-    internal sealed record Pin(string Identity, Image Image);
+    internal sealed record Pin(string Identity, Image Image, bool Platform = false, bool? ObjectCoverage = null);
 
     readonly Dictionary<Sha256Digest, Image> byDigest;
 
@@ -145,6 +150,7 @@ internal sealed class DeepCheckInputs
         Add(identity, "assemblySha256");
         if (identity.TryGetProperty("references", out var references))
             foreach (var reference in references.EnumerateArray()) Add(reference, "sha256");
+        AddPlatformImages(pins);
         return pins.AsReadOnly();
 
         void Add(JsonElement record, string digestProperty)
@@ -157,6 +163,117 @@ internal sealed class DeepCheckInputs
             pins.Add(new(name, image));
         }
     }
+
+    /// <summary>Find platform inputs by full assembly identity in the retained bytes. The kernel independently
+    /// resolves every scope from method evidence and checks the defining image and its physical fields.</summary>
+    void AddPlatformImages(List<Pin> pins)
+    {
+        var direct = pins.ToLookup(pin => pin.Image.Digest);
+        if (direct.Count == byDigest.Count && !pins.Any(pin => CouldBePlatform(pin.Identity))) return;
+        var available = byDigest.Values
+            .Where(image => !direct.Contains(image.Digest) || direct[image.Digest].Any(pin => CouldBePlatform(pin.Identity)))
+            .Select(image => (Image: image, Name: PlatformIdentity(image)))
+            .Where(candidate => candidate.Name is not null)
+            .ToLookup(candidate => candidate.Name!, candidate => candidate.Image, StringComparer.Ordinal);
+        if (available.Count == 0) return;
+
+        HashSet<string> required = new(StringComparer.Ordinal);
+        foreach (var pin in pins.DistinctBy(pin => pin.Image.Digest))
+        {
+            using var pe = pin.Image.OpenPe();
+            var metadata = pe.GetMetadataReader();
+            if (available.Contains(pin.Identity)) required.Add(pin.Identity);
+            foreach (var handle in metadata.AssemblyReferences)
+            {
+                var reference = metadata.GetAssemblyReference(handle).GetAssemblyName();
+                if (CoreLibrary(reference)) required.Add(reference.FullName);
+            }
+        }
+        Queue<string> pending = new(required.Order(StringComparer.Ordinal));
+        var complete = required.Count > 0;
+        while (pending.TryDequeue(out var name))
+        {
+            var matches = available[name].ToArray();
+            if (matches.Length == 0)
+            {
+                complete = false;
+                continue;
+            }
+            if (matches.Length != 1)
+                throw new InvalidDataException("Multiple images supplied for platform assembly " + name);
+            var image = matches[0];
+            if (!direct.Contains(image.Digest)) pins.Add(new(name, image, Platform: true));
+            using var pe = image.OpenPe();
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.ExportedTypes)
+            {
+                var type = metadata.GetExportedType(handle);
+                if (!type.IsForwarder || type.Implementation.Kind != HandleKind.AssemblyReference ||
+                    !metadata.StringComparer.Equals(type.Name, "Object") ||
+                    !metadata.StringComparer.Equals(type.Namespace, "System")) continue;
+                var target = metadata.GetAssemblyReference((AssemblyReferenceHandle)type.Implementation).GetAssemblyName();
+                if (CoreLibrary(target) && required.Add(target.FullName)) pending.Enqueue(target.FullName);
+            }
+        }
+        for (var index = 0; index < pins.Count; index++)
+            if (required.Contains(pins[index].Identity)) pins[index] = pins[index] with { ObjectCoverage = complete };
+
+        static bool CouldBePlatform(string identity)
+        {
+            var comma = identity.IndexOf(',');
+            return comma > 0 && PlatformToken(identity.AsSpan(0, comma)) is not null;
+        }
+    }
+
+    static string? PlatformIdentity(Image image)
+    {
+        try
+        {
+            using var pe = image.OpenPe();
+            if (!pe.HasMetadata) return null;
+            var metadata = pe.GetMetadataReader();
+            if (!metadata.IsAssembly) return null;
+            var assembly = metadata.GetAssemblyDefinition().GetAssemblyName();
+            return CoreLibrary(assembly) ? assembly.FullName : null;
+        }
+        catch (BadImageFormatException) { return null; } // A digest list can include arbitrary unused files.
+    }
+
+    /// <summary>Physical field details for an already rejected kernel theorem.</summary>
+    internal static string? ObjectFieldDiagnostic(IEnumerable<Pin> pins)
+    {
+        foreach (var pin in pins)
+        {
+            using var pe = pin.Image.OpenPe();
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.TypeDefinitions)
+            {
+                var type = metadata.GetTypeDefinition(handle);
+                if (!type.GetDeclaringType().IsNil || !metadata.StringComparer.Equals(type.Name, "Object") ||
+                    !metadata.StringComparer.Equals(type.Namespace, "System")) continue;
+                foreach (var field in type.GetFields())
+                    if ((metadata.GetFieldDefinition(field).Attributes & FieldAttributes.Static) == 0)
+                        return $"System.Object in {pin.Identity} declares instance field 0x{MetadataTokens.GetToken(field):x8}.";
+            }
+        }
+        return null;
+    }
+
+    static bool CoreLibrary(AssemblyName assembly)
+    {
+        var token = PlatformToken(assembly.Name);
+        return token is not null && string.IsNullOrEmpty(assembly.CultureName) &&
+            assembly.GetPublicKeyToken() is { Length: 8 } key && Convert.ToHexStringLower(key) == token;
+    }
+
+    static string? PlatformToken(ReadOnlySpan<char> name) => name switch
+    {
+        "System.Runtime" => "b03f5f7f11d50a3a",
+        "System.Private.CoreLib" => "7cec85d7bea7798e",
+        "mscorlib" => "b77a5c561934e089",
+        "netstandard" => "cc7b13ffcd2ddd51",
+        _ => null
+    };
 
     static string Unescape(string name, string path, int line)
     {
