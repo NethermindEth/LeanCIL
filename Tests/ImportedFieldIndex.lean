@@ -429,14 +429,14 @@ private def scopedItem (assembly : AssemblyName) : Option MetadataError :=
 /-- An unsigned reference cannot name the platform pair. -/
 theorem refuses_unsigned_pair :
     scopedItem { runtimeAssembly with publicKeyToken := none } =
-      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+      some (.unsupportedAssemblyRef 0x23000001) := by decide +kernel
 #print axioms refuses_unsigned_pair
 
 /-- Two signed references with different eight-byte tokens identify different assemblies. -/
 theorem refuses_other_signed_pair :
     scopedItem { runtimeAssembly with
       publicKeyToken := some (runtimeAssembly.publicKeyToken.getD 0 + 1) } =
-      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+      some (.unsupportedAssemblyRef 0x23000001) := by decide +kernel
 #print axioms refuses_other_signed_pair
 
 /-- A different reference assembly version cannot name the platform pair. -/
@@ -447,7 +447,8 @@ theorem refuses_other_version_pair :
 
 /-- A different core library cannot name the supported pair. -/
 theorem refuses_mscorlib_pair :
-    scopedItem { runtimeAssembly with name := name!"mscorlib" } =
+    scopedItem { runtimeAssembly with
+      name := name!"mscorlib", publicKeyToken := some 0xb77a5c561934e089 } =
       some (.unboundInstanceField 0x0A000001) := by decide +kernel
 #print axioms refuses_mscorlib_pair
 
@@ -455,7 +456,7 @@ theorem refuses_mscorlib_pair :
 theorem refuses_literal_neutral_culture :
     let assembly := { runtimeAssembly with culture := name!"neutral" }
     itemError (pairWorldWith [8, 8] (assembly := assembly)) 0 pair int32 =
-      some (.unboundInstanceField 0x0A000001) := by decide +kernel
+      some (.unsupportedAssemblyRef 0x23000001) := by decide +kernel
 #print axioms refuses_literal_neutral_culture
 
 /-- Three primitive arguments cannot use the two-item layout. -/
