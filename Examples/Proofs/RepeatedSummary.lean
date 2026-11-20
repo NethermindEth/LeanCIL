@@ -55,8 +55,8 @@ theorem identity_summary : ∃ record, Extracted.methodEvidence[identity]? = som
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment identity record.assembly record.original.token record.arguments
       identityContract :=
-  ⟨_, rfl, .of_decoded bodies_decode rfl Extracted.method1_specialization_validated.1
-    identity_holds⟩
+  ⟨_, rfl, .of_decoded bodies_decode rfl ⟨_, Extracted.method1_body_validated⟩
+    Extracted.method1_specialization_validated.1 identity_holds⟩
 #print axioms identity_summary
 
 /-- Both calls of the caller name the metadata token and type arguments of any summary of the

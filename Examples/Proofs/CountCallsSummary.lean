@@ -137,8 +137,8 @@ theorem decrement_summary : ∃ record, Extracted.methodEvidence[decrement]? = s
     DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
       Extracted.environment decrement record.assembly record.original.token record.arguments
       decrementContract :=
-  ⟨_, rfl, .of_decoded bodies_decode rfl Extracted.method1_specialization_validated.1
-    decrement_holds⟩
+  ⟨_, rfl, .of_decoded bodies_decode rfl ⟨_, Extracted.method1_body_validated⟩
+    Extracted.method1_specialization_validated.1 decrement_holds⟩
 #print axioms decrement_summary
 
 /-- Every summary of the index the loop's call enters is for the method that call names:

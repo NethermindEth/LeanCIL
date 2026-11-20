@@ -393,8 +393,8 @@ static string MutateProof(int calls) => $$"""
         DecodedSummary Extracted.program Extracted.methodEvidence Extracted.profile
           Extracted.environment mutate record.assembly record.original.token record.arguments
           mutateContract :=
-      ⟨_, rfl, .of_decoded bodies_decode rfl Extracted.method1_specialization_validated.1
-        mutate_holds⟩
+      ⟨_, rfl, .of_decoded bodies_decode rfl ⟨_, Extracted.method1_body_validated⟩
+        Extracted.method1_specialization_validated.1 mutate_holds⟩
     #print axioms mutate_summary
 
     /-- The caller returns `x` plus two per call and keeps all memory below its entry, applying

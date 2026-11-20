@@ -115,7 +115,8 @@ theorem first_record : records[0]? = some addTwoRecord := by cil_kernel_rfl
 theorem closure_summary :
     DecodedSummary closure.1 records Extracted.profile Extracted.environment 0
       addTwoRecord.assembly addTwoRecord.original.token addTwoRecord.arguments addTwoContract :=
-  .of_decoded closure_decodes first_record Extracted.method1_specialization_validated.1
+  .of_decoded closure_decodes first_record ⟨_, Extracted.method1_body_validated⟩
+    Extracted.method1_specialization_validated.1
     closure_holds
 #print axioms closure_summary
 
@@ -127,7 +128,7 @@ theorem summary_here :
   closure_summary.relocate (Program.closure_closed closure_found)
     (Program.closure_relocates closure_found).1 bodies_decode fun item found => by
       obtain rfl := Option.some.inj (first_record.symm.trans found)
-      refine ⟨Extracted.methodEvidence[addTwo]'(by decide), ?_, rfl, rfl, rfl, rfl⟩
+      refine ⟨Extracted.methodEvidence[addTwo]'(by decide), ?_, rfl, rfl, rfl, rfl, ⟨_, Extracted.method1_body_validated⟩⟩
       rw [here_first]
       exact List.getElem?_eq_getElem _
 #print axioms summary_here
@@ -192,7 +193,8 @@ theorem summary_elsewhere :
   closure_summary.relocate (Program.closure_closed closure_found) elsewhere_relocates
     elsewhere_decodes fun item found => by
       obtain rfl := Option.some.inj (first_record.symm.trans found)
-      exact ⟨addTwoRecord.relocateLinks elsewhere, rfl, rfl, rfl, rfl, rfl⟩
+      exact ⟨addTwoRecord.relocateLinks elsewhere, rfl, rfl, rfl, rfl, rfl,
+        ⟨_, Extracted.method1_body_validated⟩⟩
 #print axioms summary_elsewhere
 
 /-- In the second program, `Entry` returns its argument plus two and leaves memory as it was,

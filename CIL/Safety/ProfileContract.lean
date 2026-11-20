@@ -45,8 +45,8 @@ theorem DecodedAt.reprofile {program : CIL.Program} {evidence : List MethodEvide
       some (CIL.reprofile program target)) :
     DecodedAt (CIL.reprofile program target) evidence target environment index pin token
       arguments := by
-  obtain ⟨item, found, rfl, rfl, rfl, instantiated, _⟩ := bound
-  exact .of_decoded decoded found instantiated
+  obtain ⟨item, found, rfl, rfl, rfl, instantiated, body, _⟩ := bound
+  exact .of_decoded decoded found body instantiated
 
 #print axioms DecodedAt.reprofile
 

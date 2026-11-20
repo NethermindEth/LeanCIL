@@ -104,6 +104,10 @@ theorem decodedProgram?_maskValid {profile : FeatureProfile} {environment : Layo
 
 #print axioms decodedProgram?_maskValid
 
+/-- The body's metadata and bytes certify this record's assembly, raw method and signature. -/
+def _root_.CIL.Extraction.MethodEvidence.BodyBound (item : MethodEvidence) : Prop :=
+  ∃ pins, BodyDecodes pins item.assembly item.body item.original item.arguments item.signature
+
 /-- Record `index` of `evidence` is the method with metadata token `token` of assembly `pin`
     at type arguments `arguments`, its closed body instantiates that definition, and its pinned
     body bytes decode to the method at `index` of `program` under its certified mask. -/
@@ -113,7 +117,7 @@ def DecodedAt (program : CIL.Program) (evidence : List MethodEvidence)
   ∃ item, evidence[index]? = some item ∧ item.assembly = pin ∧ item.original.token = token ∧
     item.arguments = arguments ∧
     instantiateMethod environment.rawLayouts item.original arguments = some item.closed ∧
-    ∃ method, program[index]? = some method ∧
+    item.BodyBound ∧ ∃ method, program[index]? = some method ∧
       Method.ofBody? profile environment item.links item.reachable item.body item.original
         item.arguments = some method ∧ item.MaskValid evidence method
 
@@ -122,14 +126,14 @@ theorem DecodedAt.of_decoded {program : CIL.Program} {evidence : List MethodEvid
     {profile : FeatureProfile} {environment : LayoutEnvironment} {imports : List ImportSlot}
     {index : Nat} {item : MethodEvidence}
     (decoded : decodedProgram? profile environment evidence imports = some program)
-    (found : evidence[index]? = some item)
+    (found : evidence[index]? = some item) (body : item.BodyBound)
     (instantiated :
       instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed) :
     DecodedAt program evidence profile environment index item.assembly item.original.token
       item.arguments := by
   obtain ⟨method, present, decodes⟩ :=
     bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
-  exact ⟨item, found, rfl, rfl, rfl, instantiated, method, present, decodes,
+  exact ⟨item, found, rfl, rfl, rfl, instantiated, body, method, present, decodes,
     decodedProgram?_maskValid decoded found present⟩
 
 #print axioms DecodedAt.of_decoded
@@ -143,7 +147,10 @@ theorem DecodedAt.of_translation {program : CIL.Program} {evidence : List Method
       evidence[index].original.token evidence[index].arguments := by
   have checked := translation_method_checked valid index method present
   have mask := checked.maskValid
-  exact ⟨evidence[index], List.getElem?_eq_getElem index.isLt, rfl, rfl, rfl, mask.2.1,
+  have body : evidence[index].BodyBound := by
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, certified, _⟩ := checked
+    exact ⟨pins, certified⟩
+  exact ⟨evidence[index], List.getElem?_eq_getElem index.isLt, rfl, rfl, rfl, mask.2.1, body,
     method, present, checked.ofBody?, mask⟩
 
 #print axioms DecodedAt.of_translation
@@ -168,13 +175,13 @@ theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContra
     {environment : LayoutEnvironment} {index : Nat} {item : MethodEvidence}
     {imports : List ImportSlot} (decoded : decodedProgram? profile environment evidence imports =
       some program)
-    (found : evidence[index]? = some item)
+    (found : evidence[index]? = some item) (body : item.BodyBound)
     (instantiated :
       instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed)
     (holds : contract.Holds program index) :
     DecodedSummary program evidence profile environment index item.assembly item.original.token
       item.arguments contract :=
-  ⟨holds, DecodedAt.of_decoded decoded found instantiated⟩
+  ⟨holds, DecodedAt.of_decoded decoded found body instantiated⟩
 
 #print axioms DecodedSummary.of_decoded
 

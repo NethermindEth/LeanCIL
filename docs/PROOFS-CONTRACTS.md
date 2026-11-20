@@ -517,7 +517,9 @@ A contract whose precondition implies well-formed memory and a valid static worl
 when `contract.Holds program index` and record `index` of `evidence` is the method with
 metadata token `token` of the assembly pinned by `pin`, closed at type arguments `arguments`,
 whose pinned body bytes decode to the method present at that index of `program`. The record's
-feature certificate validates that method's reachability mask and decoded instructions.
+feature certificate validates that method's reachability mask and decoded instructions. Its
+`BodyDecodes` proof ties the assembly and signature to the names and tables read by the body
+decoder. Relocation requires this evidence for the destination record.
 `MethodContract.Certified` names only an index, which another extraction can fill with another
 body. A summary also names the metadata method and the bytes.
 
@@ -534,7 +536,7 @@ For example, the compiled `Bump` updates a live account's balance and raises
 | `DecodedSummary.of_translation` | Binds a proved contract to its record using the translation certificate and the method lookup at the contract index |
 | `DecodedOutcomeSummary.of_translation` | Binds normal returns and named exceptions using the same method lookup |
 | `DecodedOutcomeSummary.reprofile` | Preserves those outcomes at an agreeing profile when the same evidence decodes to the reprofiled program |
-| `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
+| `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its `BodyDecodes` evidence, its instantiation and `Holds` |
 | `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
 | `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's; it concludes nothing about the assembly pin |

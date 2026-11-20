@@ -529,15 +529,15 @@ theorem DecodedSummary.relocate {Input Output : Type} {contract : MethodContract
     (record : ∀ item, libEvidence[index]? = some item → ∃ moved,
       targetEvidence[f index]? = some moved ∧ moved.assembly = item.assembly ∧
         moved.original = item.original ∧ moved.arguments = item.arguments ∧
-        moved.closed = item.closed) :
+        moved.closed = item.closed ∧ moved.BodyBound) :
     DecodedSummary target targetEvidence profile environment (f index) pin token arguments
       contract := by
   obtain ⟨item, recorded, assembly, sameToken, sameArguments, instantiated, -⟩ := summary.bound
-  obtain ⟨moved, placed, movedAssembly, movedOriginal, movedArguments, movedClosed⟩ :=
+  obtain ⟨moved, placed, movedAssembly, movedOriginal, movedArguments, movedClosed, movedBody⟩ :=
     record item recorded
   rw [← movedAssembly.trans assembly, ← movedArguments.trans sameArguments,
     ← sameToken, ← movedOriginal]
-  apply DecodedSummary.of_decoded targetDecoded placed _ (summary.holds.relocate closed relocates)
+  apply DecodedSummary.of_decoded targetDecoded placed movedBody _ (summary.holds.relocate closed relocates)
   simpa only [movedOriginal, movedArguments, sameArguments, movedClosed] using instantiated
 
 #print axioms DecodedSummary.relocate
