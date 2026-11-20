@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -45,10 +46,10 @@ internal static partial class ProofOutline
     static (int Bytes, bool Signed)? SizedConversion(Operation op) => op is StackOperation { Kind: var kind }
         ? kind switch
     {
-        StackOpcode.ConvI1 => (1, true), StackOpcode.ConvI2 => (2, true), StackOpcode.ConvI4 => (4, true),
-            StackOpcode.ConvI8 or StackOpcode.ConvI => (8, true),
-        StackOpcode.ConvU1 => (1, false), StackOpcode.ConvU2 => (2, false), StackOpcode.ConvU4 => (4, false),
-        StackOpcode.ConvU8 => (8, false),
+        Code.Conv_I1 => (1, true), Code.Conv_I2 => (2, true), Code.Conv_I4 => (4, true),
+            Code.Conv_I8 or Code.Conv_I => (8, true),
+        Code.Conv_U1 => (1, false), Code.Conv_U2 => (2, false), Code.Conv_U4 => (4, false),
+        Code.Conv_U8 => (8, false),
         _ => null
     } : null;
 
@@ -135,7 +136,7 @@ internal static partial class ProofOutline
                 field.Stored = true;
                 walk.Stores.Add((field, field.Width < 4 ? $"({value}).setWidth {field.Width * 8}" : value, value));
             }
-            else if (op is StackOperation { Kind: StackOpcode.Dup })
+            else if (op is StackOperation { Kind: Code.Dup })
             {
                 if (stack.Count == 0) return Stop("a duplicate of an empty stack", pc);
                 stack.Push(stack.Peek());

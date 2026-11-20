@@ -300,7 +300,7 @@ owner.Methods.Add(mixedArguments);
 bool Pure(object operation, bool plainReturn = true) =>
     (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(MethodDefinition), typeof(bool)])!
         .Invoke(null, [operation, mixedArguments, plainReturn])!;
-var nop = Make("StackOperation", Named("StackOpcode", "Nop"));
+var nop = Make("StackOperation", Code.Nop);
 var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
 if (Loops(Body(nop, nop, backEdge)) != 1)
     throw new Exception("A conditional back edge is not found as a loop");

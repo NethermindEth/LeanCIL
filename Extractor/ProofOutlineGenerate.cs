@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -568,7 +569,7 @@ internal static partial class ProofOutline
         Local load => !NarrowLocal(method, load.Index),
         SetLocal store => !NarrowLocal(method, store.Index),
         _ => op is LocalAddress or ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Initobj } or
-            StackOperation { Kind: StackOpcode.Dup } or
+            StackOperation { Kind: Code.Dup } or
             StructField { Access: FieldAccess.Address or FieldAccess.Store or FieldAccess.LoadAggregate or
                 FieldAccess.StoreAggregate } or StructField { Access: FieldAccess.Load, Signed: false }
     };

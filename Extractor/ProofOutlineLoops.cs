@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -64,10 +65,10 @@ internal static partial class ProofOutline
             operation is Return ? plainReturn : operation is Arg load ? MethodArguments.Plain(method, load.Index) :
             ConstantOf(operation) is { Width: 32 or 64 } ||
             operation is ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
-            StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
-                or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
-                StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 or StackOpcode.ConvU4 or
-                StackOpcode.ConvI4 };
+            StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or Code.And
+                or Code.Or or Code.Xor or Code.Nop or
+                Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 or Code.Conv_U4 or
+                Code.Conv_I4 };
 
         /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
         /// is taken when the proposition holds; signed comparisons read the words through `toInt`. A literal
@@ -228,7 +229,7 @@ internal static partial class ProofOutline
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
             if (body.Operations.Any(op => Body.OffsetOf(op) is not null ||
-                    op is StackOperation { Kind: StackOpcode.Add }) &&
+                    op is StackOperation { Kind: Code.Add }) &&
                 spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
                 callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
@@ -610,9 +611,9 @@ internal static partial class ProofOutline
                 ops.Any(op => Body.Conditional(op) || op is Throw) &&
                 ops.All(op => op is Return ? plainReturn : op is Arg load ? MethodArguments.Plain(callee, load.Index) :
                     Body.ConstantOf(op) is { Width: 32 or 64 } ||
-                    op is Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
-                        or StackOpcode.And or StackOpcode.Or or
-                        StackOpcode.Xor or StackOpcode.Nop });
+                    op is Jump or Throw or StackOperation { Kind: Code.Add or Code.Sub or Code.Mul
+                        or Code.And or Code.Or or
+                        Code.Xor or Code.Nop });
         }
 
         /// <summary>The term a constant's operand is written as: its digits, or its bit-vector conversion.</summary>
@@ -627,7 +628,7 @@ internal static partial class ProofOutline
         static int? ReferenceStride(Operation operation) =>
             Body.OffsetOf(operation) is { Signed: true, Stride: <= int.MaxValue } offset
                 ? Convert.ToInt32(offset.Stride)
-                : operation is StackOperation { Kind: StackOpcode.Add } ? 1 : null;
+                : operation is StackOperation { Kind: Code.Add } ? 1 : null;
 
         /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
         static bool ReadsWidth(Operation operation, int width) => operation switch
@@ -1507,7 +1508,7 @@ internal static partial class ProofOutline
                 stack.RemoveRange(stack.Count - 2, 2);
                 stack.Add(new AddedReference(reference.Name, referenceIndex.Term, stride));
             }
-            else if (op is StackOperation { Kind: StackOpcode.Add } && stack.Count >= 2 &&
+            else if (op is StackOperation { Kind: Code.Add } && stack.Count >= 2 &&
                 (stack[^1] is ReferenceArgument or AddedReference ||
                     stack[^2] is ReferenceArgument or AddedReference))
                 return Stop("a reference addition other than a reference argument followed by a 32-bit index " +
@@ -1520,7 +1521,7 @@ internal static partial class ProofOutline
                     stack.Add(new Number($"({a.Term} {symbol} {b.Term})", a.Width));
                 else stack.Add(new Unknown("arithmetic on a value the outline cannot name"));
             }
-            else if (op is StackOperation { Kind: StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 })
+            else if (op is StackOperation { Kind: Code.Conv_I8 or Code.Conv_I or Code.Conv_U8 })
             {
                 var value = Pop();
                 stack.Add(value is Number { Literal: true, Width: 4 } literal ? literal with { Width = 8 }
@@ -1609,7 +1610,7 @@ internal static partial class ProofOutline
             }
             // `ldlen` pushes the length as a 64-bit word, which a test of an `int` index narrows; a test reads
             // the narrowed word simplified.
-            else if (op is StackOperation { Kind: StackOpcode.ConvI4 } && stack.Count > 0
+            else if (op is StackOperation { Kind: Code.Conv_I4 } && stack.Count > 0
                 && stack[^1] is ArrayLengthValue length)
             {
                 stack.RemoveAt(stack.Count - 1);

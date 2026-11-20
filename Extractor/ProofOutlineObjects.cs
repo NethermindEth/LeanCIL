@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -373,12 +374,12 @@ internal static partial class ProofOutline
                     stack.Add(item);
                 }
                 else if (op is LoadNull) stack.Add(new Null());
-                else if (op is StackOperation { Kind: StackOpcode.Dup })
+                else if (op is StackOperation { Kind: Code.Dup })
                 {
                     if (stack.Count == 0) return Stop("a duplicate of an empty stack");
                     stack.Add(stack[^1]);
                 }
-                else if (op is StackOperation { Kind: StackOpcode.Pop })
+                else if (op is StackOperation { Kind: Code.Pop })
                 {
                     if (Pop() is null) return Stop("a pop of an empty stack");
                 }
@@ -403,14 +404,14 @@ internal static partial class ProofOutline
                     if (Compared(left, right) is not { } condition) return Stop(Uncompared, showInstruction: true);
                     return Branch(condition, equalityTest.Kind == JumpKind.Equal, equalityTest.Target);
                 }
-                else if (op is StackOperation { Kind: StackOpcode.Ceq or StackOpcode.CgtUn } comparison
+                else if (op is StackOperation { Kind: Code.Ceq or Code.Cgt_Un } comparison
                     && stack.Count > 1 &&
                     (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
                     var left = Pop();
                     // `cgt.un` on references is defined only against null.
-                    if (Compared(left, right) is null || comparison.Kind == StackOpcode.CgtUn && right is not Null)
+                    if (Compared(left, right) is null || comparison.Kind == Code.Cgt_Un && right is not Null)
                         return Stop(Uncompared, showInstruction: true);
                     stack.Add(new Word(null, 4));
                 }
@@ -446,31 +447,31 @@ internal static partial class ProofOutline
                     stack.Add(new Word(left.Term is null || right.Term is null ? null
                         : $"({left.Term} {symbol} {right.Term})", left.Width));
                 }
-                else if (op is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI }
+                else if (op is StackOperation { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I }
                     widening)
                 {
                     if (Pop() is not Word { Width: 4 } word)
                         return Stop("a widening of a value the outline cannot name");
-                    var widen = widening.Kind == StackOpcode.ConvU8 ? "setWidth" : "signExtend";
+                    var widen = widening.Kind == Code.Conv_U8 ? "setWidth" : "signExtend";
                     stack.Add(new Word(word.Term is null ? null : $"({word.Term}.{widen} 64)", 8));
                 }
                 // Values the steps compute but the outline does not name: they may be returned, not stored.
-                else if (op is StackOperation { Kind: StackOpcode.Shl or StackOpcode.Shr or StackOpcode.ShrUn
-                    or StackOpcode.Ceq or StackOpcode.Cgt or
-                    StackOpcode.CgtUn or StackOpcode.Clt or StackOpcode.CltUn } unnamed)
+                else if (op is StackOperation { Kind: Code.Shl or Code.Shr or Code.Shr_Un
+                    or Code.Ceq or Code.Cgt or
+                    Code.Cgt_Un or Code.Clt or Code.Clt_Un } unnamed)
                 {
                     if (Pop() is not Word || Pop() is not Word left)
                         return Stop(" on a value that is not a word", showInstruction: true);
-                    stack.Add(new Word(null, unnamed.Kind is StackOpcode.Ceq or StackOpcode.Cgt or StackOpcode.CgtUn
-                        or StackOpcode.Clt or StackOpcode.CltUn
+                    stack.Add(new Word(null, unnamed.Kind is Code.Ceq or Code.Cgt or Code.Cgt_Un
+                        or Code.Clt or Code.Clt_Un
                         ? 4 : left.Width));
                 }
-                else if (op is StackOperation { Kind: StackOpcode.Neg or StackOpcode.ConvI1 or StackOpcode.ConvI2
-                    or StackOpcode.ConvI4 or
-                    StackOpcode.ConvU1 or StackOpcode.ConvU2 or StackOpcode.ConvU4 } unary)
+                else if (op is StackOperation { Kind: Code.Neg or Code.Conv_I1 or Code.Conv_I2
+                    or Code.Conv_I4 or
+                    Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4 } unary)
                 {
                     if (Pop() is not Word word) return Stop(" on a value that is not a word", showInstruction: true);
-                    stack.Add(new Word(null, unary.Kind == StackOpcode.Neg ? word.Width : 4));
+                    stack.Add(new Word(null, unary.Kind == Code.Neg ? word.Width : 4));
                 }
                 else if (op is ClassField { Field: { Store: false, Kind: ClassViews.FieldKind.Word } load })
                 {

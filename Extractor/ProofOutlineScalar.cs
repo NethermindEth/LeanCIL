@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -106,9 +107,9 @@ internal static partial class ProofOutline
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;
                     stack = stack.Pop(out var word).Push(new(null,
-                        op is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI }
+                        op is StackOperation { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I }
                             ? 64
-                        : op is StackOperation { Kind: StackOpcode.ConvU4 or StackOpcode.ConvI4 }
+                        : op is StackOperation { Kind: Code.Conv_U4 or Code.Conv_I4 }
                             or ScalarIntrinsic { Result: 32 } ? 32
                         : word.Bits));
                 }

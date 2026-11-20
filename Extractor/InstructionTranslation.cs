@@ -99,6 +99,11 @@ internal static class InstructionTranslation
             return new CheckedConvert(conversion.Target, conversion.Unsigned);
         return i.OpCode.Code switch
         {
+            Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Not or Code.Neg or
+            Code.Shl or Code.Shr or Code.Shr_Un or Code.Ceq or Code.Clt or Code.Clt_Un or Code.Cgt or Code.Cgt_Un or
+            Code.Conv_I1 or Code.Conv_I2 or Code.Conv_I4 or Code.Conv_I8 or Code.Conv_I or
+            Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4 or Code.Conv_U8 or Code.Conv_U or
+            Code.Dup or Code.Pop => new StackOperation(i.OpCode.Code),
             Code.Nop or Code.Readonly => StackOperation.Nop,
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
@@ -108,7 +113,6 @@ internal static class InstructionTranslation
             Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Starg or Code.Starg_S => new Starg(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
-            Code.Conv_I => new StackOperation(StackOpcode.ConvI),
             Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
             Code.Stind_I => new IndirectAccess(NumericKind.I, true),
             Code.Add_Ovf => new CheckedArithmetic(CheckedOperator.Add, true),
@@ -131,15 +135,10 @@ internal static class InstructionTranslation
             Code.Stind_I1 => new IndirectAccess(NumericKind.I1, true),
             Code.Stind_I2 => new IndirectAccess(NumericKind.I2, true),
             Code.Stind_I4 => new IndirectAccess(NumericKind.I4, true),
-            Code.Conv_I1 => new StackOperation(StackOpcode.ConvI1),
-            Code.Conv_I2 => new StackOperation(StackOpcode.ConvI2),
-            Code.Conv_U2 => new StackOperation(StackOpcode.ConvU2),
-            Code.Neg => new StackOperation(StackOpcode.Neg),
             Code.Ldnull => new LoadNull(),
             Code.Castclass => new CastClass(ObjectTypes.TestOperand(i)),
             Code.Isinst => new IsInstance(ObjectTypes.TestOperand(i)),
             Code.Ldstr => StringOperation((string)i.Operand),
-            Code.Cgt => new StackOperation(StackOpcode.Cgt),
             Code.Bgt or Code.Bgt_S => JumpTo(JumpKind.Greater),
             Code.Ble or Code.Ble_S => JumpTo(JumpKind.LessOrEqual),
             Code.Ble_Un or Code.Ble_Un_S => JumpTo(JumpKind.LessOrEqualUnsigned),
@@ -179,30 +178,8 @@ internal static class InstructionTranslation
             Code.Ldc_I4_8 => new Constant(32, 8, true),
             Code.Ldc_I4 or Code.Ldc_I4_S => new Constant(32, Convert.ToInt64(i.Operand), false),
             Code.Ldc_I8 => new Constant(64, (long)i.Operand, false),
-            Code.Conv_I8 => new StackOperation(StackOpcode.ConvI8),
-            Code.Conv_U => new StackOperation(StackOpcode.ConvU),
-            Code.Conv_U1 => new StackOperation(StackOpcode.ConvU1),
-            Code.Add => new StackOperation(StackOpcode.Add),
-            Code.Conv_U4 => new StackOperation(StackOpcode.ConvU4),
-            Code.Conv_U8 => new StackOperation(StackOpcode.ConvU8),
-            Code.Not => new StackOperation(StackOpcode.Not),
-            Code.Sub => new StackOperation(StackOpcode.Sub),
-            Code.And => new StackOperation(StackOpcode.And),
-            Code.Or => new StackOperation(StackOpcode.Or),
-            Code.Xor => new StackOperation(StackOpcode.Xor),
-            Code.Mul => new StackOperation(StackOpcode.Mul),
-            Code.Shl => new StackOperation(StackOpcode.Shl),
-            Code.Shr => new StackOperation(StackOpcode.Shr),
-            Code.Shr_Un => new StackOperation(StackOpcode.ShrUn),
-            Code.Conv_I4 => new StackOperation(StackOpcode.ConvI4),
-            Code.Clt => new StackOperation(StackOpcode.Clt),
-            Code.Clt_Un => new StackOperation(StackOpcode.CltUn),
-            Code.Cgt_Un => new StackOperation(StackOpcode.CgtUn),
-            Code.Ceq => new StackOperation(StackOpcode.Ceq),
             Code.Ldind_I8 => new IndirectAccess(NumericKind.I8, false),
             Code.Stind_I8 => new IndirectAccess(NumericKind.I8, true),
-            Code.Dup => new StackOperation(StackOpcode.Dup),
-            Code.Pop => new StackOperation(StackOpcode.Pop),
             Code.Br or Code.Br_S => JumpTo(JumpKind.Always),
             Code.Brfalse or Code.Brfalse_S => JumpTo(JumpKind.IfZero),
             Code.Brtrue or Code.Brtrue_S => JumpTo(JumpKind.IfNonzero),

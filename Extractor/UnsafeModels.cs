@@ -1,4 +1,5 @@
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -76,15 +77,15 @@ internal static class UnsafeModels
         if (isNullRef) return MemoryOperation.Other(".isNullRef");
         var width = ElementWidth(element, reference.Module, architecture);
 
-        if (skipInit) return new StackOperation(StackOpcode.SkipInit);
+        if (skipInit) return Unoutlined.Site;
         if (comparison) return reference.Name switch
         {
-            "AreSame" => new StackOperation(StackOpcode.Ceq),
-            "IsAddressLessThan" => new StackOperation(StackOpcode.CltUn),
-            _ => new StackOperation(StackOpcode.CgtUn)
+            "AreSame" => new StackOperation(Code.Ceq),
+            "IsAddressLessThan" => new StackOperation(Code.Clt_Un),
+            _ => new StackOperation(Code.Cgt_Un)
         };
         if (byteOffset) return MemoryOperation.Other(".byteOffset");
-        if (subtractBytes) return new StackOperation(StackOpcode.Sub);
+        if (subtractBytes) return new StackOperation(Code.Sub);
         if (sizeOf) return new Constant(32, width, true);
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
         // Native-width negative strides reuse the checked wrapping offset operation.

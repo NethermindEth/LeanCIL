@@ -1,4 +1,5 @@
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -153,7 +154,7 @@ internal static class RuntimeModels
         if (StaticSpanModel(reference, profile.Architecture) is { } staticSpan) return staticSpan;
         if (MarshalModels.CallModel(reference, profile.Architecture) is { } marshal) return marshal;
         if (BinaryModels.CallModel(reference, profile.Architecture) is { } binary) return binary;
-        if (ObjectConstructor(reference)) return new StackOperation(StackOpcode.Pop);
+        if (ObjectConstructor(reference)) return new StackOperation(Code.Pop);
         if (VectorModel(reference, profile) is { } vector)
         {
             ValidateSignature(reference, profile.Architecture);

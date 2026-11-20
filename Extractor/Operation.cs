@@ -9,7 +9,7 @@ namespace Nethermind.LeanCIL;
 internal abstract record Operation
 {
     /// <summary>The operation does nothing: a prefix or an operand the translator folded away.</summary>
-    internal bool IsNop => this is StackOperation { Kind: StackOpcode.Nop };
+    internal bool IsNop => this is StackOperation { Kind: Code.Nop };
 }
 
 /// <summary>A site with no proof-outline rule. Diagnostics use the original instruction at its PC.</summary>
@@ -18,28 +18,22 @@ internal sealed record Unoutlined : Operation
     internal static readonly Unoutlined Site = new();
 }
 
-/// <summary>An instruction that only moves the evaluation stack or does scalar arithmetic.</summary>
-internal enum StackOpcode
-{
-    Nop, Pop, Dup, Add, Sub, Mul, And, Or, Xor, Not, Neg, Shl, Shr, ShrUn, Ceq, Clt, Cgt, CltUn, CgtUn,
-    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvI, ConvU, ConvU1, ConvU4, ConvU8, SkipInit
-}
-
-internal sealed record StackOperation(StackOpcode Kind) : Operation
+/// <summary>The CIL stack opcode used by the proof outline for this site.</summary>
+internal sealed record StackOperation(Code Kind) : Operation
 {
     /// <summary>The operation is word addition, subtraction, multiplication or a bitwise combination.</summary>
-    internal bool IsArithmetic => Kind is StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or
-        StackOpcode.And or StackOpcode.Or or StackOpcode.Xor;
+    internal bool IsArithmetic => Kind is Code.Add or Code.Sub or Code.Mul or
+        Code.And or Code.Or or Code.Xor;
 
     /// <summary>The infix operator that Lean's bit-vector arithmetic writes for an arithmetic operation.</summary>
     internal string Symbol => Kind switch
     {
-        StackOpcode.Add => "+", StackOpcode.Sub => "-", StackOpcode.Mul => "*", StackOpcode.And => "&&&",
-        StackOpcode.Or => "|||", StackOpcode.Xor => "^^^",
+        Code.Add => "+", Code.Sub => "-", Code.Mul => "*", Code.And => "&&&",
+        Code.Or => "|||", Code.Xor => "^^^",
         _ => throw new InvalidOperationException("Not an arithmetic operation: " + Kind)
     };
 
-    internal static readonly StackOperation Nop = new(StackOpcode.Nop);
+    internal static readonly StackOperation Nop = new(Code.Nop);
 }
 
 /// <summary>The jump kinds; a conditional jump pops one (zero tests) or two operands.</summary>
