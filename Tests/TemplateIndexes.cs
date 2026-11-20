@@ -64,15 +64,16 @@ object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadat
     Listed(Model("InitialValue"), []), Listed(Model("LocalKind"), []), Listed(typeof(int), []),
     Listed(Model("ParameterHome"), []), Listed(Model("StaticSite"), sites),
     "{ parameters := [], returnType := .void }");
-object MethodIn(string identity, object frame, params object[] ops) => Activator.CreateInstance(
+object MethodIn(string identity, object frame, int[] linked, params object[] ops) => Activator.CreateInstance(
     emitter.GetNestedType("Method", BindingFlags.NonPublic)!, identity, frame,
-    Typed(Model("Operation"), ops.Select(Operation)), new int[ops.Length])!;
-object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), ops);
+    Typed(Model("Operation"), ops.Select(Operation)), new int[ops.Length], linked)!;
+object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), [], ops);
+object Linked(string identity, int target, params object[] ops) => MethodIn(identity, FrameOf(false), [target], ops);
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
     [first] = Variant(first, false, [Method("Caller", ".feature .avx2", ".nop", ".ret")]),
     [second] = Variant(second, true,
-        [Method("Helper", ".ret"), Method("Caller", ".feature .avx2", "call 0", ".ret")])
+        [Method("Helper", ".ret"), Linked("Caller", 0, ".feature .avx2", "call 0", ".ret")])
 };
 var read = typeof(Program).GetMethod(nameof(ReadVariants), BindingFlags.Static | BindingFlags.NonPublic)!
     .MakeGenericMethod(variantType).Invoke(null, [variants]);
@@ -94,7 +95,8 @@ var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
 var secondBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings1.lean"));
 if (!templates.Contains("if avx2 then (Input1.method1.code) else (Input0.method0.code)", StringComparison.Ordinal) ||
-    !templates.Contains("[(1, .direct callee0)]", StringComparison.Ordinal) ||
+    !templates.Contains("(Input1.method1.relocate (fun | 0 => callee0 | index => index)).links",
+        StringComparison.Ordinal) ||
     !firstBinding.Contains("Templates.method0 Extracted.profile Extracted.environment false 0",
         StringComparison.Ordinal) ||
     !secondBinding.Contains("Templates.method1 Extracted.profile Extracted.environment)", StringComparison.Ordinal) ||
@@ -159,12 +161,15 @@ Console.WriteLine("PASS template order, reordered callees, absent-callee placeho
 var tailRoot = Path.Combine(root, "Tail");
 var (tailFirst, tailSecond, tailOutput) = (Path.Combine(tailRoot, "First"), Path.Combine(tailRoot, "Second"),
     Path.Combine(tailRoot, "Shared"));
-variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Method("Tail", "tail call 0")]);
-variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", "tail call 1"), Method("Target", ".ret")]);
+variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Linked("Tail", 0, "tail call 0")]);
+variants[tailSecond] = Variant(tailSecond, true, [Linked("Tail", 1, "tail call 1"), Method("Target", ".ret")]);
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
 var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
 if (!tailTemplate.Contains("cil_template_code% (Input0.method1.code)", StringComparison.Ordinal) ||
-    !tailTemplate.Contains("links := ([(0, .direct callee0)])", StringComparison.Ordinal))
+    !tailTemplate.Contains("links := (Input0.method1.relocate (fun | 0 => callee0 | index => index)).links",
+        StringComparison.Ordinal) ||
+    !tailTemplate.Contains("(Input1.method0.relocate (fun | 1 => callee0 | index => index)).links := rfl",
+        StringComparison.Ordinal))
     throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
 
@@ -184,15 +189,16 @@ string SharedBody(string name, Func<int, object> caller)
     run.Invoke(null, [(string[])[shared, one, two], read]);
     return File.ReadAllText(Path.Combine(shared, "Templates.lean"));
 }
+const string relocatedTarget = "(Input1.method0.relocate (fun | 1 => callee0 | index => index)).links := rfl";
 var numbered = new (string Name, Func<int, object> Caller, string Expected)[]
 {
-    ("CallVirtual", target => Method("Caller", WithSite(Create("CallVirtual", Listed(typeof((string, int)),
-        [("Class", target)]), 1)), ".ret"), ".virtual [(Class, callee0)]"),
-    ("MethodAddress", target => Method("Caller", Create("MethodAddress", Entry("ID", target), "SIG"), ".ret"),
-        ".address callee0"),
-    ("IndirectCall", target => Method("Caller", Create("IndirectCall", "SIG", Listed(Model("ManagedTarget"),
-        [Entry("ID", target)]), false), ".ret"), ".indirect [{ identity := ID, method := callee0 }]"),
-    ("Initializer", target => MethodIn("Caller", FrameOf(false, InitializedSite(target)), ".ret"),
+    ("CallVirtual", target => Linked("Caller", target, WithSite(Create("CallVirtual", Listed(typeof((string, int)),
+        [("Class", target)]), 1)), ".ret"), relocatedTarget),
+    ("MethodAddress", target => Linked("Caller", target, Create("MethodAddress", Entry("ID", target), "SIG"), ".ret"),
+        relocatedTarget),
+    ("IndirectCall", target => Linked("Caller", target, Create("IndirectCall", "SIG", Listed(Model("ManagedTarget"),
+        [Entry("ID", target)]), false), ".ret"), relocatedTarget),
+    ("Initializer", target => MethodIn("Caller", FrameOf(false, InitializedSite(target)), [], ".ret"),
         "initializer := some { method := callee0, arguments := []")
 };
 foreach (var (name, caller, spelling) in numbered)
@@ -245,8 +251,8 @@ string Differing(string identity, object leftFrame, object[] left, object rightF
     var directory = Path.Combine(root, "Differing" + identity);
     var (one, two, shared) = (Path.Combine(directory, "First"), Path.Combine(directory, "Second"),
         Path.Combine(directory, "Shared"));
-    variants[one] = Variant(one, false, [MethodIn(identity, leftFrame, left)]);
-    variants[two] = Variant(two, true, [MethodIn(identity, rightFrame, right)]);
+    variants[one] = Variant(one, false, [MethodIn(identity, leftFrame, [], left)]);
+    variants[two] = Variant(two, true, [MethodIn(identity, rightFrame, [], right)]);
     return Rejected(() => run.Invoke(null, [(string[])[shared, one, two], read]));
 }
 if (!Differing("Frame", FrameOf(false), [".ret"], FrameOf(true), [".ret"])

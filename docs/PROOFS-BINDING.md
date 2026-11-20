@@ -619,13 +619,15 @@ its pc. At a missing flag combination each pc contains a hole with its original 
 `cil_instruction_equations` generates kernel-checked equations for each position.
 For each input containing the method, `Templates.methodN_inputJ_code` proves by `rfl` that its
 flag assignment selects that input's decoded code for arbitrary profile, environment and callee
-parameters. Here `J` counts the inputs containing that method, in the order supplied.
+parameters. `Templates.methodN_inputJ_links` checks the link table for the same assignment.
+Each link comes from the selected decoded body, with its extracted method indices relocated to
+the caller's callee parameters. Here `J` counts the inputs containing that method, in the order
+supplied.
 
 `TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
 `Templates` and prove `Extracted.program[i]? = some (Templates.methodN ...)` by `rfl`, including
 all metadata and callee indices. The binding passes `Extracted.profile` and `Extracted.environment`,
-and the template writes its call links as a table over its callee parameters, so `rfl` also checks
-them against the extraction's link table. The exact binding ties the entire instantiated method to
+and supplies the original indices for the callees. The exact binding ties the entire instantiated method to
 the independently checked extraction. The extraction carries the byte, specialization and decoder
 evidence, including `Extracted.method0_decoder_eq`, `Extracted.method0_decoded` and
 `Extracted.method0_decoded_code` for the entry method.

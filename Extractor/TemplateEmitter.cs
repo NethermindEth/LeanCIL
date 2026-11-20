@@ -7,8 +7,9 @@ namespace Nethermind.LeanCIL;
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
 internal static partial class TemplateEmitter
 {
-    /// <summary>One extracted method: its identity, frame, operations and the raw opcode at each pc.</summary>
-    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes);
+    /// <summary>One decoded method's frame, proof descriptors, raw opcodes and linked method indices.</summary>
+    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes,
+        int[] LinkedMethods);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods)
     {
         /// <summary>The closed decoder inputs for this extraction in method index order.</summary>
@@ -19,6 +20,8 @@ internal static partial class TemplateEmitter
     {
         /// <summary>The qualified name of the decoded method in the shared module.</summary>
         internal required string Body;
+        /// <summary>The decoded body's links with its method indices mapped to template parameters.</summary>
+        internal required string RelocatedLinks;
     }
     sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
         int[] Opcodes);
@@ -178,16 +181,21 @@ internal static partial class TemplateEmitter
             row.Method.Operations.Any(operation => operation is ModelCall { Model: FeatureTest test } &&
                 test.Feature == feature)))
             .ToArray();
-        var callees = selected.SelectMany(row => row.Method.Operations.SelectMany(operation => operation.Methods)
-                .Concat(row.Method.Frame.Methods).Select(index => CalleeIdentity(row.Variant, index)))
+        var callees = selected.SelectMany(row => row.Method.LinkedMethods.Concat(row.Method.Frame.Methods)
+                .Select(index => CalleeIdentity(row.Variant, index)))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var calleeIndices = callees.Select((callee, index) => (callee, index))
             .ToDictionary(pair => pair.callee, pair => pair.index, StringComparer.Ordinal);
         var rows = selected.Select(row =>
         {
             int Renumbered(int index) => calleeIndices[CalleeIdentity(row.Variant, index)];
+            var cases = string.Join(" ", row.Method.LinkedMethods.Select(index =>
+                $"| {index} => {Callee(Renumbered(index))}"));
+            var links = cases.Length == 0 ? $"{row.Body}.links"
+                : $"({row.Body}.relocate (fun {cases} | index => index)).links";
             return new Row(row.Variant, row.Method.Frame.Renumber(Renumbered),
-                [.. row.Method.Operations.Select(operation => operation.Renumber(Renumbered))]) { Body = row.Body };
+                [.. row.Method.Operations.Select(operation => operation.Renumber(Renumbered))])
+                { Body = row.Body, RelocatedLinks = links };
         }).ToArray();
         // Frames compare once their callees share the template's numbering, as each body does.
         if (rows.Any(row => row.Frame != rows[0].Frame))
@@ -198,49 +206,25 @@ internal static partial class TemplateEmitter
 
     static string Callee(int index) => $"callee{index}";
 
-    /// <summary>The selected decoder's code, or the raw opcode holes of an unselected combination.</summary>
-    static string Code(Template template, Row[] rows, int featureIndex = 0)
+    /// <summary>The decoded code and relocated links selected by the same feature flags.</summary>
+    static (string Code, string Links) SelectBody(Template template, Row[] rows, int featureIndex = 0)
     {
-        if (rows.Length == 0)
-            return $"Extraction.templateHoles {template.Rows[0].Body}Closed.code";
-        if (featureIndex == template.Features.Length) return $"{rows[0].Body}.code";
-        var feature = template.Features[featureIndex];
-        var enabled = Code(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], featureIndex + 1);
-        var disabled = Code(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], featureIndex + 1);
-        return $"if {Flag(feature)} then ({enabled}) else ({disabled})";
-    }
-
-    /// <summary>Profiles with identical flags must agree on the operation and its callee at this pc.</summary>
-    static Operation Instruction(Template template, Row[] rows, int pc)
-    {
-        var values = rows.Select(row => row.Ops[pc]).Distinct().ToArray();
-        if (values.Length != 1)
-            throw new InvalidDataException($"""
-                Profiles with identical observed flags emit different instructions: {template.Identity} at pc {pc}
-                """);
-        return values[0];
-    }
-
-    /// <summary>The table entries of one pc, as a list expression over the template's feature flags.</summary>
-    static string LinkEntries(Template template, Row[] rows, int pc, int featureIndex = 0)
-    {
-        if (rows.Length == 0) return "[]";
+        if (rows.Length == 0) return ($"Extraction.templateHoles {template.Rows[0].Body}Closed.code", "[]");
         if (featureIndex == template.Features.Length)
-            return Instruction(template, rows, pc).Link(Callee) is { } link ? $"[({pc}, {link})]" : "[]";
+        {
+            var selected = rows[0];
+            foreach (var other in rows.AsSpan(1))
+                for (var pc = 0; pc < selected.Ops.Length; pc++)
+                    if (selected.Ops[pc] != other.Ops[pc])
+                        throw new InvalidDataException("Profiles with identical observed flags emit different " +
+                            $"instructions: {template.Identity} at pc {pc}");
+            return ($"{selected.Body}.code", selected.RelocatedLinks);
+        }
         var feature = template.Features[featureIndex];
-        var enabled = LinkEntries(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], pc,
-            featureIndex + 1);
-        var disabled = LinkEntries(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], pc,
-            featureIndex + 1);
-        return enabled == disabled ? enabled : $"if {Flag(feature)} then ({enabled}) else ({disabled})";
-    }
-
-    /// <summary>The links field of a template: one entry per call site, in pc order, linear in the code.</summary>
-    static string LinkTable(Template template)
-    {
-        var entries = Enumerable.Range(0, template.Opcodes.Length)
-            .Select(pc => LinkEntries(template, template.Rows, pc)).Where(entry => entry != "[]").ToArray();
-        return entries.Length == 0 ? "[]" : string.Join(" ++ ", entries.Select(entry => $"({entry})"));
+        var enabled = SelectBody(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], featureIndex + 1);
+        var disabled = SelectBody(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], featureIndex + 1);
+        string Select(string yes, string no) => yes == no ? yes : $"if {Flag(feature)} then ({yes}) else ({no})";
+        return (Select(enabled.Code, disabled.Code), Select(enabled.Links, disabled.Links));
     }
 
     // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
@@ -251,6 +235,7 @@ internal static partial class TemplateEmitter
         void Line(string text = "") => lean.Append(text).Append('\n');
         Line("import CIL.InstructionEquations");
         Line("import CIL.Extraction.TemplateCode");
+        Line("import CIL.Safety.Linking");
         Line();
         Line("/-! Shared decoded bodies for the selected extraction profiles. -/");
         Line();
@@ -278,8 +263,9 @@ internal static partial class TemplateEmitter
             var sites = template.Frame.StaticSitesLeanWith(Callee);
             Line($$""" : Method := { {{template.Rows[0].Body}} with""");
             Line("  profile, environment,");
-            Line($"  links := {LinkTable(template)}, staticSites := [{sites}],");
-            Line($$"""  code := cil_template_code% ({{Code(template, template.Rows)}}) }""");
+            var body = SelectBody(template, template.Rows);
+            Line($"  links := {body.Links}, staticSites := [{sites}],");
+            Line($$"""  code := cil_template_code% ({{body.Code}}) }""");
             var callees = Enumerable.Range(0, template.Callees.Length).Select(Callee).ToArray();
             var binders = callees.Length == 0 ? "" : $" ({string.Join(' ', callees)} : Nat)";
             foreach (var (rowIndex, row) in template.Rows.Index())
@@ -288,11 +274,16 @@ internal static partial class TemplateEmitter
                 foreach (var feature in template.Features)
                     arguments.Add(LeanText.Bool(row.Variant.Profile.Get(feature)));
                 arguments.AddRange(callees);
-                var name = $"method{index}_input{rowIndex}_code";
+                var instance = $"(method{index} {string.Join(' ', arguments)})";
+                var name = $"method{index}_input{rowIndex}";
                 Line("/-- The selected flags give this input's decoded code for every caller. -/");
-                Line($"theorem {name} (profile : FeatureProfile) (environment : LayoutEnvironment){binders} :");
-                Line($"    (method{index} {string.Join(' ', arguments)}).code = {row.Body}.code := rfl");
-                Line($"#print axioms {name}");
+                Line($"theorem {name}_code (profile : FeatureProfile) (environment : LayoutEnvironment){binders} :");
+                Line($"    {instance}.code = {row.Body}.code := rfl");
+                Line($"#print axioms {name}_code");
+                Line("/-- The selected links enter this input's callees at the supplied method indices. -/");
+                Line($"theorem {name}_links (profile : FeatureProfile) (environment : LayoutEnvironment){binders} :");
+                Line($"    {instance}.links = {row.RelocatedLinks} := rfl");
+                Line($"#print axioms {name}_links");
             }
             if (!omitEquations)
             {

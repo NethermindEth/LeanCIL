@@ -94,7 +94,8 @@ if (templates.Split("code := cil_template_code%").Length != 4 ||
     throw new InvalidOperationException("Expected one generated body per method with flags, callees and equations.");
 if (!templates.Contains("cil_decoded_method method0 := Method.ofClosed?", StringComparison.Ordinal) ||
     !templates.Contains("code := cil_template_code%", StringComparison.Ordinal) ||
-    !templates.Contains(".direct callee0", StringComparison.Ordinal))
+    !templates.Contains("=> callee0 | index => index)).links", StringComparison.Ordinal) ||
+    !templates.Contains("theorem method0_input0_links", StringComparison.Ordinal))
     throw new InvalidOperationException("The Choose template needs decoded code and a parameterized call link.");
 var renamed = File.ReadAllText(Path.Combine(shared, "TemplateBindings3.lean"));
 if (!renamed.Contains("Templates.method0 Extracted.profile Extracted.environment true true 2",
@@ -179,7 +180,7 @@ run_cmd do
 var kinds = new (string Name, string Selector, string Spelling)[]
 {
     ("Virtual", "Kinds::Virtual(Slot)", ".virtual [("),
-    ("Address", "Kinds::Address(uint)", ".address callee"),
+    ("Address", "Kinds::Address(uint)", ": Link := .address "),
     ("Indirect", "Kinds::Indirect(method System.UInt32 *(System.UInt32)[],System.Int32,System.UInt32)",
         ".indirect [{ identity := "),
     ("Initial", "Kinds::Initial()", "initializer := some { method := callee1")
@@ -241,6 +242,9 @@ example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (ca
 var wrongBranch = templates.Replace("Input2.method0.code)", "(Input2.method0.code.set 1 (.brfalse 6)))",
     StringComparison.Ordinal);
 RejectLean("WrongBranch", wrongBranch, sharedPath);
+var wrongLinks = templates.Split('\n').Select(line => line.StartsWith("  links := ", StringComparison.Ordinal)
+    ? line.Replace("=> callee0 ", "=> callee0 + 1 ", StringComparison.Ordinal) : line);
+RejectLean("WrongRelocatedLinks", string.Join('\n', wrongLinks), sharedPath);
 RejectLean("UnequalTemplateLengths", """
     import CIL.Extraction.TemplateCode
     example (flag : Bool) : List CIL.Instruction := cil_template_code% (if flag then [.ret] else [])

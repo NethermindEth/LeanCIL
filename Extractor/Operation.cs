@@ -8,23 +8,11 @@ namespace Nethermind.LeanCIL;
 /// </summary>
 internal abstract record Operation
 {
-    /// <summary>
-    /// The index of every method this operation enters, constructs through, dispatches to or names as a
-    /// callable target; empty when it names none.
-    /// </summary>
-    internal virtual IEnumerable<int> Methods => [];
-
     /// <summary>The operation does nothing: a prefix or an operand the translator folded away.</summary>
     internal bool IsNop => this is StackOperation { Kind: StackOpcode.Nop };
 
     /// <summary>This operation with every method index replaced by <paramref name="map"/> of it.</summary>
     internal virtual Operation Renumber(Func<int, int> map) => this;
-
-    /// <summary>
-    /// The Lean `Link` term the interpreter follows from this instruction, with each callee written as
-    /// <paramref name="calleeName"/> of it; null for an instruction that enters no method.
-    /// </summary>
-    internal virtual string? Link(Func<int, string> calleeName) => null;
 }
 
 /// <summary>An instruction that only moves the evaluation stack or does scalar arithmetic.</summary>
@@ -207,11 +195,7 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
     /// <summary>The type term of the <c>constrained.</c> prefix's closed operand.</summary>
     internal string? ConstrainedType { get; init; }
 
-    internal override IEnumerable<int> Methods => [Method];
-
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
-
-    internal override string? Link(Func<int, string> calleeName) => $".direct {calleeName(Method)}";
 }
 
 /// <summary>
@@ -246,17 +230,7 @@ internal abstract record Allocation
 /// </summary>
 internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Constructor) : Operation
 {
-    internal override IEnumerable<int> Methods => [Method];
-
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
-
-    internal override string? Link(Func<int, string> calleeName) => Allocated switch
-    {
-        Allocation.Aggregate aggregate => $".aggregate {calleeName(Method)} {aggregate.Size}",
-        Allocation.Instance instance =>
-            $".object {calleeName(Method)} {LeanText.ClassList(instance.Bases)} {instance.Size}",
-        _ => throw new InvalidOperationException("Unknown allocation: " + Allocated)
-    };
 }
 
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>
@@ -265,15 +239,8 @@ internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets
     /// <summary>The method reference of the virtual slot named at the call site.</summary>
     internal MethodRef? Site { get; init; }
 
-    internal override IEnumerable<int> Methods => Targets.Select(target => target.Method);
-
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Targets = [.. Targets.Select(target => (target.Class, map(target.Method)))] };
-
-    internal override string? Link(Func<int, string> calleeName) => $".virtual {Table(calleeName)}";
-
-    string Table(Func<int, string> calleeName) => "[" + string.Join(", ",
-        Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})")) + "]";
 }
 
 /// <summary>The CIL instruction of a static field access.</summary>
@@ -478,26 +445,15 @@ internal abstract record ManagedPointer : Operation;
 /// <summary>An indirect call through a callable pointer of the given signature and target catalog.</summary>
 internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> Catalog, bool Tail) : ManagedPointer
 {
-    internal override IEnumerable<int> Methods => Catalog.Select(target => target.Method);
-
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Catalog = [.. Catalog.Select(target => target with { Method = map(target.Method) })] };
-
-    internal override string? Link(Func<int, string> calleeName) => $".indirect {Targets(calleeName)}";
-
-    string Targets(Func<int, string> calleeName) =>
-        "[" + string.Join(", ", Catalog.Select(target => target.Lean(calleeName))) + "]";
 }
 
 /// <summary>The address of the managed method <paramref name="Target"/> of the given signature.</summary>
 internal sealed record MethodAddress(ManagedTarget Target, string Signature) : ManagedPointer
 {
-    internal override IEnumerable<int> Methods => [Target.Method];
-
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Target = Target with { Method = map(Target.Method) } };
-
-    internal override string Link(Func<int, string> calleeName) => $".address {calleeName(Target.Method)}";
 }
 
 /// <summary>A runtime memory operation.</summary>

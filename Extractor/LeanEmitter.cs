@@ -264,7 +264,9 @@ internal static class LeanEmitter
                     profile))];
             var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, [], homes, sites,
                 genericEvidence.Declared(m));
-            var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution, layoutContext);
+            SortedSet<int>? linkedMethods = templateInputs ? [] : null;
+            var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution,
+                layoutContext, linkedMethods);
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
@@ -353,7 +355,7 @@ internal static class LeanEmitter
                     if (templateOperations[site.Pc] is StaticFieldInstruction access)
                         templateOperations[site.Pc] = access with { Field = site.Field };
                 templates.Add(new(m.FullName, frame, [.. templateOperations],
-                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
+                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)], linkedMethods?.ToArray() ?? []));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.
