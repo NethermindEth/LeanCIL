@@ -5,6 +5,16 @@ import CIL.Safety.SymbolicExecution
 namespace TemplateProof
 open CIL CIL.Safety
 
+-- A consumer matching an instruction equation sees a numeral at every excluded pc.
+open Lean in
+run_cmd do
+  for pc in [:11] do
+    let equation := `Templates ++ Name.mkSimple s!"method0_instruction{pc}"
+    let type := (← getConstInfo equation).type
+    if (type.find? fun term => term.isAppOfArity ``Instruction.unadmitted 1 &&
+        (natLiteral? term.appArg!).isNone).isSome then
+      throwError "{equation} has a nonliteral hole opcode"
+
 /-- The generated helper returns its argument for any profile. -/
 theorem helper_returns (program : Program) (index : Nat) (profile : FeatureProfile)
     (environment : LayoutEnvironment)

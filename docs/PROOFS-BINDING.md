@@ -609,22 +609,25 @@ leancil templates shared scalar sse42 v3
 The command reruns exact extraction checking for every input and requires the same assembly bytes.
 `shared/Templates.lean` defines each method once, with a profile parameter, an environment parameter
 for the extraction's layout tables, parameters for the feature flags it reads, and managed callee
-indices keyed by full method identity. Each `Templates.InputN` namespace contains the raw bodies,
-specialization evidence, links, layout environment and reachability masks for that input.
+indices keyed by full method identity. Each `Templates.InputN` namespace contains the closed raw
+bodies, argument metadata, links, layout environment and reachability masks for that input.
 Lean defines each input method with `cil_decoded_method` over `Method.ofClosed?`.
-Every selected method must decode for the shared module to elaborate.
+The templates command refuses an input that needs a literal method and names its first refused IL site.
 The shared method takes each instruction from those decoded bodies. Every IL instruction keeps
 its pc. At a missing flag combination each pc contains a hole with its original opcode.
 `cil_instruction_equations` generates kernel-checked equations for each position.
+For each input containing the method, `Templates.methodN_inputJ_code` proves by `rfl` that its
+flag assignment selects that input's decoded code for arbitrary profile, environment and callee
+parameters. Here `J` counts the inputs containing that method, in the order supplied.
 
 `TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
 `Templates` and prove `Extracted.program[i]? = some (Templates.methodN ...)` by `rfl`, including
 all metadata and callee indices. The binding passes `Extracted.profile` and `Extracted.environment`,
 and the template writes its call links as a table over its callee parameters, so `rfl` also checks
-them against the extraction's link table. The binding also proves the closed decoder equation,
-the raw decoder equation and the code equation for that template instantiation, under the
-names `TemplateBindings.method0_decoder_eq`, `TemplateBindings.method0_decoded` and
-`TemplateBindings.method0_decoded_code` for the entry method.
+them against the extraction's link table. The exact binding ties the entire instantiated method to
+the independently checked extraction. The extraction carries the byte, specialization and decoder
+evidence, including `Extracted.method0_decoder_eq`, `Extracted.method0_decoded` and
+`Extracted.method0_decoded_code` for the entry method.
 Compile a binding only against its corresponding extraction,
 recorded in `templates.json`. Add the shared module and selected binding module to your proof
 package, import that binding from the consumer proof, and run `leancil verify` with that

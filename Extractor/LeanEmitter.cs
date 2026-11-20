@@ -160,11 +160,12 @@ internal static class LeanEmitter
         Math.Max(BaseHeartbeats, HeartbeatsPerInstruction * instructions + HeartbeatsPerCall * calls);
 
     /// <summary>The closed decoder and its specialization determine the method and every code position.</summary>
-    static void EmitDecodedMethod(StringBuilder lean, int n, string fields)
+    static void EmitDecodedMethod(StringBuilder lean, int n, string fields, StringBuilder? decoderInputs)
     {
         var method = $"method{n}";
         var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} method{n}Links {method}Reachable";
         var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
+        decoderInputs?.AppendLine($"cil_decoded_method {method} := {closedDecoder}");
         var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
         const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
         var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
@@ -206,8 +207,9 @@ internal static class LeanEmitter
 
             """.ReplaceLineEndings("\n"));
         StringBuilder? inputs = templateInputs ? new() : null;
-        int inputStart = lean.Length;
-        lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
+        var profileDefinition = $"def profile : FeatureProfile := {profile.Lean}";
+        lean.AppendLine($"@[cil_code] {profileDefinition}");
+        inputs?.AppendLine(profileDefinition);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
         if (importResolution is not null) layoutContext.AddImported(importResolution.LocalLayouts());
@@ -220,21 +222,24 @@ internal static class LeanEmitter
                 layoutContext.FieldOffset(types[i], field.Definition), layoutContext.FieldSize(field.Type),
                 layoutContext.IsLayout(field.Type)))];
             layouts[i] = new ComputedLayout(LayoutEvidence.Identity(types[i]), size, fields);
-            lean.AppendLine($"def layout{i} : AggregateLayout := {layouts[i].ToLean()}");
+            var layout = $"def layout{i} : AggregateLayout := {layouts[i].ToLean()}";
+            lean.AppendLine(layout);
+            inputs?.AppendLine(layout);
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := {Decide}");
         }
         LayoutEvidence layoutEvidence = new(types, layoutContext);
-        layoutEvidence.EmitLayouts(lean);
+        layoutEvidence.EmitLayouts(lean, inputs);
         // One shared constant, so a method literal names the tables instead of repeating them.
-        lean.AppendLine($"@[cil_code] def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := " +
-            "{ rawLayouts := rawLayouts, layouts := computedLayouts }");
+        const string tables = "{ rawLayouts := rawLayouts, layouts := computedLayouts }";
+        var environment = $"def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := {tables}";
+        lean.AppendLine($"@[cil_code] {environment}");
+        inputs?.AppendLine(environment);
         // The shape facts are written here once every method has been translated, so admission reports its own
         // refusals first, and every method's components see them.
         var shapeFactsAt = lean.Length;
         var operandShapes = new OperandShapes(layoutEvidence);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
-        inputs?.Append(lean, inputStart, lean.Length - inputStart);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
@@ -287,7 +292,6 @@ internal static class LeanEmitter
                 genericEvidence.Declared(m));
             var opaqueLocals = $"Extraction.rawOpaqueLocals method{n}Closed method{n}Reachable";
             var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution, layoutContext);
-            inputStart = lean.Length;
             lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
@@ -298,6 +302,7 @@ internal static class LeanEmitter
             }
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
+            var inputStart = lean.Length;
             foreach (var (pc, link) in linkEntries)
                 lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
             // One named table, which the literal and the decoder both take, so a decoded method's links are the
@@ -305,7 +310,9 @@ internal static class LeanEmitter
             var linkTable = $"method{n}Links";
             lean.AppendLine($"@[cil_code] def {linkTable} : List (Nat × Link) := [" + string.Join(", ",
                 linkEntries.Select(entry => $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]");
+            inputs?.Append(lean, inputStart, lean.Length - inputStart);
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
+            inputStart = lean.Length;
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             var staticInput = "";
             if (sites.Length != 0)
@@ -326,12 +333,8 @@ internal static class LeanEmitter
                 lean.AppendLine($"def {table} : List (Prod Nat Extraction.StaticFieldSite) := [{fields}]");
                 staticInput = $"staticFields := {table}, ";
             }
-            genericEvidence.EmitMethod(lean, m, n, reachable, staticInput);
-            if (inputs is not null)
-            {
-                inputs.Append(lean, inputStart, lean.Length - inputStart);
-                EmitDecodedMethod(inputs, n, "");
-            }
+            inputs?.Append(lean, inputStart, lean.Length - inputStart);
+            genericEvidence.EmitMethod(lean, m, n, reachable, staticInput, inputs);
             // A call names the method its raw operand names; a constrained one also the type the definition just
             // written spells for its prefix.
             for (var pc = 0; pc < ops.Count; pc++)
@@ -367,7 +370,7 @@ internal static class LeanEmitter
                     _ => null
                 }).OfType<string>().Distinct(StringComparer.Ordinal));
                 var fields = naming.Length == 0 ? "" : $"[{naming}] ";
-                EmitDecodedMethod(lean, n, fields);
+                EmitDecodedMethod(lean, n, fields, inputs);
             }
             else
             {
@@ -387,7 +390,8 @@ internal static class LeanEmitter
             }
             // Both selected forms use these operations, including the raw opcode hole at every dead pc.
             if (collectTemplates)
-                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
+                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)])
+                    { Refusal = refusals[n] });
             const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
             var layoutCheck = $"{layoutTables} method{n} method{n}LayoutUses";
             lean.AppendLine($"theorem method{n}_layouts_validated : {layoutCheck} := ⟨layouts_validated, {Decide}⟩");

@@ -214,13 +214,16 @@ foreach (var (name, selector, spelling) in kinds)
     Console.WriteLine($"PASS a {name} template elaborates and binds to each profile's own method indices");
 }
 
-void RejectLean(string name, string text, string path)
+void RejectLean(string name, string text, string path, string diagnostic = "Not a definitional equality")
 {
     var file = Path.Combine(directory, name + ".lean");
     File.WriteAllText(file, text);
     var result = Execute(["lean", file], leanPath: path);
-    if (result.Code == 0 || !result.Output.Contains("rfl", StringComparison.Ordinal))
-        throw new InvalidOperationException("Expected exact equality rejection: " + name + "\n" + result.Output);
+    if (result.Code == 0 || !result.Output.Contains(diagnostic, StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException($"""
+            Expected {diagnostic} checking {name}.
+            {result.Output}
+            """);
     Console.WriteLine("PASS rejection: " + name);
 }
 
@@ -234,13 +237,18 @@ RejectLean("WrongEquation", """
 import Templates
 example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (callee : Nat) :
     (Templates.method0 profile environment true true callee).code[1]? = some (.brfalse 6) := by rfl
-""", sharedPath);
-var changed = Path.Combine(directory, "ChangedBranch");
-Directory.CreateDirectory(changed);
-File.WriteAllText(Path.Combine(changed, "Templates.lean"),
-    templates.Replace("Input2.method0.code)", "(Input2.method0.code.set 1 (.brfalse 6)))", StringComparison.Ordinal));
-Compile(changed, "Templates", changed + Path.PathSeparator + library);
-RejectLean("WrongBranch", wideBinding, changed + Path.PathSeparator + widePath);
+""", sharedPath, "is not definitionally equal to the right-hand side");
+var wrongBranch = templates.Replace("Input2.method0.code)", "(Input2.method0.code.set 1 (.brfalse 6)))",
+    StringComparison.Ordinal);
+RejectLean("WrongBranch", wrongBranch, sharedPath);
+RejectLean("UnequalTemplateLengths", """
+    import CIL.Extraction.TemplateCode
+    example (flag : Bool) : List CIL.Instruction := cil_template_code% (if flag then [.ret] else [])
+    """, sharedPath, "template alternatives have different lengths");
+RejectLean("OpenTemplateCode", """
+    import CIL.Extraction.TemplateCode
+    example (body : CIL.Method) : List CIL.Instruction := cil_template_code% body.code
+    """, sharedPath, "a template alternative must have a closed instruction list");
 
 var original = File.ReadAllText(Path.Combine(extractions[0], "Extracted.lean"));
 try

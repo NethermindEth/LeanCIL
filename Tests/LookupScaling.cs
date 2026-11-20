@@ -1962,7 +1962,7 @@ if (!instructionEquationsOnly)
     var decisions = TypeDecisionCosts();
     foreach (var outcome in new[] { "equal", "unequal" })
     {
-        long shortName = decisions[outcome + " 20"], longName = decisions[outcome + " 80"];
+        long shortName = decisions[$"{outcome} 20"], longName = decisions[$"{outcome} 80"];
         var measured = $"{shortName} heartbeats at 20 characters and {longName} at 80";
         if (Math.Min(shortName, longName) < KernelDecisionFloor || Math.Max(shortName, longName) > TypeDecisionLimit ||
             longName > shortName * AllowedNameGrowth)
@@ -2282,14 +2282,22 @@ long DecideCost(string path, string header, string statement, string scope)
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement
 // stepping tactics rewrite with, depend on `propext` alone, and still be fetched by `cil_code`.
 (long Count, string Output) Checked(string path, string text, string binder, string method, string equation,
-    int last)
+    int last, string verifyAfter = "")
 {
     var statement = $"example {binder}: {method}.code[{last}]? = some CIL.Instruction.ret";
-    return Reported(path, text + $"""
+    var checks = $"""
 
         {statement} := {equation}
         {statement} := by simp only [cil_code]
-        """);
+        """;
+    // CountHeartbeats reads the first count. The independent equality is checked outside the measured row.
+    if (verifyAfter.Length > 0)
+        checks = $"""
+            {checks}
+            #eval show IO Nat from IO.getNumHeartbeats
+            {verifyAfter}
+            """;
+    return Reported(path, $"""{text}{checks}""");
 }
 
 // The extraction with its call check and its method evidence theorem each reporting the heartbeats it costs alone.
@@ -2373,7 +2381,23 @@ string WithEvidenceCosts(string extracted)
         $"Body.method0_instruction{last} profile environment", last);
     var template = Checked(Path.Combine(shared, "Measured.lean"), templates,
         Binder, "(Templates.method0 profile environment)",
-        $"Templates.method0_instruction{last} profile environment", last);
+        $"Templates.method0_instruction{last} profile environment", last, $$"""
+            namespace Handwritten
+            open CIL
+            {{body}}
+            open Lean Meta in
+            run_cmd Elab.Command.liftTermElabM do
+              forallTelescope (<- getConstInfo ``method0).type fun parameters _ => do
+                let code := fun name => mkApp (mkConst ``Method.code) (mkAppN (mkConst name) parameters)
+                let (expected, leftClosed) <- InstructionEquations.listElements (code ``method0)
+                let (actual, rightClosed) <- InstructionEquations.listElements (code ``Templates.method0)
+                unless leftClosed && rightClosed && expected.size == actual.size do
+                  throwError "the hand-written and generated templates have different or open lengths"
+                for pc in [:expected.size] do
+                  unless <- isDefEq expected[pc]! actual[pc]! do
+                    throwError "the hand-written and generated instructions differ at pc {pc}"
+            end Handwritten
+            """);
     return (instructions, [extraction.Count, command.Count, template.Count], EvidenceCosts(extraction.Output));
 }
 
@@ -2401,7 +2425,119 @@ for (var producer = 0; producer < producers.Length; producer++)
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
 
+TemplateChoiceCosts();
 if (instructionEquationsOnly) return;
+
+// Each body has eight feature branches. Vary the number of distinct getters and inputs independently.
+void TemplateChoiceCosts()
+{
+    var root = Path.Combine(directory, "TemplateChoices");
+    var project = Path.Combine(root, "Assembly");
+    Directory.CreateDirectory(project);
+    File.Copy(Path.Combine(source, "Lookups.csproj"), Path.Combine(project, "Flags.csproj"), overwrite: true);
+    string[] getters = ["Avx512F.IsSupported", "Aes.IsSupported", "Vector256.IsHardwareAccelerated",
+        "Avx.IsSupported", "Sse2.IsSupported", "Ssse3.IsSupported", "Avx2.IsSupported", "Bmi2.X64.IsSupported"];
+    int[] sizes = [2, 4, 8];
+    string MethodWithFlags(int flags)
+    {
+        var branches = Enumerable.Range(0, getters.Length)
+            .Select(i => $"if ({getters[i % flags]}) total += {i + 1};");
+        return $$"""
+            public static int Read{{flags}}(int word) { int total = word; {{string.Join(' ', branches)}} return total; }
+            """;
+    }
+    File.WriteAllText(Path.Combine(project, "Flags.cs"), $$"""
+        using System.Runtime.Intrinsics;
+        using System.Runtime.Intrinsics.X86;
+        public static class Flags { {{string.Join('\n', sizes.Select(MethodWithFlags))}} }
+        """);
+    Run(["dotnet", "build", Path.Combine(project, "Flags.csproj"), "-c", "Release"]);
+    var image = Path.Combine(project, "bin/Flags.dll");
+    int[] masks = [0, 7, 2, 5, 1, 6, 3, 4];
+    foreach (var mask in masks.Append(15))
+    {
+        var wide = (mask & 1) != 0;
+        var profile = new { name = $"choice{mask}", architecture = "x64", nativeWidth = 64, littleEndian = true,
+            sse2 = true, ssse3 = true, sse41 = true, sse42 = true, avx = true, avx2 = true, x86Base64 = true,
+            vector128Accelerated = true, vector256Accelerated = (mask & 4) != 0, bmi1 = true, bmi2 = true,
+            avx512F = wide, avx512FVL = wide, avx512DQ = wide, avx512DQVL = wide, avx512Vbmi = (mask & 8) != 0,
+            aes = (mask & 2) != 0, armAes = false, advSimd = false, armBase64 = false };
+        var json = System.Text.Json.JsonSerializer.Serialize(profile);
+        File.WriteAllText(Path.Combine(root, $"profile{mask}.json"), json);
+    }
+    var samples = new Dictionary<(bool VaryInputs, int Size), (long Total, long Selection)>();
+    var extracted = new HashSet<string>(StringComparer.Ordinal);
+    var pcs = 0;
+    foreach (var varyInputs in new[] { true, false })
+        foreach (var size in sizes)
+        {
+            var flags = varyInputs ? 4 : size;
+            // Two pairs of profiles agree on all observed getters as the number of distinct getters grows.
+            string[] profiles = varyInputs ? [.. masks.Take(size).Select(mask => $"profile{mask}")] :
+                ["scalar", "arm64-advsimd", "profile7", "profile15"];
+            var paths = new List<string>();
+            foreach (var profile in profiles)
+            {
+                var path = Path.Combine(root, $"Read{flags}-{profile}");
+                if (extracted.Add(path))
+                {
+                    var specification = profile.StartsWith("profile", StringComparison.Ordinal)
+                        ? $"@{Path.Combine(root, $"{profile}.json")}" : profile;
+                    Run(Extract("extract", image, "Flags", $"Flags::Read{flags}(int)", path, specification));
+                }
+                paths.Add(path);
+            }
+            var shared = Path.Combine(root, varyInputs ? $"Inputs{size}" : $"Flags{size}");
+            Run(["dotnet", ExtractorPath, "templates", shared, .. paths]);
+            var module = File.ReadAllText(Path.Combine(shared, "Templates.lean")).ReplaceLineEndings("\n");
+            var start = module.IndexOf("/-- The stable managed identity", StringComparison.Ordinal);
+            var last = module.LastIndexOf("#print axioms method0_instruction", StringComparison.Ordinal);
+            using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(shared,
+                "templates.json")));
+            var features = manifest.RootElement.GetProperty("methods")[0].GetProperty("flags").EnumerateArray()
+                .Select(flag => flag.GetString()!)
+                .Select(flag => $"{char.ToUpperInvariant(flag[0])}{flag[1..]}").ToArray();
+            var bindings = manifest.RootElement.GetProperty("profiles");
+            int ObservedFlags(System.Text.Json.JsonElement binding)
+            {
+                var profile = binding.GetProperty("profile");
+                return features.Aggregate(0, (bits, flag) =>
+                    2 * bits + (profile.GetProperty(flag).GetBoolean() ? 1 : 0));
+            }
+            var leaves = bindings.EnumerateArray().Select(ObservedFlags).Distinct().Count();
+            if (features.Length != flags || bindings.GetArrayLength() != paths.Count ||
+                leaves != (varyInputs ? size : 2) || start < 0 || last < 0)
+                throw new InvalidOperationException($"Unexpected dimensions at {paths.Count} inputs, {flags} flags.");
+            var number = module[(last + "#print axioms method0_instruction".Length)..].Split('\n')[0];
+            var count = int.Parse(number, CultureInfo.InvariantCulture) + 1;
+            if (pcs != 0 && count != pcs) throw new InvalidOperationException("Template instruction counts differ.");
+            pcs = count;
+            var header = module.IndexOf("/-!", StringComparison.Ordinal);
+            var parts = new[] { module[..header], module[header..start], module[start..] };
+            var costs = PartHeartbeats(Path.Combine(shared, "Costs.lean"), parts);
+            samples.Add((varyInputs, size), (costs.Sum(), costs[1]));
+            Console.WriteLine($"""
+                Template {Path.GetFileName(shared)}, {paths.Count} inputs, {flags} flags, {pcs} pcs:
+                  {costs.Sum()} total heartbeats, {costs[1]} for selection, leaf proofs and equations
+                """);
+        }
+    foreach (var varyInputs in new[] { true, false })
+        foreach (var selectionOnly in new[] { true, false })
+        {
+            double PerUnit(int size)
+            {
+                var cost = samples[(varyInputs, size)];
+                return (double)(selectionOnly ? cost.Selection : cost.Total) / (size * pcs);
+            }
+            foreach (var (smaller, larger) in sizes.Zip(sizes.Skip(1)))
+                if (PerUnit(larger) > AllowedGrowth * PerUnit(smaller))
+                    throw new InvalidOperationException($"""
+                        Template cost from {smaller} to {larger} exceeds {AllowedGrowth} per unit per pc.
+                        Inputs varying: {varyInputs}. Selection only: {selectionOnly}.
+                        Measured {PerUnit(smaller):F0} and {PerUnit(larger):F0} heartbeats.
+                        """);
+        }
+}
 
 // A body with no call at three lengths. Its call check reads every pc's link by one walk, so it costs the same per
 // instruction; its evidence theorem is assembled from the conjuncts' theorems and costs the same at every length.

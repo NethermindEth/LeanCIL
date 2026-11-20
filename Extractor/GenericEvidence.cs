@@ -507,7 +507,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
-        IReadOnlySet<Instruction> reachable, string staticInput)
+        IReadOnlySet<Instruction> reachable, string staticInput, StringBuilder? decoderInputs = null)
     {
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, original, method, reachable, staticInput);
@@ -517,14 +517,16 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var closedEvidence = Method(method, original, method, reachable, staticInput);
         closedCalls = closedOperands;
         closedOperands = null;
-        externalIdentities.Emit(lean);
+        externalIdentities.Emit(lean, decoderInputs);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);
         if (body.Slices.Length > 0)
             foreach (var line in body.Slices.Split('\n')) lean.AppendLine(line);
         lean.AppendLine(body.Definition);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
-        lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {closedEvidence}");
+        var closed = $"def method{number}Closed : Extraction.RawMethod := {closedEvidence}";
+        lean.AppendLine(closed);
+        decoderInputs?.AppendLine(closed);
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
         // Direct equality proofs avoid a separate structural decision over the raw metadata.
         lean.AppendLine($"theorem method{number}_specialization_validated :" +

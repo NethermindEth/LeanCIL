@@ -131,8 +131,9 @@ internal sealed class LayoutEvidence
         _ => throw new InvalidDataException($"Unsupported vector field lane: {vector.FullName}")
     };
 
-    internal void EmitLayouts(StringBuilder lean)
+    internal void EmitLayouts(StringBuilder lean, StringBuilder? decoderInputs = null)
     {
+        var start = lean.Length;
         var rowIdentities = (string[])identityTerms.Clone();
         for (var index = 0; index < rawTypes.Length; index++)
         {
@@ -191,6 +192,7 @@ internal sealed class LayoutEvidence
                 var alignment = layouts.AggregateLayout(type).Alignment;
                 return $"⟨layout{index}, {alignment}⟩";
             })) + "]");
+        decoderInputs?.Append(lean, start, lean.Length - start);
         lean.AppendLine("theorem layouts_validated : Extraction.LayoutsValid rawLayouts computedLayouts " +
             $".{Architecture} := " + LeanEmitter.Decide);
     }

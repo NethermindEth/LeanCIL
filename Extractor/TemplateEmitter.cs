@@ -8,14 +8,20 @@ namespace Nethermind.LeanCIL;
 internal static partial class TemplateEmitter
 {
     /// <summary>One extracted method: its identity, frame, operations and the raw opcode at each pc.</summary>
-    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes);
+    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes)
+    {
+        /// <summary>A reachable instruction that prevents a definition from the closed decoder.</summary>
+        internal GenericEvidence.DecodeRefusal? Refusal;
+    }
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods)
     {
+        /// <summary>The closed decoder inputs for this extraction in method index order.</summary>
         internal required string DecoderInputs;
     }
     /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
     sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops)
     {
+        /// <summary>The qualified name of the decoded method in the shared module.</summary>
         internal required string Body;
     }
     sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
@@ -70,6 +76,7 @@ internal static partial class TemplateEmitter
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*\z")]
     internal static partial Regex LeanName { get; }
 
+    /// <summary>The generated binding filenames checked for stale inputs.</summary>
     [GeneratedRegex(@"\ATemplateBindings[0-9]+\.lean\z")]
     internal static partial Regex BindingName { get; }
 
@@ -167,6 +174,11 @@ internal static partial class TemplateEmitter
     static Template Prepare(string identity, (Variant Variant, Method Method, string Body)[] selected)
     {
         var first = selected[0].Method;
+        foreach (var row in selected)
+            if (row.Method.Refusal is { } refusal)
+                throw new InvalidDataException($"""
+                    Template decoder refused {identity} at IL_{refusal.Offset:x4} ({refusal.Opcode.Name}).
+                    """);
         if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length ||
             !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
@@ -199,7 +211,7 @@ internal static partial class TemplateEmitter
     static string Code(Template template, Row[] rows, int featureIndex = 0)
     {
         if (rows.Length == 0)
-            return $"{template.Rows[0].Body}Closed.code.map (fun site => .unadmitted site.opcode)";
+            return $"Extraction.templateHoles {template.Rows[0].Body}Closed.code";
         if (featureIndex == template.Features.Length) return $"{rows[0].Body}.code";
         var feature = template.Features[featureIndex];
         var enabled = Code(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], featureIndex + 1);
@@ -277,6 +289,20 @@ internal static partial class TemplateEmitter
             Line("  profile, environment,");
             Line($"  links := {LinkTable(template)}, staticSites := [{sites}],");
             Line($$"""  code := cil_template_code% ({{Code(template, template.Rows)}}) }""");
+            var callees = Enumerable.Range(0, template.Callees.Length).Select(Callee).ToArray();
+            var binders = callees.Length == 0 ? "" : $" ({string.Join(' ', callees)} : Nat)";
+            foreach (var (rowIndex, row) in template.Rows.Index())
+            {
+                var arguments = new List<string> { "profile", "environment" };
+                foreach (var feature in template.Features)
+                    arguments.Add(LeanText.Bool(row.Variant.Profile.Get(feature)));
+                arguments.AddRange(callees);
+                var name = $"method{index}_input{rowIndex}_code";
+                Line("/-- The selected flags give this input's decoded code for every caller. -/");
+                Line($"theorem {name} (profile : FeatureProfile) (environment : LayoutEnvironment){binders} :");
+                Line($"    (method{index} {string.Join(' ', arguments)}).code = {row.Body}.code := rfl");
+                Line($"#print axioms {name}");
+            }
             if (!omitEquations)
             {
                 Line($"cil_instruction_equations method{index}");
@@ -312,23 +338,10 @@ internal static partial class TemplateEmitter
                 arguments.Add(Math.Max(0, target).ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
             var instance = $"{options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}";
-            var method = $"Extracted.method{index}";
-            var inputs = $"Extracted.profile Extracted.environment {method}Links {method}Reachable";
             Line("/-- This extracted method is exactly the instantiated shared template. -/");
             Line($"@[cil_code] theorem method{index}_template : Extracted.program[{index}]? =");
             Line($"    some ({instance}) := rfl");
             Line($"#print axioms method{index}_template");
-            Line($"""
-                theorem method{index}_decoder_eq : Method.ofClosed? {inputs} {method}Closed {method}RawArguments =
-                    .ok ({instance}) := {method}_decoder_eq
-                #print axioms method{index}_decoder_eq
-                theorem method{index}_decoded : Method.ofRaw? {inputs} {method}Original {method}TypeArgumentsRaw =
-                    some ({instance}) := {method}_decoded
-                #print axioms method{index}_decoded
-                theorem method{index}_decoded_code : ({instance}).code =
-                    Extraction.methodCode {inputs} {method}Closed := {method}_decoded_code
-                #print axioms method{index}_decoded_code
-                """.ReplaceLineEndings("\n"));
         }
         Line("end TemplateBindings");
         return lean.ToString();

@@ -50,18 +50,30 @@ dotnet run --file scripts/Test.cs -- --suite lookups
 The suite (`Tests/LookupScaling.cs`) extracts one method, `word = word * y + x;` repeated, at
 about 500 and about 2,000 instructions, and compiles three files at each length: the
 extraction, its code as a body with a parameter under `cil_instruction_equations`, and its
-generated template. Heartbeats are read by `IO.getNumHeartbeats` at the end of each file, less
-the heartbeats of a file that holds the imports alone. Each file prints one line:
+generated template. The suite reads `IO.getNumHeartbeats` after the final lookup assertions
+and subtracts the heartbeats of the imports alone. Each row prints one line:
 
 ```text
 PASS compiling an extracted method costs <n> heartbeats per instruction at 502 instructions and <n> at 2002, <ratio> times as many
 ```
 
-The suite fails when a ratio exceeds 1.15. Linear equations measure 0.99 for the extraction and
-1.01 for the body and the template; equations proved against the whole list measure 3.09 for the
-extraction and about 3.7 for the body. A ratio that rises toward 1.15 means some proof or
-elaboration step walks the code list again. The suite also fails when a `cil_lookup` at a
+The suite fails when a ratio exceeds 1.15. The ratios are 0.98 for the extraction, 1.02 for the
+hand-written body and 0.95 for the decoded template. At 502 and 2,002 instructions the template
+costs 52,427 and 49,854 heartbeats per instruction. Proving each equation against the whole list
+costs 3.09 times as much per instruction for the extraction and about 3.7 for the hand-written
+body at the longer length. The suite also fails when a `cil_lookup` at a
 computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
+
+The lookup fixture checks the hand-written multiply-add code against the entire decoded template
+after reading its heartbeat count. A second fixture keeps eight branch sites and varies either
+the number of input profiles or the number of distinct feature getters over 2, 4 and 8, holding
+the other dimension at 4. It measures the whole shared module after imports and the public
+selection, leaf proofs and instruction equations after the closed decoder inputs. Each doubling
+may cost at most 1.15 times as much per instruction per input or per distinct flag.
+The input row adds a distinct observed flag assignment for each input. The flag row uses the
+same four profiles at every size, with two observed assignments. A template with no flags uses
+its decoded input's code directly. With flags, each conditional instruction compiles separately
+so the compiler can handle one pc without tracing the branches at later pcs.
 
 The same method at 125, 250 and 500 statements also reports, from its extraction, the heartbeats
 of `Extracted.method0_calls_validated` and of `Extracted.method0_evidence_validated` alone. The

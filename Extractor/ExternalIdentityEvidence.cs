@@ -25,13 +25,14 @@ internal sealed class ExternalIdentityEvidence
         return "externalIdentity" + index.ToString(CultureInfo.InvariantCulture);
     }
 
-    internal void Emit(StringBuilder lean)
+    internal void Emit(StringBuilder lean, StringBuilder? decoderInputs = null)
     {
         while (emitted < identities.Count)
         {
             var identity = identities[emitted];
             var name = "externalIdentity" + emitted.ToString(CultureInfo.InvariantCulture);
             var encoded = StrictUtf8.GetBytes(identity);
+            decoderInputs?.AppendLine($"def {name} : String := {IdentityText.Quote(identity)}");
             var proofs = EmitChunks(lean, encoded);
             var bytes = string.Join(", ", encoded
                 .Select(value => value.ToString(CultureInfo.InvariantCulture)));
