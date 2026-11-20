@@ -41,10 +41,11 @@ def prefixAlignment : RawOperand → Option Nat
   | _ => none
 
 /-- The alignment of a `cpblk` or `initblk` after `previous`: the operand of an `unaligned.`
-    before it, and otherwise `defaultBlockAlignment`. -/
-def blockAlignment : Option RawInstruction → Nat
-  | some ⟨_, 0xFE12, operand⟩ => (prefixAlignment operand).getD defaultBlockAlignment
-  | _ => defaultBlockAlignment
+    before it when `prefixAlignment` admits it, none for any other `unaligned.` operand, and
+    `defaultBlockAlignment` after any other instruction or at the first pc. -/
+def blockAlignment : Option RawInstruction → Option Nat
+  | some ⟨_, 0xFE12, operand⟩ => prefixAlignment operand
+  | _ => some defaultBlockAlignment
 
 /-- The call opcode for a constrained instance or static slot. -/
 def constrainedCallOpcode (site : CallSite) : Nat := if site.hasThis then 111 else 40

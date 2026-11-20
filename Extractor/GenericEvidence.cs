@@ -670,7 +670,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Ldind_Ref or Code.Stind_Ref => HoleFamily.ReferenceIndirection,
         Code.Throw or Code.Rethrow or Code.Leave or Code.Leave_S or Code.Endfinally or Code.Endfilter =>
             HoleFamily.Exceptions,
-        Code.Volatile or Code.Unaligned or Code.No => HoleFamily.Prefixes,
+        Code.Volatile or Code.No => HoleFamily.Prefixes,
         _ => HoleFamily.Other
     };
 

@@ -1534,7 +1534,7 @@ example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvide
   decide +kernel
 example : MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence addMethod := by decide +kernel
 
-/-- The total decoder writes a hole for a reachable block initialization. -/
+/-- A method that fills a block through its byref argument with an unprefixed `initblk`. -/
 private def blockInit : RawMethod :=
   { raw [i 2, i 22, i 22, i 65048, i 42] [.byref intType] with
     maxStack := 3, returnType := .void }
@@ -1548,6 +1548,16 @@ theorem decoded_block_hole_refused :
       ((Instruction.ofRawCode none blockInit.code).set 3 (.unadmitted 65048)) true := by
   decide +kernel
 #print axioms decoded_block_hole_refused
+
+/-- The certificate refused above is valid over the code the decoder gives `blockInit`, so the
+    refusal comes from the hole at pc 3. -/
+theorem decoded_block_init_valid :
+    ScalarFlowValid blockInit ([0, 1, 2, 3, 0].map unknown)
+      [some [], some [.reference], some [.word32, .reference],
+        some [.word32, .word32, .reference], some []]
+      (Instruction.ofRawCode none blockInit.code) true := by
+  decide +kernel
+#print axioms decoded_block_init_valid
 
 /-- A decoded addition meets the full method evidence including the code equality. -/
 theorem flagged_addition_valid :

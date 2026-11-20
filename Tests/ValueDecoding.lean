@@ -355,6 +355,31 @@ theorem unaligned_indirect_unchanged :
   decide +kernel
 #print axioms unaligned_indirect_unchanged
 
+/-- `cpblk` and `initblk` decode at alignment 8 with nothing before them, at the operand of an
+    `unaligned.` 1, 2 or 4 before them, and at 8 after an instruction that is not a prefix,
+    whatever integer operand it carries. -/
+theorem block_alignments :
+    let copy : RawInstruction := ⟨2, 65047, .none⟩
+    let fill : RawInstruction := ⟨2, 65048, .none⟩
+    let aligned (alignment : Int) : Option RawInstruction := some ⟨0, 0xfe12, .integer alignment⟩
+    let constant (value : Int) : Option RawInstruction := some ⟨0, 0x1f, .integer value⟩
+    (Instruction.ofRaw? none copy == some (.memory (.copyBlock 8)) &&
+      Instruction.ofRaw? none fill == some (.memory (.initBlock 8)) &&
+      Instruction.ofRaw? (aligned 1) copy == some (.memory (.copyBlock 1)) &&
+      Instruction.ofRaw? (aligned 2) copy == some (.memory (.copyBlock 2)) &&
+      Instruction.ofRaw? (aligned 4) copy == some (.memory (.copyBlock 4)) &&
+      Instruction.ofRaw? (aligned 1) fill == some (.memory (.initBlock 1)) &&
+      Instruction.ofRaw? (aligned 2) fill == some (.memory (.initBlock 2)) &&
+      Instruction.ofRaw? (aligned 4) fill == some (.memory (.initBlock 4)) &&
+      Instruction.ofRaw? (constant 1) copy == some (.memory (.copyBlock 8)) &&
+      Instruction.ofRaw? (constant 2) copy == some (.memory (.copyBlock 8)) &&
+      Instruction.ofRaw? (constant 4) copy == some (.memory (.copyBlock 8)) &&
+      Instruction.ofRaw? (constant 1) fill == some (.memory (.initBlock 8)) &&
+      Instruction.ofRaw? (constant 2) fill == some (.memory (.initBlock 8)) &&
+      Instruction.ofRaw? (constant 4) fill == some (.memory (.initBlock 8))) = true := by
+  decide +kernel
+#print axioms block_alignments
+
 /-- Only a valid unaligned prefix before an object load or store preserves its decoding. -/
 theorem object_prefixes :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") int32

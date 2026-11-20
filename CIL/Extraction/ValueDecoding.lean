@@ -488,8 +488,10 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
   | 65039, .none => emit .localloc
   -- Block copies and fills, at the alignment an `unaligned.` before them gives.
-  | 65047, .none => emit (.memory (.copyBlock (blockAlignment previous)))
-  | 65048, .none => emit (.memory (.initBlock (blockAlignment previous)))
+  | 65047, .none => (blockAlignment previous).bind fun alignment =>
+    emit (.memory (.copyBlock alignment))
+  | 65048, .none => (blockAlignment previous).bind fun alignment =>
+    emit (.memory (.initBlock alignment))
   -- The prefixes their consumers record; `invalidPredecessor` refuses a consumer that takes
   -- neither, and `rawPrefixesValid` a prefix with no consumer.
   | 65054, .none => if previous.any fun before => isPrefixOpcode before.opcode then none
