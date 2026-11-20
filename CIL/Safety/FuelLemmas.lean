@@ -214,17 +214,16 @@ theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : 
   rw [failure] at returned
   cases returned
 
-/-- Settled invocations agree at every fuel, so a computed settled run refutes a contract; a run
-    that ends in fuel exhaustion or an `unsupported` fault is not settled, so this lemma takes
-    none. -/
+/-- Two stable outcomes of the same invocation agree at any fuel budgets. This includes the
+    interpreter stopping at an unsupported operation. -/
 theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value}
     {memory : Memory} {first second : Except LocatedFault (Memory × List Value)}
-    (firstSettled : Settled first) (secondSettled : Settled second)
+    (firstStable : Stable first) (secondStable : Stable second)
     (one : invoke program left method args memory = first)
     (other : invoke program right method args memory = second) :
     first = second := by
-  have up := invoke_mono program left right method args memory first firstSettled.stable one
-  have down := invoke_mono program right left method args memory second secondSettled.stable other
+  have up := invoke_mono program left right method args memory first firstStable one
+  have down := invoke_mono program right left method args memory second secondStable other
   rw [Nat.add_comm] at down
   exact up.symm.trans down
 
@@ -253,7 +252,7 @@ theorem Counterexample.violates {program : CIL.Program} {method fuel : Nat}
     (settled : Settled outcome) (ran : invoke program fuel method args memory = outcome) :
     violates outcome := by
   rcases counter with ⟨observed, witness, invoked, witnessSettled, bad⟩ | diverges
-  · rw [← invoke_unique witnessSettled settled invoked ran]
+  · rw [← invoke_unique witnessSettled.stable settled.stable invoked ran]
     exact bad
   · obtain ⟨fault, exhausted, kind⟩ := diverges fuel
     rw [ran] at exhausted

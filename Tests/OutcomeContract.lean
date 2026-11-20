@@ -192,9 +192,7 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
   { returnsValue := false, locals := [], code := [.unadmitted 0] }
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
-/-- A hole's fault is not a throw, so it is no raised outcome, and it is not settled, so
-    `invoke_unique` refutes no raise from it: the model does not cover a run that reaches a
-    hole. -/
+/-- A hole gives an unsupported fault and leaves the method's exception behavior unknown. -/
 example (m : Memory) :
     invoke [stuck] 1 0 [] m = .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
       (∀ exception, ExecutionFault.unsupported "Opcode not admitted" ≠ .thrown exception) ∧

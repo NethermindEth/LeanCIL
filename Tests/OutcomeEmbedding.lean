@@ -175,7 +175,7 @@ example : ¬ checkContract.Holds [outer, renamedException] 1 := by
     (by decide)
   have thrown : Safety.invoke [outer, renamedException] 10 1 (checkContract.args 101) empty =
       .error ⟨1, 7, .thrown .argument⟩ := rfl
-  cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
+  cases invoke_unique (by simp [Stable, named]) (by simp [Stable]) ran thrown
   simp [outOfRange] at named
 
 /-- The lowered bound throws for 60, which the contract says returns. -/
@@ -184,7 +184,7 @@ example : ¬ checkContract.Holds [outer, lowerBound] 1 := by
   obtain ⟨_, _, _, ran, -⟩ := holds.returning (input := 60) (initial := empty) trivial (by decide)
   have thrown : Safety.invoke [outer, lowerBound] 10 1 (checkContract.args 60) empty =
       .error ⟨1, 7, .thrown outOfRange⟩ := rfl
-  cases invoke_unique (by trivial) (by simp [Settled]) ran thrown
+  cases invoke_unique (by trivial) (by simp [Stable]) ran thrown
 
 /-! Only named throws are transported: fuel exhaustion and unsupported execution are not exceptions. -/
 
@@ -202,8 +202,7 @@ example : ¬ Transported (.error ⟨1, 6, .unsupported "Opcode not admitted"⟩ 
   rintro ⟨_, thrown⟩
   cases thrown
 
-/-- The extraction raises, but the literal body proves nothing about it: its hole's fault is not
-    a throw, and it is not settled, so `invoke_unique` refutes no raise from it either. -/
+/-- The hole gives an unsupported model outcome, which cannot witness a contract refutation. -/
 example : ¬ Settled (.error ⟨1, 6, .unsupported "Opcode not admitted"⟩ :
     Except LocatedFault (Safety.Memory × List Safety.Value)) := by decide
 

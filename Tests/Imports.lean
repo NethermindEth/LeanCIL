@@ -180,7 +180,8 @@ theorem root_unlinked (input : RootInput) (m : Memory) (permitted : rootContract
 theorem root_unlinked_never_returns (input : RootInput) (m : Memory) (permitted : rootContract.pre input m)
     (fuel : Nat) (result : Memory × List Value) :
     invoke Extracted.program fuel root (rootContract.args input) m ≠ .ok result := fun returned =>
-  nomatch invoke_unique (first := .ok result) trivial (by simp [Settled]) returned (root_unlinked input m permitted 0)
+  nomatch invoke_unique (first := .ok result) trivial (by simp [Stable]) returned
+    (root_unlinked input m permitted 0)
 
 /-- So the unlinked contract holds only vacuously: no input meets its precondition. -/
 theorem root_unlinked_vacuous (holds : rootContract.Holds Extracted.program root) (input : RootInput) (m : Memory) :

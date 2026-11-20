@@ -62,7 +62,7 @@ theorem RaisesCLR.not_of_invoke {program : CIL.Program} {fuel method : Nat} {arg
     ¬ RaisesCLR program method args memory exception := by
   rintro ⟨otherFuel, otherFault, otherInvoked, named⟩
   have same : fault = otherFault := Except.error.inj
-    (invoke_unique settled (settled_of_clrException named) invoked otherInvoked)
+    (invoke_unique settled.stable (settled_of_clrException named).stable invoked otherInvoked)
   subst otherFault
   exact different named
 

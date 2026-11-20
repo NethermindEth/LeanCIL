@@ -991,7 +991,10 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
 | `cil_outcome_call holds input at site [facts]` | Continues after a call the callee's contract says returns, whether the caller then returns or raises |
 | `cil_outcome_raise holds input at site [facts]` | Closes a `Raises` goal by propagating the exception the callee's contract names |
 | `MethodContract.Holds.outcomes` | Lifts a normal-only contract |
-| `invoke_unique` | Ties a computed settled outcome to the contract's existential one; fuel exhaustion and `unsupported` faults are not settled |
+| `invoke_unique` | Proves that two stable outcomes of the same invocation agree across fuel budgets, including an interpreter stop at an unsupported operation |
+
+For a CLR contract refutation, a fault must also be definite. An unsupported operation leaves
+the CLR outcome unknown at every fuel budget.
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
 `.invalidOperation` when its two arguments are equal, with `cil_raise_steps` and
