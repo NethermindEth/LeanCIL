@@ -299,6 +299,23 @@ example : refuses call6 ({ profile with avx512F := false }) := by decide +kernel
 example : refuses call8 ({ profile with avx512DQ := false }) := by decide +kernel
 example : Intrinsic.available profile (.avx512 .ltu512) = true := by decide +kernel
 example : Intrinsic.available profile (.avx512DQ .moveMask512) = true := by decide +kernel
+-- A kept hardware call is refused at the evidence level under a profile lacking its feature.
+example : RuntimeModelsAgree (raw call0) [true] (body [.call call0.method {}]) := by
+  decide +kernel
+example : ¬ RuntimeModelsAgree (raw call0) [true]
+    { body [.call call0.method {}] with profile := .scalar } := by decide +kernel
+example : ¬ RuntimeModelsAgree (raw call6) [true]
+    { body [.call call6.method {}] with profile := { profile with avx512F := false } } := by
+  decide +kernel
+example : ¬ RuntimeModelsAgree (raw call8) [true]
+    { body [.call call8.method {}] with profile := { profile with avx512DQ := false } } := by
+  decide +kernel
+-- A link at a hardware site keeps the feature requirement of the model the site resolves to.
+example : RuntimeModelsAgree (raw call0) [true]
+    { body [.call call0.method {}] with links := [(0, .direct 0)] } := by decide +kernel
+example : ¬ RuntimeModelsAgree (raw call0) [true]
+    { body [.call call0.method {}] with links := [(0, .direct 0)], profile := .scalar } := by
+  decide +kernel
 
 example : ¬ ({ profile with architecture := .arm64 } : FeatureProfile).Valid := by decide +kernel
 

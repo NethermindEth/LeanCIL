@@ -513,13 +513,15 @@ private def HardwareSlot.Registered (slot : HardwareSlot) (table : ModelTable) :
     table.entry? .call (slotReference (.apply slot.head element) slot.key) = some slot.entry
   else table.entry? .call (slotReference slot.head slot.key) = some slot.entry
 
-/-- Every exact slot selects its own registered row for every instantiation of its owner. -/
-def ExactHardwareRegistered (table : ModelTable) : Prop :=
-  ∀ slot ∈ exactSlots, slot.Registered table
+/-- Every hardware slot selects its own registered entry for every instantiation of its owner,
+    so no other entry of the table shadows a hardware name. -/
+def HardwareRegistered (table : ModelTable) : Prop :=
+  ∀ slot ∈ hardwareSlots, slot.Registered table
 
-/-- Literal lookups at the static exact slots certify the runtime table's registration. -/
+/-- Literal lookups at the static hardware slots certify the runtime table's registration. -/
 macro "hardware_registrations" : tactic => `(tactic|
-  (simp only [ExactHardwareRegistered, exactSlots, exactMachineSlots, exactVectorSlots,
+  (simp only [HardwareRegistered, hardwareSlots, exactSlots, exactMachineSlots, exactVectorSlots,
+     otherMachineSlots, otherVectorSlots,
      List.flatMap_cons, List.flatMap_nil, List.forall_mem_append, List.forall_mem_cons,
      List.not_mem_nil, false_implies, implies_true, and_true, true_and]
    repeat' first | apply And.intro | exact True.intro
@@ -555,9 +557,36 @@ private theorem exactSlots_noPair : exactSlots.all (fun slot =>
 
 #print axioms exactSlots_noPair
 
+/-- The hardware slot selected by the closed reference's owner and name. -/
+private def hardwareSlot (method : MethodRef) := hardwareSlots.find? (·.matches method)
+
+/-- A closed reference names a hardware member even if no row of its slot admits it. -/
+def hardwareCallFamily (method : MethodRef) : Bool := (hardwareSlot method).isSome
+
+/-- The model the rows of a hardware reference's own slot select. -/
+def hardwareModel (environment : LayoutEnvironment) (method : MethodRef) :
+    Option RuntimeModel := do
+  let slot ← hardwareSlot method
+  slot.entry.resolve environment.callLayouts method
+
+/-- The table resolves a hardware reference only through the rows of its own slot. -/
+theorem HardwareRegistered.resolve {table : ModelTable} (registered : HardwareRegistered table)
+    (environment : LayoutEnvironment) (method : MethodRef)
+    (member : hardwareCallFamily method = true) :
+    table.find environment .call method = hardwareModel environment method := by
+  obtain ⟨slot, selected⟩ := Option.isSome_iff_exists.mp member
+  have found : hardwareSlots.find? (·.matches method) = some slot := selected
+  have listed := List.mem_of_find?_eq_some found
+  have matched := List.find?_some found
+  rw [ModelTable.find, HardwareSlot.lookup (registered slot listed) matched]
+  simp only [hardwareModel, selected]
+  rfl
+
+#print axioms HardwareRegistered.resolve
+
 /-- The runtime table resolves an exact-family method only through its exact closed signature. -/
-theorem ExactHardwareRegistered.resolve {table : ModelTable}
-    (registered : ExactHardwareRegistered table)
+theorem HardwareRegistered.resolveExact {table : ModelTable}
+    (registered : HardwareRegistered table)
     (environment : LayoutEnvironment) (method : MethodRef)
     (member : exactCallFamily method = true) :
     table.find environment .call method = exactIntrinsic method := by
@@ -565,7 +594,8 @@ theorem ExactHardwareRegistered.resolve {table : ModelTable}
   have found : exactSlots.find? (·.matches method) = some slot := selected
   have listed := List.mem_of_find?_eq_some found
   have matched := List.find?_some found
-  rw [ModelTable.find, HardwareSlot.lookup (registered slot listed) matched]
+  have exact : slot ∈ hardwareSlots := List.mem_append_left _ (List.mem_append_left _ listed)
+  rw [ModelTable.find, HardwareSlot.lookup (registered slot exact) matched]
   simp only [exactIntrinsic, selected]
   change slot.entry.resolve environment.callLayouts method = slot.entry.resolve _ method
   unfold ModelEntry.resolve
@@ -578,6 +608,6 @@ theorem ExactHardwareRegistered.resolve {table : ModelTable}
     change row.model slot environment.callLayouts method = row.model slot _ method
     simp [HardwareRow.model, valid]
 
-#print axioms ExactHardwareRegistered.resolve
+#print axioms HardwareRegistered.resolveExact
 
 end CIL.Extraction

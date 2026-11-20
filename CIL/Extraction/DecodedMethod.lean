@@ -119,7 +119,7 @@ theorem TranslationValid.programBindingsValid {rawLayouts layouts pins evidence 
   obtain ⟨recorded, compiled⟩ := List.getElem?_zip_eq_some.mp found
   obtain ⟨bound, rfl⟩ := List.getElem?_eq_some_iff.mp recorded
   have checked := translation_method_checked valid ⟨index, bound⟩ method compiled
-  obtain ⟨specialized, -, -, features, calls, -, -, -, -, -, -, -, -, dispatch, body, env, -⟩ :=
+  obtain ⟨specialized, -, -, features, calls, -, -, -, -, -, -, -, dispatch, body, env, -⟩ :=
     checked
   apply decide_eq_true
   refine ⟨?_, calls, dispatch⟩
@@ -179,7 +179,7 @@ theorem MethodEvidenceValid.prefixEntryFree {rawLayouts : List RawLayout}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
     PrefixEntryFree item.closed.code := by
-  obtain ⟨specialized, -, -, -, -, -, -, -, -, -, -, -, -, -, decodes, -, -⟩ := valid
+  obtain ⟨specialized, -, -, -, -, -, -, -, -, -, -, -, -, decodes, -, -⟩ := valid
   exact instantiateMethod_prefixEntryFree specialized.1 decodes.prefixEntryFree
 
 #print axioms MethodEvidenceValid.prefixEntryFree

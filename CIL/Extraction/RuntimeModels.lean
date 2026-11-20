@@ -68,12 +68,25 @@ def runtimeModel (environment : LayoutEnvironment) (opcode : CallOpcode) (method
     Option RuntimeModel :=
   runtimeModels.find environment opcode method
 
+/-- Every hardware slot, exact or not, selects its own entry of the runtime table. -/
+theorem runtimeModels_hardwareRegistered : HardwareRegistered runtimeModels := by
+  hardware_registrations
+
+#print axioms runtimeModels_hardwareRegistered
+
+/-- Every hardware reference, DivRem among them, resolves through the rows of its own slot. -/
+theorem runtimeModels_hardware (environment : LayoutEnvironment) (method : MethodRef)
+    (member : hardwareCallFamily method = true) :
+    runtimeModel environment .call method = hardwareModel environment method :=
+  runtimeModels_hardwareRegistered.resolve environment method member
+
+#print axioms runtimeModels_hardware
+
 /-- Every exact hardware reference selects the operation of its own closed signature. -/
 theorem runtimeModels_exactHardware (environment : LayoutEnvironment) (method : MethodRef)
     (member : exactCallFamily method = true) :
-    runtimeModel environment .call method = exactIntrinsic method := by
-  apply ExactHardwareRegistered.resolve _ environment method member
-  hardware_registrations
+    runtimeModel environment .call method = exactIntrinsic method :=
+  runtimeModels_hardwareRegistered.resolveExact environment method member
 
 #print axioms runtimeModels_exactHardware
 

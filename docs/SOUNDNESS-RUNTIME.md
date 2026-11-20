@@ -60,8 +60,10 @@ the indexed layout reader.
 Portable 128-, 256- and 512-bit integer vector bitwise operators, whole-vector equality, `Zero` and
 `AllBitsSet` share their bit-level semantics for byte, signed/unsigned 32-bit and signed/unsigned
 64-bit elements. Hardware model entries bind the open declaration and external identity of each overload.
-The closed reference selects its operation and arity. `runtimeModels_exactHardware` proves
-that every exact-family reference resolves to `exactIntrinsic` in every layout environment.
+The closed reference selects its operation and arity. `runtimeModels_hardware` proves that every
+hardware reference, `DivRem` among them, resolves through the rows of its own slot, and
+`runtimeModels_exactHardware` that every exact-family reference resolves to `exactIntrinsic` in
+every layout environment.
 The decoder checks availability under the method's profile. A live unresolved or unavailable
 call prevents construction of the decoded method. Portable
 vector constructors and byte-reference loads and stores retain their calls. Their model entries

@@ -690,7 +690,7 @@ private def tupleRaw := { raw [i 2, i 3, i 4, i 40 (.call tupleSite), i 42] [wor
 private theorem tuple_result_cases :
     (ScalarFlowValid tupleRaw [unknown 0, unknown 1, unknown 2, unknown 3, unknown 1] [some [],
       some [.word64], some [.word64, .word64], some [.word64, .word64, .word64], some [.other]]
-      [.ldarg 0, .ldarg 1, .ldarg 2, .intrinsic (.x86Base .divRem64) 3, .ret]) ∧
+      [.ldarg 0, .ldarg 1, .ldarg 2, .call tupleSite.method {}, .ret]) ∧
     (scalarTransfer tupleRaw (i 40 (.call { tupleSite with
         method.parameters := [word, intType, word] })) [.word64, .word32, .word64] = none) := by
   decide +kernel

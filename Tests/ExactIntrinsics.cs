@@ -41,7 +41,7 @@ string DeclareAes(string name, string flag)
     profile[flag] = true;
     var path = Path.Combine(root, $"{name}-{flag}.json");
     File.WriteAllText(path, profile.ToJsonString());
-    return "@" + path;
+    return $"@{path}";
 }
 var hardwareRoot = Path.Combine(root, "HardwareMembers");
 Directory.CreateDirectory(hardwareRoot);

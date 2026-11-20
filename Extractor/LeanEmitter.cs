@@ -184,7 +184,6 @@ internal static class LeanEmitter
 
             """.ReplaceLineEndings("\n"));
         lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
-        lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
         if (importResolution is not null) layoutContext.AddImported(importResolution.LocalLayouts());
@@ -466,7 +465,7 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
-                $"profile_valid, method{n}_models_validated, method{n}_opaque_validated, " +
+                $"method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
             var statics = refusals[n] is null

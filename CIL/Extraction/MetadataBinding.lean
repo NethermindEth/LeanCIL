@@ -519,7 +519,8 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
       if target == definition then .ok {} else .error (.operandMismatch token)
     | none => .error (.operandMismatch token)
   | .external identity =>
-    if site.definition.isSome || !(site.externalMatches frame identity) then .error (.operandMismatch token)
+    if site.definition.isSome || !(site.externalMatches frame identity) then
+      .error (.operandMismatch token)
     else .ok {}
 
 /-- The same member binds the typed reference and both permitted external identity spellings. -/

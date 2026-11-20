@@ -399,7 +399,6 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
   MethodShapeValid item.closed method ∧
   UnsafeCallsValid item.closed item.reachable method.code ∧
-  method.profile.Valid ∧
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   ObjectOperandsValid item.closed item.reachable method ∧
@@ -419,13 +418,13 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧
-    _ ∧ _ ∧ _))
+    _ ∧ _))
 
 /-- The record supplies exactly the executable links checked for its method. -/
 theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
     item.links = method.links := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links, -⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, links, -⟩ := valid
   exact links
 #print axioms MethodEvidenceValid.links_eq
 
@@ -433,10 +432,18 @@ theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item m
 theorem MethodEvidenceValid.decoded_staticSites {rawLayouts layouts pins all imports item method}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
     (flag : item.decoded = true) : method.staticSites = item.closed.staticDescriptors := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, fields⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, fields⟩ := valid
   exact fields flag
 
 #print axioms MethodEvidenceValid.decoded_staticSites
+
+/-- Validated evidence runs under a valid feature profile, which its shape check states. -/
+theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    method.profile.Valid := by
+  obtain ⟨-, -, -, -, -, -, shape, -⟩ := valid
+  exact shape.1
+#print axioms MethodEvidenceValid.profile_valid
 
 /-- A set decoded flag in a validated record binds every emitted instruction to its decoding. -/
 theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
@@ -445,7 +452,7 @@ theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
     (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
     (flag : item.decoded = true) : method.code =
       methodCode method.profile method.environment method.links item.reachable item.closed := by
-  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
   exact same flag
 
 #print axioms MethodEvidenceValid.decoded_code
@@ -459,7 +466,7 @@ theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}
     (atLive : item.reachable[pc]? = some true) :
     SiteClaimTotal method.environment (method.linkAt pc) raw true
       ((foldRoles item.closed.code)[pc]?.join) := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, agree, -⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, agree, -⟩ := valid
   exact agree.siteClaimTotal atRaw atLive
 
 #print axioms MethodEvidenceValid.siteClaimTotal
@@ -475,7 +482,7 @@ theorem MethodEvidenceValid.foldOwnedSite {rawLayouts : List RawLayout}
     (owned : foldOwnsSite ((foldRoles item.closed.code)[pc]?.join) = true) :
     ((foldRoles item.closed.code)[pc]?.join).bind
       (Instruction.ofRole? · none raw) = some emitted := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, agree, -⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, agree, -⟩ := valid
   exact agree.foldOwnedSite atRaw atLive atCode owned
 
 #print axioms MethodEvidenceValid.foldOwnedSite
