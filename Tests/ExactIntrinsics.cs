@@ -535,6 +535,47 @@ foreach ((string name, int width, string profile, string unavailable, string fea
 
 Flush();
 
+// The AVX2 source halves contain ones and twos. Bit 7 masks every low byte.
+static byte[] Halves(byte low, byte high) =>
+    Enumerable.Repeat(low, 16).Concat(Enumerable.Repeat(high, 16)).ToArray();
+var shuffleSource = Halves(1, 2);
+var shuffleMask = Halves(0x80, 0);
+if (!RuntimeShuffle(runtime.GetMethod("Shuffle256")!, shuffleSource, shuffleMask).SequenceEqual(Halves(0, 2)))
+    throw new InvalidOperationException("AVX2 did not mask the low half or select byte two in the high half.");
+foreach ((string name, byte low, byte high) in new (string, byte, byte)[]
+{
+    ("ShuffleCrossHalf", 0, 1), ("ShuffleIgnoreHighBit", 1, 2)
+})
+{
+    if (!RuntimeShuffle(runtime.GetMethod(name)!, shuffleSource, shuffleMask).SequenceEqual(Halves(low, high)))
+        throw new InvalidOperationException($"The compiled {name} differs from its counterexample.");
+    verification.VerifyContractVariant(assembly, "Examples", selectors["Shuffle256"],
+        Path.Combine(root, "ShuffleContract"), assembly, selectors[name], Path.Combine(root, name),
+        "open Tests.ShuffleContract", """
+        set_option maxRecDepth 8192 in
+        /-- The compiled shuffle reads each valid span once and leaves caller memory unchanged. -/
+        theorem correctness : shuffle.Holds Extracted.program 0 := by
+          rintro ⟨s, c⟩ memory ⟨⟨sv, ss, sr⟩, cv, cs, cr⟩
+          apply MethodContract.Holds.intro (c := shuffle) (input := (s, c)) memory
+            (CIL.Vector.shuffleBytes256 s.bits c.bits) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+          refine ⟨32, ?_⟩
+          change invoke Extracted.program 32 0
+            [.bufferSpan (byteSpan s.address s.length), .bufferSpan (byteSpan c.address c.length)] memory =
+              .ok (memory, [.scalar (.v256 (CIL.Vector.shuffleBytes256 s.bits c.bits))])
+          have first := read_span memory s.address s.length s.bits sv ss sr []
+          have second := read_span memory c.address c.length c.bits cv cs cr [.scalar (.v256 s.bits)]
+          cil_checked_steps [sv, cv, first, second]
+        """, $$"""
+        set_option maxRecDepth 16384 in
+        /-- The extracted mutant returns the wrong bytes for the two readable spans. -/
+        theorem correctness : shuffle.Refuted Extracted.program 0 := by
+          apply refuted_of_shuffle (fuel := 64) (actual := halves {{low}} {{high}}) (by decide)
+          rfl
+        """, profile: "x64-v3", imports: "import Tests.ShuffleContract");
+    Console.WriteLine($"PASS AVX2 byte shuffle contract and checked {name} counterexample");
+}
+
+
 // A forged operation at the hardware call must fail the model agreement of the complete method.
 var rejectedHardware = new RejectedEvidence(Path.Combine(root, "RejectedHardware"));
 void RejectHardware(string folder, string example, string member, string operation, string label)

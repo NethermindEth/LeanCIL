@@ -65,6 +65,14 @@ public static class DivisionIntrinsics
     public static void Init512(ref Vector512<ulong> value) => value = default;
     public static Vector256<byte> Shuffle256(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
         Avx2.Shuffle(Vector256.Create(source), Vector256.Create(control));
+    // These compiled variants violate the lane and zero-mask rules of Shuffle256.
+    public static Vector256<byte> ShuffleCrossHalf(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
+        Avx2.Shuffle(Avx2.Permute4x64(Vector256.Create(source).AsUInt64(), 0x4e).AsByte(), Vector256.Create(control));
+
+    public static Vector256<byte> ShuffleIgnoreHighBit(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
+        Avx2.Shuffle(Vector256.Create(source),
+            Avx2.And(Vector256.Create(control).AsUInt64(), Vector256.Create(0x7f7f7f7f7f7f7f7fUL)).AsByte());
+
     public static Vector128<byte> Shuffle128(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
         Ssse3.Shuffle(Vector128.Create(source), Vector128.Create(control));
     // A portable AES hash round: x86 AESENC, else ARM64 AESE with a zero key, AESMC and the key.
