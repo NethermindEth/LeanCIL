@@ -84,6 +84,12 @@ if (!Equals(Property(Operation(call), "Method"), 1)) throw new Exception("Incorr
 var linked = new SortedSet<int>();
 if (!Links(linked).SequenceEqual([(0, ".direct 1")]) || !linked.SetEquals([1]))
     throw new Exception("Incorrect call link or target");
+caller.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
+var tail = Operation(call);
+linked.Clear();
+if (!Equals(Property(tail, "Method"), 1) || !Equals(Property(tail, "Kind"), Named("CallKind", "Tail")) ||
+    !Links(linked).SequenceEqual([(1, ".direct 1")]) || !linked.SetEquals([1]))
+    throw new Exception("The prefixed call lost its target or its link at the call instruction");
 methods.Remove(callee);
 try
 {
@@ -300,7 +306,7 @@ if (Loops(Body(nop, nop, backEdge)) != 1)
     throw new Exception("A conditional back edge is not found as a loop");
 if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
-    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0, false)))
+    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
 if (Equals(Make("LoadScalar", 4, false), Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) ||
     !Equals(Make("LoadScalar", 1, true), Make("LoadScalar", 1, Named("LoadSign", "Signed"))))
@@ -309,16 +315,6 @@ var negativeOffset = Make("AddOffset", ulong.MaxValue - 7, true);
 if (!Equals(Property(negativeOffset, "Stride"), ulong.MaxValue - 7) ||
     !Equals(Property(negativeOffset, "Signed"), true))
     throw new Exception("A negative stride lost its signed two's complement value");
-var tail = Make("Call", Named("CallKind", "Tail"), 3, 0, false);
-// The call's operand is the typed method its raw operand names; its rendering is the call's operand term.
-object NoTypes() =>
-    Activator.CreateInstance(Model("ValueList`1").MakeGenericType(typeof(string)), [Array.Empty<string>()])!;
-var siteName = Model("MetadataName").GetMethod("OfText", Declared)!.Invoke(null, ["Site"])!;
-var site = Make("MethodRef", ".void", siteName, false, 0, ".void", NoTypes(), NoTypes());
-Assign(tail, "Site", site);
-if (!Equals(Property(tail, "Method"), 3) ||
-    !Equals(Property(tail, "Site"), site) || !Equals(Property(tail, "Kind"), Named("CallKind", "Tail")))
-    throw new Exception("The outline lost the tail call's target, typed operand or prefix");
 try
 {
     Make("Constant", 32, -1L, true);
