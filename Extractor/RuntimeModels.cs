@@ -229,22 +229,6 @@ internal static class RuntimeModels
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
     }
 
-    internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
-    {
-        if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
-            reference.HasThis != (reference.Name == ".ctor")) return null;
-        ValidateCallScope(reference);
-        Operation? op = reference.DeclaringType.Scope.Name switch
-        {
-            "System.Runtime" => UnsafeModels.Translate(reference, profile.Architecture),
-            _ => null
-        };
-        if (op is not null) ValidateSignature(reference, profile.Architecture);
-        if (op is not null && ValueTuples.Is(reference.ReturnType))
-            ValueTuples.RequirePair(reference.ReturnType, reference.Module, profile.Architecture);
-        return op;
-    }
-
     internal static readonly (string Type, int Width, bool Signed)[] MathIntegers =
     [
         ("System.SByte", 8, true), ("System.Byte", 8, false),

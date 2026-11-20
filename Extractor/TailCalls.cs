@@ -26,9 +26,9 @@ internal static class TailCalls
         if (prefix.Next is not { OpCode.Code: Code.Call, Operand: MethodReference target } ||
             InitAccessors.Return(target.ReturnType).FullName !=
                 InitAccessors.Return(method.ReturnType).FullName ||
-            target.DeclaringType.Scope != method.Module ||
-            RuntimeModels.Translate(target, FeatureProfile.Scalar) is not null)
+            target.DeclaringType.Scope != method.Module)
             throw new InvalidDataException(
                 "Unsupported tail prefix: requires same-assembly direct call with matching return type");
+        RuntimeModels.ValidateCallScope(target);
     }
 }

@@ -8,17 +8,10 @@ internal static class UnsafeModels
     static readonly TypeLevel Owner = new(MetadataName.OfText("System.Runtime.CompilerServices"),
         MetadataName.OfText("Unsafe"));
 
-    internal static Operation? Translate(MethodReference reference, string architecture = "scalar") =>
-        Helper(reference, architecture, modelled: false);
-
     // A modelled helper keeps its call. Extractor analyses read the operation selected for that call.
-    internal static Operation? CallModel(MethodReference reference, string architecture) =>
-        Helper(reference, architecture, modelled: true);
-
-    // Each helper is either modelled or translated, never both, so the two entry points partition the family.
-    static Operation? Helper(MethodReference reference, string architecture, bool modelled)
+    internal static Operation? CallModel(MethodReference reference, string architecture)
     {
-        if (modelled && reference.Name is "As" or "AsRef" or "BitCast")
+        if (reference.Name is "As" or "AsRef" or "BitCast")
         {
             if (reference.DeclaringType is TypeSpecification ||
                 !IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime))
@@ -34,7 +27,7 @@ internal static class UnsafeModels
             return null;
 
         var element = generic.GenericArguments[0];
-        if (modelled && reference.Name is "Read" or "Write" or "ReadUnaligned" or "WriteUnaligned")
+        if (reference.Name is "Read" or "Write" or "ReadUnaligned" or "WriteUnaligned")
             return generic.ElementMethod.CallingConvention == MethodCallingConvention.Generic &&
                 reference.DeclaringType is not TypeSpecification &&
                 IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime)
@@ -45,31 +38,31 @@ internal static class UnsafeModels
         bool Reference(TypeReference type) => type is ByReferenceType byRef && Parameter(byRef.ElementType);
         bool Pointer(TypeReference type) => type is PointerType { ElementType.MetadataType: MetadataType.Void };
 
-        var sizeOf = modelled && reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
+        var sizeOf = reference.Name == "SizeOf" && reference.Parameters.Count == 0 &&
             reference.ReturnType.FullName == "System.Int32";
-        var elementOffset = modelled && reference.Parameters.Count == 2 &&
+        var elementOffset = reference.Parameters.Count == 2 &&
             ((reference.Name is "Add" or "Subtract" && Reference(reference.ReturnType) &&
               Reference(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName is "System.Int32" or "System.IntPtr" or "System.UIntPtr") ||
              (reference.Name is "Add" or "Subtract" && Pointer(reference.ReturnType) &&
               Pointer(reference.Parameters[0].ParameterType) &&
               reference.Parameters[1].ParameterType.FullName == "System.Int32"));
-        var skipInit = modelled && reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
+        var skipInit = reference.Name == "SkipInit" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Void;
-        var nullRef = modelled && reference.Name == "NullRef" && reference.Parameters.Count == 0 &&
+        var nullRef = reference.Name == "NullRef" && reference.Parameters.Count == 0 &&
             Reference(reference.ReturnType);
-        var isNullRef = modelled && reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
+        var isNullRef = reference.Name == "IsNullRef" && reference.Parameters.Count == 1 &&
             Reference(reference.Parameters[0].ParameterType) && reference.ReturnType.MetadataType == MetadataType.Boolean;
         var referencePair = reference.Parameters.Count == 2 &&
             Reference(reference.Parameters[0].ParameterType) && Reference(reference.Parameters[1].ParameterType);
-        var comparison = modelled && referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
+        var comparison = referencePair && reference.ReturnType.MetadataType == MetadataType.Boolean &&
             reference.Name is "AreSame" or "IsAddressLessThan" or "IsAddressGreaterThan";
-        var byteOffset = modelled && referencePair && reference.Name == "ByteOffset" &&
+        var byteOffset = referencePair && reference.Name == "ByteOffset" &&
             reference.ReturnType.FullName == "System.IntPtr";
-        var addBytes = modelled && reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
+        var addBytes = reference.Name == "AddByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
-        var subtractBytes = modelled && reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
+        var subtractBytes = reference.Name == "SubtractByteOffset" && reference.Parameters.Count == 2 &&
             Reference(reference.ReturnType) && Reference(reference.Parameters[0].ParameterType) &&
             reference.Parameters[1].ParameterType.FullName is "System.IntPtr" or "System.UIntPtr";
         if (!sizeOf && !elementOffset && !skipInit && !nullRef && !isNullRef && !comparison && !byteOffset &&

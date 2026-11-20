@@ -114,7 +114,7 @@ internal static class InstructionTranslation
                 return new ModelCall(model);
             if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
                 return new ModelCall(MemoryOperation.Of(source)) { Constructs = true };
-            if (RuntimeModels.Translate(r, profile) is { } modeled) return modeled;
+            RuntimeModels.ValidateCallScope(r);
             var (resolved, index) = InstructionOperands.DirectTarget(r, TailCalls.IsCall(i), methodIndex, methods);
             if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
                 return new Newobj(index, ObjectTypes.AllocationOf(resolved), null);
