@@ -70,12 +70,8 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", true)!
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
-string Lean(object operation) => (string)operation.GetType()
-    .GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, Type.EmptyTypes)!
-    .Invoke(operation, null)!;
 object Operation(Instruction instruction) => translate.Invoke(null,
     [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
-string Translate(Instruction instruction) => Lean(Operation(instruction));
 string? Link(Instruction instruction)
 {
     var operation = Operation(instruction);
@@ -90,7 +86,7 @@ if (Link(call) != ".direct 1") throw new Exception("Incorrect call link");
 methods.Remove(callee);
 try
 {
-    Translate(call);
+    Operation(call);
     throw new Exception("Unresolved method was assigned a call index");
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
@@ -102,7 +98,8 @@ var choose = Instruction.Create(OpCodes.Switch, [destination, destination]);
 caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_0));
 caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
-if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target order or duplicates changed");
+if (!((IEnumerable<int>)Property(Operation(choose), "Targets")).SequenceEqual([2, 2]))
+    throw new Exception("Switch target order or duplicates changed");
 if (Link(choose) is not null) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
 var runtimeScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
@@ -242,14 +239,14 @@ var addressArgument = Instruction.Create(OpCodes.Ldarga, argumentMethod.Paramete
 foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeArgument, loadArgument,
     Instruction.Create(OpCodes.Pop), addressArgument, Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ret) })
     argumentMethod.Body.Instructions.Add(instruction);
-string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => Lean(translate.Invoke(null,
+object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), null, null, positions, null, null, null])!);
-if (TranslateArgument(storeArgument, homePositions) != ".starg 1" ||
-    TranslateArgument(loadArgument, homePositions) != ".ldarg 1" ||
-    TranslateArgument(addressArgument, homePositions) != ".ldarga 1")
+        0, Index(argumentMethod), null, null, positions, null, null, null])!;
+if (!Equals(TranslateArgument(storeArgument, homePositions), Make("Starg", 1)) ||
+    !Equals(TranslateArgument(loadArgument, homePositions), Make("Arg", 1)) ||
+    !Equals(TranslateArgument(addressArgument, homePositions), Make("Ldarga", 1)))
     throw new Exception("A homed argument's store, load or address no longer names the argument");
-if (TranslateArgument(loadArgument, []) != ".ldarg 1")
+if (!Equals(TranslateArgument(loadArgument, []), Make("Arg", 1)))
     throw new Exception("Unhomed loads no longer use the original argument");
 try
 {
@@ -267,7 +264,7 @@ catch (TargetInvocationException error) when (error.InnerException is InvalidDat
     rejected.Message == "Missing parameter storage") { }
 Console.WriteLine("PASS home lookup preserves first positions, argument indexes and missing-home rejection");
 
-// The typed operation model: the cases the outline generators branch on keep the spellings they are told apart by.
+// Outline generation reads the typed operation and its operands.
 const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
     BindingFlags.NonPublic;
 Type Model(string name) => extractor.GetType("Nethermind.LeanCIL." + name, true)!;
@@ -303,15 +300,13 @@ if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0, false)))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
-if (Lean(Make("Arg", 1)) != ".ldarg 1")
-    throw new Exception("An argument load no longer renders as the decoded ldarg");
-if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
-    Lean(Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) != ".loadScalar 4 false" ||
-    Lean(Make("LoadScalar", 1, true)) != ".loadScalar 1 true" ||
-    !Make("LoadScalar", 1, true).Equals(Make("LoadScalar", 1, Named("LoadSign", "Signed"))))
-    throw new Exception("Scalar loads lost the spelling that tells the unaligned load from the aligned one");
-if (Lean(Make("AddOffset", ulong.MaxValue - 7, true)) != "(.add 18446744073709551608 true)")
-    throw new Exception("A negative stride lost its two's complement spelling");
+if (Equals(Make("LoadScalar", 4, false), Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) ||
+    !Equals(Make("LoadScalar", 1, true), Make("LoadScalar", 1, Named("LoadSign", "Signed"))))
+    throw new Exception("Scalar load signedness or alignment changed");
+var negativeOffset = Make("AddOffset", ulong.MaxValue - 7, true);
+if (!Equals(Property(negativeOffset, "Stride"), ulong.MaxValue - 7) ||
+    !Equals(Property(negativeOffset, "Signed"), true))
+    throw new Exception("A negative stride lost its signed two's complement value");
 var tail = Make("Call", Named("CallKind", "Tail"), 3, 0, false);
 var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
 // The call's operand is the typed method its raw operand names; its rendering is the call's operand term.
@@ -320,11 +315,10 @@ object NoTypes() =>
 var siteName = Model("MetadataName").GetMethod("OfText", Declared)!.Invoke(null, ["Site"])!;
 var site = Make("MethodRef", ".void", siteName, false, 0, ".void", NoTypes(), NoTypes());
 Assign(renumbered, "Site", site);
-var siteTerm = (string)site.GetType().GetMethod("ToLean", Declared)!.Invoke(site, [])!;
 if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) ||
     !((IEnumerable<int>)Property(renumbered, "Methods")).SequenceEqual([1]) ||
-    Lean(renumbered) != $".call ({siteTerm}) {{ tail := true }}")
-    throw new Exception("A tail call does not expose and renumber its callee or render its prefix");
+    !Equals(Property(renumbered, "Site"), site) || !Equals(Property(renumbered, "Kind"), Named("CallKind", "Tail")))
+    throw new Exception("Renumbering changed the method operand or prefix of a tail call");
 try
 {
     Make("Constant", 32, -1L, true);
@@ -344,7 +338,7 @@ foreach (var (constant, property, newValue) in new (object, string, object)[]
         throw new Exception("Changing " + property + " made a negative numeral constant");
     }
     catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
-Console.WriteLine("PASS typed operations keep the spellings and shapes the outline generators branch on");
+Console.WriteLine("PASS typed operations preserve outline operands, argument kinds and tail-call targets");
 
 // The extractor's narrowing table, which the outline readers refuse arguments by, states for every primitive
 // head the narrowing Lean's declaredNarrow gives it (pinned in Tests/ResolutionFacts.lean); an admitted enum
@@ -379,9 +373,13 @@ Console.WriteLine(
 var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
     .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
-var constructors = RenderedLeanReaders.Constructors(sourceFiles["Extractor/Operation.cs"]);
+foreach (var type in extractor.GetTypes().Where(type =>
+    Model("Operation").IsAssignableFrom(type) || Model("MemoryOperation").IsAssignableFrom(type)))
+    if (type.GetMethods(Declared | BindingFlags.DeclaredOnly).Any(method => method.Name is "Render" or "ToLean"))
+        throw new Exception("Extractor operation defines an instruction renderer: " + type);
+var constructors = RenderedLeanReaders.Constructors(File.ReadLines(At("CIL/Instructions.lean")));
 foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callvirt" })
-    if (!constructors.Contains(rendered)) throw new Exception("Operation no longer renders ." + rendered);
+    if (!constructors.Contains(rendered)) throw new Exception("Missing CIL instruction ." + rendered);
 var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
 (string File, int Reads, string Reason)[] allowedReaders =
 [
@@ -407,11 +405,13 @@ foreach (var (scratchFile, scratchText, rule) in new (string, string, string)[]
     ("Extractor/Scratch.cs", "var bodies = Regex.Matches(module, @\"^def method\\d+ : Method := \");",
         "reads generated Lean"),
     ("Extractor/Scratch.cs", "var text = op.ToLean(); // parsed below",
-        "renders an operation outside emission and messages"),
+        "renders an instruction"),
     ("Extractor/ProofOutlineLoops.cs", "if (op.ToLean().StartsWith(\".br\")) return Stop(\"x\");",
-        "renders an operation outside emission and messages"),
+        "renders an instruction"),
     ("Extractor/LeanEmitter.cs", "var first = ops.Select(op => op.ToLean()).First(text => text.Contains(\"x\"));",
-        "searches a rendered operation"),
+        "renders an instruction"),
+    ("Extractor/LeanEmitter.cs", "if (op.Link(callee).Contains(target)) return true;",
+        "searches a rendered link"),
 })
     if (!RenderedLeanReaders.Scan(new Dictionary<string, string> { [scratchFile] = scratchText }, constructors)
             .Any(finding => finding.Kind == rule))
@@ -426,17 +426,10 @@ static partial class RenderedLeanReaders
 {
     internal sealed record Finding(string File, int Line, string Kind);
 
-    /// <summary>Files that write an operation into the generated module.</summary>
+    /// <summary>Files that serialize method links.</summary>
     static readonly string[] Emitters = ["Extractor/LeanEmitter.cs", "Extractor/TemplateEmitter.cs"];
 
-    /// <summary>Files that quote an operation in a message that stops an outline or reports a lint.</summary>
-    static readonly string[] Messengers =
-    [
-        "Extractor/ExceptionLint.cs", "Extractor/ProofOutlineGenerate.cs", "Extractor/ProofOutlineLoops.cs",
-        "Extractor/ProofOutlineObjects.cs", "Extractor/ProofOutlineStructLoops.cs", "Extractor/ProofOutlineStructs.cs"
-    ];
-
-    [GeneratedRegex("\"\\.([a-z][A-Za-z0-9]*)")]
+    [GeneratedRegex(@"\| ([a-z][A-Za-z0-9_]*)")]
     private static partial Regex RenderedConstructor { get; }
 
     const string SearchMethods =
@@ -454,7 +447,7 @@ static partial class RenderedLeanReaders
 
     const string RenderedReceivers = """op|operation|ops\[\w+\]|values\[\w+\]""";
 
-    [GeneratedRegex($"""\b(?:{RenderedReceivers})\.ToLean\(|\bop\.Link\(|new Unadmitted\(.*\)\.ToLean\(""")]
+    [GeneratedRegex($"""\b(?:{RenderedReceivers})\.ToLean\(|new Unadmitted\(.*\)\.ToLean\(""")]
     private static partial Regex RenderedOperation { get; }
 
     /// <summary>A dotted name, with its dot escaped or not, that no word or dot precedes.</summary>
@@ -466,12 +459,12 @@ static partial class RenderedLeanReaders
         DottedName.Matches(text).Any(match => constructors.Contains(match.Groups["name"].Value) &&
             text.LastIndexOf('"', match.Index) >= 0 && text.IndexOf('"', match.Index + match.Length) >= 0);
 
-    [GeneratedRegex(@"\$""[^""]*\{(?:op|ops\[\w+\])\.ToLean\(\)\}|""\s*\+\s*operation\.ToLean\(\)")]
-    private static partial Regex OperationInMessage { get; }
-
-    /// <summary>The Lean constructor names that Operation.cs renders, without their dot.</summary>
-    internal static string[] Constructors(string operationSource) =>
-        [.. RenderedConstructor.Matches(operationSource).Select(match => match.Groups[1].Value).Distinct()];
+    /// <summary>The constructors of the executable instruction type in Lean.</summary>
+    internal static string[] Constructors(IEnumerable<string> lines) =>
+        [.. lines.SkipWhile(line => line != "inductive Instruction where")
+            .TakeWhile(line => !line.StartsWith("  deriving ", StringComparison.Ordinal))
+            .Where(line => line.StartsWith("  | ", StringComparison.Ordinal))
+            .SelectMany(line => RenderedConstructor.Matches(line).Select(match => match.Groups[1].Value)).Distinct()];
 
     /// <summary>One finding per line that reads generated Lean or misuses a rendered operation.</summary>
     internal static List<Finding> Scan(IReadOnlyDictionary<string, string> files, string[] constructors)
@@ -480,7 +473,6 @@ static partial class RenderedLeanReaders
         var found = new List<Finding>();
         foreach (var (file, text) in files)
         {
-            if (file == "Extractor/Operation.cs") continue;
             var lines = text.Split('\n');
             for (var index = 0; index < lines.Length; index++)
             {
@@ -489,11 +481,10 @@ static partial class RenderedLeanReaders
                 var searched = search.Success && (GeneratedDeclaration.IsMatch(search.Groups["rest"].Value) ||
                     NamesConstructor(search.Groups["rest"].Value, rendered));
                 if (searched) found.Add(new(file, index + 1, "reads generated Lean"));
-                if (!RenderedOperation.IsMatch(line)) continue;
-                var allowed = Emitters.Contains(file) ||
-                    (Messengers.Contains(file) && OperationInMessage.IsMatch(line));
-                if (!allowed) found.Add(new(file, index + 1, "renders an operation outside emission and messages"));
-                else if (search.Success) found.Add(new(file, index + 1, "searches a rendered operation"));
+                if (RenderedOperation.IsMatch(line)) found.Add(new(file, index + 1, "renders an instruction"));
+                if (!line.Contains("op.Link(", StringComparison.Ordinal)) continue;
+                if (!Emitters.Contains(file)) found.Add(new(file, index + 1, "renders a link outside emission"));
+                else if (search.Success) found.Add(new(file, index + 1, "searches a rendered link"));
             }
         }
         return found;

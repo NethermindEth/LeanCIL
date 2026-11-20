@@ -3,17 +3,11 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 /// <summary>
-/// What the translator decides for one CIL instruction: one sealed case per kind of interpreter operation.
-/// Consumers read the typed members. Templates use <see cref="ToLean()"/> for the Lean `CIL.Instruction` term.
+/// Instruction information used by extraction, profile template comparison and proof outlines.
+/// The compiled method's instructions come from Lean's decoder.
 /// </summary>
 internal abstract record Operation
 {
-    /// <summary>The Lean instruction term.</summary>
-    internal string ToLean() => Render(LeanText.MethodNumber);
-
-    /// <summary>The Lean instruction term with each callee index written as <paramref name="calleeName"/>.</summary>
-    internal string ToLean(Func<int, string> calleeName) => Render(calleeName);
-
     /// <summary>
     /// The index of every method this operation enters, constructs through, dispatches to or names as a
     /// callable target; empty when it names none.
@@ -31,8 +25,6 @@ internal abstract record Operation
     /// <paramref name="calleeName"/> of it; null for an instruction that enters no method.
     /// </summary>
     internal virtual string? Link(Func<int, string> calleeName) => null;
-
-    internal abstract string Render(Func<int, string> calleeName);
 }
 
 /// <summary>An instruction that only moves the evaluation stack or does scalar arithmetic.</summary>
@@ -56,41 +48,6 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
         _ => throw new InvalidOperationException("Not an arithmetic operation: " + Kind)
     };
 
-    internal override string Render(Func<int, string> calleeName) => Kind switch
-    {
-        StackOpcode.Nop => ".nop",
-        StackOpcode.Pop => ".pop",
-        StackOpcode.Dup => ".dup",
-        StackOpcode.Add => ".add",
-        StackOpcode.Sub => ".sub",
-        StackOpcode.Mul => ".mul",
-        StackOpcode.And => ".and",
-        StackOpcode.Or => ".or",
-        StackOpcode.Xor => ".xor",
-        StackOpcode.Not => ".not",
-        StackOpcode.Neg => ".neg",
-        StackOpcode.Shl => ".shl",
-        StackOpcode.Shr => ".shr",
-        StackOpcode.ShrUn => ".shr_un",
-        StackOpcode.Ceq => ".ceq",
-        StackOpcode.Clt => ".clt",
-        StackOpcode.Cgt => ".cgt",
-        StackOpcode.CltUn => ".clt_un",
-        StackOpcode.CgtUn => ".cgt_un",
-        StackOpcode.ConvI1 => ".conv_i1",
-        StackOpcode.ConvI2 => ".conv_i2",
-        StackOpcode.ConvU2 => ".conv_u2",
-        StackOpcode.ConvI4 => ".conv_i4",
-        StackOpcode.ConvI8 => ".conv_i8",
-        StackOpcode.ConvI => ".conv_i",
-        StackOpcode.ConvU => ".conv_u",
-        StackOpcode.ConvU1 => ".conv_u1",
-        StackOpcode.ConvU4 => ".conv_u4",
-        StackOpcode.ConvU8 => ".conv_u8",
-        StackOpcode.SkipInit => ".skipInit",
-        _ => throw new ArgumentOutOfRangeException(nameof(Kind))
-    };
-
     internal static readonly StackOperation Nop = new(StackOpcode.Nop);
 }
 
@@ -108,8 +65,6 @@ internal sealed record Unadmitted(int Opcode) : Operation
     /// <c>0xFE00 + nn</c>.
     /// </summary>
     internal static int RawOpcode(Instruction instruction) => (ushort)instruction.OpCode.Value;
-
-    internal override string Render(Func<int, string> calleeName) => $".unadmitted {Opcode}";
 }
 
 /// <summary>The jump kinds; a conditional jump pops one (zero tests) or two operands.</summary>
@@ -133,8 +88,6 @@ internal sealed record Jump(JumpKind Kind, int Target) : Operation
         _ => 2
     };
 
-    internal override string Render(Func<int, string> calleeName) => $"{Name} {Target}";
-
     /// <summary>The Lean constructor name, without its dot.</summary>
     internal string Mnemonic => Name[1..];
 
@@ -149,22 +102,13 @@ internal sealed record Jump(JumpKind Kind, int Target) : Operation
     };
 }
 
-internal sealed record Switch(ValueList<int> Targets) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".switch [{string.Join(", ", Targets)}]";
-}
+internal sealed record Switch(ValueList<int> Targets) : Operation;
 
 /// <summary>A return whose value and storage width are determined by the method declaration.</summary>
-internal sealed record Return : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => ".ret";
-}
+internal sealed record Return : Operation;
 
 /// <summary>A fault of the modelled CLR exception type.</summary>
-internal sealed record Throw(ExceptionType Exception) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".throw {Exception.ToLean()}";
-}
+internal sealed record Throw(ExceptionType Exception) : Operation;
 
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
 internal enum Narrowing { Signed8, Unsigned8, Signed16, Unsigned16 }
@@ -181,22 +125,13 @@ internal static class NarrowingText
 }
 
 /// <summary>An argument pushed from its slot; the method's declared parameter type gives any narrowing.</summary>
-internal sealed record Arg(int Index) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".ldarg {Index}";
-}
+internal sealed record Arg(int Index) : Operation;
 
 /// <summary>An argument assigned from the stack into its home, whose kind gives any narrowing.</summary>
-internal sealed record Starg(int Index) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".starg {Index}";
-}
+internal sealed record Starg(int Index) : Operation;
 
 /// <summary>The address of an argument's home.</summary>
-internal sealed record Ldarga(int Index) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".ldarga {Index}";
-}
+internal sealed record Ldarga(int Index) : Operation;
 
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation
@@ -204,9 +139,6 @@ internal sealed record Local(int Index) : Operation
     /// <summary>The load of the argument homed in this slot when the body names the argument, as diagnostics show it.
     /// </summary>
     internal Arg? Argument { get; init; }
-
-    internal override string Render(Func<int, string> calleeName) =>
-        Argument?.Render(calleeName) ?? $".ldloc {Index}";
 }
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
@@ -215,9 +147,6 @@ internal sealed record SetLocal(int Index) : Operation
     /// <summary>The store to the argument homed in this slot when the body names the argument, as diagnostics show it.
     /// </summary>
     internal Starg? Argument { get; init; }
-
-    internal override string Render(Func<int, string> calleeName) =>
-        Argument?.Render(calleeName) ?? $".stloc {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
@@ -225,9 +154,6 @@ internal sealed record LocalAddress(int Index) : Operation
     /// <summary>The address of the argument homed in this slot when the body names the argument, as diagnostics show
     /// it.</summary>
     internal Ldarga? Argument { get; init; }
-
-    internal override string Render(Func<int, string> calleeName) =>
-        Argument?.Render(calleeName) ?? $".ldloca {Index}";
 }
 
 /// <summary>
@@ -261,17 +187,6 @@ internal sealed record Constant : Operation
 
     static ArgumentOutOfRangeException NegativeNumeral(string name) =>
         new(name, "A numeral constant is not negative.");
-
-    /// <summary>The Lean constructor name, without its dot: `ldc_i4` for 32 bits and `ldc_i8` for 64.</summary>
-    string Mnemonic => Width switch
-    {
-        32 => "ldc_i4",
-        64 => "ldc_i8",
-        _ => throw new InvalidOperationException($"No integer constant instruction has width {Width}.")
-    };
-
-    internal override string Render(Func<int, string> calleeName) => Numeral
-        ? $".{Mnemonic} {Value}" : $".{Mnemonic} (BitVec.ofInt {Width} ({Value}))";
 }
 
 internal enum CallKind { Static, Instance, Tail }
@@ -297,24 +212,6 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 
     internal override string? Link(Func<int, string> calleeName) => $".direct {calleeName(Method)}";
-
-    string Operand => Site?.ToLean() ?? throw new InvalidOperationException("A call has no method operand.");
-
-    internal override string Render(Func<int, string> calleeName) => Kind switch
-    {
-        CallKind.Instance => $".callvirt ({Operand})",
-        CallKind.Static or CallKind.Tail => $".call ({Operand}) {Prefixes}",
-        _ => throw new ArgumentOutOfRangeException(nameof(Kind))
-    };
-
-    string Prefixes => (Kind, Constrained) switch
-    {
-        (CallKind.Tail, false) => "{ tail := true }",
-        (CallKind.Static, true) => $"{{ constrained := some ({ConstrainedType ??
-            throw new InvalidOperationException("A constrained call has no constraint type.")}) }}",
-        (CallKind.Static, false) => "{}",
-        _ => throw new InvalidOperationException("A tail call carries no constrained prefix.")
-    };
 }
 
 /// <summary>
@@ -329,12 +226,6 @@ internal sealed record ModelCall(Operation Model) : Operation
 
     /// <summary>The typed method the call site's raw operand names, which the extraction sets.</summary>
     internal MethodRef? Site { get; init; }
-
-    internal override string Render(Func<int, string> calleeName)
-    {
-        var method = Site?.ToLean() ?? throw new InvalidOperationException("A model site has no method operand.");
-        return Constructs ? $".newobj ({method})" : $".call ({method}) {{}}";
-    }
 }
 
 /// <summary>What a <c>newobj</c> allocates, as its link states it.</summary>
@@ -366,10 +257,6 @@ internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Const
             $".object {calleeName(Method)} {LeanText.ClassList(instance.Bases)} {instance.Size}",
         _ => throw new InvalidOperationException("Unknown allocation: " + Allocated)
     };
-
-    internal override string Render(Func<int, string> calleeName) => $".newobj ({(Constructor ??
-        throw new InvalidOperationException("A construction is rendered before its constructor is named."))
-        .ToLean()})";
 }
 
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>
@@ -385,12 +272,6 @@ internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets
 
     internal override string? Link(Func<int, string> calleeName) => $".virtual {Table(calleeName)}";
 
-    internal override string Render(Func<int, string> calleeName)
-    {
-        var slot = Site ?? throw new InvalidOperationException("A virtual call has no method operand.");
-        return $".callvirt ({slot.ToLean()})";
-    }
-
     string Table(Func<int, string> calleeName) => "[" + string.Join(", ",
         Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})")) + "]";
 }
@@ -400,27 +281,12 @@ internal enum StaticFieldOpcode { Ldsfld, Ldsflda, Ldtoken }
 
 /// <summary>
 /// A static field load, address load or field token over the field its raw operand names; the field is null
-/// until the emitter resolves it, and rendering an unresolved access fails.
+/// until the emitter resolves it.
 /// </summary>
-internal sealed record StaticFieldInstruction(StaticFieldOpcode Opcode, FieldRef? Field) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => Opcode switch
-    {
-        StaticFieldOpcode.Ldsfld => $".ldsfld {Operand}",
-        StaticFieldOpcode.Ldsflda => $".ldsflda {Operand}",
-        _ => $".ldtoken (.field {Operand})"
-    };
-
-    string Operand => (Field ?? throw new InvalidOperationException(
-        $"Static field {Opcode} rendered before its field operand was resolved")).ToLean();
-}
+internal sealed record StaticFieldInstruction(StaticFieldOpcode Opcode, FieldRef? Field) : Operation;
 
 /// <summary>A boolean read of a runtime feature of the selected profile.</summary>
-internal sealed record FeatureTest(Feature Feature) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) =>
-        ".feature " + FeatureProfile.LeanFeature(Feature);
-}
+internal sealed record FeatureTest(Feature Feature) : Operation;
 
 internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address }
 
@@ -429,9 +295,6 @@ internal interface INamedField
 {
     /// <summary>The field operand, which the extraction sets from the raw operand the scalar check compares.</summary>
     FieldRef? Reference { get; }
-
-    /// <summary>The instruction with its field operand written as the Lean term <paramref name="operand"/>.</summary>
-    string Naming(string operand);
 }
 
 /// <summary>
@@ -444,21 +307,14 @@ internal sealed record StructField(FieldAccess Access, int Offset, int Width, bo
     /// <inheritdoc/>
     public FieldRef? Reference { get; init; }
 
-    internal override string Render(Func<int, string> calleeName) =>
-        Naming($"({(Reference ?? throw new InvalidOperationException(
-            "A struct field access is rendered before its field operand is named.")).ToLean()})");
-
-    /// <inheritdoc/>
-    public string Naming(string operand) => $".{Opcode} {operand}";
-
-    string Opcode => Access switch
+    Code Opcode => Access switch
     {
-        FieldAccess.Address => "ldflda",
-        FieldAccess.Load or FieldAccess.LoadAggregate => "ldfld",
-        _ => "stfld"
+        FieldAccess.Address => Code.Ldflda,
+        FieldAccess.Load or FieldAccess.LoadAggregate => Code.Ldfld,
+        _ => Code.Stfld
     };
 
-    // The rendered term holds only the opcode and the operand, so profiles merged into one template compare those.
+    // Access size and sign come from the field layout. The opcode and field reference identify the instruction.
     public bool Equals(StructField? other) =>
         other is not null && Opcode == other.Opcode && Reference == other.Reference;
 
@@ -471,14 +327,7 @@ internal sealed record StructField(FieldAccess Access, int Offset, int Width, bo
 /// </summary>
 internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Reference) : Operation, INamedField
 {
-    internal override string Render(Func<int, string> calleeName) =>
-        Naming($"({(Reference ?? throw new InvalidOperationException(
-            "A class field access is rendered before its field operand is named.")).ToLean()})");
-
-    /// <inheritdoc/>
-    public string Naming(string operand) => $".{(Field.Store ? "stfld" : "ldfld")} {operand}";
-
-    // The rendered term holds only the direction and the operand, so profiles merged into one template compare those.
+    // Class field instructions agree when they access the same field in the same direction.
     public bool Equals(ClassField? other) =>
         other is not null && Field.Store == other.Field.Store && Reference == other.Reference;
 
@@ -487,23 +336,12 @@ internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Ref
 
 /// <summary>An object instruction names the closed type whose shape determines its memory access.</summary>
 internal sealed record ObjectInstruction(Code Opcode, string? Operand = null, int? ScalarWidth = null,
-    bool Signed = false, int? ByteSize = null) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) =>
-        $".{Opcode.ToString().ToLowerInvariant()} ({Operand ?? throw new InvalidOperationException("Missing type")})";
-}
+    bool Signed = false, int? ByteSize = null) : Operation;
 
 internal enum AggregateAccess { Load, Store }
 
 /// <summary>A load or store of an aggregate of <paramref name="Size"/> bytes.</summary>
-internal sealed record AggregateTransfer(AggregateAccess Access, int Size) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => Access switch
-    {
-        AggregateAccess.Load => $".loadAggregate {Size}",
-        _ => $".storeAggregate {Size}"
-    };
-}
+internal sealed record AggregateTransfer(AggregateAccess Access, int Size) : Operation;
 
 /// <summary>
 /// How a scalar load extends its value, and how the Lean term spells an unsigned extension: left out, as an
@@ -520,19 +358,9 @@ internal sealed record LoadScalar(int Width, LoadSign Sign) : Operation
 
     /// <summary>The load sign-extends.</summary>
     internal bool Signed => Sign == LoadSign.Signed;
-
-    internal override string Render(Func<int, string> calleeName) => $".loadScalar {Width}" + Sign switch
-    {
-        LoadSign.Signed => " true",
-        LoadSign.UnsignedSpelled => " false",
-        _ => ""
-    };
 }
 
-internal sealed record StoreScalar(int Width) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
-}
+internal sealed record StoreScalar(int Width) : Operation;
 
 /// <summary>
 /// The integer element an <c>ldind</c>, <c>stind</c>, <c>ldelem</c> or <c>stelem</c> opcode names; <c>I</c> is
@@ -570,15 +398,10 @@ internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
 
     /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
     internal string KindTerm => Kind.Term();
-
-    internal override string Render(Func<int, string> calleeName) => $".{(Store ? "stind" : "ldind")} {KindTerm}";
 }
 
 /// <summary>An <c>ldlen</c> of a value array, an array of class references or a managed handler table.</summary>
-internal sealed record ArrayLength : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => ".ldlen";
-}
+internal sealed record ArrayLength : Operation;
 
 /// <summary>
 /// An <c>ldelem</c> or <c>stelem</c> of <paramref name="Kind"/> on a value array, or the <c>ldelem.i</c> of a managed
@@ -591,9 +414,6 @@ internal sealed record ArrayElementAccess(NumericKind Kind, bool Store) : Operat
 
     /// <summary>Whether a load sign-extends.</summary>
     internal bool Signed => Kind.Signed();
-
-    internal override string Render(Func<int, string> calleeName) =>
-        $".{(Store ? "stelem" : "ldelem")} {Kind.Term()}";
 }
 
 /// <summary>
@@ -601,37 +421,19 @@ internal sealed record ArrayElementAccess(NumericKind Kind, bool Store) : Operat
 /// expression. <paramref name="Storage"/> is the element's inline storage, or null for a handler table's method
 /// pointer.
 /// </summary>
-internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, string? Element = null) : Operation
-{
-    // Translation does not see the layout table the term indexes, so the emitter attaches it.
-    internal override string Render(Func<int, string> calleeName) =>
-        $".{(Store ? "stelem_any" : "ldelem_any")} ({Element ?? throw new InvalidOperationException(
-            "A typed element access is rendered before its element type is attached")})";
-}
+internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, string? Element = null) : Operation;
 
 /// <summary>
 /// An <c>ldelema</c> of the element type <paramref name="Element"/>, the raw operand's type expression, whose inline
 /// storage is <paramref name="Storage"/>; <paramref name="ReadOnly"/> records a <c>readonly.</c> prefix.
 /// </summary>
-internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, string? Element = null) : Operation
-{
-    // Translation does not see the layout table the term indexes, so the emitter attaches it.
-    internal override string Render(Func<int, string> calleeName) =>
-        $".ldelema ({Element ?? throw new InvalidOperationException(
-            "An element address is rendered before its element type is attached")}) {(ReadOnly ? "true" : "false")}";
-}
+internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, string? Element = null) : Operation;
 
 /// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
-internal sealed record ReferenceElementAccess(bool Store) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => Store ? ".stelem_ref" : ".ldelem_ref";
-}
+internal sealed record ReferenceElementAccess(bool Store) : Operation;
 
 /// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
-internal sealed record Localloc : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => ".localloc";
-}
+internal sealed record Localloc : Operation;
 
 /// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>
 internal enum ConvTarget { I1, U1, I2, U2, I4, U4, I8, U8, I, U }
@@ -640,27 +442,15 @@ internal enum ConvTarget { I1, U1, I2, U2, I4, U4, I8, U8, I, U }
 /// A conversion to <paramref name="Target"/> that faults on overflow, reading the operand as unsigned when
 /// <paramref name="UnsignedSource"/> is set.
 /// </summary>
-internal sealed record CheckedConvert(ConvTarget Target, bool UnsignedSource) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) =>
-        $".conv_ovf{(UnsignedSource ? "_un" : "")} .{Target.ToString().ToLowerInvariant()}";
-}
+internal sealed record CheckedConvert(ConvTarget Target, bool UnsignedSource) : Operation;
 
 internal enum CheckedOperator { Add, Sub, Mul }
 
 /// <summary>An overflow-checked <c>add</c>, <c>sub</c> or <c>mul</c>, rendered as its opcode's constructor.</summary>
-internal sealed record CheckedArithmetic(CheckedOperator Operator, bool Signed) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) =>
-        $".{Operator.ToString().ToLowerInvariant()}_ovf{(Signed ? "" : "_un")}";
-}
+internal sealed record CheckedArithmetic(CheckedOperator Operator, bool Signed) : Operation;
 
 /// <summary>A division or, when <paramref name="Remainder"/> is set, a remainder.</summary>
-internal sealed record Divide(bool Signed, bool Remainder) : Operation
-{
-    internal override string Render(Func<int, string> calleeName)
-        => $".{(Remainder ? "rem" : "div")}{(Signed ? "" : "_un")}";
-}
+internal sealed record Divide(bool Signed, bool Remainder) : Operation;
 
 /// <summary>
 /// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,
@@ -670,48 +460,27 @@ internal sealed record NewArray(NewArray.ClassElement? Class, string? Element = 
 {
     /// <summary>The class <paramref name="Name"/> (a full name) of the assembly <paramref name="Scope"/>.</summary>
     internal sealed record ClassElement(string Scope, string Name);
-
-    // Translation does not see the layout table the term indexes, so the emitter attaches it.
-    internal override string Render(Func<int, string> calleeName) => $".newarr ({Element ??
-        throw new InvalidOperationException("An array allocation is rendered before its element type is attached")})";
 }
 
 /// <summary>An <c>ldnull</c>: the null object reference.</summary>
-internal sealed record LoadNull : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => ".ldnull";
-}
+internal sealed record LoadNull : Operation;
 
 /// <summary>A <c>castclass</c> of the top reference to the class <paramref name="Type"/>.</summary>
-internal sealed record CastClass(string Type) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".castclass ({Type})";
-}
+internal sealed record CastClass(string Type) : Operation;
 
 /// <summary>An <c>isinst</c> test of the top reference against the class <paramref name="Type"/>.</summary>
-internal sealed record IsInstance(string Type) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".isinst ({Type})";
-}
+internal sealed record IsInstance(string Type) : Operation;
 
 /// <summary>
 /// The model of a span constructor that a call runs on the span home beneath its arguments: the slot the home
 /// names then holds the span <paramref name="Source"/> builds. It renders as the Lean runtime model.
 /// </summary>
-internal sealed record SpanInPlace(SpanSource Source) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".spanInPlace ({Source.SpanDescriptor})";
-}
+internal sealed record SpanInPlace(SpanSource Source) : Operation;
 
 /// <summary>
 /// An operation of the managed callable pointer model; the signatures are Lean terms and the targets are typed.
 /// </summary>
-internal abstract record ManagedPointer : Operation
-{
-    protected abstract string Body(Func<int, string> calleeName);
-
-    internal sealed override string Render(Func<int, string> calleeName) => ".managed " + Body(calleeName);
-}
+internal abstract record ManagedPointer : Operation;
 
 /// <summary>An indirect call through a callable pointer of the given signature and target catalog.</summary>
 internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> Catalog, bool Tail) : ManagedPointer
@@ -722,9 +491,6 @@ internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> C
         this with { Catalog = [.. Catalog.Select(target => target with { Method = map(target.Method) })] };
 
     internal override string? Link(Func<int, string> calleeName) => $".indirect {Targets(calleeName)}";
-
-    protected override string Body(Func<int, string> calleeName) =>
-        $"(.call {Signature} {LeanText.Bool(Tail)})";
 
     string Targets(Func<int, string> calleeName) =>
         "[" + string.Join(", ", Catalog.Select(target => target.Lean(calleeName))) + "]";
@@ -739,23 +505,13 @@ internal sealed record MethodAddress(ManagedTarget Target, string Signature) : M
         this with { Target = Target with { Method = map(Target.Method) } };
 
     internal override string Link(Func<int, string> calleeName) => $".address {calleeName(Target.Method)}";
-
-    protected override string Body(Func<int, string> calleeName) => $"(.address {Target.Identity} {Signature})";
 }
 
 /// <summary>A runtime memory operation.</summary>
-internal sealed record Memory(MemoryOperation Operation) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => ".memory " + Operation.ToLean();
-}
+internal sealed record Memory(MemoryOperation Operation) : Operation;
 
 /// <summary>An intrinsic of the scalar, vector or hardware families over the given number of operands.</summary>
-internal abstract record Intrinsic(int Arguments) : Operation
-{
-    protected abstract string Family { get; }
-
-    internal sealed override string Render(Func<int, string> calleeName) => $".intrinsic ({Family}) {Arguments}";
-}
+internal abstract record Intrinsic(int Arguments) : Operation;
 
 internal enum ScalarFunction
 {
@@ -774,49 +530,26 @@ internal sealed record ScalarIntrinsic(ScalarFunction Function, int Width, bool 
     internal bool CountsBits => Function is ScalarFunction.PopCount or ScalarFunction.LeadingZeroCount or
         ScalarFunction.TrailingZeroCount or ScalarFunction.Log2;
 
-    // A helper ignores the width, sign or result its Lean term leaves out, so two of them are equal
-    // exactly when they render the same, as profiles merged into one template must be.
+    // BigMul32 fixes its input width. Only bit counts select a result width.
+    // Rotates, unsigned round-up and bit counts ignore signedness.
+    (int Width, bool Signed, int Result) OperandTypes =>
+        (Function == ScalarFunction.BigMul32 ? 32 : Width,
+         Signed && !CountsBits && Function is not (ScalarFunction.RotateLeft or ScalarFunction.RotateRight or
+             ScalarFunction.RoundUpToPowerOf2),
+         CountsBits ? Result : 0);
+
     public bool Equals(ScalarIntrinsic? other) =>
-        other is not null && Arguments == other.Arguments && Family == other.Family;
+        other is not null && Function == other.Function && Arguments == other.Arguments &&
+        OperandTypes == other.OperandTypes;
 
-    public override int GetHashCode() => HashCode.Combine(Arguments, Family);
-
-    protected override string Family => Function switch
-    {
-        ScalarFunction.BigMul32 => $".scalar (.bigMul32 {LeanText.Bool(Signed)})",
-        ScalarFunction.DivRem => $".scalar (.divRem {Width} {LeanText.Bool(Signed)})",
-        ScalarFunction.Min => MathCall("min"),
-        ScalarFunction.Max => MathCall("max"),
-        ScalarFunction.Clamp => MathCall("clamp"),
-        ScalarFunction.Abs => MathCall("abs"),
-        ScalarFunction.Sign => MathCall("sign"),
-        ScalarFunction.RotateLeft => $".scalar (.rotateLeft {Width})",
-        ScalarFunction.RotateRight => $".scalar (.rotateRight {Width})",
-        ScalarFunction.PopCount => Count("popCount"),
-        ScalarFunction.LeadingZeroCount => Count("leadingZeroCount"),
-        ScalarFunction.TrailingZeroCount => Count("trailingZeroCount"),
-        ScalarFunction.Log2 => Count("log2"),
-        ScalarFunction.RoundUpToPowerOf2 => $".scalar (.roundUpToPowerOf2 {Width})",
-        ScalarFunction.IsPow2 => $".scalar (.isPow2 {Width} {LeanText.Bool(Signed)})",
-        _ => $".scalar (.reverseEndianness {Width} {LeanText.Bool(Signed)})"
-    };
-
-    string MathCall(string name) => $".scalar (.math .{name} {Width} {LeanText.Bool(Signed)})";
-
-    string Count(string name) => $".scalar (.{name} {Width} .word{Result})";
+    public override int GetHashCode() => HashCode.Combine(Function, Arguments, OperandTypes);
 }
 
 /// <summary>The vector constructor that sets the low 64-bit lane and leaves the rest unspecified.</summary>
-internal sealed record VectorCreateScalarUnsafe64() : Intrinsic(1)
-{
-    protected override string Family => ".vector .createScalarUnsafe64";
-}
+internal sealed record VectorCreateScalarUnsafe64() : Intrinsic(1);
 
 /// <summary>The x86 64-bit division with remainder.</summary>
-internal sealed record X86BaseDivRem64() : Intrinsic(3)
-{
-    protected override string Family => ".x86Base .divRem64";
-}
+internal sealed record X86BaseDivRem64() : Intrinsic(3);
 
 /// <summary>A vector or hardware intrinsic no consumer inspects, held as its rendered Lean family term.</summary>
 internal sealed record HardwareIntrinsic : Intrinsic
@@ -824,18 +557,7 @@ internal sealed record HardwareIntrinsic : Intrinsic
     readonly string family;
 
     internal HardwareIntrinsic(string family, int arguments) : base(arguments) => this.family = family;
-
-    protected override string Family => family;
 }
 
 /// <summary>Which elements of an array a span covers.</summary>
 internal enum ArrayRange { Whole, FromStart, Counted }
-
-internal static class ArrayRangeText
-{
-    internal static string LeanName(this ArrayRange range) => range switch
-    {
-        ArrayRange.Whole => ".whole", ArrayRange.FromStart => ".fromStart", ArrayRange.Counted => ".counted",
-        _ => throw new ArgumentOutOfRangeException(nameof(range))
-    };
-}

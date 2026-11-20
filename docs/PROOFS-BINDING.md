@@ -649,6 +649,9 @@ produce unsupported instructions, and no correctness claim about another extract
 generating a template. The full profile remains an explicit parameter; a behavioral proof must
 relate its feature fields to the flag arguments it uses. Profiles that produce different metadata,
 different instruction counts, or different instructions under identical observed flags are rejected.
+Template comparison uses typed operation records. For scalar helpers it compares the function,
+arity and the operand widths or signedness that affect that function. Lean decodes the selected
+body and checks its exact instruction equations against the corresponding input extraction.
 Static descriptors are retained when their complete metadata agrees across the selected profiles,
 including field identities, bytes, initializer indices and arguments. Different static metadata is
 rejected rather than remapped. Imported callee slots are not supported in template generation.

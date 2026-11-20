@@ -220,21 +220,17 @@ object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Sta
 object ClassWord(bool store, int width, bool signed) => Create("ClassField", Create("ClassViews+FieldOperation",
     store, "T", 0, Named(Model("ClassViews+FieldKind"), "Word"), width, signed, null),
     Create("FieldRef", "T", 0, "U", ValueName()));
-var merged = new (string Identity, object Left, object Right, string Expected)[]
+var merged = new (string Identity, object Left, object Right)[]
 {
-    ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
-        ".intrinsic (.scalar (.bigMul32 true)) 2"),
-    ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
-        ".intrinsic (.scalar (.popCount 32 .word32)) 1"),
-    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false),
-        ".stfld ({ owner := T, index := 0, type := U, name := name!\"value\" })")
+    ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2)),
+    ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1)),
+    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false))
 };
-foreach (var (identity, left, right, spelling) in merged)
+foreach (var (identity, left, right) in merged)
 {
     var body = Merge(identity, [left, ".ret"], [right, ".ret"]);
-    var render = Model("Operation").GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic, []);
     if (!body.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
-        !Equals(render!.Invoke(left, []), spelling) || !Equals(render.Invoke(right, []), spelling))
+        !Equals(left, right) || left.GetHashCode() != right.GetHashCode())
         throw new Exception($"The {identity} alternatives must agree and share one decoded body.");
 }
 if (!Rejected(() => Merge("Rotate", [Scalar("RotateLeft", 32, false, 32, 2), ".ret"],
