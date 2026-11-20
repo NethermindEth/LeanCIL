@@ -17,8 +17,6 @@ using Mono.Cecil.Cil;
 if (args is not ([] or ["--update"])) throw new ArgumentException("Usage: RuntimeModelInventory.cs [--update]");
 var extractor = Assembly.LoadFrom(ExtractorPath);
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
-// A call the Lean model table models keeps its call; the translator asks for its model before any lowered form.
 var callModel = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("CallModel", flags)!;
 var identityImage = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("IdentityImage", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
@@ -104,8 +102,7 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
                 var label = labels[index];
                 foreach (var profile in profiles)
                 {
-                    var operation = TranslatePinned(method, profile);
-                    if (operation is null) continue;
+                    if (!HasPinnedModel(method, profile)) continue;
                     var probeConvention = (method.DeclaringType.GetElementType().FullName, method.Name) is
                         ("System.Object", ".ctor") or ("System.Math", "Min") or
                         ("System.Numerics.BitOperations", "PopCount") or
@@ -113,12 +110,8 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
                         ("System.Runtime.Intrinsics.Vector128", "CreateScalarUnsafe" or "GetElement") or
                         ("System.Span`1" or "System.ReadOnlySpan`1", "get_Item" or "Slice" or "get_Length" or
                             "get_IsEmpty" or "GetPinnableReference" or "get_Empty" or "op_Implicit");
-                    if (probeConvention && !conventionChecks.Contains(method.Name) &&
-                        callModel.Invoke(null, [method, profile]) is not null)
-                    {
-                        conventionChecks.Add(method.Name);
+                    if (probeConvention && conventionChecks.Add(method.Name))
                         CheckConventions(method, profile);
-                    }
                     if (!admitted.TryGetValue(label.Family, out var definitions))
                         admitted.Add(label.Family, definitions = new(StringComparer.Ordinal));
                     definitions.Add(label.Definition);
@@ -130,7 +123,7 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
         {
             try
             {
-                TranslatePinned(contextProbe, profiles[0]);
+                HasPinnedModel(contextProbe, profiles[0]);
                 throw new InvalidOperationException(
                     "A missing metadata context was recorded as an unsupported method.");
             }
@@ -163,20 +156,24 @@ foreach (var (family, definitions) in admitted) Console.WriteLine($"{family}: {d
 Console.WriteLine($"PASS runtime dispatcher catalog: {entries.Length} definitions, {admitted.Count} API families, " +
     $"{instances.Count} admitted closed instances in the fixed primitive domain");
 
-object? TranslatePinned(MethodReference method, object? profile)
+bool HasPinnedModel(MethodReference method, object? profile)
 {
     identityImage.Invoke(null, [method.DeclaringType]);
-    try { return callModel.Invoke(null, [method, profile]) ?? translate.Invoke(null, [method, profile]); }
+    try
+    {
+        if (callModel.Invoke(null, [method, profile]) is not null) return true;
+    }
     catch (TargetInvocationException exception) when (exception.InnerException is
         InvalidDataException or NotSupportedException or AssemblyResolutionException)
     {
-        unsupported++;
-        return null;
+        // The pinned candidate has an unsupported signature or scope.
     }
     catch (TargetInvocationException exception)
     {
         throw new InvalidOperationException("Inventory candidate: " + method.FullName, exception);
     }
+    unsupported++;
+    return false;
 }
 
 void CheckConventions(MethodReference method, object? profile)

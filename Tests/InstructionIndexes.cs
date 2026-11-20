@@ -130,7 +130,7 @@ if ((int)layoutIndex.Invoke(layouts, [inner])! != 0 || (int)layoutIndex.Invoke(l
     (int)layoutIndex.Invoke(layouts, [module.TypeSystem.String])! != -1)
     throw new Exception("Layout index lost topological order or admitted an absent type");
 var emitted = new System.Text.StringBuilder();
-layoutType.GetMethod("EmitLayouts", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(layouts, [emitted]);
+layoutType.GetMethod("EmitLayouts", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(layouts, [emitted, null]);
 if (!emitted.ToString().Contains("computedLayouts : Array Extraction.ComputedLayout := #[⟨layout1, 8⟩, ⟨layout0, 8⟩]",
     StringComparison.Ordinal))
     throw new Exception("Raw layout order was confused with emitted layout order");
