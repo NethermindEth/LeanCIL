@@ -1008,6 +1008,94 @@ File.WriteAllText(multiplyProof, $$"""
 pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse42",
     () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs")));
 Flush();
+// Shift each input's odd UInt32 element into the even position before the original SSE2 multiply.
+var oddProducts = Path.Combine(root, "OddProducts128");
+Directory.CreateDirectory(oddProducts);
+var oddProductsAssembly = Path.Combine(oddProducts, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods
+        .Single(method => method.Name == "MultiplyEven128");
+    var loads = method.Body.Instructions.Where(site =>
+        site.OpCode.Code is Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or Code.Ldarg_3).ToArray();
+    Code[] expected = [Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3];
+    if (!loads.Select(load => load.OpCode.Code).SequenceEqual(expected))
+        throw new InvalidDataException("MultiplyEven128 must load the four words in lane order.");
+    var il = method.Body.GetILProcessor();
+    foreach (var load in loads)
+    {
+        var count = il.Create(OpCodes.Ldc_I4_S, (sbyte)32);
+        il.InsertAfter(load, count);
+        il.InsertAfter(count, il.Create(OpCodes.Shr_Un));
+    }
+    variant.Write(oddProductsAssembly);
+}
+if (Sse2.IsSupported)
+{
+    var changedType = Assembly.LoadFile(oddProductsAssembly).GetType("Examples.DivisionIntrinsics")!;
+    static Vector128<ulong> Products(Type type) => type.GetMethod("MultiplyEven128")!
+        .CreateDelegate<Func<ulong, ulong, ulong, ulong, Vector128<ulong>>>()
+        (0x100000002, 0x300000004, 0x500000006, 0x700000008);
+    if (!Products(runtime).Equals(Vector128.Create(12UL, 32UL)) ||
+        !Products(changedType).Equals(Vector128.Create(5UL, 21UL)))
+        throw new InvalidOperationException("SSE2 products differ from the unsigned low- and high-half witness.");
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["MultiplyEven128"],
+    Path.Combine(root, "EvenProductsContract"), oddProductsAssembly, selectors["MultiplyEven128"], oddProducts, """
+    open CIL.Vector (pack128 sseMultiplyEven32_pack128)
+
+    /-- Each unsigned 32-bit operand comes from the low half of its 64-bit lane. -/
+    private def product (left right : W64) : W64 :=
+      (left.setWidth 32).zeroExtend 64 * (right.setWidth 32).zeroExtend 64
+
+    /-- PMULUDQ returns two full-width products and preserves caller memory. -/
+    def evenProducts : MethodContract ((W64 × W64) × (W64 × W64)) (BitVec 128) where
+      args input := [.scalar (.i64 input.1.1), .scalar (.i64 input.1.2),
+        .scalar (.i64 input.2.1), .scalar (.i64 input.2.2)]
+      results value := [.scalar (.v128 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧
+        value = pack128 (product input.1.1 input.2.1) (product input.1.2 input.2.2)
+    """, """
+    set_option maxRecDepth 8192 in
+    /-- The compiled SSE2 method multiplies the low halves for all four arguments. -/
+    theorem correctness : evenProducts.Holds Extracted.program 0 := by
+      rintro ⟨⟨a, b⟩, c, d⟩ memory -
+      apply MethodContract.Holds.intro (c := evenProducts) (input := ((a, b), (c, d))) memory
+        (pack128 (product a c) (product b d)) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      refine ⟨64, ?_⟩
+      change invoke Extracted.program 64 0 _ memory =
+        .ok (memory, [.scalar (.v128 (pack128 (product a c) (product b d)))])
+      unfold product
+      rw [← sseMultiplyEven32_pack128]
+      rfl
+    """, """
+    set_option maxRecDepth 8192
+    /-- Each high half and its low half contribute different products at this input. -/
+    private def witness : (W64 × W64) × (W64 × W64) :=
+      ((0x100000002, 0x300000004), (0x500000006, 0x700000008))
+
+    /-- The observed high-half products violate the low-half postcondition. -/
+    private theorem wrongProducts :
+        ¬ evenProducts.Returns witness Memory.empty Memory.empty [.scalar (.v128 (pack128 5 21))] := by
+      rintro ⟨value, encoded, -, rfl⟩
+      exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v128 (pack128 5 21))] =
+        [.scalar (.v128 (pack128 12 32))])) encoded
+
+    #print axioms wrongProducts
+
+    /-- Selecting the odd UInt32 elements instead returns the two high-half products. -/
+    theorem correctness : evenProducts.Refuted Extracted.program 0 := by
+      have ran : invoke Extracted.program 64 0 (evenProducts.args witness) Memory.empty =
+          .ok (Memory.empty, [.scalar (.v128 (pack128 5 21))]) := by
+        simp only [evenProducts, witness]
+        cil_checked_steps [] <;> rfl
+      exact MethodContract.Refuted.of_return (c := evenProducts) (input := witness)
+        (program := Extracted.program) (fuel := 64) (method := 0) (final := Memory.empty)
+        (values := [.scalar (.v128 (pack128 5 21))]) trivial ran (fun h => wrongProducts h.2)
+    """, profile: "x64-sse42", imports: "import CIL.SIMD.PackedLanes");
+Console.WriteLine("PASS SSE2 even-lane product contract and certified odd-lane replacement");
 // Without SSE2 the reachable call is rejected before any evidence is written.
 var multiplyRejectedOutput = Path.Combine(root, "MultiplyEven128-scalar");
 Directory.CreateDirectory(multiplyRejectedOutput);
