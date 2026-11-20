@@ -1,5 +1,5 @@
 import CIL.Extraction.DecodedMethod
-import CIL.Safety.MethodContract
+import CIL.Safety.OutcomeContract
 
 /-!
 # Contracts bound to decoded methods
@@ -117,6 +117,37 @@ def DecodedAt (program : CIL.Program) (evidence : List MethodEvidence)
       Method.ofBody? profile environment item.links item.reachable item.body item.original
         item.arguments = some method ∧ item.MaskValid evidence method
 
+/-- An entire decoded program binds each recorded method to its pinned body and valid mask. -/
+theorem DecodedAt.of_decoded {program : CIL.Program} {evidence : List MethodEvidence}
+    {profile : FeatureProfile} {environment : LayoutEnvironment} {imports : List ImportSlot}
+    {index : Nat} {item : MethodEvidence}
+    (decoded : decodedProgram? profile environment evidence imports = some program)
+    (found : evidence[index]? = some item)
+    (instantiated :
+      instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed) :
+    DecodedAt program evidence profile environment index item.assembly item.original.token
+      item.arguments := by
+  obtain ⟨method, present, decodes⟩ :=
+    bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
+  exact ⟨item, found, rfl, rfl, rfl, instantiated, method, present, decodes,
+    decodedProgram?_maskValid decoded found present⟩
+
+#print axioms DecodedAt.of_decoded
+
+/-- A validated translation binds the method at the selected index to its pinned record. -/
+theorem DecodedAt.of_translation {program : CIL.Program} {evidence : List MethodEvidence}
+    {rawLayouts layouts pins imports} (valid : TranslationValid rawLayouts layouts pins evidence
+      imports program) (index : Fin evidence.length) {method : Method}
+    (present : program[index.val]? = some method) :
+    DecodedAt program evidence method.profile method.environment index evidence[index].assembly
+      evidence[index].original.token evidence[index].arguments := by
+  have checked := translation_method_checked valid index method present
+  have mask := checked.maskValid
+  exact ⟨evidence[index], List.getElem?_eq_getElem index.isLt, rfl, rfl, rfl, mask.2.1,
+    method, present, checked.ofBody?, mask⟩
+
+#print axioms DecodedAt.of_translation
+
 /-- `contract` holds for the method at `index`, and `bound` names that method by pinned
     assembly, metadata token and type arguments and ties it to the bytes it decodes from.
     `MethodContract.Certified` names only an index, which another extraction can give another
@@ -142,11 +173,8 @@ theorem DecodedSummary.of_decoded {Input Output : Type} {contract : MethodContra
       instantiateMethod environment.rawLayouts item.original item.arguments = some item.closed)
     (holds : contract.Holds program index) :
     DecodedSummary program evidence profile environment index item.assembly item.original.token
-      item.arguments contract := by
-  obtain ⟨method, present, decodes⟩ :=
-    bodyMap_getElem (Option.filter_eq_some_iff.mp decoded).1 found
-  exact ⟨holds, item, found, rfl, rfl, rfl, instantiated, method, present, decodes,
-    decodedProgram?_maskValid decoded found present⟩
+      item.arguments contract :=
+  ⟨holds, DecodedAt.of_decoded decoded found instantiated⟩
 
 #print axioms DecodedSummary.of_decoded
 
@@ -157,13 +185,34 @@ theorem DecodedSummary.of_translation {Input Output : Type} {contract : MethodCo
     (index : Fin evidence.length) {method : Method} (present : program[index.val]? = some method)
     (holds : contract.Holds program index) :
     DecodedSummary program evidence method.profile method.environment index evidence[index].assembly
-      evidence[index].original.token evidence[index].arguments contract := by
-  have checked := translation_method_checked valid index method present
-  have mask := checked.maskValid
-  exact ⟨holds, evidence[index], List.getElem?_eq_getElem index.isLt, rfl, rfl, rfl, mask.2.1,
-    method, present, checked.ofBody?, mask⟩
+      evidence[index].original.token evidence[index].arguments contract :=
+  ⟨holds, DecodedAt.of_translation valid index present⟩
 
 #print axioms DecodedSummary.of_translation
+
+/-- A method's normal returns and named exceptions, proved for its pinned decoded body. -/
+structure DecodedOutcomeSummary {Input Output : Type} (program : CIL.Program)
+    (evidence : List MethodEvidence) (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (index : Nat) (pin : AssemblyPin) (token : Nat) (arguments : List TypeExpr)
+    (contract : OutcomeContract Input Output) : Prop where
+  /-- Each permitted input returns with the contract's frame and postcondition or raises
+      the exception specified for that input and initial memory. -/
+  holds : contract.Holds program index
+  /-- The pinned bytes, metadata and checked reachability mask of the method. -/
+  bound : DecodedAt program evidence profile environment index pin token arguments
+
+/-- The translation certificate binds an outcome proof to its method's decoded record. -/
+theorem DecodedOutcomeSummary.of_translation {Input Output : Type}
+    {contract : OutcomeContract Input Output} {program : CIL.Program}
+    {evidence : List MethodEvidence}
+    {rawLayouts layouts pins imports} (valid : TranslationValid rawLayouts layouts pins evidence
+      imports program) (index : Fin evidence.length) {method : Method}
+    (present : program[index.val]? = some method) (holds : contract.Holds program index) :
+    DecodedOutcomeSummary program evidence method.profile method.environment index
+      evidence[index].assembly evidence[index].original.token evidence[index].arguments contract :=
+  ⟨holds, DecodedAt.of_translation valid index present⟩
+
+#print axioms DecodedOutcomeSummary.of_translation
 
 /-- At a live `call` whose link enters `index`, a summary of `index` is for the method the
     raw site names: the site's managed token and type arguments are the summary's. -/

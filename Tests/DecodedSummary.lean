@@ -162,6 +162,20 @@ theorem add_summary_x64 :
     (imports := []) (by cil_kernel_rfl)
 #print axioms add_summary_x64
 
+/-- Reusing the scalar outcome proof under x86-64-v3 retains the adder's pinned body. -/
+theorem add_outcome_x64 :
+    DecodedOutcomeSummary (reprofile [addMethod] Tests.ProfileContract.avx2Profile) [addItem]
+      Tests.ProfileContract.avx2Profile testEnvironment 0 pin tokens.main []
+      { addContract with raises := fun _ _ => none } := by
+  let outcome : OutcomeContract (W64 × W64) W64 :=
+    { addContract with raises := fun _ _ => none }
+  have source : DecodedOutcomeSummary [addMethod] [addItem] testProfile testEnvironment 0
+      pin tokens.main [] outcome := ⟨add_holds_alone.outcomes, decoded_summary.bound⟩
+  exact source.reprofile (by decide +kernel)
+    (Program.ProfileAgreement.of_flags _ _ _ (by decide +kernel))
+    (imports := []) (by cil_kernel_rfl)
+#print axioms add_outcome_x64
+
 /-- The caller's call check, against the records' method table. -/
 theorem caller_calls_valid :
     ManagedCallsValid (specializationTable evidence) [] (callModelled callerMethod) callerRaw

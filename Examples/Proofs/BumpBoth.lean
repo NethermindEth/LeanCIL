@@ -1,7 +1,7 @@
 import Extracted
 import CIL.MethodIdentity
+import CIL.Safety.DecodedSummary
 import CIL.Safety.ObjectFields
-import CIL.Safety.OutcomeContract
 
 /-!
 # Two calls on class instances
@@ -128,4 +128,14 @@ theorem bump_outcome : bumpOutcome.Holds Extracted.program bump := by
   | address account => exact WP.adequate.mp (bump_holds (account, amount) memory permitted)
 
 #print axioms bump_outcome
+
+/-- The balance update and null exception belong to the same pinned `Bump` body. -/
+theorem bump_summary : ∃ record, Extracted.methodEvidence[bump]? = some record ∧
+    DecodedOutcomeSummary Extracted.program Extracted.methodEvidence Extracted.profile
+      Extracted.environment bump record.assembly record.original.token record.arguments
+      bumpOutcome :=
+  ⟨_, rfl, .of_translation Extracted.translation_valid ⟨bump, by decide⟩
+    (method := Extracted.method1) rfl bump_outcome⟩
+
+#print axioms bump_summary
 end ExampleProof

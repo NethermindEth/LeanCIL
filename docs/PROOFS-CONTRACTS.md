@@ -521,12 +521,19 @@ feature certificate validates that method's reachability mask and decoded instru
 `MethodContract.Certified` names only an index, which another extraction can fill with another
 body. A summary also names the metadata method and the bytes.
 
+`DecodedOutcomeSummary` binds an `OutcomeContract` to the same evidence. Its `holds` field
+supplies the normal result and memory footprint or the named exception for each permitted input.
+For example, the compiled `Bump` updates a live account's balance and raises
+`NullReferenceException` on a null account. Both outcomes use one pinned method body.
+
 | Name | Use |
 | --- | --- |
 | `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
 | `decodedProgram?_eq_some` | Proves the decoded program from `programBindingsValid evidence program = true` and `BodiesDecode` |
 | `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
 | `DecodedSummary.of_translation` | Binds a proved contract to its record using the translation certificate and the method lookup at the contract index |
+| `DecodedOutcomeSummary.of_translation` | Binds normal returns and named exceptions using the same method lookup |
+| `DecodedOutcomeSummary.reprofile` | Preserves those outcomes at an agreeing profile when the same evidence decodes to the reprofiled program |
 | `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
 | `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
 | `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
