@@ -560,8 +560,8 @@ theorem fieldReference_contract (body : CIL.Method) (field : CIL.Extraction.Fiel
     InstructionContract memory result stack values := by
   unfold fieldReference at executed
   split at executed
-  · exact instruction_contract _ _ _ _ _ executed
-  · exact instruction_contract _ _ _ _ _ executed
+  · exact structFieldAddress_contract _ _ _ _ _ executed
+  · exact structFieldAddress_contract _ _ _ _ _ executed
   · cases executed
   · cases executed
 #print axioms fieldReference_contract

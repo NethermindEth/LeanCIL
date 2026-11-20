@@ -389,7 +389,7 @@ theorem Memory.Renamed.stepFieldAddress {indices : LocalIndexMap} {mapping : All
     all_goals simp only [resolved] at observable ⊢
     all_goals first
       | exact .error _
-      | (apply (related.instructionResult _ sourceFormed stack bounds observable.bind_left).bind
+      | (apply (related.structFieldAddressResult sourceFormed _ stack bounds observable.bind_left).bind
          intro first second result
          rcases first with ⟨sourceAfter, values⟩
          rcases second with ⟨targetAfter, targetValues⟩

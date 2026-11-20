@@ -925,11 +925,6 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
       instructionStep (.fieldAt offset width signed) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_fieldAddress_eq {offset} (stack : List Value) :
-    step body (.fieldAddress offset) pc args frame stack memory =
-      instructionStep (.fieldAddress offset) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
 @[cil_step] theorem step_setFieldAt_eq {offset width} (stack : List Value) :
     step body (.setFieldAt offset width) pc args frame stack memory =
       instructionStep (.setFieldAt offset width) pc frame stack memory := by
@@ -1015,23 +1010,48 @@ theorem step_stfld_aggregate_eq (field : CIL.Extraction.FieldRef) (offset size :
     rfl
 #print axioms step_stfld_aggregate_eq
 
-/-- `ldflda` of a struct field steps as `fieldAddress` of its offset on every stack, faults
-    included. -/
+/-- A struct ldflda computes its checked field offset and preserves the receiver's writability. -/
 theorem step_ldflda_struct_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
     (addressed : (body.fieldShape field).structOffset? = some offset) (stack : List Value) :
-    step body (.ldflda field) pc args frame stack memory =
-      step body (.fieldAddress offset) pc args frame stack memory := by
-  have reached : fieldReference body field stack memory =
-      instruction (.fieldAddress offset) stack memory := by
+    step body (.ldflda field) pc args frame stack memory = (do
+      let (memory, stack) ← structFieldAddress offset stack memory
+      return .next (pc + 1) stack frame memory) := by
+  have reached : fieldReference body field stack memory = structFieldAddress offset stack memory := by
     unfold fieldReference
     split <;> simp_all [CIL.FieldShape.structOffset?]
-  rw [step_ldflda_eq, step_fieldAddress_eq, reached]
-  simp only [instructionStep]
-  cases observed : unspecifiedOperands 1 stack
-  · rfl
-  · rw [instruction_guarded memory (operation := .fieldAddress offset) observed]
-    rfl
+  rw [step_ldflda_eq, reached]
+  unfold structFieldAddress
+  split <;> rfl
 #print axioms step_ldflda_struct_eq
+
+/-- A struct field address keeps a writable reference writable. -/
+theorem step_ldflda_reference_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (addressed : (body.fieldShape field).structOffset? = some offset) (reference : Reference)
+    (rest : List Value) :
+    step body (.ldflda field) pc args frame (.reference (.address reference) :: rest)
+        memory = do
+      let address ← checkedAt (.address reference) 0
+        (add memory reference 1 (BitVec.ofNat 64 offset))
+      return .next (pc + 1) (.reference (.address address) :: rest) frame memory := by
+  rw [step_ldflda_struct_eq _ _ _ _ _ field offset addressed]
+  simp only [structFieldAddress, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    Bool.false_or, Bool.false_eq_true, ite_false, bind_assoc, pure_bind]
+#print axioms step_ldflda_reference_eq
+
+/-- A struct field address through a readonly receiver stays readonly. -/
+theorem step_ldflda_readOnlyReference_eq (field : CIL.Extraction.FieldRef) (offset : Nat)
+    (addressed : (body.fieldShape field).structOffset? = some offset) (reference : Reference)
+    (rest : List Value) :
+    step body (.ldflda field) pc args frame (.readOnlyReference (.address reference) :: rest)
+        memory = do
+      let address ← checkedAt (.address reference) 0
+        (add memory reference 1 (BitVec.ofNat 64 offset))
+      return .next (pc + 1) (.readOnlyReference (.address address) :: rest) frame memory := by
+  rw [step_ldflda_struct_eq _ _ _ _ _ field offset addressed]
+  simp only [structFieldAddress, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
+    Bool.false_or, Bool.false_eq_true, ite_false, bind_assoc, pure_bind]
+#print axioms step_ldflda_readOnlyReference_eq
+
 
 @[cil_step] theorem step_ldc_i4_eq {value} (stack : List Value) :
     step body (.ldc_i4 value) pc args frame stack memory =

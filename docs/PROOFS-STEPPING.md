@@ -257,10 +257,11 @@ Reference and field instructions have one `@[cil_instruction_step]` equation per
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
 and formation operations. They cover the `instruction` arms of `ldind`, `stind` and
 `storeScalar` through a reference, `ldind.i` on a native method table cursor, `ldlen` and
-`ldelem.i` of a managed handler table, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
+`ldelem.i` of a managed handler table, `fieldAt` on an address, `setFieldAt` of
 width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`. A
-struct field `ldfld`, `ldflda` or `stfld` steps by the arm of the lowered instruction its
-field's shape gives, so it takes the facts that instruction takes.
+struct field `ldfld` or `stfld` uses the load or store selected by the field's shape. For a
+struct `ldflda`, the checked field offset and a pointer-addition fact give the resulting writable
+or readonly reference.
 
 - Supply successful encoded byte reads and writes directly: the stepper derives the scalar or
   vector bridge before stepping. Narrow scalar reads support signed and unsigned results. Facts

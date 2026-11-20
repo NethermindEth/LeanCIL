@@ -103,7 +103,7 @@ def observerCount : CIL.Instruction → Nat
   | .ldfld _ | .ldflda _ => 1
   | .stfld _ => 2
   -- Memory and fields
-  | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
+  | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .aggregateFieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
@@ -1289,6 +1289,23 @@ def initializeBytes (size : Nat) (stack : List Value) (memory : Memory) :
       (write memory address (List.replicate size 0) ordinaryAccessAlignment), rest)
   | _ => .error (.unsupported "Not a memory instruction")
 
+/-- Form a struct field address at its checked offset, preserving the receiver's writability.
+    A null receiver faults before pointer arithmetic. -/
+def structFieldAddress (offset : Nat) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  if unspecifiedOperands 1 stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else
+  match stack with
+  | .reference (.address reference) :: rest =>
+    let address ← checkedAt (.address reference) 0 (add memory reference 1 (BitVec.ofNat 64 offset))
+    return (memory, .reference (.address address) :: rest)
+  | .readOnlyReference (.address reference) :: rest =>
+    let address ← checkedAt (.address reference) 0 (add memory reference 1 (BitVec.ofNat 64 offset))
+    return (memory, .readOnlyReference (.address address) :: rest)
+  | .reference .null :: _ | .readOnlyReference .null :: _ =>
+    .error (.memory .nullDereference .null 0)
+  | _ => .error (.unsupported "Not a memory instruction")
+
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
@@ -1328,13 +1345,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
       let address ← referenceAt r
       return (← checkedAt r size (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
   -- Fields
-  | .fieldAddress offset, .reference (.address r) :: rest =>
-    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
-    return (m, .reference (.address address) :: rest)
-  -- A field of a readonly reference keeps the restriction, as `readonly. ldelema` results do.
-  | .fieldAddress offset, .readOnlyReference (.address r) :: rest =>
-    let address ← checkedAt (.address r) 0 (add m r 1 (BitVec.ofNat 64 offset))
-    return (m, .readOnlyReference (.address address) :: rest)
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else
       let number := byteNumber ((bytes.drop offset).take width)
@@ -1425,8 +1435,8 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .setAggregateFieldAt _ size, _ :: .readOnlyReference r :: _ =>
     .error (.memory .unwritable r size)
   -- Field accesses through null fault like `referenceAt`, before any offset is formed.
-  | .fieldAt .., .reference .null :: _ | .fieldAddress _, .reference .null :: _
-  | .fieldAt .., .readOnlyReference .null :: _ | .fieldAddress _, .readOnlyReference .null :: _
+  | .fieldAt .., .reference .null :: _
+  | .fieldAt .., .readOnlyReference .null :: _
   | .setFieldAt .., .scalar _ :: .reference .null :: _ =>
     .error (.memory .nullDereference .null 0)
   -- Memory operations and constants

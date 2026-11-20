@@ -588,18 +588,6 @@ theorem step_appendLocals_fieldAt (offset width : Nat) (signed : Bool) :
 
 #print axioms step_appendLocals_fieldAt
 
-/-- `fieldAddress` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_fieldAddress (offset : Nat) :
-    StepAppendLocals (.fieldAddress offset) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.fieldAddress offset) pc stack frame extra memory
-
-#print axioms step_appendLocals_fieldAddress
-
 /-- `setFieldAt` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_setFieldAt (offset width : Nat) :
     StepAppendLocals (.setFieldAt offset width) := by
@@ -1713,8 +1701,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_storeScalar width
     case fieldAt offset width signed =>
       exact step_appendLocals_fieldAt offset width signed
-    case fieldAddress offset =>
-      exact step_appendLocals_fieldAddress offset
     case setFieldAt offset width =>
       exact step_appendLocals_setFieldAt offset width
     case aggregateFieldAt offset size =>

@@ -78,7 +78,7 @@ theorem view_reference_outside :
 theorem restricted_field_reads :
     instruction (.fieldAt 4 4 false) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.scalar (.i32 0)]) ∧
-    instruction (.fieldAddress 4) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
+    structFieldAddress 4 [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.readOnlyReference (.address ⟨0, 4⟩)]) ∧
     instruction (.aggregateFieldAt 4 4) [.readOnlyReference (.address ⟨0, 0⟩)] memory =
       .ok (memory, [.scalar (.aggregate [0, 0, 0, 0])]) := ⟨rfl, rfl, rfl⟩
@@ -98,7 +98,7 @@ theorem restricted_field_stores_rejected :
 theorem restricted_null_field :
     instruction (.fieldAt 4 4 false) [.readOnlyReference .null] memory =
       .error (.memory .nullDereference .null 0) ∧
-    instruction (.fieldAddress 4) [.readOnlyReference .null] memory =
+    structFieldAddress 4 [.readOnlyReference .null] memory =
       .error (.memory .nullDereference .null 0) := ⟨rfl, rfl⟩
 #print axioms restricted_null_field
 

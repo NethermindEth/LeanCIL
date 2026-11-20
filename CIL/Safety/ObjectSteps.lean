@@ -857,7 +857,7 @@ def storageLowering? (body op : Expr) (stack : Option Expr := none) :
             mkLambdaFVars (variables.push unused) (mkAppN proof variables).headBeta
       return some (lowered, ignored)
     | _ => return none
-  let accesses := [``CIL.Instruction.ldfld, ``CIL.Instruction.stfld, ``CIL.Instruction.ldflda]
+  let accesses := [``CIL.Instruction.ldfld, ``CIL.Instruction.stfld]
   unless accesses.contains name do
     return none
   let some (shape, proof) ← (try fieldShapeKnown? body field catch _ => pure none) | return none
@@ -874,15 +874,6 @@ def storageLowering? (body op : Expr) (stack : Option Expr := none) :
   | ``CIL.Instruction.stfld, (``CIL.FieldShape.aggregate, #[offset, size]) =>
     lowering ``step_stfld_aggregate_eq
       (mkApp2 (mkConst ``CIL.Instruction.setAggregateFieldAt) offset size) #[offset, size, proof]
-  | ``CIL.Instruction.ldflda, (``CIL.FieldShape.value, #[offset, _, _])
-  | ``CIL.Instruction.ldflda, (``CIL.FieldShape.aggregate, #[offset, _]) =>
-    let addressed ← mkCongrArg (mkConst ``CIL.FieldShape.structOffset?) proof
-    let resolved := mkApp (mkConst ``CIL.FieldShape.structOffset?)
-      (mkApp2 (mkConst ``CIL.Method.fieldShape) body field)
-    let placed ← mkAppM ``Option.some #[offset]
-    let addressed ← mkExpectedTypeHint addressed (← mkEq resolved placed)
-    lowering ``step_ldflda_struct_eq (mkApp (mkConst ``CIL.Instruction.fieldAddress) offset)
-      #[offset, addressed]
   | _, _ => return none
 
 open Lean Meta in
@@ -987,7 +978,7 @@ simproc [cil_step] reduceFieldStore (step _ (.stfld _) _ _ _ _ _) := fun express
   | none => equationStep generic
 
 open Lean Meta in
-/-- A struct field address steps as the lowered address of its offset, and a class field
+/-- A struct field address steps at its checked offset, and a class field
     address to its fault, as `fieldShapeIn` finds the shape. An address whose shape stays
     unknown steps to `fieldReference`. -/
 simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expression => do
@@ -1005,6 +996,16 @@ simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expr
       (mkApp2 (mkConst ``CIL.Method.fieldShape) body field)
     let expected ← mkEq resolved (← mkAppM ``Option.some #[offset])
     let addressed ← mkExpectedTypeHint addressed expected
+    if let (``List.cons, #[_, receiver, rest]) := (← whnfR stack).getAppFnArgs then
+      let (head, operands) := (← whnfR receiver).getAppFnArgs
+      if let #[pointer] := operands then
+        if let (``ManagedReference.address, #[reference]) := (← whnfR pointer).getAppFnArgs then
+          let equation := if head == ``Value.reference then some ``step_ldflda_reference_eq
+            else if head == ``Value.readOnlyReference then some ``step_ldflda_readOnlyReference_eq
+            else none
+          if let some name := equation then
+            return ← equationStep (mkAppN (mkConst name)
+              (leading ++ #[offset, addressed, reference, rest]))
     return ← equationStep (mkAppN (mkConst ``step_ldflda_struct_eq)
       (leading ++ #[offset, addressed, stack]))
   | _ => pure ()

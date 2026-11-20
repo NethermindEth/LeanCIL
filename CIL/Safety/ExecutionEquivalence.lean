@@ -329,6 +329,22 @@ theorem Memory.Equivalent.fieldStore {m n : Memory} (same : m.Equivalent n) (bod
   · exact .error _
 #print axioms Memory.Equivalent.fieldStore
 
+/-- Equivalent memories validate the same field displacement and return the same reference. -/
+theorem Memory.Equivalent.structFieldAddress {m n : Memory} (same : m.Equivalent n)
+    (offset : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (structFieldAddress offset stack m)
+      (structFieldAddress offset stack n) := by
+  unfold CIL.Safety.structFieldAddress
+  split
+  · exact .error _
+  · split <;> first
+      | exact .error _
+      | (rw [same.add]
+         apply ResultEquivalent.bind_same
+         intro address
+         exact .ok ⟨same, rfl⟩)
+#print axioms Memory.Equivalent.structFieldAddress
+
 /-- Equivalent memories give an instance field address equivalent results. -/
 theorem Memory.Equivalent.fieldReference {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value) :
@@ -336,8 +352,8 @@ theorem Memory.Equivalent.fieldReference {m n : Memory} (same : m.Equivalent n)
       (fieldReference body field stack n) := by
   unfold CIL.Safety.fieldReference
   split
-  · exact same.instruction _ _
-  · exact same.instruction _ _
+  · exact same.structFieldAddress _ _
+  · exact same.structFieldAddress _ _
   · exact .error _
   · exact .error _
 #print axioms Memory.Equivalent.fieldReference

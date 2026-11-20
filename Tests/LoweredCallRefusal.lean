@@ -237,9 +237,10 @@ theorem spanClaims :
           liveHoleAt 0 40)
     (lengthBody.code.all fun raw => Id.run do
       let .call site := raw.operand | return false
+      let lengthField : FieldRef := ⟨site.method.owner, 0, int, name!"_length"⟩
       return siteClaim full none raw == .model &&
         runtimeCatalog.siteAgrees full .scalar raw (.call site.method {}) none true &&
-        !(runtimeCatalog.siteAgrees full .scalar raw (.fieldAddress 0) none true)) ∧
+        !(runtimeCatalog.siteAgrees full .scalar raw (.ldflda lengthField) none true)) ∧
       missing lengthBody .model ∧ missing unknown .refused := by
   decide +kernel
 

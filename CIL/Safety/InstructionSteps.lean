@@ -188,28 +188,6 @@ theorem step_fieldAt_readOnlyReference_eq (offset width : Nat) (signed : Bool)
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   instruction_step_proof step_fieldAt_eq
 
-/-- A field address keeps a writable reference writable. -/
-@[cil_instruction_step high]
-theorem step_fieldAddress_reference_eq (offset : Nat) (reference : Reference)
-    (rest : List Value) :
-    step body (.fieldAddress offset) pc args frame
-      (.reference (.address reference) :: rest) memory = do
-      let address ← checkedAt (.address reference) 0
-        (add memory reference 1 (BitVec.ofNat 64 offset))
-      return .next (pc + 1) (.reference (.address address) :: rest) frame memory := by
-  instruction_step_proof step_fieldAddress_eq
-
-/-- A field address of a readonly reference stays readonly. -/
-@[cil_instruction_step high]
-theorem step_fieldAddress_readOnlyReference_eq (offset : Nat)
-    (reference : Reference) (rest : List Value) :
-    step body (.fieldAddress offset) pc args frame
-      (.readOnlyReference (.address reference) :: rest) memory = do
-      let address ← checkedAt (.address reference) 0
-        (add memory reference 1 (BitVec.ofNat 64 offset))
-      return .next (pc + 1) (.readOnlyReference (.address address) :: rest) frame memory := by
-  instruction_step_proof step_fieldAddress_eq
-
 /-- An i32 field store of width 1, 2 or 4 writes the value's low bytes at the field address. -/
 theorem step_setFieldAt_i32_eq (offset width : Nat) (narrow : width = 1 ∨ width = 2 ∨ width = 4)
     (bits : CIL.W32) (reference : Reference) (rest : List Value) :
@@ -388,8 +366,6 @@ simproc [cil_instruction_step] reduceObjectSize (step _ (.sizeof _) _ _ _ _ _) :
 #print axioms step_storeScalar_i64_eq
 #print axioms step_fieldAt_reference_eq
 #print axioms step_fieldAt_readOnlyReference_eq
-#print axioms step_fieldAddress_reference_eq
-#print axioms step_fieldAddress_readOnlyReference_eq
 #print axioms step_setFieldAt_i32_eq
 #print axioms step_setFieldAt_i32_1_eq
 #print axioms step_setFieldAt_i32_2_eq

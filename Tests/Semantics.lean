@@ -480,7 +480,7 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 32) ∧
     instructions [.memory .nullRef, .fieldAt 8 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .fieldAddress 8] [] Memory.empty =
+    structFieldAddress 8 [.reference .null] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .ldc_i8 7, .setFieldAt 8 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) :=

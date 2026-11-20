@@ -551,7 +551,7 @@ def fieldStore (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : Li
 def fieldReference (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value)
     (memory : Memory) : ExecutionResult (Memory × List Value) :=
   match body.fieldShape field with
-  | .value offset .. | .aggregate offset _ => instruction (.fieldAddress offset) stack memory
+  | .value offset .. | .aggregate offset _ => structFieldAddress offset stack memory
   | .classSlot .. => .error (.unsupported "Class field address")
   | .unsupported reason => .error (.unsupported reason)
 

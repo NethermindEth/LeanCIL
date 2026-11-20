@@ -42,7 +42,6 @@ inductive LayoutUse where
 /-- The emitted field operation uses exactly the computed offset and width, and the
     aggregate form exactly when the field is a nested struct. -/
 private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → Instruction → Bool
-  | .address, .fieldAddress offset => offset == layout.offset
   | .load, .fieldAt offset width actualSigned =>
     !layout.aggregate && offset == layout.offset && width == layout.width &&
       actualSigned == signed

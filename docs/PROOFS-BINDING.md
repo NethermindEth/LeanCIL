@@ -731,14 +731,13 @@ kernel check, however many sites and methods use the operand, and the `cil_code`
 `reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it. The
 `cil_step` simprocs `reduceFieldLoad`, `reduceFieldStore` and `reduceFieldAddress` step a class
 field access by the equation for its slot, with the owner shown as the operand writes it, and a
-struct field access as the `fieldAt`, `setFieldAt`, `aggregateFieldAt`, `setAggregateFieldAt` or
-`fieldAddress` step of its shape (`step_ldfld_value_eq` and its siblings); a closed method and
-operand without a fact resolve by compiled evaluation to the literal shape a fact would state,
-which the kernel checks again; `set_option cil.requireFieldShapeFacts true` makes that case an
-error instead, so a proof can require that every field step reads a fact. `cil_checked_steps`,
-`cil_contract_steps` and the loop steppers rewrite a struct field step to the step of its shape
-before they read supplied facts, so the facts a proof supplies for a struct field access are
-those of that lowered step.
+struct load or store by the offset and width of its shape. For `ldflda`, the shape fixes the
+offset used by the checked pointer addition. The receiver determines whether the resulting
+reference is writable or readonly. A closed method and operand without a fact resolve by
+compiled evaluation to the literal shape a fact would state, which the kernel checks again.
+`set_option cil.requireFieldShapeFacts true` reports a missing fact as an error, so a proof can require that every field step reads a fact. `cil_checked_steps`,
+`cil_contract_steps` and the loop steppers use the same resolved field shape. For a field address, supply the
+pointer-addition fact directly.
 
 For a closed generic struct, including a runtime value tuple, `Extracted.layoutIdentity{k}`
 stores the checked UTF-8 bytes of its fully scoped name at layout index `k`. The layout row

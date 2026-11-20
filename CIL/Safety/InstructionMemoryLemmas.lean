@@ -1361,6 +1361,18 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact comparisonGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
+/-- A successful field displacement preserves memory and returns a valid reference. -/
+theorem structFieldAddress_contract (offset : Nat) (stack values : List Value) (m result : Memory)
+    (h : structFieldAddress offset stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
+  unfold structFieldAddress at h
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  repeat' first
+    | solve | cases h; instruction_contract_close
+    | cases h
+    | split at h
+#print axioms structFieldAddress_contract
+
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Instruction) (stack values : List Value)
     (m result : Memory)

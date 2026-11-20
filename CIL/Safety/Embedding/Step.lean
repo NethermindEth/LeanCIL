@@ -920,7 +920,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | storeAggregate | loadScalar | storeScalar
-    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
+    | fieldAt | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
     | pop =>
     step_relabel_fallback (fun absent => absurd rfl absent)
@@ -941,8 +941,6 @@ theorem step_relabel_loadScalar (width : Nat) (signed : Bool) :
 theorem step_relabel_storeScalar (width : Nat) : StepRelabel (.storeScalar width) := step_relabel _
 theorem step_relabel_fieldAt (offset : Nat) (width : Nat) (signed : Bool) :
     StepRelabel (.fieldAt offset width signed) := step_relabel _
-theorem step_relabel_fieldAddress (offset : Nat) : StepRelabel (.fieldAddress offset) :=
-  step_relabel _
 theorem step_relabel_setFieldAt (offset : Nat) (width : Nat) :
     StepRelabel (.setFieldAt offset width) := step_relabel _
 theorem step_relabel_aggregateFieldAt (offset : Nat) (size : Nat) :
@@ -1581,7 +1579,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | storeAggregate | loadScalar | storeScalar
-    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
+    | fieldAt | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
     | pop =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)

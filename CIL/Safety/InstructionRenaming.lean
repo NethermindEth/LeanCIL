@@ -315,6 +315,27 @@ local macro "rename_memory_arm" : tactic => `(tactic| (
       | (split <;> try simp only [*, AllocationRenaming.managedReference,
           Bind.bind, Except.bind])))
 
+/-- Forming a field address at a checked offset respects allocation renaming. -/
+theorem Memory.Renamed.structFieldAddressResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (offset : Nat) (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (structFieldAddress offset stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map (indices.value mapping))
+      (structFieldAddress offset stack source)
+      (structFieldAddress offset (stack.map (indices.value mapping)) target) := by
+  unfold structFieldAddress at observable ⊢
+  rw [indices.unspecifiedOperands mapping]
+  split at observable
+  · cases observable
+  · rename_i guard
+    rw [ite_eq_right guard, ite_eq_right guard]
+    split at observable
+    rename_memory_arm
+#print axioms Memory.Renamed.structFieldAddressResult
+
 set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
 theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}

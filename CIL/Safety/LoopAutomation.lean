@@ -209,7 +209,7 @@ def loopMovesOnly : List Lean.Name :=
     ``CIL.Instruction.ldarga, ``CIL.Instruction.ldloc, ``CIL.Instruction.ldloca,
     ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br,
-    ``CIL.Instruction.initobj, ``CIL.Instruction.fieldAddress]
+    ``CIL.Instruction.initobj, ``CIL.Instruction.ldflda]
 
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/

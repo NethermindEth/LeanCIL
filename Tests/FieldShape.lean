@@ -344,19 +344,41 @@ theorem inner_load_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step]
 #print axioms inner_load_is_lowered
 
-theorem inner_address_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+theorem inner_address_uses_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :
     Safety.step body (.ldflda innerField) 0 [] frame stack memory =
-      Safety.step body (.fieldAddress 8) 0 [] frame stack memory := by
+      (do let (after, values) ← Safety.structFieldAddress 8 stack memory
+          return .next 1 values frame after) := by
   simp only [cil_step]
-#print axioms inner_address_is_lowered
+#print axioms inner_address_uses_offset
 
-theorem high_address_is_lowered (frame : Safety.Frame) (memory : Safety.Memory)
+theorem high_address_uses_offset (frame : Safety.Frame) (memory : Safety.Memory)
     (stack : List Safety.Value) :
     Safety.step body (.ldflda highField) 0 [] frame stack memory =
-      Safety.step body (.fieldAddress 4) 0 [] frame stack memory := by
+      (do let (after, values) ← Safety.structFieldAddress 4 stack memory
+          return .next 1 values frame after) := by
   simp only [cil_step]
-#print axioms high_address_is_lowered
+#print axioms high_address_uses_offset
+
+section
+open CIL.Safety
+
+/-- A writable receiver yields a writable field reference. -/
+theorem address_writable (frame : Frame) (memory : Safety.Memory) (source field : Reference)
+    (rest : List Safety.Value) (added : add memory source 1 4 = .ok field) :
+    step body (.ldflda highField) 0 [] frame (.reference (.address source) :: rest) memory =
+      .ok (.next 1 (.reference (.address field) :: rest) frame memory) := by
+  cil_checked_step [added]
+#print axioms address_writable
+
+/-- A readonly receiver retains its write restriction. -/
+theorem address_readonly (frame : Frame) (memory : Safety.Memory) (source field : Reference)
+    (rest : List Safety.Value) (added : add memory source 1 4 = .ok field) :
+    step body (.ldflda highField) 0 [] frame (.readOnlyReference (.address source) :: rest) memory =
+      .ok (.next 1 (.readOnlyReference (.address field) :: rest) frame memory) := by
+  cil_checked_step [added]
+#print axioms address_readonly
+end
 
 private def lanes : TypeExpr := .aggregate "T::Lanes" 3
 /-- A `Vector*<ulong>` of the given generic definition. -/

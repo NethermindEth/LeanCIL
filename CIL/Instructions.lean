@@ -220,7 +220,6 @@ inductive Instruction where
       `readonly.` prefix. -/
   | ldelema (element : Extraction.TypeExpr) (readOnly : Bool)
   | fieldAt (offset width : Nat) (signed : Bool := false)
-  | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)
   | aggregateFieldAt (offset size : Nat)
   | setAggregateFieldAt (offset size : Nat)
