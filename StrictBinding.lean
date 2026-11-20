@@ -14,6 +14,7 @@ import StrictBinding.Sorted
 import StrictBinding.TypeDefs
 import StrictBinding.StaticData
 import StrictBinding.ObjectFields
+import StrictBinding.TupleFields
 
 /-!
 # Deep verification

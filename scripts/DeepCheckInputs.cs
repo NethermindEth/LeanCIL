@@ -81,7 +81,8 @@ internal sealed class DeepCheckInputs
     }
 
     /// <summary>An extraction pin matched by digest; its display identity does not select the image.</summary>
-    internal sealed record Pin(string Identity, Image Image, bool Platform = false, bool? ObjectCoverage = null);
+    internal sealed record Pin(string Identity, Image Image, bool Platform = false,
+        bool? ObjectCoverage = null, bool? TupleCoverage = null);
 
     readonly Dictionary<Sha256Digest, Image> byDigest;
 
@@ -150,7 +151,7 @@ internal sealed class DeepCheckInputs
         Add(identity, "assemblySha256");
         if (identity.TryGetProperty("references", out var references))
             foreach (var reference in references.EnumerateArray()) Add(reference, "sha256");
-        AddPlatformImages(pins);
+        AddPlatformImages(pins, identity);
         return pins.AsReadOnly();
 
         void Add(JsonElement record, string digestProperty)
@@ -166,7 +167,7 @@ internal sealed class DeepCheckInputs
 
     /// <summary>Find platform inputs by full assembly identity in the retained bytes. The kernel independently
     /// resolves every scope from method evidence and checks the defining image and its physical fields.</summary>
-    void AddPlatformImages(List<Pin> pins)
+    void AddPlatformImages(List<Pin> pins, JsonElement extraction)
     {
         var direct = pins.ToLookup(pin => pin.Image.Digest);
         if (direct.Count == byDigest.Count && !pins.Any(pin => CouldBePlatform(pin.Identity))) return;
@@ -189,34 +190,57 @@ internal sealed class DeepCheckInputs
                 if (CoreLibrary(reference)) required.Add(reference.FullName);
             }
         }
-        Queue<string> pending = new(required.Order(StringComparer.Ordinal));
-        var complete = required.Count > 0;
-        while (pending.TryDequeue(out var name))
+        const string pairName = "ValueTuple`2";
+        // The admitted pair TypeRef has this exact scope (CIL.Extraction.runtimeScope).
+        const string pairScope = "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
+        const string pairPrefix = pairScope + "::System." + pairName + "<";
+        HashSet<string> pairs = new(StringComparer.Ordinal);
+        if (required.Contains(pairScope) && extraction.TryGetProperty("layoutIdentities", out var layouts) &&
+            layouts.EnumerateArray().Any(layout => layout.GetString()!.StartsWith(pairPrefix, StringComparison.Ordinal)))
+            pairs.Add(pairScope);
+
+        FollowForwarders(required, "Object");
+        FollowForwarders(pairs, pairName);
+        var objectsComplete = required.All(available.Contains);
+        var pairsComplete = pairs.All(available.Contains);
+        foreach (var name in required.Union(pairs).Order(StringComparer.Ordinal))
         {
-            var matches = available[name].ToArray();
-            if (matches.Length == 0)
-            {
-                complete = false;
-                continue;
-            }
-            if (matches.Length != 1)
-                throw new InvalidDataException("Multiple images supplied for platform assembly " + name);
-            var image = matches[0];
-            if (!direct.Contains(image.Digest)) pins.Add(new(name, image, Platform: true));
-            using var pe = image.OpenPe();
-            var metadata = pe.GetMetadataReader();
-            foreach (var handle in metadata.ExportedTypes)
-            {
-                var type = metadata.GetExportedType(handle);
-                if (!type.IsForwarder || type.Implementation.Kind != HandleKind.AssemblyReference ||
-                    !metadata.StringComparer.Equals(type.Name, "Object") ||
-                    !metadata.StringComparer.Equals(type.Namespace, "System")) continue;
-                var target = metadata.GetAssemblyReference((AssemblyReferenceHandle)type.Implementation).GetAssemblyName();
-                if (CoreLibrary(target) && required.Add(target.FullName)) pending.Enqueue(target.FullName);
-            }
+            if (available[name].SingleOrDefault() is { } image && !direct.Contains(image.Digest))
+                pins.Add(new(name, image, Platform: true));
         }
         for (var index = 0; index < pins.Count; index++)
-            if (required.Contains(pins[index].Identity)) pins[index] = pins[index] with { ObjectCoverage = complete };
+        {
+            var pin = pins[index];
+            pins[index] = pin with
+            {
+                ObjectCoverage = required.Contains(pin.Identity) ? objectsComplete : null,
+                TupleCoverage = pairs.Contains(pin.Identity) ? pairsComplete : null
+            };
+        }
+
+        void FollowForwarders(HashSet<string> scopes, string typeName)
+        {
+            Queue<string> pending = new(scopes);
+            while (pending.TryDequeue(out var name))
+            {
+                var matches = available[name].ToArray();
+                if (matches.Length == 0) continue;
+                if (matches.Length != 1)
+                    throw new InvalidDataException("Multiple images supplied for platform assembly " + name);
+                using var pe = matches[0].OpenPe();
+                var metadata = pe.GetMetadataReader();
+                foreach (var handle in metadata.ExportedTypes)
+                {
+                    var type = metadata.GetExportedType(handle);
+                    if (!type.IsForwarder || type.Implementation.Kind != HandleKind.AssemblyReference ||
+                        !metadata.StringComparer.Equals(type.Name, typeName) ||
+                        !metadata.StringComparer.Equals(type.Namespace, "System")) continue;
+                    var target = metadata.GetAssemblyReference((AssemblyReferenceHandle)type.Implementation);
+                    var assembly = target.GetAssemblyName();
+                    if (CoreLibrary(assembly) && scopes.Add(assembly.FullName)) pending.Enqueue(assembly.FullName);
+                }
+            }
+        }
 
         static bool CouldBePlatform(string identity)
         {
@@ -254,6 +278,38 @@ internal sealed class DeepCheckInputs
                 foreach (var field in type.GetFields())
                     if ((metadata.GetFieldDefinition(field).Attributes & FieldAttributes.Static) == 0)
                         return $"System.Object in {pin.Identity} declares instance field 0x{MetadataTokens.GetToken(field):x8}.";
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The first declared instance field that disagrees with the pair's names or FIELD VAR signatures.
+    /// The diagnostic accompanies a kernel rejection and plays no part in accepting the image.</summary>
+    internal static string? TupleFieldDiagnostic(IEnumerable<Pin> pins)
+    {
+        foreach (var pin in pins)
+        {
+            using var pe = pin.Image.OpenPe();
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.TypeDefinitions)
+            {
+                var type = metadata.GetTypeDefinition(handle);
+                if (!type.GetDeclaringType().IsNil || !metadata.StringComparer.Equals(type.Name, "ValueTuple`2") ||
+                    !metadata.StringComparer.Equals(type.Namespace, "System")) continue;
+                var slot = 0;
+                foreach (var handleField in type.GetFields())
+                {
+                    var field = metadata.GetFieldDefinition(handleField);
+                    if ((field.Attributes & FieldAttributes.Static) != 0) continue;
+                    var name = metadata.GetString(field.Name);
+                    var signature = metadata.GetBlobBytes(field.Signature);
+                    if (slot >= 2 || name != "Item" + (slot + 1) ||
+                        signature is not [0x06, 0x13, var parameter] || parameter != slot)
+                        return $"System.ValueTuple`2 in {pin.Identity}, field 0x{MetadataTokens.GetToken(handleField):x8}" +
+                            $" at instance slot {slot}: {name}, signature {Convert.ToHexStringLower(signature)}.";
+                    slot++;
+                }
+                if (slot != 2) return $"System.ValueTuple`2 in {pin.Identity} declares {slot} instance fields.";
             }
         }
         return null;

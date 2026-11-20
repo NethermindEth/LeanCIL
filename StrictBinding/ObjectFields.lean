@@ -1,4 +1,4 @@
-import StrictBinding.TypeDefs
+import StrictBinding.PlatformType
 import CIL.Extraction.Translation
 
 /-!
@@ -12,71 +12,14 @@ namespace StrictBinding
 
 open CIL.Extraction
 
-/-- The unique top-level System.Object in the image is a public, baseless class and each
-    physical Field row it owns has the Static flag (ECMA-335 II.23.1.5). -/
-private def objectDefinition (image : PreparedImage) : Except AuditError (Option Nat) := do
-  let cell := image.layout.cellOfRow image.view Table.typeDef
-  let mut found := none
-  for i in [:image.layout.rowCount Table.typeDef] do
-    let row := i + 1
-    unless ← stringFound image (← cell row typeNameColumn) (asciiOf "Object" ++ [0]) do continue
-    unless ← stringFound image (← cell row typeNamespaceColumn) (systemNamespace ++ [0]) do continue
-    let flags ← cell row typeDefFlagsColumn
-    if visibilityOf flags ≥ nestedVisibility then continue
-    if found.isSome || visibilityOf flags != 1 || flags &&& interfaceFlag != 0 ||
-        (← cell row typeDefExtendsColumn) != 0 then throw (.invalidObjectDefinition image.identity)
-    found := some row
-  let some row := found | return none
-  for i in [:nestedCount image] do
-    if (← nestedTypeOf image (i + 1)) == row then throw (.invalidObjectDefinition image.identity)
-  let first ← cell row typeDefFieldListColumn
-  let finish ← fieldsEnd image row
-  unless 1 ≤ first && first ≤ finish && finish ≤ image.layout.rowCount Table.field + 1 do
-    throw (.typeDefMismatch row .fields)
+/-- System.Object has no base type, and all its physically declared fields are static. -/
+private def objectFields (image : PreparedImage) (row : Nat) : Except AuditError Unit := do
+  let base ← image.layout.cellOfRow image.view Table.typeDef row typeDefExtendsColumn
+  if base != 0 then throw (.invalidObjectDefinition image.identity)
+  let (first, finish) ← platformFieldRange image row
   for field in [first:finish] do
     let flags ← image.layout.cellOfRow image.view Table.field field 0
     if flags &&& 0x10 == 0 then throw (.objectInstanceField image.identity field)
-
-  return some row
-
-/-- ECMA-335 II.22.14. A top-level forwarded System.Object has an ExportedType row with a
-    Forwarder flag and an Implementation pointing to the destination AssemblyRef. -/
-private def objectForwarder (image : PreparedImage) : Except AuditError (Option String) := do
-  let exportedType := 0x27
-  let cell := image.layout.cellOfRow image.view exportedType
-  let mut target := none
-  for i in [:image.layout.rowCount exportedType] do
-    let row := i + 1
-    unless ← stringFound image (← cell row 2) (asciiOf "Object" ++ [0]) do continue
-    unless ← stringFound image (← cell row 3) (systemNamespace ++ [0]) do continue
-    let implementation ← cell row 4
-    if implementation % 4 == 2 then continue  -- A nested export names its enclosing export.
-    if target.isSome || implementation % 4 != 1 || implementation / 4 == 0 ||
-        (← cell row 0) &&& 0x00200000 == 0 then throw (.invalidObjectDefinition image.identity)
-    let token ← CIL.Extraction.checkedTokenOf Table.assemblyRef (implementation / 4) .rowOverflow
-    unless ← coreAssemblyAt image token 0 do throw (.invalidObjectDefinition image.identity)
-    let identity ← assemblyIdentityAt image.view image.layout token 0
-    target := some (String.ofList (identity.map Char.ofNat))
-  return target
-
-/-- The platform Assembly row carries a full public key that hashes to the recognized token. -/
-private def platformAssembly (image : PreparedImage) : Except AuditError Bool := do
-  let row := tokenOf 0x20 1
-  let flags ← image.layout.cell image.view row 5
-  return flags &&& 1 != 0 && (← coreAssemblyAt image row 1)
-
-/-- Follow at most one forwarder per supplied image. A cycle or a definition competing with
-    an export cannot identify the platform root class. -/
-private def resolveObject (images : List PreparedImage) (identity : String) :
-    Nat → Except AuditError Bool
-  | 0 => throw (.invalidObjectDefinition identity)
-  | fuel + 1 => do
-    let some image := images.find? (·.identity == identity) | return false
-    unless ← platformAssembly image do throw (.invalidObjectScope identity)
-    match ← objectDefinition image, ← objectForwarder image with
-    | some _, none => pure true
-    | none, some next => resolveObject images next fuel
-    | _, _ => throw (.invalidObjectDefinition identity)
 
 /-- The exact identities of the core scopes retained in one slice, including its primitive
     type scope. The identity includes version, culture and publisher. -/
@@ -114,7 +57,8 @@ def checkObjectFields (images : List PinnedImage) (evidence : List MethodEvidenc
   let mut complete := true
   for name in scopes do
     let identity := String.ofList (name.map Char.ofNat)
-    let covered ← resolveObject prepared identity (prepared.length + 1)
+    let covered ← resolvePlatformType prepared "Object" .invalidObjectDefinition objectFields
+      identity (prepared.length + 1)
     complete := complete && covered
   return complete
 

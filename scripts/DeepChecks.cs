@@ -44,7 +44,7 @@ partial class Program
         readonly FailureReports.BindingFailureDigest digests;
         readonly (string Identity, Sha256Digest Digest)[] images;
         readonly HashSet<Sha256Digest> imageDigests;
-        readonly DeepCheckInputs.Pin[] objectPins;
+        readonly DeepCheckInputs.Pin[] platformPins;
         readonly Dictionary<Sha256Digest, string> rejectedImages = [];
         readonly Dictionary<BindingFact, string> rejectedFacts = [];
         internal string IdentitySha256 { get; }
@@ -54,7 +54,7 @@ partial class Program
         {
             digests = new(inputs.Path, inputs.Digest.ToString());
             IdentitySha256 = identitySha256;
-            objectPins = [.. pins.Where(pin => pin.ObjectCoverage.HasValue)];
+            platformPins = [.. pins.Where(pin => pin.ObjectCoverage.HasValue || pin.TupleCoverage.HasValue)];
             images = [.. pins.Select(pin => (pin.Identity, pin.Image.Digest))];
             imageDigests = [.. images.Select(image => image.Digest)];
         }
@@ -77,12 +77,19 @@ partial class Program
         {
             if (!Enum.IsDefined(fact)) throw new ArgumentException("Unknown binding fact.");
             ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-            if (fact == BindingFact.ObjectFields && objectPins.Length > 0)
-                try
+            try
+            {
+                var detail = fact switch
                 {
-                    if (DeepCheckInputs.ObjectFieldDiagnostic(objectPins) is { } detail) reason += ". " + detail;
-                }
-                catch (BadImageFormatException) { } // Preserve the kernel diagnostic for malformed metadata.
+                    BindingFact.ObjectFields => DeepCheckInputs.ObjectFieldDiagnostic(
+                        platformPins.Where(pin => pin.ObjectCoverage.HasValue)),
+                    BindingFact.ValueTupleFieldOrder => DeepCheckInputs.TupleFieldDiagnostic(
+                        platformPins.Where(pin => pin.TupleCoverage.HasValue)),
+                    _ => null
+                };
+                if (detail is not null) reason += ". " + detail;
+            }
+            catch (BadImageFormatException) { } // Preserve the kernel diagnostic for malformed metadata.
             rejectedFacts.TryAdd(fact, reason);
         }
 
@@ -122,7 +129,8 @@ partial class Program
     }
 
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
-    sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods, bool? ObjectFields = null);
+    sealed record BindingPlan(string Output, BindingImagePin[] Images, int Methods,
+        bool? ObjectFields = null, bool? TupleFields = null);
 
     /// <summary>
     /// Artifacts and requests that must join the caller's extraction and proof audit. A contribution with a result
@@ -259,7 +267,8 @@ partial class Program
         }).ToArray();
         BindingPlan plan = new(session, pins,
             identity.Root.GetProperty("methods").GetArrayLength(), matchedPins.FirstOrDefault(pin =>
-                pin.ObjectCoverage.HasValue)?.ObjectCoverage);
+                pin.ObjectCoverage.HasValue)?.ObjectCoverage, matchedPins.FirstOrDefault(pin =>
+                pin.TupleCoverage.HasValue)?.TupleCoverage);
         var directory = Path.Combine(session, "BindingAudit");
         if (Directory.Exists(directory))
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
@@ -499,7 +508,7 @@ partial class Program
             "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
         BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
         BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
-        BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
+        BindingFact.ValueTupleFieldOrder => "the supplied images do not cover a selected System.ValueTuple pair",
         BindingFact.ObjectFields => "the supplied images do not cover the extraction's platform definition of System.Object",
         BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
         BindingFact.DispatchCatalogs => "no check reads the types of an image",
@@ -511,6 +520,7 @@ partial class Program
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string TupleFieldsModule = "BindingAudit.TupleFields";
     const string ObjectFieldsModule = "BindingAudit.ObjectFields";
     const string StaticDataModule = "BindingAudit.StaticData";
     const string BodiesModule = "BindingAudit.Bodies";
@@ -714,10 +724,28 @@ partial class Program
                 end BindingAudit
 
                 """);
+        if (plan.TupleFields is { } pairComplete)
+            File.WriteAllText(ModuleSource(plan.Output, TupleFieldsModule), $$"""
+                import BindingAudit.Images
+                import Extracted
+                import StrictBinding.TupleFields
+
+                namespace BindingAudit
+
+                set_option debug.skipKernelTC true in
+                /-- The pinned platform pair declares the selected layout's two fields in generic slot order. -/
+                theorem tupleFields : StrictBinding.{{TupleProposition(pairComplete)}} images
+                    Extracted.methodEvidence Extracted.rawLayouts := by decide +kernel
+
+                end BindingAudit
+
+                """);
         foreach (var fact in PagedFacts)
             File.WriteAllText(ModuleSource(plan.Output, PagedFact(fact).Module), PagedFactModuleSource(fact,
                 plan.Methods, BindingPageSize(plan.Methods)));
     }
+
+    static string TupleProposition(bool complete) => complete ? "TupleFieldsBound" : "SuppliedTupleFieldsValid";
 
     static string ObjectProposition(bool complete) => complete ? "ObjectFieldsBound" : "SuppliedObjectFieldsValid";
 
@@ -892,6 +920,13 @@ partial class Program
             platform.Add(new(ObjectFieldsModule, new("BindingAudit.objectFields", statement, ApprovedAxioms),
                 new BindingSubject.Fact(BindingFact.ObjectFields, complete)));
         }
+        if (plan.TupleFields is { } pairComplete)
+        {
+            var statement = App(Const("StrictBinding." + TupleProposition(pairComplete)), Const("BindingAudit.images"),
+                Const("Extracted.methodEvidence"), Const("Extracted.rawLayouts"));
+            platform.Add(new(TupleFieldsModule, new("BindingAudit.tupleFields", statement, ApprovedAxioms),
+                new BindingSubject.Fact(BindingFact.ValueTupleFieldOrder, pairComplete)));
+        }
         return
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
@@ -933,6 +968,7 @@ partial class Program
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
         var facts = PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
+        if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         foreach (var module in facts)
             if (failures.ContainsKey(ImagesModule)) failures[module] = "build: " + ImagesModule + " did not build";
             else if (Build(module) is { } pagedError) failures[module] = "build: " + pagedError;

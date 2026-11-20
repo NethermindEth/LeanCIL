@@ -98,6 +98,10 @@ inductive AuditError where
   | invalidObjectDefinition (identity : String)
   /-- A physical field declared by System.Object lacks the Static flag. -/
   | objectInstanceField (identity : String) (field : Nat)
+  /-- An authenticated platform image has a malformed or ambiguous System.ValueTuple pair. -/
+  | invalidTupleDefinition (identity : String)
+  /-- The physical tuple field differs in number, name, or generic parameter signature. -/
+  | invalidTupleField (identity : String) (field : Nat)
   /-- The claimed static data differs from the bytes at the field's mapped RVA. -/
   | fieldDataMismatch (token rva offset : Nat)
   /-- The Assembly row does not spell the identity the image is pinned under. -/

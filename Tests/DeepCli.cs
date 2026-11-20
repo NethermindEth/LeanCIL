@@ -38,7 +38,8 @@ File.WriteAllText(digestFile, digests);
 
 // Each fixture carries the actual platform identity and public key. A forwarded object has an
 // ExportedType and an AssemblyRef. A defined object has one physical Field row.
-static void WritePlatformImage(string path, AssemblyName name, FieldAttributes field, AssemblyName? forward = null)
+static void WritePlatformImage(string path, AssemblyName name, FieldAttributes field, AssemblyName? forward = null,
+    AssemblyName? pairForward = null, bool definePair = false, bool reverseSlots = false)
 {
     var rows = new MetadataBuilder();
     rows.AddModule(0, rows.GetOrAddString(name.Name + ".dll"), rows.GetOrAddGuid(Guid.Empty), default, default);
@@ -62,6 +63,28 @@ static void WritePlatformImage(string path, AssemblyName name, FieldAttributes f
             rows.GetOrAddBlob(forward.GetPublicKeyToken()!), default, default);
         const TypeAttributes forwarder = (TypeAttributes)0x00200000;
         rows.AddExportedType(forwarder, system, objectName, target, 0);
+    }
+    if (pairForward is not null)
+    {
+        var target = rows.AddAssemblyReference(rows.GetOrAddString(pairForward.Name!), pairForward.Version!, default,
+            rows.GetOrAddBlob(pairForward.GetPublicKeyToken()!), default, default);
+        rows.AddExportedType((TypeAttributes)0x00200000, system, rows.GetOrAddString("ValueTuple`2"), target, 0);
+    }
+    if (definePair)
+    {
+        var start = MetadataTokens.FieldDefinitionHandle(rows.GetRowCount(TableIndex.Field) + 1);
+        var valueType = rows.AddTypeDefinition(TypeAttributes.Public, system, rows.GetOrAddString("ValueType"),
+            MetadataTokens.TypeDefinitionHandle(2), start, firstMethod);
+        var pair = rows.AddTypeDefinition(TypeAttributes.Public | TypeAttributes.Sealed, system,
+            rows.GetOrAddString("ValueTuple`2"), valueType, start, firstMethod);
+        for (var slot = 0; slot < 2; slot++)
+        {
+            var signature = new BlobBuilder();
+            new BlobEncoder(signature).Field().Type().GenericTypeParameter(reverseSlots ? 1 - slot : slot);
+            rows.AddFieldDefinition(FieldAttributes.Public, rows.GetOrAddString("Item" + (slot + 1)),
+                rows.GetOrAddBlob(signature));
+            rows.AddGenericParameter(pair, default, rows.GetOrAddString("T" + (slot + 1)), slot);
+        }
     }
     var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(),
         new MetadataRootBuilder(rows), new BlobBuilder());
@@ -138,6 +161,68 @@ void CheckPlatformObject()
     Check("failed", (reference, runtime), (definition, core));
     Console.WriteLine("PASS a rehashed instance field in the forwarded definition fails the object-fields check");
     File.WriteAllText(digestFile, digests);
+}
+
+void CheckPlatformPair()
+{
+    var pairApp = fixture.Build("Pair", "DeepCli.Pair",
+        "public static class Pair { public static int Quotient(int x, int y) => System.Math.DivRem(x, y).Quotient; }");
+    var pairOutput = fixture.Artifact("PairExtraction");
+    Run([.. cli, "extract", pairApp, "Pair::Quotient(int,int)", pairOutput]);
+    var runtime = Assembly.Load("System.Runtime").GetName();
+    var core = typeof(object).Assembly.GetName();
+    var facade = Path.Combine(fixture.Root, "pair-facade.dll");
+    var destination = Path.Combine(fixture.Root, "pair-definition.dll");
+    var pairPins = Path.Combine(fixture.Root, "pair.sha256");
+    var pairProof = At("Examples/Proofs/MathDivRemQuotient.lean");
+
+    void Check(string expected, params string[] images)
+    {
+        File.WriteAllLines(pairPins, images.Prepend(pairApp).Select(path => Sha(path) + "  " + path));
+        var result = Execute([.. cli, "verify", pairOutput, "--proof", pairProof, "--deep-checks", pairPins,
+            "--format", "json"]);
+        var certificate = Path.Combine(pairOutput, "verified.json");
+        if (expected == "failed" ? result.Code == 0 || File.Exists(certificate) : result.Code != 0)
+            throw new InvalidOperationException("Unexpected pair verification outcome: " + result.Output);
+        var report = expected == "failed"
+            ? JsonSerializer.Deserialize<JsonElement>(result.Stdout)
+            : JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(certificate));
+        var facts = report.GetProperty("binding").GetProperty("facts").EnumerateArray().ToArray();
+        var pair = facts.Single(f => f.GetProperty("id").GetString() == "value-tuple-field-order");
+        if (pair.GetProperty("status").GetString() != expected ||
+            expected == "reconfirmed" && pair.GetProperty("theorem").GetString() != "BindingAudit.tupleFields")
+            throw new InvalidOperationException("Incorrect tuple field-order report: " + pair);
+        var count = facts.Count(fact => fact.GetProperty("status").GetString() == "reconfirmed");
+        if (expected == "reconfirmed" && count != 5 || expected == "not covered" && count != 4)
+            throw new InvalidOperationException($"Unexpected number of reconfirmed facts: {count} ({expected}).");
+        if (expected == "failed" &&
+            !pair.GetProperty("reason").GetString()!.Contains("Item1, signature 061301", StringComparison.Ordinal))
+            throw new InvalidOperationException("Missing physical tuple signature in the rejection: " + pair);
+        if (expected == "not covered" && report.GetProperty("binding").GetProperty("images").EnumerateArray()
+                .Single(image => image.GetProperty("sha256").GetString() == Sha(destination))
+                .GetProperty("role").GetString() != "unused")
+            throw new InvalidOperationException("The tuple forwarder selected a different assembly version.");
+        if (expected != "failed" && facts.Single(f => f.GetProperty("id").GetString() == "object-fields")
+                .GetProperty("status").GetString() != "reconfirmed")
+            throw new InvalidOperationException("The supplied facade defines System.Object.");
+    }
+
+    WritePlatformImage(facade, runtime, FieldAttributes.Static, pairForward: core);
+    var previousCore = typeof(object).Assembly.GetName();
+    previousCore.Version = new Version(core.Version!.Major - 1, 0, 0, 0);
+    WritePlatformImage(destination, previousCore, FieldAttributes.Static, definePair: true);
+    Check("not covered", facade, destination);
+    WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true);
+    Check("reconfirmed", facade, destination);
+    WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true, reverseSlots: true);
+    Check("failed", facade, destination);
+    Console.WriteLine("PASS tuple forwarding, missing destination and swapped physical generic field signatures");
+}
+
+if (args is ["--pair"])
+{
+    CheckPlatformPair();
+    return;
 }
 
 if (args is ["--platform"])
@@ -253,6 +338,7 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
             throw new InvalidOperationException("Binding text omitted wire name " + fact);
     Console.WriteLine("PASS default and deep binding text");
     CheckPlatformObject();
+    CheckPlatformPair();
 
     var tables = fixture.Build("Table", "DeepCli.Table", """
         public static class Table {

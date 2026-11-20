@@ -359,7 +359,10 @@ reconfirms the initial bytes of RVA fields by checking the physical field signat
 packing and mapped file range. When supplied with the matching platform images, it resolves
 `System.Object` through the core AssemblyRef and any forwarding rows, checks the publisher token
 against each platform image's public key, and checks that every field the root class declares is
-static. The general public-key-token and import-identity facts remain uncovered. `check` hashes each assembly and regenerates the extraction from those inputs.
+static. For the selected `System.ValueTuple<T1,T2>` layout, the audit follows its own scoped
+TypeRef and forwarding chain. It checks the defining TypeDef's two generic parameters and
+the names and signatures of its two instance fields in physical declaration order.
+The general public-key-token and import-identity facts remain uncovered. `check` hashes each assembly and regenerates the extraction from those inputs.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler

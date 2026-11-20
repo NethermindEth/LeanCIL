@@ -346,6 +346,13 @@ The audit follows the exact assembly reference recorded in each forwarding row. 
 image matches its stated digest. Without the required platform image, `object-fields` has
 status `not covered`.
 
+For a selected `System.ValueTuple<T1,T2>` layout, the same option checks
+`value-tuple-field-order`. Supply the defining image or the complete forwarding chain for
+the pair's own System.Runtime reference. The audit checks the two generic parameter slots
+and reads the instance fields in declaration order: `Item1` has type `T1` and `Item2` has
+type `T2`. The object and pair can have different forwarding destinations. A missing pair
+destination leaves this fact uncovered. Runtime byte offsets remain a layout assumption.
+
 A fact is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
 pin or checked claim uses are listed as unused and not covered. Successful reports include the
 digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
