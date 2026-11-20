@@ -77,15 +77,30 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
         var instructions = method.Body.Instructions;
         var constructorPc = instructions.IndexOf(instructions.Single(instruction =>
             instruction.OpCode.Code == Mono.Cecil.Cil.Code.Newobj));
-        foreach (var replacement in new[] { ".spanFromReference 8 true", ".spanFromReference 4 false" })
+        // The generated model fact names the constructor's width and capability, and each forgery changes one.
+        foreach (var (operation, accepted) in new[]
         {
-            var forgedSpan = Path.Combine(root, "forged-span.lean");
-            File.WriteAllText(forgedSpan, ForgeModelEmission(source, constructorPc, $".memory ({replacement})"));
-            var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
-            if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("RuntimeModelsAgree", StringComparison.Ordinal))
-                throw new Exception("Forged span constructor was not rejected: " + rejectedSpan.Output);
-            Console.WriteLine("PASS forged stack span rejected: " + replacement);
+            (".spanFromReference 4 true", true), (".spanFromReference 8 true", false),
+            (".spanFromReference 4 false", false)
+        })
+        {
+            var stated = Path.Combine(root, "stated-span.lean");
+            File.WriteAllText(stated, ForgeModelFact(source, constructorPc, $".memory ({operation})"));
+            var checkedFact = Execute(["lake", "env", "lean", stated], cwd: FixturePackage());
+            var passed = accepted
+                ? checkedFact.Code == 0 && !checkedFact.Output.Contains("sorryAx", StringComparison.Ordinal)
+                : checkedFact.Code != 0 && ModelFactMismatch(constructorPc)(checkedFact.Output);
+            if (!passed) throw new Exception($"Stack span model fact {operation}: {checkedFact.Output}");
+            Console.WriteLine($"PASS stack span model fact {(accepted ? "accepted" : "refused")}: {operation}");
         }
+        // A modelled construction keeps its call, so its own operation in the call's place is refused.
+        var forgedSpan = Path.Combine(root, "forged-span.lean");
+        File.WriteAllText(forgedSpan,
+            ForgeModelEmission(source, constructorPc, ".memory (.spanFromReference 4 true)"));
+        var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
+        if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("RuntimeModelsAgree", StringComparison.Ordinal))
+            throw new Exception($"Substituted stack span instruction was not refused: {rejectedSpan.Output}");
+        Console.WriteLine("PASS substituted stack span instruction refused");
     }
 
     if (name != "uninitialized") continue;

@@ -18,8 +18,8 @@ theorem enterFrame_profile (body : CIL.Method) (profile : CIL.FeatureProfile)
 
 /-- A call without a link runs the same under two profiles that agree on the query of the
     model its method has, if any. -/
-theorem modelStep_profile_eq {opcode : CIL.CallOpcode} (body : CIL.Method) (method : Extraction.MethodRef)
-    (p q : CIL.FeatureProfile)
+theorem modelStep_profile_eq {opcode : CIL.CallOpcode} (body : CIL.Method)
+    (method : Extraction.MethodRef) (p q : CIL.FeatureProfile)
     (agreement : ∀ model, Extraction.runtimeModel body.environment opcode method = some model →
       model.ProfileAgreement p q)
     (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
@@ -47,7 +47,8 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
   have construction (constructor : Extraction.MethodRef)
       (agrees : (CIL.Instruction.newobj constructor).ProfileAgreement body.environment p q) :
       newobjStep (body.linkAt pc) constructor { body with profile := p } pc frame stack memory =
-        newobjStep (body.linkAt pc) constructor { body with profile := q } pc frame stack memory := by
+        newobjStep (body.linkAt pc) constructor { body with profile := q } pc frame stack
+          memory := by
     cases body.linkAt pc with
     | none => exact modelStep_profile_eq (opcode := .newobj) body constructor p q agrees ..
     | some link => cases link <;> rfl

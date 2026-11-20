@@ -682,12 +682,13 @@ storage regions are compatible with its validated type token. Runtime tests are 
 ## Struct instance calls
 
 Admitted direct instance calls use a managed-reference `this`; by-value arguments have private homes.
-Existing-storage constructors use the receiver’s storage and retain its initialization checks.
+Existing-storage constructors use the receiver's storage and retain its initialization checks.
 An unlinked `newobj` for either span type resolves its constructor by opcode, closed signature
-and open declaration. The model consumes the array and optional bounds, pointer and length, or single reference and pushes the checked view. Array views require admissible array storage. The owner
-determines write capability and the element layout determines stride. An absent model faults with
-`unlinkedCall` after the operand observation check. Aggregate `newobj`
-uses zeroed caller-owned temporary storage, a void constructor and checked snapshot readback.
+and open declaration. The model consumes the array and optional bounds, pointer and length, or
+single reference and pushes the checked view. Array views require admissible array storage. The
+owner determines write capability and the element layout determines stride. An absent model faults
+with `unlinkedCall` after the operand observation check. Aggregate `newobj` uses zeroed
+caller-owned temporary storage, a void constructor and checked snapshot readback.
 Padding/layout correspondence and resource availability remain assumptions.
 
 Tail transfers retire the caller frame before checking callee arguments, so references into retired

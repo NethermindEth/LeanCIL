@@ -73,7 +73,8 @@ using (Scope())
     var words = module.GetType("Examples.SpanTables").Methods.Single(method => method.Name == "get_Words");
     var create = (GenericInstanceMethod)words.Body.Instructions.Single(instruction =>
         instruction.Operand is GenericInstanceMethod).Operand;
-    var arrayMethod = module.GetType("Examples.MemorySpans").Methods.Single(method => method.Name == "ArrayConstructor");
+    var arrayMethod = module.GetType("Examples.MemorySpans").Methods
+        .Single(method => method.Name == "ArrayConstructor");
     var arrayConstructor = arrayMethod.Body.Instructions.Select(instruction => instruction.Operand)
         .OfType<MethodReference>().Single(reference => reference.Name == ".ctor");
     foreach (var (type, admitted) in new[]

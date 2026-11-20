@@ -281,6 +281,31 @@ partial class Program
         return changed;
     }
 
+    /// <summary>
+    /// A theorem that the generated model fact of the call or construction at `pc` of method0 is `model`. It
+    /// elaborates only when the runtime table resolves that site to exactly `model`.
+    /// </summary>
+    static string StatedModelFact(int pc, string model) => $$"""
+
+        namespace ModelFactEvidence
+        /-- The generated model fact of the site at pc {{pc}} names the stated model. -/
+        theorem stated_model : True := by
+          have _fact : CIL.Extraction.runtimeModel _ _ _ = some ({{model}}) := Extracted.method0_model{{pc}}
+          trivial
+        #print axioms stated_model
+        end ModelFactEvidence
+
+        """;
+
+    /// <summary>`source` narrowed to its model check, stating that the model fact at `pc` is `model`.</summary>
+    static string ForgeModelFact(string source, int pc, string model) =>
+        $"{NarrowEvidence(source, "method0_models_validated")}{StatedModelFact(pc, model)}";
+
+    /// <summary>The rejection of a stated model fact: a type mismatch at the fact of the site at `pc`.</summary>
+    static Func<string, bool> ModelFactMismatch(int pc) => output =>
+        output.Contains("Type mismatch", StringComparison.Ordinal) &&
+        output.Contains($"method0_model{pc}", StringComparison.Ordinal);
+
     // Keep narrowed declarations and exact obligation types checked, but reuse the original
     // proof instead of reducing the same validator twice. Mutations never use these witnesses.
     static string CheckedEvidenceControl(string original, string narrowed, IEnumerable<string> theorems, int index)

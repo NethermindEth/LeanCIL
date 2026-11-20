@@ -46,15 +46,16 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
                 $"[.bufferSpan ⟨{address}, {length}, 4, {writable}⟩] memory).map Prod.snd = " +
                 $".ok [.scalar (.i32 {(length == 0 && (!nullOnlyWhenNull || address == ".null") ? 1 : 0)})]");
     }
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
         /-- The caller owns an allocation with no readable bytes or access authority. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
             some ⟨.callerStack, ⟨16, 1, []⟩, true, [16]⟩ else none
           nextIdentity := 1 }
         /-- Empty views, readonly receivers and zero-length arrays retain their distinct results. -/
-        """ + $$"""
-
         theorem correctness :
             {{string.Join(" ∧\n", claims)}} := by
           exact ⟨{{string.Join(", ", claims.Select(_ => "by rfl"))}}⟩

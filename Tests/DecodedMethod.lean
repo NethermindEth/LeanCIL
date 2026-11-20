@@ -216,6 +216,37 @@ theorem staticInitializerCallee :
 
 #print axioms staticInitializerCallee
 
+/-- The decoder's code for `code` with RVA `sites`, reachable pcs and the link table. -/
+private def staticCode (code : List RawInstruction) (sites : List (Nat × StaticFieldSite))
+    (reachable : List Bool) (links : List (Nat × Link) := []) :
+    Except RawDecodeError (List Instruction) :=
+  (decodeRaw .scalar {} links reachable { addRaw with code, staticFields := sites } []).map Method.code
+
+/-- Each RVA guard refuses on its own: data at a platform field, an empty, misaligned,
+    initialized, scalar or opaque blob, another field opcode, a prefix and a link at the pc. -/
+theorem rvaGuardsRefuse :
+    let field : FieldRef := ⟨.object "Fixture" "Tables", 1, .atom "Fixture" "Data", name!"Words"⟩
+    let data : StaticFieldSite :=
+      { descriptor := { identity := 3, field, bytes := [1, 2, 3, 4], alignment := 4 },
+        rvaSize := some 4 }
+    let refused : List StaticFieldSite :=
+      [{ descriptor := { data.descriptor with bytes := [] }, rvaSize := some 0 },
+      { data with descriptor.alignment := 3 }, { data with descriptor.alignment := 16 },
+      { data with descriptor.initializer := some { method := 0, arguments := [] } },
+      { data with descriptor.scalar := some false }, { data with descriptor.opaqueValue := true }]
+    let load := { fieldSite 127 field with offset := 2 }
+    fieldCode 126 littleEndianField [(0, data)] = liveHoleAt 0 126 ∧
+      refused.all (fun other => decide (fieldCode 127 field [(0, other)] = liveHoleAt 0 127)) ∧
+      [126, 128].all (fun opcode =>
+        decide (fieldCode opcode field [(0, data)] = liveHoleAt 0 opcode)) ∧
+      staticCode [instr 0 0x00, load] [(1, data)] [false, true] =
+        .ok [.unadmitted 0, .ldsflda field] ∧
+      staticCode [instr 0 0xFE13, load] [(1, data)] [false, true] = liveHoleAt 1 127 ∧
+      staticCode [fieldSite 127 field] [(0, data)] [true] [(0, .direct 0)] = liveHoleAt 0 127 := by
+  decide +kernel
+
+#print axioms rvaGuardsRefuse
+
 /-- A field handle produces a span only at the open declaration and the matching closed width. -/
 theorem staticSpanDecodes :
     let owner := "System.Runtime.CompilerServices.RuntimeHelpers"

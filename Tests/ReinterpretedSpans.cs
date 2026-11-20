@@ -56,7 +56,12 @@ foreach (var method in methods.Where(method => method.IsPublic))
         var noAuthority = Run(7).Replace("] memory", "] { memory with views := [] }", StringComparison.Ordinal);
         claims.Add($"({noAuthority}).map Prod.snd = .ok [{View(7 * sourceWidth / targetWidth, targetWidth)}]");
     }
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    var correctness = claims.Count == 1 ? "by rfl"
+        : $"by exact ⟨{string.Join(", ", claims.Select(_ => "by rfl"))}⟩";
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
         /-- Sparse caller storage permits boundary lengths without allocating their byte contents. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
@@ -65,10 +70,12 @@ foreach (var method in methods.Where(method => method.IsPublic))
           views := [⟨0, 0, 2^35, true, true⟩]
           nextIdentity := 1 }
         /-- Empty, truncated, overflow and unreadable views retain their exact runtime behavior. -/
-        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := " + (claims.Count == 1 ? "by rfl" :
-            $"by exact ⟨{string.Join(", ", claims.Select(_ => "by rfl"))}⟩") +
-        "\n#print axioms correctness\nend ExampleProof\n");
+        theorem correctness :
+        {{string.Join(" ∧\n", claims)}} := {{correctness}}
+        #print axioms correctness
+        end ExampleProof
+
+        """);
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS reinterpreted span: " + name));
 }
 queue.Flush();

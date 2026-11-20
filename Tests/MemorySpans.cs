@@ -347,11 +347,14 @@ foreach (var (name, signature, element, width, writable, range) in new[]
             #print axioms expired_array_is_not_a_range_exception
             """);
     }
-    spanProofs.Add(name, proof);
     if (name is "ArrayReadOnly" or "ArrayConstructor" or "ArrayRange")
     {
+        // The generated model fact names the element, capability and bounds, and each forgery changes one of them.
         var bounds = range == 2 ? ".counted" : ".whole";
         var otherCapability = writable ? "false" : "true";
+        var site = range + 1;
+        var model = $".memory (.arraySpan .{element} {capability} {bounds})";
+        File.AppendAllText(proof, StatedModelFact(site, model));
         foreach (var (mutation, operation) in new[]
         {
             ("array-element", $".memory (.arraySpan .unsigned32 {capability} {bounds})"),
@@ -359,10 +362,19 @@ foreach (var (name, signature, element, width, writable, range) in new[]
         })
         {
             var forged = Path.Combine(root, $"Forged-{name}-{mutation}.lean");
-            File.WriteAllText(forged, ForgeModelEmission(source, range + 1, operation));
-            rejected.Add(forged, $"PASS independent span call rejection: {mutation}", "RuntimeModelsAgree", "is false");
+            File.WriteAllText(forged, ForgeModelFact(source, site, operation));
+            rejected.Add(forged, $"PASS forged span model fact refused: {name} {mutation}", ModelFactMismatch(site));
+        }
+        if (name == "ArrayConstructor")
+        {
+            // A modelled construction keeps its call, so its own operation in the call's place is refused.
+            var substituted = Path.Combine(root, $"Forged-{name}-substituted.lean");
+            File.WriteAllText(substituted, ForgeModelEmission(source, site, model));
+            rejected.Add(substituted, $"PASS substituted memory instruction refused: {name}", "RuntimeModelsAgree",
+                "is false");
         }
     }
+    spanProofs.Add(name, proof);
 }
 
 if (argumentStart < 0) throw new Exception("Missing span argument evidence");

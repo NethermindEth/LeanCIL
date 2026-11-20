@@ -21,6 +21,15 @@ var root = At("artifacts/SpanConstructors");
 Directory.CreateDirectory(root);
 using var metadata = ModuleDefinition.ReadModule(assembly);
 var queue = new GeneratedQueue(verification, assembly);
+// The fixtures whose generated model fact is stated, at the pc of their construction or Empty read.
+string[] modelled = ["Single", "ReadOnlySingle", "Aggregate", "Pointer", "AggregateLocal", "Empty", "ReadOnlyEmpty"];
+var modelSites = modelled.ToDictionary(name => name, name =>
+{
+    var code = metadata.GetType("Examples.SpanConstructors").Methods.Single(method => method.Name == name)
+        .Body.Instructions;
+    return code.IndexOf(code.Single(instruction => instruction.OpCode.Code is Code.Newobj or Code.Call &&
+        instruction.Operand is MethodReference { Name: ".ctor" or "get_Empty" }));
+}, StringComparer.Ordinal);
 foreach (var method in metadata.GetType("Examples.SpanConstructors").Methods.Where(method => method.IsPublic))
 foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse42", "arm64-advsimd" } : ["scalar"])
 {
@@ -88,6 +97,12 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse42", "arm
             .error (.thrown .argumentOutOfRange) := by rfl
         #print axioms negative
         """ : "") + "\nend ExampleProof\n");
+    if (modelSites.TryGetValue(name, out var modelPc))
+    {
+        var capability = writable ? "true" : "false";
+        var form = empty ? "spanEmpty" : counted ? "spanFromReference" : "spanSingleReference";
+        File.AppendAllText(proof, StatedModelFact(modelPc, $".memory (.{form} {width} {capability})"));
+    }
     queue.Add(new(method.FullName, proof, output, Profile: profile),
         () => Console.WriteLine("PASS span constructor: " + name + " (" + profile + ")"));
 }
@@ -119,28 +134,29 @@ var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
     File.WriteAllText(path, ForgeModelEmission(source, pc, ".memory (.spanFromReference 48 true)"));
     rejected.Add(path, "PASS forged in-place constructor refused", "RuntimeModelsAgree", "is false");
 }
-foreach (var (name, pc, operation) in new[]
+// Each forgery changes the width or capability of a generated model fact, so it elaborates exactly when the
+// runtime table resolves the site to the forged model.
+foreach (var (name, model) in new[]
 {
-    ("Single", 1, ".spanSingleReference 8 true"),
-    ("ReadOnlySingle", 1, ".spanSingleReference 4 true"),
-    ("Aggregate", 1, ".spanSingleReference 24 true"),
-    ("Pointer", 2, ".spanFromReference 16 true"),
-    ("AggregateLocal", 1, ".spanSingleReference 16 false"),
-    ("AggregateLocal", 1, ".spanSingleReference 32 true")
+    ("Single", ".memory (.spanSingleReference 8 true)"), ("ReadOnlySingle", ".memory (.spanSingleReference 4 true)"),
+    ("Aggregate", ".memory (.spanSingleReference 24 true)"), ("Pointer", ".memory (.spanFromReference 16 true)"),
+    ("AggregateLocal", ".memory (.spanSingleReference 16 false)"),
+    ("AggregateLocal", ".memory (.spanSingleReference 32 true)"),
+    ("Empty", ".memory (.spanEmpty 8 true)"), ("ReadOnlyEmpty", ".memory (.spanEmpty 32 true)"),
+    ("ReadOnlyEmpty", ".memory (.spanEmpty 24 false)")
 })
 {
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
-    var path = Path.Combine(root, $"{name}-{operation}-rejected.lean");
-    File.WriteAllText(path, ForgeModelEmission(source, pc, $".memory ({operation})"));
-    rejected.Add(path, $"PASS forged span constructor refused: {name}", "RuntimeModelsAgree", "is false");
+    var path = Path.Combine(root, $"{name}-{model}-rejected.lean");
+    File.WriteAllText(path, ForgeModelFact(source, modelSites[name], model));
+    rejected.Add(path, $"PASS forged span model fact refused: {name} {model}", ModelFactMismatch(modelSites[name]));
 }
-foreach (var (name, width, writable) in new[]
-    { ("Empty", 8, "true"), ("ReadOnlyEmpty", 32, "true"), ("ReadOnlyEmpty", 24, "false") })
 {
-    var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
-    var path = Path.Combine(root, $"{name}-{width}-{writable}-rejected.lean");
-    File.WriteAllText(path, ForgeModelEmission(source, 0, $".memory (.spanEmpty {width} {writable})"));
-    rejected.Add(path, $"PASS forged empty span refused: {name}", "RuntimeModelsAgree", "is false");
+    // A modelled construction keeps its call, so a memory instruction in its place is refused whatever its operands.
+    var source = File.ReadAllText(Path.Combine(root, "Single", "Extracted.lean"));
+    var path = Path.Combine(root, "Single-substituted-rejected.lean");
+    File.WriteAllText(path, ForgeModelEmission(source, modelSites["Single"], ".memory (.spanSingleReference 4 true)"));
+    rejected.Add(path, "PASS substituted memory instruction refused: Single", "RuntimeModelsAgree", "is false");
 }
 {
     // A reset takes its width from its home and its operand from the decoded body, so a forged element identity

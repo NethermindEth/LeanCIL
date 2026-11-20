@@ -361,6 +361,23 @@ theorem bulk_vector_models :
 
 #print axioms bulk_vector_models
 
+/-- Span copy, clear and fill admit a laid-out struct. Both array fill overloads refuse it. -/
+theorem bulk_aggregate_models :
+    let element := TypeExpr.aggregate "Fixture::Words" 0
+    let rows : List RawLayout := [{
+      identity := "Fixture::Words", explicit := false,
+      packing := 0, declaredSize := 0, byRefLike := false,
+      fields := [⟨.unsigned32, none⟩] }]
+    let layouts : LayoutEnvironment :=
+      { rawLayouts := rows, layouts := (computeLayouts rows).getD #[] }
+    (bulkSites element "Words").all fun site =>
+      let body := { raw [] [i 40 (.call site)] with parameters := [] }
+      let expected := if site.hasThis then .ok [.call site.method {}] else liveHoleAt 0 40
+      decide ((decodeRaw .scalar layouts [] [true] body []).map Method.code = expected)
+    := by decide +kernel
+
+#print axioms bulk_aggregate_models
+
 /-- `ReadOnlySpan<uint>(uint[])`, the array constructor a call runs on a span home. -/
 private def localConstructor : CallSite := {
   declared := { convention := 0x20, parameters := [.array (.parameter 0)] },

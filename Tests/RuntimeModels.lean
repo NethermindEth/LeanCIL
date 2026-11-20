@@ -393,6 +393,24 @@ example : ¬ ManagedCallsValid [] [] (callModelled body) (method ⟨0, 40, .call
       parameterCount := 0, returnsValue := false }⟩) [true]
     (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
 
+/-- `Span<int>(ref int)`, a construction the runtime table models. -/
+private def spanReference : MethodRef :=
+  let int := runtimeType "System.Int32"
+  { owner := .apply (.constructor runtimeScope "System.Span`1") int, name := name!".ctor",
+    hasThis := true, genericArity := 0, returnType := .void, parameters := [.byref int] }
+
+/-- The linked call rule at a `newobj` of `spanReference` with the given link. -/
+private def constructionFits (live : Bool) (link : Option CIL.Link) : Bool :=
+  validateLinkedCallWith (callModelled body) 1 (fun _ => none) (fun _ => none)
+    (site spanReference 115) live link (.newobj spanReference)
+
+-- A modelled construction keeps its newobj without a link. A link there is refused, live or dead,
+-- so a forged link cannot make the construction enter a callee body.
+example : callModelled body (.newobj, spanReference) ∧ constructionFits true none ∧
+    constructionFits false none := by decide +kernel
+example : [CIL.Link.aggregate 0 8, .object 0 [] 8, .direct 0].all fun link =>
+    !constructionFits true (some link) && !constructionFits false (some link) := by decide +kernel
+
 -- `pop` stands for no model, so a model site does not emit it, and no call site of any opcode
 -- emits it, since it would drop the call.
 example :
