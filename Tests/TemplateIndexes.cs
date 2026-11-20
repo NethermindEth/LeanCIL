@@ -11,6 +11,15 @@ using System.Reflection;
 using System.Text.Json;
 
 var assembly = Assembly.LoadFrom(ExtractorPath);
+// The reflected CLI reads its bundled verification sources beside the extractor executable.
+var savedBase = AppContext.GetData("APP_CONTEXT_BASE_DIRECTORY");
+try
+{
+    AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", Path.GetDirectoryName(assembly.Location) +
+        Path.DirectorySeparatorChar);
+    System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(assembly.GetType("Program", true)!.TypeHandle);
+}
+finally { AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", savedBase); }
 var emitter = assembly.GetType("Nethermind.LeanCIL.TemplateEmitter", true)!;
 var variantType = emitter.GetNestedType("Variant", BindingFlags.NonPublic)!;
 var run = emitter.GetMethod("Run", BindingFlags.Static | BindingFlags.NonPublic)!;
@@ -29,44 +38,48 @@ Array Typed(Type element, IEnumerable<object> items)
 }
 object Listed(Type element, IEnumerable<object> items) =>
     Activator.CreateInstance(Model("ValueList`1").MakeGenericType(element), Typed(element, items))!;
-object Variant(string path, bool avx, object[] methods) => Activator.CreateInstance(variantType, path, "same",
-    JsonSerializer.Deserialize(JsonSerializer.Serialize(new
+Dictionary<object, string> bodies = new(ReferenceEqualityComparer.Instance);
+object Variant(string path, bool avx, object[] methods)
+{
+    var profile = JsonSerializer.Deserialize(JsonSerializer.Serialize(new
     {
         Name = avx ? "x64-v3" : "scalar", Architecture = avx ? "x64" : "scalar", NativeWidth = 64,
         LittleEndian = true, Avx2 = avx
-    }), Model("FeatureProfile"))!, Typed(emitter.GetNestedType("Method", BindingFlags.NonPublic)!, methods))!;
-// The only operations the fixtures need: a feature test, a nop, a return and static and tail calls of method 0
-// or 1, each naming the method operand `site`.
-object Operation(object operation) => operation is not string text ? operation : text switch
+    }), Model("FeatureProfile"))!;
+    var variant = Activator.CreateInstance(variantType, path, "same", profile,
+        Typed(emitter.GetNestedType("Method", BindingFlags.NonPublic)!, methods))!;
+    var inputs = string.Concat(methods.Select((method, index) => $"def method{index} : Method := {bodies[method]}\n"));
+    variantType.GetField("DecoderInputs", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(variant, inputs);
+    return variant;
+}
+FixtureSite Site(object instruction) => instruction switch
 {
-    ".feature .avx2" => WithSite(Create("ModelCall", Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")))),
-    ".nop" => Create("StackOperation", Enum.Parse(Model("StackOpcode"), "Nop")),
-    ".ret" => Create("Return"),
-    "call 0" => Call("Static", 0),
-    "tail call 0" => Call("Tail", 0),
-    "tail call 1" => Call("Tail", 1),
-    _ => throw new ArgumentException("Unmodelled fixture operation: " + text)
+    FixtureSite site => site,
+    "call 0" => new(".call (.arity 0)", ".direct 0"),
+    "tail call 0" => new(".call (.arity 0) { tail := true }", ".direct 0"),
+    "tail call 1" => new(".call (.arity 0) { tail := true }", ".direct 1"),
+    string code => new(code),
+    _ => throw new ArgumentException("Unrecognised template fixture instruction")
 };
-// The one method operand every fixture call names, and the term the templates spell it by.
-var site = Create("MethodRef", ".void",
-    Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, ["Site"]),
-    false, 0, ".void", Listed(typeof(string), []), Listed(typeof(string), []));
-object Call(string kind, int method)
-{
-    return WithSite(Create("Call", Enum.Parse(Model("CallKind"), kind), method, 0, false));
-}
-object WithSite(object call)
-{
-    call.GetType().GetProperty("Site", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(call, site);
-    return call;
-}
 object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadata", returnsValue,
     Listed(Model("InitialValue"), []), Listed(Model("LocalKind"), []), Listed(typeof(int), []),
     Listed(Model("ParameterHome"), []), Listed(Model("StaticSite"), sites),
     "{ parameters := [], returnType := .void }");
-object MethodIn(string identity, object frame, int[] linked, params object[] ops) => Activator.CreateInstance(
-    emitter.GetNestedType("Method", BindingFlags.NonPublic)!, identity, frame,
-    Typed(Model("Operation"), ops.Select(Operation)), new int[ops.Length], linked)!;
+object MethodIn(string identity, object frame, int[] linked, params object[] ops)
+{
+    var sites = ops.Select(Site).ToArray();
+    var features = sites.Any(site => site.Code == ".feature .avx2") ? new[] { Named(Model("Feature"), "Avx2") } : [];
+    var method = Activator.CreateInstance(emitter.GetNestedType("Method", BindingFlags.NonPublic)!,
+        identity, frame, Typed(Model("Feature"), features), new int[sites.Length], linked)!;
+    var links = string.Join(", ", sites.Index().Where(pair => pair.Item.Link is not null)
+        .Select(pair => $"({pair.Index}, {pair.Item.Link})"));
+    var firstOther = Array.FindIndex(sites, site => site.Code != ".nop");
+    var prefix = firstOther < 0 ? sites.Length : firstOther;
+    var code = "[" + string.Join(", ", sites.Skip(prefix).Select(site => site.Code)) + "]";
+    if (prefix > 0) code = $"List.replicate {prefix} .nop ++ " + code;
+    bodies.Add(method, $"{{ code := {code}, locals := [], returnsValue := false, links := [{links}] }}");
+    return method;
+}
 object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), [], ops);
 object Linked(string identity, int target, params object[] ops) => MethodIn(identity, FrameOf(false), [target], ops);
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
@@ -95,7 +108,7 @@ var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
 var secondBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings1.lean"));
 if (!templates.Contains("if avx2 then (Input1.method1.code) else (Input0.method0.code)", StringComparison.Ordinal) ||
-    !templates.Contains("(Input1.method1.relocate (fun | 0 => callee0 | index => index)).links",
+    !templates.Contains("(Input1.method1.reindexLinks (fun | 0 => callee0 | index => index)).links",
         StringComparison.Ordinal) ||
     !firstBinding.Contains("Templates.method0 Extracted.profile Extracted.environment false 0",
         StringComparison.Ordinal) ||
@@ -166,16 +179,17 @@ variants[tailSecond] = Variant(tailSecond, true, [Linked("Tail", 1, "tail call 1
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
 var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
 if (!tailTemplate.Contains("cil_template_code% (Input0.method1.code)", StringComparison.Ordinal) ||
-    !tailTemplate.Contains("links := (Input0.method1.relocate (fun | 0 => callee0 | index => index)).links",
+    !tailTemplate.Contains("links := (Input0.method1.reindexLinks (fun | 0 => callee0 | index => index)).links",
         StringComparison.Ordinal) ||
-    !tailTemplate.Contains("(Input1.method0.relocate (fun | 1 => callee0 | index => index)).links := rfl",
+    !tailTemplate.Contains("(Input1.method0.reindexLinks (fun | 1 => callee0 | index => index)).links := rfl",
         StringComparison.Ordinal))
     throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
 
 // A virtual dispatch, a callable pointer and a static initializer name their methods by the template's callee
 // parameters too, whatever index each profile gives them.
-object Entry(string identity, int method) => Create("ManagedTarget", identity, method);
+const string managedId = "{ owner := \"ID\", token := 1, arguments := [] }";
+const string managedSignature = "{ result := .void, parameters := [] }";
 object InitializedSite(int initializer) => Create("StaticSite", 0, Create("StaticIdentityRecord", "id", "asm", "fld"),
     Create("FieldRef", "T", 0, "U", ValueName()), Listed(typeof(byte), []),
     Create("InitializedStaticValue", null, initializer, Listed(typeof(string), []), null, false));
@@ -189,15 +203,16 @@ string SharedBody(string name, Func<int, object> caller)
     run.Invoke(null, [(string[])[shared, one, two], read]);
     return File.ReadAllText(Path.Combine(shared, "Templates.lean"));
 }
-const string relocatedTarget = "(Input1.method0.relocate (fun | 1 => callee0 | index => index)).links := rfl";
+const string relocatedTarget = "(Input1.method0.reindexLinks (fun | 1 => callee0 | index => index)).links := rfl";
 var numbered = new (string Name, Func<int, object> Caller, string Expected)[]
 {
-    ("CallVirtual", target => Linked("Caller", target, WithSite(Create("CallVirtual", Listed(typeof((string, int)),
-        [("Class", target)]), 1)), ".ret"), relocatedTarget),
-    ("MethodAddress", target => Linked("Caller", target, Create("MethodAddress", Entry("ID", target), "SIG"), ".ret"),
+    ("CallVirtual", target => Linked("Caller", target,
+        new FixtureSite(".callvirt (.arity 0)", $".virtual [(.void, {target})]"), ".ret"), relocatedTarget),
+    ("MethodAddress", target => Linked("Caller", target,
+        new FixtureSite($".managed (.address {managedId} {managedSignature})", $".address {target}"), ".ret"),
         relocatedTarget),
-    ("IndirectCall", target => Linked("Caller", target, Create("IndirectCall", "SIG", Listed(Model("ManagedTarget"),
-        [Entry("ID", target)]), false), ".ret"), relocatedTarget),
+    ("IndirectCall", target => Linked("Caller", target, new FixtureSite($".managed (.call {managedSignature} false)",
+        $".indirect [{{ identity := {managedId}, method := {target} }}]"), ".ret"), relocatedTarget),
     ("Initializer", target => MethodIn("Caller", FrameOf(false, InitializedSite(target)), [], ".ret"),
         "initializer := some { method := callee0, arguments := []")
 };
@@ -206,8 +221,15 @@ foreach (var (name, caller, spelling) in numbered)
         throw new Exception($"A {name} kept its profile's method index in the template");
 Console.WriteLine("PASS template dispatch, callable pointer and initializer methods take callee parameters");
 
-// Records that render the same Lean are equal, so profiles whose instructions differ only in what the text
-// leaves out merge; a real difference still fails at its instruction.
+var dispatchDifference = Rejected(() => SharedBody("DifferentReceiver", target =>
+    Linked("Caller", target, ".nop", new FixtureSite(".callvirt (.arity 0)",
+        $".virtual [(.atom \"Fixture\" \"Receiver{target}\", {target})]"), ".ret")));
+if (!dispatchDifference.Contains("different instructions: Caller at pc 1", StringComparison.Ordinal))
+    throw new Exception("Equal call instructions with different receiver tables were merged: " + dispatchDifference);
+Console.WriteLine("PASS differing dispatch metadata names the call pc after target renumbering");
+
+// The canonical instruction comparisons use decoded values. The outline descriptors independently
+// preserve their existing equality for widths or signs the operation ignores.
 string Merge(string identity, object[] left, object[] right)
 {
     var directory = Path.Combine(root, "Merge" + identity);
@@ -226,21 +248,23 @@ object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Sta
 object ClassWord(bool store, int width, bool signed) => Create("ClassField", Create("ClassViews+FieldOperation",
     store, "T", 0, Named(Model("ClassViews+FieldKind"), "Word"), width, signed, null),
     Create("FieldRef", "T", 0, "U", ValueName()));
-var merged = new (string Identity, object Left, object Right)[]
+var merged = new (string Identity, object Left, object Right, string Code)[]
 {
-    ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2)),
-    ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1)),
-    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false))
+    ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
+        ".intrinsic (.scalar (.bigMul32 true)) 2"),
+    ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
+        ".intrinsic (.scalar (.popCount 32 .word32)) 1"),
+    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false), ".setFieldAt 0 4")
 };
-foreach (var (identity, left, right) in merged)
+foreach (var (identity, left, right, code) in merged)
 {
-    var body = Merge(identity, [left, ".ret"], [right, ".ret"]);
+    var body = Merge(identity, [code, ".ret"], [$"id ({code} : Instruction)", ".ret"]);
     if (!body.Contains("cil_template_code% (Input0.method0.code)", StringComparison.Ordinal) ||
         !Equals(left, right) || left.GetHashCode() != right.GetHashCode())
         throw new Exception($"The {identity} alternatives must agree and share one decoded body.");
 }
-if (!Rejected(() => Merge("Rotate", [Scalar("RotateLeft", 32, false, 32, 2), ".ret"],
-        [Scalar("RotateLeft", 64, false, 32, 2), ".ret"]))
+if (!Rejected(() => Merge("Rotate", [".intrinsic (.scalar (.rotateLeft 32)) 2", ".ret"],
+        [".intrinsic (.scalar (.rotateLeft 64)) 2", ".ret"]))
     .Contains("Profiles with identical observed flags emit different instructions: Rotate at pc 0"))
     throw new Exception("Profiles that render a rotate differently merged");
 Console.WriteLine("PASS template merge accepts what the Lean text equates and names the instruction that differs");
@@ -301,6 +325,8 @@ if (large.TotalMilliseconds > 256 * small.TotalMilliseconds)
         $"instructions, {large.TotalMilliseconds:F0} ms for 80000");
 Console.WriteLine("PASS template emission is linear in the instructions " +
     $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms for {iterations} emissions)");
+
+sealed record FixtureSite(string Code, string? Link = null);
 
 partial class Program
 {

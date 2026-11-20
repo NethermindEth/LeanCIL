@@ -1,4 +1,5 @@
 import CIL.MethodBinding
+import CIL.Extraction.TemplateCode
 import Tests.Support
 
 namespace Tests.MethodBinding
@@ -61,6 +62,33 @@ example : body 6 = { body 6 with code := (body 6).code ++ [.nop] } := by cil_bod
 def calling : Method := {
   code := [.ldarg 0, .br 2, .call (Tests.callee 1) {}, .ret], links := [(2, .direct 7)],
   locals := [], returnsValue := true }
+
+/-- A tail-prefixed call with a managed operand and its own target slot. -/
+private def tailCall (slot : Nat) : Method :=
+  { calling with
+    code := [.nop, .call (Tests.callee 1) { tail := true }, .ret]
+    links := [(1, .direct slot)] }
+
+-- Relocation retains the operand and the prefix, and only the managed target index changes.
+#guard ((tailCall 3).relocate (fun _ => 1)).code == (tailCall 1).code
+#guard MethodBinding.firstCodeOrLinkDifference
+  ((tailCall 3).relocate (fun _ => 1)) (tailCall 1) == none
+#guard MethodBinding.firstCodeOrLinkDifference (tailCall 3) (tailCall 1) == some 1
+
+/-- Templates rename the definition named by an address as well as indirect call targets. -/
+theorem reindexed_address (newIndex : Nat) :
+    (({ calling with links := [(2, .address 3)] } : Method).reindexLinks
+      (fun _ => newIndex)).links = [(2, .address newIndex)] := rfl
+#print axioms reindexed_address
+
+#guard MethodBinding.firstCodeOrLinkDifference calling { calling with links := [] } == some 2
+#guard MethodBinding.firstCodeOrLinkDifference { calling with links := [] } calling == some 2
+#guard MethodBinding.firstCodeOrLinkDifference calling
+  { calling with links := [(3, .direct 7)] } == some 2
+#guard MethodBinding.firstCodeOrLinkDifference calling
+  { calling with code := [.nop], links := [] } == some 0
+#guard MethodBinding.firstCodeOrLinkDifference calling
+  { calling with code := calling.code ++ [.nop], links := [] } == some 2
 
 /-- The field operand of the static reads below. -/
 def fieldRef : CIL.Extraction.FieldRef :=

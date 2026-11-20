@@ -1,5 +1,6 @@
 import CIL.InstructionEquations
 import CIL.Extraction.DecodedDefinition
+import CIL.Safety.Linking
 
 /-!
 # Code selection for decoded profile templates
@@ -10,6 +11,13 @@ instruction at each pc so the template has a fixed length even when the flags ar
 
 namespace CIL.Extraction
 open Lean Meta Elab
+
+/-- Give every method index in a template link table its caller's numbering, including the
+    definition named by `ldftn`. Taking its address enters no callee during execution. -/
+def _root_.CIL.Method.reindexLinks (body : Method) (index : Nat → Nat) : Method :=
+  { body with links := body.links.map fun (pc, link) => (pc, match link with
+    | .address target => .address (index target)
+    | other => other.relocate index) }
 
 /-- An unselected flag combination keeps the raw opcode at every position. -/
 def templateHoles (sites : List RawInstruction) : List Instruction :=

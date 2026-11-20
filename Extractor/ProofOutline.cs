@@ -9,16 +9,19 @@ namespace Nethermind.LeanCIL;
 // the extraction's keyed module, which resolves both in the editor workspace and under verify.
 internal static partial class ProofOutline
 {
+    /// <summary>The frame and instruction descriptors used to outline a proof of this method.</summary>
+    internal sealed record Method(FrameMetadata Frame, Operation[] Operations);
+
     /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
     /// its computed layouts in emission order, each with its identity, its named class fields, and
     /// the architecture that sizes its struct array elements.</summary>
-    internal sealed record Extraction(MethodDefinition[] Methods, TemplateEmitter.Method[] Emitted,
+    internal sealed record Extraction(MethodDefinition[] Methods, Method[] Emitted,
         ClassViews.View[] Views, string Architecture,
         ComputedLayout[] Layouts);
 
     /// <summary>The outline reads homed arguments through their frame slots and modelled calls through
     /// their runtime operations. Each entry retains its instruction's program counter.</summary>
-    internal static Operation[] SlotOperations(TemplateEmitter.Method emitted)
+    internal static Operation[] SlotOperations(Method emitted)
     {
         var frame = emitted.Frame;
         var slots = new Dictionary<int, int>();

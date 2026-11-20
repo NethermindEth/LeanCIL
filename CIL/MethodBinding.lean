@@ -29,6 +29,21 @@ def firstDifference [BEq T] :
   | a :: _, [], index => some (index, some a, none)
   | [], b :: _, index => some (index, none, some b)
 
+/-- First program counter where decoded instructions or their ordered call links differ.
+    A caller comparing profiles relocates both link tables to the same callee numbering. -/
+def firstCodeOrLinkDifference (left right : Method) : Option Nat :=
+  let code := (firstDifference left.code right.code 0).map Prod.fst
+  let link := (firstDifference left.links right.links 0).bind fun (_, lhs, rhs) =>
+    match lhs, rhs with
+    | some a, some b => some (min a.1 b.1)
+    | some a, none => some a.1
+    | none, some b => some b.1
+    | none, none => none
+  match code, link with
+  | some pc, some site => some (min pc site)
+  | _, none => code
+  | none, _ => link
+
 /-- An element for a diagnostic, or a marker when one list has ended. -/
 private def element [Repr T] : Option T -> String
   | some value => reprStr value

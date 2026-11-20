@@ -3,6 +3,35 @@ using Nethermind.LeanCIL;
 
 partial class Program
 {
+    /// <summary>Require alternatives with the same observed flags to have identical decoded code and links.</summary>
+    internal static void CheckTemplateBodies(string decoderInputs, string space,
+        List<(string Identity, string Left, string Right)> comparisons)
+    {
+        using var verifier = new Program();
+        var session = verifier.Library(CommonInputs());
+        var checks = comparisons.Select(pair =>
+            $"MethodBinding.firstCodeOrLinkDifference {pair.Left} {pair.Right}");
+        const string marker = "template differences ";
+        var query = $"""
+            import CIL.MethodBinding
+            {decoderInputs}
+            #eval IO.println ("{marker}" ++ (Lean.toJson
+              ([{string.Join(",\n    ", checks)}] : List (Option Nat))).compress)
+            end {space}
+            """;
+        var probe = Path.Combine(session, "TemplateComparisons.lean");
+        File.WriteAllText(probe, query);
+        var output = Run([verifier.LeanExecutable, probe], cwd: session, leanPath: verifier.SessionLeanPath(session));
+        var line = output.Split('\n').Single(line => line.StartsWith(marker, StringComparison.Ordinal));
+        var differences = JsonSerializer.Deserialize<int?[]>(line[marker.Length..]);
+        if (differences is null || differences.Length != comparisons.Count)
+            throw new InvalidDataException("Lean did not compare every requested template alternative.");
+        for (var index = 0; index < differences.Length; index++)
+            if (differences[index] is int pc)
+                throw new InvalidDataException("Profiles with identical observed flags emit different " +
+                    $"instructions: {comparisons[index].Identity} at pc {pc}");
+    }
+
     /// <summary>Templates compare and print the same opaque slots as their checked extractions.</summary>
     internal static TemplateEmitter.Method[] TemplateVectorFrames(string source, TemplateEmitter.Method[] methods)
     {

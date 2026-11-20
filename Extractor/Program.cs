@@ -364,7 +364,7 @@ internal static partial class Program
             }
             stage = "metadata and CIL validation";
             LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, callSites, imports,
-                staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null,
+                staticIdentities, collectOutlines: inspect is not null,
                 templateInputs: checkedTemplate is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
@@ -507,7 +507,7 @@ internal static partial class Program
             }
             definitions?.Invoke(new(methods));
             if (args[0] == "check" && !refresh)
-                inspect?.Invoke(new(methods, emitted.Templates, emitted.Views,
+                inspect?.Invoke(new(methods, emitted.Outlines, emitted.Views,
                     profile.Architecture, emitted.Layouts));
         }
         catch (Exception exception)

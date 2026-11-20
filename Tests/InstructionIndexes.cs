@@ -310,17 +310,15 @@ if (!Equals(Property(negativeOffset, "Stride"), ulong.MaxValue - 7) ||
     !Equals(Property(negativeOffset, "Signed"), true))
     throw new Exception("A negative stride lost its signed two's complement value");
 var tail = Make("Call", Named("CallKind", "Tail"), 3, 0, false);
-var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
 // The call's operand is the typed method its raw operand names; its rendering is the call's operand term.
 object NoTypes() =>
     Activator.CreateInstance(Model("ValueList`1").MakeGenericType(typeof(string)), [Array.Empty<string>()])!;
 var siteName = Model("MetadataName").GetMethod("OfText", Declared)!.Invoke(null, ["Site"])!;
 var site = Make("MethodRef", ".void", siteName, false, 0, ".void", NoTypes(), NoTypes());
-Assign(renumbered, "Site", site);
+Assign(tail, "Site", site);
 if (!Equals(Property(tail, "Method"), 3) ||
-    !Equals(Property(renumbered, "Method"), 1) ||
-    !Equals(Property(renumbered, "Site"), site) || !Equals(Property(renumbered, "Kind"), Named("CallKind", "Tail")))
-    throw new Exception("Renumbering changed the method operand or prefix of a tail call");
+    !Equals(Property(tail, "Site"), site) || !Equals(Property(tail, "Kind"), Named("CallKind", "Tail")))
+    throw new Exception("The outline lost the tail call's target, typed operand or prefix");
 try
 {
     Make("Constant", 32, -1L, true);

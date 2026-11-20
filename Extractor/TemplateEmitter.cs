@@ -7,8 +7,8 @@ namespace Nethermind.LeanCIL;
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
 internal static partial class TemplateEmitter
 {
-    /// <summary>One decoded method's frame, proof descriptors, raw opcodes and linked method indices.</summary>
-    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes,
+    /// <summary>One decoded method's frame, observed hardware features, raw opcodes and linked method indices.</summary>
+    internal sealed record Method(string Identity, FrameMetadata Frame, Feature[] Features, int[] Opcodes,
         int[] LinkedMethods);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods)
     {
@@ -16,7 +16,7 @@ internal static partial class TemplateEmitter
         internal required string DecoderInputs;
     }
     /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
-    sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops)
+    sealed record Row(Variant Variant, FrameMetadata Frame, string ComparisonBody)
     {
         /// <summary>The qualified name of the decoded method in the shared module.</summary>
         internal required string Body;
@@ -173,14 +173,10 @@ internal static partial class TemplateEmitter
     static Template Prepare(string identity, (Variant Variant, Method Method, string Body)[] selected)
     {
         var first = selected[0].Method;
-        if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length ||
-            !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
+        if (selected.Any(row => !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
-        var features = Enum.GetValues<Feature>().Where(feature => selected.Any(row =>
-            row.Method.Operations.Any(operation => operation is ModelCall { Model: FeatureTest test } &&
-                test.Feature == feature)))
-            .ToArray();
+        var features = selected.SelectMany(row => row.Method.Features).Distinct().Order().ToArray();
         var callees = selected.SelectMany(row => row.Method.LinkedMethods.Concat(row.Method.Frame.Methods)
                 .Select(index => CalleeIdentity(row.Variant, index)))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -189,13 +185,16 @@ internal static partial class TemplateEmitter
         var rows = selected.Select(row =>
         {
             int Renumbered(int index) => calleeIndices[CalleeIdentity(row.Variant, index)];
-            var cases = string.Join(" ", row.Method.LinkedMethods.Select(index =>
-                $"| {index} => {Callee(Renumbered(index))}"));
-            var links = cases.Length == 0 ? $"{row.Body}.links"
-                : $"({row.Body}.relocate (fun {cases} | index => index)).links";
+            string Relocate(Func<int, string> name)
+            {
+                if (row.Method.LinkedMethods.Length == 0) return row.Body;
+                var cases = string.Join(" ", row.Method.LinkedMethods.Select(index =>
+                    $"| {index} => {name(Renumbered(index))}"));
+                return $"({row.Body}.reindexLinks (fun {cases} | index => index))";
+            }
             return new Row(row.Variant, row.Method.Frame.Renumber(Renumbered),
-                [.. row.Method.Operations.Select(operation => operation.Renumber(Renumbered))])
-                { Body = row.Body, RelocatedLinks = links };
+                Relocate(index => index.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                { Body = row.Body, RelocatedLinks = Relocate(Callee) + ".links" };
         }).ToArray();
         // Frames compare once their callees share the template's numbering, as each body does.
         if (rows.Any(row => row.Frame != rows[0].Frame))
@@ -207,22 +206,20 @@ internal static partial class TemplateEmitter
     static string Callee(int index) => $"callee{index}";
 
     /// <summary>The decoded code and relocated links selected by the same feature flags.</summary>
-    static (string Code, string Links) SelectBody(Template template, Row[] rows, int featureIndex = 0)
+    static (string Code, string Links) SelectBody(Template template, Row[] rows,
+        List<(string Identity, string Left, string Right)> comparisons, int featureIndex = 0)
     {
         if (rows.Length == 0) return ($"Extraction.templateHoles {template.Rows[0].Body}Closed.code", "[]");
         if (featureIndex == template.Features.Length)
         {
             var selected = rows[0];
             foreach (var other in rows.AsSpan(1))
-                for (var pc = 0; pc < selected.Ops.Length; pc++)
-                    if (selected.Ops[pc] != other.Ops[pc])
-                        throw new InvalidDataException("Profiles with identical observed flags emit different " +
-                            $"instructions: {template.Identity} at pc {pc}");
+                comparisons.Add((template.Identity, selected.ComparisonBody, other.ComparisonBody));
             return ($"{selected.Body}.code", selected.RelocatedLinks);
         }
         var feature = template.Features[featureIndex];
-        var enabled = SelectBody(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], featureIndex + 1);
-        var disabled = SelectBody(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], featureIndex + 1);
+        var enabled = SelectBody(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], comparisons, featureIndex + 1);
+        var disabled = SelectBody(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], comparisons, featureIndex + 1);
         string Select(string yes, string no) => yes == no ? yes : $"if {Flag(feature)} then ({yes}) else ({no})";
         return (Select(enabled.Code, disabled.Code), Select(enabled.Links, disabled.Links));
     }
@@ -250,6 +247,8 @@ internal static partial class TemplateEmitter
             Line($"end Input{input}");
             Line();
         }
+        var decoderLength = lean.Length;
+        List<(string Identity, string Left, string Right)> comparisons = [];
         for (var index = 0; index < templates.Length; index++)
         {
             var template = templates[index];
@@ -263,7 +262,7 @@ internal static partial class TemplateEmitter
             var sites = template.Frame.StaticSitesLeanWith(Callee);
             Line($$""" : Method := { {{template.Rows[0].Body}} with""");
             Line("  profile, environment,");
-            var body = SelectBody(template, template.Rows);
+            var body = SelectBody(template, template.Rows, comparisons);
             Line($"  links := {body.Links}, staticSites := [{sites}],");
             Line($$"""  code := cil_template_code% ({{body.Code}}) }""");
             var callees = Enumerable.Range(0, template.Callees.Length).Select(Callee).ToArray();
@@ -294,6 +293,8 @@ internal static partial class TemplateEmitter
             }
             Line();
         }
+        if (comparisons.Count != 0)
+            global::Program.CheckTemplateBodies(lean.ToString(0, decoderLength), space, comparisons);
         Line($"end {space}");
         return lean.ToString();
     }

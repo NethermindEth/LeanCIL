@@ -212,6 +212,24 @@ foreach (var (name, selector, spelling) in kinds)
             overwrite: true);
         Compile(extracted, binding, path);
     }
+    if (name == "Address")
+    {
+        File.WriteAllText(Path.Combine(kindShared, "AddressTarget.lean"), """
+            import Templates
+            open CIL
+
+            /-- Taking Bump's address names the target index supplied by the template caller. -/
+            theorem address_target (profile : FeatureProfile) (environment : LayoutEnvironment)
+                (bump twice : Nat) :
+                (Templates.method0 profile environment true bump twice).linkAt 2 =
+                  some (.address bump) := rfl
+            #print axioms address_target
+            """);
+        Compile(kindShared, "AddressTarget", kindPath);
+        using Program verifier = new();
+        verifier.ReplayCheckedModules(["Templates", "AddressTarget"], kindPath,
+            "Kernel replay of the decoded method-address template");
+    }
     Console.WriteLine($"PASS a {name} template elaborates and binds to each profile's own method indices");
 }
 

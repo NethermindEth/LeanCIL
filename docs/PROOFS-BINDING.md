@@ -613,7 +613,9 @@ indices keyed by full method identity. Each `Templates.InputN` namespace contain
 bodies, argument metadata, links, layout environment and reachability masks for that input.
 Lean defines each input method with `cil_decoded_method` over `Method.ofClosed?`.
 The templates command checks each extraction before it writes the shared module. A decoder
-refusal identifies the method and its first refused live instruction.
+refusal identifies the method and its first refused live instruction. When profiles have the same
+observed flags, Lean compares their decoded instructions and their links under one numbering of
+the callees. A disagreement identifies its first pc before the command writes the templates.
 The shared method takes each instruction from those decoded bodies. Every IL instruction keeps
 its pc. At a missing flag combination each pc contains a hole with its original opcode.
 `cil_instruction_equations` generates kernel-checked equations for each position.

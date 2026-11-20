@@ -3,16 +3,13 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 /// <summary>
-/// Instruction information used by extraction, profile template comparison and proof outlines.
+/// Instruction information used by extraction and proof outlines.
 /// The compiled method's instructions come from Lean's decoder.
 /// </summary>
 internal abstract record Operation
 {
     /// <summary>The operation does nothing: a prefix or an operand the translator folded away.</summary>
     internal bool IsNop => this is StackOperation { Kind: StackOpcode.Nop };
-
-    /// <summary>This operation with every method index replaced by <paramref name="map"/> of it.</summary>
-    internal virtual Operation Renumber(Func<int, int> map) => this;
 }
 
 /// <summary>An instruction that only moves the evaluation stack or does scalar arithmetic.</summary>
@@ -194,8 +191,6 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments, bool Const
 
     /// <summary>The type term of the <c>constrained.</c> prefix's closed operand.</summary>
     internal string? ConstrainedType { get; init; }
-
-    internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 }
 
 /// <summary>
@@ -228,19 +223,13 @@ internal abstract record Allocation
 /// <paramref name="Allocated"/>. <paramref name="Constructor"/> is the typed reference its raw operand names,
 /// which the extraction sets; rendering the instruction before it is set fails.
 /// </summary>
-internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Constructor) : Operation
-{
-    internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
-}
+internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Constructor) : Operation;
 
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>
 internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets, int Arguments) : Operation
 {
     /// <summary>The method reference of the virtual slot named at the call site.</summary>
     internal MethodRef? Site { get; init; }
-
-    internal override Operation Renumber(Func<int, int> map) =>
-        this with { Targets = [.. Targets.Select(target => (target.Class, map(target.Method)))] };
 }
 
 /// <summary>The CIL instruction of a static field access.</summary>
@@ -443,18 +432,10 @@ internal sealed record SpanInPlace(SpanSource Source) : Operation;
 internal abstract record ManagedPointer : Operation;
 
 /// <summary>An indirect call through a callable pointer of the given signature and target catalog.</summary>
-internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> Catalog, bool Tail) : ManagedPointer
-{
-    internal override Operation Renumber(Func<int, int> map) =>
-        this with { Catalog = [.. Catalog.Select(target => target with { Method = map(target.Method) })] };
-}
+internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> Catalog, bool Tail) : ManagedPointer;
 
 /// <summary>The address of the managed method <paramref name="Target"/> of the given signature.</summary>
-internal sealed record MethodAddress(ManagedTarget Target, string Signature) : ManagedPointer
-{
-    internal override Operation Renumber(Func<int, int> map) =>
-        this with { Target = Target with { Method = map(Target.Method) } };
-}
+internal sealed record MethodAddress(ManagedTarget Target, string Signature) : ManagedPointer;
 
 /// <summary>A runtime memory operation.</summary>
 internal sealed record Memory(MemoryOperation Operation) : Operation;

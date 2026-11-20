@@ -8,7 +8,8 @@ internal static class LeanEmitter
 {
     /// <summary>An extraction's Lean source and what it is built from.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts, string TemplateInputs);
+        TemplateEmitter.Method[] Templates, ProofOutline.Method[] Outlines, ClassViews.View[] Views,
+        ComputedLayout[] Layouts, string TemplateInputs);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -182,11 +183,12 @@ internal static class LeanEmitter
 
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
         ResolvedCallSites callSites, ImportResolution? importResolution = null,
-        StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false, bool templateInputs = false)
+        StaticIdentityRecord[]? staticIdentities = null, bool collectOutlines = false, bool templateInputs = false)
     {
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
         var templates = new List<TemplateEmitter.Method>();
+        var outlines = new List<ProofOutline.Method>();
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
             import CIL.Extraction.DecodedDefinition
@@ -314,23 +316,31 @@ internal static class LeanEmitter
             var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
             if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)
                 throw new GenericEvidence.UndecodedInstruction(m, refusal);
-            if (collectTemplates)
+            if (templateInputs)
+            {
+                var features = reachable.Where(site => site.OpCode.Code == Code.Call && callSites.IsModel(site))
+                    .Select(site => FeatureProfile.Getter((MethodReference)site.Operand)).OfType<Feature>()
+                    .Distinct().Order().ToArray();
+                templates.Add(new(m.FullName, frame, features,
+                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)], linkedMethods!.ToArray()));
+            }
+            if (collectOutlines)
             {
                 var instructions = new InstructionIndex(m);
                 var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
-                var templateOperations = new List<Operation>(m.Body.Instructions.Count);
+                var outlineOperations = new List<Operation>(m.Body.Instructions.Count);
                 foreach (var site in m.Body.Instructions)
                 {
                     if (!reachable.Contains(site))
                     {
-                        templateOperations.Add(Unadmitted.At(site));
+                        outlineOperations.Add(Unadmitted.At(site));
                         continue;
                     }
-                    var pc = templateOperations.Count;
+                    var pc = outlineOperations.Count;
                     var operation = InstructionTranslation.Translate(site, m, methodIndices, n, instructions, callSites,
                         profile, scalarCertificate, parameterHomes, importResolution, layoutContext);
                     // Each descriptor reads the operand of the closed instruction the decoder checks.
-                    templateOperations.Add(operation switch
+                    outlineOperations.Add(operation switch
                     {
                         ObjectInstruction access => access with { Operand = genericEvidence.ClosedOperandOf(site) },
                         NewArray allocation => allocation with { Element = genericEvidence.ClosedOperandOf(site) },
@@ -352,10 +362,9 @@ internal static class LeanEmitter
                     });
                 }
                 foreach (var site in sites)
-                    if (templateOperations[site.Pc] is StaticFieldInstruction access)
-                        templateOperations[site.Pc] = access with { Field = site.Field };
-                templates.Add(new(m.FullName, frame, [.. templateOperations],
-                    [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)], linkedMethods?.ToArray() ?? []));
+                    if (outlineOperations[site.Pc] is StaticFieldInstruction access)
+                        outlineOperations[site.Pc] = access with { Field = site.Field };
+                outlines.Add(new(frame, [.. outlineOperations]));
             }
             // The decoder's raw definition is the method's only source; the command states its field facts and
             // writes each field operand as the definition the operand shapes name.
@@ -476,7 +485,7 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts,
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews, layouts,
             inputs?.ToString().ReplaceLineEndings("\n") ?? "");
     }
 
