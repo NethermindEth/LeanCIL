@@ -137,21 +137,27 @@ private def staticResult (opcode : Nat) (operand : FieldRef) (descriptor : Stati
     { arguments := [], locals := [], code := code.map fun _ => .other }
   Method.ofClosed? .scalar {} [] (allLive source) source arguments
 
-/-- Each ordinary static opcode uses its exact field, and the method retains its initializer. -/
+/-- A load and an address use their exact field, and the method retains its initializer. -/
 theorem ordinaryStaticsDecode :
     let field := bias.field
     let descriptor := bias
-    [(126, Instruction.ldsfld field), (127, .ldsflda field), (128, .stsfld field)].all
+    [(126, Instruction.ldsfld field), (127, .ldsflda field)].all
       (fun (opcode, op) =>
         match staticResult opcode field descriptor with
-        | .ok method =>
-          let value := if opcode == 128 then [Instruction.ldc_i4 1] else []
-          method.code == (value ++ [op, .ret]) &&
-            method.staticSites == [(value.length, descriptor)]
+        | .ok method => method.code == [op, .ret] && method.staticSites == [(0, descriptor)]
         | .error _ => false) = true := by
   decide +kernel
 
 #print axioms ordinaryStaticsDecode
+
+/-- A reachable store to a static field is refused at the store, with a matching descriptor. -/
+theorem ordinaryStaticStoreRefused :
+    (match staticResult 128 bias.field bias with
+     | .error (.liveHole pc opcode) => pc == 1 && opcode == 128
+     | _ => false) = true := by
+  decide +kernel
+
+#print axioms ordinaryStaticStoreRefused
 
 /-- A mismatched value leaves a hole at the access. A volatile prefix is itself a live hole. -/
 theorem ordinaryStaticRefusals :

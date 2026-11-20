@@ -177,7 +177,8 @@ private def localStaticOwner (methodOwner : String) (owner : TypeExpr) : Bool :=
   | .aggregate identity _ => ownedBy scope identity
   | _ => false
 
-/-- Loads and addresses bind immutable storage. A store retains its field for the store fault. -/
+/-- Loads and addresses bind immutable storage. A store does not decode, so its position stays
+    a hole and a method with a reachable store is refused. -/
 private def ordinaryStaticInstruction (environment : CallLayouts) (methodOwner : String)
     (descriptor : StaticDescriptor) (opcode : Nat) : Option Instruction := do
   let field := descriptor.field
@@ -193,7 +194,6 @@ private def ordinaryStaticInstruction (environment : CallLayouts) (methodOwner :
   match opcode with
   | 126 => return .ldsfld field
   | 127 => return .ldsflda field
-  | 128 => return .stsfld field
   | _ => none
 
 /-- The raw operand names the descriptor's field. An RVA site also requires its full blob. -/

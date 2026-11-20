@@ -592,9 +592,9 @@ reference. Checked writes through it fail, including writes through `Unsafe.AsRe
 
 Extraction requires the declaring type's initialization assumption and one of the supported
 aggregate initializer forms. A second store, a store outside the static constructor, or taking
-the field's address during initialization prevents extraction. The closed decoder can represent
-a matching `stsfld` operand. Extraction rejects a reachable store, and the interpreter reports
-an unsupported store if one occurs in a hand-built method.
+the field's address during initialization prevents extraction. Extraction rejects a reachable
+store, the method decoder refuses a method that has one, and the interpreter reports an
+unsupported store if one occurs in a hand-built method.
 
 #### Unknown readonly values
 
