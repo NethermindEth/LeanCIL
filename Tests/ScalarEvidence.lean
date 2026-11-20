@@ -1084,20 +1084,9 @@ private def fieldRaw : RawMethod :=
 private def fieldFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
 private def fieldStates : ScalarCertificate := [some [], some [.object], some [.word64]]
 private def fieldCode (access : Instruction) : List Instruction := [.ldarg 0, access, .ret]
--- A class field load names the field its raw operand names: owner, index, held type and name.
--- The code equation, not the scalar check, refuses a forged field at this ordinary site.
+-- The scalar check and the code equation accept the load of the field the raw operand names.
 example : Tests.DecodedFlow fieldRaw fieldFeatures fieldStates (fieldCode (.ldfld balance)) := by
   decide +kernel
-example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with index := 0 })) := by decide +kernel
-example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with owner := .object "Scope" "Scope.Other" })) := by
-  decide +kernel
-example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with type := .atom runtime "System.Int32" })) := by
-  decide +kernel
-example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with name := name!"limit" })) := by decide +kernel
 example : ¬ ScalarFlowValid fieldRaw fieldFeatures fieldStates
     (fieldCode (.stfld balance)) := by decide
 
@@ -1114,10 +1103,39 @@ private def nextStates : ScalarCertificate := [some [], some [.object], some [.o
 -- A class-typed field load names its own field; the step reads the slot the field's type gives.
 example : Tests.DecodedFlow nextRaw fieldFeatures nextStates (fieldCode (.ldfld next)) := by
   decide +kernel
-example : ¬ Tests.DecodedFlow nextRaw fieldFeatures nextStates
-    (fieldCode (.ldfld { next with index := 0 })) := by decide +kernel
-example : ¬ Tests.DecodedFlow nextRaw fieldFeatures nextStates
-    (fieldCode (.ldfld { next with owner := account })) := by decide +kernel
+
+/-- `raw` as the evidence of a method whose every pc is reachable. -/
+private def reachableEvidence (raw : RawMethod) : MethodEvidence :=
+  { addEvidence with closed := raw, reachable := raw.code.map fun _ => true }
+
+/-- The evidence of `raw`, every pc reachable, refuses a method emitting `code`. -/
+private def EvidenceRefuses (raw : RawMethod) (code : List Instruction) : Prop :=
+  ¬ MethodEvidenceValid [] #[] [] [reachableEvidence raw] [] (reachableEvidence raw)
+    { addMethod with code }
+
+/-- Code other than the decoding of `raw` is refused by the code equation conjunct alone. -/
+private theorem refused_by_code_equation {raw : RawMethod} {code : List Instruction}
+    (different : code ≠ methodCode addMethod.profile addMethod.environment addMethod.links
+      (raw.code.map fun _ => true) raw) : EvidenceRefuses raw code :=
+  fun valid => different valid.code_eq
+#print axioms refused_by_code_equation
+
+/-- Evidence refuses a class field load naming another owner, index, held type or name than its
+    raw operand. The scalar check skips the operand at this ordinary site, so each refusal is
+    proved from the code equation conjunct. -/
+theorem forged_field_loads_refused :
+    EvidenceRefuses fieldRaw (fieldCode (.ldfld { balance with index := 0 })) ∧
+    EvidenceRefuses fieldRaw
+      (fieldCode (.ldfld { balance with owner := .object "Scope" "Scope.Other" })) ∧
+    EvidenceRefuses fieldRaw
+      (fieldCode (.ldfld { balance with type := .atom runtime "System.Int32" })) ∧
+    EvidenceRefuses fieldRaw (fieldCode (.ldfld { balance with name := name!"limit" })) ∧
+    EvidenceRefuses nextRaw (fieldCode (.ldfld { next with index := 0 })) ∧
+    EvidenceRefuses nextRaw (fieldCode (.ldfld { next with owner := account })) :=
+  ⟨refused_by_code_equation (by decide +kernel), refused_by_code_equation (by decide +kernel),
+    refused_by_code_equation (by decide +kernel), refused_by_code_equation (by decide +kernel),
+    refused_by_code_equation (by decide +kernel), refused_by_code_equation (by decide +kernel)⟩
+#print axioms forged_field_loads_refused
 example : scalarEmissionMatches none none (i 123 nextField) [.object]
     (.ldfld value) = false := by
   decide
@@ -1345,7 +1363,8 @@ private def typedSizeAt (type emitted : TypeExpr) (bits : Nat) : Bool :=
   decide (ScalarFlowValid (sizeRaw (i 65052 (.type type))) pushHoleFeatures sizeStates
     [.sizeof emitted, .pop, .ldarg 0, .ret]) && (environment.valueShape type).size? == some bits
 
-/-- Equal layout sizes cannot justify replacing a literal sizeof operand with another struct. -/
+/-- The decoder keeps a sizeof operand: with equal layout sizes, the scalar check and the code
+    equation accept the operand's own struct and refuse another. -/
 private theorem sizeof_equal_layouts :
     let a := TypeExpr.aggregate "Fixture::A" 0
     let b := TypeExpr.aggregate "Fixture::B" 1
@@ -1361,6 +1380,14 @@ private theorem sizeof_equal_layouts :
     LayoutsValid rows environment.layouts .x64 ∧ environment.valueShape a = .aggregate 4 ∧
       environment.valueShape b = .aggregate 4 ∧ valid a ∧ ¬ valid b := by decide +kernel
 #print axioms sizeof_equal_layouts
+
+/-- Evidence refuses a sizeof naming another struct than its raw operand, through the code
+    equation conjunct. -/
+theorem sizeof_other_struct_refused :
+    EvidenceRefuses (sizeRaw (i 65052 (.type (.aggregate "Fixture::A" 0))))
+      [.sizeof (.aggregate "Fixture::B" 1), .pop, .ldarg 0, .ret] :=
+  refused_by_code_equation (by decide +kernel)
+#print axioms sizeof_other_struct_refused
 
 private def sizeOfSite (type : TypeExpr) : CallSite := {
   declared := { convention := 0x10, returnType := intType },
@@ -1571,11 +1598,12 @@ theorem addition_rejects_extra_static_site :
   decide +kernel
 #print axioms addition_rejects_extra_static_site
 
-/-- The call-aware method binding restores the explicit encoding check at every scalar site. -/
-theorem checked_method_encodings (method : Method) (item : MethodEvidence)
-    (valid : ScalarFlowValid item.closed item.featureStates item.scalarStates method.code)
-    (binding : method.code =
-      methodCode method.profile method.environment method.links item.reachable item.closed)
+/-- Valid evidence gives the full scalar encoding check at every reachable pc, from its scalar
+    check and its code equation conjunct. -/
+theorem checked_method_encodings {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
+    {pins : List AssemblyPin} {all : List MethodEvidence} {imports : List ImportSlot}
+    {item : MethodEvidence} {method : Method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : item.closed.code[pc]? = some instruction)
@@ -1584,8 +1612,9 @@ theorem checked_method_encodings (method : Method) (item : MethodEvidence)
     (stackAt : item.scalarStates[pc]? = some (some stack))
     (emittedAt : method.code[pc]? = some emitted) :
     scalarEmissionMatches role (rawBefore (item.closed.code[·]?) pc) instruction stack emitted =
-      true :=
-  valid.instruction_checked (binding.trans (methodCode_eq ..)) rawAt roleAt featureAt stackAt
+      true := by
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, ⟨flow, binding⟩, _⟩ := valid
+  exact flow.instruction_checked (binding.trans (methodCode_eq ..)) rawAt roleAt featureAt stackAt
     emittedAt
 
 #print axioms checked_method_encodings
