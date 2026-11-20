@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include StoreReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -142,17 +144,8 @@ queue.Flush();
 var contract = At("Examples/Proofs/InstanceWriteRead.lean");
 verification.Verify(assembly, "Examples", "Counter::WriteRead(ulong)", contract, Path.Combine(root, "UniversalWriteRead"));
 var wrongOutput = Path.Combine(root, "WrongWriteRead");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Counter::WrongWriteRead(ulong)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect instance mutation accepted");
+verification.VerifyStoreReturn(assembly, "Counter::WriteRead(ulong)", contract,
+    assembly, "Counter::WrongWriteRead(ulong)", wrongOutput, 64);
 
 // Invalid call metadata must not be mistaken for an instance or static invocation.
 foreach (var mutation in new[] { "static-call", "explicit-this", "class", "constructor-return" })

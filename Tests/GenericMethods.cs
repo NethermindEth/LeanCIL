@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -157,18 +159,11 @@ foreach (var (directory, expected) in new[] { ("Repeated", 2), ("Nested", 3), ("
 }
 
 var wrong = Path.Combine(root, "WrongIdentity");
-var rejected = false;
-try
-{
-    verification.Verify(assembly, "Examples", "GenericMethods::WrongIdentity(int)",
-        At("Examples/Proofs/GenericIdentity32.lean"), wrong);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-if (!rejected || File.Exists(Path.Combine(wrong, "verified.json")))
-    throw new InvalidOperationException("Wrong generic implementation accepted");
+verification.VerifyEmptyReturn(assembly, "GenericMethods::Identity32(int)",
+    At("Examples/Proofs/GenericIdentity32.lean"), assembly, "GenericMethods::WrongIdentity(int)", wrong,
+    new("W32", "[.scalar (.i32 input)]",
+        ".scalar (.i32 input)", 16,
+        "exact ExampleProof.correctness input", "0"));
 
 // A closed primitive-array local now specializes and executes through its typed root slot.
 var arrayLocal = Path.Combine(root, "ClosedArrayLocal");

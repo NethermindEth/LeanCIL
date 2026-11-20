@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -135,18 +137,11 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     method.Body.Instructions.Single(i => i.OpCode.Code is Code.Starg or Code.Starg_S).Operand = method.Parameters[1];
     module.Write(wrongDll);
 }
-var wrongRejected = false;
-try
-{
-    verification.Verify(wrongDll, "Examples", "Arguments::Overwrite(uint,uint)",
-        At("Examples/Proofs/ArgumentOverwrite.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    wrongRejected = true;
-}
-if (!wrongRejected || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect argument assignment accepted");
+verification.VerifyEmptyReturn(assembly, "Arguments::Overwrite(uint,uint)",
+    At("Examples/Proofs/ArgumentOverwrite.lean"), wrongDll, "Arguments::Overwrite(uint,uint)", wrongOutput,
+    new("W32 × W32", "[.scalar (.i32 input.1), .scalar (.i32 input.2)]",
+        ".scalar (.i32 input.2)", 8,
+        "exact ExampleProof.correctness input.1 input.2", "(0, 1)"));
 
 // Exact full and short encodings, across every admitted integer storage type.
 var types = new[] { "SByte", "Byte", "Boolean", "Int16", "UInt16", "Char", "Int32", "UInt32", "Int64", "UInt64", "IntPtr", "UIntPtr" };

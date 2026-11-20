@@ -255,8 +255,8 @@ leancil verify artifacts/FSharpAdd --proof Examples/Proofs/Add.lean
 ```
 
 The theorem proves `(x + y) mod 2^64` for every pair of 64-bit inputs. The `fsharp` suite also
-checks universal store/load and constructor contracts and rejects subtraction under the unchanged
-addition contract.
+checks universal store/load and constructor contracts. At inputs zero and one, the compiled
+subtraction returns the largest unsigned word. The kernel checks this counterexample to addition.
 
 These examples cover F# programs that compile into the supported CIL subset. F# lists, closures,
 discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite

@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -162,32 +164,20 @@ queue.Flush();
 var contract = At("Examples/Proofs/RotateRoundTrip.lean");
 verification.Verify(assembly, "Examples", "Bits::RoundTrip(ulong)", contract, Path.Combine(root, "RoundTrip"));
 var wrongOutput = Path.Combine(root, "WrongRoundTrip");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Bits::WrongRoundTrip(ulong)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect rotation inverse accepted");
+verification.VerifyEmptyReturn(assembly, "Bits::RoundTrip(ulong)",
+    contract, assembly, "Bits::WrongRoundTrip(ulong)", wrongOutput,
+    new("W64", "[.scalar (.i64 input)]",
+        ".scalar (.i64 input)", 8,
+        "exact ExampleProof.correctness input", "1"));
 
 var logarithm = At("Examples/Proofs/IntegerLog2.lean");
 verification.Verify(assembly, "Examples", "Bits::Log64(ulong)", logarithm, Path.Combine(root, "UniversalLog"));
 var wrongLog = Path.Combine(root, "WrongLog");
-failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Bits::WrongLog64(ulong)", logarithm, wrongLog);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongLog, "verified.json")))
-    throw new InvalidOperationException("Incorrect integer logarithm accepted");
+verification.VerifyEmptyReturn(assembly, "Bits::Log64(ulong)",
+    logarithm, assembly, "Bits::WrongLog64(ulong)", wrongLog,
+    new("W64", "[.scalar (.i64 input)]",
+        ".scalar (.i32 (BitVec.ofNat 32 input.toNat.log2))", 8,
+        "exact ExampleProof.correctness input", "0"));
 
 // Preserve exact runtime identity and signature checks for the new allowlist.
 foreach (var mutation in new[] { "scope", "version", "instance", "return", "argument", "generic", "unsupported",

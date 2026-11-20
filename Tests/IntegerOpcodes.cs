@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -111,22 +113,14 @@ foreach (var operation in operations)
     {
         // The rejection reuses this fixture's output, so certify the fixture first.
         queue.Flush();
-        var rejected = false;
-
-        try
-        {
-            verification.Verify(dll, "Examples", $"IntegerOperations::Greater{width}({parameters})",
-                At($"Examples/Proofs/Negate{width}.lean"), output);
-        }
-        catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-        {
-            rejected = true;
-        }
-
-        if (!rejected || File.Exists(Path.Combine(output, "verified.json")))
-            throw new InvalidOperationException("Incorrect negation implementation accepted");
-
-        Console.WriteLine($"PASS incorrect negation i{width} rejected by proof checking");
+        verification.VerifyEmptyReturn(assembly, $"IntegerOperations::Negate{width}({type})",
+            At($"Examples/Proofs/Negate{width}.lean"), dll, $"IntegerOperations::Greater{width}({parameters})", output,
+            new($"W{width}", $"[.scalar (.i{width} input)]", $".scalar (.i{width} (-input))", 3,
+                """
+                obtain ⟨result, ran, inverse⟩ := ExampleProof.correctness input
+                have same : result = -input := by bv_omega
+                exact same ▸ ran
+                """, "1"));
     }
 }
 

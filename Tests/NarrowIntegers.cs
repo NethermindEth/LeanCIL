@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -240,18 +242,16 @@ using (var module = ModuleDefinition.ReadModule(assembly))
     module.Write(incorrectDll);
 }
 
-var rejected = false;
-try
-{
-    verification.Verify(incorrectDll, "Examples", "NarrowIntegers::UnsignedShort(int)",
-        At("Examples/Proofs/UnsignedShort.lean"), incorrect);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    rejected = true;
-}
-
-if (!rejected || File.Exists(Path.Combine(incorrect, "verified.json")))
-    throw new InvalidOperationException("Incorrect signed conversion accepted");
+verification.VerifyEmptyReturn(assembly, "NarrowIntegers::UnsignedShort(int)",
+    At("Examples/Proofs/UnsignedShort.lean"), incorrectDll, "NarrowIntegers::UnsignedShort(int)", incorrect,
+    new("W32", "[.scalar (.i32 input)]", ".scalar (.i32 (BitVec.ofNat 32 (input.toNat % 65536)))", 3,
+        """
+        obtain ⟨result, ran, value⟩ := ExampleProof.correctness input
+        have same : result = BitVec.ofNat 32 (input.toNat % 65536) := by
+          apply BitVec.eq_of_toNat_eq
+          simp only [BitVec.toNat_ofNat]
+          omega
+        exact same ▸ ran
+        """, "32768"));
 
 Console.WriteLine($"Narrow integer proofs passed: {cases} boundary cases; incorrect signed conversion rejected.");

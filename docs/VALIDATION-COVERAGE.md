@@ -819,8 +819,8 @@ missing arguments, zero initialization and a non-void constructor result.
 
 F# validation compares .NET execution for addition, unsigned branching, managed calls,
 mutable structs and by-reference stores across 324 cases. The addition, store/load and constructor
-contracts are checked against the F# assembly. Subtraction must fail the addition contract,
-and a list-returning function must fail extraction. These examples use the shared CIL semantics.
+contracts are checked against the F# assembly. The subtraction fixture must prove a counterexample
+to addition at zero and one. A list-returning function must fail extraction.
 
 ## Contracts and extraction evidence
 

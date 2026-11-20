@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include EmptyReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -120,17 +122,11 @@ foreach (var outerPack in new[] { 1, 2, 4, 8 })
 var contract = At("Examples/Proofs/NestedSnapshot.lean");
 verification.Verify(assembly, "Examples", "Nested::Extract(Examples.NestedRecord)", contract, Path.Combine(root, "UniversalSnapshot"));
 var wrongOutput = Path.Combine(root, "WrongSnapshot");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples", "Nested::WrongExtract(Examples.NestedRecord)", contract, wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect nested snapshot accepted");
+verification.VerifyEmptyReturn(assembly, "Nested::Extract(Examples.NestedRecord)",
+    contract, assembly, "Nested::WrongExtract(Examples.NestedRecord)", wrongOutput,
+    new("List (BitVec 8)", "[.scalar (.aggregate input)]",
+        ".scalar (.aggregate ((input.drop 8).take 16))", 3,
+        "exact ExampleProof.correctness input permitted", "(List.replicate 32 1)", "input.length = 32"));
 
 // Recursive and transitively unsupported layouts must fail before emission.
 var mutations = new[] { "self", "mutual", "reference", "float", "pack", "size", "auto" };

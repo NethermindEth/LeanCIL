@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include StoreReturnVariants.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -343,18 +345,9 @@ var wrongDll = Fixture("WrongWrite", (module, method) =>
     method.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 });
 var wrongOutput = Path.Combine(root, "WrongWrite");
-var failed = false;
-try
-{
-    verification.Verify(wrongDll, "Examples", "PrimitiveOperations::ReadWrite(int&,int)",
-        At("Examples/Proofs/PrimitiveReadWrite.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect write accepted");
+verification.VerifyStoreReturn(assembly, "PrimitiveOperations::ReadWrite(int&,int)",
+    At("Examples/Proofs/PrimitiveReadWrite.lean"),
+    wrongDll, "PrimitiveOperations::ReadWrite(int&,int)", wrongOutput, 32);
 
 queue.Flush();
 
