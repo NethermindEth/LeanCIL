@@ -120,7 +120,8 @@ private def bias : StaticDescriptor :=
 
 /-- The checked inputs of a static access retain its descriptor in the resulting method. -/
 private def staticResult (opcode : Nat) (operand : FieldRef) (descriptor : StaticDescriptor)
-    (hasVolatilePrefix := false) : Except MethodDecodeError Method :=
+    (hasVolatilePrefix := false) (owner := addRaw.owner) (environment : LayoutEnvironment := {}) :
+    Except MethodDecodeError Method :=
   let value := if opcode == 128 then [instr 0 0x17] else []
   let prefixes := if hasVolatilePrefix then [instr value.length 0xfe13] else []
   let offset := value.length + 2 * prefixes.length
@@ -131,11 +132,11 @@ private def staticResult (opcode : Nat) (operand : FieldRef) (descriptor : Stati
     | 128 => .void
     | _ => operand.type
   let source := { addRaw with
-    code, returnType := result,
+    code, owner, returnType := result,
     staticFields := [(value.length + prefixes.length, ⟨descriptor, none⟩)] }
   let arguments : RawArguments :=
     { arguments := [], locals := [], code := code.map fun _ => .other }
-  Method.ofClosed? .scalar {} [] (allLive source) source arguments
+  Method.ofClosed? .scalar environment [] (allLive source) source arguments
 
 /-- A load and an address use their exact field, and the method retains its initializer. -/
 theorem ordinaryStaticsDecode :
@@ -187,6 +188,46 @@ theorem ordinaryStaticRefusals :
 
 #print axioms ordinaryStaticRefusals
 
+/-- The load operand names exactly the field in the descriptor under test. -/
+private def ordinaryLoad (descriptor : StaticDescriptor) (owner := addRaw.owner)
+    (environment : LayoutEnvironment := {}) : Except RawDecodeError (List Instruction) :=
+  (staticResult 126 descriptor.field descriptor (owner := owner) (environment := environment))
+    |>.map Method.code |>.mapError .method
+
+/-- Ordinary static storage requires byte alignment. -/
+theorem ordinaryStaticAlignmentRefused :
+    ordinaryLoad { bias with alignment := 2 } = liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticAlignmentRefused
+
+/-- A non-opaque static load requires an initializer for its bytes. -/
+theorem ordinaryStaticMissingInitializerRefused :
+    ordinaryLoad { bias with initializer := none } = liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticMissingInitializerRefused
+
+/-- Seven fits in one byte, but the declared unsigned word requires four. -/
+theorem ordinaryStaticWidthRefused :
+    ordinaryLoad { bias with bytes := [7] } = liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticWidthRefused
+
+/-- The unsigned word field refuses a descriptor that requests signed extension. -/
+theorem ordinaryStaticSignednessRefused :
+    ordinaryLoad { bias with scalar := some true } = liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticSignednessRefused
+
+/-- A static field on an aggregate owner requires that aggregate's assembly to match. -/
+theorem ordinaryStaticAggregateOwnerRefused :
+    let localSite := { bias with field.owner := .aggregate (ownIdentity ++ "::Statics") 0 }
+    let foreignSite := { localSite with field.owner := .aggregate "Foreign::Statics" 0 }
+    ordinaryLoad localSite = .ok [.ldsfld localSite.field, .ret] ∧
+      ordinaryLoad foreignSite = liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticAggregateOwnerRefused
+
+/-- Matching empty assembly names cannot establish ownership of a static field. -/
+theorem ordinaryStaticEmptyScopeRefused :
+    ordinaryLoad { bias with field.owner := .object "" "Statics" } "::Caller" =
+      liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticEmptyScopeRefused
+
 /-- A caller-bound field supports a load with zero placeholder bytes and no address or store. -/
 theorem opaqueStaticAccess :
     let field := bias.field
@@ -221,6 +262,14 @@ private def staticCode (code : List RawInstruction) (sites : List (Nat × Static
     (reachable : List Bool) (links : List (Nat × Link) := []) :
     Except RawDecodeError (List Instruction) :=
   (decodeRaw .scalar {} links reachable { addRaw with code, staticFields := sites } []).map Method.code
+
+/-- A volatile prefix makes the following ordinary load a hole even when only the load is live. -/
+theorem ordinaryStaticVolatileLoadRefused :
+    let sites := [(1, ⟨bias, none⟩)]
+    let load := { fieldSite 126 bias.field with offset := 2 }
+    staticCode [instr 0 0, load] sites [false, true] = .ok [.unadmitted 0, .ldsfld bias.field] ∧
+      staticCode [instr 0 0xfe13, load] sites [false, true] = liveHoleAt 1 126 := by decide +kernel
+#print axioms ordinaryStaticVolatileLoadRefused
 
 /-- Each RVA guard refuses on its own: data at a platform field, an empty, misaligned,
     initialized, scalar or opaque blob, another field opcode, a prefix and a link at the pc. -/
@@ -804,6 +853,16 @@ private def wordLayout : RawLayout :=
 @[cil_code] def wordEnvironment : LayoutEnvironment :=
   { rawLayouts := [wordLayout],
     layouts := #[⟨{ size := 8, fields := [{ offset := 0, width := 8 }] }, 8⟩] }
+
+/-- A static aggregate load requires all eight bytes of the field's checked layout. -/
+theorem ordinaryStaticAggregateSizeRefused :
+    let site := { bias with
+      field.type := .aggregate wordLayout.identity 0, scalar := none, bytes := List.replicate 8 0,
+      initializer := some { method := 1, arguments := [] } }
+    ordinaryLoad site (environment := wordEnvironment) = .ok [.ldsfld site.field, .ret] ∧
+      ordinaryLoad { site with bytes := List.replicate 7 0 } (environment := wordEnvironment) =
+        liveHoleAt 0 126 := by decide +kernel
+#print axioms ordinaryStaticAggregateSizeRefused
 
 /-- `ret` over one zero-initialized `T::Word` local. -/
 private def aggregateLocalRaw : RawMethod :=

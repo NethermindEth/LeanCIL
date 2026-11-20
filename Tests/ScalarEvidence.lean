@@ -1555,6 +1555,16 @@ theorem flagged_addition_valid :
     MethodEvidenceValid [] #[] [] [item] [] item addMethod := by decide +kernel
 #print axioms flagged_addition_valid
 
+/-- Only literal evidence permits an extra static site on a method whose body has none. -/
+theorem decoded_addition_rejects_extra_static_site :
+    let item := { addEvidence with decoded := true }
+    let site : StaticDescriptor := { identity := 1, field := value, bytes := [] }
+    let altered := { addMethod with staticSites := [(0, site)] }
+    MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence altered ∧
+      ¬ MethodEvidenceValid [] #[] [] [item] [] item altered := by
+  decide +kernel
+#print axioms decoded_addition_rejects_extra_static_site
+
 /-- The call-aware method binding restores the explicit encoding checks at every scalar site. -/
 theorem checked_method_encodings (method : Method) (item : MethodEvidence)
     (valid : ScalarFlowValid item.closed item.featureStates item.scalarStates method.code true)
