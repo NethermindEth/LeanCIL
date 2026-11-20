@@ -657,6 +657,8 @@ Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeLa
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeReferences::Half(Examples.FourLimbs&)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector128`1<System.UInt64>& Examples.UnsafeReferences::SubtractVector(System.Runtime.Intrinsics.Vector128`1<System.UInt64>&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::Shuffle256(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
+Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::ShuffleCrossHalf(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
+Examples:System.Runtime.Intrinsics.Vector256`1<System.Byte> Examples.DivisionIntrinsics::ShuffleIgnoreHighBit(System.ReadOnlySpan`1<System.Byte>,System.ReadOnlySpan`1<System.Byte>)	B	B	B	B	B	B	B	B
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int32> Examples.ValueBitCasts::To256Int32(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.ValueBitCasts::To256Int64(Examples.ValueBitCasts/Limbs)	A	A	A	A	A	A	A	A
 Examples:System.Runtime.Intrinsics.Vector256`1<System.Int64> Examples.VectorFields::ReadLongs256(Examples.VectorFields/Longs256)	B	B	B	B	B	B	B	B
