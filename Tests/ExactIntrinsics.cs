@@ -719,6 +719,87 @@ foreach ((string mutant, int tableBit, bool swapTables) in new[]
         .All(same => same))
         throw new InvalidOperationException($"Permutation inputs do not reject the {mutant} mutant");
 }
+// Change the VPERMQ immediate to broadcast limb zero's sign to all four upper-table lanes.
+var lowSign = Path.Combine(root, "SignWindowLowSign");
+Directory.CreateDirectory(lowSign);
+var lowSignImage = Path.Combine(lowSign, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "SignWindow");
+    var permute = method.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Call && instruction.Operand is MethodReference
+            { Name: "Permute4x64", DeclaringType.FullName: "System.Runtime.Intrinsics.X86.Avx2" });
+    var control = permute.Previous;
+    if (control.OpCode != OpCodes.Ldc_I4 || control.Operand is not 255)
+        throw new InvalidDataException("The sign broadcast must select lane three for all four lanes.");
+    control.OpCode = OpCodes.Ldc_I4_0;
+    control.Operand = null;
+    variant.Write(lowSignImage);
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"], Path.Combine(root, "SignWindowContract"),
+    lowSignImage, selectors["SignWindow"], lowSign, "open Tests.SignWindowContract CIL.Vector", """
+    set_option maxRecDepth 12288
+    set_option exponentiation.threshold 1024
+
+    /-- The compiled method stores a 256-bit sign-fill table in one frame-local slot. -/
+    private def localSpec : NumericLocalSpec := ⟨.vector256, .v256 0, 0, rfl⟩
+
+    /-- SignWindow implements the lane selector and preserves caller storage on x64-v4. -/
+    theorem correctness : signWindow.Holds Extracted.program 0 := by
+      rintro ⟨v, i⟩ memory formed
+      let args := signWindow.args (v, i)
+      let value := pack256 v.a v.b v.c v.d
+      let indices := pack256 i.a i.b i.c i.d
+      let fill := permute4x64 (zip256 (fun x y => mask64 (x.slt y)) value 0) 255
+      obtain ⟨frame, entered, setup, homes, prior, _⟩ :=
+        numeric_frame_setup Extracted.method0 [localSpec] rfl rfl rfl rfl memory args formed
+      obtain ⟨home, slot, fresh, _, writable⟩ := homes.home_at 0 localSpec rfl
+      obtain ⟨after, stored, written, readback⟩ := step_store_numeric_local
+        (body := Extracted.method0) (pc := 12) (args := args) (rest := [.scalar (.v256 value)])
+        .vector256 (.v256 fill) fill.toNat rfl slot writable
+      have loaded := step_load_numeric_local (body := Extracted.method0) (pc := 18)
+        (args := args) (stack := [.scalar (.v256 indices), .scalar (.v256 value)])
+        .vector256 (.v256 fill) fill.toNat rfl slot readback
+      have frameFresh := enterFrame_fresh _ _ _ _ _ setup
+      have confined := (Confined.refl [] memory).then_below prior frameFresh.1.1
+      have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh written
+      have frameWritten := confined.then_below preserved (Nat.le_of_eq (write_nextIdentity written).symm)
+      have final := frameWritten.after_leaveFrame (frame := frame) (fun id h => (frameFresh.2 id h).1)
+      apply MethodContract.Holds.intro (c := signWindow) (input := (v, i)) (leaveFrame frame after)
+        (permuteVar4x64x2 value indices fill) ?_ final ?_
+      · refine ⟨64, invoke_of_run Extracted.program_method0 rfl setup ?_⟩
+        dsimp only [args, signWindow] at *
+        cil_checked_steps []
+        refine (run_next (fuel := 51) Extracted.program_method0 (by rfl) stored).trans ?_
+        cil_checked_steps []
+        refine (run_next (fuel := 45) Extracted.program_method0 (by rfl) loaded).trans ?_
+        rfl
+      · exact signWindow_result v i
+    """, """
+    set_option maxRecDepth 12288
+    /-- The sign bit is set only in limb three. Each selector requests the sign-fill table. -/
+    private def witness : Limbs × Limbs := (⟨0, 1, 2, 0x8000000000000000⟩, ⟨4, 5, 6, 7⟩)
+
+    /-- Broadcasting the sign of the low limb returns zero in every lane at the witness. -/
+    theorem correctness : signWindow.Refuted Extracted.program 0 := by
+      let call := invoke Extracted.program 64 0 (signWindow.args witness) Memory.empty
+      have observed : call.map Prod.snd = .ok [.scalar (.v256 0)] := by decide +kernel
+      cases ran : call with
+      | error fault => simp [ran, Except.map] at observed
+      | ok result =>
+        obtain ⟨after, values⟩ := result
+        have actual : values = [.scalar (.v256 0)] := by simpa [ran, Except.map] using observed
+        subst values
+        apply MethodContract.Refuted.of_return (c := signWindow) (input := witness)
+          (program := Extracted.program) (fuel := 64) (method := 0) (final := after)
+          (values := [.scalar (.v256 0)]) Memory.empty_wellFormed ran
+        rintro ⟨_, value, encoded, rfl⟩
+        exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 0)] =
+          [.scalar (.v256 (pack256 (selected witness.1 witness.2.a) (selected witness.1 witness.2.b)
+            (selected witness.1 witness.2.c) (selected witness.1 witness.2.d)))])) encoded
+    """, profile: "x64-v4", imports: "import Tests.SignWindowContract\nimport CIL.Safety.LocalSnapshots");
+Console.WriteLine("PASS AVX-512 sign window for every selector and certified low-limb sign replacement");
+
 uint[] words = Enumerable.Range(0, 8).Select(_ => (uint)WindowWord()).ToArray();
 var wordBytes = new byte[32];
 ((Vector256<uint>)runtime.GetMethod("CreateWords")!.Invoke(null, words.Cast<object>().ToArray())!)
