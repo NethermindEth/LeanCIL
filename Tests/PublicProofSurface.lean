@@ -120,10 +120,19 @@ theorem native_conversion_result (body : CIL.Method) (frame : Frame) (memory : M
 /-- A two-word aggregate argument is described independently of any callee body. -/
 def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 
+/-- The checked call that accepts the output byref before the two field reads. -/
+private def skipWord : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  { owner := CIL.Extraction.unsafeOwner, name := name!"SkipInit", hasThis := false,
+    genericArity := 1, parameters := [.byref word], methodArguments := [word], returnType := .void }
+
 /-- Both source fields are loaded before any output could overwrite them. -/
 @[cil_code] def readPair : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.ldarg 2, .skipInit,
+  { locals := [], returnsValue := true, code := [.ldarg 2, .call skipWord {},
       .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 8 8, .add, .ret] }
+
+cil_instruction_equations Tests.PublicProofSurface.readPair
+cil_runtime_models Tests.PublicProofSurface.readPair
 
 /-- Named call validity supplies field reads even when output aliases an entire input. -/
 theorem overlapping_fields (memory : Memory) (left right : Reference)

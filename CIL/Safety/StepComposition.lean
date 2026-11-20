@@ -391,7 +391,7 @@ theorem step_newobj_memory {method : Extraction.MethodRef} {operation : CIL.Memo
 #print axioms step_newobj_memory
 
 /-- A call without a link whose method's model is `SkipInit` checks that its reference operand
-    forms and pops it, as the `skipInit` instruction does; nothing is written. -/
+    forms, then pops it and preserves memory. -/
 theorem step_call_skipInit_reference {method : Extraction.MethodRef} {prefixes : CallPrefixes}
     (link : body.linkAt pc = none)
     (found : Extraction.runtimeModel body.environment .call method = some .skipInit)
@@ -1087,11 +1087,6 @@ attribute [cil_step, cil_instruction_step] CIL.NumericKind.width CIL.NumericKind
 @[cil_step] theorem step_pop_eq (stack : List Value) :
     step body .pop pc args frame stack memory =
       instructionStep .pop pc frame stack memory := id rfl
-@[cil_step] theorem step_skipInit_eq (stack : List Value) :
-    step body .skipInit pc args frame stack memory =
-      instructionStep .skipInit pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
 -- Locals go through the frame's slot for `index`.
 @[cil_step] theorem step_ldloc_eq (index : Nat) (stack : List Value) :
     step body (.ldloc index) pc args frame stack memory = do

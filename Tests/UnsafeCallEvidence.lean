@@ -42,10 +42,9 @@ theorem skipInitOperand :
 
 #print axioms skipInitOperand
 
--- No live site emits the dedicated SkipInit instruction.
+-- A SkipInit call must retain the checked call operand.
 example : UnsafeCallsValid (raw call) [true] [.call call.method {}] := by decide +kernel
-example : ¬ UnsafeCallsValid (raw call) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid nonCall [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid (raw call) [true] [.pop] := by decide +kernel
 example : ¬ UnsafeCallsValid (raw call) [] [.call call.method {}] := by decide +kernel
 example : ¬ UnsafeCallsValid (raw call) [true] [] := by decide +kernel
 

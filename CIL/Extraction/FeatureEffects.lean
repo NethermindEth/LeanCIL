@@ -74,7 +74,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .stind _ | .cpobj _ | .stobj _
   | .setFieldAt .. | .setAggregateFieldAt .. | .stfld _ => some (2, 0)
-  | .initobj _ | .skipInit | .pop => some (1, 0)
+  | .initobj _ | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
   | .call method _ => some (method.argumentCount, if returnsValue then 1 else 0)

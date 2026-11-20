@@ -277,7 +277,7 @@ example : ¬ RuntimeModelsAgree (method lessSite) [true] (emitting .clt_un) := b
 example : ¬ RuntimeModelsAgree (method greaterSite) [true] (emitting .cgt_un) := by
   decide +kernel
 example : ¬ RuntimeModelsAgree (method skipSite) [true]
-    (emitting .skipInit) := by decide +kernel
+    (emitting .pop) := by decide +kernel
 
 /-- The real decoder keeps the control call and emits the opcode's hole for the changed site.
     The live site also rejects the supplied instruction with the same stack effect. -/

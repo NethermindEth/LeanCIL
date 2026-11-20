@@ -74,7 +74,7 @@ example : runModel body .referenceSubtract 3 frame [.scalar (.i32 4), fourth] st
 example : runModel body (.typedTransfer (.scalar 4 false) false) 3 frame [start] staticMemory =
     step body (.loadScalar 4 false) 3 [] frame [start] staticMemory := rfl
 example : runModel body .skipInit 3 frame [start] staticMemory =
-    step body .skipInit 3 [] frame [start] staticMemory := rfl
+    .ok (.next 4 [] frame staticMemory) := rfl
 example : runModel body .objectConstructor 3 frame [.object .null] staticMemory =
     step body .pop 3 [] frame [.object .null] staticMemory := rfl
 
@@ -122,7 +122,7 @@ example : (runModel body .skipInit 3 frame [start] staticMemory).toBool := rfl
 example : runModel body .objectConstructor 3 frame [] staticMemory =
     step body .pop 3 [] frame [] staticMemory := rfl
 example : runModel body .skipInit 3 frame [.scalar (.i32 0)] staticMemory =
-    step body .skipInit 3 [] frame [.scalar (.i32 0)] staticMemory := rfl
+    .error (.unsupported "Not a memory instruction") := rfl
 
 -- The model, unlike the opcode, takes only references: scalar operands are refused.
 example : runModel body (.referenceCompare .same) 3 frame [.scalar (.i32 1), .scalar (.i32 1)]
@@ -168,7 +168,7 @@ example : (CIL.RuntimeModel.referenceCompare .less).observerCount = observerCoun
 example : CIL.RuntimeModel.referenceSubtract.observerCount = observerCount .sub := rfl
 example : (CIL.RuntimeModel.typedTransfer (.scalar 4 false) true).observerCount =
     observerCount (.storeScalar 4) := rfl
-example : CIL.RuntimeModel.skipInit.observerCount = observerCount .skipInit := rfl
+example : CIL.RuntimeModel.skipInit.observerCount = 1 := rfl
 example : CIL.RuntimeModel.objectConstructor.observerCount = observerCount .pop := rfl
 
 private def element : CIL.ArrayElement := .signed32

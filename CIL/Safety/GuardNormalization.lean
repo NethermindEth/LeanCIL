@@ -201,7 +201,6 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
 @[cil_guard] theorem guard_stelem (kind : CIL.NumericKind) : observerCount (.stelem kind) = 3 :=
   rfl
 @[cil_guard] theorem guard_stelem_ref : observerCount .stelem_ref = 3 := rfl
-@[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
 @[cil_guard] theorem guard_ldsfld (field : CIL.Extraction.FieldRef) :
     observerCount (.ldsfld field) = 0 := rfl
 @[cil_guard] theorem guard_ldsflda (field : CIL.Extraction.FieldRef) :

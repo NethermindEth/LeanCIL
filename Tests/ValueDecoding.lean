@@ -222,7 +222,7 @@ def undecoded : List Name := [
   ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
-  ``Instruction.skipInit, ``Instruction.feature,
+  ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.throw,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
   ``Instruction.ldtoken]
@@ -569,7 +569,7 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 43, .target 1⟩, .br 2), (⟨0, 69, .targets [1, 2]⟩, .switch [2, 1]),
   (⟨0, 69, .targets [1, 2]⟩, .switch [1, 2, 3]),
   -- Another constructor with the same stack effect.
-  (⟨0, 88, .none⟩, .sub), (⟨0, 38, .none⟩, .skipInit), (⟨0, 19, .local 4⟩, .ldloc 4),
+  (⟨0, 88, .none⟩, .sub), (⟨0, 38, .none⟩, .stloc 0), (⟨0, 19, .local 4⟩, .ldloc 4),
   (⟨0, 18, .local 4⟩, .ldloc 4), (⟨0, 16, .argument 4⟩, .stloc 4),
   (⟨0, 15, .argument 4⟩, .ldloca 4), (⟨0, 58, .target 1⟩, .brfalse 1),
   (⟨0, 138, .none⟩, .conv_ovf_un .i8), (⟨0, 211, .none⟩, .conv_i8),
@@ -741,7 +741,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 92, undecoded 18 of 110 constructors -/
+/-- info: decoded 92, undecoded 17 of 109 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

@@ -104,7 +104,7 @@ def observerCount : CIL.Instruction → Nat
   | .stfld _ => 2
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
-  | .ldind _ | .skipInit | .initobj _ => 1
+  | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .stind _ | .cpobj _ | .stobj _ => 2
@@ -1455,9 +1455,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .ldlen, _ | .ldelem _, _ | .ldelem_ref, _ | .stelem _, _ | .stelem_ref, _ =>
     elementInstruction op stack m
   -- References and stack shuffles
-  | .skipInit, .reference r :: rest =>
-    let _ ← formValue m r
-    return (m, rest)
   | .dup, value :: rest => return (m, value :: value :: rest)
   | .pop, _ :: rest => return (m, rest)
   | _, _ => .error (.unsupported "Not a memory instruction")

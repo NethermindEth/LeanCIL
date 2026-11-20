@@ -290,6 +290,7 @@ field's shape gives, so it takes the facts that instruction takes.
   only the operands its model observes; the stepper uses it, with the supplied intrinsic facts,
   when the kernel cannot evaluate the model's step. For a checked call to `Unsafe.SkipInit<T>`, the
   stepper uses the caller's address-formation fact to pop the byref argument and preserve memory.
+  For a symbolic managed reference, `step_call_skipInit_reference` exposes the formation check.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies

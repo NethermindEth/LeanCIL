@@ -400,8 +400,8 @@ def typedTransferCall (kind : CIL.TransferKind) (store : Bool) (pc : Nat) (frame
   let (memory, values) ← instruction (typedTransferInstruction kind store) stack memory
   return .next (pc + 1) values frame memory
 
-/-- `Unsafe.SkipInit` pops its out reference once it forms; nothing is written. Any other operand
-    faults as the `skipInit` instruction does. -/
+/-- `Unsafe.SkipInit` pops its out reference once it forms; nothing is written. A non-reference operand
+    gives an unsupported result. -/
 def skipInitCall (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
     ExecutionResult FrameAction := do
   match stack with

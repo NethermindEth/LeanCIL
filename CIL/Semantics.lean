@@ -237,8 +237,6 @@ def step (op : Instruction) (returns : Bool)
   | .memory operation, _ =>
     let (updated, values) ← evalMemory operation stack memory
     return .next (pc + 1) values updated
-  | .skipInit, .object _ :: rest => return .next (pc + 1) rest memory
-  | .skipInit, .ref _ :: rest => return .next (pc + 1) rest memory
   -- Return.
   | .ret, _ => returnFromStack narrow returns stack memory
   | _, _ => none

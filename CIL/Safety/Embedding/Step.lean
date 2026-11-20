@@ -922,7 +922,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case loadAggregate | storeAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
-    | pop | skipInit =>
+    | pop =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -985,7 +985,6 @@ theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabe
 theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := step_relabel _
 theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
 theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
-theorem step_relabel_skipInit : StepRelabel .skipInit := step_relabel _
 theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_relabel _
 
 #print axioms step_relabel
@@ -1584,7 +1583,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case loadAggregate | storeAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
-    | pop | skipInit =>
+    | pop =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

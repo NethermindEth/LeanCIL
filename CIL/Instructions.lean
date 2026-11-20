@@ -280,7 +280,6 @@ inductive Instruction where
   | ldflda (field : Extraction.FieldRef)
   /-- `stfld`: pops a value and a receiver below it and stores the value into the field. -/
   | stfld (field : Extraction.FieldRef)
-  | skipInit
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)

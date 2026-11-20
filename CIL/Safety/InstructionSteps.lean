@@ -324,15 +324,6 @@ theorem step_aggregateFieldAt_snapshot_eq (offset size total : Nat)
   instruction_step_proof step_aggregateFieldAt_eq
 
 -- Reference checks and struct initialization.
-/-- `skipInit` checks that the reference forms and pops it. -/
-@[cil_instruction_step high]
-theorem step_skipInit_reference_eq (reference : ManagedReference)
-    (rest : List Value) :
-    step body .skipInit pc args frame (.reference reference :: rest) memory = do
-      let _ ← formValue memory reference
-      return .next (pc + 1) rest frame memory := by
-  instruction_step_proof step_skipInit_eq
-
 /-- `initobj` zeroes `size` bytes behind a writable reference. -/
 @[cil_instruction_step high]
 theorem step_initobj_reference_eq {type : Extraction.TypeExpr} {size : Nat}
@@ -408,7 +399,6 @@ simproc [cil_instruction_step] reduceObjectSize (step _ (.sizeof _) _ _ _ _ _) :
 #print axioms step_fieldAt_aggregate_8_eq
 #print axioms step_aggregateFieldAt_aggregate_eq
 #print axioms step_aggregateFieldAt_snapshot_eq
-#print axioms step_skipInit_reference_eq
 #print axioms step_initobj_reference_eq
 
 end CIL.Safety

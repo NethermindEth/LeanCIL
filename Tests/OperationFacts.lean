@@ -119,10 +119,13 @@ theorem byte_stind_beside_narrowed_write {memory after other : Memory} {destinat
 /-- A symbolic reference with an established formation result can be skipped without a write. -/
 theorem skip_formed_reference {memory : Memory} {reference : ManagedReference}
     {value : Value} (formed : formValue memory reference = .ok value)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body .skipInit pc args frame (.reference reference :: rest) memory =
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {method : CIL.Extraction.MethodRef} (link : body.linkAt pc = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call method = some .skipInit) :
+    step body (.call method {}) pc args frame (.reference reference :: rest) memory =
       .ok (.next (pc + 1) rest frame memory) := by
-  cil_checked_step [formed]
+  rw [step_call_skipInit_reference (link := link) (found := model) (direct := rfl), formed]
+  rfl
 #print axioms skip_formed_reference
 
 end Tests.OperationFacts
