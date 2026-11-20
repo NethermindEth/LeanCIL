@@ -428,6 +428,7 @@ Examples:System.Int32 Examples.SampleArrays::Sum(Examples.Samples,System.Int32[]
 Examples:System.Int32 Examples.Sequential::PackedSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Sequential::RecordSize()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::AggregateLocal(Examples.AggregateSpans/Words&)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.SpanConstructors::BytePointerLocal(System.Byte*,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanConstructors::LayoutLocal(Examples.AggregateSpans/VectorRecord*,System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.SpanConstructors::Local(System.Int32&)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.SpanHelpers::Count(System.ReadOnlySpan`1<T>)	B	B	B	B	B	B	B	B
