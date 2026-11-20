@@ -372,9 +372,9 @@ it.
 
 The [compiler corpus](COMPILER-COVERAGE.md) checks admission changes, not compiler correctness or
 every possible folded pattern. The runtime-call inventory does not count these folds.
-[OPCODES](OPCODES.md) records the admitted forms. Metadata table decoding, token resolution,
-static-data serialization and runtime-helper correspondence remain trusted even when evidence
-validates.
+[OPCODES](OPCODES.md) records the admitted forms. Lean checks token operands against the carried
+rows and signatures. Default verification trusts the positions of those bytes in the pinned image,
+the platform definitions used during resolution, static-data contents and runtime-helper behavior.
 
 ## Negative evidence
 
