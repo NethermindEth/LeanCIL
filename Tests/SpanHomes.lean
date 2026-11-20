@@ -385,8 +385,8 @@ private theorem byValue_refused {address call : RawInstruction}
     (callNotStore : ∀ stack emitted,
       scalarStoreFault (byValueRaw address call) call stack emitted = false)
     (features : FeatureCertificate) (certificate : ScalarCertificate)
-    (code : List Instruction) (decoded : Bool) :
-    ¬ ScalarFlowValid (byValueRaw address call) features certificate code decoded := by
+    (code : List Instruction) :
+    ¬ ScalarFlowValid (byValueRaw address call) features certificate code := by
   intro valid
   have lengths := valid
   obtain ⟨featureLength, scalarLength, codeLength, entry, _⟩ := lengths
@@ -417,20 +417,19 @@ private theorem byValue_refused {address call : RawInstruction}
     a `newobj`, that takes the span by value, for every certificate, so a linked call or
     construction never receives a home at such a position. -/
 theorem home_at_by_value_parameter_refused (features : FeatureCertificate)
-    (certificate : ScalarCertificate) (code : List Instruction) (decoded : Bool) :
-    ¬ ScalarFlowValid (byValueRaw ⟨0, 18, .local 0⟩ (takes intSpan)) features certificate code
-      decoded ∧
+    (certificate : ScalarCertificate) (code : List Instruction) :
+    ¬ ScalarFlowValid (byValueRaw ⟨0, 18, .local 0⟩ (takes intSpan)) features certificate code ∧
     ¬ ScalarFlowValid (byValueRaw ⟨0, 15, .argument 0⟩ (takes intSpan)) features certificate
-      code decoded ∧
+      code ∧
     ¬ ScalarFlowValid
       (byValueRaw ⟨0, 18, .local 0⟩ (instanceTakes 115 name!".ctor" ".ctor" intSpan))
-      features certificate code decoded :=
+      features certificate code :=
   ⟨byValue_refused (by decide +kernel) (by decide +kernel) (by decide +kernel)
-      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code decoded,
+      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code,
     byValue_refused (by decide +kernel) (by decide +kernel) (by decide +kernel)
-      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code decoded,
+      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code,
     byValue_refused (by decide +kernel) (by decide +kernel) (by decide +kernel)
-      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code decoded⟩
+      (fun _ => rfl) (fun _ _ => rfl) (fun _ _ => rfl) features certificate code⟩
 #print axioms home_at_by_value_parameter_refused
 
 end Tests.SpanHomes

@@ -23,8 +23,8 @@ The top of the extraction checks. `TranslationValid` conjoins the kernel-checked
 for one extraction: layouts recompute, every emitted method passes the per-method validators
 against its evidence record, static values are reproduced by their initializers, each static
 identity stands for exactly one field, import
-layouts agree, every body is owned by the pinned assembly its evidence names, and every decoded
-method definition is what its body bytes and carried metadata say. It is not a simulation proof for
+layouts agree, every body is owned by the pinned assembly its evidence names, and every method
+definition is what its body bytes and carried metadata say. It is not a simulation proof for
 every raw opcode; general instruction translation, that the carried metadata rows are the image's,
 definitions in platform assemblies and the PE container stay trusted, as `docs/SOUNDNESS.md`
 describes.
@@ -58,8 +58,6 @@ structure MethodEvidence where
   /-- The link table the extraction states for the method's call sites and constructions; the
       call check ties each entry to its raw site. -/
   links : List (Nat × Link) := []
-  /-- The scalar certificate uses the equality of the emitted and decoded code. -/
-  decoded : Bool := false
 
 /-- The pin and owner identity of every original and closed body, for attribution checks. -/
 def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=
@@ -402,16 +400,15 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   ObjectOperandsValid item.closed item.reachable method ∧
-  (ScalarFlowValid item.closed item.featureStates item.scalarStates
-    method.code item.decoded ∧
-    (item.decoded = true → method.code =
-      methodCode method.profile method.environment method.links item.reachable item.closed)) ∧
+  (ScalarFlowValid item.closed item.featureStates item.scalarStates method.code ∧
+    method.code =
+      methodCode method.profile method.environment method.links item.reachable item.closed) ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
   MethodEnvironmentValid rawLayouts layouts method ∧
   DeclaredValid item.closed method ∧ item.links = method.links ∧
-  (item.decoded = true → method.staticSites = item.closed.staticDescriptors)
+  method.staticSites = item.closed.staticDescriptors
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
@@ -428,14 +425,15 @@ theorem MethodEvidenceValid.links_eq {rawLayouts layouts pins all imports item m
   exact links
 #print axioms MethodEvidenceValid.links_eq
 
-/-- A decoded method retains the identities, bytes and initializers of its checked static sites. -/
-theorem MethodEvidenceValid.decoded_staticSites {rawLayouts layouts pins all imports item method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
-    (flag : item.decoded = true) : method.staticSites = item.closed.staticDescriptors := by
+/-- A validated method retains the identities, bytes and initializers of its checked static
+    sites. -/
+theorem MethodEvidenceValid.staticSites_eq {rawLayouts layouts pins all imports item method}
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) :
+    method.staticSites = item.closed.staticDescriptors := by
   obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, -, fields⟩ := valid
-  exact fields flag
+  exact fields
 
-#print axioms MethodEvidenceValid.decoded_staticSites
+#print axioms MethodEvidenceValid.staticSites_eq
 
 /-- Validated evidence runs under a valid feature profile, which its shape check states. -/
 theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins all imports item method}
@@ -445,17 +443,16 @@ theorem MethodEvidenceValid.profile_valid {rawLayouts layouts pins all imports i
   exact shape.1
 #print axioms MethodEvidenceValid.profile_valid
 
-/-- A set decoded flag in a validated record binds every emitted instruction to its decoding. -/
-theorem MethodEvidenceValid.decoded_code {rawLayouts : List RawLayout}
+/-- A validated record binds every emitted instruction to its decoding. -/
+theorem MethodEvidenceValid.code_eq {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {pins : List AssemblyPin} {all : List MethodEvidence}
     {imports : List ImportSlot} {item : MethodEvidence} {method : Method}
-    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method)
-    (flag : item.decoded = true) : method.code =
+    (valid : MethodEvidenceValid rawLayouts layouts pins all imports item method) : method.code =
       methodCode method.profile method.environment method.links item.reachable item.closed := by
   obtain ⟨_, _, _, _, _, _, _, _, _, _, _, ⟨_, same⟩, _⟩ := valid
-  exact same flag
+  exact same
 
-#print axioms MethodEvidenceValid.decoded_code
+#print axioms MethodEvidenceValid.code_eq
 
 /-- Every reachable method-token call outside a fold in validated evidence has a raw claim. -/
 theorem MethodEvidenceValid.siteClaimTotal {rawLayouts : List RawLayout}

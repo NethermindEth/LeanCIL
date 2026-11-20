@@ -121,12 +121,13 @@ private def code (readOnly : Bool) : List CIL.Instruction :=
 
 /-- A branch to the prefix itself does not bypass the restriction. -/
 theorem prefix_certificate :
-    CIL.Extraction.ScalarFlowValid (raw 2) features states (code true) := by decide +kernel
+    Tests.DecodedFlow (raw 2) features states (code true) := by decide +kernel
 #print axioms prefix_certificate
 
-/-- Independently forging a writable address under the same readonly raw CIL fails. -/
+/-- Independently forging a writable address under the same readonly raw CIL fails the code
+    equation. -/
 theorem writable_forgery_rejected :
-    ¬ CIL.Extraction.ScalarFlowValid (raw 2) features states (code false) := by decide +kernel
+    ¬ Tests.DecodedFlow (raw 2) features states (code false) := by decide +kernel
 #print axioms writable_forgery_rejected
 
 /-- Changing only the branch target to skip the prefix is rejected, even for a dead branch:
@@ -185,10 +186,10 @@ theorem readonly_requires_element_address :
   exact ⟨rfl, rfl⟩
 #print axioms readonly_requires_element_address
 
-/-- Whether the scalar check accepts a body with no layouts. -/
+/-- Whether the scalar check and the code equation accept a body with no layouts. -/
 private def accepted (body : RawMethod) (features : FeatureCertificate)
     (states : ScalarCertificate) (code : List CIL.Instruction) : Bool :=
-  decide (ScalarFlowValid body features states code)
+  decide (Tests.DecodedFlow body features states code)
 
 /-- A readonly and a writable element address, each emitted as it decodes, pass the check. -/
 theorem decoded_addresses_accepted :

@@ -928,8 +928,8 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
 /-- A `readonly.` site requires the raw instruction after it, `next`, to be `ldelema` (143), so a
     `readonly.` that ends the body is refused. This is the rule that only `ldelema` follows
     `readonly.`: a reachable `readonly.` falls through to the instruction after it, which
-    `PrefixEntryFree` keeps every branch out of. Translated sites never consult the decoder, so
-    the rule holds them to it until no site is translated. -/
+    `PrefixEntryFree` keeps every branch out of. The evidence binds code to `methodCode`, which
+    does not check prefixes, so the scalar check applies this rule at every reachable site. -/
 def readOnlyPrefixMatches (next : Option RawInstruction) (instruction : RawInstruction) : Bool :=
   instruction.opcode != 65054 || next.any (prefixTakes instruction)
 
@@ -942,15 +942,16 @@ private def decodedValueSite (raw : RawInstruction) (role : Option FoldRole)
     agree with the feature stack depth, satisfy the indirect access rule and the `readonly.` rule
     (`readOnlyPrefixMatches`) over the raw instructions `rawAt` gives, emit the right encoding
     after the raw instruction before it, and give every successor, which must be reachable,
-    exactly the resulting stack kinds, with local slots read through `locals`. -/
-private def checkScalarSite (decoded : Bool) (raw : RawMethod)
+    exactly the resulting stack kinds, with local slots read through `locals`. An ordinary
+    value site skips the raw value comparison, which the decoded code equation implies. -/
+private def checkScalarSite (raw : RawMethod)
     (context : NativeDispatchContext) (locals : ScalarLocals) (rawAt : Nat → Option RawInstruction)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Instruction → Bool
   | _, none, none, .unadmitted _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
-    let skipEncoding := decoded && decodedValueSite instruction role emitted
+    let skipEncoding := decodedValueSite instruction role emitted
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       spanEmissionAllowed emitted &&
       indirectSiteWindow rawAt pc instruction emitted skipEncoding &&
@@ -968,7 +969,7 @@ private def checkScalarSite (decoded : Bool) (raw : RawMethod)
 /-- The scalar certificate covers exactly the feature-reachable pcs, starts with an empty
     stack, and passes every site check. -/
 def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
-    (certificate : ScalarCertificate) (code : List Instruction) (decoded := false) : Prop :=
+    (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
   let context := nativeDispatchContext raw
   let locals := ScalarLocals.indexed raw context
   let rawAt := (FlowIndex.ofList raw.code).get?
@@ -976,7 +977,7 @@ def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite decoded raw context locals rawAt
+      checkScalarSite raw context locals rawAt
         (fun after target => match lookup target with
           | some (some _, incoming) => incoming == some after
           | _ => false) instruction feature stack emitted)
@@ -985,8 +986,8 @@ def ScalarFlowValid (raw : RawMethod) (features : FeatureCertificate)
 
 instance (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate)
-    (code : List Instruction) (decoded : Bool) :
-    Decidable (ScalarFlowValid raw features certificate code decoded) :=
+    (code : List Instruction) :
+    Decidable (ScalarFlowValid raw features certificate code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Pairing feature and scalar states preserves both the reachability and exact stack
@@ -1014,12 +1015,12 @@ theorem scalarSuccessor_zip (features : FeatureCertificate)
     slots read from the metadata lists at each site. -/
 theorem ScalarFlowValid_iff_list (raw : RawMethod)
     (features : FeatureCertificate)
-    (certificate : ScalarCertificate) (code : List Instruction) (decoded : Bool) :
-    ScalarFlowValid raw features certificate code decoded ↔
+    (certificate : ScalarCertificate) (code : List Instruction) :
+    ScalarFlowValid raw features certificate code ↔
       raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
       raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
       all3 (fun (instruction, feature) stack emitted =>
-          checkScalarSite decoded raw (nativeDispatchContext raw)
+          checkScalarSite raw (nativeDispatchContext raw)
             (ScalarLocals.ofLists raw (nativeDispatchContext raw))
             (fun target => raw.code[target]?)
             (fun after target => match features[target]? with
@@ -1044,30 +1045,27 @@ theorem ScalarFlowValid_iff_list (raw : RawMethod)
 
 #print axioms ScalarFlowValid_iff_list
 
-/-- At a decoded site each skipped encoding comparison would succeed. -/
-private theorem decodedSite_eq (raw : RawMethod)
-    (context : NativeDispatchContext) (locals : ScalarLocals) (rawAt : Nat → Option RawInstruction)
-    (successor : List ScalarKind → Nat → Bool) (instruction : RawInstruction)
-    (role : Option FoldRole) (pc : Nat) (feature : Option FeatureState)
-    (stack : Option (List ScalarKind)) (emitted : Instruction)
+/-- At an ordinary site whose emitted instruction is its decoding, the skipped raw value
+    comparison would succeed, so the scalar check equals the one that compares it. -/
+private theorem decodedEmission_eq (role : Option FoldRole) (previous : Option RawInstruction)
+    (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Instruction)
     (same : boundSite instruction = false → role = none →
-      emitted = Instruction.ofRaw (rawBefore rawAt pc) instruction ∨
+      emitted = Instruction.ofRaw previous instruction ∨
         emitted = .unadmitted instruction.opcode) :
-    checkScalarSite true raw context locals rawAt successor ((instruction, role), pc)
-        feature stack emitted =
-      checkScalarSite false raw context locals rawAt successor ((instruction, role), pc)
-        feature stack emitted := by
+    scalarEmissionMatches role previous instruction stack emitted
+        (decodedValueSite instruction role emitted) =
+      scalarEmissionMatches role previous instruction stack emitted := by
   have redundant :
       (decodedValueSite instruction role emitted ||
-        valueEncodingMatches (rawBefore rawAt pc) instruction emitted) =
-          valueEncodingMatches (rawBefore rawAt pc) instruction emitted := by
+        valueEncodingMatches previous instruction emitted) =
+          valueEncodingMatches previous instruction emitted := by
     by_cases called : boundSite instruction = true
     · simp [decodedValueSite, called]
     by_cases unfolded : role = none
     case neg => cases role <;> simp_all [decodedValueSite]
     obtain same | hole := same (Bool.eq_false_iff.mpr called) unfolded
     case inr => simp [hole, decodedValueSite]
-    cases partialDecode : Instruction.ofRaw? (rawBefore rawAt pc) instruction with
+    cases partialDecode : Instruction.ofRaw? previous instruction with
     | none =>
       simp [Instruction.ofRaw, partialDecode] at same
       subst emitted
@@ -1077,40 +1075,27 @@ private theorem decodedSite_eq (raw : RawMethod)
       subst emitted
       simp [valueEncodingMatches, partialDecode,
         Instruction.sameValue_self_of_ofRaw? partialDecode]
-  cases feature <;> cases stack <;> first
-    | rfl
-    | (cases emitted <;> rfl)
-    | (unfold checkScalarSite
-       delta indirectSiteWindow scalarEmissionMatches indirectAccessMatches scalarOpMatches
-         arrayMatches classFieldMatches structFieldMatches readOnlyDecodedMatches
-       simp only [Bool.true_and, Bool.false_and, redundant, Bool.false_or])
+  delta scalarEmissionMatches scalarOpMatches arrayMatches classFieldMatches structFieldMatches
+    readOnlyDecodedMatches
+  simp only [redundant, Bool.false_or]
 
-#print axioms decodedSite_eq
+#print axioms decodedEmission_eq
 
-/-- A certificate checked against the decoded code also passes every explicit encoding check. -/
-theorem ScalarFlowValid.of_decoded {raw : RawMethod}
-    {features : FeatureCertificate} {certificate : ScalarCertificate} {code : List Instruction}
+/-- Code that is the decoding of the raw body emits, at each ordinary live site, the value
+    decoding of the raw instruction after its predecessor, and a hole at a dead one. -/
+private theorem decodedSite_same {raw : RawMethod} {code : List Instruction}
     {live : Nat → Bool} {decodeSite : SiteDecoder}
     (same : code = Instruction.ofRawCode none raw.code
-        (Instruction.withSiteDecoder (foldRoles raw.code).toArray live decodeSite))
-    (valid : ScalarFlowValid raw features certificate code true) :
-    ScalarFlowValid raw features certificate code false := by
-  dsimp only [ScalarFlowValid] at valid ⊢
-  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at valid ⊢
-  refine ⟨valid.1, valid.2.1, valid.2.2.1, valid.2.2.2.1, ?_⟩
-  rw [← valid.2.2.2.2]
-  apply all3_congr_getElem?
-  rintro pc ⟨⟨instruction, role⟩, index⟩ ⟨feature, stack⟩ emitted site _ emittedAt
-  simp only [List.getElem?_zipIdx, Nat.zero_add, Option.map_eq_some_iff] at site
-  obtain ⟨pair, entry, found⟩ := site
-  obtain ⟨rfl, rfl⟩ := Prod.mk.inj found
-  have rawAt := (List.getElem?_zip_eq_some.mp entry).1
+      (Instruction.withSiteDecoder (foldRoles raw.code).toArray live decodeSite))
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {emitted : Instruction}
+    (rawAt : raw.code[pc]? = some instruction)
+    (roleAt : (foldRoles raw.code)[pc]? = some role) (emittedAt : code[pc]? = some emitted) :
+    boundSite instruction = false → role = none →
+      emitted = Instruction.ofRaw (rawBefore (raw.code[·]?) pc) instruction ∨
+        emitted = .unadmitted instruction.opcode := by
+  intro ordinary unfolded
   rw [same, Instruction.ofRawCode_getElem? raw.code pc _, Instruction.ofRawAt, rawAt]
     at emittedAt
-  apply Eq.symm
-  apply decodedSite_eq
-  intro ordinary unfolded
-  have roleAt := (List.getElem?_zip_eq_some.mp entry).2
   rw [unfolded] at roleAt
   cases active : live pc with
   | false =>
@@ -1121,22 +1106,50 @@ theorem ScalarFlowValid.of_decoded {raw : RawMethod}
         (rawBefore (FlowIndex.ofList raw.code).get? pc) instruction := by
       simpa [Instruction.withSiteDecoder, active, ordinary, roleAt, rawBefore,
         FlowIndex.get?_ofList] using (Option.some.inj emittedAt).symm
+    have flow : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) :=
+      funext (FlowIndex.get?_ofList raw.code)
+    rw [flow] at closed
     unfold Instruction.ofClosedValue at closed
     repeat' split at closed
     all_goals first | exact Or.inl closed | exact Or.inr closed
 
-#print axioms ScalarFlowValid.of_decoded
+#print axioms decodedSite_same
 
-/-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies
-    after the raw instruction before it. -/
+/-- At every reachable pc the certificate passes the scalar emission rule, with the raw value
+    comparison skipped at an ordinary site. -/
+private theorem ScalarFlowValid.emission_at {raw : RawMethod} {features : FeatureCertificate}
+    {certificate : ScalarCertificate} {code : List Instruction}
+    (valid : ScalarFlowValid raw features certificate code)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
+    {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : raw.code[pc]? = some instruction)
+    (roleAt : (foldRoles raw.code)[pc]? = some role)
+    (featureAt : features[pc]? = some (some feature))
+    (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
+    scalarEmissionMatches role (rawBefore (raw.code[·]?) pc) instruction stack emitted
+      (decodedValueSite instruction role emitted) = true := by
+  have pairAt : (raw.code.zip (foldRoles raw.code)).zipIdx[pc]? =
+      some ((instruction, role), pc) := by
+    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
+  have statesAt : (features.zip certificate)[pc]? = some (some feature, some stack) :=
+    List.getElem?_zip_eq_some.mpr ⟨featureAt, stackAt⟩
+  have sites := valid.2.2.2.2
+  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
+  have checked := all3_at sites pairAt statesAt emittedAt
+  simp only [checkScalarSite, Bool.and_eq_true] at checked
+  simpa only [rawBefore, FlowIndex.get?_ofList] using checked.1.2
+
+#print axioms ScalarFlowValid.emission_at
+
+/-- At every reachable pc of code that is the decoding of the raw body, the emitted
+    instruction is the scalar encoding the raw one implies after the raw instruction before it. -/
 theorem ScalarFlowValid.instruction_checked {raw : RawMethod}
     {features : FeatureCertificate}
     {certificate : ScalarCertificate} {code : List Instruction}
-    {decoded : Bool} (valid : ScalarFlowValid raw features certificate code decoded)
+    (valid : ScalarFlowValid raw features certificate code)
     {live : Nat → Bool} {decodeSite : SiteDecoder}
-    (codeDecodes : decoded = true → code =
-      Instruction.ofRawCode none raw.code
-        (Instruction.withSiteDecoder (foldRoles raw.code).toArray live decodeSite))
+    (codeDecodes : code = Instruction.ofRawCode none raw.code
+      (Instruction.withSiteDecoder (foldRoles raw.code).toArray live decodeSite))
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
     {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
@@ -1145,29 +1158,36 @@ theorem ScalarFlowValid.instruction_checked {raw : RawMethod}
     (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
     scalarEmissionMatches role (rawBefore (raw.code[·]?) pc) instruction stack emitted =
       true := by
-  have pairAt : (raw.code.zip (foldRoles raw.code)).zipIdx[pc]? =
-      some ((instruction, role), pc) := by
-    simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt]
-  have statesAt : (features.zip certificate)[pc]? = some (some feature, some stack) :=
-    List.getElem?_zip_eq_some.mpr ⟨featureAt, stackAt⟩
-  have checkedFlow : ScalarFlowValid raw features certificate code false := by
-    cases decoded
-    · exact valid
-    · exact valid.of_decoded (codeDecodes rfl)
-  have sites := checkedFlow.2.2.2.2
-  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm] at sites
-  have checked := all3_at sites pairAt statesAt emittedAt
-  simp only [checkScalarSite, Bool.false_and, Bool.and_eq_true] at checked
-  simpa only [rawBefore, FlowIndex.get?_ofList] using checked.1.2
+  rw [← decodedEmission_eq _ _ _ _ _ (decodedSite_same codeDecodes rawAt roleAt emittedAt)]
+  exact valid.emission_at rawAt roleAt featureAt stackAt emittedAt
 
 #print axioms ScalarFlowValid.instruction_checked
+
+/-- At every reachable folded pc the emitted instruction is the scalar encoding the raw one
+    implies after the raw instruction before it; a folded site never skips the comparison. -/
+theorem ScalarFlowValid.folded_checked {raw : RawMethod}
+    {features : FeatureCertificate}
+    {certificate : ScalarCertificate} {code : List Instruction}
+    (valid : ScalarFlowValid raw features certificate code)
+    {pc : Nat} {instruction : RawInstruction} {role : FoldRole} {feature : FeatureState}
+    {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : raw.code[pc]? = some instruction)
+    (roleAt : (foldRoles raw.code)[pc]? = some (some role))
+    (featureAt : features[pc]? = some (some feature))
+    (stackAt : certificate[pc]? = some (some stack)) (emittedAt : code[pc]? = some emitted) :
+    scalarEmissionMatches (some role) (rawBefore (raw.code[·]?) pc) instruction stack emitted =
+      true := by
+  have checked := valid.emission_at rawAt roleAt featureAt stackAt emittedAt
+  simpa [decodedValueSite] using checked
+
+#print axioms ScalarFlowValid.folded_checked
 
 /-- At a reachable pc the certificate's stack passes the raw instruction's scalar transfer, or
     the site is a narrowing store the interpreter rejects, and every successor's certificate
     entry is exactly the transferred stack. -/
 theorem ScalarFlowValid.transfer_at {raw : RawMethod} {features : FeatureCertificate}
-    {certificate : ScalarCertificate} {code : List Instruction} {decoded : Bool}
-    (valid : ScalarFlowValid raw features certificate code decoded)
+    {certificate : ScalarCertificate} {code : List Instruction}
+    (valid : ScalarFlowValid raw features certificate code)
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole}
     {feature : Option FeatureState} {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
@@ -1178,7 +1198,7 @@ theorem ScalarFlowValid.transfer_at {raw : RawMethod} {features : FeatureCertifi
       ∃ after successors, scalarTransfer raw instruction stack role = some after ∧
         featureSuccessors role pc instruction state.stack = some successors ∧
         ∀ target ∈ successors, certificate[target]? = some (some after)) := by
-  have sites := ((ScalarFlowValid_iff_list raw features certificate code decoded).mp valid).2.2.2.2
+  have sites := ((ScalarFlowValid_iff_list raw features certificate code).mp valid).2.2.2.2
   have pairAt : ((raw.code.zip (foldRoles raw.code)).zipIdx.zip features)[pc]? =
       some (((instruction, role), pc), feature) := by
     simp [List.getElem?_zipIdx, List.getElem?_zip_eq_some, rawAt, roleAt, featureAt]
@@ -1213,7 +1233,7 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
     (prefixes : rawPrefixesValid raw.returnType raw.code = true)
     (featureFlow : FeatureFlowValid layouts constants linkAt raw profile features reachable
       body.code)
-    (scalarFlow : ScalarFlowValid raw features scalars body.code false)
+    (scalarFlow : ScalarFlowValid raw features scalars body.code)
     (calls : ManagedCallsValid methods imports modelled (lowerConstrainedRaw types raw)
       reachable body)
     (constrained : ConstrainedCallsValid types methods raw reachable body)
@@ -1237,9 +1257,7 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
         featureOpMatchesAt layouts raw (some role) instruction decoded previous = true ∧
         scalarEmissionMatches (some role) previous instruction stack decoded = true := by
   have feature := featureFlow.instruction_checked rawAt roleAt featureAt codeAt
-  have scalar := scalarFlow.instruction_checked (live := fun _ => true)
-    (decodeSite := fun _ _ raw => .unadmitted raw.opcode)
-    (by intro impossible; contradiction) rawAt roleAt featureAt stackAt codeAt
+  have scalar := scalarFlow.folded_checked rawAt roleAt featureAt stackAt codeAt
   have bound : Instruction.ofRole? role (rawBefore (raw.code[·]?) pc) instruction =
       some emitted := by
     cases role with

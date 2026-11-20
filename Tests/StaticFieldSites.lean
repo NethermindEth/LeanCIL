@@ -8,8 +8,9 @@ import Tests.BodyEncoding
 `stsfld`. `Y` and `X` are either fields of `T`'s own `Fixture`, which the carried slice defines,
 or member references into `Ext.Point` of an assembly no slice carries. The static site at the
 access carries the descriptor of `X`, so the model would use `X`'s storage for `Y`: every such
-body is refused, while the carried `Y` with its own descriptor is a valid translation for each
-instruction. Of the fields of types no slice carries, only `BitConverter.IsLittleEndian` is
+body is refused, while the carried `Y` with its own descriptor is a valid translation for a load
+and an address. A store, or a token outside an RVA site, decodes to a hole and is refused with
+either descriptor. Of the fields of types no slice carries, only `BitConverter.IsLittleEndian` is
 admitted, and only as the `ldsfld` the feature check reads as a constant.
 
 A static of the generic `Box`1` named through `Box<int>` is refused for each instruction, since
@@ -158,15 +159,22 @@ private def yBody (carried : Bool) (opcode : Nat) : BodyEvidence :=
 
 private def unknown (count : Nat) : Option FeatureState := some ⟨List.replicate count none, []⟩
 
-/-- The evidence of the method accessing `Y`: the stack holds the loaded value or its address after
-    a load, the stored value before a store and the handle after a token. -/
-private def evidence (carried : Bool) (opcode : Nat) : MethodEvidence :=
+/-- The raw static sites that key each pc's descriptor, as the extractor records them. -/
+private def sitesOf (sites : List (Nat × StaticDescriptor)) : List (Nat × StaticFieldSite) :=
+  sites.map fun (pc, descriptor) => (pc, ⟨descriptor, none⟩)
+
+/-- The evidence of the method accessing `Y`, its raw sites keyed by `sites`: the stack holds the
+    loaded value or its address after a load, the stored value before a store and the handle after
+    a token. -/
+private def evidence (carried : Bool) (opcode : Nat) (sites : List (Nat × StaticDescriptor)) :
+    MethodEvidence :=
   let three := opcode == stsfld || opcode == ldtoken
   let pushed : ScalarKind :=
     if opcode == ldsfld || opcode == stsfld then .word32
     else if opcode == ldsflda then .reference else .other
   let operations : List ArgumentOp := List.replicate (if three then 3 else 2) .other
-  let original := raw opcode (yField carried) (returnType opcode)
+  let original := { raw opcode (yField carried) (returnType opcode) with
+    staticFields := sitesOf sites }
   { original, body := yBody carried opcode, arguments := [], closed := original,
     parameterInput := { arguments := [], locals := [], code := operations },
     reachable := List.replicate (if three then 3 else 2) true,
@@ -202,18 +210,26 @@ private def withX (carried : Bool) (opcode : Nat) : Method :=
 private def withY (carried : Bool) (opcode : Nat) : Method :=
   method carried opcode (descriptorOf (yField carried) 2 2)
 
-/-- Whether the extraction of one method accessing `Y` is a valid translation. -/
+/-- Whether the extraction of one method accessing `Y`, its evidence recording the emitted
+    method's static sites, is a valid translation. -/
 private abbrev valid (carried : Bool) (opcode : Nat) (emitted : Method) : Prop :=
-  TranslationValid [] #[] [] [evidence carried opcode] [] [emitted]
+  TranslationValid [] #[] [] [evidence carried opcode emitted.staticSites] [] [emitted]
 
 /-! ## A carried owner -/
 
-/-- Each access to the carried `Y` is a valid translation with `Y`'s own descriptor at its site. -/
+/-- Each load of the carried `Y` or of its address is a valid translation with `Y`'s own
+    descriptor at its site. -/
 theorem carried_access_with_own_descriptor_accepted :
-    valid true ldsfld (withY true ldsfld) ∧ valid true ldsflda (withY true ldsflda) ∧
-    valid true stsfld (withY true stsfld) ∧ valid true ldtoken (withY true ldtoken) := by
+    valid true ldsfld (withY true ldsfld) ∧ valid true ldsflda (withY true ldsflda) := by
   decide +kernel
 #print axioms carried_access_with_own_descriptor_accepted
+
+/-- A store to the carried `Y`, or its token outside an RVA site, decodes to a hole, so even
+    with `Y`'s own descriptor at its site the method is no valid translation. -/
+theorem carried_store_and_token_rejected :
+    ¬ valid true stsfld (withY true stsfld) ∧ ¬ valid true ldtoken (withY true ldtoken) := by
+  decide +kernel
+#print axioms carried_store_and_token_rejected
 
 /-- Each access to the carried `Y` whose site carries `X`'s descriptor is no valid translation. -/
 theorem carried_access_with_descriptor_of_x_rejected :
@@ -350,16 +366,6 @@ private def compareBody : BodyEvidence :=
   let table := [(x, operandOf (xField true)), (y, operandOf (yField true))]
   { evidenceOf bytes table { own := intWorld.1 } compareRaw with statics := [(0, x), (1, y)] }
 
-/-- The evidence of the comparison: two references, then the `int` that compares them. -/
-private def compareEvidence : MethodEvidence :=
-  { original := compareRaw, body := compareBody, arguments := [], closed := compareRaw,
-    parameterInput := { arguments := [], locals := [], code := List.replicate 4 .other },
-    reachable := List.replicate 4 true,
-    featureStates := [unknown 0, unknown 1, unknown 2, unknown 1],
-    scalarStates := [some [], some [.reference], some [.reference, .reference], some [.word32]],
-    layoutUses := [], assembly := pin,
-    signature := (spelled? compareBody.names.signature).getD "" }
-
 /-- The emitted comparison, with the sites of `X` and `Y` keyed by the given identities. -/
 private def compareMethod (xIdentity yIdentity : Nat) : Method :=
   { locals := [], returnsValue := true, declared := DeclaredSignature.ofRaw compareRaw,
@@ -367,12 +373,25 @@ private def compareMethod (xIdentity yIdentity : Nat) : Method :=
     staticSites := [(0, descriptorOf (xField true) xIdentity 0),
       (1, descriptorOf (yField true) yIdentity 0)] }
 
+/-- The evidence of the comparison with its raw sites keyed as `compareMethod` keys them: two
+    references, then the `int` that compares them. -/
+private def compareEvidence (xIdentity yIdentity : Nat) : MethodEvidence :=
+  let source := { compareRaw with
+    staticFields := sitesOf (compareMethod xIdentity yIdentity).staticSites }
+  { original := source, body := compareBody, arguments := [], closed := source,
+    parameterInput := { arguments := [], locals := [], code := List.replicate 4 .other },
+    reachable := List.replicate 4 true,
+    featureStates := [unknown 0, unknown 1, unknown 2, unknown 1],
+    scalarStates := [some [], some [.reference], some [.reference, .reference], some [.word32]],
+    layoutUses := [], assembly := pin,
+    signature := (spelled? compareBody.names.signature).getD "" }
+
 /-- Keyed by one identity, `X` and `Y` would share one storage in the model and their addresses
     would compare equal; the evidence check refuses that, and accepts two identities. -/
 theorem shared_identity_in_one_method_rejected :
     ¬ StaticIdentitiesValid [compareMethod 1 1] [compareBody] ∧
-    ¬ TranslationValid [] #[] [] [compareEvidence] [] [compareMethod 1 1] ∧
-    TranslationValid [] #[] [] [compareEvidence] [] [compareMethod 1 2] := by
+    ¬ TranslationValid [] #[] [] [compareEvidence 1 1] [] [compareMethod 1 1] ∧
+    TranslationValid [] #[] [] [compareEvidence 1 2] [] [compareMethod 1 2] := by
   decide +kernel
 #print axioms shared_identity_in_one_method_rejected
 
@@ -380,11 +399,8 @@ theorem shared_identity_in_one_method_rejected :
 theorem decoded_static_keys_bound :
     let check := fun key =>
       let expected := compareMethod 1 key
-      let sites : List (Nat × StaticFieldSite) :=
-        expected.staticSites.map fun (pc, descriptor) => (pc, ⟨descriptor, none⟩)
-      let source := { compareRaw with staticFields := sites }
-      let item := { compareEvidence with original := source, closed := source, decoded := true }
-      let decoded := Method.ofClosed? .scalar {} [] item.reachable source item.parameterInput
+      let item := compareEvidence 1 key
+      let decoded := Method.ofClosed? .scalar {} [] item.reachable item.closed item.parameterInput
       let kept := match decoded with
         | .ok method => method.staticSites == expected.staticSites
         | .error _ => false
@@ -394,9 +410,11 @@ theorem decoded_static_keys_bound :
 
 #print axioms decoded_static_keys_bound
 
-/-- The evidence of a method of its own that loads the carried `field` with `token`. -/
-private def loadEvidence (field : FieldRef) (token : Nat) : MethodEvidence :=
-  let original := raw ldsfld field int32
+/-- The evidence of a method of its own that loads the carried `field` with `token`, its site
+    keyed by `identity`. -/
+private def loadEvidence (field : FieldRef) (token identity : Nat) : MethodEvidence :=
+  let original := { raw ldsfld field int32 with
+    staticFields := sitesOf [(0, descriptorOf field identity 2)] }
   let decoded := { body ldsfld field int32 intWorld.1 token with statics := [(0, token)] }
   { original, body := decoded, arguments := [], closed := original,
     parameterInput := { arguments := [], locals := [], code := [.other, .other] },
@@ -412,7 +430,8 @@ private def loadMethod (field : FieldRef) (identity : Nat) : Method :=
 
 /-- A program of one load method per entry: the field, its token and the identity of its site. -/
 private abbrev loadsValid (loads : List (FieldRef × Nat × Nat)) : Prop :=
-  TranslationValid [] #[] [] (loads.map fun (field, token, _) => loadEvidence field token) []
+  TranslationValid [] #[] []
+    (loads.map fun (field, token, identity) => loadEvidence field token identity) []
     (loads.map fun (field, _, identity) => loadMethod field identity)
 
 /-- Two methods may not key `X` and `Y` by one identity, and may key them by two. -/

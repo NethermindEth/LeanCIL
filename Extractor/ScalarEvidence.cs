@@ -30,18 +30,17 @@ internal static class ScalarEvidence
         EmitInstructionChecks(lean, number, method.Body.Instructions.Count, calls, objectProof);
     }
 
-    // The checks share the closed operands. Every method is decoded, so it already proves its code equality.
+    // The checks share the closed operands; the code equality comes from the method's decoding.
     static void EmitInstructionChecks(StringBuilder lean, int number, int instructions, int calls,
         string? objectProof)
     {
         var method = $"method{number}";
-        const string flag = "true";
-        var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code {flag}";
+        var flow = $"{method}Closed {method}FeatureStates {method}ScalarStates {method}.code";
         var scalar = $"Extraction.ScalarFlowValid {flow}";
         var context = $"{method}.profile {method}.environment {method}.links";
         var code = $"Extraction.methodCode {context} {method}Reachable {method}Closed";
-        var binding = $"{flag} = true -> {method}.code = {code}";
-        var witness = $"fun _ => {method}_decoded_code";
+        var binding = $"{method}.code = {code}";
+        var witness = $"{method}_decoded_code";
         var scalarEvidence = $"And ({scalar}) ({binding})";
         var unsafeCalls = $"Extraction.UnsafeCallsValid {method}Closed {method}Reachable {method}.code";
         var models = $"Extraction.RuntimeModelsAgree {method}Closed {method}Reachable {method}";

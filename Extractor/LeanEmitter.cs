@@ -381,8 +381,7 @@ internal static class LeanEmitter
                 $"featureStates := {method}FeatureStates", $"scalarStates := {method}ScalarStates",
                 $"layoutUses := {method}LayoutUses", $"dispatchTypes := {method}DispatchTypes",
                 $"links := {method}Links",
-                $"assembly := assembly{pinned.Index(methods[n].Module)}", $"signature := {method}Signature",
-                "decoded := true");
+                $"assembly := assembly{pinned.Index(methods[n].Module)}", $"signature := {method}Signature");
             return $$"""{ {{fields}} }""";
         });
         lean.AppendLine($"""def methodEvidence : List Extraction.MethodEvidence := [{string.Join(", ", records)}]""");
@@ -425,7 +424,7 @@ internal static class LeanEmitter
                 $"method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            var statics = $"fun _ => (Method.ofClosed?_fields method{n}_decoder_eq).2";
+            var statics = $"(Method.ofClosed?_fields method{n}_decoder_eq).2";
             lean.AppendLine(
                 $"    method{n}_environment_validated, method{n}_declared_validated, rfl, {statics}\u27e9");
         }

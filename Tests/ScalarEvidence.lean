@@ -2,6 +2,7 @@ import CIL.Extraction.Translation
 import CIL.Safety.Frames
 import Tests.BodyEncoding
 import Tests.Support.ModelOperands
+import Tests.Support.RawDecoding
 
 /-!
 Certificate regression fixtures, evaluated against the checked CIL extraction model.
@@ -1084,16 +1085,19 @@ private def fieldFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown
 private def fieldStates : ScalarCertificate := [some [], some [.object], some [.word64]]
 private def fieldCode (access : Instruction) : List Instruction := [.ldarg 0, access, .ret]
 -- A class field load names the field its raw operand names: owner, index, held type and name.
-example : ScalarFlowValid fieldRaw fieldFeatures fieldStates (fieldCode (.ldfld balance)) := by
-  decide
-example : ¬ ScalarFlowValid fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with index := 0 })) := by decide
-example : ¬ ScalarFlowValid fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with owner := .object "Scope" "Scope.Other" })) := by decide
-example : ¬ ScalarFlowValid fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with type := .atom runtime "System.Int32" })) := by decide
-example : ¬ ScalarFlowValid fieldRaw fieldFeatures fieldStates
-    (fieldCode (.ldfld { balance with name := name!"limit" })) := by decide
+-- The code equation, not the scalar check, refuses a forged field at this ordinary site.
+example : Tests.DecodedFlow fieldRaw fieldFeatures fieldStates (fieldCode (.ldfld balance)) := by
+  decide +kernel
+example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
+    (fieldCode (.ldfld { balance with index := 0 })) := by decide +kernel
+example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
+    (fieldCode (.ldfld { balance with owner := .object "Scope" "Scope.Other" })) := by
+  decide +kernel
+example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
+    (fieldCode (.ldfld { balance with type := .atom runtime "System.Int32" })) := by
+  decide +kernel
+example : ¬ Tests.DecodedFlow fieldRaw fieldFeatures fieldStates
+    (fieldCode (.ldfld { balance with name := name!"limit" })) := by decide +kernel
 example : ¬ ScalarFlowValid fieldRaw fieldFeatures fieldStates
     (fieldCode (.stfld balance)) := by decide
 
@@ -1108,12 +1112,12 @@ private def nextRaw : RawMethod :=
   { raw [i 2, i 123 nextField, i 42] [node] with returnType := node, maxStack := 1 }
 private def nextStates : ScalarCertificate := [some [], some [.object], some [.object]]
 -- A class-typed field load names its own field; the step reads the slot the field's type gives.
-example : ScalarFlowValid nextRaw fieldFeatures nextStates (fieldCode (.ldfld next)) := by
-  decide
-example : ¬ ScalarFlowValid nextRaw fieldFeatures nextStates
-    (fieldCode (.ldfld { next with index := 0 })) := by decide
-example : ¬ ScalarFlowValid nextRaw fieldFeatures nextStates
-    (fieldCode (.ldfld { next with owner := account })) := by decide
+example : Tests.DecodedFlow nextRaw fieldFeatures nextStates (fieldCode (.ldfld next)) := by
+  decide +kernel
+example : ¬ Tests.DecodedFlow nextRaw fieldFeatures nextStates
+    (fieldCode (.ldfld { next with index := 0 })) := by decide +kernel
+example : ¬ Tests.DecodedFlow nextRaw fieldFeatures nextStates
+    (fieldCode (.ldfld { next with owner := account })) := by decide +kernel
 example : scalarEmissionMatches none none (i 123 nextField) [.object]
     (.ldfld value) = false := by
   decide
@@ -1352,8 +1356,8 @@ private theorem sizeof_equal_layouts :
     let rows := [row, { row with identity := "Fixture::B" }]
     let environment : LayoutEnvironment := { rawLayouts := rows, layouts := #[layout, layout] }
     let input := sizeRaw (i 65052 (.type a))
-    let valid := fun type => ScalarFlowValid input pushHoleFeatures sizeStates
-      [.sizeof type, .pop, .ldarg 0, .ret] false
+    let valid := fun type => Tests.DecodedFlow input pushHoleFeatures sizeStates
+      [.sizeof type, .pop, .ldarg 0, .ret]
     LayoutsValid rows environment.layouts .x64 ∧ environment.valueShape a = .aggregate 4 ∧
       environment.valueShape b = .aggregate 4 ∧ valid a ∧ ¬ valid b := by decide +kernel
 #print axioms sizeof_equal_layouts
@@ -1539,13 +1543,13 @@ private def blockInit : RawMethod :=
   { raw [i 2, i 22, i 22, i 65048, i 42] [.byref intType] with
     maxStack := 3, returnType := .void }
 
-/-- A hole at a reachable block initialization is refused under decoded checking, which compares
-    it with the block operation the decoder gives that pc. -/
+/-- A hole at a reachable block initialization is refused: the scalar check compares it with
+    the block operation the decoder gives that pc. -/
 theorem decoded_block_hole_refused :
     ¬ ScalarFlowValid blockInit ([0, 1, 2, 3, 0].map unknown)
       [some [], some [.reference], some [.word32, .reference],
         some [.word32, .word32, .reference], some []]
-      ((Instruction.ofRawCode none blockInit.code).set 3 (.unadmitted 65048)) true := by
+      ((Instruction.ofRawCode none blockInit.code).set 3 (.unadmitted 65048)) := by
   decide +kernel
 #print axioms decoded_block_hole_refused
 
@@ -1555,33 +1559,34 @@ theorem decoded_block_init_valid :
     ScalarFlowValid blockInit ([0, 1, 2, 3, 0].map unknown)
       [some [], some [.reference], some [.word32, .reference],
         some [.word32, .word32, .reference], some []]
-      (Instruction.ofRawCode none blockInit.code) true := by
+      (Instruction.ofRawCode none blockInit.code) := by
   decide +kernel
 #print axioms decoded_block_init_valid
 
-/-- A decoded addition meets the full method evidence including the code equality. -/
-theorem flagged_addition_valid :
-    let item := { addEvidence with decoded := true }
-    MethodEvidenceValid [] #[] [] [item] [] item addMethod := by decide +kernel
-#print axioms flagged_addition_valid
-
-/-- Only literal evidence permits an extra static site on a method whose body has none. -/
-theorem decoded_addition_rejects_extra_static_site :
-    let item := { addEvidence with decoded := true }
+/-- Evidence refuses an extra static site on a method whose body has none. -/
+theorem addition_rejects_extra_static_site :
     let site : StaticDescriptor := { identity := 1, field := value, bytes := [] }
     let altered := { addMethod with staticSites := [(0, site)] }
-    MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence altered ∧
-      ¬ MethodEvidenceValid [] #[] [] [item] [] item altered := by
+    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence altered := by
   decide +kernel
-#print axioms decoded_addition_rejects_extra_static_site
+#print axioms addition_rejects_extra_static_site
 
-/-- The call-aware method binding restores the explicit encoding checks at every scalar site. -/
+/-- The call-aware method binding restores the explicit encoding check at every scalar site. -/
 theorem checked_method_encodings (method : Method) (item : MethodEvidence)
-    (valid : ScalarFlowValid item.closed item.featureStates item.scalarStates method.code true)
+    (valid : ScalarFlowValid item.closed item.featureStates item.scalarStates method.code)
     (binding : method.code =
-      methodCode method.profile method.environment method.links item.reachable item.closed) :
-    ScalarFlowValid item.closed item.featureStates item.scalarStates method.code false :=
-  valid.of_decoded (binding.trans (methodCode_eq ..))
+      methodCode method.profile method.environment method.links item.reachable item.closed)
+    {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
+    {stack : List ScalarKind} {emitted : Instruction}
+    (rawAt : item.closed.code[pc]? = some instruction)
+    (roleAt : (foldRoles item.closed.code)[pc]? = some role)
+    (featureAt : item.featureStates[pc]? = some (some feature))
+    (stackAt : item.scalarStates[pc]? = some (some stack))
+    (emittedAt : method.code[pc]? = some emitted) :
+    scalarEmissionMatches role (rawBefore (item.closed.code[·]?) pc) instruction stack emitted =
+      true :=
+  valid.instruction_checked (binding.trans (methodCode_eq ..)) rawAt roleAt featureAt stackAt
+    emittedAt
 
 #print axioms checked_method_encodings
 
@@ -1589,7 +1594,7 @@ theorem checked_method_encodings (method : Method) (item : MethodEvidence)
 theorem wrong_decoded_owner_refused (item : MethodEvidence) :
     let owner := TypeExpr.aggregate "Fixture" 0
     let source := raw [i 123 (.field owner 0 intType (name!"Field") false)]
-    let evidence := { item with closed := source, decoded := true }
+    let evidence := { item with closed := source }
     let field : FieldRef := ⟨.aggregate "Fixture" 1, 0, intType, name!"Field"⟩
     ¬ MethodEvidenceValid [] #[] [] [evidence] [] evidence
       { addMethod with code := [.ldfld field] } := by
@@ -1602,7 +1607,7 @@ theorem wrong_decoded_owner_refused (item : MethodEvidence) :
     change [Instruction.ldfld field] ≠ [if !item.reachable.toArray[0]?.getD false then
       .unadmitted 123 else .ldfld { field with owner := owner }]
     cases item.reachable.toArray[0]?.getD false <;> decide +kernel
-  exact different (valid.decoded_code rfl)
+  exact different valid.code_eq
 #print axioms wrong_decoded_owner_refused
 
 end Tests.ScalarEvidence
