@@ -92,7 +92,8 @@ starts at the caller's next instruction. `cil_checked_steps`, `cil_contract_step
   stepping there. With literal fuel and a target equal only up to rewriting, use
   `cil_checked_steps n [facts]` and prove the residual `run` equation.
   `MemoryBelow.frame_round_trip` carries caller memory across `enterFrame` and `leaveFrame` when
-  the callee body keeps it.
+  the callee body keeps it. For a method contract with an empty footprint, `Confined.frame_round_trip`
+  uses the same preservation fact and the growth of the allocation counter during the call.
 
 ### Lookups
 

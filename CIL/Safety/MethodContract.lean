@@ -96,6 +96,19 @@ theorem Confined.ofMemoryBelow {footprint : List (Reference × Nat)} {before aft
     fun id bound offset _ => preserved.permissions id (old bound) offset false,
     fun id bound offset _ => preserved.slots id (old bound) offset⟩
 
+/-- A method that uses only fresh storage during execution leaves every caller allocation,
+    byte, object slot and access permission unchanged when its frame retires. -/
+theorem Confined.frame_round_trip {body : CIL.Method} {args : List Value}
+    {before entered updated : Memory} {frame : Frame}
+    (setup : enterFrame body args before = .ok (frame, entered))
+    (preserved : MemoryBelow before.nextIdentity entered updated)
+    (grows : entered.nextIdentity ≤ updated.nextIdentity) :
+    Confined [] before (leaveFrame frame updated) := by
+  apply Confined.ofMemoryBelow (MemoryBelow.frame_round_trip setup preserved) (Nat.le_refl _)
+  rw [leaveFrame_nextIdentity]
+  exact Nat.le_trans (enterFrame_fresh _ _ _ _ _ setup).1.1 grows
+#print axioms Confined.frame_round_trip
+
 /-- A change confined to no storage keeps all memory that existed before it. -/
 theorem Confined.nil_memoryBelow {before after : Memory} (framed : Confined [] before after) :
     MemoryBelow before.nextIdentity before after :=

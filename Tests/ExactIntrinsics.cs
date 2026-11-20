@@ -314,7 +314,7 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["Less"], Path
     theorem correctness : unsignedMask.Holds Extracted.program 0 := by
       rintro ⟨left, right⟩ memory formed
       let args : List CIL.Safety.Value := [.scalar (.i64 left), .scalar (.i64 right)]
-      obtain ⟨frame, entered, setup, homes, prior, _⟩ :=
+      obtain ⟨frame, entered, setup, homes, _, _⟩ :=
         numeric_frame_setup Extracted.method0 [localSpec] rfl rfl rfl rfl memory args formed
       obtain ⟨home, slot, fresh, _, writable⟩ := homes.home_at 0 localSpec rfl
       obtain ⟨after, stored, written, readback⟩ := step_store_numeric_local
@@ -323,13 +323,8 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["Less"], Path
       have loaded := step_load_numeric_local (body := Extracted.method0) (pc := 11)
         (args := args) (stack := [.scalar (.v512 (splat left))]) .vector512
         (.v512 (splat right)) (splat right).toNat rfl slot readback
-      have frameFresh := enterFrame_fresh _ _ _ _ _ setup
-      have confined := (Confined.refl [] memory).then_below prior frameFresh.1.1
       have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh written
-      have frameWritten := confined.then_below preserved
-        (Nat.le_of_eq (write_nextIdentity written).symm)
-      have final := frameWritten.after_leaveFrame (frame := frame)
-        (fun id member => (frameFresh.2 id member).1)
+      have final := Confined.frame_round_trip setup preserved (Nat.le_of_eq (write_nextIdentity written).symm)
       apply MethodContract.Holds.intro (c := unsignedMask) (input := (left, right)) (leaveFrame frame after)
         (if left.ult right then 255 else 0) ?_ final rfl
       refine ⟨64, invoke_of_run Extracted.program_method0 rfl setup ?_⟩
@@ -751,7 +746,7 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"]
       let value := pack256 v.a v.b v.c v.d
       let indices := pack256 i.a i.b i.c i.d
       let fill := permute4x64 (zip256 (fun x y => mask64 (x.slt y)) value 0) 255
-      obtain ⟨frame, entered, setup, homes, prior, _⟩ :=
+      obtain ⟨frame, entered, setup, homes, _, _⟩ :=
         numeric_frame_setup Extracted.method0 [localSpec] rfl rfl rfl rfl memory args formed
       obtain ⟨home, slot, fresh, _, writable⟩ := homes.home_at 0 localSpec rfl
       obtain ⟨after, stored, written, readback⟩ := step_store_numeric_local
@@ -760,11 +755,8 @@ verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"]
       have loaded := step_load_numeric_local (body := Extracted.method0) (pc := 18)
         (args := args) (stack := [.scalar (.v256 indices), .scalar (.v256 value)])
         .vector256 (.v256 fill) fill.toNat rfl slot readback
-      have frameFresh := enterFrame_fresh _ _ _ _ _ setup
-      have confined := (Confined.refl [] memory).then_below prior frameFresh.1.1
       have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh written
-      have frameWritten := confined.then_below preserved (Nat.le_of_eq (write_nextIdentity written).symm)
-      have final := frameWritten.after_leaveFrame (frame := frame) (fun id h => (frameFresh.2 id h).1)
+      have final := Confined.frame_round_trip setup preserved (Nat.le_of_eq (write_nextIdentity written).symm)
       apply MethodContract.Holds.intro (c := signWindow) (input := (v, i)) (leaveFrame frame after)
         (permuteVar4x64x2 value indices fill) ?_ final ?_
       · refine ⟨64, invoke_of_run Extracted.program_method0 rfl setup ?_⟩
