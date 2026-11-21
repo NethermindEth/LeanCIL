@@ -92,7 +92,7 @@ theorem starg_writes_home :
 
 /-- A method that writes 11 through the address of its homed argument, then returns it. -/
 private def addressedParameter : CIL.Method :=
-  { homedParameter with code := [.ldarga 0, .ldc_i4 11, .storeScalar 4, .ldarg 0, .ret] }
+  { homedParameter with code := [.ldarga 0, .ldc_i4 11, .stind .i4, .ldarg 0, .ret] }
 
 /-- `ldarga` of a homed argument is the address of the home that `ldarg` reads. -/
 theorem ldarga_addresses_home :
@@ -198,25 +198,25 @@ theorem scalar_load_null :
       .error (.memory .nullDereference .null 4) := rfl
 
 theorem scalar_store_null :
-    instruction (.storeScalar 4) [.scalar (.i32 7), .reference .null] Tests.caller =
+    instruction (.stind .i4) [.scalar (.i32 7), .reference .null] Tests.caller =
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem scalar_store_wrong_width :
-    instruction (.storeScalar 2) [.scalar (.i64 7), Tests.reference] Tests.caller =
+    observedTransfer (.scalar 2 false) true [.scalar (.i64 7), Tests.reference] Tests.caller =
       .error .invalidState := rfl
 
 theorem scalar_store_bounds :
-    instruction (.storeScalar 4) [.scalar (.i32 7), .reference (.address ⟨0, 6⟩)] Tests.caller =
+    instruction (.stind .i4) [.scalar (.i32 7), .reference (.address ⟨0, 6⟩)] Tests.caller =
       .error (.memory .outsideAllocation (.address ⟨0, 6⟩) 4) := rfl
 
 theorem scalar_store_lifetime :
-    instruction (.storeScalar 2) [.scalar (.i32 7), Tests.reference] (expire Tests.caller 0) =
+    instruction (.stind .i2) [.scalar (.i32 7), Tests.reference] (expire Tests.caller 0) =
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 2) := rfl
 
 theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.W32)
     (ready : access memory reference 4 1 true = .ok ()) :
     ∃ result,
-      instruction (.storeScalar 4) [.scalar (.i32 bits), .reference (.address reference)] memory =
+      instruction (.stind .i4) [.scalar (.i32 bits), .reference (.address reference)] memory =
         .ok (result, []) ∧
       instruction (.loadScalar 4) [.reference (.address reference)] result =
         .ok (result, [.scalar (.i32 bits)]) := by
@@ -226,7 +226,8 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
     pure (Value.scalar (.i32 (BitVec.ofNat 32 (byteNumber bytes)))) : ExecutionResult Value) = _ at loaded
   refine ⟨result, ?_, ?_⟩
   · cases hw : checkedAt (.address reference) 4 (write memory reference (numberBytes bits.toNat 4) 1) <;>
-      simp_all [instruction, transferValues, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
+      simp_all [instruction, CIL.NumericKind.width, storeLocal, localNumber, referenceAt,
+        localWidth, ordinaryAccessAlignment,
         observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
@@ -469,7 +470,7 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 4) ∧
     instructions [.memory .nullRef, .ldc_i8 7, .stind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i4 7, .stind .i4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     (do
       let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty

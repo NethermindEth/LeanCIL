@@ -106,7 +106,7 @@ def observerCount : CIL.Instruction → Nat
   | .loadScalar .. | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
-  | .storeScalar _ | .setFieldAt ..
+  | .setFieldAt ..
   | .stind _ | .cpobj _ | .stobj _ => 2
   | .ldlen => 1
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
@@ -1412,7 +1412,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   match op, stack with
   -- Typed copies and scalar and aggregate memory
   | .loadScalar width signed, _ => transferValues (.scalar width signed) false stack m
-  | .storeScalar width, _ => transferValues (.scalar width false) true stack m
   -- Fields
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else

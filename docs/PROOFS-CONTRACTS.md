@@ -607,7 +607,7 @@ contents separately.
 
 For a word store through a named output, `cil_contract_steps` first uses supplied checked
 operation facts. If none establishes the store, it derives a successful write from the current
-`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, eight-byte `storeScalar` and eight-byte
+`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, primitive eight-byte `stobj` and eight-byte
 `setFieldAt`. The continuation names:
 
 | Name | Holds |

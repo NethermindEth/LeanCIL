@@ -50,8 +50,8 @@ internal static partial class ProofOutline
         StackOperation { Kind: Code.Stind_I2 } => "step_stind_narrow_of_write .i2",
         StackOperation { Kind: Code.Stind_I4 } => "step_stind_narrow_of_write .i4",
         ObjectInstruction { Opcode: Code.Stobj, ScalarWidth: 8 } or
-            StoreScalar { Width: 8 } => "step_storeScalar_i64_of_write",
-        _ => "step_storeScalar_of_write"
+            StoreScalar { Width: 8 } => "transfer_i64_of_write",
+        _ => "transfer_i32_of_write"
     };
 
     /// <summary>The contract proof of a callee that stores its value into the first element of its span.</summary>

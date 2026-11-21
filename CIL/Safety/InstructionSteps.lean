@@ -103,66 +103,6 @@ theorem step_stind_i32_eq (kind : CIL.NumericKind) (narrow : kind.width ≠ 8) (
       return .next (pc + 1) rest frame stored := by
   cases kind <;> first | exact absurd rfl narrow | instruction_step_proof step_stind_eq
 
--- Scalar stores through a reference.
-/-- An i32 store of width 1, 2 or 4 writes the value's low bytes through the reference. -/
-theorem step_storeScalar_i32_eq (width : Nat) (narrow : width = 1 ∨ width = 2 ∨ width = 4)
-    (bits : CIL.W32) (reference : ManagedReference) (rest : List Value) :
-    step body (.storeScalar width) pc args frame
-      (.scalar (.i32 bits) :: .reference reference :: rest) memory = do
-      let address ← referenceAt reference
-      let stored ← checkedAt reference width
-        (write memory address (numberBytes bits.toNat width) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame stored := by
-  rcases narrow with rfl | rfl | rfl <;> instruction_step_proof step_storeScalar_eq
-
-/-- A one-byte scalar store. -/
-@[cil_instruction_step high]
-theorem step_storeScalar_i32_1_eq (bits : CIL.W32)
-    (reference : ManagedReference) (rest : List Value) :
-    step body (.storeScalar 1) pc args frame
-      (.scalar (.i32 bits) :: .reference reference :: rest) memory = do
-      let address ← referenceAt reference
-      let stored ← checkedAt reference 1
-        (write memory address (numberBytes bits.toNat 1) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame stored :=
-  step_storeScalar_i32_eq body pc args frame memory 1 (.inl rfl) bits reference rest
-
-/-- A two-byte scalar store. -/
-@[cil_instruction_step high]
-theorem step_storeScalar_i32_2_eq (bits : CIL.W32)
-    (reference : ManagedReference) (rest : List Value) :
-    step body (.storeScalar 2) pc args frame
-      (.scalar (.i32 bits) :: .reference reference :: rest) memory = do
-      let address ← referenceAt reference
-      let stored ← checkedAt reference 2
-        (write memory address (numberBytes bits.toNat 2) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame stored :=
-  step_storeScalar_i32_eq body pc args frame memory 2 (.inr (.inl rfl)) bits reference rest
-
-/-- A four-byte scalar store. -/
-@[cil_instruction_step high]
-theorem step_storeScalar_i32_4_eq (bits : CIL.W32)
-    (reference : ManagedReference) (rest : List Value) :
-    step body (.storeScalar 4) pc args frame
-      (.scalar (.i32 bits) :: .reference reference :: rest) memory = do
-      let address ← referenceAt reference
-      let stored ← checkedAt reference 4
-        (write memory address (numberBytes bits.toNat 4) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame stored :=
-  step_storeScalar_i32_eq body pc args frame memory 4 (.inr (.inr rfl)) bits reference rest
-
-/-- An eight-byte scalar store of an i64. -/
-@[cil_instruction_step high]
-theorem step_storeScalar_i64_eq (bits : CIL.W64)
-    (reference : ManagedReference) (rest : List Value) :
-    step body (.storeScalar 8) pc args frame
-      (.scalar (.i64 bits) :: .reference reference :: rest) memory = do
-      let address ← referenceAt reference
-      let stored ← checkedAt reference 8
-        (write memory address (numberBytes bits.toNat 8) ordinaryAccessAlignment)
-      return .next (pc + 1) rest frame stored := by
-  instruction_step_proof step_storeScalar_eq
-
 -- Fields of a referenced struct.
 /-- A field load forms the field address, then reads it at the field's width. -/
 @[cil_instruction_step high]
@@ -367,11 +307,6 @@ simproc [cil_instruction_step] reduceObjectSize (step _ (.sizeof _) _ _ _ _ _) :
 #print axioms step_stind_i8_eq
 #print axioms step_stind_i_eq
 #print axioms step_stind_i32_eq
-#print axioms step_storeScalar_i32_eq
-#print axioms step_storeScalar_i32_1_eq
-#print axioms step_storeScalar_i32_2_eq
-#print axioms step_storeScalar_i32_4_eq
-#print axioms step_storeScalar_i64_eq
 #print axioms step_fieldAt_reference_eq
 #print axioms step_fieldAt_readOnlyReference_eq
 #print axioms step_setFieldAt_i32_eq

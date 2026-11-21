@@ -81,7 +81,7 @@ example : runModel body .objectConstructor 3 frame [.object .null] staticMemory 
 -- Every typed transfer family runs as its typed load or store.
 example : runModel body (.typedTransfer (.scalar 4 false) true) 3 frame
       [.scalar (.i32 9), start] heapMemory =
-    step body (.storeScalar 4) 3 [] frame [.scalar (.i32 9), start] heapMemory := rfl
+    step body (.stind .i4) 3 [] frame [.scalar (.i32 9), start] heapMemory := rfl
 example : runModel body (.typedTransfer (.snapshot (.aggregate 16)) false) 3 frame [start]
       heapMemory =
     .ok (.next 4 [.scalar (.aggregate (List.replicate 16 7))] frame heapMemory) := rfl
@@ -167,7 +167,7 @@ example : (CIL.RuntimeModel.constant 8).observerCount = observerCount (.ldc_i4 8
 example : (CIL.RuntimeModel.referenceCompare .less).observerCount = observerCount .clt_un := rfl
 example : CIL.RuntimeModel.referenceSubtract.observerCount = observerCount .sub := rfl
 example : (CIL.RuntimeModel.typedTransfer (.scalar 4 false) true).observerCount =
-    observerCount (.storeScalar 4) := rfl
+    observerCount (.stind .i4) := rfl
 example : CIL.RuntimeModel.skipInit.observerCount = 1 := rfl
 example : CIL.RuntimeModel.objectConstructor.observerCount = observerCount .pop := rfl
 

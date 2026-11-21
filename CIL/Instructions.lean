@@ -188,7 +188,6 @@ inductive Instruction where
   /-- Copy the initialized bytes of the type from source to destination. -/
   | cpobj (type : Extraction.TypeExpr)
   | loadScalar (width : Nat) (signed : Bool := false)
-  | storeScalar (width : Nat)
   /-- `ldind` of `kind`: a load through a reference, or of the entry a native method table
       cursor names. -/
   | ldind (kind : NumericKind)

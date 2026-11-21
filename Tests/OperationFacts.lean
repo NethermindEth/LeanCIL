@@ -60,11 +60,12 @@ theorem byte_load {memory : Memory} {source : Reference} {bits : BitVec 8}
 /-- A byte store consumes write authority without requiring old initialized contents. -/
 theorem byte_store {memory after : Memory} {destination : Reference} {bits : CIL.W32}
     (written : write memory destination (numberBytes bits.toNat 1) 1 = .ok after)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeScalar 1) pc args frame
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr} {signed : Bool}
+    (shape : body.valueShape type = .primitive 1 signed) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.stobj type) pc args frame
         (.scalar (.i32 bits) :: .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
-  cil_checked_step [written]
+  cil_checked_step [shape, written]
 #print axioms byte_store
 
 /-- A four-byte `stind` consumes the write fact for its width; its kind decides the width. -/

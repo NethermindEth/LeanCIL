@@ -607,7 +607,7 @@ example (frame : Frame) (memory : Memory) (value : Value) (post : Memory → Lis
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
-  returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .storeScalar 4, .ret] }
+  returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .stind .i4, .ret] }
 
 /-- The program, with `stamps` calling `stamp` as method 1. -/
 @[cil_code] def stampsProgram : CIL.Program := [stamps, stamp]
@@ -626,7 +626,7 @@ theorem stamp_holds : stampContract.Holds stampsProgram 1 := by
   dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
   refine MethodContract.Holds.intro after () ?_ confined filled
-  cil_checked_steps [step_storeScalar_of_write wrote, formed]
+  cil_checked_steps [step_stind_narrow_of_write .i4 wrote, formed]
 /-- info: 'Tests.LoopDiagnostics.stamp_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms stamp_holds

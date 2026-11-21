@@ -30,7 +30,7 @@ theorem local_preserves_restriction :
 
 /-- Stores through restricted references fail despite the backing allocation's write authority. -/
 theorem restricted_store_rejected :
-    instruction (.storeScalar 4)
+    instruction (.stind .i4)
       [.scalar (.i32 7), .readOnlyReference (.address ⟨0, 4⟩)] memory =
       .error (.memory .unwritable (.address ⟨0, 4⟩) 4) := rfl
 #print axioms restricted_store_rejected

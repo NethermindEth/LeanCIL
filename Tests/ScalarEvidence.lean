@@ -1023,7 +1023,7 @@ private def indirectForged : List IndirectCase := [
   -- Sign.
   load 70 (.ldind .u1), load 71 (.ldind .i1), load 72 (.ldind .u2), load 73 (.ldind .i2),
   -- Runtime-model transfers of the right width, which no raw `ldind` or `stind` decodes to.
-  load 74 (.loadScalar 4 false), load 70 (.loadScalar 1 true), store 84 (.storeScalar 4),
+  load 74 (.loadScalar 4 false), load 70 (.loadScalar 1 true), store 84 (.stobj intType),
   -- Alignment and operation.
   block 65047 (.memory (.copyBlock 1)), block 65048 (.memory (.initBlock 4)),
   block 65047 (.memory (.copyBlock 8)) [unaligned 1],
@@ -1047,8 +1047,8 @@ private def objectForged : List IndirectCase := [
   load 113 (.loadScalar 4 true) (operand := .type intType),
   load 113 (.loadScalar 1 false) (operand := .type sbyteType),
   load 113 (.ldind .i8) .word64 (operand := .type word),
-  store 129 (.storeScalar 1) (operand := .type intType),
-  store 129 (.storeScalar 8) (operand := .type sbyteType),
+  store 129 (.stind .i1) (operand := .type intType),
+  store 129 (.stind .i8) (operand := .type sbyteType),
   typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.ldobj aggregateType),
   typed 113 enumType (.loadScalar 2 false), typed 113 vectorType (.memory .load256),
   -- Floating-point and pointer operands, which extraction refuses.

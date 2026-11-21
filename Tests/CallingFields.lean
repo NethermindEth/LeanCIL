@@ -129,7 +129,7 @@ theorem writes_after_reads (memory : Memory) (left right output : Reference)
 /-- Four writes followed by a read exercise argument evidence at each new memory. -/
 @[cil_code] def repeatedWriter : CIL.Method :=
   { locals := [], returnsValue := true, code := [
-    .ldarg 2, .ldc_i8 1, .storeScalar 8,
+    .ldarg 2, .ldc_i8 1, .stind .i8,
     .ldarg 2, .ldc_i8 2, .setFieldAt 8 8,
     .ldarg 2, .ldc_i8 3, .setFieldAt 16 8,
     .ldarg 2, .ldc_i8 4, .setFieldAt 24 8,
@@ -154,7 +154,7 @@ theorem reads_after_writes (memory : Memory) (left right output : Reference)
 /-- `repeatedWriter` with its field accesses decoded: each store and the load name a field. -/
 @[cil_code] def decodedWriter : CIL.Method :=
   { locals := [], returnsValue := true, environment := wordsEnvironment, code := [
-    .ldarg 2, .ldc_i8 1, .storeScalar 8,
+    .ldarg 2, .ldc_i8 1, .stind .i8,
     .ldarg 2, .ldc_i8 2, .stfld word1,
     .ldarg 2, .ldc_i8 3, .stfld word2,
     .ldarg 2, .ldc_i8 4, .stfld word3,

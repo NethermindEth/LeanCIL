@@ -70,7 +70,7 @@ theorem invalid_index :
 #print axioms invalid_index
 
 private def illegalWriter : Method := {
-  code := [.ldarg 0, .ldc_i4 0, .memory (.spanItem 4), .ldc_i4 1, .storeScalar 4, .ret]
+  code := [.ldarg 0, .ldc_i4 0, .memory (.spanItem 4), .ldc_i4 1, .stind .i4, .ret]
   locals := [], returnsValue := false }
 
 theorem readonly_reference_rejects_store :

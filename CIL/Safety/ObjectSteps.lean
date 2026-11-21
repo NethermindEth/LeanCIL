@@ -819,8 +819,7 @@ def storageLowering? (body op : Expr) (stack : Option Expr := none) :
       if load then
         return ← lowering ``step_ldobj_primitive
           (mkApp2 (mkConst ``CIL.Instruction.loadScalar) width signed) #[width, signed, proof]
-      return ← lowering ``step_stobj_primitive
-        (mkApp (mkConst ``CIL.Instruction.storeScalar) width) #[width, signed, proof]
+      return none
     | (``CIL.ValueShape.vector, #[width]) =>
       let some (equation, operation) := (match ← getNatValue? width, load with
         | some 16, true => some (``step_ldobj_vector16, ``CIL.MemoryOp.load128)

@@ -376,7 +376,7 @@ example {xs : List (BitVec 32)} {x : BitVec 32} (filled : Filled caller base 4 x
 #guard_msgs (substring := true) in
 example {memory after : Memory} {target : Reference} {bits : CIL.W32}
     (written : write memory target (numberBytes bits.toNat 8) 1 = .ok after) :=
-  step_storeScalar_of_write written
+  transfer_i32_of_write written
 
 /-- info: 'Tests.LoopFrames.CallerFacts.caller_facts_carried' depends on axioms: [propext,
  Quot.sound] -/

@@ -200,7 +200,7 @@ private def writableMemory : Memory := { memory with
 
 /-- Offset then store a word; only the base reference's capability varies. -/
 private def offsetStore : CIL.Method := {
-  code := [.ldarg 0, .ldc_i4 4, .add, .ldc_i4 7, .storeScalar 4, .ret]
+  code := [.ldarg 0, .ldc_i4 4, .add, .ldc_i4 7, .stind .i4, .ret]
   locals := [], returnsValue := false }
 
 /-- A store through an offset readonly reference faults, while the writable base stores. -/

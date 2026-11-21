@@ -1335,9 +1335,11 @@ elab_rules : tactic
           try
             evalTactic (← `(tactic| (
               first
+              | (refine Eq.trans (step_stobj_primitive _ _ _ _ _ (by first | assumption | rfl) _) ?_
+                 solve_by_elim only [$[$facts:term],*])
               | refine Eq.trans (step_stobj_initialized_eq _ _ _ _ _ _ (by first | assumption | rfl) _ _ _) ?_
               | refine Eq.trans (step_stobj_snapshot_eq _ _ _ _ _ _ _ (by first | assumption | rfl) _ _ _) ?_
-              simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
+              all_goals simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
             return
           catch _ => saved.restore
         if let some (lowered, lowering) ← storageLowering? body op stack then
@@ -1688,7 +1690,7 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
       (mkOr (← mkEq byteWidth (mkNatLit 2)) (← mkEq byteWidth (mkNatLit 4))))
     let kindWidth := mkApp (mkConst ``CIL.NumericKind.width) (mkConst kind)
     let narrowKind ← mkDecideProof (mkNot (← mkEq kindWidth (mkNatLit 8)))
-    return #[(``step_storeScalar_of_write, #[written, scalarWidth]),
+    return #[(``transfer_i32_of_write, #[written, scalarWidth]),
       (``step_stind_narrow_of_write, #[mkConst kind, written, narrowKind])]
   let operationEquation (operation : Expr) :=
     operation.isAppOfArity ``CIL.Safety.read 4 ||
@@ -1753,7 +1755,8 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                     | true, 16 => #[(``load_vector128_of_read, #[applied])]
                     | true, 32 => #[(``load_vector256_of_read, #[applied])]
                     | true, 64 => #[(``load_vector512_of_read, #[applied])]
-                    | false, 8 => #[(``step_stind_i8_of_write, #[applied])] ++
+                    | false, 8 => #[(``transfer_i64_of_write, #[applied]),
+                        (``step_stind_i8_of_write, #[applied])] ++
                         if includeNative then #[(``step_stind_i_of_write, #[applied])] else #[]
                     | false, 16 => #[(``step_store128_of_write, #[applied])]
                     | false, 32 => #[(``step_store256_of_write, #[applied])]
@@ -2018,7 +2021,7 @@ open Lean Elab Tactic Meta in
     and a `ValidCall` at its current memory are considered; permissions remain real premises. -/
 def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
-  unless [``CIL.Instruction.stind, ``CIL.Instruction.storeScalar,
+  unless [``CIL.Instruction.stind, ``CIL.Instruction.stobj,
       ``CIL.Instruction.setFieldAt].contains operation do
     return facts
   unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
@@ -2040,8 +2043,13 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   let some fetchedOp := lastArgument? found | return facts
   let opcode ← whnf (← cilSteppedOp instruction fetchedOp)
   let mut offset := mkNatLit 0
-  if operation == ``CIL.Instruction.storeScalar then
-    let some width := lastArgument? opcode | return facts
+  if operation == ``CIL.Instruction.stobj then
+    let some code := instruction.find? (·.isAppOfArity ``CIL.Method.code 1) | return facts
+    let some type := lastArgument? opcode | return facts
+    let shape := mkApp2 (mkConst ``CIL.Method.valueShape) code.appArg! type
+    let some (.done resolved) ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape shape
+      | return facts
+    let some #[width, _] := argumentsOf? resolved.expr ``CIL.ValueShape.primitive 2 | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts
   if operation == ``CIL.Instruction.stind then
     let some kind := lastArgument? opcode | return facts

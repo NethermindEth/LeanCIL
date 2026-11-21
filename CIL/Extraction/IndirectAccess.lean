@@ -32,7 +32,6 @@ def indirectEmission? (alignment : Option Nat) : Nat → Option Instruction
 def sameIndirectEmission : Instruction → Instruction → Bool
   | .loadScalar width signed, .loadScalar otherWidth otherSigned =>
     width == otherWidth && signed == otherSigned
-  | .storeScalar width, .storeScalar otherWidth => width == otherWidth
   | .memory (.copyBlock alignment), .memory (.copyBlock other)
   | .memory (.initBlock alignment), .memory (.initBlock other) => alignment == other
   | _, _ => false
@@ -40,7 +39,7 @@ def sameIndirectEmission : Instruction → Instruction → Bool
 /-- Emitted loads, stores and block operations whose width, sign extension or alignment a raw
     instruction decides; only the opcodes `indirectOpcode` names and calls may emit one. -/
 def indirectEmission : Instruction → Bool
-  | .loadScalar .. | .storeScalar _ | .ldind _ | .stind _
+  | .loadScalar .. | .ldind _ | .stind _
   | .memory (.copyBlock _) | .memory (.initBlock _)
   | .memory .load128 | .memory .load256 | .memory .load512
   | .memory .store128 | .memory .store256 | .memory .store512 => true

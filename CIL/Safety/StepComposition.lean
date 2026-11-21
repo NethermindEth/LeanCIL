@@ -812,10 +812,10 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
 @[cil_step] theorem step_stobj_primitive {type : Extraction.TypeExpr} {width : Nat} {signed : Bool}
     (shape : body.valueShape type = .primitive width signed) (stack : List Value) :
     step body (.stobj type) pc args frame stack memory =
-      step body (.storeScalar width) pc args frame stack memory := by
-  simp only [step, observerCount, shape, transferObject,
-    pureArity, staticInstruction]
-  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+      typedTransferCall (.scalar width false) true pc frame stack memory := by
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp [step, observerCount, shape, transferObject, typedTransferCall, observedTransfer,
+      observed] <;> rfl
 #print axioms step_stobj_primitive
 
 /-- The decoded stobj of aggregate storage has the full result of its memory rule. -/
@@ -899,11 +899,6 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
       instructionStep (.loadScalar width signed) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   by_cases observed : unspecifiedOperands 1 stack = true <;> simp [observed] <;> rfl
-@[cil_step] theorem step_storeScalar_eq {width} (stack : List Value) :
-    step body (.storeScalar width) pc args frame stack memory =
-      instructionStep (.storeScalar width) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  by_cases observed : unspecifiedOperands 2 stack = true <;> simp [observed] <;> rfl
 @[cil_step] theorem step_fieldAt_eq {offset width signed} (stack : List Value) :
     step body (.fieldAt offset width signed) pc args frame stack memory =
       instructionStep (.fieldAt offset width signed) pc frame stack memory := by

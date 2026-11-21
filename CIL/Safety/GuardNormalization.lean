@@ -177,7 +177,6 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
 #print axioms guard_sizeof
 @[cil_guard] theorem guard_loadScalar (width : Nat) (signed : Bool) :
     observerCount (.loadScalar width signed) = 1 := rfl
-@[cil_guard] theorem guard_storeScalar (width : Nat) : observerCount (.storeScalar width) = 2 := rfl
 @[cil_guard] theorem guard_fieldAt (offset width : Nat) (signed : Bool) :
     observerCount (.fieldAt offset width signed) = 1 := rfl
 @[cil_guard] theorem guard_setFieldAt (offset width : Nat) :

@@ -122,34 +122,35 @@ theorem step_stind_narrow_of_write (kind : CIL.NumericKind) {memory after : Memo
 
 /-- A 1-, 2- or 4-byte scalar store of an int through an address whose write succeeds steps to
     that write. The step holds in any method and frame. -/
-theorem step_storeScalar_of_write {memory after : Memory} {target : Reference} {width : Nat}
+theorem transfer_i32_of_write {memory after : Memory} {target : Reference} {width : Nat}
     {bits : CIL.W32} (written : write memory target (numberBytes bits.toNat width) 1 = .ok after)
     (narrow : width = 1 ∨ width = 2 ∨ width = 4 := by decide) :
-    ∀ body pc args frame rest,
-      step body (.storeScalar width) pc args frame
+    ∀ pc frame rest,
+      typedTransferCall (.scalar width false) true pc frame
         (.scalar (.i32 bits) :: .reference (.address target) :: rest) memory =
         .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_storeScalar_i32_eq body pc args frame memory width narrow]
-  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
-    Except.bind, Pure.pure, Except.pure]
+  intro pc frame rest
+  rcases narrow with rfl | rfl | rfl <;>
+    simp [typedTransferCall, observedTransfer, transferValues, unspecifiedOperands,
+      Value.hasUnspecified, CIL.Value.hasUnspecified, referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
+      Except.bind, Pure.pure, Except.pure]
 
 /-- An eight-byte scalar store of a long through an address whose write succeeds steps to that
     write. The step holds in any method and frame. -/
-theorem step_storeScalar_i64_of_write {memory after : Memory} {target : Reference}
+theorem transfer_i64_of_write {memory after : Memory} {target : Reference}
     {bits : CIL.W64} (written : write memory target (numberBytes bits.toNat 8) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body (.storeScalar 8) pc args frame
+    ∀ pc frame rest,
+      typedTransferCall (.scalar 8 false) true pc frame
         (.scalar (.i64 bits) :: .reference (.address target) :: rest) memory =
         .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
-  rw [step_storeScalar_i64_eq]
-  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
+  intro pc frame rest
+  simp [typedTransferCall, observedTransfer, transferValues, unspecifiedOperands,
+    Value.hasUnspecified, CIL.Value.hasUnspecified, referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
     Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_stind_i8_of_write
 #print axioms step_stind_i_of_write
 #print axioms step_stind_narrow_of_write
-#print axioms step_storeScalar_of_write
-#print axioms step_storeScalar_i64_of_write
+#print axioms transfer_i32_of_write
+#print axioms transfer_i64_of_write
 end CIL.Safety
