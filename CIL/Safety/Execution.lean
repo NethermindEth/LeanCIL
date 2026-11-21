@@ -381,23 +381,10 @@ def referenceSubtractCall (pc : Nat) (frame : Frame) (stack : List Value) (memor
     return .next (pc + 1) (.readOnlyReference result :: rest) frame memory
   | _ => .error .invalidState
 
-/-- The typed load or store an unaligned transfer of `kind` performs. -/
-def typedTransferInstruction : CIL.TransferKind → Bool → CIL.Instruction
-  | .scalar width signed, false => .loadScalar width signed
-  | .scalar width _, true => .storeScalar width
-  | .snapshot (.aggregate size), false => .loadAggregate size
-  | .snapshot (.aggregate size), true => .storeAggregate size
-  | .snapshot .vector128, false => .memory .load128
-  | .snapshot .vector128, true => .memory .store128
-  | .snapshot .vector256, false => .memory .load256
-  | .snapshot .vector256, true => .memory .store256
-  | .snapshot .vector512, false => .memory .load512
-  | .snapshot .vector512, true => .memory .store512
-
 /-- An unaligned transfer of `kind` runs as its typed load or store. -/
 def typedTransferCall (kind : CIL.TransferKind) (store : Bool) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
-  let (memory, values) ← instruction (typedTransferInstruction kind store) stack memory
+  let (memory, values) ← observedTransfer kind store stack memory
   return .next (pc + 1) values frame memory
 
 /-- `Unsafe.SkipInit` pops its out reference once it forms; nothing is written. A non-reference operand

@@ -178,7 +178,6 @@ inductive Instruction where
   | ble_un (target : Nat)
   -- Value-type aggregates and fields, by byte offset and width.
   | loadAggregate (size : Nat)
-  | storeAggregate (size : Nat)
   /-- Read the value of the addressed type. -/
   | ldobj (type : Extraction.TypeExpr)
   /-- Store a value of the addressed type. -/

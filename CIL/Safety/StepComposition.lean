@@ -418,23 +418,17 @@ theorem step_call_skipInit_address {method : Extraction.MethodRef} {prefixes : C
 
 #print axioms step_call_skipInit_address
 
-/-- An unaligned transfer call has the same result as its typed instruction on every stack. -/
+/-- A resolved unaligned transfer executes its checked stack and memory action at the call PC. -/
 theorem step_call_typedTransfer {method : Extraction.MethodRef} {prefixes : CallPrefixes}
     {kind : CIL.TransferKind} {store : Bool} (link : body.linkAt pc = none)
     (found : Extraction.runtimeModel body.environment .call method =
       some (.typedTransfer kind store)) (direct : prefixes.tail = false) (stack : List Value) :
     step body (.call method prefixes) pc args frame stack memory =
-      step body (typedTransferInstruction kind store) pc args frame stack memory := by
+      typedTransferCall kind store pc frame stack memory := by
   rw [step_call_model (link := link) (found := found) (direct := direct)]
-  cases kind with
-  | scalar width signed => cases store <;> rfl
-  | snapshot shape =>
-    cases shape <;> cases store <;> first
-    | rfl
-    | (simp only [modelStep, observedCall, runModel, typedTransferCall, typedTransferInstruction,
-        CIL.RuntimeModel.observerCount, step, observerCount, staticInstruction, instruction,
-        CIL.MemoryOp.argumentCount, viewOperandCount, viewOperands, pure_bind]
-       first | rfl | (split <;> simp_all))
+  by_cases observed : unspecifiedOperands (if store then 2 else 1) stack = true <;>
+    simp [modelStep, observedCall, runModel, CIL.RuntimeModel.observerCount, observed,
+      typedTransferCall, observedTransfer] <;> rfl
 
 #print axioms step_call_typedTransfer
 
@@ -828,10 +822,10 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
 @[cil_step] theorem step_stobj_aggregate {type : Extraction.TypeExpr} {size : Nat}
     (shape : body.valueShape type = .aggregate size) (stack : List Value) :
     step body (.stobj type) pc args frame stack memory =
-      step body (.storeAggregate size) pc args frame stack memory := by
-  simp only [step, observerCount, shape, transferObject,
-    pureArity, staticInstruction]
-  first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
+      typedTransferCall (.snapshot (.aggregate size)) true pc frame stack memory := by
+  by_cases observed : unspecifiedOperands 2 stack = true <;>
+    simp [step, observerCount, shape, transferObject, typedTransferCall, observedTransfer,
+      observed] <;> rfl
 #print axioms step_stobj_aggregate
 
 /-- The decoded stobj of vector storage has the full result of its memory rule. -/
@@ -904,22 +898,17 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
     step body (.loadAggregate size) pc args frame stack memory =
       instructionStep (.loadAggregate size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_storeAggregate_eq {size} (stack : List Value) :
-    step body (.storeAggregate size) pc args frame stack memory =
-      instructionStep (.storeAggregate size) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
+  by_cases observed : unspecifiedOperands 1 stack = true <;> simp [observed] <;> rfl
 @[cil_step] theorem step_loadScalar_eq {width signed} (stack : List Value) :
     step body (.loadScalar width signed) pc args frame stack memory =
       instructionStep (.loadScalar width signed) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
+  by_cases observed : unspecifiedOperands 1 stack = true <;> simp [observed] <;> rfl
 @[cil_step] theorem step_storeScalar_eq {width} (stack : List Value) :
     step body (.storeScalar width) pc args frame stack memory =
       instructionStep (.storeScalar width) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
+  by_cases observed : unspecifiedOperands 2 stack = true <;> simp [observed] <;> rfl
 @[cil_step] theorem step_fieldAt_eq {offset width signed} (stack : List Value) :
     step body (.fieldAt offset width signed) pc args frame stack memory =
       instructionStep (.fieldAt offset width signed) pc frame stack memory := by

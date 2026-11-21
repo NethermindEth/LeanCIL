@@ -153,7 +153,7 @@ foreach (var (name, lowered) in new[]
 {
     ("ReadHalf", ".loadScalar 2 true"), ("ReadWord", ".loadScalar 8 false"),
     ("Read128", ".memory .load128"), ("Write512", ".memory .store512"),
-    ("ReadAggregate", ".loadAggregate 32"), ("WriteAggregate", ".storeAggregate 32"),
+    ("ReadAggregate", ".loadAggregate 32"), ("WriteAggregate", ".stobj (method0.declared.parameters[1]?.getD .void)"),
     ("ReadPointerWord", ".loadScalar 8 false"), ("ReadPointerAggregate", ".loadAggregate 32"),
     ("ReadAlignedWord", ".memory (.pointerTransfer (.scalar 8 false) 8 false)"),
     ("WriteAlignedWord", ".memory (.pointerTransfer (.scalar 8 false) 8 true)"),

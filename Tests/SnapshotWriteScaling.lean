@@ -81,13 +81,18 @@ private def checkCompiledCost : IO Unit := do
 
 /-- Both instructions operate on the same stack address and execution frame. -/
 private def Stepped (width : Nat) : Prop :=
-  let body : CIL.Method := { code := [], locals := [], returnsValue := false }
+  let type := CIL.Extraction.TypeExpr.aggregate "Fixture::Bytes" 0
+  let raw : CIL.Extraction.RawLayout :=
+    { identity := "Fixture::Bytes", explicit := true, packing := 1, declaredSize := width, fields := [] }
+  let body : CIL.Method :=
+    { code := [.stobj type], locals := [], returnsValue := false
+      environment := { rawLayouts := [raw], layouts := #[⟨{ size := width, fields := [] }, 1⟩] } }
   let frame : Frame := Frame.mk 0 [] [] 0
   let address := Value.reference (.address target)
   let value := Value.scalar (.snapshot (.aggregate width) (payload width))
   let stored := (writeSnapshot (memory width) target (payload width) 1).toOption.getD Memory.empty
   And
-    (step body (.storeAggregate width) 0 [] frame [value, address] (memory width) =
+    (step body (.stobj type) 0 [] frame [value, address] (memory width) =
       .ok (.next 1 [] frame stored))
     (step body (.loadAggregate width) 1 [] frame [address] stored =
       .ok (.next 2 [value] frame stored))

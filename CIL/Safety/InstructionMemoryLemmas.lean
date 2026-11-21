@@ -1399,6 +1399,28 @@ theorem structFieldAddress_contract (offset : Nat) (stack values : List Value) (
     | split at h
 #print axioms structFieldAddress_contract
 
+/-- Scalar, aggregate and vector transfers preserve memory authority and the validity of stack values. -/
+theorem transferValues_contract (kind : CIL.TransferKind) (store : Bool) (stack values : List Value)
+    (m result : Memory) (h : transferValues kind store stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
+  unfold transferValues at h
+  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+  all_goals repeat' first
+    | solve | apply memoryInstruction_contract; assumption
+    | solve | cases h; instruction_contract_close
+    | cases h
+    | split at h
+#print axioms transferValues_contract
+
+/-- Observing the transfer operands preserves the same contract on every successful result. -/
+theorem observedTransfer_contract (kind : CIL.TransferKind) (store : Bool) (stack values : List Value)
+    (m result : Memory) (h : observedTransfer kind store stack m = .ok (result, values)) :
+    InstructionContract m result stack values := by
+  by_cases observed : unspecifiedOperands (if store then 2 else 1) stack = true
+  · simp [observedTransfer, observed] at h
+  · exact transferValues_contract _ _ _ _ _ _ (by simpa [observedTransfer, observed] using h)
+#print axioms observedTransfer_contract
+
 set_option maxHeartbeats 800000 in
 theorem instruction_contract (operation : CIL.Instruction) (stack values : List Value)
     (m result : Memory)
@@ -1407,6 +1429,7 @@ theorem instruction_contract (operation : CIL.Instruction) (stack values : List 
   unfold instruction at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
+    | solve | apply transferValues_contract; assumption
     | solve | apply memoryInstruction_contract; assumption
     | solve | apply elementInstruction_contract; assumption
     | solve | cases h; instruction_contract_close
@@ -1451,7 +1474,7 @@ theorem transferObject_contract (shape : ValueShape) (store : Bool) (stack value
   unfold transferObject at executed
   split at executed <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   all_goals repeat' first
-    | solve | apply instruction_contract; assumption
+    | solve | apply observedTransfer_contract; assumption
     | solve | apply memoryInstruction_contract; assumption
     | solve | cases executed; instruction_contract_close
     | cases executed

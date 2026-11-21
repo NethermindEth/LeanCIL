@@ -535,7 +535,7 @@ theorem padded_copy_keeps_padding :
         match Safety.step body (.ldfld outerPairField) 1 [] emptyFrame
             [.reference (.address ⟨0, 0⟩), field] paddedMemory with
         | .ok (.next _ stack _ loaded) =>
-          match Safety.step body (.storeAggregate 12) 2 [] emptyFrame stack loaded with
+          match Safety.step body (.stobj pair) 2 [] emptyFrame stack loaded with
           | .ok (.next _ [] _ stored) => copiedPair stored
           | _ => false
         | _ => false

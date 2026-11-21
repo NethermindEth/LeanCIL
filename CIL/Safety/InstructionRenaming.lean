@@ -380,6 +380,42 @@ theorem Memory.Renamed.storeAggregateFieldResult {mapping : AllocationRenaming}
     rename_memory_arm
 #print axioms Memory.Renamed.storeAggregateFieldResult
 
+/-- A typed transfer maps the references in its operands and preserves initialized and snapshot bytes. -/
+theorem Memory.Renamed.transferValuesResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (kind : CIL.TransferKind) (store : Bool)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (transferValues kind store stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map (indices.value mapping))
+      (transferValues kind store stack source)
+      (transferValues kind store (stack.map (indices.value mapping)) target) := by
+  unfold transferValues at observable ⊢
+  split at observable
+  rename_memory_arm
+#print axioms Memory.Renamed.transferValuesResult
+
+/-- Renaming preserves the observation guard and the result of a typed transfer. -/
+theorem Memory.Renamed.observedTransferResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (kind : CIL.TransferKind) (store : Bool)
+    (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (observedTransfer kind store stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map (indices.value mapping))
+      (observedTransfer kind store stack source)
+      (observedTransfer kind store (stack.map (indices.value mapping)) target) := by
+  by_cases seen : unspecifiedOperands (if store then 2 else 1) stack = true
+  · simp only [observedTransfer, seen, ite_true] at observable
+    cases observable
+  · simp only [observedTransfer, indices.unspecifiedOperands mapping, seen, ite_false] at observable ⊢
+    exact related.transferValuesResult kind store formed stack bounds observable
+#print axioms Memory.Renamed.observedTransferResult
+
 set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
 theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
@@ -400,6 +436,7 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
   · rename_i guard
     rw [ite_eq_right guard, ite_eq_right guard]
     split at observable
+    all_goals try exact related.transferValuesResult _ _ formed _ bounds observable
     rename_memory_arm
 #print axioms Memory.Renamed.instructionResult
 
@@ -453,7 +490,7 @@ theorem Memory.Renamed.transferObjectResult {mapping : AllocationRenaming}
   unfold transferObject at observable ⊢
   split at observable
   all_goals first
-    | exact related.instructionResult _ formed _ bounds observable
+    | exact related.observedTransferResult _ _ formed _ bounds observable
     | exact related.memoryInstructionResult _ formed _ bounds observable
     | exact .ok ⟨related, rfl⟩
     | cases observable

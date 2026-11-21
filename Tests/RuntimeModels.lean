@@ -87,8 +87,8 @@ example : runModel body (.typedTransfer (.snapshot (.aggregate 16)) false) 3 fra
     step body (.loadAggregate 16) 3 [] frame [start] heapMemory := rfl
 example : runModel body (.typedTransfer (.snapshot (.aggregate 16)) true) 3 frame
       [.scalar (.aggregate (List.replicate 16 1)), start] heapMemory =
-    step body (.storeAggregate 16) 3 [] frame
-      [.scalar (.aggregate (List.replicate 16 1)), start] heapMemory := rfl
+    .ok (.next 4 [] frame ((write heapMemory ⟨0, 0⟩ (List.replicate 16 1) 1).toOption.getD
+      Memory.empty)) := rfl
 example : runModel body (.typedTransfer (.snapshot .vector128) false) 3 frame [start]
       heapMemory =
     step body (.memory .load128) 3 [] frame [start] heapMemory := rfl

@@ -226,11 +226,11 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
     pure (Value.scalar (.i32 (BitVec.ofNat 32 (byteNumber bytes)))) : ExecutionResult Value) = _ at loaded
   refine ⟨result, ?_, ?_⟩
   · cases hw : checkedAt (.address reference) 4 (write memory reference (numberBytes bits.toNat 4) 1) <;>
-      simp_all [instruction, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
+      simp_all [instruction, transferValues, storeLocal, localNumber, referenceAt, localWidth, ordinaryAccessAlignment,
         observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
-      simp_all [instruction, loadValue, localResult, dereference, ordinaryAccessAlignment,
+      simp_all [instruction, transferValues, loadValue, localResult, dereference, ordinaryAccessAlignment,
         observerCount, unspecifiedOperands, Value.hasUnspecified, Bind.bind, Except.bind,
         Pure.pure, Except.pure]
 

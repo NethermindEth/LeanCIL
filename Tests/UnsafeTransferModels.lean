@@ -95,8 +95,7 @@ private def resolves (environment : LayoutEnvironment) (element : TypeExpr)
         else
         let expected := if aligned then RuntimeModel.memory (.pointerTransfer kind alignment store)
           else .typedTransfer kind store
-        let emitted := if aligned then Instruction.memory (.pointerTransfer kind alignment store)
-          else typedTransferInstruction kind store
+        let wrongPrefix := Instruction.call call.method { tail := true }
         let x64 : FeatureProfile :=
           { architecture := .x64, sse2 := true, ssse3 := true,
             sse41 := true, sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true,
@@ -107,7 +106,7 @@ private def resolves (environment : LayoutEnvironment) (element : TypeExpr)
         model == some expected && [FeatureProfile.scalar, x64, arm].all fun profile =>
           decide (decoded environment profile raw = .ok [.call call.method {}]) &&
           runtimeCatalog.siteAgrees environment profile raw (.call call.method {}) &&
-          !runtimeCatalog.siteAgrees environment profile raw emitted
+          !runtimeCatalog.siteAgrees environment profile raw wrongPrefix
       | _ => false
 
 /-- The integer vector of the indicated width with unsigned 64-bit elements. -/
@@ -191,12 +190,10 @@ theorem refusedDeclarations :
       | .call call =>
         let denied := fun (declared : OpenSignature) =>
           let changed := { raw with operand := .call { call with declared } }
-          let op := if aligned then Instruction.memory (.pointerTransfer (.scalar 8 false) 8 store)
-            else typedTransferInstruction (.scalar 8 false) store
           decide (decoded {} .scalar raw = .ok [.call call.method {}]) &&
             decide (decoded {} .scalar changed = liveHoleAt 0 40) &&
             !runtimeCatalog.siteAgrees {} .scalar changed (.call call.method {}) &&
-            !runtimeCatalog.siteAgrees {} .scalar changed op
+            !runtimeCatalog.siteAgrees {} .scalar changed (.call call.method { tail := true })
         let byteAddress := TypeExpr.byref (.atom runtimeScope "System.Byte")
         let forged := if aligned then { call.declared with
             parameters := if store then [byteAddress, .parameter 0] else [byteAddress] }
@@ -232,7 +229,7 @@ theorem reservedEmissions :
     let control := site name!"Read" false (.atom runtimeScope "System.UInt64") false 0x10
     let other := site name!"Unknown" false (.atom runtimeScope "System.UInt64") false 0x10
     let operations := [Instruction.loadScalar 8, .storeScalar 8, .loadAggregate 8,
-      .storeAggregate 8, .memory .load128, .memory .load256, .memory .load512,
+       .stobj (.aggregate "Fixture::Packet" 0), .memory .load128, .memory .load256, .memory .load512,
       .memory .store128, .memory .store256, .memory .store512,
       .memory (.pointerTransfer (.scalar 8 false) 8 false)]
     (match control.operand with
@@ -276,18 +273,18 @@ theorem unresolvedTransfers :
 
 #print axioms unresolvedTransfers
 
-/-- The kept call has the lowered result, including faults, for every kind and machine state. -/
+/-- Each resolved call produces the checked transfer action, including its faults. -/
 theorem callEqualsTransfer (body : Method) (method : MethodRef) (pc alignment : Nat)
     (kind : TransferKind) (aligned store : Bool) (args stack : List Safety.Value)
     (frame : Safety.Frame) (memory : Safety.Memory) (unlinked : body.linkAt pc = none)
     (model : runtimeModel body.environment .call method = some (if aligned then
       .memory (.pointerTransfer kind alignment store) else .typedTransfer kind store)) :
     step body (.call method {}) pc args frame stack memory =
-      step body (if aligned then .memory (.pointerTransfer kind alignment store)
-        else typedTransferInstruction kind store) pc args frame stack memory := by
+      (if aligned then modelStep (some (.memory (.pointerTransfer kind alignment store)))
+        body pc frame stack memory else typedTransferCall kind store pc frame stack memory) := by
   cases aligned
   · exact step_call_typedTransfer body pc args frame memory unlinked model rfl stack
-  · exact step_call_memory body pc args frame memory unlinked model rfl stack
+  · exact step_call_model body pc args frame memory unlinked model rfl stack
 
 #print axioms callEqualsTransfer
 

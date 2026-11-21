@@ -141,22 +141,24 @@ theorem symbolic_unknown_load {memory : Memory} {source : Reference} {width : Na
 /-- A store uses the checked byte write and does not need old destination contents. -/
 theorem initialized_store {memory after : Memory} {destination : Reference}
     {bytes : List (BitVec 8)} (written : write memory destination bytes 1 = .ok after)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeAggregate bytes.length) pc args frame
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {type : CIL.Extraction.TypeExpr} (shape : body.valueShape type = .aggregate bytes.length) :
+    step body (.stobj type) pc args frame
       (.scalar (.aggregate bytes) :: .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
-  cil_checked_step [written]
+  cil_checked_step [shape, written]
 #print axioms initialized_store
 
 /-- Storing unknown bytes uses the snapshot write, which retains their initialization flags. -/
 theorem unknown_store {memory after : Memory} {destination : Reference}
     (written : writeSnapshot memory destination [(0, false)] 1 = .ok after)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeAggregate 1) pc args frame
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {type : CIL.Extraction.TypeExpr} (shape : body.valueShape type = .aggregate 1) :
+    step body (.stobj type) pc args frame
       (.scalar (.snapshot (.aggregate 1) [(0, false)]) ::
         .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
-  cil_checked_step [written]
+  cil_checked_step [shape, written]
 #print axioms unknown_store
 
 /-- An unknown snapshot cannot be reported as an initialized aggregate. -/
@@ -171,11 +173,12 @@ theorem unknown_is_not_initialized {memory : Memory} {source : Reference}
 
 /-- A snapshot with the wrong shape width is rejected before its write operation. -/
 theorem wrong_snapshot_width (memory : Memory) (destination : Reference)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.storeAggregate 1) pc args frame
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value)
+    {type : CIL.Extraction.TypeExpr} (shape : body.valueShape type = .aggregate 1) :
+    step body (.stobj type) pc args frame
       (.scalar (.snapshot (.aggregate 2) [(0, false)]) ::
         .reference (.address destination) :: rest) memory = .error .invalidState := by
-  cil_checked_step []
+  cil_checked_step [shape]
 #print axioms wrong_snapshot_width
 
 /-- A null aggregate load preserves the requested width in its fault. -/

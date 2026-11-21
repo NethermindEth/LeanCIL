@@ -18,7 +18,7 @@ namespace CIL.Safety
     decided guard leaves the single matching arm. -/
 local macro "instruction_step_proof " generic:ident : tactic => `(tactic| (
   rw [$generic:ident]
-  simp only [instructionStep, instruction, elementInstruction, cil_guard, unspecifiedOperands,
+  simp only [instructionStep, instruction, transferValues, elementInstruction, cil_guard, unspecifiedOperands,
     List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_assoc, pure_bind]
   all_goals first | rfl | (split <;> rfl)))

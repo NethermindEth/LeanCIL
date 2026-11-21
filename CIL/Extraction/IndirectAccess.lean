@@ -40,7 +40,7 @@ def sameIndirectEmission : Instruction → Instruction → Bool
 /-- Emitted loads, stores and block operations whose width, sign extension or alignment a raw
     instruction decides; only the opcodes `indirectOpcode` names and calls may emit one. -/
 def indirectEmission : Instruction → Bool
-  | .loadScalar .. | .storeScalar _ | .ldind _ | .stind _ | .loadAggregate _ | .storeAggregate _
+  | .loadScalar .. | .storeScalar _ | .ldind _ | .stind _ | .loadAggregate _
   | .memory (.copyBlock _) | .memory (.initBlock _)
   | .memory .load128 | .memory .load256 | .memory .load512
   | .memory .store128 | .memory .store256 | .memory .store512 => true

@@ -609,6 +609,40 @@ theorem Memory.Equivalent.storeAggregateField {m n : Memory} (same : m.Equivalen
     | split
 #print axioms Memory.Equivalent.storeAggregateField
 
+/-- Equivalent memories give the same typed load and equivalent scalar, snapshot and vector stores. -/
+theorem Memory.Equivalent.transferValues {m n : Memory} (same : m.Equivalent n)
+    (kind : CIL.TransferKind) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (transferValues kind store stack m)
+      (transferValues kind store stack n) := by
+  unfold CIL.Safety.transferValues
+  split <;> try simp only [same.dereference, same.loadValue, same.loadSnapshot]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.transferValues
+
+/-- Equivalent memories share every observable transfer outcome and its operand guard. -/
+theorem Memory.Equivalent.observedTransfer {m n : Memory} (same : m.Equivalent n)
+    (kind : CIL.TransferKind) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (observedTransfer kind store stack m)
+      (observedTransfer kind store stack n) := by
+  unfold CIL.Safety.observedTransfer
+  by_cases observed : unspecifiedOperands (if store then 2 else 1) stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  · simp only [observed, ite_false]
+    exact same.transferValues _ _ _
+#print axioms Memory.Equivalent.observedTransfer
+
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.Instruction) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)
@@ -617,6 +651,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
   split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot,
     same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
+    | exact same.transferValues _ _ _
     | exact same.memoryInstruction _ _
     | exact same.elementInstruction _ _
     | exact .error _
@@ -647,7 +682,6 @@ theorem Memory.Equivalent.copyInitializedBytes {m n : Memory} (same : m.Equivale
   split <;> try simp only [same.read]
   all_goals repeat first
     | exact same.memoryInstruction _ _
-    | exact same.instruction _ _
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)
@@ -666,7 +700,6 @@ theorem Memory.Equivalent.initializeBytes {m n : Memory} (same : m.Equivalent n)
   split <;> try simp only [same.read]
   all_goals repeat first
     | exact same.memoryInstruction _ _
-    | exact same.instruction _ _
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)
@@ -685,7 +718,7 @@ theorem Memory.Equivalent.transferObject {m n : Memory} (same : m.Equivalent n)
   split <;> try simp only [same.read]
   all_goals repeat first
     | exact same.memoryInstruction _ _
-    | exact same.instruction _ _
+    | exact same.observedTransfer _ _ _
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)

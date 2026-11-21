@@ -41,7 +41,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
         return .next (pc + 1) (.scalar value :: rest) frame memory
       else .error (.unsupported "Scalar memory width") := by
   rw [step_loadScalar_eq]
-  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+  simp only [instructionStep, instruction, transferValues, cil_guard, unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_ite,
     bind_assoc, pure_bind]
   rfl
@@ -57,7 +57,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
         return .next (pc + 1) (.scalar value :: rest) frame memory
       else .error (.unsupported "Scalar memory width") := by
   rw [step_loadScalar_eq]
-  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+  simp only [instructionStep, instruction, transferValues, cil_guard, unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_ite,
     bind_assoc, pure_bind]
   rfl

@@ -377,7 +377,7 @@ theorem typedTransfer_stepRenamed (kind : CIL.TransferKind) (store : Bool) :
   · simp only [observed, ite_true]
     exact .error _
   simp only [observed, Bool.false_eq_true, ite_false] at observable ⊢
-  apply (related.instructionResult _ formed stack bounds observable.bind_left).bind
+  apply (related.observedTransferResult kind store formed stack bounds observable.bind_left).bind
   intro left right ⟨memories, values⟩
   rw [values]
   exact .ok (.next memories frames)

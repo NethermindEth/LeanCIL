@@ -106,7 +106,7 @@ def observerCount : CIL.Instruction → Nat
   | .loadAggregate _ | .loadScalar .. | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
-  | .storeAggregate _ | .storeScalar _ | .setFieldAt ..
+  | .storeScalar _ | .setFieldAt ..
   | .stind _ | .cpobj _ | .stobj _ => 2
   | .ldlen => 1
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
@@ -1353,6 +1353,54 @@ def storeAggregateField (offset size : Nat) (stack : List Value) (m : Memory) :
     .error (.memory .unwritable r size)
   | _ => .error (.unsupported "Not a memory instruction")
 
+/-- Apply a scalar, aggregate or vector transfer to its evaluated stack operands. Callers
+    check observation of unspecified operands before executing the transfer. -/
+def transferValues (kind : TransferKind) (store : Bool) (stack : List Value) (m : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match kind, store, stack with
+  | .scalar width signed, false, .reference r :: rest
+  | .scalar width signed, false, .readOnlyReference r :: rest =>
+    if width = 1 || width = 2 || width = 4 || width = 8 then
+      return (m, .scalar (← loadValue m r width signed) :: rest)
+    else .error (.unsupported "Scalar memory width")
+  | .scalar width _, true, .scalar value :: .reference r :: rest =>
+    let number ← match width, value with
+      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
+      | 8, .i64 bits => .ok bits.toNat
+      | _, _ => .error .invalidState
+    let address ← referenceAt r
+    return (← checkedAt r width
+      (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
+  | .scalar width _, true, _ :: .readOnlyReference r :: _ =>
+    .error (.memory .unwritable r width)
+  | .snapshot (.aggregate size), false, .reference r :: rest | .snapshot (.aggregate size), false, .readOnlyReference r :: rest =>
+    if let .error .uninitialized := dereference m r size ordinaryAccessAlignment then
+      return (m, .scalar (← loadSnapshot m r (.aggregate size)) :: rest)
+    let bytes ← checkedAt r size (dereference m r size ordinaryAccessAlignment)
+    return (m, .scalar (.aggregate bytes) :: rest)
+  | .snapshot (.aggregate size), true, .scalar (.aggregate bytes) :: .reference r :: rest =>
+    if bytes.length != size then .error .invalidState else
+      let address ← referenceAt r
+      return (← checkedAt r size (write m address bytes ordinaryAccessAlignment), rest)
+  | .snapshot (.aggregate size), true, .scalar (.snapshot (.aggregate width) bytes) :: .reference r :: rest =>
+    if bytes.length != size || width != size then .error .invalidState else
+      let address ← referenceAt r
+      return (← checkedAt r size (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
+  | .snapshot .vector128, false, _ => memoryInstruction .load128 stack m
+  | .snapshot .vector128, true, _ => memoryInstruction .store128 stack m
+  | .snapshot .vector256, false, _ => memoryInstruction .load256 stack m
+  | .snapshot .vector256, true, _ => memoryInstruction .store256 stack m
+  | .snapshot .vector512, false, _ => memoryInstruction .load512 stack m
+  | .snapshot .vector512, true, _ => memoryInstruction .store512 stack m
+  | _, _, _ => .error (.unsupported "Not a memory instruction")
+
+/-- A typed transfer observes the reference and, for a store, its value. -/
+def observedTransfer (kind : TransferKind) (store : Bool) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) :=
+  if unspecifiedOperands (if store then 2 else 1) stack then
+    .error (.unsupported "Instruction observes unspecified vector bits")
+  else transferValues kind store stack memory
+
 /-- Runs an op on the stack (top first) and memory: loads, stores, typed copies, aggregate
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
@@ -1363,34 +1411,9 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
   -- Typed copies and scalar and aggregate memory
-  | .loadScalar width signed, .reference r :: rest
-  | .loadScalar width signed, .readOnlyReference r :: rest =>
-    if width = 1 || width = 2 || width = 4 || width = 8 then
-      return (m, .scalar (← loadValue m r width signed) :: rest)
-    else .error (.unsupported "Scalar memory width")
-  | .storeScalar width, .scalar value :: .reference r :: rest =>
-    let number ← match width, value with
-      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
-      | 8, .i64 bits => .ok bits.toNat
-      | _, _ => .error .invalidState
-    let address ← referenceAt r
-    return (← checkedAt r width
-      (write m address (numberBytes number width) ordinaryAccessAlignment), rest)
-  | .storeScalar width, _ :: .readOnlyReference r :: _ =>
-    .error (.memory .unwritable r width)
-  | .loadAggregate size, .reference r :: rest | .loadAggregate size, .readOnlyReference r :: rest =>
-    if let .error .uninitialized := dereference m r size ordinaryAccessAlignment then
-      return (m, .scalar (← loadSnapshot m r (.aggregate size)) :: rest)
-    let bytes ← checkedAt r size (dereference m r size ordinaryAccessAlignment)
-    return (m, .scalar (.aggregate bytes) :: rest)
-  | .storeAggregate size, .scalar (.aggregate bytes) :: .reference r :: rest =>
-    if bytes.length != size then .error .invalidState else
-      let address ← referenceAt r
-      return (← checkedAt r size (write m address bytes ordinaryAccessAlignment), rest)
-  | .storeAggregate size, .scalar (.snapshot (.aggregate width) bytes) :: .reference r :: rest =>
-    if bytes.length != size || width != size then .error .invalidState else
-      let address ← referenceAt r
-      return (← checkedAt r size (writeSnapshot m address bytes ordinaryAccessAlignment), rest)
+  | .loadScalar width signed, _ => transferValues (.scalar width signed) false stack m
+  | .storeScalar width, _ => transferValues (.scalar width false) true stack m
+  | .loadAggregate size, _ => transferValues (.snapshot (.aggregate size)) false stack m
   -- Fields
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else
@@ -1493,10 +1516,9 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
 def transferObject (shape : ValueShape) (store : Bool) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) :=
   match shape, store with
-  | .primitive width signed, false => instruction (.loadScalar width signed) stack memory
-  | .primitive width _, true => instruction (.storeScalar width) stack memory
-  | .aggregate size, false => instruction (.loadAggregate size) stack memory
-  | .aggregate size, true => instruction (.storeAggregate size) stack memory
+  | .primitive width signed, false => observedTransfer (.scalar width signed) false stack memory
+  | .primitive width _, true => observedTransfer (.scalar width false) true stack memory
+  | .aggregate size, store => observedTransfer (.snapshot (.aggregate size)) store stack memory
   | .vector 16, false => memoryInstruction .load128 stack memory
   | .vector 32, false => memoryInstruction .load256 stack memory
   | .vector 64, false => memoryInstruction .load512 stack memory

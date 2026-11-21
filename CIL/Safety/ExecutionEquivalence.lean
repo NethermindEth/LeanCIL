@@ -407,7 +407,7 @@ theorem Memory.Equivalent.modelStep {m n : Memory} (same : m.Equivalent n)
        obtain ⟨otherMemory, otherValues⟩ := right
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
-    | (apply ResultEquivalent.bind (same.instruction _ _)
+    | (apply ResultEquivalent.bind (same.observedTransfer _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
        obtain ⟨otherMemory, otherValues⟩ := right

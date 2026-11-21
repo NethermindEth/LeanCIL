@@ -1311,6 +1311,16 @@ elab_rules : tactic
     if let some (_, step, result) := initial.eq? then
       if let some #[body, op, pc, args, frame, stack, memory] :=
           argumentsOf? step ``CIL.Safety.step 7 then
+        if op.isAppOfArity ``CIL.Instruction.stobj 1 then
+          let saved ← saveState
+          try
+            evalTactic (← `(tactic| (
+              first
+              | refine Eq.trans (step_stobj_initialized_eq _ _ _ _ _ _ (by first | assumption | rfl) _ _ _) ?_
+              | refine Eq.trans (step_stobj_snapshot_eq _ _ _ _ _ _ _ (by first | assumption | rfl) _ _ _) ?_
+              simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
+            return
+          catch _ => saved.restore
         if let some (lowered, lowering) ← storageLowering? body op stack then
           let equation := (mkAppN lowering #[pc, args, frame, memory, stack]).headBeta
           let steppedLowered :=
@@ -1535,8 +1545,9 @@ elab_rules : tactic
           | (refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
              cil_checked_intrinsic [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
-             simp only [CIL.Safety.typedTransferInstruction]
-             cil_checked_step_normalized [$facts:term,*])
+             cil_simp_only [CIL.Safety.typedTransferCall, CIL.Safety.observedTransfer,
+               CIL.Safety.transferValues, cil_guard, cil_checked, $[$facts:term],*]
+             all_goals cil_checked_side [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_newobj_memory _ _ _ _ _ $link $model rfl _) ?_
              first
              | cil_checked_memory_from_fact [$facts:term,*]

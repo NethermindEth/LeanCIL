@@ -295,7 +295,10 @@ or readonly reference.
   For a symbolic managed reference, `step_call_skipInit_reference` exposes the formation check.
 
 Aggregate loads and stores use the address-shape equations in
-[AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies
+[AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). For an aggregate `stobj`,
+the operand type's checked layout determines its width. `step_stobj_initialized_eq` uses the
+ordinary byte write and `step_stobj_snapshot_eq` preserves the initialization flag of each byte.
+A checked `readSnapshot` supplies
 the actual initialization mask; it does not establish that every byte is initialized. Initialized
 byte reads and writes reuse the corresponding snapshot bridges. Null faults retain the
 instruction's requested width.

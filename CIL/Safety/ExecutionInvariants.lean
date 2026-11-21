@@ -579,7 +579,7 @@ theorem modelStep_contract {body : CIL.Method} {model : Option CIL.RuntimeModel}
   all_goals first
     | (apply StepContract.spanInPlace <;> first | assumption | rfl)
     | exact StepContract.instruction (memoryInstruction_contract _ _ _ _ _ (by assumption))
-    | exact StepContract.instruction (instruction_contract _ _ _ _ _ (by assumption))
+    | exact StepContract.instruction (observedTransfer_contract _ _ _ _ _ _ (by assumption))
     | exact StepContract.viewed (by assumption)
         (StepContract.instruction (memoryInstruction_contract _ _ _ _ _ (by assumption)))
     | refine StepContract.of_effect (.memory (.ordinary (.unchanged _))) ?_
