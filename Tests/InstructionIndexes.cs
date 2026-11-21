@@ -301,9 +301,12 @@ bool Pure(object operation, bool plainReturn = true) =>
     (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(MethodDefinition), typeof(bool)])!
         .Invoke(null, [operation, mixedArguments, plainReturn])!;
 var nop = Make("StackOperation", Code.Nop);
-var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
-if (Loops(Body(nop, nop, backEdge)) != 1)
-    throw new Exception("A conditional back edge is not found as a loop");
+foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
+{
+    var backEdge = Make("Jump", (int)encoding.Value, 0);
+    if (Loops(Body(nop, nop, backEdge)) != 1)
+        throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
+}
 if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
@@ -369,8 +372,7 @@ Console.WriteLine(
 var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
     .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
     .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
-foreach (var type in extractor.GetTypes().Where(type =>
-    Model("Operation").IsAssignableFrom(type) || Model("MemoryOperation").IsAssignableFrom(type)))
+foreach (var type in extractor.GetTypes().Where(Model("Operation").IsAssignableFrom))
     if (type.GetMethods(Declared | BindingFlags.DeclaredOnly).Any(method => method.Name is "Render" or "ToLean"))
         throw new Exception("Extractor operation defines an instruction renderer: " + type);
 var constructors = RenderedLeanReaders.Constructors(File.ReadLines(At("CIL/Instructions.lean")));
