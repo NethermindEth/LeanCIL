@@ -1311,6 +1311,25 @@ elab_rules : tactic
     if let some (_, step, result) := initial.eq? then
       if let some #[body, op, pc, args, frame, stack, memory] :=
           argumentsOf? step ``CIL.Safety.step 7 then
+        if op.isAppOfArity ``CIL.Instruction.ldobj 1 then
+          let saved ← saveState
+          try
+            evalTactic (← `(tactic| (
+              first
+              | exact step_ldobj_aggregate_of_snapshot _ _ _ _ _ false _
+                  (by first | assumption | rfl) (by solve_by_elim only [$[$facts:term],*])
+              | exact step_ldobj_aggregate_of_snapshot _ _ _ _ _ true _
+                  (by first | assumption | rfl) (by solve_by_elim only [$[$facts:term],*])
+              | refine Eq.trans (step_ldobj_aggregate_address_eq _ _ _ _ _ _
+                  (by first | assumption | rfl) _ _) ?_
+              | refine Eq.trans (step_ldobj_aggregate_readOnlyAddress_eq _ _ _ _ _ _
+                  (by first | assumption | rfl) _ _) ?_
+              | exact step_ldobj_aggregate_null_eq _ _ _ _ _ _ (by first | assumption | rfl) _
+              | exact step_ldobj_aggregate_readOnlyNull_eq _ _ _ _ _ _
+                  (by first | assumption | rfl) _
+              all_goals simp [cil_guard, cil_checked, $[$facts:term],*] <;> rfl)))
+            return
+          catch _ => saved.restore
         if op.isAppOfArity ``CIL.Instruction.stobj 1 then
           let saved ← saveState
           try

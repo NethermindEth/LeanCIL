@@ -103,7 +103,7 @@ def observerCount : CIL.Instruction → Nat
   | .ldfld _ | .ldflda _ => 1
   | .stfld _ => 2
   -- Memory and fields
-  | .loadAggregate _ | .loadScalar .. | .fieldAt ..
+  | .loadScalar .. | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
   | .storeScalar _ | .setFieldAt ..
@@ -1323,7 +1323,7 @@ def loadAggregateField (offset size : Nat) (stack : List Value) (memory : Memory
   | .readOnlyReference reference :: rest =>
     let r ← referenceAt reference
     let address ← checkedAt (.address r) 0 (add memory r 1 (BitVec.ofNat 64 offset))
-    -- Padding stays uninitialized in the copy, as `loadAggregate` keeps it.
+    -- The aggregate snapshot preserves the initialization flags of padding bytes.
     if let .error .uninitialized := read memory address size ordinaryAccessAlignment then
       return (memory, .scalar (← loadSnapshot memory (.address address) (.aggregate size)) :: rest)
     let bytes ← checkedAt (.address address) size (read memory address size ordinaryAccessAlignment)
@@ -1413,7 +1413,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   -- Typed copies and scalar and aggregate memory
   | .loadScalar width signed, _ => transferValues (.scalar width signed) false stack m
   | .storeScalar width, _ => transferValues (.scalar width false) true stack m
-  | .loadAggregate size, _ => transferValues (.snapshot (.aggregate size)) false stack m
   -- Fields
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else

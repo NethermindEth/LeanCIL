@@ -85,7 +85,7 @@ private def Stepped (width : Nat) : Prop :=
   let raw : CIL.Extraction.RawLayout :=
     { identity := "Fixture::Bytes", explicit := true, packing := 1, declaredSize := width, fields := [] }
   let body : CIL.Method :=
-    { code := [.stobj type], locals := [], returnsValue := false
+    { code := [.stobj type, .ldobj type], locals := [], returnsValue := false
       environment := { rawLayouts := [raw], layouts := #[⟨{ size := width, fields := [] }, 1⟩] } }
   let frame : Frame := Frame.mk 0 [] [] 0
   let address := Value.reference (.address target)
@@ -94,7 +94,7 @@ private def Stepped (width : Nat) : Prop :=
   And
     (step body (.stobj type) 0 [] frame [value, address] (memory width) =
       .ok (.next 1 [] frame stored))
-    (step body (.loadAggregate width) 1 [] frame [address] stored =
+    (step body (.ldobj type) 1 [] frame [address] stored =
       .ok (.next 2 [value] frame stored))
 
 /-- The store and load each discharge a checked instruction goal. -/

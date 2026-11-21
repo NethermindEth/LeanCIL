@@ -471,7 +471,9 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .loadAggregate 32] [] Memory.empty =
+    (do
+      let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty
+      transferObject (.aggregate 32) false stack memory) =
       .error (.memory .nullDereference .null 32) ∧
     (do
       let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty

@@ -154,7 +154,7 @@ strategy:
 | Unknown opcode heads | The equation path |
 
 `cil_contract_step [facts]` prepares `facts` as `cil_checked_step` does, so a supplied `read` steps
-a `.loadAggregate` through a managed-reference address there as well.
+a decoded `ldobj` through a managed-reference address when its type has aggregate storage.
 
 Pass facts about formation and successful memory operations instead of evaluator definitions or
 monadic binds. The tactics accept these fact forms:

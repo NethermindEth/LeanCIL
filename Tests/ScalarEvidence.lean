@@ -1037,7 +1037,7 @@ private def indirectForged : List IndirectCase := [
   store 87 (.stind .i8),
   -- Access forms at other opcodes.
   load 108 (.loadScalar 8 false) .other, load 108 (.ldind .i8) .other,
-  load 107 (.loadAggregate 4) .other]
+  load 107 (.ldind .i4) .other]
 
 /-- Forged emissions at operands the test encoder cannot write: wrong widths and signs of `ldobj`
     and `stobj`, field accesses at operand types extraction refuses, and calls emitting an
@@ -1049,7 +1049,7 @@ private def objectForged : List IndirectCase := [
   load 113 (.ldind .i8) .word64 (operand := .type word),
   store 129 (.storeScalar 1) (operand := .type intType),
   store 129 (.storeScalar 8) (operand := .type sbyteType),
-  typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.loadAggregate 8),
+  typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.ldobj aggregateType),
   typed 113 enumType (.loadScalar 2 false), typed 113 vectorType (.memory .load256),
   -- Floating-point and pointer operands, which extraction refuses.
   typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),

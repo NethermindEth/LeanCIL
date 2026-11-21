@@ -67,7 +67,11 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
 @[cil_code] def aggregateZero : CIL.Method :=
   {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
-  locals := [], returnsValue := true, code := [.loadAggregate 32,
+  environment := {
+    rawLayouts := [{ identity := "Fixture::Bytes", explicit := true, packing := 1,
+                     declaredSize := 32, fields := [] }]
+    layouts := #[⟨{ size := 32, fields := [] }, 1⟩] },
+  locals := [], returnsValue := true, code := [.ldobj (.aggregate "Fixture::Bytes" 0),
     .memory (.bitcastValue (.aggregate 32) .vector256),
     .intrinsic (.vector (.zero 256)) 0, .intrinsic (.vector (.equalsAll 256)) 2,
     .ret] }

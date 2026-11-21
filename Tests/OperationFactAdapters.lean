@@ -91,23 +91,25 @@ theorem quantified_vector_write {memory : Memory} (after : Nat → Memory)
 /-- Aggregate reads accept symbolic widths and byte lists inside a conjunction. -/
 theorem conjoined_aggregate_read {memory : Memory} {source : Reference} {width : Nat}
     {bytes : List (BitVec 8)} (facts : True ∧ read memory source width 1 = .ok bytes)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.reference (.address source) :: rest)
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate width) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest)
         memory = .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory) := by
-  cil_checked_step [facts]
+  cil_checked_step [shape, facts]
 #print axioms conjoined_aggregate_read
 
 /-- A readonly aggregate preserves the initialization mask of a quantified snapshot fact. -/
 theorem quantified_readonly_snapshot {memory : Memory} (source : Nat → Reference)
     (width : Nat) (bytes : Nat → List (BitVec 8 × Bool))
     (facts : ∀ index, True ∧ readSnapshot memory (source index) width 1 = .ok (bytes index))
-    (index : Nat) (body : CIL.Method) (pc : Nat) (args : List Value)
+    (index : Nat) (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .aggregate width) (pc : Nat) (args : List Value)
     (frame : Frame) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame
+    step body (.ldobj type) pc args frame
         (.readOnlyReference (.address (source index)) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (snapshotValue (.aggregate width) (bytes index)) :: rest)
         frame memory) := by
-  cil_checked_step [facts]
+  cil_checked_step [shape, facts]
 #print axioms quantified_readonly_snapshot
 
 /-- Other memory, reference, width or write authority cannot replace an initialized read. -/

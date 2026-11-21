@@ -667,10 +667,10 @@ private theorem valueShape_span_test (type : Extraction.TypeExpr) :
 @[cil_step] theorem step_ldobj_aggregate {type : Extraction.TypeExpr} {size : Nat}
     (shape : body.valueShape type = .aggregate size) (stack : List Value) :
     step body (.ldobj type) pc args frame stack memory =
-      step body (.loadAggregate size) pc args frame stack memory := by
-  simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
-    pureArity, staticInstruction]
-  first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
+      typedTransferCall (.snapshot (.aggregate size)) false pc frame stack memory := by
+  by_cases observed : unspecifiedOperands 1 stack = true <;>
+    simp [step, observerCount, valueShape_span_test body type, shape, viewOperands, transferObject,
+      typedTransferCall, observedTransfer, observed, Bind.bind, Except.bind, Pure.pure, Except.pure]
 #print axioms step_ldobj_aggregate
 
 /-- The decoded ldobj of vector storage has the full result of its memory rule. -/
@@ -894,11 +894,6 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
 #print axioms step_sizeof_eq
 
 -- One equation per op, so simp selects it by constructor without a side condition.
-@[cil_step] theorem step_loadAggregate_eq {size} (stack : List Value) :
-    step body (.loadAggregate size) pc args frame stack memory =
-      instructionStep (.loadAggregate size) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  by_cases observed : unspecifiedOperands 1 stack = true <;> simp [observed] <;> rfl
 @[cil_step] theorem step_loadScalar_eq {width signed} (stack : List Value) :
     step body (.loadScalar width signed) pc args frame stack memory =
       instructionStep (.loadScalar width signed) pc frame stack memory := by

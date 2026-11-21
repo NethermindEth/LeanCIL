@@ -155,8 +155,6 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
     observerCount .ret = 1 := rfl
 
 #print axioms guard_ret
-@[cil_guard] theorem guard_loadAggregate (size : Nat) :
-    observerCount (.loadAggregate size) = 1 := rfl
 /-- The cpobj guard checks the operands observed by the storage operation. -/
 @[cil_guard] theorem guard_cpobj (type : Extraction.TypeExpr) :
     observerCount (.cpobj type) = 2 := rfl

@@ -37,49 +37,73 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 /-- Loading an aggregate copies its snapshot without requiring initialized bytes. -/
 @[cil_instruction_step high]
-theorem step_loadAggregate_address_eq (width : Nat) (reference : Reference)
+theorem step_ldobj_aggregate_address_eq {type : CIL.Extraction.TypeExpr} (width : Nat)
+    (shape : body.valueShape type = .aggregate width) (reference : Reference)
     (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.reference (.address reference) :: rest)
+    step body (.ldobj type) pc args frame (.reference (.address reference) :: rest)
       memory = do
       let value ← loadSnapshot memory (.address reference) (.aggregate width)
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  rw [step_loadAggregate_eq, ← aggregate_load_snapshot memory reference width]
-  simp only [instructionStep, instruction, transferValues, cil_guard, unspecifiedOperands, List.take, List.any,
+  rw [step_ldobj_aggregate body pc args frame memory shape,
+    ← aggregate_load_snapshot memory reference width]
+  simp only [typedTransferCall, observedTransfer, transferValues, cil_guard,
+    unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false]
   split <;> first | rfl | simp_all only [ordinaryAccessAlignment, bind_assoc, pure_bind]
-#print axioms step_loadAggregate_address_eq
+#print axioms step_ldobj_aggregate_address_eq
 
 /-- A readonly reference permits the same aggregate snapshot without write authority. -/
 @[cil_instruction_step high]
-theorem step_loadAggregate_readOnlyAddress_eq (width : Nat) (reference : Reference)
+theorem step_ldobj_aggregate_readOnlyAddress_eq {type : CIL.Extraction.TypeExpr} (width : Nat)
+    (shape : body.valueShape type = .aggregate width) (reference : Reference)
     (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.readOnlyReference (.address reference) :: rest)
+    step body (.ldobj type) pc args frame (.readOnlyReference (.address reference) :: rest)
       memory = do
       let value ← loadSnapshot memory (.address reference) (.aggregate width)
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  rw [step_loadAggregate_eq, ← aggregate_load_snapshot memory reference width]
-  simp only [instructionStep, instruction, transferValues, cil_guard, unspecifiedOperands, List.take, List.any,
+  rw [step_ldobj_aggregate body pc args frame memory shape,
+    ← aggregate_load_snapshot memory reference width]
+  simp only [typedTransferCall, observedTransfer, transferValues, cil_guard,
+    unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false]
   split <;> first | rfl | simp_all only [ordinaryAccessAlignment, bind_assoc, pure_bind]
-#print axioms step_loadAggregate_readOnlyAddress_eq
+#print axioms step_ldobj_aggregate_readOnlyAddress_eq
+
+/-- A checked snapshot determines the continuation of an aggregate load through either
+    kind of managed reference. -/
+theorem step_ldobj_aggregate_of_snapshot {type : CIL.Extraction.TypeExpr} {width : Nat}
+    {reference : Reference} {value : CIL.Value} (readonly : Bool) (rest : List Value)
+    (shape : body.valueShape type = .aggregate width)
+    (loaded : loadSnapshot memory (.address reference) (.aggregate width) = .ok value) :
+    step body (.ldobj type) pc args frame
+      ((if readonly then .readOnlyReference (.address reference)
+        else .reference (.address reference)) :: rest) memory =
+        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  cases readonly <;>
+    simp only [Bool.false_eq_true, ite_false, ite_true,
+      step_ldobj_aggregate_address_eq body pc args frame memory width shape,
+      step_ldobj_aggregate_readOnlyAddress_eq body pc args frame memory width shape, loaded] <;> rfl
+#print axioms step_ldobj_aggregate_of_snapshot
 
 /-- A null aggregate source retains the requested width in its fault diagnostic. -/
 @[cil_instruction_step high]
-theorem step_loadAggregate_null_eq (width : Nat) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.reference .null :: rest) memory =
+theorem step_ldobj_aggregate_null_eq {type : CIL.Extraction.TypeExpr} (width : Nat)
+    (shape : body.valueShape type = .aggregate width) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference .null :: rest) memory =
       .error (.memory .nullDereference .null width) := by
-  rw [step_loadAggregate_eq]
+  rw [step_ldobj_aggregate body pc args frame memory shape]
   rfl
-#print axioms step_loadAggregate_null_eq
+#print axioms step_ldobj_aggregate_null_eq
 
 /-- A readonly null source reports the same requested aggregate width. -/
 @[cil_instruction_step high]
-theorem step_loadAggregate_readOnlyNull_eq (width : Nat) (rest : List Value) :
-    step body (.loadAggregate width) pc args frame (.readOnlyReference .null :: rest) memory =
+theorem step_ldobj_aggregate_readOnlyNull_eq {type : CIL.Extraction.TypeExpr} (width : Nat)
+    (shape : body.valueShape type = .aggregate width) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.readOnlyReference .null :: rest) memory =
       .error (.memory .nullDereference .null width) := by
-  rw [step_loadAggregate_eq]
+  rw [step_ldobj_aggregate body pc args frame memory shape]
   rfl
-#print axioms step_loadAggregate_readOnlyNull_eq
+#print axioms step_ldobj_aggregate_readOnlyNull_eq
 
 /-- An initialized aggregate store checks its width and writes its bytes. -/
 @[cil_instruction_step high]
