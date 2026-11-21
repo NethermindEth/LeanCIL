@@ -12,21 +12,25 @@ The check itself stays the kernel's decision; the evaluation here only words the
 
 namespace CIL.Extraction
 
-/-- The first part of a decoded body that the emitted definition does not repeat. -/
-def bodyDifference (decoded : DecodedBody) (method : RawMethod) : String :=
-  if decoded.maxStack != method.maxStack then "the maximum stack depth"
-  else if decoded.initLocals != method.initLocals then "the init-locals flag"
-  else "the instructions"
+/-- The first field where the decoded body differs from the supplied evidence or method. -/
+def bodyDifference (decoded : DecodedBody) (body : BodyEvidence) (method : RawMethod) :
+    Option String :=
+  if decoded.statics != body.statics then some "the recorded static field tokens"
+  else if decoded.maxStack != method.maxStack then some "the maximum stack depth"
+  else if decoded.initLocals != method.initLocals then some "the init-locals flag"
+  else if decoded.code != method.code then some "the instructions"
+  else none
 
-/-- The failure of `bodyMatches body method arguments`, worded for the method named `signature`. -/
+/-- The decoding error, mismatching field or kernel reduction failure for the named method. -/
 def describeBodyFailure (signature : String) (body : BodyEvidence) (method : RawMethod)
     (arguments : List TypeExpr) : String :=
   let lead := s!"Method {signature}: the decoded method does not match its body bytes or metadata"
   match checkBody body method arguments with
   | .error error => s!"{lead}: {repr error}"
   | .ok decoded =>
-    if decoded.statics != body.statics then s!"{lead}: the recorded static field tokens differ"
-    else s!"{lead}: {bodyDifference decoded method} differ"
+    match bodyDifference decoded body method with
+    | some field => s!"{lead}: {field} differ"
+    | none => s!"Method {signature}: the decoded fields agree, but kernel reduction failed"
 
 open Lean Elab Tactic Meta in
 /-- Prove `bodyMatches body method arguments = true` with the kernel, naming the method and the

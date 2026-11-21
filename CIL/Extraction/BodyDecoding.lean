@@ -171,7 +171,7 @@ structure ImportSlotIndex where
 def ImportSlotIndex.ofList (imports : List ImportSlot) : ImportSlotIndex :=
   let names := imports.flatMap fun slot =>
     slot.layouts.published.map fun row => bytesOf row.identity
-  { slots := FlowIndex.ofList imports, layouts := names.mergeSort.toArray }
+  { slots := FlowIndex.ofList imports, layouts := (Std.TreeSet.ofList names).toList.toArray }
 
 /-- Static call slots at their direct-link pcs and the value layouts published by the imports. -/
 structure BodyImports where
