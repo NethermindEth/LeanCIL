@@ -277,6 +277,14 @@ partial class Program
         | original => original
         """.ReplaceLineEndings(" "));
 
+    /// <summary>A call with the original prefixes and a changed method operand at this instruction position.</summary>
+    static string ChangedCallOperand(int pc, string fields) =>
+        $$"""
+        match (method0.code[{{pc}}]'(by decide +kernel) : CIL.Instruction) with
+        | .call method prefixes => .call { method with {{fields}} } prefixes
+        | original => original
+        """.ReplaceLineEndings(" ");
+
     /// <summary>Check a replacement instruction at a live pc against the original call operand.</summary>
     static string ForgeModelEmission(string source, int pc, string instruction)
     {

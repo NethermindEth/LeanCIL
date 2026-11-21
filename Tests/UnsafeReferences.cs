@@ -237,31 +237,24 @@ foreach (var (name, theorem) in new[]
 }
 controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
-foreach (var (name, pc, operation) in new[]
+const string wrongWidth = "methodArguments := [.atom Extraction.runtimeScope \"System.UInt32\"]";
+const string wordWidth = "methodArguments := [.atom Extraction.runtimeScope \"System.UInt64\"]";
+const string signedOffset = "parameters := method.parameters.set 1 (.atom Extraction.runtimeScope \"System.IntPtr\")";
+const string unsignedOffset = "parameters := method.parameters.set 1 (.atom Extraction.runtimeScope \"System.UIntPtr\")";
+foreach (var (name, pc, fields) in new[]
 {
-    ("AddSigned", 2, ".memory (.add 8 true)"),
-    ("AddUnsigned", 2, ".memory (.add 1 true)"),
-    ("Subtract", 2, ".add"), ("SubtractUnsigned", 2, ".sub"),
-    ("AddPointer", 2, ".memory (.add 4 true)"),
-    ("SubtractPointer", 2, ".memory (.add 8 true)"),
-    ("Store", 7, ".memory (.add 8 false)"),
-    ("SubtractElements32", 2, ".memory (.add 8 true)"),
-    ("SubtractElementsUnsigned", 2, ".memory (.add 18446744073709551608 true)"),
-    ("SubtractVector", 2, ".memory (.add 16 false)"),
-    ("SubtractAggregate", 2, ".memory (.add 32 true)"),
-    ("AddPointerAggregate", 2, ".memory (.add 8 true)"),
-    ("SubtractPointerAggregate", 2, ".memory (.add 18446744073709551608 true)")
+    ("AddSigned", 2, unsignedOffset), ("AddUnsigned", 2, signedOffset),
+    ("Subtract", 2, "name := name!\"AddByteOffset\""), ("SubtractUnsigned", 2, signedOffset),
+    ("AddPointer", 2, wrongWidth), ("SubtractPointer", 2, "name := name!\"Add\""),
+    ("Store", 7, "name := name!\"Subtract\""),
+    ("SubtractElements32", 2, signedOffset), ("SubtractElementsUnsigned", 2, "name := name!\"Add\""),
+    ("SubtractVector", 2, signedOffset), ("SubtractAggregate", 2, wordWidth),
+    ("AddPointerAggregate", 2, wordWidth), ("SubtractPointerAggregate", 2, wordWidth)
 })
 {
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
-    var evidence = NarrowEvidence(source, "method0_models_validated");
-    const string original = "method0Reachable method0 := by decide";
-    var body = $$"""{ method0 with code := method0.code.set {{pc}} ({{operation}}) }""";
-    var forged = $"method0Reachable {body} := by decide";
-    if (!evidence.Contains(original, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing offset call obligation for {name}");
     var path = Path.Combine(root, name, "WrongOperation.lean");
-    File.WriteAllText(path, evidence.Replace(original, forged, StringComparison.Ordinal));
+    File.WriteAllText(path, ForgeModelEmission(source, pc, ChangedCallOperand(pc, fields)));
     rejected.Add(path, $"PASS offset call emission rejection: {name}", "RuntimeModelsAgree");
 }
 foreach (var methodName in new[] { "AddPointer", "SubtractPointer" })

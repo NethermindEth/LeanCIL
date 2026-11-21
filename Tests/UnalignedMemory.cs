@@ -152,13 +152,14 @@ var rejectedIndex = 0;
 foreach (var (name, lowered) in new[]
 {
     ("ReadHalf", ".ldind .i2"), ("ReadWord", ".ldind .i8"),
-    ("Read128", ".memory .load128"), ("Write512", ".memory .store512"),
+    ("Read128", ".ldobj method0.declared.returnType"),
+    ("Write512", ".stobj (method0.declared.parameters[1]?.getD .void)"),
     ("ReadAggregate", ".ldobj method0.declared.returnType"), ("WriteAggregate", ".stobj (method0.declared.parameters[1]?.getD .void)"),
     ("ReadPointerWord", ".ldind .i8"), ("ReadPointerAggregate", ".ldobj method0.declared.returnType"),
-    ("ReadAlignedWord", ".memory (.pointerTransfer (.scalar 8 false) 8 false)"),
-    ("WriteAlignedWord", ".memory (.pointerTransfer (.scalar 8 false) 8 true)"),
-    ("ReadAlignedAggregate", ".memory (.pointerTransfer (.snapshot (.aggregate 32)) 8 false)"),
-    ("ReadAligned128", ".memory (.pointerTransfer (.snapshot .vector128) 16 false)")
+    ("ReadAlignedWord", ChangedCallOperand(1, "name := name!\"ReadUnaligned\"")),
+    ("WriteAlignedWord", ChangedCallOperand(2, "name := name!\"WriteUnaligned\"")),
+    ("ReadAlignedAggregate", ChangedCallOperand(1, "name := name!\"ReadUnaligned\"")),
+    ("ReadAligned128", ChangedCallOperand(1, "name := name!\"ReadUnaligned\""))
 }.Where(item => !alignedOnly || item.Item1.Contains("Aligned", StringComparison.Ordinal)))
 {
     const string theorem = "method0_models_validated";

@@ -10,7 +10,7 @@ partial class Program
         var obligation = SingleLineTheorem.Matches(mutated).FirstOrDefault(match => match.Groups[1].Value == theorem)
             ?? throw new InvalidOperationException("Missing obligation to refute: " + theorem);
         return mutated.Replace(obligation.Value,
-            $"theorem {refutation} : ¬ ({obligation.Groups[2].Value}) := by decide +kernel");
+            $"theorem {refutation} : ¬ ({obligation.Groups["statement"].Value}) := by decide +kernel");
     }
 
     // Each mutation must produce its own expected diagnostic. A different failing case
@@ -88,6 +88,8 @@ partial class Program
                 diagnostics = [.. located.Where(match => match.Groups["file"].Value == path)];
             var starts = ranges.Select(range => range.Start).ToArray();
             var errors = cases.Select(_ => new StringBuilder()).ToArray();
+            var sourceLines = source.Split('\n');
+            var failedLines = cases.Select(_ => new HashSet<int>()).ToArray();
             for (var diagnostic = 0; diagnostic < diagnostics.Length; diagnostic++)
             {
                 var match = diagnostics[diagnostic];
@@ -100,6 +102,7 @@ partial class Program
                     ? diagnostics[diagnostic + 1].Index
                     : result.Output.Length;
                 errors[index].Append(result.Output.AsSpan(match.Index, end - match.Index));
+                failedLines[index].Add(location);
             }
             for (var index = 0; index < cases.Count; index++)
             {
@@ -112,7 +115,7 @@ partial class Program
                 if (File.ReadAllText(cases[index].Path) != cases[index].Source)
                     throw new InvalidOperationException("Mutation changed during checking: " + cases[index].Path);
             }
-            RefuteSemanticRejections(errors);
+            RefuteSemanticRejections(errors, failedLines, sourceLines, leanPath);
             foreach (var item in cases) Console.WriteLine(item.Passed);
             cases.Clear();
         }
@@ -121,7 +124,8 @@ partial class Program
         // is stated as its negation and proved by `decide +kernel`, so the mutation is shown false, not merely
         // unprovable. Rejections of another kind (a name that no longer resolves, a malformed term) have no negation
         // to prove and are counted, not hidden.
-        void RefuteSemanticRejections(StringBuilder[] errors)
+        void RefuteSemanticRejections(StringBuilder[] errors, HashSet<int>[] failedLines, string[] sourceLines,
+            string? leanPath)
         {
             var refutations = new List<string>();
             var imports = new SortedSet<string>(StringComparer.Ordinal);
@@ -129,9 +133,9 @@ partial class Program
             for (var index = 0; index < cases.Count; index++)
             {
                 var output = errors[index].ToString();
-                var theorems = SingleLineTheorem.Matches(cases[index].Source)
-                    .Select(match => match.Groups[1].Value)
-                    .Where(name => !CarriedWitnessName.IsMatch(name)).ToArray();
+                // Use the failed declaration's location. A narrowed fixture retains successful identity witnesses.
+                var theorems = failedLines[index].Select(line => SingleLineTheorem.Match(sourceLines[line - 1]))
+                    .Where(match => match.Success).Select(match => match.Groups[1].Value).Distinct().ToArray();
                 if (!output.Contains("proved that the proposition", StringComparison.Ordinal) ||
                     !output.Contains("is false", StringComparison.Ordinal) || theorems.Length != 1)
                 {
@@ -149,7 +153,7 @@ partial class Program
                 var path = Path.GetFullPath(Path.Combine(directory, "KernelRefutations.lean"));
                 File.WriteAllText(path, string.Join('\n', imports.Select(module => "import " + module)) + "\n" +
                     string.Concat(refutations));
-                var proved = Execute(["lake", "env", "lean", path], cwd: FixturePackage());
+                var proved = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
                 if (proved.Code != 0 || proved.Output.Contains("sorryAx", StringComparison.Ordinal))
                     throw new InvalidOperationException(
                         "The kernel did not refute a mutation the evaluator found false:\n" + proved.Output);
@@ -164,12 +168,10 @@ partial class Program
     private static partial Regex RejectedImport { get; }
 
     // A theorem stated and proved on one line; a Lean name may end in ?, ! or '.
-    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) : ([^\r\n]*?) := [^\r\n]*(?=\r?$)")]
+    [GeneratedRegex(@"(?m)^(?:@\[[^\r\n]*\] )?theorem ([\w?!']+) : " +
+        @"(?:(?<statement>[^\r\n]*) := by decide(?: \+kernel)?[ \t]*|(?<statement>[^\r\n]*?) := [^\r\n]*)(?=\r?$)")]
     private static partial Regex SingleLineTheorem { get; }
 
     [GeneratedRegex(@"(?m)^(?<file>[^\r\n]*?):(\d+):\d+: (error|warning|information)(?:\([^)\r\n]+\))?:")]
     private static partial Regex LocatedDiagnostic { get; }
-
-    [GeneratedRegex(@"\AexternalIdentity|_tables_valid\z")]
-    private static partial Regex CarriedWitnessName { get; }
 }

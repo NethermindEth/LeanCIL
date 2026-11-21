@@ -230,9 +230,9 @@ Console.WriteLine("PASS context-taking emission rejects mismatched architecture"
 
 var indexHomes = extractor.GetType("Nethermind.LeanCIL.ParameterStorage", true)!
     .GetMethod("IndexHomes", BindingFlags.Static | BindingFlags.NonPublic)!
-    .CreateDelegate<Func<IEnumerable<int>, Dictionary<int, int>>>();
-var homePositions = indexHomes([2, 1, 2]);
-if (homePositions[2] != 0 || homePositions[1] != 1 || homePositions.ContainsKey(0))
+    .CreateDelegate<Func<IEnumerable<int>, int, Dictionary<int, int>>>();
+var homePositions = indexHomes([2, 1, 2], 2);
+if (homePositions[2] != 2 || homePositions[1] != 3 || homePositions.ContainsKey(0))
     throw new Exception("Home positions lost first-match or missing-argument behavior");
 var argumentMethod = new MethodDefinition("Arguments", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
 owner.Methods.Add(argumentMethod);
@@ -250,10 +250,10 @@ foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeA
 object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
         Index(argumentMethod), sites, null, null, positions, null, null])!;
-if (!Equals(TranslateArgument(storeArgument, homePositions), Make("Starg", 1)) ||
-    !Equals(TranslateArgument(loadArgument, homePositions), Make("Arg", 1)) ||
-    !Equals(TranslateArgument(addressArgument, homePositions), Make("Ldarga", 1)))
-    throw new Exception("A homed argument's store, load or address no longer names the argument");
+if (!Equals(TranslateArgument(storeArgument, homePositions), Make("SetLocal", 3)) ||
+    !Equals(TranslateArgument(loadArgument, homePositions), Make("Local", 3)) ||
+    !Equals(TranslateArgument(addressArgument, homePositions), Make("LocalAddress", 3)))
+    throw new Exception("A homed argument's store, load or address used the wrong frame slot");
 if (!Equals(TranslateArgument(loadArgument, []), Make("Arg", 1)))
     throw new Exception("Unhomed loads no longer use the original argument");
 try
