@@ -72,6 +72,33 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         }
     }
 
+    if (name == "Quotient")
+    {
+        var ctorPc = body.IndexOf(body.Single(site => site.OpCode.Code == Code.Newobj));
+        var obligation = FeatureObligation(method);
+        var evidence = NarrowEvidence(source, $"method{method}_features_validated");
+        var control = Path.Combine(folder, "ConstructorControl.lean");
+        File.WriteAllText(control, evidence);
+        controls.Add(control, "PASS compiled exception constructor signature", $"method{method}_features_validated");
+        foreach (var (changed, field) in new[]
+        {
+            ("vararg", "declared.convention := 0x25"),
+            ("explicit-this", "declared.convention := 0x60"),
+            ("result", "declared.returnType := .atom Extraction.runtimeScope \"System.Int32\""),
+            ("generic-arity", "method.genericArity := 1")
+        })
+        {
+            var changedFile = Path.Combine(folder, $"Constructor-{changed}.lean");
+            File.WriteAllText(changedFile, ForgeClosedCode(evidence, method, $$"""
+                modify {{ctorPc}} (fun raw => { raw with operand := match raw.operand with
+                  | .call site => .call { site with {{field}} }
+                  | operand => operand })
+                """));
+            rejected.Add(changedFile, $"PASS altered {changed} exception constructor rejected",
+                "Extraction.FeatureFlowValid", obligation, "is false");
+        }
+    }
+
     string? label = null;
     var claims = inputs.Select(input =>
     {

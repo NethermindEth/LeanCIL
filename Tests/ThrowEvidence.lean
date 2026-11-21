@@ -101,6 +101,32 @@ private def changeSite (operand : RawOperand) (change : CallSite → CallSite) :
   | .call site => .call (change site)
   | other => other
 
+/-- Changes to a nongeneric exception constructor that retain the printed external target. -/
+private def alteredConstructors : List RawOperand := [
+  changeSite divide fun site => { site with declared.convention := 0x25 },
+  changeSite divide fun site => { site with declared.convention := 0x60 },
+  changeSite divide fun site => { site with declared.returnType := intType },
+  changeSite divide fun site => { site with declared.parameters := [intType] },
+  changeSite divide fun site => { site with method.genericArity := 1 },
+  changeSite divide fun site => { site with method.methodArguments := [intType] },
+  changeSite divide fun site => { site with ownerArgumentCount := 1 },
+  changeSite divide fun site => { site with staticVirtualInterfaceSlot := true }]
+
+/-- The ordinary instance signature is required at the instruction that constructs the exception. -/
+theorem exact_exception_signatures :
+    throwFold [i 115 divide, i 122] = some (0, .divideByZero) ∧
+    alteredConstructors.all (fun operand => (throwFold [i 115 operand, i 122]).isNone) := by
+  decide +kernel
+#print axioms exact_exception_signatures
+
+/-- The checked feature flow accepts the ordinary constructor and refuses each altered MemberRef. -/
+theorem exact_exception_certificate :
+    let accepts := fun operand => FeatureFlowValid #[] (fun _ => none) (fun _ => none)
+      (raw [i 115 operand, i 122]) .scalar [state [], state [none]] [true, true]
+      [.nop, .throw .divideByZero]
+    accepts divide ∧ ∀ operand ∈ alteredConstructors, ¬ accepts operand := by decide +kernel
+#print axioms exact_exception_certificate
+
 /-- An Int32 parameter outside the allowlisted constructor signatures is refused. -/
 theorem rejects_int32_parameter :
     throwFold [i 114 (.text "a"), i 115 (changeSite wrongParameter fun site =>

@@ -309,9 +309,9 @@ In addition to the admitted string constructors, `Exception`, `InvalidOperationE
 `ArgumentException` and `ArgumentOutOfRangeException` admit a message with a null inner exception.
 `ArgumentException` also admits message, parameter name and null inner exception;
 `ArgumentOutOfRangeException` admits parameter name, null actual value and message.
-Only the thrown type is observed. Constructor signatures and null operands are checked
-independently; expressions with effects or faults are not discarded. Prefix recognition inspects
-at most four loads.
+The model observes the thrown type. Lean checks the declared instance calling convention, return
+type and parameter types against the nongeneric constructor. A separate check requires null for
+inner exceptions and actual values. Prefix recognition inspects at most four loads.
 
 ### Constrained struct calls
 

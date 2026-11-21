@@ -180,24 +180,31 @@ def admittedParameters : ExceptionType → List (List TypeExpr)
       [messageParameter, innerParameter], [messageParameter, actualParameter, messageParameter]]
   | .invalidCast | .arrayTypeMismatch => []
 
-/-- An exact allowlisted `System.Runtime` constructor, including its complete signature. -/
+/-- Resolve an allowlisted System.Runtime exception constructor from the closed member
+    and its declared MemberRef signature. Its printed target must identify the same overload. -/
+def exceptionConstructor? (site : CallSite) : Option ExceptionType := do
+  guard (site.declared == site.method.signature 0x20 && site.hasThis && !site.returnsValue &&
+    site.returnType == .void && site.method.name == name!".ctor" && site.method.genericArity == 0 &&
+    site.method.methodArguments.isEmpty && site.typeArguments.isEmpty && site.ownerArgumentCount == 0 &&
+    !site.staticVirtualInterfaceSlot && site.parameterCount == site.parameterTypes.length)
+  let raised ← exceptionOwner? site.declaringType
+  let .external signature := site.target | none
+  guard (site.parameterTypes ∈ admittedParameters raised)
+  let names := site.parameterTypes.map fun type =>
+    match type with | .atom _ name | .object _ name => name | _ => ""
+  guard (signature == runtimeScope ++ "::System.Void " ++ raised.ownerName ++ "::.ctor(" ++
+    ",".intercalate names ++ ")")
+  return raised
+
+/-- The operands of the constructor are the permitted literal or null loads at this throw. -/
 private def raisedType (count : Nat) (arguments : List RawInstruction)
     (instruction : RawInstruction) : Option ExceptionType :=
   if 3 < count then none else match instruction with
-  | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
-    | .atom _ name, .external signature => do
-      let raised ← exceptionOwner? site.declaringType
-      if site.parameterTypes ∈ admittedParameters raised &&
-        site.parameterTypes.length == count && arguments.length == count &&
-        (arguments.zip site.parameterTypes).all (fun (argument, parameter) =>
-          parameter == .object runtimeScope "System.String" || argument.opcode == 20) &&
-        signature == runtimeScope ++ "::System.Void " ++ name ++ "::.ctor(" ++
-          ",".intercalate (site.parameterTypes.map fun type =>
-            match type with | .atom _ name | .object _ name => name | _ => "") ++ ")" &&
-        site.method.name == name!".ctor" && site.hasThis && !site.returnsValue &&
-        site.returnType == .void && site.typeArguments.isEmpty &&
-        site.parameterCount == count then some raised else none
-    | _, _ => none
+  | ⟨_, 115, .call site⟩ =>
+    if site.parameterCount == count && arguments.length == count &&
+      (arguments.zip site.parameterTypes).all (fun (argument, parameter) =>
+        parameter == messageParameter || argument.opcode == 20) then exceptionConstructor? site
+    else none
   | _ => none
 
 /-- One beyond the largest admitted message arity; reaching it rules out a throw fold. -/
