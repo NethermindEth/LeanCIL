@@ -60,8 +60,10 @@ CallWitness[] witnesses =
         4, 1, ".model"),
     new("throwConstructor", "Throws::Inner(System.UInt32)",
         0, 4, ".refused"),
+    new("typeHandle", "TypeTests::Marker(System.Int32)",
+        1, 1, ".model", Refusal: "0 208"),
     new("typeTest", "TypeTests::Marker(System.Int32)",
-        1, 4, ".refused", Refusal: "0 208"),
+        1, 4, ".model", Refusal: "0 208"),
     new("feature", "Capabilities::AesFlags()",
         0, 0, ".model"),
     new("aesX64", "Capabilities::AesFlags()", 0, 3, ".model"),
@@ -194,7 +196,7 @@ sealed record CallWitness(string Name, string Entry, int Method, int Pc, string 
         var refusal = Refusal ?? $"{Pc} raw.opcode";
         var change = Name switch
         {
-            "typeTest" => "method.owner := .atom runtimeScope \"MyType\"",
+            "typeHandle" or "typeTest" => "method.owner := .atom runtimeScope \"MyType\"",
             "throwConstructor" => "method.owner := .atom runtimeScope \"System.Object\"",
             "areSame" => "method.owner := .atom \"Fixture\" \"System.Runtime.CompilerServices.Unsafe\"",
             _ when Claim == ".model" => "declared.convention := site.declared.convention + 1",
