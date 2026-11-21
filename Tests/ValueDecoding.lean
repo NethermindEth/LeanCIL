@@ -258,6 +258,9 @@ theorem role_decodings :
     let indirect : RawInstruction := ⟨2, 41, .indirectCall .void [] false false 0⟩
     let decoded := fun role raw => Instruction.ofRole? role none raw
     decoded .head call = some .nop ∧ decoded .interior call = some .nop ∧
+      decoded .head ⟨0, 20, .none⟩ = some .ldnull ∧
+      decoded .interior ⟨0, 20, .none⟩ = some .ldnull ∧
+      decoded .head ⟨0, 20, .integer 0⟩ = none ∧
       decoded .blocked call = none ∧ decoded (.result true) call = some (.ldc_i4 1) ∧
       decoded (.result false) call = some (.ldc_i4 0) ∧
       decoded (.typeBranch true) branch = some (.br 9) ∧

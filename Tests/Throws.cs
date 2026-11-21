@@ -85,11 +85,16 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         return $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => $".scalar (.i32 {v})"))}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
     }).ToList();
     if (label is null) throw new InvalidOperationException($"No runtime input reached the throw in {name}");
+    var nullLoads = body.Select((site, index) => (site, index)).Where(item => item.site.OpCode.Code == Code.Ldnull);
+    var nullEquations = string.Join('\n', nullLoads.Select(item =>
+        $"example : Extracted.method{method}.code[{item.index}]? = some .ldnull := " +
+        $"Extracted.method{method}_instruction{item.index}"));
     var proof = Path.Combine(folder, "BoundaryProof.lean");
     File.WriteAllText(proof, $$"""
         import Extracted
         import CIL.Safety.Execution
         namespace ExampleProof
+        {{nullEquations}}
         example : Extracted.method{{method}}.code[{{pc}}]? = some (.throw .{{label}}) :=
           Extracted.method{{method}}_instruction{{pc}}
         theorem correctness :
@@ -110,6 +115,11 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
     if (name is "Null" or "Inner" or "ArgumentInner" or "ActualValue")
     {
+        var nullPc = body.IndexOf(body.First(site => site.OpCode.Code == Code.Ldnull));
+        var erased = Path.Combine(root, name + "-erased-null.lean");
+        File.WriteAllText(erased, ForgeDecodedInstruction(source, method, nullPc, "fun _ => .nop"));
+        rejected.Add(erased, $"PASS {name}: erasing the null load rejected",
+            "Extraction.FeatureFlowValid", FeatureObligation(method), "is false");
         var nonNull = Path.Combine(root, name + "-non-null.lean");
         const string nullLoad = "opcode := 20, operand := .none";
         if (!source.Contains(nullLoad, StringComparison.Ordinal))

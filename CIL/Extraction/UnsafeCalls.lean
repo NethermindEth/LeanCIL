@@ -14,8 +14,7 @@ namespace CIL.Extraction
 private def memoryCallOrigin (raw : RawInstruction) : Instruction → Bool
   | .memory (.binaryRead ..) | .memory (.binaryWrite ..) | .memory (.vector128Unsafe ..) => false
   | .memory (.zeroGuard ..) | .memory (.comparisonGuard ..) | .memory .throwIfNull => false
-  | .memory .isNullRef | .memory .byteOffset => false
-  | .memory .nullRef => raw.opcode == 20 && raw.operand == .none
+  | .memory .nullRef | .memory .isNullRef | .memory .byteOffset => false
   | .memory (.pointerTransfer ..) | .memory (.marshalRead ..) | .memory (.marshalWrite ..)
   | .memory (.spanReinterpret ..) | .memory (.observeView _) => raw.opcode == 40
   | _ => true

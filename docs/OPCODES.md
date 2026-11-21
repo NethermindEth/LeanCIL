@@ -293,15 +293,15 @@ outside this subset.
 ### Throws
 
 `throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of
-`E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, the loads
-and `newobj` emit `nop` and `throw` emits `.throw raised`, with `raised` the `CIL.ExceptionType`
-member for `E`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]`
+`E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, each
+`ldnull` pushes the null object reference. The string loads and `newobj` emit `nop`. The
+`throw` raises the `CIL.ExceptionType` for `E` at the original instruction position. A `[DoesNotReturn]`
 helper containing only this pattern is an ordinary call.
 Other arguments, any instruction between the parts, a branch past the first part, rethrowing a
 stored exception and exception handlers are rejected.
 
-The adjacent `ldnull; throw` form emits `nop` followed by the same named-fault operation for
-`.nullReference`, located at the raw `throw`. A branch may target the null load,
+In the adjacent `ldnull; throw` form, `ldnull` pushes the null object reference and the
+following `throw` raises `.nullReference` at its original position. A branch may target the null load,
 but cannot enter at the throw. Nulls passed through locals, arguments or intervening instructions
 do not satisfy this exact fold.
 

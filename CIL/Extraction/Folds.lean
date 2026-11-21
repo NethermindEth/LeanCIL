@@ -5,9 +5,9 @@ import CIL.Extraction.SpanCalls
 /-!
 # Folded instruction sequences
 
-Some raw instruction sequences have no instruction-by-instruction translation and are
-emitted as a unit: `typeof(A) == typeof(B)` becomes its decided Boolean and `throw new E(...)`
-becomes one `throw`.
+A closed `typeof(A) == typeof(B)` comparison yields its decided Boolean. An allowlisted
+exception construction binds the raised type to the `throw`. Its `ldnull` operands push the
+same null object reference as in ordinary code.
 `foldRoles` finds these sequences from the raw body alone and gives each instruction its
 role, which the feature and scalar checks then enforce.
 -/
@@ -244,9 +244,9 @@ theorem throwFold_eq_takeWhile (code : List RawInstruction) :
 
 /-- An instruction's part in a folded sequence. -/
 inductive FoldRole where
-  /-- The first instruction: emits nothing, and may be a branch target. -/
+  /-- The first instruction of the sequence, which may be a branch target. -/
   | head
-  /-- Later instructions: emit nothing, and are entered only from the preceding instruction. -/
+  /-- A later operand entered only from the preceding instruction. -/
   | interior
   /-- A type comparison: pushes the decided Boolean. -/
   | result (value : Bool)
@@ -266,7 +266,10 @@ inductive FoldRole where
 def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
     (raw : RawInstruction) : Option Instruction :=
   match role with
-  | .head | .interior => some .nop
+  | .head | .interior =>
+    if raw.opcode == 20 then
+      if raw.operand == .none then some .ldnull else none
+    else some .nop
   | .result value => some (.ldc_i4 (if value then 1 else 0))
   | .typeBranch taken => match raw.operand with
     | .target target => some (if taken then .br target else .nop)

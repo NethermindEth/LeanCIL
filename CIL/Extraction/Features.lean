@@ -465,7 +465,7 @@ def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : I
   | .target _, .nop => !taken
   | _, _ => false
 
-/-- Fold operands emit nothing, a type comparison emits its decided word or branch and a folded
+/-- A null operand pushes its object reference, a type comparison emits its decided word or branch and a folded
     `throw` raises its constructed type. Outside a decided test, type handles and
     `System.Type` calls have no admitted translation. -/
 def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
@@ -473,7 +473,9 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction)
     (previous : Option RawInstruction := none) : Bool :=
   match role, emitted with
-  | some .head, .nop | some .interior, .nop => true
+  | some .head, .nop | some .interior, .nop => instruction.opcode != 20
+  | some .head, .ldnull | some .interior, .ldnull =>
+    instruction.opcode == 20 && instruction.operand == .none
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
   | some (.raise raised), .throw exception => raised == exception
@@ -509,7 +511,10 @@ theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
     cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
     exact eq_comm
   | argument | tailCall | blocked => exact fixed.elim
-  | head | interior | raise =>
+  | head | interior =>
+    by_cases null : raw.opcode = 20 <;> by_cases valid : raw.operand = .none <;>
+      cases emitted <;> simp [featureOpMatchesAt, Instruction.ofRole?, null, valid]
+  | raise =>
     cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
 
 #print axioms fixedRole_matches

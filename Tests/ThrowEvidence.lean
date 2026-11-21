@@ -165,16 +165,19 @@ theorem null_throw_encoding :
     foldRoles [i 20, i 122] =
       [some .head, some (.raise .nullReference)] ∧
     FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar
+      [state [], state [none]] [true, true] [.ldnull, .throw .nullReference] ∧
+    ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar
       [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 22, i 122]) .scalar
-      [state [], state [some 0]] [true, true] [.nop, .throw .nullReference] ∧
+      [state [], state [some 0]] [true, true] [.ldnull, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20 (.text "forged"), i 122])
       .scalar
-      [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
+      [state [], state [none]] [true, true] [.ldnull, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw [i 20, i 0, i 122]) .scalar
       [state [], state [none], state [none]] [true, true, true]
-      [.nop, .nop, .throw .nullReference] := by decide +kernel
+      [.ldnull, .nop, .throw .nullReference] := by decide +kernel
 #print axioms null_throw_encoding
+
 
 /-- A branch may enter at the null load, but not skip it to reach the folded throw. -/
 theorem null_throw_entry :
@@ -182,11 +185,11 @@ theorem null_throw_entry :
       [i 20, i 43 (.target 2), i 20, i 122]) .scalar
       [state [], state [none], state [none], state [none, none]]
       [true, true, true, true]
-      [.memory .nullRef, .br 2, .nop, .throw .nullReference] ∧
+      [.ldnull, .br 2, .ldnull, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw
       [i 20, i 43 (.target 3), i 20, i 122]) .scalar
       [state [], state [none], none, state [none]] [true, true, false, true]
-      [.memory .nullRef, .br 3, .unadmitted 20, .throw .nullReference] :=
+      [.ldnull, .br 3, .unadmitted 20, .throw .nullReference] :=
   by decide +kernel
 #print axioms null_throw_entry
 
@@ -211,7 +214,7 @@ theorem decoded_throw_entry :
 example : ∀ other ∈ ExceptionType.all, other ≠ .nullReference → ¬ FeatureFlowValid #[]
     (fun _ => none) (fun _ => none) (raw [i 20, i 122]) .scalar [state [], state [none]] [true,
       true]
-    [.nop, .throw other] := by decide +kernel
+    [.ldnull, .throw other] := by decide +kernel
 
 /-- Types outside the constructor allowlist cannot form a throw fold. -/
 theorem rejects_unadmitted_owners :

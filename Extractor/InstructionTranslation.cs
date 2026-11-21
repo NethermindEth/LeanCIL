@@ -64,7 +64,7 @@ internal static class InstructionTranslation
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
         if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
-        if (throws.Operands.Contains(i)) return StackOperation.Nop;
+        if (i.OpCode.Code != Code.Ldnull && throws.Operands.Contains(i)) return StackOperation.Nop;
         if (i.Operand is Instruction destination &&
             i.OpCode.OperandType is OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget &&
             i.OpCode.Code is not (Code.Leave or Code.Leave_S))

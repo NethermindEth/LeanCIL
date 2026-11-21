@@ -394,6 +394,8 @@ theorem RuntimeModelsAgree.of_decoded_site {profile : FeatureProfile}
       | none => contradiction
       | some part =>
         cases part <;> simp_all [foldOwnsSite, Instruction.ofRole?]
+        all_goals by_cases load : raw.opcode = 20 <;> by_cases valid : raw.operand = .none <;>
+          simp_all [eq_comm]
 
 #print axioms RuntimeModelsAgree.of_decoded_site
 

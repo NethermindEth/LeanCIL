@@ -612,11 +612,19 @@ internal static partial class ProofOutline
                 callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
                 extraction.Emitted[index].Frame.HasNoLocals &&
                 ops.Any(op => Body.Conditional(op) || op is Throw) &&
-                ops.All(op => op is Return ? plainReturn : op is Arg load ? MethodArguments.Plain(callee, load.Index) :
-                    Body.ConstantOf(op) is { Width: 32 or 64 } ||
-                    op is Jump or Throw or StackOperation { Kind: Code.Add or Code.Sub or Code.Mul
-                        or Code.And or Code.Or or
-                        Code.Xor or Code.Nop });
+                Enumerable.Range(0, ops.Length).All(Supported);
+
+            bool Supported(int pc) => ops[pc] switch
+            {
+                Return => plainReturn,
+                Arg load => MethodArguments.Plain(callee, load.Index),
+                // The word stack ends at this throw before any path can use its object operand.
+                StackOperation { Kind: Code.Ldnull } =>
+                    Throws.Analyze(callee).Operands.Contains(callee.Body.Instructions[pc]),
+                Jump or Throw or StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or
+                    Code.And or Code.Or or Code.Xor or Code.Nop } => true,
+                var op => Body.ConstantOf(op) is { Width: 32 or 64 }
+            };
         }
 
         /// <summary>The term a constant's operand is written as: its digits, or its bit-vector conversion.</summary>

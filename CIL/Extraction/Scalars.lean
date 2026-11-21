@@ -457,8 +457,6 @@ def scalarEmissionMatches (role : Option FoldRole)
   else if instruction.opcode == 114 ||
       (match emitted with | .memory (.stringLiteral _) => true | _ => false) then
     stringLiteralMatches role instruction emitted
-  else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
-    instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instanceFieldSite instruction emitted then
     if classOwned instruction then
       classFieldMatches previous instruction stack emitted skipEncoding

@@ -56,8 +56,9 @@ example : ¬ UnsafeCallsValid nonCall [true] [.memory .byteOffset] := by decide 
 example : ¬ UnsafeCallsValid nonCall [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid nonCall [true] [.memory .isNullRef] := by decide +kernel
 example : UnsafeCallsValid nonCall [true] [.pop] := by decide +kernel
--- The raw ldnull exception requires an operand-free opcode.
-example : UnsafeCallsValid { nonCall with code := [⟨0, 20, .none⟩] } [true]
+-- A decoded null object cannot be replaced by an Unsafe managed null reference.
+example : UnsafeCallsValid { nonCall with code := [⟨0, 20, .none⟩] } [true] [.ldnull] := by decide
+example : ¬ UnsafeCallsValid { nonCall with code := [⟨0, 20, .none⟩] } [true]
     [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid { nonCall with code := [⟨0, 20, .call call⟩] } [true]
     [.memory .nullRef] := by decide +kernel

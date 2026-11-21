@@ -67,7 +67,7 @@ internal static class Reachability
                 if (queued.Add(target)) pending.Enqueue(target);
             }
 
-            // Folded operands push nothing, so a fold must be entered at its start.
+            // A jump must not bypass the operands used to establish a folded result.
             void ValidateJump(Instruction target)
             {
                 if (TailCalls.IsInterior(target))
