@@ -1198,10 +1198,24 @@ example : scalarEmissionMatches none none (i 125 valueField) [.word64, .object]
     (.stfld value) = true := by decide
 example : scalarEmissionMatches none none (i 125 valueField) [.word64, .word64]
     (.stfld value) = false := by decide
--- `ldflda` of a class field is decoded; its step faults, since an object field has no address.
-example : scalarEmissionMatches none none (i 124 valueField) [.object]
-    (.ldflda value) = true := by
-  decide
+/-- No incoming stack can admit the address of a field on either class owner. This holds
+    both when checking a literal emission and when the code already equals its decoding. -/
+theorem class_field_address_refused (stack : List ScalarKind) (skipEncoding : Bool) :
+    let generic := TypeExpr.apply (.objectConstructor "Scope" "Scope.Node`1") word
+    scalarEmissionMatches none none (i 124 valueField) stack (.ldflda value) skipEncoding = false ∧
+    scalarEmissionMatches none none (i 124 (.field generic 0 word name!"value" false)) stack
+      (.ldflda { value with owner := generic }) skipEncoding = false := by
+  cases skipEncoding <;> cases stack <;> exact ⟨rfl, rfl⟩
+
+#print axioms class_field_address_refused
+
+/-- Even when the method emits the exact raw field instruction and its stack carries a byref
+    result, its scalar certificate cannot admit a live class field address. -/
+example :
+    let body := { raw [i 2, i 124 valueField, i 42] [node] with
+      returnType := .byref word, maxStack := 1 }
+    ¬ ScalarFlowValid body fieldFeatures [some [], some [.object], some [.reference]]
+      (fieldCode (.ldflda value)) := by decide +kernel
 /-- Whether a `stfld` of a `Scope.Node` field at raw index 0 holding `type` admits a stored
     `value` of that kind. -/
 private def storesInto (type : TypeExpr) (value : ScalarKind) : Bool :=

@@ -372,16 +372,17 @@ private def storedReferences (type : TypeExpr) : List ScalarKind :=
   else if opaqueFieldType type then [.opaque, .object, .nullObject]
   else [.object, .nullObject]
 
-/-- `ldfld`, `ldflda` and `stfld` of a class instance field emit the instruction the raw one
+/-- `ldfld` and `stfld` of a class instance field emit the instruction the raw one
     decodes to after `previous`, naming the field its operand names, on an object or null
-    receiver. A stored class or class array must be an object or null, a stored value array one
+    receiver. Class field addresses have no storage model. A stored class or class array must be
+    an object or null, a stored value array one
     of the field's element, and a stored integer of the field's stack kind (`word32` up to 4
     bytes, `word64` or `native` for 8), so `classFieldStore` never meets a word of the other
     width; the step resolves the slot and faults on a field type without one. -/
 private def classFieldMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) (skipEncoding : Bool) : Bool :=
   (skipEncoding || valueEncodingMatches previous instruction emitted) && match emitted, stack with
-  | .ldfld _, receiver :: _ | .ldflda _, receiver :: _ => receiver ∈ [.object, .nullObject]
+  | .ldfld _, receiver :: _ => receiver ∈ [.object, .nullObject]
   | .stfld field, value :: receiver :: _ =>
     receiver ∈ [.object, .nullObject] &&
       (!referenceFieldType field.type || value ∈ storedReferences field.type) &&
