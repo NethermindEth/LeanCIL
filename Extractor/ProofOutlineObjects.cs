@@ -699,15 +699,17 @@ internal static partial class ProofOutline
                         stack.Add(new Word(null, callee.Spec.Result is { Width: 8 } ? 8 : 4));
                 }
                 // An array of a runtime class, such as `string[]`, is not stepped.
-                else if (op is NewArray { Class: { } allocated } && allocated.Scope != TypeTests.RuntimeScope)
+                else if (op is Unoutlined && spec.Method.Body.Instructions[pc] is
+                    { OpCode.Code: Code.Newarr, Operand: TypeReference element } && ReferenceArrays.Element(element) &&
+                    LayoutEvidence.Scope(element) is var elementScope && elementScope != TypeTests.RuntimeScope)
                 {
                     // Facts stated of the caller's memory carry into the fresh one only across this first write.
                     if (Pop() is not Word { Width: 4, Origin: { Numeral: true, Value: > 0 } count })
                         return Stop("`newarr` of a length that is not a positive literal");
                     if (linear || stores > 0 || calls > 0 || Fresh is not null)
                         return Stop("`newarr` after a write, a call or another allocation");
-                    Fresh = new Allocation("fresh1", GenericEvidence.Quote(allocated.Scope),
-                        GenericEvidence.Quote(allocated.Name), (int)count.Value, stores);
+                    Fresh = new Allocation("fresh1", GenericEvidence.Quote(elementScope),
+                        GenericEvidence.Quote(element.FullName), (int)count.Value, stores);
                     Steps.Add(Fresh);
                     stores++;
                     stack.Add(new ArrayArgument(Fresh.Array));

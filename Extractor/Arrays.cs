@@ -103,7 +103,7 @@ internal static class Arrays
         return instruction.OpCode.Code switch
         {
             Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
-                { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
+                { Width: > 0 and <= ushort.MaxValue } => Unoutlined.Site,
             Code.Ldlen => new StackOperation(instruction.OpCode.Code),
             _ when NumericElement(instruction.OpCode.Code).HasValue => new StackOperation(instruction.OpCode.Code),
             Code.Ldelem_Any => Typed(instruction, false, architecture),

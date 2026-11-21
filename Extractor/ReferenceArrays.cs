@@ -26,7 +26,7 @@ internal static class ReferenceArrays
     internal static Operation? Translate(Instruction instruction) => instruction.OpCode.Code switch
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
-            new NewArray(new(LayoutEvidence.Scope(element), element.FullName)),
+            Unoutlined.Site,
         Code.Ldelem_Ref or Code.Stelem_Ref => new StackOperation(instruction.OpCode.Code),
         _ => null
     };

@@ -188,15 +188,6 @@ internal static class NumericKinds
 /// </summary>
 internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage) : Operation;
 
-/// <summary>
-/// A <c>newarr</c> site. The object proof outline uses the scope and name of a class element.
-/// </summary>
-internal sealed record NewArray(NewArray.ClassElement? Class) : Operation
-{
-    /// <summary>The class <paramref name="Name"/> (a full name) of the assembly <paramref name="Scope"/>.</summary>
-    internal sealed record ClassElement(string Scope, string Name);
-}
-
 /// <summary>An intrinsic of the scalar, vector or hardware families over the given number of operands.</summary>
 internal abstract record Intrinsic(int Arguments) : Operation;
 
