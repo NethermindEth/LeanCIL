@@ -80,8 +80,7 @@ internal static class Arrays
         var element = generic.GenericArguments[0];
         if (Primitive(element) is null && !EnumTypes.IsEnum(element)) return null;
         RuntimeModels.ValidateSignature(method, architecture);
-        var storage = Storage(element, architecture)!;
-        return MemoryOperation.Other($"(.arrayFill {storage.Expression} {LeanText.Bool(counted)})");
+        return Storage(element, architecture) is null ? null : Unoutlined.Site;
 
         static bool MethodElement(TypeReference type) =>
             type is GenericParameter { Type: GenericParameterType.Method, Position: 0 };

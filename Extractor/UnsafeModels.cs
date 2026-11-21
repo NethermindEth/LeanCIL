@@ -73,8 +73,7 @@ internal static class UnsafeModels
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
         MetadataValidation.Type(element, reference.Module, architecture: architecture);
         RuntimeModels.ValidateSignature(reference, architecture);
-        if (nullRef) return MemoryOperation.Other(".nullRef");
-        if (isNullRef) return MemoryOperation.Other(".isNullRef");
+        if (nullRef || isNullRef) return Unoutlined.Site;
         var width = ElementWidth(element, reference.Module, architecture);
 
         if (skipInit) return Unoutlined.Site;
@@ -84,13 +83,13 @@ internal static class UnsafeModels
             "IsAddressLessThan" => new StackOperation(Code.Clt_Un),
             _ => new StackOperation(Code.Cgt_Un)
         };
-        if (byteOffset) return MemoryOperation.Other(".byteOffset");
+        if (byteOffset) return Unoutlined.Site;
         if (subtractBytes) return new StackOperation(Code.Sub);
         if (sizeOf) return new Constant(32, width, true);
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
         // Native-width negative strides reuse the checked wrapping offset operation.
         var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
-        return MemoryOperation.Of(new AddOffset(stride, signed));
+        return new AddOffset(stride, signed);
     }
 
     // An element of field or vector storage has a width; any other element is unsupported.
@@ -133,7 +132,7 @@ internal static class UnsafeModels
             _ = ElementWidth(type, reference.Module, architecture);
         }
         RuntimeModels.ValidateSignature(reference, architecture);
-        return MemoryOperation.Other(".asRef");
+        return Unoutlined.Site;
     }
 }
 
@@ -157,27 +156,24 @@ internal static class ValueBitCasts
         if (source.MetadataType == MetadataType.Byte && target.MetadataType == MetadataType.Boolean)
         {
             RuntimeModels.ValidateSignature(reference, architecture);
-            return MemoryOperation.Other(".bitcastByteBool");
+            return Unoutlined.Site;
         }
         if (!generic.GenericArguments.Any(type => MetadataValidation.IsAggregate(type, reference.Module) ||
             type is GenericInstanceType)) return null;
-        var fromShape = Snapshot(source, reference.Module, architecture);
-        var toShape = Snapshot(target, reference.Module, architecture);
-        if (fromShape is null || toShape is null || fromShape.Value.Width != toShape.Value.Width)
+        var fromWidth = SnapshotWidth(source, reference.Module, architecture);
+        var toWidth = SnapshotWidth(target, reference.Module, architecture);
+        if (fromWidth is null || toWidth is null || fromWidth != toWidth)
             throw new InvalidDataException($"Unsupported Unsafe.BitCast value layouts: {reference.FullName}");
         RuntimeModels.ValidateSignature(reference, architecture);
-        return MemoryOperation.Other($"(.bitcastValue {fromShape.Value.Shape} {toShape.Value.Shape})");
+        return Unoutlined.Site;
     }
 
-    static (string Shape, int Width)? Snapshot(TypeReference type, ModuleDefinition module, string architecture)
+    static int? SnapshotWidth(TypeReference type, ModuleDefinition module, string architecture)
     {
         MetadataValidation.Type(type, module, architecture: architecture);
         RuntimeModels.ValidateTypeIdentity(type, module, architecture);
         if (MetadataValidation.IsAggregate(type, module))
-        {
-            int width = MetadataValidation.Layout(type, module, architecture);
-            return ($"(.aggregate {width})", width);
-        }
-        return MetadataValidation.IntegerVectorWidth(type) is int bytes ? ($".vector{bytes * 8}", bytes) : null;
+            return MetadataValidation.Layout(type, module, architecture);
+        return MetadataValidation.IntegerVectorWidth(type);
     }
 }

@@ -62,7 +62,7 @@ internal static class Spans
         RuntimeModels.ValidateSignature(reference, architecture);
         var range = method.Parameters.Count switch { 1 => ArrayRange.Whole, 2 => ArrayRange.FromStart,
             _ => ArrayRange.Counted };
-        return MemoryOperation.Of(new ArraySpan(element, true, range));
+        return new ArraySpan(element, true, range);
     }
 
     static bool OwnerElement(TypeReference type) =>
@@ -72,7 +72,7 @@ internal static class Spans
     /// The constructor consumes only its explicit arguments and produces a span value. With
     /// <paramref name="staticData"/> a read-only byte span over a pointer must lie in extracted static data.
     /// </summary>
-    internal static MemoryOperation? ConstructorOperation(MethodReference method, string architecture,
+    internal static SpanSource? ConstructorOperation(MethodReference method, string architecture,
         bool staticData = true)
     {
         if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
@@ -85,7 +85,7 @@ internal static class Spans
         if (ElementWidth(element, architecture) is not int width) return null;
         var writable = Writable(owner);
         var parameters = method.Parameters;
-        MemoryOperation? operation = parameters switch
+        SpanSource? operation = parameters switch
         {
             [{ ParameterType: ByReferenceType byref }] when OwnerElement(byref.ElementType) =>
                 new SpanSingleReference(width, writable),
@@ -138,16 +138,16 @@ internal static class Spans
             "GetPinnableReference" or "op_Implicit" or "get_Empty" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo"))
             return null;
         if (ElementWidth(element, architecture) is not int width) return null;
-        MemoryOperation? operation = method.Name switch
+        Operation? operation = method.Name switch
         {
             "Clear" when writable && parameters.Count == 0 && result.MetadataType == MetadataType.Void =>
-                new OtherMemory($"(.spanFill {width} true)"),
+                Unoutlined.Site,
             "Fill" when writable && parameters.Count == 1 && OwnerElement(parameters[0].ParameterType) &&
-                result.MetadataType == MetadataType.Void => new OtherMemory($"(.spanFill {width} false)"),
+                result.MetadataType == MetadataType.Void => Unoutlined.Site,
             "CopyTo" or "TryCopyTo" when parameters.Count == 1 &&
                 DeclaredSpan(parameters[0].ParameterType, "System.Span`1") &&
                 result.MetadataType == (method.Name == "CopyTo" ? MetadataType.Void : MetadataType.Boolean) =>
-                new OtherMemory($"(.spanCopy {width} {LeanText.Bool(method.Name == "TryCopyTo")})"),
+                Unoutlined.Site,
             "get_Item" when parameters is [{ ParameterType.MetadataType: MetadataType.Int32 }] &&
                 ElementReference(result, writable) => new SpanItem(width),
             "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => new SpanLength(),
@@ -169,7 +169,7 @@ internal static class Spans
             DeclaredSpan(parameters[0].ParameterType, name) && DeclaredSpan(result, "System.ReadOnlySpan`1")))
             return null;
         RuntimeModels.ValidateSignature(method, architecture);
-        return operation is null ? MemoryOperation.Other(".spanReadOnly") : MemoryOperation.Of(operation);
+        return operation ?? Unoutlined.Site;
     }
 
     /// <summary>The model of a span constructor that a call runs on a span home; null for any other method.</summary>

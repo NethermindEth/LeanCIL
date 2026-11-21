@@ -5,23 +5,19 @@ namespace Nethermind.LeanCIL;
 // Managed-reference transfers share the exact layouts used by typed CIL loads and stores.
 internal static class MemoryTransfers
 {
-    internal static (string Kind, int Alignment) Describe(TypeReference type, ModuleDefinition module,
+    internal static void ValidateElement(TypeReference type, ModuleDefinition module,
         string architecture)
     {
         if (MetadataValidation.IsAggregate(type, module))
         {
-            var layout = MetadataValidation.AggregateLayout(type, module, architecture);
-            return ($".snapshot (.aggregate {layout.Size})", layout.Alignment);
+            MetadataValidation.AggregateLayout(type, module, architecture);
+            return;
         }
         MetadataValidation.Type(type, module, architecture: architecture);
-        if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
-            return ($".snapshot .vector{vectorWidth * 8}", vectorWidth);
+        if (MetadataValidation.IntegerVectorWidth(type) is not null) return;
         if (type is TypeSpecification)
             throw new InvalidDataException($"Unsupported transferred value type: {type.FullName}");
-        var storage = EnumTypes.Storage(type);
-        var width = MetadataValidation.PrimitiveWidth(storage);
-        var signed = storage.FullName is "System.SByte" or "System.Int16";
-        return ($".scalar {width} {signed.ToString().ToLowerInvariant()}", width);
+        MetadataValidation.PrimitiveWidth(EnumTypes.Storage(type));
     }
 
     // The analyses use this transfer for the kept call of the validated generic Unsafe owner.
@@ -45,9 +41,8 @@ internal static class MemoryTransfers
         var type = reference.GenericArguments[0];
         if (aligned)
         {
-            var (kind, alignment) = Describe(type, reference.Module, architecture);
-            return MemoryOperation.Other(
-                $"(.pointerTransfer ({kind}) {alignment} {write.ToString().ToLowerInvariant()})");
+            ValidateElement(type, reference.Module, architecture);
+            return Unoutlined.Site;
         }
         MetadataValidation.Type(type, reference.Module, architecture: architecture);
         if (MetadataValidation.IsAggregate(type, reference.Module))
@@ -55,8 +50,7 @@ internal static class MemoryTransfers
             var width = MetadataValidation.Layout(type, reference.Module, architecture);
             return new AggregateTransfer(read ? AggregateAccess.Load : AggregateAccess.Store, width);
         }
-        if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
-            return MemoryOperation.Other($".{(read ? "load" : "store")}{vectorWidth * 8}");
+        if (MetadataValidation.IntegerVectorWidth(type) is not null) return Unoutlined.Site;
         if (type is TypeSpecification)
             throw new InvalidDataException($"Unsupported unaligned value type: {type.FullName}");
         var storage = EnumTypes.Storage(type);

@@ -47,22 +47,18 @@ internal static class MarshalModels
         if (Spans.ElementWidth(element, architecture) is not { } width) return null;
         switch (method.Name)
         {
-            case "GetReference": return MemoryOperation.Other(".spanReference");
-            case "GetArrayDataReference": return MemoryOperation.Of(new ObserveView(ViewQuery.ArrayData));
+            case "GetReference": return Unoutlined.Site;
+            case "GetArrayDataReference": return new ObserveView(ViewQuery.ArrayData);
             case "CreateSpan":
             case "CreateReadOnlySpan":
-                return MemoryOperation.Of(new SpanFromReference(width, method.Name == "CreateSpan"));
+                return new SpanFromReference(width, method.Name == "CreateSpan");
             case "AsBytes":
             case "Cast":
                 var target = arity == 1 ? 1 : Spans.ElementWidth(method.GenericArguments[1], architecture);
-                return target is null ? null :
-                    MemoryOperation.Other($"(.spanReinterpret {width} {target} {LeanText.Bool(writable)})");
+                return target is null ? null : Unoutlined.Site;
             default:
-                var (kind, _) = MemoryTransfers.Describe(element, method.Module, architecture);
-                var read = method.Name is "Read" or "TryRead";
-                var trying = method.Name is "TryRead" or "TryWrite";
-                return MemoryOperation.Other(
-                    $"(.marshal{(read ? "Read" : "Write")} ({kind}) {LeanText.Bool(trying)})");
+                MemoryTransfers.ValidateElement(element, method.Module, architecture);
+                return Unoutlined.Site;
         }
     }
 

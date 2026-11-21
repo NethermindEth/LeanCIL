@@ -103,8 +103,8 @@ internal static class NativeOperands
         if (result is RequiredModifierType { ModifierType.FullName:
             "System.Runtime.InteropServices.InAttribute", ElementType: ByReferenceType })
         {
-            if (RuntimeModels.CallModel(method, profile) is Memory
-                { Operation: ObserveView { Query: ViewQuery.SpanPinnable } or SpanItem })
+            if (RuntimeModels.CallModel(method, profile) is
+                ObserveView { Query: ViewQuery.SpanPinnable } or SpanItem)
                 return Kind.Reference;
         }
         return Type(result);

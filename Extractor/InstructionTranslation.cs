@@ -37,6 +37,11 @@ internal static class InstructionTranslation
         ResolvedCallSites callSites)
     {
         var typeTests = TypeTests.Analyze(m);
+        if (i.OpCode.Code is Code.Cpblk or Code.Initblk)
+        {
+            MemoryPrefixes.BlockAlignment(i);
+            return Unoutlined.Site;
+        }
         if (i.OpCode.Code == Code.Tail)
         {
             TailCalls.ValidateReachable(m, i, profile.Architecture);
@@ -92,7 +97,7 @@ internal static class InstructionTranslation
             if (i.OpCode.Code == Code.Call && RuntimeModels.CallModel(r, profile) is { } model)
                 return model;
             if (i.OpCode.Code == Code.Newobj && Spans.ConstructorOperation(r, profile.Architecture) is { } source)
-                return MemoryOperation.Of(source);
+                return source;
             if (i.OpCode.Code == Code.Newobj) return Unoutlined.Site;
             var (resolved, index) = callSites.Target(i, methods);
             var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
@@ -113,8 +118,6 @@ internal static class InstructionTranslation
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
             Code.Localloc => new Localloc(),
-            Code.Cpblk => MemoryOperation.Other($"(.copyBlock {MemoryPrefixes.BlockAlignment(i)})"),
-            Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Starg or Code.Starg_S => new Starg(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
@@ -180,6 +183,6 @@ internal static class InstructionTranslation
     static Operation StringOperation(string text)
     {
         InstructionOperands.ValidateLiteral(text);
-        return MemoryOperation.Of(new StringLiteral(text));
+        return new StringLiteral(text);
     }
 }

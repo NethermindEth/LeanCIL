@@ -171,17 +171,14 @@ internal static class RuntimeModels
         var model = reference.FullName switch
         {
             $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
-            $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" =>
-                MemoryOperation.Other("(.copyBlock 8)"),
+            $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" or
             $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" or
-            $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" =>
-                MemoryOperation.Other("(.copyBlock 1)"),
+            $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" or
             $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" or
-            $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" =>
-                MemoryOperation.Other("(.initBlock 8)"),
+            $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" or
             $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
             $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
-                MemoryOperation.Other("(.initBlock 1)"),
+                Unoutlined.Site,
             _ => IntegerMathCalls.GetValueOrDefault(reference.FullName)
         };
         if (model is null) return null;
@@ -215,8 +212,7 @@ internal static class RuntimeModels
         var element = method.GenericArguments[0];
         if (Arrays.Primitive(element) is null && !EnumTypes.IsEnum(element)) return null;
         ValidateSignature(reference, architecture);
-        return Spans.ElementWidth(element, architecture) is { } width
-            ? MemoryOperation.Other($"(.createSpan {width})") : null;
+        return Spans.ElementWidth(element, architecture) is not null ? Unoutlined.Site : null;
     }
 
     internal static void ValidateCallScope(MethodReference reference)
@@ -255,7 +251,7 @@ internal static class RuntimeModels
             generic.GenericArguments.Count != generic.ElementMethod.GenericParameters.Count) return null;
         if (reference is not GenericInstanceMethod && reference.HasGenericParameters) return null;
         string signature = reference.FullName;
-        if (VectorHelperCalls.TryGetValue(signature, out var helper)) return helper;
+        if (VectorHelperSignatures.Contains(signature)) return Unoutlined.Site;
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
             return Unoutlined.Site;
         foreach (int width in new[] { 128, 256 })
@@ -282,13 +278,13 @@ internal static class RuntimeModels
             ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] =
                 Scalar(ScalarFunction.BigMul32, 32, true, 2),
             ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
-                MemoryOperation.Other("(.bigMul64 false)"),
+                Unoutlined.Site,
             ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] =
-                MemoryOperation.Other("(.bigMul64 true)"),
+                Unoutlined.Site,
             ["System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)"] =
-                MemoryOperation.Other("(.divRemOut 32)"),
+                Unoutlined.Site,
             ["System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"] =
-                MemoryOperation.Other("(.divRemOut 64)")
+                Unoutlined.Site
         };
         foreach (var (type, width, signed) in MathIntegers)
             calls.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
@@ -332,12 +328,12 @@ internal static class RuntimeModels
         return signatures;
     }
 
-    private static readonly Dictionary<string, Operation> VectorHelperCalls = BuildVectorHelperCalls();
+    private static readonly HashSet<string> VectorHelperSignatures = BuildVectorHelperSignatures();
 
     // Every key fixes the open member declaration and the element used by the call.
-    private static Dictionary<string, Operation> BuildVectorHelperCalls()
+    private static HashSet<string> BuildVectorHelperSignatures()
     {
-        var calls = new Dictionary<string, Operation>(StringComparer.Ordinal);
+        var signatures = new HashSet<string>(StringComparer.Ordinal);
         foreach (int width in VectorWidths)
         {
             var owner = $"{Intrinsics}.Vector{width}";
@@ -345,13 +341,11 @@ internal static class RuntimeModels
             foreach (var element in new[] { "Byte", "Int32", "UInt32", "Int64", "UInt64" })
             {
                 var vector = Vector(width, $"System.{element}");
-                calls.Add($"System.Boolean {vector}::op_Equality({open},{open})",
-                    Unoutlined.Site);
+                signatures.Add($"System.Boolean {vector}::op_Equality({open},{open})");
             }
             if (width == 512)
             {
-                calls.Add($"{V512UInt64} {owner}::Create({V256UInt64},{V256UInt64})",
-                    Unoutlined.Site);
+                signatures.Add($"{V512UInt64} {owner}::Create({V256UInt64},{V256UInt64})");
                 continue;
             }
             foreach (var (element, count) in new[]
@@ -360,22 +354,18 @@ internal static class RuntimeModels
             })
             {
                 var parameters = string.Join(",", Enumerable.Repeat(element, count));
-                calls.Add($"{Vector(width, element)} {owner}::Create({parameters})",
-                    Unoutlined.Site);
+                signatures.Add($"{Vector(width, element)} {owner}::Create({parameters})");
             }
             var result = Vector(width, "!!0");
-            calls.Add($"{result} {owner}::Create<System.Byte>(System.ReadOnlySpan`1<!!0>)",
-                MemoryOperation.Other($"(.marshalRead (.snapshot .vector{width}) false)"));
+            signatures.Add($"{result} {owner}::Create<System.Byte>(System.ReadOnlySpan`1<!!0>)");
         }
         var source = Vector(128, "!!0");
-        foreach (var (suffix, offset) in new[] { ("", "false"), (",System.UIntPtr", "true") })
+        foreach (var suffix in new[] { "", ",System.UIntPtr" })
         {
-            calls.Add($"{source} {Intrinsics}.Vector128::LoadUnsafe<System.Byte>(!!0&{suffix})",
-                MemoryOperation.Other($"(.vector128Unsafe false {offset})"));
-            calls.Add($"System.Void {Intrinsics}.Vector128::StoreUnsafe<System.Byte>({source},!!0&{suffix})",
-                MemoryOperation.Other($"(.vector128Unsafe true {offset})"));
+            signatures.Add($"{source} {Intrinsics}.Vector128::LoadUnsafe<System.Byte>(!!0&{suffix})");
+            signatures.Add($"System.Void {Intrinsics}.Vector128::StoreUnsafe<System.Byte>({source},!!0&{suffix})");
         }
-        return calls;
+        return signatures;
     }
 
     private static Operation? HardwareModel(string signature, FeatureProfile profile)

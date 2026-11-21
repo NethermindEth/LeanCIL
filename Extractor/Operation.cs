@@ -299,12 +299,9 @@ internal sealed record IsInstance(string Type) : Operation;
 
 /// <summary>
 /// The model of a span constructor that a call runs on the span home beneath its arguments: the slot the home
-/// names then holds the span <paramref name="Source"/> builds. It renders as the Lean runtime model.
+/// names then holds the span <paramref name="Source"/> builds.
 /// </summary>
 internal sealed record SpanInPlace(SpanSource Source) : Operation;
-
-/// <summary>A runtime memory operation.</summary>
-internal sealed record Memory(MemoryOperation Operation) : Operation;
 
 /// <summary>An intrinsic of the scalar, vector or hardware families over the given number of operands.</summary>
 internal abstract record Intrinsic(int Arguments) : Operation;

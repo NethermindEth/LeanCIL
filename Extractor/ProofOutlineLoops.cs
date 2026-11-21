@@ -38,7 +38,7 @@ internal static partial class ProofOutline
         /// <summary>The array view supplied by a constructor, factory or conversion call.</summary>
         internal static ArraySpan? ArrayView(Operation operation) => operation switch
         {
-            Memory { Operation: ArraySpan view } => view,
+            ArraySpan view => view,
             _ => null
         };
 
@@ -58,7 +58,7 @@ internal static partial class ProofOutline
 
         /// <summary>The checked displacement applied by a retained Unsafe offset call.</summary>
         internal static AddOffset? OffsetOf(Operation operation) =>
-            operation is Memory { Operation: AddOffset offset } ? offset : null;
+            operation as AddOffset;
 
         /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
         /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
@@ -332,7 +332,7 @@ internal static partial class ProofOutline
             var ops = body.Operations;
             var stores = Enumerable.Range(1, ops.Length - 1).Where(pc =>
                 ops[pc] is SetLocal store && store.Index == local &&
-                ops[pc - 1] is not Memory { Operation: SpanSlice { Counted: false } }).ToArray();
+                ops[pc - 1] is not SpanSlice { Counted: false }).ToArray();
             var refused = Unsupported($"span local `{name}` is not assigned once from a span argument or from the " +
                 "whole of an array argument");
             if (stores.Length != 1 || stores[0] >= loops[0].Head) throw refused;
@@ -1566,13 +1566,13 @@ internal static partial class ProofOutline
                 state.State[components.IndexOf(field)] = value is Number { Literal: false } number && field.Width < 4
                     ? number with { Narrow = true } : value;
             }
-            else if (op is Memory { Operation: SpanLength })
+            else if (op is SpanLength)
             {
                 if (Pop() is not LocalValue value || slots[value.Slot].Components[0].Part != Part.Span)
                     return Stop("the length of a span the outline does not follow");
                 stack.Add(new SpanLengthValue(components.IndexOf(slots[value.Slot].Components[0])));
             }
-            else if (op is Memory { Operation: SpanSlice { Counted: false } })
+            else if (op is SpanSlice { Counted: false })
             {
                 var count = Pop();
                 var source = Pop();
@@ -1583,7 +1583,7 @@ internal static partial class ProofOutline
                 PendingTail(state, component, span);
                 stack.Add(new Sliced(component));
             }
-            else if (op is Memory { Operation: SpanItem })
+            else if (op is SpanItem)
             {
                 var index = Pop();
                 var source = Pop();

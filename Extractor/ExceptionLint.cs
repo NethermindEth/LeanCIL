@@ -136,7 +136,7 @@ internal static partial class ExceptionLint
         {
             ScalarIntrinsic { Function: ScalarFunction.Abs } => FaultKind.Overflow,
             X86BaseDivRem64 => FaultKind.DivideByZeroAndOverflow,
-            Memory { Operation: SpanItem } => FaultKind.IndexOutOfRange,
+            SpanItem => FaultKind.IndexOutOfRange,
             _ => null
         };
     }

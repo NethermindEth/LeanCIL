@@ -17,7 +17,7 @@ internal static partial class ProofOutline
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
         if (ops is not [LocalAddress { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
-                Memory { Operation: SpanItem item }, Arg { Index: 1 }, var store,
+                SpanItem item, Arg { Index: 1 }, var store,
                 Return] || item.Width != width || !MethodArguments.Plain(method, 1))
             return null;
         return width is 4 or 8 && StoredWidth(store) == width ? (width, store) : null;
