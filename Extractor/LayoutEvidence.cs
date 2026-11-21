@@ -49,8 +49,17 @@ internal sealed class LayoutEvidence
         return [.. ordered];
     }
 
-    internal static string Scope(TypeReference type) => type.Scope is AssemblyNameReference assembly
-        ? assembly.FullName : type.Module.Assembly.Name.FullName;
+    internal static string Scope(TypeReference type)
+    {
+        if (type.Scope is not AssemblyNameReference assembly) return type.Module.Assembly.Name.FullName;
+        var module = PinnedAssemblies.Active?.ModuleOf(type);
+        if (module is not { HasExportedTypes: true }) return assembly.FullName;
+        var element = type.GetElementType();
+        if (!module.ExportedTypes.Any(export => export.IsForwarder && export.FullName == element.FullName))
+            return assembly.FullName;
+        return element.Resolve()?.Module.Assembly.Name.FullName ??
+            throw new InvalidDataException("Unresolved forwarded type: " + element.FullName);
+    }
 
     internal static string Identity(TypeReference type)
     {

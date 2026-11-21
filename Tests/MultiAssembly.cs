@@ -259,6 +259,37 @@ Decided(("RunAppGenericOff", false), ("RunGenericOn", true));
 Proved("ScaledGenericPlain", "MultiFixture.Application::ScaledGenericPlain(ulong)",
     "Tests/MultiAssembly/Scaled.lean", referencedBody: true);
 
+// Compile the caller against the original facade, then supply the facade that forwards the type.
+(string Caller, string[] References) ProveForwardedCall()
+{
+    const string facadeName = "ForwardFacade";
+    fixture.Build("OriginalFacade", facadeName,
+        "namespace Forward; public static class Value { public static int Next(int input) => input; }");
+    var caller = fixture.Build("ForwardCaller", "ForwardCaller",
+        "namespace Forward; public static class Entry { public static int Run(int value) => Value.Next(value); }",
+        references: """<ProjectReference Include="../OriginalFacade/OriginalFacade.csproj" />""");
+    var implementation = fixture.Build("ForwardImplementation", "ForwardImplementation",
+        "namespace Forward; public static class Value { public static int Next(int input) => input + 1; }");
+    var facade = fixture.Build("ForwardFacade", facadeName,
+        "[assembly: System.Runtime.CompilerServices.TypeForwardedTo(typeof(Forward.Value))]",
+        references: """<ProjectReference Include="../ForwardImplementation/ForwardImplementation.csproj" />""");
+    var artifact = Artifact("ForwardedCall");
+    Run([.. cli, "extract", caller, "Entry::Run(int)", artifact, .. Reference(facade), .. Reference(implementation)]);
+    var proof = Path.Combine(root, "accepted-ForwardedCall.lean");
+    File.WriteAllText(proof, File.ReadAllText(Path.Combine(artifact, "Extracted.lean")) + """
+
+        open CIL in
+        theorem forwarded_call (value : W32) :
+            (Safety.invoke Extracted.program 16 0 [.scalar (.i32 value)] Safety.Memory.empty).map Prod.snd =
+              .ok [.scalar (.i32 (value + 1))] := rfl
+        #print axioms forwarded_call
+        """);
+    evidence.Add(proof, "PASS a facade binds the implementation used by a compiled caller");
+    return (caller, [facade, implementation]);
+}
+
+var forwarded = ProveForwardedCall();
+
 evidence.Check();
 
 void Rejected(string name, string marker, string[] command) => MultiAssemblyFixture.Rejected(name, marker, command);
@@ -520,6 +551,6 @@ string strictFixture = Path.Combine(root, "StrictFixture.dll");
 File.WriteAllBytes(strictFixture, StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)));
 CheckExtractedSlices(Path.Combine(root, "binding-slices"), FixturePackage(),
     (strictFixture, []), (app, [lib]), (lib, []),
-    (generic.App, [generic.Lib]), (generic.Lib, []));
+    (generic.App, [generic.Lib]), (generic.Lib, []), forwarded);
 CheckBindingScaling(Path.Combine(root, "binding-scaling"));
 CheckDeepBinding(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));

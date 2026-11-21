@@ -98,6 +98,7 @@ def moduleRef : Nat := 0x1A
 def typeSpec : Nat := 0x1B
 def assembly : Nat := 0x20
 def assemblyRef : Nat := 0x23
+def exportedType : Nat := 0x27
 def nestedClass : Nat := 0x29
 def genericParam : Nat := 0x2A
 def methodSpec : Nat := 0x2B
@@ -153,6 +154,7 @@ structure ColumnWidths where
   genericParam : Nat
   typeDefOrRef : Nat
   resolutionScope : Nat
+  implementation : Nat
   memberRefParent : Nat
   methodDefOrRef : Nat
   typeOrMethodDef : Nat
@@ -189,6 +191,7 @@ def columnWidthsOf (heapSizes : Nat) (rows : Nat → Nat) : ColumnWidths :=
     param := simpleWidth (rows 0x08), typeDef := simpleWidth (rows 0x02),
     genericParam := simpleWidth (rows 0x2A),
     typeDefOrRef := codedWidth 2 (max (rows 0x02) (max (rows 0x01) (rows 0x1B))),
+    implementation := codedWidth 2 (max (rows 0x26) (max (rows 0x23) (rows 0x27))),
     resolutionScope := codedWidth 2
       (max (rows 0x00) (max (rows 0x1A) (max (rows 0x23) (rows 0x01)))),
     memberRefParent := codedWidth 3
@@ -283,6 +286,9 @@ def linkNesting : Nat := 2
 /-- A link names the first `GenericParam` row of a `TypeDef` or `MethodDef` token. -/
 def linkGenericParams : Nat := 3
 
+/-- A TypeRef crosses assemblies through this ExportedType row in its named facade. -/
+def linkForwarder : Nat := 4
+
 /-- The rows and heap entries one method's tokens, definition and locals reach in one
     assembly, with the links that locate definitions among them. -/
 structure MetadataSlice where
@@ -322,6 +328,7 @@ def columnWidths (widths : ColumnWidths) : Nat → Option (List Nat)
   | 0x1B => some [widths.blob]
   | 0x20 => some [4, 2, 2, 2, 2, 4, widths.blob, widths.string, widths.string]
   | 0x23 => some [2, 2, 2, 2, 4, widths.blob, widths.string, widths.string, widths.blob]
+  | 0x27 => some [4, 4, widths.string, widths.string, widths.implementation]
   | 0x29 => some [widths.typeDef, widths.typeDef]
   | 0x2A => some [2, 2, widths.typeOrMethodDef, widths.string]
   | 0x2B => some [widths.methodDefOrRef, widths.blob]
@@ -912,6 +919,19 @@ def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
   let version := parts.version
   return assemblySpelling parts.name version.major version.minor version.build version.revision
     parts.culture spelled
+
+/-- Read a top-level type forwarder and its destination AssemblyRef from the facade bytes.
+    A file export or a nested export does not identify a destination assembly. -/
+def MetadataIndex.forwardedAssembly (index : MetadataIndex) (token : Nat)
+    (parts : List (List Nat)) : Except MetadataError (List Nat) := do
+  let [flags, typeDefId, name, namespace_, implementation] ← index.columnsOf Table.exportedType token
+    | throw (.operandMismatch token)
+  unless flags == 0x00200000 && typeDefId == 0 do throw (.operandMismatch token)
+  let destination ← decodeCoded [0x26, Table.assemblyRef, Table.exportedType] 2 implementation
+  unless metadataTableOf destination == Table.assemblyRef && tokenRow destination != 0 do
+    throw (.operandMismatch token)
+  unless [← index.string namespace_, ← index.string name] == parts do throw (.operandMismatch token)
+  index.assemblyRefIdentity destination
 
 /-- The assembly identity when its name and culture fit the expected identity's byte lengths. -/
 def MetadataIndex.assemblyRefName (index : MetadataIndex) (token : Nat) (expected : AssemblyName) :

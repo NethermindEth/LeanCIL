@@ -181,7 +181,7 @@ partial class Program
     }
 
     /// <summary>The tables whose rows a metadata slice carries.</summary>
-    static readonly int[] CarriedTables = [0x01, 0x02, 0x04, 0x06, 0x0A, 0x11, 0x1B, 0x23, 0x29, 0x2A, 0x2B];
+    static readonly int[] CarriedTables = [0x01, 0x02, 0x04, 0x06, 0x0A, 0x11, 0x1B, 0x23, 0x27, 0x29, 0x2A, 0x2B];
 
     /// <summary>
     /// The MethodDef token of every method with a body, with the tokens its instructions name and its local

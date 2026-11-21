@@ -342,7 +342,11 @@ What `MetadataResolution` and `MetadataBinding` check:
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
-  `void` return, forwarded types, module references and `AssemblyRef` rows with a public key flag.
+  `void` return, module references and `AssemblyRef` rows with a public key flag.
+- A top-level `TypeRef` may follow one forwarder between pinned assemblies. Lean reads the facade’s
+  `ExportedType` row, verifies the namespace, name, forwarding flag and destination `AssemblyRef`,
+  and checks that the defining slice contains the public `TypeDef` of the same name. Nested exports,
+  file exports and multi-hop forwarding chains are outside this binding.
 - A custom modifier binds its assembly and full name, including the namespace of each nested
   segment. A local nested `TypeDef` requires its enclosing `NestedClass` rows. Each enclosing
   type occupies a nonzero, earlier row in the same `TypeDef` table. A `TypeRef`

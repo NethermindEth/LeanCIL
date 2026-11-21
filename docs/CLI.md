@@ -171,6 +171,8 @@ identity only, as an `Extraction.AssemblyPin` attributed to every body it suppli
 replays the recorded references and rejects a changed hash or identity. Assemblies resolve only
 against this pinned set and the runtime's platform assemblies, so an unpinned reference, a name
 pinned under another version, a duplicate identity or a framework DLL passed as a reference fails.
+For a top-level type forwarded by a referenced facade, pass both the facade DLL and its defining DLL
+with `--reference`. Lean checks the `ExportedType` name, destination `AssemblyRef` and public `TypeDef`.
 One assembly cannot be both a typed import and a reference.
 
 A referenced assembly's static methods are admitted as direct `call` and `ldftn` targets, and its

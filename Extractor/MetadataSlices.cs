@@ -384,12 +384,43 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
             var definedIn = definition.Module.Assembly.Name.FullName;
             if (typeReference.Scope is AssemblyNameReference named && named.FullName != definedIn)
-                throw new InvalidDataException("Unsupported forwarded type: " + typeReference.FullName +
-                    " is defined in " + definedIn + ", not in the assembly that names it.");
+            {
+                var facade = collection.Pinned.ModuleOf(typeReference);
+                if (facade is null || !collection.Pinned.Contains(collection.Pinned.Working(definition.Module)))
+                    throw new InvalidDataException("Unpinned forwarded type: " + typeReference.FullName);
+                var source = collection.SliceOf(facade);
+                Link(4, token, source.PositionOf, source.Forwarder(typeReference, definedIn));
+            }
             var target = collection.SliceOf(definition.Module);
             Link(0, token, target.PositionOf, definition.MetadataToken.ToUInt32());
             if (baseOnly) target.DefinitionName(definition.MetadataToken.ToUInt32());
             else target.Token(definition.MetadataToken.ToUInt32());
+        }
+
+        /// <summary>The single top-level ExportedType row forwarding this name to the pinned implementation.</summary>
+        uint Forwarder(TypeReference type, string implementation)
+        {
+            uint token = 0;
+            foreach (var handle in Reader.ExportedTypes)
+            {
+                var row = Reader.GetExportedType(handle);
+                if (!Reader.StringComparer.Equals(row.Name, type.Name) ||
+                    !Reader.StringComparer.Equals(row.Namespace, type.Namespace)) continue;
+                if (token != 0 || type.DeclaringType is not null || !row.IsForwarder ||
+                    row.Implementation.Kind != HandleKind.AssemblyReference)
+                    throw new InvalidDataException("Ambiguous or unsupported forwarded type: " + type.FullName);
+                var destination = TokenOf(row.Implementation);
+                var reference = module.AssemblyReferences.SingleOrDefault(assembly =>
+                    assembly.MetadataToken.ToUInt32() == destination);
+                if (reference?.FullName != implementation)
+                    throw new InvalidDataException("Forwarder destination mismatch: " + type.FullName);
+                token = TokenOf(handle);
+                Row(token);
+                Text(row.Name);
+                Text(row.Namespace);
+                Token(destination);
+            }
+            return token != 0 ? token : throw new InvalidDataException("Missing type forwarder: " + type.FullName);
         }
 
         /// <summary>
@@ -720,6 +751,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                     (blob, Heap.Blob)],
                 TableIndex.AssemblyRef => [(8, Heap.None), (4, Heap.None), (blob, Heap.Blob), (text, Heap.Text),
                     (text, Heap.Text), (blob, Heap.Blob)],
+                TableIndex.ExportedType => [(8, Heap.None), (text, Heap.Text), (text, Heap.Text),
+                    (Coded(2, TableIndex.File, TableIndex.AssemblyRef, TableIndex.ExportedType), Heap.None)],
                 TableIndex.NestedClass => [(Simple(TableIndex.TypeDef), Heap.None),
                     (Simple(TableIndex.TypeDef), Heap.None)],
                 _ => throw new InvalidDataException($"No column layout for table {table}.")

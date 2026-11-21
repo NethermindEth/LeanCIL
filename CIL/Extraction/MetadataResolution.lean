@@ -480,21 +480,33 @@ def MetadataIndex.methodGenericParameters (index : MetadataIndex)
       (index.link linkGenericParams method).isNone then .ok []
   else index.genericParameters position method
 
-/-- The definition link of a carried reference must select the requested slice. -/
-private def IndexTables.linkedDefinition (index : IndexTables) (token target : Nat) :
-    Except MetadataError Nat := do
+/-- Resolve a definition link in the referenced assembly or through a top-level forwarder.
+    The facade's AssemblyRef names the implementation slice and its exported name matches
+    the original TypeRef. -/
+private def checkedDefinitionLink (env : MetadataEnv) (index : MetadataIndex)
+    (token target : Nat) (scope : List Nat) (parts : List (List Nat)) :
+    Except MetadataError (Nat × Nat × List Nat) := do
   let some (linked, definition) := index.link linkDefinition token | throw (.unresolvedType token)
-  if linked != target then throw (.unresolvedType token)
-  return definition
+  if linked == target then return (linked, definition, scope)
+  let some (facade, exported) := index.link linkForwarder token | throw (.unresolvedType token)
+  if facade != target then throw (.unresolvedType token)
+  let source ← env.slice facade exported
+  if source.identity != scope then throw (.operandMismatch token)
+  let destination ← source.forwardedAssembly exported parts
+  if env.identities[destination]? != some linked then throw (.operandMismatch token)
+  let implementation ← env.slice linked definition
+  let row ← implementation.typeDef definition
+  if implementation.identity != destination || row.flags % 8 != 1 then throw (.operandMismatch token)
+  return (linked, definition, destination)
 
-/-- A carried reference must link to the definition in its scope with its exact name parts. -/
+/-- A carried reference binds the qualified name in the checked defining assembly. -/
 private def linkedType (env : MetadataEnv) (position token target : Nat) (scope : List Nat)
     (parts : List (List Nat)) (resolve : Nat → Nat → Except MetadataError NamedType) :
     Except MetadataError NamedType := do
   let index ← env.slice position token
-  let definition <- index.linkedDefinition token target
-  let named <- resolve target definition
-  if named.scope != scope || named.parts != parts then throw (.operandMismatch token)
+  let (linked, definition, identity) ← checkedDefinitionLink env index token target scope parts
+  let named ← resolve linked definition
+  if named.scope != identity || named.parts != parts then throw (.operandMismatch token)
   return named
 
 /-- A modifier needs the qualified name of each enclosing local definition. -/
@@ -779,11 +791,11 @@ def typeDefKind (env : MetadataEnv) (index : MetadataIndex) (position token : Na
         let core <- index.coreLibraryReference row.extends_
         env.externalBaseKind index token row.extends_ scope parts core
       | some target => do
-        let definition <- index.linkedDefinition row.extends_ target
-        let base <- env.slice target definition
-        let baseParts <- definitionParts base target resolveFuel definition
+        let (linked, definition, identity) ← checkedDefinitionLink env index row.extends_ target scope parts
+        let base <- env.slice linked definition
+        let baseParts <- definitionParts base linked resolveFuel definition
           (<- base.typeDef definition)
-        if base.identity != scope || baseParts != parts then throw (.operandMismatch row.extends_)
+        if base.identity != identity || baseParts != parts then throw (.operandMismatch row.extends_)
         carriedRootKind index token base.identity baseParts
     | _ => pure .classType
   if kind == .valueType && ownParts == [systemNamespace, enumName] &&

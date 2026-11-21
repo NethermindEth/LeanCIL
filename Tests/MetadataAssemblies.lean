@@ -14,6 +14,49 @@ open CIL CIL.Extraction Tests.MetadataBuilder Tests.MetadataWorld
 
 set_option maxRecDepth 32768
 
+/-- Resolve a caller's TypeRef through the facade's physical ExportedType and AssemblyRef rows. -/
+private def forwarded (flags := 0x00200000) (typeDefId := 0) (implementation := 5)
+    (forwardName := "InvalidOperationException") (targetName := "Core")
+    (declaredName := "InvalidOperationException") (visibility := 1)
+    (forwarderSlice := 1) (carry := true) : Option (List Nat) := do
+  let identity := fun (name : String) => name ++ ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+  let make := fun (name : String) (entries : Step Nat) => build entries (bytesOf name) (identity name)
+  let (library, definition) := make "Core" do
+    let name ← string declaredName
+    let ns ← string "System"
+    row Table.typeDef [visibility, name, ns, 0, 1, 1]
+  let (facade, exported) := make "Facade" do
+    let dest ← string targetName
+    let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, dest, 0, 0]
+    let name ← string forwardName
+    let ns ← string "System"
+    row Table.exportedType [flags, typeDefId, name, ns, implementation]
+  let (caller, reference) := make "Caller" do
+    let scope ← string "Facade"
+    let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, scope, 0, 0]
+    let name ← string "InvalidOperationException"
+    let ns ← string "System"
+    let reference ← row Table.typeRef [6, name, ns]
+    link linkDefinition reference 2 definition
+    if carry then link linkForwarder reference forwarderSlice exported
+    return reference
+  let slices ← [caller, facade, library].mapM fun slice => slice.index.toOption
+  let .inl named ← (typeRefTarget (.ofSlices slices) 0 resolveFuel reference).toOption | none
+  return named.scope
+
+/-- A top-level forwarder selects the public definition in its named implementation.
+    A changed flag, name, implementation tag, assembly, visibility or witness fails. -/
+theorem checked_forwarder :
+    forwarded = some (bytesOf "Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null") ∧
+    [forwarded (flags := 0), forwarded (typeDefId := 1), forwarded (implementation := 0),
+     forwarded (implementation := 1), forwarded (implementation := 4),
+     forwarded (implementation := 6), forwarded (implementation := 7),
+     forwarded (forwardName := "Exception"), forwarded (declaredName := "Exception"),
+     forwarded (targetName := "Other"), forwarded (visibility := 0),
+     forwarded (forwarderSlice := 0), forwarded (carry := false)].all Option.isNone := by
+  decide +kernel
+#print axioms checked_forwarder
+
 /-- Prefix matching agrees with the prefix predicate, including overlapping and empty prefixes. -/
 theorem prefixes :
     let stored := [[1], [1, 2, 3], [4, 5], [4, 6]]

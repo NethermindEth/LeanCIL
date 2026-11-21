@@ -272,7 +272,7 @@ static partial class StrictBindingFacts
     // The tables a carried slice holds rows of, other than Assembly, in token order.
     static readonly TableIndex[] SliceTables = [TableIndex.TypeRef, TableIndex.TypeDef, TableIndex.Field,
         TableIndex.MethodDef, TableIndex.MemberRef, TableIndex.StandAloneSig, TableIndex.TypeSpec,
-        TableIndex.AssemblyRef, TableIndex.NestedClass, TableIndex.GenericParam, TableIndex.MethodSpec];
+        TableIndex.AssemblyRef, TableIndex.ExportedType, TableIndex.NestedClass, TableIndex.GenericParam, TableIndex.MethodSpec];
 
     /// <summary>
     /// A slice an extraction could carry for an image, as a Lean `CIL.Extraction.MetadataSlice`: the assembly block,
@@ -339,7 +339,7 @@ static partial class StrictBindingFacts
     {
         TableIndex.TypeDef => 4,
         TableIndex.Field => 2,
-        TableIndex.MethodDef => 8,
+        TableIndex.MethodDef or TableIndex.ExportedType => 8,
         TableIndex.StandAloneSig or TableIndex.TypeSpec => 0,
         TableIndex.AssemblyRef => 12,
         _ => null
@@ -358,6 +358,9 @@ static partial class StrictBindingFacts
             case HandleKind.TypeReference:
                 var reference = reader.GetTypeReference((TypeReferenceHandle)handle);
                 return [Text(reference.Name), Text(reference.Namespace)];
+            case HandleKind.ExportedType:
+                var exported = reader.GetExportedType((ExportedTypeHandle)handle);
+                return [Text(exported.Name), Text(exported.Namespace)];
             case HandleKind.TypeDefinition:
                 var type = reader.GetTypeDefinition((TypeDefinitionHandle)handle);
                 return [Text(type.Name), Text(type.Namespace)];
