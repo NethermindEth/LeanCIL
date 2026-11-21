@@ -3,14 +3,31 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
+    const string Isolation = """
+        set_option Elab.async false
+        namespace EvidenceRejectionHarness
+        open Lean Elab Command
+        /-- Check invalid fixtures without letting their declarations or attributes escape. -/
+        elab "#isolated_rejection" "{" commands:command* "}" : command => do
+          let saved ← get
+          let mut messages := saved.messages
+          for command in commands do
+            modify ({ · with messages := {} })
+            messages := messages ++
+              (← Lean.Elab.Tactic.GuardMsgs.runAndCollectMessages command)
+          set { saved with messages := messages }
+        end EvidenceRejectionHarness
+        """ + "\n";
+
     // The mutated source with `theorem` stated as its own negation, `¬ (statement)`, proved by the kernel: the
     // obligation a mutation breaks is shown false, not merely unprovable by the tactic that proves it when true.
-    static string KernelRefutation(string mutated, string theorem, string refutation)
+    static string KernelRefutation(string mutated, string theorem, string refutation, bool prefixOnly = false)
     {
         var obligation = SingleLineTheorem.Matches(mutated).FirstOrDefault(match => match.Groups[1].Value == theorem)
             ?? throw new InvalidOperationException("Missing obligation to refute: " + theorem);
-        return mutated.Replace(obligation.Value,
-            $"theorem {refutation} : ¬ ({obligation.Groups["statement"].Value}) := by decide +kernel");
+        var proof = $"theorem {refutation} : ¬ ({obligation.Groups["statement"].Value}) := by decide +kernel";
+        return prefixOnly ? mutated[..obligation.Index] + proof + $"\n#print axioms {refutation}\n"
+            : mutated.Replace(obligation.Value, proof);
     }
 
     // Each mutation must produce its own expected diagnostic. A different failing case
@@ -38,25 +55,10 @@ partial class Program
                 bodies.Add(RejectedImport.Replace(item.Source,
                     match => { imports.Add(match.Groups[1].Value); return ""; }));
             }
-            const string isolation = """
-                set_option Elab.async false
-                namespace EvidenceRejectionHarness
-                open Lean Elab Command
-                /-- Check invalid fixtures without letting their declarations or attributes escape. -/
-                elab "#isolated_rejection" "{" commands:command* "}" : command => do
-                  let saved ← get
-                  let mut messages := saved.messages
-                  for command in commands do
-                    modify ({ · with messages := {} })
-                    messages := messages ++
-                      (← Lean.Elab.Tactic.GuardMsgs.runAndCollectMessages command)
-                  set { saved with messages := messages }
-                end EvidenceRejectionHarness
-                """ + "\n";
             var source = new StringBuilder(string.Join('\n', imports.Select(module => "import " + module)) +
-                "\n" + isolation);
+                "\n" + Isolation);
             var ranges = new List<(int Start, int End)>();
-            var line = imports.Count + 1 + isolation.Count(character => character == '\n');
+            var line = imports.Count + 1 + Isolation.Count(character => character == '\n');
             for (var index = 0; index < cases.Count; index++)
             {
                 source.Append($"#isolated_rejection {{\nnamespace RejectedCase{index}\n");
@@ -89,7 +91,8 @@ partial class Program
             var starts = ranges.Select(range => range.Start).ToArray();
             var errors = cases.Select(_ => new StringBuilder()).ToArray();
             var sourceLines = source.Split('\n');
-            var failedLines = cases.Select(_ => new HashSet<int>()).ToArray();
+            var firstLines = Enumerable.Repeat(int.MaxValue, cases.Count).ToArray();
+            var refutable = new string?[cases.Count];
             for (var diagnostic = 0; diagnostic < diagnostics.Length; diagnostic++)
             {
                 var match = diagnostics[diagnostic];
@@ -101,8 +104,14 @@ partial class Program
                 var end = diagnostic + 1 < diagnostics.Length
                     ? diagnostics[diagnostic + 1].Index
                     : result.Output.Length;
-                errors[index].Append(result.Output.AsSpan(match.Index, end - match.Index));
-                failedLines[index].Add(location);
+                var message = result.Output.AsSpan(match.Index, end - match.Index);
+                errors[index].Append(message);
+                if (location >= firstLines[index]) continue;
+                firstLines[index] = location;
+                var theorem = SingleLineTheorem.Match(sourceLines[location - 1]);
+                var decidedFalse = message.Contains("proved that the proposition", StringComparison.Ordinal) &&
+                    message.Contains("is false", StringComparison.Ordinal);
+                refutable[index] = theorem.Success && decidedFalse ? theorem.Groups[1].Value : null;
             }
             for (var index = 0; index < cases.Count; index++)
             {
@@ -115,7 +124,7 @@ partial class Program
                 if (File.ReadAllText(cases[index].Path) != cases[index].Source)
                     throw new InvalidOperationException("Mutation changed during checking: " + cases[index].Path);
             }
-            RefuteSemanticRejections(errors, failedLines, sourceLines, leanPath);
+            RefuteSemanticRejections(refutable, leanPath);
             foreach (var item in cases) Console.WriteLine(item.Passed);
             cases.Clear();
         }
@@ -124,35 +133,30 @@ partial class Program
         // is stated as its negation and proved by `decide +kernel`, so the mutation is shown false, not merely
         // unprovable. Rejections of another kind (a name that no longer resolves, a malformed term) have no negation
         // to prove and are counted, not hidden.
-        void RefuteSemanticRejections(StringBuilder[] errors, HashSet<int>[] failedLines, string[] sourceLines,
-            string? leanPath)
+        void RefuteSemanticRejections(string?[] theorems, string? leanPath)
         {
             var refutations = new List<string>();
             var imports = new SortedSet<string>(StringComparer.Ordinal);
             var unrefuted = new List<string>();
             for (var index = 0; index < cases.Count; index++)
             {
-                var output = errors[index].ToString();
-                // Use the failed declaration's location. A narrowed fixture retains successful identity witnesses.
-                var theorems = failedLines[index].Select(line => SingleLineTheorem.Match(sourceLines[line - 1]))
-                    .Where(match => match.Success).Select(match => match.Groups[1].Value).Distinct().ToArray();
-                if (!output.Contains("proved that the proposition", StringComparison.Ordinal) ||
-                    !output.Contains("is false", StringComparison.Ordinal) || theorems.Length != 1)
+                if (theorems[index] is not { } theorem)
                 {
                     unrefuted.Add(Path.GetFileName(cases[index].Path));
                     continue;
                 }
                 var body = RejectedImport.Replace(
-                    KernelRefutation(cases[index].Source, theorems[0], "kernelRefutation"),
+                    KernelRefutation(cases[index].Source, theorem, "kernelRefutation", prefixOnly: true),
                     match => { imports.Add(match.Groups[1].Value); return ""; });
-                refutations.Add($"namespace KernelRefuted{refutations.Count}\n{body}\n" +
-                    $"end KernelRefuted{refutations.Count}\n");
+                // Only the declarations preceding the failed theorem are premises of its refutation.
+                refutations.Add($"#isolated_rejection {{\n{body}\n}}\n");
             }
             if (refutations.Count > 0)
             {
                 var path = Path.GetFullPath(Path.Combine(directory, "KernelRefutations.lean"));
+                imports.Add("Lean");
                 File.WriteAllText(path, string.Join('\n', imports.Select(module => "import " + module)) + "\n" +
-                    string.Concat(refutations));
+                    Isolation + string.Concat(refutations));
                 var proved = Execute(["lake", "env", "lean", path], cwd: FixturePackage(), leanPath: leanPath);
                 if (proved.Code != 0 || proved.Output.Contains("sorryAx", StringComparison.Ordinal))
                     throw new InvalidOperationException(
