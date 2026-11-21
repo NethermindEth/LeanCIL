@@ -148,8 +148,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
     // The helper keeps its call, which steps as the scalar intrinsic its model fact names.
     var instruction = "(body := Extracted.method0)";
-    var callStep = $"  rw [CIL.Safety.step_call_intrinsic (link := Extracted.method0_link{argc}) " +
-        $"(found := Extracted.method0_model{argc}) (direct := rfl)]\n";
+    var callStep = $"  math_wrapper_step Extracted.method0_model{argc} evaluated\n";
     var argumentsLean = string.Join(" ", variables);
     var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
     string ForCase(string expression)
@@ -164,12 +163,12 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         $"    {invocation} = .ok (CIL.Safety.Memory.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
         $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
         $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
-        callStep + "  math_wrapper_step evaluated\n" +
+        callStep +
         $"theorem wrapper_fault_full {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +
         $"    {invocation} = .error ⟨0, {argc}, .arithmetic fault⟩ := by\n" + prefix +
         $"  apply Tests.WrapperProofs.run_fault {instruction} (by rfl) (by rfl)\n" +
-        callStep + "  math_wrapper_step evaluated\n" +
+        callStep +
         $"theorem wrapper_success {binders} (r : CIL.W{resultWidth})\n" +
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    ({invocation}).map Prod.snd = .ok [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})] :=\n" +
