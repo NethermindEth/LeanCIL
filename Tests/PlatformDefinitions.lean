@@ -27,6 +27,52 @@ theorem carried_core_scope_checks_publisher :
   decide +kernel
 #print axioms carried_core_scope_checks_publisher
 
+/-- Three carried class definitions. The root ends the chain and its direct child owns a field. -/
+private def carriedClasses (scope rootName : String) (rootFlags : Nat) :
+    Except MetadataError MetadataEnv := do
+  let rows : Step Unit := do
+    let space ← string "System"
+    let root ← string rootName
+    let parent ← string "Exception"
+    let child ← string "SystemException"
+    let fieldName ← string "_HResult"
+    let fieldType ← blob [0x06, 0x08]
+    let _ ← row Table.typeDef [rootFlags, root, space, 0, 1, 1]
+    let _ ← row Table.typeDef [1, parent, space, 4, 1, 1]
+    let _ ← row Table.typeDef [1, child, space, 8, 2, 1]
+    let _ ← row Table.field [1, fieldName, fieldType]
+  let slice := (build rows (bytesOf "System.Private.CoreLib") scope 11).1
+  let index ← slice.indexWith (← slice.tables) (bytesOf scope)
+  return MetadataEnv.ofSlices [index]
+
+/-- Only the checked root ends the lineage. Its child's field counts towards the grandchild. -/
+theorem carried_object_lineage :
+    (do let env ← carriedClasses coreLibraryScope "Object" 1
+        let lineage ← env.classChain resolveFuel 0 0x02000003
+        let fields ← env.chainFieldCount lineage
+        let frame ← env.frame 0 0
+        return (lineage, fields, frame.corlib)) =
+      .ok ([(0, 0x02000002)], 1, some (bytesOf coreLibraryScope)) := by rfl
+#print axioms carried_object_lineage
+
+/-- The defining CoreLib identity supplies Int32 storage even without a facade reference. -/
+theorem carried_primitive_storage :
+    typeStorageAt (fun _ => none) (.atom coreLibraryScope "System.Int32") = some (.field .signed32) ∧
+    typeStorageAt (fun _ => none) (.atom ownIdentity "System.Int32") = none :=
+  ⟨rfl, rfl⟩
+#print axioms carried_primitive_storage
+
+/-- A facade, another name or an interface cannot stand in for the defining root class. -/
+theorem carried_object_rejects_other_definitions :
+    let check := fun scope name flags => do
+      let env ← carriedClasses scope name flags
+      env.classChain resolveFuel 0 0x02000003
+    check runtimeScope "Object" 1 = .error (.unsupportedBase 0x02000001) ∧
+    check coreLibraryScope "Other" 1 = .error (.unsupportedBase 0x02000001) ∧
+    check coreLibraryScope "Object" 0x21 = .error (.unsupportedBase 0x02000001) :=
+  ⟨rfl, rfl, rfl⟩
+#print axioms carried_object_rejects_other_definitions
+
 /-! ## A type reference outside the carried slices -/
 
 /-- `System.Console` of the world resolved under `platform`, read with `hint`. -/

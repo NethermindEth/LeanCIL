@@ -155,7 +155,8 @@ private def identityEq (left right : String) : Decidable (left = right) :=
 
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorageAt (layoutAt : Nat → Option RawLayout) : TypeExpr → Option StorageType
-  | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
+  | .atom scope name =>
+    if scope = runtimeScope ∨ scope = coreLibraryScope then .field <$> primitiveField name else none
   | .object _ _ => some .object
   | .aggregate identity index => do
     let metadata ← layoutAt index

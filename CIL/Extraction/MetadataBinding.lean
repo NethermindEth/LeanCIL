@@ -218,29 +218,45 @@ theorem MetadataEnv.chainRoot_ok {env : MetadataEnv} {token base : Nat} {scope :
 
 #print axioms MetadataEnv.chainRoot_ok
 
+/-- A carried root has the public, nongeneric, fieldless System.Object definition in CoreLib. -/
+def MetadataEnv.carriedObjectRoot (env : MetadataEnv) (index : MetadataIndex)
+    (position token : Nat) (row : TypeDefRow) : Except MetadataError Bool := do
+  unless index.identity == bytesOf coreLibraryScope &&
+      row.flags &&& 0x27 == 1 && index.instanceTotal.find? token == some 0 do return false
+  let namespaceBytes ← index.string row.namespace_
+  let name ← index.string row.name
+  return namespaceBytes == systemNamespace && name == objectName &&
+    (← env.definitionArity position token) == 0
+
 /-- The base classes of a class definition, nearest first, as slice positions and `TypeDef`
-    tokens. The chain ends at `System.Object` (`MetadataEnv.chainRoot`). -/
-def MetadataEnv.classChain (env : MetadataEnv) :
-    Nat → Nat → Nat → Except MetadataError (List (Nat × Nat))
-  | 0, _, token => .error (.unsupportedBase token)
-  | fuel + 1, position, token => do
+    tokens. Traversal includes each base except System.Object. -/
+def MetadataEnv.classChain (env : MetadataEnv) (fuel position token : Nat)
+    (includeOwner : Bool := false) : Except MetadataError (List (Nat × Nat)) :=
+  match fuel with
+  | 0 => .error (.unsupportedBase token)
+  | fuel + 1 => do
     let index ← env.slice position token
     let row ← index.typeDef token
+    let lineage (bases : List (Nat × Nat)) :=
+      if includeOwner then (position, token) :: bases else bases
     match metadataTableOf row.extends_ with
     | 0x02 =>
-      if tokenRow row.extends_ == 0 then .error (.unsupportedBase token)
+      if tokenRow row.extends_ == 0 then
+        if ← env.carriedObjectRoot index position token row then pure []
+        else throw (.unsupportedBase token)
       else if (← env.definitionArity position row.extends_) != 0 then
         .error (.unsupportedBase token)
-      else do .ok ((position, row.extends_) :: (← env.classChain fuel position row.extends_))
+      else lineage <$> env.classChain fuel position row.extends_ true
     | 0x01 =>
       match ← typeRefTarget env position resolveFuel row.extends_ with
       | .inl _ =>
         let some (linked, definition) := index.link linkDefinition row.extends_
           | throw (.unsupportedBase token)
         if (← env.definitionArity position row.extends_) != 0 then throw (.unsupportedBase token)
-        .ok ((linked, definition) :: (← env.classChain fuel linked definition))
+        lineage <$> env.classChain fuel linked definition true
       | .inr (scope, _, parts) =>
-        env.chainRoot token row.extends_ scope parts (← index.coreLibraryReference row.extends_)
+        lineage <$> env.chainRoot token row.extends_ scope parts
+          (← index.coreLibraryReference row.extends_)
     | _ => .error (.unsupportedBase token)
 
 /-- The number of instance fields of the types of a chain. -/

@@ -248,6 +248,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   the end of a class hierarchy, Lean checks the base TypeRef's own AssemblyRef. It must name
   `System.Runtime`, `netstandard`, `mscorlib` or `System.Private.CoreLib` with neutral culture
   and the publisher token for that name. The full reference version is part of the type identity.
+  For a carried .NET 11 CoreLib definition, the chain ends at the public, nongeneric, fieldless
+  `System.Object` whose `TypeDef` has no base. CoreLib supplies the scope of its own primitive
+  signatures. The field index counts the instance fields of each class below `System.Object`.
 - A reference whose scope has the name of a pinned assembly, at any version, culture or key token,
   needs the pinned assembly's slice among the method's slices; without it the check fails with
   `missingSlice`, so a pinned type or call, or one of another version of a pinned assembly, is

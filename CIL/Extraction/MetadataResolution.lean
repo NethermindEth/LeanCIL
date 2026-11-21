@@ -271,11 +271,12 @@ def MetadataIndex.coreLibraryReference (index : MetadataIndex) (token : Nat) :
   if metadataTableOf row.scope != Table.assemblyRef then return false
   index.coreAssemblyRef row.scope
 
-/-- The identity of the assembly the slice's primitive types come from, or `none` when the
-    slice names none. -/
+/-- CoreLib defines its own primitives. Other slices identify their primitive assembly by its
+    AssemblyRef row, if present. -/
 def MetadataIndex.corlibIdentity (index : MetadataIndex) :
     Except MetadataError (Option (List Nat)) :=
-  if index.corlib == 0 then .ok none
+  if index.corlib == 0 then
+    .ok (if index.identity == bytesOf coreLibraryScope then some index.identity else none)
   else do
     let token ← checkedTokenOf Table.assemblyRef index.corlib .rowOverflow
     if !(← index.coreAssemblyRef token) then throw (.unsupportedAssemblyRef token)

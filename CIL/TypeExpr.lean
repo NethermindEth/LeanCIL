@@ -25,6 +25,10 @@ def runtimeScope : String :=
       ("System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
       ).isValidUTF8 }
 
+/-- The defining assembly of the .NET 11 CoreLib implementation. -/
+def coreLibraryScope : String :=
+  "System.Private.CoreLib, Version=11.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+
 /-- The byte-backed scope retains the exact original assembly identity. -/
 theorem runtimeScope_eq :
     runtimeScope =
