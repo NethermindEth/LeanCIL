@@ -680,6 +680,69 @@ foreach (var (label, profile) in new[]
         () => Console.WriteLine($"PASS hash round matches the host CPU's AESENC on {AesCases} blocks: {label}")));
 }
 Flush();
+// Both profiles must implement the same round for every input and reject a lost high key half.
+var wrongAes = Path.Combine(root, "AesRoundLowKeyTwice");
+Directory.CreateDirectory(wrongAes);
+var wrongAesImage = Path.Combine(wrongAes, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var round = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "AesRound");
+    var highKey = round.Body.Instructions.Single(i => i.OpCode.Code == Code.Ldarg_3);
+    if (highKey.Previous?.OpCode.Code != Code.Ldarg_2 ||
+        highKey.Next?.Operand is not MethodReference { Name: "Create" })
+        throw new InvalidOperationException("Expected the two key halves before Vector128.Create.");
+    highKey.OpCode = OpCodes.Ldarg_2;
+    variant.Write(wrongAesImage);
+}
+var wrongRound = Assembly.Load(File.ReadAllBytes(wrongAesImage)).GetType("Examples.DivisionIntrinsics")!.GetMethod("AesRound")!;
+var keyWitness = new object[] { 0UL, 0UL, 0UL, 1UL };
+var expectedZeroRound = Vector128.Create((byte)0x63).AsUInt64();
+var observedRound = ((Vector128<byte>)aesRound.Invoke(null, keyWitness)!).AsUInt64();
+var observedWrongRound = ((Vector128<byte>)wrongRound.Invoke(null, keyWitness)!).AsUInt64();
+if (observedWrongRound != expectedZeroRound || observedRound != (expectedZeroRound ^ Vector128.Create(0UL, 1UL)))
+    throw new InvalidOperationException("The CLR AES results disagree with the high-key witness.");
+
+foreach (var (label, profile, arm) in new[]
+{
+    ("x64", DeclareAes("x64-v4", "aes"), false), ("arm64", DeclareAes("arm64-advsimd", "armAes"), true)
+})
+{
+    var result = arm ? """
+          change [Value.scalar (.v128 (CIL.Vector.aesMixColumns (CIL.Vector.armAesEncrypt state 0) ^^^ key))] =
+            [Value.scalar (.v128 (CIL.Vector.aesEncryptRound state key))]
+          rw [CIL.Vector.armAes_round_eq_aesEncryptRound]
+        """ : "  rfl";
+    verification.VerifyContractVariant(assembly, "Examples", selectors["AesRound"], Path.Combine(root, "AesRoundContract-" + label),
+        wrongAesImage, selectors["AesRound"], Path.Combine(wrongAes, label), "open Tests.AesRoundContract", $$"""
+        bind_entry entry (memory : Memory) (a b k l : W64) (wf : memory.WellFormed) :=
+          Extracted.method0 with [.scalar (.i64 a), .scalar (.i64 b), .scalar (.i64 k), .scalar (.i64 l)]
+          from memory allocating wf
+
+        set_option maxRecDepth 8192 in
+        /-- The compiled round uses its two fresh vector locals and preserves caller storage. -/
+        theorem correctness : roundContract.Holds Extracted.program 0 := by
+          rintro ⟨a, b, k, l⟩ memory wf
+          obtain ⟨stateHome, keyHome, entered, enter⟩ := entry.checked memory a b k l wf
+          let state := CIL.Vector.pack128 a b
+          let key := CIL.Vector.pack128 k l
+          obtain ⟨first, stateStore, frame1, -⟩ := (enter.frame []).store 0 (.v128 state) rfl
+          obtain ⟨second, keyStore, frame2, -⟩ := frame1.store 1 (.v128 key) rfl
+          apply WP.enter (by rfl) (by rfl) enter.setup
+          have stateRead := frame2.snapshots.read_vector128 (index := 0) (bits := state) rfl (by rfl)
+          have keyRead := frame2.snapshots.read_vector128 (index := 1) (bits := key) rfl (by rfl)
+          cil_contract_steps [stateStore, keyStore, entry.frame, stateRead, keyRead, state, key]
+          refine ⟨(frame2.leave enter.setup).1, CIL.Vector.aesEncryptRound state key, ?_, rfl⟩
+        {{result}}
+        """, """
+        set_option maxRecDepth 8192 in
+        /-- Reusing the low key half drops the high bit set by the witness. -/
+        theorem correctness : roundContract.Refuted Extracted.program 0 := by
+          apply refuted_of_dropped_key (fuel := 64)
+          rfl
+        """, profile: profile, imports: "import CIL\nimport CIL.Safety.LoopScaffold\nimport Tests.AesRoundContract");
+    Console.WriteLine($"PASS {label} AES round contract and verified high-key counterexample");
+}
+
 // Without AES the x86 getter folds false, so the reachable ARM64 calls are rejected on every built-in.
 foreach (var profile in new[] { "x64-v4", "arm64-advsimd" })
 {

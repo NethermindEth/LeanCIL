@@ -334,6 +334,9 @@ name = "Tests.ExactIntrinsics"
 name = "Tests.ShuffleContract"
 
 [[lean_lib]]
+name = "Tests.AesRoundContract"
+
+[[lean_lib]]
 name = "Tests.SignWindowContract"
 
 [[lean_lib]]
