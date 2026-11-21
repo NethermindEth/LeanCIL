@@ -63,7 +63,7 @@ internal static class InstructionTranslation
             var (resolved, index) = callSites.Target(i, methods);
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
-        if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
+        if (throws.Raises.ContainsKey(i)) return new StackOperation(i.OpCode.Code);
         if (i.OpCode.Code != Code.Ldnull && throws.Operands.Contains(i)) return StackOperation.Nop;
         if (i.Operand is Instruction destination &&
             i.OpCode.OperandType is OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget &&
@@ -124,7 +124,7 @@ internal static class InstructionTranslation
             Code.Div or Code.Div_Un or Code.Rem or Code.Rem_Un or Code.Dup or Code.Pop or Code.Ldnull or
             Code.Ldind_I1 or Code.Ldind_U1 or Code.Ldind_I2 or Code.Ldind_U2 or Code.Ldind_I4 or Code.Ldind_U4 or
             Code.Ldind_I8 or Code.Ldind_I or Code.Stind_I1 or Code.Stind_I2 or Code.Stind_I4 or Code.Stind_I8 or
-            Code.Stind_I =>
+            Code.Stind_I or Code.Ret =>
                 new StackOperation(i.OpCode.Code),
             Code.Nop or Code.Readonly => StackOperation.Nop,
             // Ordinary accesses already use the documented byte-aligned runtime model.
@@ -169,7 +169,6 @@ internal static class InstructionTranslation
             Code.Ldc_I4_8 => new Constant(32, 8, true),
             Code.Ldc_I4 or Code.Ldc_I4_S => new Constant(32, Convert.ToInt64(i.Operand), false),
             Code.Ldc_I8 => new Constant(64, (long)i.Operand, false),
-            Code.Ret => new Return(),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
     }

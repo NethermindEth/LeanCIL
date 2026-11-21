@@ -308,7 +308,7 @@ foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
         throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
 }
 if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
-    !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
+    !Pure(Make("StackOperation", Code.Ret)) || Pure(Make("StackOperation", Code.Ret), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
 var unaligned = Model("UnsafeModels").GetMethod("UnalignedStorage", Declared)!;

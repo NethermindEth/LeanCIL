@@ -283,7 +283,7 @@ internal static partial class ProofOutline
                     Walk(no, taken ? pc + 1 : target, indent + "  ", hypothesis, iteration);
                     return;
                 }
-                else if (op is Return && plainReturn)
+                else if (op is StackOperation { Kind: Code.Ret } && plainReturn)
                 {
                     lean.Wrapped(indent + "cil_loop_finish", ("[" + string.Join(", ", path.Facts
                         .Concat([path.Confined])) + "]").Terms(), "");

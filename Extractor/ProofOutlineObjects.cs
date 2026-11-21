@@ -776,12 +776,12 @@ internal static partial class ProofOutline
                     stores++;
                 }
                 else if (op.IsNop) { }
-                else if (throws && !linear && op is Throw)
+                else if (throws && !linear && op is StackOperation { Kind: Code.Throw })
                 {
                     Steps.Add(new Thrown(location(pc)));
                     return true;
                 }
-                else if (op is Return)
+                else if (op is StackOperation { Kind: Code.Ret })
                 {
                     if (spec.Result is not null)
                     {

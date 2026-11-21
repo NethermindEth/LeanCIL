@@ -142,7 +142,7 @@ internal static partial class ProofOutline
                 stack.Push(stack.Peek());
             }
             else if (op.IsNop) { }
-            else if (op is Return && plainReturn && pc == ops.Length - 1)
+            else if (op is StackOperation { Kind: Code.Ret } && plainReturn && pc == ops.Length - 1)
             {
                 if (spec.Result is not null)
                 {

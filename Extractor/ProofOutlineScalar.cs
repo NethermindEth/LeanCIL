@@ -110,7 +110,7 @@ internal static partial class ProofOutline
                         return null;
                     return new ScalarSplit(condition, pc, holds, holdsStep, fails, failsStep);
                 }
-                else if (op is Return && plainReturn)
+                else if (op is StackOperation { Kind: Code.Ret } && plainReturn)
                     return ++paths > MaxScalarPaths ? null : new ScalarReturn();
                 else if (op.IsNop) { }
                 else if (Body.Pure(op, spec.Method, plainReturn))

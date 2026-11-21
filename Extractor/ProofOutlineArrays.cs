@@ -21,13 +21,13 @@ internal static partial class ProofOutline
     static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, Operation[] all)
     {
         // Instructions after the return cannot affect a straight-line read.
-        var end = Array.FindIndex(all, op => op is Return);
+        var end = Array.FindIndex(all, op => op is StackOperation { Kind: Code.Ret });
         var ops = all.Take(end + 1).Where(op => !op.IsNop).ToArray();
         if (LeanEmitter.Narrow(spec.Method.ReturnType) is not null || spec.Method.HasThis ||
             spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
             Argument(ops[0]) is not { Shape: ParameterShape.WordArray } array ||
             Argument(ops[1]) is not { Shape: ParameterShape.Scalar, Width: 4 } index ||
-            spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return)
+            spec.Result.Lean != WordType(array.Width) || ops[^1] is not StackOperation { Kind: Code.Ret })
             return null;
         if (ops.Length == 4 &&
             Arrays.Numeric(ops[2], Array.IndexOf(all, ops[2])) is { Store: false, Signed: false } load &&
@@ -57,7 +57,7 @@ internal static partial class ProofOutline
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
             extraction.Emitted[index].Frame.HasNoLocals && ops is
                 [Arg { Index: 0 }, Arg { Index: 1 },
-                    ElementAddress { ReadOnly: false } address, Return] &&
+                    ElementAddress { ReadOnly: false } address, StackOperation { Kind: Code.Ret }] &&
             address.Storage == element
             ? method : null;
     }

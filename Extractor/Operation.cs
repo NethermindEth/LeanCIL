@@ -69,12 +69,6 @@ internal sealed record Jump(int Opcode, int Target) : Operation
     };
 }
 
-/// <summary>A return whose value and storage width are determined by the method declaration.</summary>
-internal sealed record Return : Operation;
-
-/// <summary>A fault of the modelled CLR exception type.</summary>
-internal sealed record Throw(ExceptionType Exception) : Operation;
-
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
 internal enum Narrowing { Signed8, Unsigned8, Signed16, Unsigned16 }
 

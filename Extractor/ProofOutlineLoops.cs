@@ -63,7 +63,8 @@ internal static partial class ProofOutline
         /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
         /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
         internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
-            operation is Return ? plainReturn : operation is Arg load ? MethodArguments.Plain(method, load.Index) :
+            operation is StackOperation { Kind: Code.Ret } ? plainReturn :
+            operation is Arg load ? MethodArguments.Plain(method, load.Index) :
             ConstantOf(operation) is { Width: 32 or 64 } ||
             operation is ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
             StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or Code.And
@@ -127,7 +128,8 @@ internal static partial class ProofOutline
             for (var index = 0; index < Operations.Length; index++)
             {
                 if (Target(Operations[index]) is { } target) leaders.Add(target);
-                if (Target(Operations[index]) is not null || Operations[index] is Return) leaders.Add(index + 1);
+                if (Target(Operations[index]) is not null || Operations[index] is StackOperation { Kind: Code.Ret })
+                    leaders.Add(index + 1);
             }
             return leaders.Where(leader => leader <= pc).Max();
         }
@@ -561,7 +563,7 @@ internal static partial class ProofOutline
             var callee = extraction.Methods[index];
             var ops = StoreBodySites(extraction, index);
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
-                !extraction.Emitted[index].Frame.HasNoLocals || ops[3].Op is not Return) return null;
+                !extraction.Emitted[index].Frame.HasNoLocals || ops[3].Site.OpCode.Code != Code.Ret) return null;
             if (ops[0].Op is not Arg { Index: var reference } || ops[1].Op is not Arg { Index: var word } ||
                 !MethodArguments.Plain(callee, reference) || !MethodArguments.Plain(callee, word)) return null;
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
@@ -611,17 +613,17 @@ internal static partial class ProofOutline
                 callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
                 callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
                 extraction.Emitted[index].Frame.HasNoLocals &&
-                ops.Any(op => Body.Conditional(op) || op is Throw) &&
+                ops.Any(op => Body.Conditional(op) || op is StackOperation { Kind: Code.Throw }) &&
                 Enumerable.Range(0, ops.Length).All(Supported);
 
             bool Supported(int pc) => ops[pc] switch
             {
-                Return => plainReturn,
+                StackOperation { Kind: Code.Ret } => plainReturn,
                 Arg load => MethodArguments.Plain(callee, load.Index),
                 // The word stack ends at this throw before any path can use its object operand.
                 StackOperation { Kind: Code.Ldnull } =>
                     Throws.Analyze(callee).Operands.Contains(callee.Body.Instructions[pc]),
-                Jump or Throw or StackOperation { Kind: Code.Add or Code.Sub or Code.Mul or
+                Jump or StackOperation { Kind: Code.Throw or Code.Add or Code.Sub or Code.Mul or
                     Code.And or Code.Or or Code.Xor or Code.Nop } => true,
                 var op => Body.ConstantOf(op) is { Width: 32 or 64 }
             };
@@ -687,7 +689,7 @@ internal static partial class ProofOutline
                     stack.RemoveRange(stack.Count - 2, 2);
                     stack.Add(new($"({left.Term} {symbol} {right.Term})", left.Bits));
                 }
-                else if (op is Return)
+                else if (op is StackOperation { Kind: Code.Ret })
                 {
                     var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";
@@ -698,7 +700,7 @@ internal static partial class ProofOutline
                         $"{name}Contract.post of the returned value{Where()}");
                     return;
                 }
-                else if (op is Throw)
+                else if (op is StackOperation { Kind: Code.Throw })
                 {
                     lean.Comment($"{indent}-- ", $"{indent}-- ", $"`{callee.Name}` throws at " +
                         $"{ProofOutline.Location(callee, pc)}{Where()}, which its precondition must rule out");
@@ -1672,7 +1674,7 @@ internal static partial class ProofOutline
             }
             else if (op is Jump) return Event.Branch;
             else if (op is Call { ReturnsToCaller: true }) return Event.Call;
-            else if (op is Return) return Event.Return;
+            else if (op is StackOperation { Kind: Code.Ret }) return Event.Return;
             else if (scalarStore is { Width: 4 or 8 } spanWrite && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
             {
