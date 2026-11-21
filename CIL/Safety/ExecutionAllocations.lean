@@ -32,7 +32,7 @@ theorem memoryInstruction_extends_allocations (operation : CIL.MemoryOp)
     AllocationExtension m result := by
   exact (memoryInstruction_effect _ _ _ _ _ h).allocations
 
-theorem instruction_extends_allocations (operation : CIL.Op) (stack values : List Value)
+theorem instruction_extends_allocations (operation : CIL.Instruction) (stack values : List Value)
     (m result : Memory) (h : instruction operation stack m = .ok (result, values)) :
     AllocationExtension m result := by
   exact (instruction_effect _ _ _ _ _ h).allocations
@@ -43,7 +43,7 @@ theorem staticInstruction_extends_allocations (body : CIL.Method) (pc : Nat)
     AllocationExtension m result := by
   exact (staticInstruction_effect _ _ _ _ _ _ _ h).allocations
 
-theorem step_extends_allocations (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_extends_allocations (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     AllocationExtension m action.memory := by
@@ -70,7 +70,7 @@ def FrameAction.OwnedAbove (action : FrameAction) (watermark : Nat) : Prop :=
 
 /-- A step keeps the current frame above a watermark that memory has already passed: any home
     it allocates gets a fresh identity. -/
-theorem step_ownedAbove (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_ownedAbove (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (watermark : Nat) (old : frame.OwnedAbove watermark)
     (bound : watermark ≤ m.nextIdentity)

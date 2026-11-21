@@ -1,6 +1,10 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include DeepChecks.cs
+#:include FailureReports.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include ConsumerVerification.cs
 #:include LeanDiagnostics.cs
 

@@ -1,4 +1,5 @@
 import CIL.Extraction.FlowIndex
+import CIL.Extraction.KernelEquation
 
 /-!
 # Consuming certificate index regressions
@@ -38,4 +39,33 @@ theorem partitions :
   decide +kernel
 #print axioms partitions
 
+/-- A named cell, which `program_index%` writes into its leaf as written. -/
+def cell : Nat := 7
+
+open Lean Elab Term Command in
+run_cmd liftTermElabM do
+  let tree ← elabTerm (← `(program_index% [cell])) none
+  let_expr FlowIndex.leaf _ value := tree | throwError "Expected a singleton leaf"
+  unless value.isConstOf ``cell do throwError "Expected the named cell, found {value}"
+
+/-- The kernel rejects index agreement with a duplicated or missing leaf, and a false length. -/
+example : True := by
+  fail_if_success
+    have : (program_index% [10, 20, 20]) = FlowIndex.ofList [10, 20, 30] := by cil_kernel_rfl
+  fail_if_success
+    have : (program_index% [10, 20]) = FlowIndex.ofList [10, 20, 30] := by cil_kernel_rfl
+  fail_if_success have : 2 = [10, 20, 30].length := by cil_kernel_rfl
+  trivial
+
+/-- `program_index%` writes the index `ofList` builds, split at the same middles, for lists with
+    none, one, an odd and an even number of cells. -/
+theorem literal_indices :
+    (program_index% ([] : List Nat)) = FlowIndex.ofList [] ∧
+    (program_index% [cell]) = FlowIndex.ofList [cell] ∧
+    (program_index% [10, 20, 30]) = .branch 1 (.leaf 10) (.branch 1 (.leaf 20) (.leaf 30)) ∧
+    (program_index% [10, 20, 30]) = FlowIndex.ofList [10, 20, 30] ∧
+    (program_index% [10, 11, 12, 13, 14, 15, 16, 17]) =
+      FlowIndex.ofList [10, 11, 12, 13, 14, 15, 16, 17] := by
+  decide +kernel
+#print axioms literal_indices
 end Tests.FlowIndex

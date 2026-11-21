@@ -16,14 +16,16 @@ internal static class ParameterEvidence
         if (type is ByReferenceType or PointerType) return ".reference";
         if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return ".object";
         if (type is ArrayType array && MetadataValidation.IsAggregate(array.ElementType, module))
-            return $".aggregateArray {System.Text.Json.JsonSerializer.Serialize(LayoutEvidence.Identity(array.ElementType))} " +
-                layouts.Index(array.ElementType);
+        {
+            var identity = IdentityText.Quote(LayoutEvidence.Identity(array.ElementType));
+            return $".aggregateArray {identity} {layouts.Index(array.ElementType)}";
+        }
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
         if (type is GenericInstanceType span && Spans.Is(type) &&
             MetadataValidation.IsAggregate(span.GenericArguments[0], module))
-            return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {(Spans.Writable(type) ? "true" : "false")}";
+            return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {LeanText.Bool(Spans.Writable(type))}";
         if (Spans.Width(type, layouts.Metadata.Architecture) is { } width)
-            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
+            return $".span {width} {LeanText.Bool(Spans.Writable(type))}";
         if (type is GenericInstanceType vector && !MetadataValidation.IsAggregate(type, module))
             return vector.ElementType.FullName switch
             {
@@ -49,8 +51,8 @@ internal static class ParameterEvidence
         var arguments = new List<string>();
         if (method.HasThis) arguments.Add(ObjectTypes.Is(method.DeclaringType) ? ".object" : ".reference");
         arguments.AddRange(method.Parameters.Select(parameter => InReferences.Parameter(parameter.ParameterType))
-            .Select(type => dispatch.Kind(type) ?? Type(type, method.Module, layouts)));
-        var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index) ??
+            .Select(type => dispatch.Kind(type)?.ToLean() ?? Type(type, method.Module, layouts)));
+        var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index)?.ToLean() ??
             Type(local.VariableType, method.Module, layouts));
         var code = method.Body.Instructions.Select(instruction => instruction.OpCode.Code switch
         {
@@ -62,6 +64,5 @@ internal static class ParameterEvidence
         });
         lean.AppendLine($"def method{number}RawArguments : Extraction.RawArguments := {{ arguments := [{string.Join(", ", arguments)}], locals := [{string.Join(", ", locals)}], code := [{string.Join(", ", code)}] }}");
         lean.AppendLine($"def method{number}Reachable : List Bool := [{string.Join(", ", method.Body.Instructions.Select(instruction => reachable.Contains(instruction).ToString().ToLowerInvariant()))}]");
-        lean.AppendLine($"theorem method{number}_parameters_validated : Extraction.ParameterHomesValid computedLayouts method{number}RawArguments method{number}Reachable method{number} := {LeanEmitter.Decide}");
     }
 }

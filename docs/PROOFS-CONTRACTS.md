@@ -103,12 +103,12 @@ local pushes, or `none`.
 
 | Need | Use |
 | --- | --- |
-| Step a `.local` load | `snapshots.load value specified`, a step fact the stepping tactics take |
+| Step a `.ldloc` load | `snapshots.load value specified`, a step fact the stepping tactics take |
 | Step a numeric store and get the updated snapshots | `LocalSnapshots.store` |
 | Keep snapshots across a call confined apart from the homes | `LocalSnapshots.after_confined` |
 | Keep snapshots across a write, or memory that keeps old allocations | `after_write_apart`, `after_below` |
 | The typed read of a remembered local whose slot is known | `snapshots.read_at specified slot` |
-| That read for a vector | `read_vector128`, `read_vector256`, `read_vector512` |
+| That read for a 64-bit word or a vector | `read_word64`, `read_vector128`, `read_vector256`, `read_vector512` |
 
 The vector reads are stated as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its
 wider forms. A snapshot that overlaps a callee's footprint is not kept: restate it from the
@@ -135,6 +135,8 @@ Pass the `writable` projection to the general snapshot lemmas.
 The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
 take numeric local stores and loads through a `LocalSnapshots` hypothesis and pass the updated
 snapshots to each later step. A load pushes the latest remembered value; a store replaces it.
+A homed argument's `starg` and `ldarg` are the store and load of its home slot, so the snapshots
+remember the argument at that slot.
 
 #### Tactic forms
 
@@ -152,8 +154,7 @@ The two forms differ:
 
 | | Checked form | Contract form |
 | --- | --- | --- |
-| Local instructions taken from the snapshots | `.local`, `.setLocal` | `.local`, `.setLocal`, `.vectorLocal`, `.setVectorLocal` |
-| Other instructions | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
+| Instructions other than `.ldloc` and `.stloc` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
 | Finds each store's home | From the premises in context | From a homes hypothesis ([required context](#required-context)) |
 | Restates context facts after a store | `access` equations only; byte-value facts stay at the old memory | `access` equations and the [caller facts](#facts-the-contract-form-carries) |
 | Prepares step facts again after a store | No | Yes |
@@ -245,9 +246,21 @@ the memory written to at the new memory, each under the name it already has:
 
 A fact whose condition is not shown stays at the old memory.
 
+A restated fact replaces the fact it restates when that one is stated at a memory the walk
+introduced, the `storedLocal` of an earlier store: the hypothesis the new one shadows is cleared, so
+a walk adds the names of each store and nothing that grows with the stores before it. The walk
+records the variables it introduces, so a fact stated at the memory the walk entered with, such as
+`valid`, `homes` or `preserved`, stays in scope next to its restatement whatever that memory is
+named. A `MemoryBelow` or `AccessBelow` fact that starts at a `storedLocal` memory is restated only
+when homes are stated at that memory, as after a step that changes memory without a store; the ones
+that start at the memory the walk entered with, such as `MemoryBelow boundary memory`, follow every
+store, and the `localBelow` and `localAccess` of a store state the step from the memory before it.
+The access a store finds for its own home is read by that store only, and the walk clears it with
+the other facts the store alone uses.
+
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
-`.arg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
+`.ldarg`, `.ldfld` and memory loads of caller data continue in the same call. After a store, a
 word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
 offset`. `ArgumentView.word_below localBelow view old` restates a word at the memory the store
 wrote to, and `ArgumentView.bytes_below` the whole range.
@@ -283,7 +296,8 @@ the `MethodContract` and `OutcomeContract` lemmas for a contract indexed by
 `programStaticDescriptors`.
 
 `CIL.Program.ProfileAgreement.of_flags` reduces agreement to the flags in `program.profileReads`,
-which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
+the flags its feature tests and intrinsics read, a call's being those of its method's runtime
+model, which `decide` checks for concrete profiles, so one proof covers every profile in a family. For a
 program with no profile reads, `empty : program.profileReads = []` discharges the premise with
 `by simp [empty]`. A separate per-profile extraction is covered once it is shown equal to the
 reprofiled program, by `rfl` when only the profiles differ.
@@ -296,11 +310,11 @@ reprofiled program, by `rfl` when only the profiles differ.
   "contract": "Public.supported",
   "theorem": "Proof.family",
   "program": "Reference.program",
-  "referenceProfile": "x64-sse2",
+  "referenceProfile": "x64-sse42",
   "profiles": [
-    { "profile": "x64-sse2", "artifact": "extractions/sse2" },
     { "profile": "x64-sse42", "artifact": "extractions/sse42" },
-    { "profile": "x64-v3", "artifact": "extractions/v3" }
+    { "profile": "x64-v3", "artifact": "extractions/v3" },
+    { "profile": "x64-v4", "artifact": "extractions/v4" }
   ]
 }
 ```
@@ -373,13 +387,17 @@ def mixContract : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
 ### Step a caller through its callees
 
 `cil_contract_steps [facts]` steps an existential-fuel goal through ordinary instructions and
-calls. At a call it applies:
+calls. At an unlinked call with a runtime model, it uses the generated link and model facts to
+execute the operation in the caller's frame. Supply the facts that `cil_checked_step` needs for
+that operation, such as a span's validity and the result of slicing it. At a managed call it uses
+one of the following proofs.
 
 - a proved `MethodContract.Holds` theorem marked `@[cil_contract]`, or one whose proof is in
   `facts`. Contracts merely present in the local context are not selected. The theorem's program
   and method binding must match the actual call; required binding premises are checked;
-- a supplied successful child invocation, with fixed or existential fuel, or an
-  `InvocationCertificate`, without unfolding the helper body.
+- a supplied or local successful child invocation, with fixed or existential fuel, a
+  `CallResult` or an `InvocationCertificate`, without unfolding the helper body. A local fact
+  that starts from another memory variable than the call is not tried.
 
 Input fields, each component of a tuple input included, are inferred from the encoded arguments;
 an input that is one word or one reference is the argument as the caller wrote it. The
@@ -410,6 +428,10 @@ The stepping tactics state the goal with the `args`, `results`, `pre`, `footprin
 each defined contract unfolded, at entry and in each call's continuation, so the stack holds the
 encoded output. A fact read from `call.post` keeps the contract folded until
 `dsimp only [mixContract] at` it.
+
+A proof that composes calls with `WP.local_call` gets a `LoopFrame` after each call. `clear` the
+frame of the call before once the next one is introduced: the stepping tactics read every frame
+in scope at each step, so frames left in scope make each call cost more than the one before.
 
 The tactic has these variants:
 
@@ -471,7 +493,8 @@ the helper's contract. Confinement, access permissions and content snapshots req
 proved effects; a cell-only footprint does not imply `Confined`.
 
 `WP.load_call_store` composes a placed `loadCallStoreCode` segment with any proved scalar helper
-contract. Both input words are loaded before the call and the output write, so the argument ranges
+contract. Each `ldfld` operand must resolve to an eight-byte unsigned word at offset zero. The
+call site must link to the specified helper. Both loads precede the call and the output write, so the argument ranges
 may overlap. The continuation receives the helper's `CallResult` and the actual checked write, and
 retains the helper's full postcondition and footprint without unfolding the helper body.
 
@@ -487,6 +510,74 @@ A contract whose precondition implies well-formed memory and a valid static worl
 | `Certified.weaken` | Keeps the certificate through a `Refines` |
 | `InvocationCertificate.of_invoke` | Certifies any successful `invoke` from those two premises |
 | `InvocationCertificate.of_run` | Certifies a run of the frame that checked arguments enter |
+
+### Bind a contract to a decoded method
+
+`CIL.Safety.DecodedSummary` ties a contract to the method it was proved for.
+`DecodedSummary program evidence profile environment index pin token arguments contract` holds
+when `contract.Holds program index` and record `index` of `evidence` is the method with
+metadata token `token` of the assembly pinned by `pin`, closed at type arguments `arguments`,
+whose pinned body bytes decode to the method present at that index of `program`. The record's
+feature certificate validates that method's reachability mask and decoded instructions. Its
+`BodyDecodes` proof ties the assembly and signature to the names and tables read by the body
+decoder. Relocation requires this evidence for the destination record.
+`MethodContract.Certified` names only an index, which another extraction can fill with another
+body. A summary also names the metadata method and the bytes.
+
+`DecodedOutcomeSummary` binds an `OutcomeContract` to the same evidence. Its `holds` field
+supplies the normal result and memory footprint or the named exception for each permitted input.
+For example, the compiled `Bump` updates a live account's balance and raises
+`NullReferenceException` on a null account. Both outcomes use one pinned method body.
+
+| Name | Use |
+| --- | --- |
+| `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
+| `decodedProgram?_eq_some` | Proves the decoded program from `programBindingsValid evidence program = true` and `BodiesDecode` |
+| `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
+| `DecodedSummary.of_translation` | Binds a proved contract to its record using the translation certificate and the method lookup at the contract index |
+| `DecodedOutcomeSummary.of_translation` | Binds normal returns and named exceptions using the same method lookup |
+| `DecodedOutcomeSummary.reprofile` | Preserves those outcomes at an agreeing profile when the same evidence decodes to the reprofiled program |
+| `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its `BodyDecodes` evidence, its instantiation and `Holds` |
+| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call or `cil_loop_call` at a call in a loop |
+| `DecodedSummary.reprofile` | Reuses the contract and method identity at an agreeing profile once the same evidence decodes to the reprofiled program |
+| `DecodedSummary.site` | At a live direct managed call, identifies the summary's MethodDef token and type arguments. |
+| `DecodedAt.direct_site` | For a declaring type with an explicit assembly scope, identifies the callee's pin, MethodDef token and type arguments using the call link and validated assembly attribution. Apply it to the `bound` field of a method or outcome summary. |
+| `BodyDecodes.callManagedTarget` | Resolves the caller's operand through its checked metadata to a MethodDef token and slice position. The caller's MemberRef and the target MethodDef can have different token values. |
+
+For an extracted method, `DecodedSummary.of_translation` takes `Extracted.translation_valid`, the
+record index, the method lookup and the contract proof. The certificate supplies the body decode
+and the feature mask used by the summary.
+
+A separate Lean module can import a compiled `DecodedSummary` and apply `reprofile` to an
+independently extracted program. Compile the producer's extraction and summary, then put both
+compiled modules on the consumer's Lean search path. Prove that the consumer's MethodDef token
+and method evidence agree with the producer's, that its program equals the reprofiled program,
+and that the profiles agree on the features the program observes. Replay the two extractions,
+the saved summary and the consumer proof together. This works for scalar and vector returns
+and for a by-reference write with a proved footprint.
+
+Use `Extracted.translation_valid.programBindingsValid` for the mask and call checks. Each record's
+feature certificate describes its pinned, instantiated body. The decoder checks managed and
+constrained calls against the methods and links it returns. For a program with imports, pass
+`Extracted.imports` as the final argument to `decodedProgram?` and `programBindingsValid`.
+An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
+`(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
+for a method defined from its decoder, and `site` its `ManagedCallsValid` premise from
+`Extracted.method{n}_calls_validated` of the caller and its instruction and link premises from a
+`bind_call` site's `call` and `link` facts. For a call into a reference assembly, pass
+`Extracted.attribution_validated` to `DecodedAt.direct_site` and identify the declaring type's
+`headScope`. The scope must be nonempty and contain no colon. This distinguishes definitions in
+different assemblies even when both use the same MethodDef token. For an aggregate, Lean reads
+the assembly scope before the first `::`, even when generic arguments name types in another assembly.
+
+The proof of `decodedProgram?_eq_some` adds one
+constructor per record, so its cost is linear in the methods of the extraction
+([scaling](performance/InstructionLookups.md)).
+A summary whose bound names another token, or whose record's bytes decode to another method, does
+not type-check, and `site` at a call that names another token proves `False` from the summary.
+A call that runs through a runtime model, such as `Vector128.CreateScalarUnsafe` or `GetElement`,
+has no link and enters no method of the program, so a callee that makes such calls decodes and is
+summarized like any other body.
 
 ### Pass byref arguments with ValidCall
 
@@ -517,8 +608,7 @@ contents separately.
 
 For a word store through a named output, `cil_contract_steps` first uses supplied checked
 operation facts. If none establishes the store, it derives a successful write from the current
-`ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar` and eight-byte
-`setFieldAt`. The continuation names:
+`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, primitive eight-byte `stobj` and `stfld` of a checked eight-byte value field. The continuation names:
 
 | Name | Holds |
 | --- | --- |
@@ -583,11 +673,29 @@ successful snapshot copy does not establish initialization.
 
 ### Refute a contract
 
+A refutation states `MethodContract.Refuted`, `OutcomeContract.Refuted` or
+`OutcomeContract.RefutedCLR` of the contract, the program and the method, with the arguments
+`Holds` or `HoldsCLR` takes. Each carries a counterexample (`CIL.Safety.Counterexample`): an
+input and memory meeting the precondition, and either a settled outcome at some fuel that the
+contract does not allow, or fuel exhaustion at every budget (`CIL.Safety.Diverges`). Its
+`not_holds` gives the negation of the contract.
+
 | Lemma | Use |
 | --- | --- |
+| `MethodContract.Refuted.of_fault` | A checked located definite fault (`ExecutionFault.definite`) on an input meeting the precondition |
+| `MethodContract.Refuted.of_return` | A checked return outside the footprint or the postcondition |
+| `MethodContract.Refuted.of_diverges` | Fuel exhaustion at every budget, such as a loop that never exits |
+| `OutcomeContract.Refuted.of_fault`, `OutcomeContract.Refuted.of_return`, `OutcomeContract.Refuted.of_diverges` | The same for an outcome contract, where a fault other than the named exception, or any return when one is named, violates it; `OutcomeContract.RefutedCLR` has the same three for the CLR reading |
 | `invoke_ok_unique` | Ties a computed run to the contract's existential one |
 | `invoke_ok_observation_unique` | The same for one observation of the run, such as the returned values, so the refutation never compares memories |
-| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a semantic fault; fuel exhaustion is not a witness |
+
+Every settled outcome is a success or a fault other than fuel exhaustion and `unsupported`
+(`Settled`). An `unsupported` fault, such as a hole (`.unadmitted`), marks a run the model does
+not cover, and one exhausted budget says nothing about a larger one, so neither is a
+counterexample, and no stepping tactic steps past a hole to a return. Such a run can still prove
+`¬ c.Holds program method`: no fuel returns. That negation is evidence of a gap in the model, not
+of a fault in the method, so `leancil verify` rejects a requested theorem that states it (see
+[failure reports](CLI.md#failure-reports)); a lemma that states it is checked like any other.
 
 ## Frame class instances
 
@@ -596,8 +704,8 @@ fields instead of offsets. For every field of an admitted class that its methods
 extraction emits a descriptor under `Extracted.Classes`, such as `Account.Balance :
 WordField 8`, `Node.Next : ReferenceField` or `Samples.Values : ArrayField .signed32`, carrying
 the class and the model offset the extractor validated. Each comes with a theorem, checked by
-`decide`, that the descriptor matches the operands of an instruction it names
-(`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
+`decide`, that the method's `Method.fieldShape` of the field an instruction it names accesses is
+the descriptor's slot (`Account.Balance_accessed`). A field name is a label; only the class, offset and width or
 element are relied on.
 
 `CIL.Safety.ObjectFields` gives each descriptor its predicates and lemmas:
@@ -696,25 +804,25 @@ or references it may change.
 | --- | --- |
 | Confine a store to that entry | `Confined.setSlot`, `Confined.storeSlot` |
 | Keep the reference a field of a different, older object holds | `Confined.objectSlot_of_ne` |
-| Step the field accesses | `step_objectReferenceField_eq`, `step_setObjectReferenceField_eq` |
+| Step the field accesses | the `cil_step` simprocs, by `step_ldfld_reference_eq` and `step_stfld_reference_eq` |
 | Reduce them, given the slot's access check, to the held reference and to `setSlot` | `loadSlot_of_access`, `storeSlot_of_access` |
 | Read `setSlot` back | `setSlot_slots_same`, `setSlot_slots_of_ne` |
 | `setSlot` leaves bytes, authority and field locations unchanged | `read_setSlot`, `access_setSlot`, `objectFieldAddress_setSlot` |
 
 An instance call compiled as `callvirt` steps like a call once its receiver forms as a live
-object (`step_callInstance_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
+object (`step_callvirt_eq`, `receiverCall_address`), so `cil_contract_steps` composes it
 through the callee's contract. A null receiver steps to `NullReferenceException` at the
 `callvirt` itself (`receiverCall_null`).
 
 A virtual call steps the same way once the receiver's runtime type is known. Pass a fact
 `runtimeTypeOf memory receiver = .ok type`, with the definitions of `type` and its assembly
-scope; stepping looks the class up in the call's table (`step_callVirtual_eq`,
+scope; stepping looks the class up in the call's table (`step_callvirt_eq`,
 `virtualCall_address`) and enters the listed body
 ([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)). For an instance the method constructs, the
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
 A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
 
-`castclass` and `isinst` step on the same fact (`step_objectTest_eq`): with
+`castclass` and `isinst` step on the same fact (`step_castclass_eq`, `step_isinst_eq`): with
 `RuntimeType.lineage` and the definitions of the type, its bases and their scope, stepping
 decides whether the tested class is in the lineage, so the reference passes, becomes null or
 throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),
@@ -781,7 +889,7 @@ predicates in the `ReferenceArray` namespace:
 | Carry a covariance check across an allocation from well-formed memory | `storableIn_of_confined` |
 | Let `Confined.forget_fresh` drop the elements of an array the method allocated | `entries_young` |
 | A fresh array from `newReferenceArray_ok`, live with every element owned and null | `ReferenceArray.fresh` |
-| Step the three instructions | `step_referenceArrayLength_eq`, `step_referenceArrayLoad_eq`, `step_referenceArrayStore_eq` |
+| Step the three instructions | `step_ldlen_object_eq`, `step_ldelem_ref_i32_eq`, `step_stelem_ref_i32_eq` |
 
 | Example | Shows |
 | --- | --- |
@@ -808,9 +916,9 @@ one, whose view validates.
 | Keep an array whole across the same changes, whatever its elements then hold | `WholeArray.after_confined`, `after_below`, `after_kept` |
 | Pass a whole array as a call argument, from its view's `valid` | `checkedValue_array` |
 | Move it through a local, from its view's `valid` | `storeLocal_array`, `loadLocal_array` |
-| Step `ldfld` and `stfld` | `step_arrayField_eq`, `step_setArrayField_eq` |
-| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_memory_arrayLength_address_eq` |
-| Step `ldlen` of the null array to its throw | `step_memory_arrayLength_null_eq` |
+| Step `ldfld` and `stfld` | the `cil_step` simprocs, by `step_ldfld_array_eq` and `step_stfld_array_eq` |
+| Step `ldlen` of the loaded array to its length, once its view validates (`whole.valid`) | `step_ldlen_address_eq` |
+| Step `ldlen` of the null array to its throw | `step_ldlen_null_eq` |
 
 | Example | Shows |
 | --- | --- |
@@ -858,8 +966,9 @@ theorem pair_constructs :
 ```
 
 The storage does not exist before the step, so a caller names the contract input as a function of
-it. `cil_contract_construct holds constructs input [facts]` applies `run_newAggregate_of_contract`
-at the fetched `newobj` and leaves:
+it. `cil_contract_construct holds constructs input [facts]` applies `run_newobj_aggregate_of_contract`
+at the fetched `newobj`, whose `.aggregate` link gives the constructor and the size of the storage,
+and leaves:
 
 - the caller memory's `WellFormed`;
 - the precondition over the fresh storage;
@@ -883,9 +992,11 @@ struct.
 
 ## Name exceptional outcomes
 
-An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option String`
+An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option ExceptionType`
 to a `MethodContract`: where it is `some exception` the method must end in exactly `.thrown
-exception` (`Raises`), and elsewhere the normal clause applies. Fuel exhaustion, unsupported
+exception` (`Raises`), and elsewhere the normal clause applies. `CIL.ExceptionType` lists the
+exceptions the model raises, such as `.argumentOutOfRange`; each member stands for one type of
+namespace `System` in the runtime assembly (`CIL.ExceptionType.typeIdentity`). Fuel exhaustion, unsupported
 instructions and memory faults never satisfy `Raises`, so a contract cannot be met by getting stuck.
 Memory after a throw is not observable to the caller, so `Raises` states none; runtime exceptions
 count only where the semantics models them as `.thrown`.
@@ -901,7 +1012,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 ```
 
 | Name | Use |
@@ -910,10 +1021,13 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
 | `cil_outcome_call holds input at site [facts]` | Continues after a call the callee's contract says returns, whether the caller then returns or raises |
 | `cil_outcome_raise holds input at site [facts]` | Closes a `Raises` goal by propagating the exception the callee's contract names |
 | `MethodContract.Holds.outcomes` | Lifts a normal-only contract |
-| `invoke_unique` | Ties a computed fault to the contract's existential one |
+| `invoke_unique` | Proves that two stable outcomes of the same invocation agree across fuel budgets, including an interpreter stop at an unsupported operation |
+
+For a CLR contract refutation, a fault must also be definite. An unsupported operation leaves
+the CLR outcome unknown at every fuel budget.
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
-`System.InvalidOperationException` when its two arguments are equal, with `cil_raise_steps` and
+`.invalidOperation` when its two arguments are equal, with `cil_raise_steps` and
 `cil_checked_steps`, then proves its loop returns or propagates that exception through the contract
 alone.
 
@@ -925,8 +1039,8 @@ normal-return clause, footprint and `raises` field unchanged. Its fixed
 | Fault | Named CLR exception |
 | --- | --- |
 | `.thrown exception` | `exception` |
-| `.arithmetic .overflow` | `System.OverflowException` |
-| `.arithmetic .divideByZero` | `System.DivideByZeroException` |
+| `.arithmetic .overflow` | `.overflow` |
+| `.arithmetic .divideByZero` | `.divideByZero` |
 | Every other fault | None |
 
 Checked add, subtract, multiply and integer conversions report overflow through this mapping.
@@ -936,7 +1050,7 @@ arithmetic operands, invalid bounds, memory faults, unsupported instructions, in
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
 
-For a wide-integer `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in
+For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in
 `raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped
 arithmetic failure can establish this exact outcome. The proof must reach that fault through the
 actual extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of_run`
@@ -1004,31 +1118,35 @@ yields a normal-only contract. Both `Refines` are reflexive and transitive.
 
 ## Inherit a callee's contract in a forwarder
 
-Overload forwarders and instance-to-static wrappers compile to `ldarg*; call k; ret`.
+Overload forwarders and instance-to-static wrappers compile to `ldarg*; call m; ret`.
 `MethodContract.Holds.forward` (`CIL.Safety.Forwarders`) gives such a method its callee's contract
 with the forwarder's own argument encoding, `contract.withArgs forwarded`, without stepping either
 body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 
 ```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
-  add_holds.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+  add_holds.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
-`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee narrow`
-with no locals, vector argument homes or parameter homes, so frame entry and exit leave memory
+`Forwards body calleeBody loads method callee narrow` fixes the body to `forwarderCode loads method`,
+a `call` of `method` taking one argument per load (`arity`) and linked to `callee` (`linked`), with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
-are data: each is an argument index and the narrowing the extractor attaches to `bool`, `byte`,
-`sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones). The lemma has these premises:
+are data: each is an argument index, read as `Method.argumentAccess` says, which narrows `bool`,
+`char`, `byte`, `sbyte`, `short` and `ushort` parameters, and enums over them, to their declared
+width. The lemma has these
+premises:
 
-- The callee's arguments are the forwarder's at those indices, each kept by its load's narrowing
-  (`LoadsUnchanged`).
-- Every forwarder argument reaches the callee or is valid under the precondition, since the
-  forwarder's own invocation checks them all.
+- The callee's arguments are the forwarder's at those indices, each kept by the forwarder's read
+  (`LoadsUnchanged body index value`). `plainLoads_unchanged` discharges it for arguments read
+  without narrowing, and `LoadsUnchanged.narrow` for an i32 already in its declared range.
+- Every forwarder argument reaches the callee or is valid and not a span home under the
+  precondition, since the forwarder's own invocation checks them all.
 - The call exposes no unspecified vector bits.
-- A narrowed `ret (some kind)` does not change the callee's result (`ReturnsUnchanged`), which
+- A return with declared narrowing `some kind` does not change the callee's result (`ReturnsUnchanged`), which
   holds for a boolean.
 
 Aggregate results retain their complete byte list. Use `Holds.weaken` afterwards to export a
@@ -1047,8 +1165,8 @@ premises over those memories:
 
 - The callee's arguments are the forwarder's selected by the loads followed by the home, each kept
   by its load's narrowing and none with unspecified vector bits.
-- `outer.pre` gives a well-formed memory in which every forwarder argument is valid (`checked`),
-  since the forwarder checks them all.
+- `outer.pre` gives a well-formed memory in which every forwarder argument is valid and not a
+  span home (`checked`), since the forwarder checks them all.
 - `inner.pre` follows from `outer.pre` with the home fresh, writable and holding its initializer
   (`LocalHolds`).
 - The `inner` footprint names fresh storage or lies inside `outer.footprint`. The lemma checks
@@ -1105,10 +1223,11 @@ rule; the next section describes relocating a library into the slot.
 A library extracted on its own calls its helpers by its own method indices. `CIL.Safety.Linking`
 relocates it into a linked program:
 
-- `Op.relocate f` renames only the method index of `.call`, `.newVector256` and `.newAggregate`
-  (`Op.callees`); pcs, locals, profiles and static sites are unchanged.
-- `Closed lib` says every callee index in `lib` is one of its methods (`Closed.of_check` decides
-  it).
+- `Method.relocate f` renames only the method indices of the link table: the callees of calls,
+  constructions and managed-call catalogs. Code, pcs, locals, profiles and static sites are
+  unchanged, since each call reads its target from the table.
+- `Closed lib` says every callee of every link-table entry in `lib` is one of its methods
+  (`Closed.of_check` decides it).
 - `RelocatesInto lib linked f` says method `i` sits at `f i` relocated by `f`.
 - `run_relocate` and `invoke_relocate` then give exactly the same result: the same memory and
   values on return, and on a fault the same pc and fault with only its method index renamed to
@@ -1133,6 +1252,36 @@ one `Relocatable` property per slot, so libraries may export contracts of differ
 library exports only its index-0 method. Static identities are not renamed: two linked libraries
 that use the same identity for different bytes fault `invalidState` at the second static access, so
 a collision can make a proof fail and cannot prove a false statement.
+
+## Carry a summary to other programs
+
+`CIL.Safety.ProgramClosure` takes out of a program the methods one method reaches, so that a
+summary proved there binds wherever those methods appear:
+
+- `Program.closure program root` is `some (lib, indices)`: the methods `root` reaches through link
+  tables, renumbered from `root` at 0, and the index in `program` of each. It is `none` when a
+  link of a reached method enters a method outside them. It is `closureWith (program[·]?)
+  program.length root`, which reads each method from the list, so a search over n methods with
+  e link callees in a program of P methods costs O(n * P + e) kernel steps. An extraction states
+  `Extracted.programIndex`, a literal index of its methods, with `Extracted.programLength` and
+  `Extracted.programIndex_get?`; rewriting by
+  `Program.closure_eq_closureWith Extracted.programIndex_get? Extracted.programLength_eq`
+  before `cil_kernel_rfl` or `decide +kernel` brings the search to O(n * log P + e). The
+  [lookup scaling suite](performance/InstructionLookups.md) pins both costs.
+- `Program.closure_closed` gives `Closed lib`, and `Program.closure_relocates` gives
+  `RelocatesInto lib program` at the indices, with `root` first.
+- `Program.closureEvidence` renumbers the records' links and checks the feature certificates
+  against the closure's method indices. `Program.closureEvidence_decodes` says the records
+  decode to `lib` when the program's records decode to `program`. Relocation preserves the
+  reachability mask and the set of pcs occupied by links. `Method.ofBody?_relocate` therefore
+  applies to the renumbered records.
+- `MethodContract.Holds.restrict` carries a contract proved in `program` to the closure, where
+  `DecodedSummary.of_decoded` binds it to the closure's record.
+- `RelocatesInto.of_decoded` places `lib` in a target program whose records decode, at the
+  indices `f` gives, to the relocated library methods. A map may send two library methods to
+  one index when both decode to the method there: a call into either runs the method both denote.
+- `DecodedSummary.relocate` carries a summary over `lib` to the method `f` places in the target,
+  bound to the target's record there when it names the same pinned method and type arguments.
 
 ## Reuse framework contracts
 

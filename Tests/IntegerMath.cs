@@ -2,7 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -12,11 +18,12 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/IntegerMath");
 Directory.CreateDirectory(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.IntegerMath")!;
-using var metadata = ModuleDefinition.ReadModule(assembly);
 verification.EnsureExtractorBuilt();
 var extractor = Assembly.Load(File.ReadAllBytes(ExtractorPath));
+using var pinned = new PinnedMetadata(extractor, assembly);
+var metadata = pinned.Module;
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
+var callModel = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("CallModel", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
 var profile = select.Invoke(null, ["scalar"]);
 var cases = 0;
@@ -103,9 +110,9 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         alias.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
         math.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
     }
-    var originalModel = (string?)translate.Invoke(null, [math, profile]);
-    var aliasModel = (string?)translate.Invoke(null, [alias, profile]);
-    if (originalModel is null || originalModel != aliasModel)
+    var originalModel = callModel.Invoke(null, [math, profile]);
+    var aliasModel = callModel.Invoke(null, [alias, profile]);
+    if (originalModel is null || !originalModel.Equals(aliasModel))
         throw new InvalidOperationException("Primitive helper must share its Math model: " + alias.FullName);
     var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }
         .Select(x => Value(type, x)).Distinct().ToArray();
@@ -138,8 +145,10 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var binders = $"({string.Join(" ", variables)} : CIL.W{stackWidth})";
     var evaluation = $"CIL.evalIntegerMath .{operation} {width} {signed} [{string.Join(", ", loaded)}]";
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] CIL.Safety.Memory.empty";
-    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
-    var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
+    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
+    // The helper keeps its call, which steps as the scalar intrinsic its model fact names.
+    var instruction = "(body := Extracted.method0)";
+    var callStep = $"  math_wrapper_step Extracted.method0_model{argc} evaluated\n";
     var argumentsLean = string.Join(" ", variables);
     var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
     string ForCase(string expression)
@@ -153,13 +162,13 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    {invocation} = .ok (CIL.Safety.Memory.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
         $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
-        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
-        "  math_wrapper_step evaluated\n" +
+        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
+        callStep +
         $"theorem wrapper_fault_full {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +
         $"    {invocation} = .error ⟨0, {argc}, .arithmetic fault⟩ := by\n" + prefix +
         $"  apply Tests.WrapperProofs.run_fault {instruction} (by rfl) (by rfl)\n" +
-        "  math_wrapper_step evaluated\n" +
+        callStep +
         $"theorem wrapper_success {binders} (r : CIL.W{resultWidth})\n" +
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    ({invocation}).map Prod.snd = .ok [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})] :=\n" +

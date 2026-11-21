@@ -17,10 +17,10 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 
 | Name | Cases |
 | --- | --- |
-| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions and caller reuse |
+| `exports` | Production, wrapper-True rejection, generic/virtual/static-value restrictions, caller reuse after a body-only rebuild and rejection of a cached exact postcondition after its imported contract is weakened |
 | `exportsprotected` | SDK-built protected static export, separately compiled derived caller and rehashed visibility mismatch rejection |
 | `exportsaudit` | Proof-source and compiled-wrapper callback mutations |
-| `exportsresolution` | Same loaded files and changed loaded module |
+| `exportsresolution` | Same loaded files, changed loaded module and same-length caller artifact rewrite |
 | `exportsfullconsumer` | Explicit and repeated consumer full verification; stale-report removal; caller and library proof-build stages required separately for each invocation |
 | `exportsfullordinary` | Ordinary caller full verification, requiring its direct proof check and the imported proof build |
 | `exportsfullpair` | Two imported slots from one bundle, requiring both imported proof builds and the caller check |
@@ -32,7 +32,7 @@ Run one partition with `dotnet run --file scripts/Test.cs -- --suite NAME`:
 | `exportsmutationsource` | Executed consumer caller source mutation |
 | `exportsmutationshadow` | Executed original-root module shadow |
 | `exportsstatics` | Standalone modular static exports with their own SDK setup and assertions |
-| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a chain of Top, App and library independently composes the table reader with its static-world premise |
+| `exportsfullstatics` | The same fixture with `--full-composition`: forced full verification of app and library tables with one local index and one table shared by two imported slots, run after a repeated ordinary verification restored a receipt, with a private library cache that the first forced run meets empty and builds into, and the last meets holding the library and opens, tracing the open; a republished bundle with forged static records fails in preflight and a re-certified changed table fails the independent library proof; a chain of Top, App and library independently composes the table reader with its static-world premise |
 | `exportstransitive` | A chain of App, A and B, and a four-node diamond where A and C share B; full mode rechecks each selected export despite warm receipts, rejects changed deployment pins and cycles before building, rejects forged dependency composition, and detects B changing staged A before A builds |
 | `exportstransitiveoutcomes` | A chain of App, C, A and B independently preserves normal returns and the named exceptional outcome through three forwarders |
 | `exportsdiscovery` | Real producer SDK/publication bootstrap, then the six-argument discovery fixture |
@@ -46,7 +46,7 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
 
 ### Case ledger
 
-- The base ledger has 49 cases: 22 core, 3 protected, 2 callback, 2 resolution and 20 full cases.
+- The base ledger covers 51 cases across 23 core, 3 protected, 2 callback, 3 resolution and 20 full cases.
   Each partition rejects an omitted, repeated or unexpected completion.
 - The artifact-mode rejection runs after consumer requests that succeed, so it checks removal of
   a successful report that a request wrote.
@@ -56,11 +56,11 @@ and their case IDs. [Suite jobs](CI.md#suite-jobs) gives their CI time limits.
   standalone and discovery partitions cannot enter it.
 - `exportsstatics`, `exportsfullstatics`, `exportstransitive`, `exportstransitiveoutcomes`,
   `exportstyped`, `exportsderived`, `exportsinitialized` and `exportsprofiles` run directly, with
-  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 49
+  no core export bootstrap or nested post-call. Their fixture assertions are separate from the 51
   base case IDs, and a standalone fixture cannot use an empty base completion ledger to claim
   coverage.
 - `exportsdiscovery` records one separate `discovery.fixture` completion after the child
-  succeeds; the child's behaviors are outside the 49 base cases. The partition builds the
+  succeeds; the child's behaviors are outside the 51 base cases. The partition builds the
   producer library and creates its proof packages and publication. The child builds, extracts
   and verifies its own caller and needs no baseline caller artifact or verified report. The
   partition runs no core caller verification, restrictions, callbacks or full cases.
@@ -85,13 +85,14 @@ Full integration results come from the CI partition jobs. The routing tests,
   must reject subtraction forged as addition. The Lean fixtures cover negative offsets and
   differences, end positions, readonly preservation, every unsigned branch, and null,
   cross-allocation, invalid-position and signed-comparison rejection.
-- `Tests/ExtractionGenerics.lean` and the 15 generated generic-method samples in
-  `Tests/GenericEvidence.cs` cover managed-call proof construction. Direct tactic rejection checks
-  cover changed signedness, assembly scope, generic arguments and argument count.
+- `Tests/ExtractionGenerics.lean` decides the managed-call check of a generic call site, and the 15
+  generated generic-method samples in `Tests/GenericEvidence.cs` cover the generated managed-call
+  checks. Its rejection checks cover changed signedness, assembly scope, generic arguments and
+  argument count.
 - `Tests/GenericEvidence.cs` also checks exact external-call identity sharing, repeated emission,
   pruned-only identities and Unicode/escaped characters. Changed bytes, versions and tokens fail
-  the generated equality proof. Replacing a raw target with another correctly encoded identity, or
-  changing its emitted intrinsic, fails the unchanged division certificate. The specialization and
+  the generated equality proof. The body decoder rejects a scalar-unsafe reference paired with the external
+  identity of Avx2.And. Model agreement rejects a different instruction at a kept call. The specialization and
   raw/translated metadata rejection cases run alongside.
 - `Tests/AllocationImports.cs`, in `core`, checks that the CIL umbrella omits allocation
   refinement, builds both explicit allocation acceptance modules, and jointly replays every
@@ -116,7 +117,7 @@ equivalence theorem or property stated for each index and the regression that co
 | Region suffix membership | Fallthrough closure is automatic, since `lower ≤ pc` implies `lower ≤ pc + 1`, so the checker looks up only explicit branch targets and callees. Its equivalence theorem covers every instruction, including a final fallthrough beyond the body; instruction availability is a separate execution obligation. | `Tests.RegionRun` |
 | Constrained validation and lowering | Balanced instruction/reachability indexes and a set of all decoded branch destinations, including unreachable instructions and switch arms; lowering also indexes predecessor instructions. `lowerConstrainedRaw_eq_original` proves identical output for arbitrary raw bodies, including malformed prefixes. `ConstrainedCallsValid_iff_original` preserves the list-based rules. | Constrained evidence suites |
 | Sequential constrained evidence | Validation consumes the raw, reachability and emitted lists together, keeping the previous instruction and reading the next from the tail; lowering keeps the raw predecessor before rewriting it. Malformed-neighbor and length rejection, method-target lookup, branch membership and dispatch metadata resolution are unchanged checks. | Constrained evidence suites |
-| Managed-call validation | Indexes extracted methods and imported slots once per method check. `ManagedCallsValid_iff_original` preserves the list-based rules, including absent entries, import offsets and malformed lengths. `cil_managed_calls` uses structural metadata equalities before its kernel-decision fallback. | Import evidence suites |
+| Managed-call validation | Indexes extracted methods and imported slots once per method check, requires the link table's keys to ascend and to be pcs of the code, and reads each pc's link by one walk beside the code. `ManagedCallsValid_iff_original` shows the check accepts exactly the bodies whose calls and constructions pass the list-based rules with the link a scan of the table gives each pc, including absent entries, import offsets and malformed lengths. `ManagedCallsValid.linkFits` shows that such a table gives a `call` pc no link when the call's method has a runtime model and a direct link otherwise, and each other pc except a `newobj` the link its instruction implies, and `validated_managed_call` that each live pc passes the linked rule, which at a `newobj` ties the link to the raw site (`validateConstructionWith`). Generated `methodN_calls_validated` theorems decide this check in the kernel, so each pc's link is read by the walk rather than by a scan of the table. | Import evidence suites; the `lookups` call check row |
 | Home discovery, static sites, opaque locals | Balanced indexes: `Std.TreeSet`/`Std.TreeMap` for keyed membership and `FlowIndex` for positional lookup. Home discovery collects live stores and addresses once and keeps argument order while filtering the argument range. Static sites keep the first descriptor at a duplicate pc. Opaque-local discovery considers addresses in the complete raw body, including dead instructions, and reads each type from `zipIdx`. Equivalence theorems cover arbitrary input lists, including malformed indexes, duplicate sites and truncated masks; they require no new assumptions. | `Tests.ExtractionHomeIndexes` |
 | Parameter home enumeration | Enumerates the collected ordered set and filters by the argument bound. The proved list equality keeps ascending order, duplicate elimination, out-of-range filtering and truncated reachability semantics. | `Tests/HomeEnumerationScaling.lean` compares both algorithms |
 | Argument instruction validation | Shares indexes for argument types and appended home slots; expected home kinds use the argument-type index. The home-slot map keeps the first occurrence for duplicate home lists; missing argument indexes, hidden home accesses and unsupported replacements are rejected. Exact lookup/check equivalence theorems preserve the semantic consequence statements. | `Tests.ExtractionHomeIndexes` |
@@ -138,9 +139,16 @@ These regressions cover the extractor's own C# indexes:
   mutations are visible. `Tests/InstructionIndexes.cs` includes those rejection and mutation
   cases.
 - Template emission writes templates and callees in sorted order and profiles in input order,
-  and rejects duplicate method identities before emission. An absent callee in an excluded
-  profile gets a zero placeholder. `Tests/TemplateIndexes.cs` checks reordered methods,
-  conditional absent callees, deterministic output and duplicate rejection without compiling Lean.
+  and rejects duplicate method identities before emission. Every method a body or frame names (calls,
+  tail calls, virtual dispatch targets, callable pointer targets and static initializers) becomes a callee
+  parameter, and an absent callee in an excluded profile gets a zero placeholder. Profiles merge when
+  their renumbered instructions agree at every pc for the same observed flags. Lean reads the
+  selected instruction lists from decoded methods and proves each selected leaf equals its input's
+  code. Each input must pass extraction checking. Differing frames, lengths or unflagged
+  instructions cause rejection.
+  `Tests/TemplateIndexes.cs` checks reordered methods, each kind of callee, conditional absent
+  callees, those merge rules, deterministic output, duplicate rejection and linear growth in the
+  instructions without compiling Lean.
 - Loaded contract libraries index exports by exact identity and certifications by exact
   (identity, profile). The production reader rejects duplicates before constructing either index.
   `Tests/ImportIndexes.cs` checks case-sensitive lookup, multiple profiles and the reader's exact
@@ -164,8 +172,9 @@ These regressions cover the extractor's own C# indexes:
   mutation visibility, distinct x64/arm64 vector layouts and nesting rejection after warming a
   child.
 - C# argument translation indexes argument home positions once per method in validation,
-  emission and exception lint. Duplicate inputs keep their first position, missing homes stay
-  absent, and raw locals are added to the home position when emitting local-slot instructions.
+  emission and exception lint. Duplicate inputs keep their first position and missing homes stay
+  absent. A homed argument's load, store and address keep the argument index, and a store or
+  address of an argument without a home is refused.
   `Tests/InstructionIndexes.cs` exercises loads, stores, addresses, duplicate homes and
   missing-store rejection.
 - Interface-module merging detects spelling collisions ignoring ordinal case and writes its
@@ -184,9 +193,27 @@ These regressions cover the extractor's own C# indexes:
   resolve as unknown while random seeds do.
 - Layout computation accumulates field placements in reverse and restores declaration order
   once. `computeLayout_eq_append` proves equality to the complete list-based computation for
-  arbitrary layouts, architectures and nested-layout tables. `Tests.LayoutAccumulation` covers
+  arbitrary layouts, architectures and nested-layout lookups. `Tests.LayoutAccumulation` covers
   order, explicit overlaps, empty layouts, missing children, packing/offset failures and vector
   architecture restrictions.
+- The `Decidable` instance of `LayoutsValid` runs `layoutsValidIndexed` on the raw
+  and claimed tables for `Extracted.layouts_validated`, import catalogs and projections. Each
+  method reuses the extraction's table proof and checks its own layout uses.
+  Each identity names one row. Validation checks uniqueness with an ordered set of UTF-8
+  keys. Two successful reads with equal identities have equal indices. The field check
+  reads raw entries and claimed layouts through balanced indexes built once, lets each entry read
+  only claimed layouts at earlier positions, and finds closed generic owners through an ordered
+  map keyed by closed type that returns the first match. For `L` layouts with `A` fields in total
+  it costs `O((L + A) log L)` lookups, plus, for each `.apply` node of a generic layout's argument
+  and original field types, one owner lookup keyed by that node's closed subtree.
+  `layoutsValidIndexed_iff` proves the pass equivalent to `LayoutsValid` for arbitrary inputs,
+  and `LayoutTable.indexed_eq` proves the indexed reads equal to the list scans that
+  `computeLayouts` uses. `Tests.LayoutAccumulation` checks that a wrong offset, a wrong size, a
+  child at, after or past its parent, and a wrong length are rejected by both checks. Of the
+  generic cases, a class owner and a mismatched owner identity are rejected before any owner
+  lookup, while a missing owner, an owner at another position and the wrong one of two
+  same-shaped owners are rejected through the owner index, which also finds the first of two
+  equal closed types. A class application never closes to a layout entry that claims it.
 - Constrained dispatch validation and lowering each build ordered dispatch candidate indexes
   once per invocation and reuse them across call sites, never across invocations. The indexes
   support type identity, method token/name and explicit interface override lookup. Candidate
@@ -198,11 +225,10 @@ These regressions cover the extractor's own C# indexes:
   `constrainedSiteWindow`, `constrainedSites`, `lowerConstrainedInstruction`,
   `lowerConstrainedCode` and their streaming equivalence theorems accept a resolver function.
 - Public layout projection validation indexes artifact selection and nested public-index
-  expansion, and uses ordered sets for its three uniqueness checks.
+  expansion. Both catalogs satisfy `LayoutsValid`, and the selected artifact indices are distinct.
   `LayoutProjectionValid_iff_list` proves exact equivalence to all list-based conditions for
   arbitrary inputs, including malformed indices and catalogs. The unfolded proposition exposes
-  `projectionDistinct ... = true` and `projectionMetadataMatches`; recover the list-based
-  uniqueness and metadata conditions through `LayoutProjectionValid_iff_list`.
+  `orderedDistinct` for the indices and `projectionMetadataMatches` for the layout rows.
   `Tests.LayoutProjectionIndexes` checks reordering, empty catalogs, duplicate identities/indices,
   case-sensitive identity, missing indices and nested expansion.
 
@@ -345,7 +371,7 @@ These regressions cover joint replay:
   cases.
 - Generic substitution, managed-call and method-shape mutations select their corresponding emitted
   validator; type-test mutations select feature-flow validation. External-call mutation fixtures
-  check only the intended division or intrinsic validator, with a complete positive certificate
+  check body binding and runtime model agreement, with a complete positive certificate
   and a checked unchanged-obligation control in the replayed evidence batch. Unchanged controls
   compile first, with repeated generic controls deduplicated. Byte-backed identity definitions
   keep their UTF-8 witnesses. Evidence-list omission and reordering check the complete
@@ -407,15 +433,13 @@ These regressions cover joint replay:
 
 ### Fold discovery
 
-Fold discovery counts decoded local references once. `foldRoles_eq_filter` proves exact equality
-to the filter-based specification, including malformed operands and out-of-range local indexes.
-Methods without locals skip count construction. The positional lookup of local types is linear,
-so fold discovery as a whole is not linear.
+Fold discovery reads local types from a `FlowIndex` built once per body. Span receiver stores and
+addresses have no fold roles; their raw opcodes bind the emitted local instructions independently.
 
 Exception folds inspect at most three message loads, since admitted constructors accept at most
 two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. A long rejected
-prefix does not prevent an admitted fold starting later. Span and throw evidence tests cover extra
-uses, malformed local operands, oversized prefixes and valid suffix folds.
+prefix does not prevent an admitted fold starting later. Span and throw evidence tests cover exact
+constructors, receiver instructions, oversized prefixes and valid suffix folds.
 
 ### Transitive composition replay
 
@@ -439,8 +463,10 @@ and traces match exactly.
 `Subtract<T>` use the checked allocation-relative reference operations, whose admitted forms
 [OPCODES](OPCODES.md#reference-observations) lists and whose limits
 [reference observations](SOUNDNESS-EVIDENCE.md#reference-observations) states. Generic storage
-types must have a supported managed layout. Lean translation evidence checks exact runtime
-identity, closed signatures, offset signedness and byte scaling. `ByteOffset` accepts readonly
+types must have a supported managed layout. The comparisons and offsets keep their calls. Lean binds each closed overload to its external
+identity and generic declaration. The model uses the selected displacement type for signedness
+and the indexed element size for scaling.
+`ByteOffset` accepts readonly
 views, and byte and element offsets from a readonly reference stay readonly.
 
 Tests compare native wraparound with the runtime and reject forged strides and signedness in Lean

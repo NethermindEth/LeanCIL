@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include DeepChecks.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include LeanDiagnostics.cs
 #:include FailureReports.cs
 #:include VerifyReports.cs
@@ -227,16 +230,31 @@ string[] expectedRerun = ["leancil", "verify", output, "--proof", proof, "--theo
 Require(unrooted is { kind: FailureReports.UnsolvedGoal, module: "Proof", line: 4, column: 2 } &&
     unrooted.file == proof && unrooted.rerun.SequenceEqual(expectedRerun),
     "unrooted proof copy and rerun");
-const string Audit = "ExampleProof.correctness : ¬mixContract.Holds Extracted.program mix\n" +
+const string Audit = "ExampleProof.correctness : mixContract.Refuted Extracted.program mix\n" +
     "'ExampleProof.correctness' depends on axioms: [propext]\n";
-var refuted = FailureReports.Refuted(Audit + "LeanCIL refutes: CIL.Safety.MethodContract.Holds at 21:0\n",
-    "ExampleProof.correctness", proof, output, package);
-Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage: "theorem audit" } &&
+const string Mix = "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)";
+var refuted = FailureReports.Refuted(new("CIL.Safety.MethodContract.Holds",
+        new(Mix, "Contracts.Lib, Version=1.0.0.0", "digest"), 21, 0),
+    Audit, "ExampleProof.correctness", proof, output, package);
+// The report names the method and assembly verification bound the refutation to, and reads no file for them.
+Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage: "theorem audit",
+        method: { entry: Mix, assembly: "Contracts.Lib, Version=1.0.0.0", assemblySha256: "digest" } } &&
     refuted.file == proof && refuted.rerun[^2..].SequenceEqual(["--proof-root", package]),
     "verified refutation");
-// The marker comes from the Lean audit only; statement text never makes a refutation.
-Require(FailureReports.Refuted(Audit, "ExampleProof.correctness", proof, output, package) is null &&
-    unsolved.kind != FailureReports.Refutation, "an unsolved goal or a negated statement alone is never a refutation");
+// Only the audit's structured result makes a refutation; statement text never does.
+Require(FailureReports.Refuted(null, Audit, "ExampleProof.correctness", proof, output, package) is null &&
+    unsolved.kind != FailureReports.Refutation,
+    "an unsolved goal or a refuting statement alone is never a refutation");
+// A raw statement can print a declaration name across lines, so its text can hold a whole marker line.
+const string Forged = """
+    ExampleProof.correctness : And True «Repro.x
+    LeanCIL refutes: CIL.Safety.MethodContract.Holds at 3:0
+    y»
+    'ExampleProof.correctness' does not depend on any axioms
+
+    """;
+Require(FailureReports.Refuted(null, Forged, "ExampleProof.correctness", proof, output, package) is null,
+    "a marker line inside a statement made a refutation");
 
 // A build that Lake reports as successful while a tactic of the proof module read past the end of an array.
 const string built = "\u2139";
@@ -363,7 +381,8 @@ Require(obligationSource.Contains(leanTags) &&
     "the report's obligation tags and record marker are Lean's");
 var recordLine = new System.Text.Json.Nodes.JsonObject
 {
-    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1, ["instruction"] = "CIL.Op.add", ["stopped"] = false,
+    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1,
+    ["instruction"] = "CIL.Instruction.add", ["stopped"] = false,
     ["error"] = new System.Text.Json.Nodes.JsonObject { ["line"] = 3, ["column"] = 2 },
     ["obligation"] = "invariant", ["reached"] = new System.Text.Json.Nodes.JsonObject { ["stack"] = "[]" },
     ["expected"] = new System.Text.Json.Nodes.JsonObject(), ["missing"] = "load",

@@ -2,26 +2,33 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
+#:include StableNames.cs
 
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 
 // Admission of LeanCIL's own assembly under the scalar profile against its baseline of admitted methods.
 // Fails on any difference, so a lost admission, an unrecorded gain or a removed method all need review.
-const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--reuse-report]";
+const string Usage = "Usage: SelfAdmission.cs [--update] [--baseline baseline.txt] [--reuse-report] [--lean-check]";
 const string Profile = "scalar";
 const int ListedBlockers = 10;
 const int ListedMethods = 20;
 var baselinePath = At("Tests/SelfAdmissionBaseline.txt");
-bool update = false, reuse = false;
+bool update = false, reuse = false, leanCheck = false;
 for (var index = 0; index < args.Length; index++)
     switch (args[index])
     {
         case "--update": update = true; break;
         // The gate's own tests compare an existing report with altered baselines.
         case "--reuse-report": reuse = true; break;
+        // Run by hand: elaborates the extraction of every admitted method, hours of CPU time in all.
+        case "--lean-check": leanCheck = true; break;
         case "--baseline" when index + 1 < args.Length: baselinePath = Path.GetFullPath(args[++index]); break;
         default: throw new ArgumentException(Usage);
     }
@@ -54,6 +61,8 @@ foreach (var entry in document.RootElement.GetProperty("entries").EnumerateArray
     };
 if (current.Count != signatures.Length)
     throw new InvalidDataException($"Report has {current.Count} entries for {signatures.Length} methods.");
+if (leanCheck) CheckAdmittedInLean(current.Where(pair => pair.Value == 'A').Select(pair => pair.Key).ToArray());
+
 // The baseline lists admitted methods only; whether a non-admitted method is new does not matter. A
 // generated method counts toward its source method, so renumbering by unrelated edits changes nothing.
 var admitted = current.Where(pair => pair.Value == 'A').Select(pair => StableNames.Of(pair.Key))
@@ -119,45 +128,39 @@ if (gained.Length != 0 || removed.Length != 0)
         "`dotnet run --file Tests/SelfAdmission.cs -- --update`.");
 Console.WriteLine($"PASS self-admission: {Count('A')} of {current.Count} methods admitted, matching the baseline");
 
-/// <summary>
-/// The baseline's names: a method written in source, or the source method a generated one belongs to.
-/// </summary>
-static partial class StableNames
+// Extracts each admitted method alone and elaborates it against the checkout's CIL; an admission the Lean
+// checks refuse is a drift between the extractor and the checker, so any refusal fails.
+void CheckAdmittedInLean(string[] methods)
 {
-    /// <summary>
-    /// <paramref name="signature"/> itself for a method written in source. A compiler-generated method
-    /// (closure, lambda, local function, iterator or async state machine) is named by the source method
-    /// it was generated for, since the compiler numbers it by positions that shift with unrelated edits.
-    /// Generated top-level types share one name, as their numbers count across the assembly.
-    /// </summary>
-    internal static string Of(string signature)
+    using var verification = new Program();
+    Run(["lake", "build", "CIL"], verification.CheckoutPackage());
+    var leanPath = verification.CheckoutLeanPath();
+    var root = Path.Combine(directory, "lean");
+    if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    var refusals = new System.Collections.Concurrent.ConcurrentBag<(string Method, string Reason)>();
+    var finished = 0;
+    var clock = Stopwatch.StartNew();
+    // Each elaboration peaks near 1 GB, so a quarter of the cores bounds memory as well as time.
+    var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount / 4) };
+    Parallel.ForEach(methods.Index(), options, entry =>
     {
-        if (signature.EndsWith(Generated, StringComparison.Ordinal)) return signature;
-        var member = signature[(signature.IndexOf(' ', StringComparison.Ordinal) + 1)..];
-        var separator = member.IndexOf("::", StringComparison.Ordinal);
-        var declaring = member[..separator];
-        if (declaring.StartsWith('<')) return GeneratedTypes;
-        var nested = declaring.IndexOf("/<", StringComparison.Ordinal);
-        var method = member[(separator + 2)..];
-        if (nested < 0 && !method.StartsWith('<')) return signature;
-        var outer = nested < 0 ? declaring : declaring[..nested];
-        var source = SourceName().Match((nested < 0 ? "" : declaring[nested..]) + "::" + method).Groups["name"].Value;
-        return source.Length == 0 ? $"{outer} closure classes{Generated}" : $"{outer}::{source}{Generated}";
-    }
-
-    /// <summary>The suffix of every name that stands for compiler-generated methods.</summary>
-    const string Generated = " (compiler-generated)";
-
-    /// <summary>The one name of every method of a compiler-generated top-level type.</summary>
-    const string GeneratedTypes = "top-level types" + Generated;
-
-    /// <summary>How many times each name occurs.</summary>
-    internal static Dictionary<string, int> Counts(IEnumerable<string> names) =>
-        names.GroupBy(name => name, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-
-    // The first nonempty bracketed name, which the compiler sets to the method it generated code for;
-    // a closure class's own constructor has none and counts toward its outer type's closure classes.
-    [GeneratedRegex(@"<(?<name>[^<>]+)>")]
-    private static partial Regex SourceName();
+        var output = Path.Combine(root, entry.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var result = Execute(["dotnet", ExtractorPath, "extract", ExtractorPath, entry.Item, output, Profile]);
+        if (result.Code == 0)
+            result = Execute([verification.LeanExecutable, "--root=" + output, Path.Combine(output, "Extracted.lean")],
+                leanPath: leanPath);
+        if (result.Code == 0 && !result.Output.Contains("sorryAx", StringComparison.Ordinal))
+            Directory.Delete(output, recursive: true);
+        else
+            refusals.Add((entry.Item, result.Output.Split('\n').FirstOrDefault(line => line.Contains(": error: ",
+                StringComparison.Ordinal))?.Trim() ?? result.Output.Split('\n')[0].Trim()));
+        if (Interlocked.Increment(ref finished) % 100 == 0)
+            Console.WriteLine($"Lean check: {finished} of {methods.Length} in {clock.Elapsed.TotalMinutes:F0} min");
+    });
+    var refused = refusals.OrderBy(refusal => refusal.Method, StringComparer.Ordinal).ToArray();
+    foreach (var (method, reason) in refused) Console.WriteLine($"REFUSED {method}\n  {reason}");
+    if (refused.Length != 0)
+        throw new InvalidOperationException($"Lean refuses {refused.Length} of {methods.Length} admitted methods.");
+    Console.WriteLine($"PASS Lean check: {methods.Length} admitted methods elaborate, " +
+        $"{clock.Elapsed.TotalMinutes:F0} min");
 }

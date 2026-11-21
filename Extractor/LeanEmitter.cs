@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -7,15 +6,17 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
+    /// <summary>An extraction's Lean source and what it is built from.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views);
+        TemplateEmitter.Method[] Templates, ProofOutline.Method[] Outlines, ClassViews.View[] Views,
+        ComputedLayout[] Layouts, string TemplateInputs);
 
-    internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
+    internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
-        "System.SByte" => "signed8",
-        "System.Byte" or "System.Boolean" => "unsigned8",
-        "System.Int16" => "signed16",
-        "System.UInt16" or "System.Char" => "unsigned16",
+        "System.SByte" => Narrowing.Signed8,
+        "System.Byte" or "System.Boolean" => Narrowing.Unsigned8,
+        "System.Int16" => Narrowing.Signed16,
+        "System.UInt16" or "System.Char" => Narrowing.Unsigned16,
         _ => null
     };
 
@@ -25,71 +26,71 @@ internal static class LeanEmitter
 
     // The kernel rechecks every decide; elaborator whnf costs grow superlinearly with body size.
     internal const string Decide = "by decide +kernel";
-    internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar",
+    internal static LocalKind Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar",
         MetadataValidation.LayoutContext? layouts = null)
     {
         layouts?.Require(module, architecture);
         if (ManagedPointers.Signature(type) is { } pointer)
-            return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
-                ManagedPointers.SignatureEvidence(pointer);
-        if (type is ByReferenceType or PointerType) return ".reference";
-        if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return ".object";
-        if (Arrays.Of(type, architecture) is { } element) return $".array {element.Expression}";
-        if (Spans.Width(type, architecture) is { } width)
-            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
+            return type is ArrayType ? new LocalKind.MethodTable(ManagedPointers.SignatureEvidence(pointer))
+                : new LocalKind.MethodPointer(ManagedPointers.SignatureEvidence(pointer));
+        if (type is ByReferenceType or PointerType) return new LocalKind.Reference();
+        if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return new LocalKind.Object();
+        if (Arrays.Of(type, architecture) is { } element) return new LocalKind.Array(element);
+        if (Spans.Width(type, architecture) is { } width) return new LocalKind.Span(width, Spans.Writable(type));
         if (MetadataValidation.IsAggregate(type, module) || layouts?.IsImported(type) == true)
-        {
-            var size = layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture);
-            return $".aggregate {size}";
-        }
-        if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
+            return new LocalKind.Aggregate(
+                layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture));
+        if (Narrow(type) is { } narrow) return new LocalKind.Narrow(narrow);
         return EnumTypes.Storage(type).FullName switch
         {
-            "System.Int32" or "System.UInt32" => ".word32",
-            "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => ".word64",
-            string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) => ".vector128",
-            string s when s.StartsWith("System.Runtime.Intrinsics.Vector256`1<", StringComparison.Ordinal) => ".vector256",
-            string s when s.StartsWith("System.Runtime.Intrinsics.Vector512`1<", StringComparison.Ordinal) => ".vector512",
+            "System.Int32" or "System.UInt32" => new LocalKind.Word32(),
+            "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => new LocalKind.Word64(),
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) =>
+                new LocalKind.Vector(128),
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector256`1<", StringComparison.Ordinal) =>
+                new LocalKind.Vector(256),
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector512`1<", StringComparison.Ordinal) =>
+                new LocalKind.Vector(512),
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
     // An opaque value names no initializer; its zero bytes fix only the load width.
-    static string OpaqueSite(int pc, StaticValues.Value value)
+    static StaticSite OpaqueSite(int pc, FieldRef reference, StaticValues.Value value) =>
+        new(pc, StaticIdentity.Of(value.Field), reference, value.Bytes,
+            new OpaqueStaticValue(StaticValues.ScalarSign(value.Field)));
+
+    static StaticSite SiteOf(Instruction i, int pc, FieldRef reference, MethodDefinition method,
+        IReadOnlyDictionary<MethodDefinition, int> methodIndices, FeatureProfile profile)
     {
-        StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-        return $$"""
-            ({{pc}}, { identity := {{identity.Identity}},
-            assemblyIdentity := {{JsonSerializer.Serialize(identity.AssemblyIdentity)}},
-            fieldName := {{JsonSerializer.Serialize(value.Field.FullName)}},
-            bytes := {{StaticData.LeanBytes(value.Bytes)}}, scalar := {{StaticValues.Scalar(value.Field)}},
-            opaqueValue := true })
-            """.ReplaceLineEndings(" ");
+        if (StaticValues.IsLoad(i))
+        {
+            var value = StaticValues.Resolve((FieldReference)i.Operand, method.Module, profile.Architecture);
+            if (value.Opaque) return OpaqueSite(pc, reference, value);
+            int? initializer = value.Initializer is null
+                ? null : methodIndices.GetValueOrDefault(value.Initializer, -1);
+            if (initializer < 0)
+                throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
+            return new(pc, StaticIdentity.Of(value.Field), reference, value.Bytes,
+                new InitializedStaticValue(StaticValues.ScalarSign(value.Field), initializer, value.Arguments,
+                    value.Literal, value.Construct));
+        }
+        FieldDefinition field = StaticData.Validate((FieldReference)i.Operand, method.Module);
+        return new(pc, StaticIdentity.Of(field), reference, field.InitialValue,
+            new StaticDataBlock(StaticData.Alignment(field)));
     }
 
-    static bool StaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
+    static bool IsStaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
         (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
-    static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => StaticValues.IsLoad(i)
-        ? StaticValues.Resolve((FieldReference)i.Operand, module, architecture).Field : StaticData.Validate((FieldReference)i.Operand, module);
     internal static StaticIdentityRecord[] StaticIdentities(MethodDefinition[] methods, FeatureProfile profile) =>
-        methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(StaticSite)
-            .Select(instruction => StaticIdentity.Of(StaticField(instruction, methods[0].Module, profile.Architecture)))
+        methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(IsStaticSite)
+            .Select(instruction => StaticIdentity.Of(
+                StaticData.FieldOf(instruction, methods[0].Module, profile.Architecture)))
             .Distinct().OrderBy(identity => identity.Identity, StringComparer.Ordinal).ToArray();
-    internal static string Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
-        MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts) switch
-    {
-        ".reference" or ".object" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
-        string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
-        string kind when kind.StartsWith(".span ", StringComparison.Ordinal) ||
-            kind.StartsWith(".array ", StringComparison.Ordinal) ||
-            kind.StartsWith(".methodPointer ", StringComparison.Ordinal) ||
-            kind.StartsWith(".methodTable ", StringComparison.Ordinal) => ".nullRef",
-        ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
-        _ => ".aggregate (List.replicate " +
-            (layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)) + " 0)"
-    };
+    internal static InitialValue Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
+        MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts).Initial();
     static TypeReference[] LayoutTypes(MethodDefinition[] methods, MetadataValidation.LayoutContext metadata)
     {
-        TypeReference[] types = methods
+        var types = methods
             .SelectMany(m => m.Parameters.Select(p => InReferences.Parameter(p.ParameterType))
             .Concat(m.HasThis ? [MethodSpecialization.DeclaringType(m)] : [])
             .Concat(m.Body.Variables.Select(v => v.VariableType)).Append(InitAccessors.Return(m.ReturnType))
@@ -104,41 +105,35 @@ internal static class LeanEmitter
             .Select(t => t is ByReferenceType r ? r.ElementType : t)
             .Select(t => t is ArrayType array ? array.ElementType : t)
             .Select(t => Spans.Is(t) ? ((GenericInstanceType)t).GenericArguments[0] : t)
-            .Where(metadata.IsLayout).Select(metadata.Canonical).DistinctBy(LayoutEvidence.Identity).ToArray();
+            .Where(metadata.IsLayout);
         List<TypeReference> layouts = [];
-        HashSet<string> seenLayouts = new(StringComparer.Ordinal);
-        void IncludeLayout(TypeReference type)
+        HashSet<TypeReference> seenReferences = new(ReferenceEqualityComparer.Instance);
+        Dictionary<string, StructuralSignatures.Signature> identities = new(StringComparer.Ordinal);
+        Func<TypeReference, StructuralSignatures.Signature>? signatureOf = null;
+        void IncludeLayout(TypeReference reference)
         {
-            if (!seenLayouts.Add(LayoutEvidence.Identity(type))) return;
+            if (!seenReferences.Add(reference)) return;
+            var spelling = LayoutEvidence.Identity(reference);
+            signatureOf ??= StructuralSignatures.Current.LayoutSnapshot();
+            var signature = signatureOf(reference);
+            if (identities.TryGetValue(spelling, out var previous))
+            {
+                if (previous != signature) throw new InvalidDataException($"Ambiguous layout identity: {spelling}");
+                return;
+            }
+            identities.Add(spelling, signature);
+            var type = metadata.Canonical(reference);
+            if (!ReferenceEquals(type, reference) && signatureOf(type) != signature)
+                throw new InvalidDataException($"Ambiguous imported layout identity: {spelling}");
             layouts.Add(type);
             foreach (MetadataValidation.InstanceField field in metadata.Fields(type))
-                if (metadata.IsLayout(field.Type)) IncludeLayout(metadata.Canonical(field.Type));
+                if (metadata.IsLayout(field.Type)) IncludeLayout(field.Type);
         }
         foreach (TypeReference type in types) IncludeLayout(type);
         return layouts.ToArray();
     }
 
-    // These definitions guide proof simplification; the full validator still checks every call.
-    static string? CallDefinitions(int caller, IReadOnlyList<string> operations, int methodCount)
-    {
-        var targets = new SortedSet<int> { caller };
-        var hasCall = false;
-        foreach (var operation in operations)
-        {
-            if (!operation.StartsWith(".call ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".callInstance ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newAggregate ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newObject ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newVector256 ", StringComparison.Ordinal)) continue;
-            hasCall = true;
-            var fields = operation.Split(' ', 3);
-            if (fields.Length >= 2 && int.TryParse(fields[1], out var target) &&
-                target >= 0 && target < methodCount) targets.Add(target);
-        }
-        if (!hasCall) return null;
-        return string.Join(", ", targets.SelectMany(target =>
-            new[] { $"method{target}Closed", $"method{target}TypeArgumentsRaw" }));
-    }
+    static string LinkName(int method, int pc) => $"method{method}Link{pc}";
 
     /// <summary>The recursion depth every generated declaration fits in, whatever the method length.</summary>
     const int BaseRecursionDepth = 4096;
@@ -150,20 +145,57 @@ internal static class LeanEmitter
     internal static int RecursionDepth(int longestBody) =>
         Math.Max(BaseRecursionDepth, RecursionDepthPerInstruction * longestBody);
 
+    /// <summary>Lean's default heartbeat budget, which the instruction checks of a shorter body fit in.</summary>
+    const int BaseHeartbeats = 200_000;
+
+    /// <summary>Twice the 60 heartbeats per instruction the instruction checks measured on an arithmetic body.</summary>
+    const int HeartbeatsPerInstruction = 120;
+
+    /// <summary>Twice the 216 heartbeats each call site added to the instruction checks of a body of linked calls.</summary>
+    const int HeartbeatsPerCall = 432;
+
+    // The kernel decides the instruction checks once per site and a call site costs more, so the budget counts both.
+    internal static int InstructionCheckHeartbeats(int instructions, int calls) =>
+        Math.Max(BaseHeartbeats, HeartbeatsPerInstruction * instructions + HeartbeatsPerCall * calls);
+
+    /// <summary>The closed decoder and its specialization determine the method and every code position.</summary>
+    static void EmitDecodedMethod(StringBuilder lean, int n, string fields, StringBuilder? decoderInputs)
+    {
+        var method = $"method{n}";
+        var decoderArgs = $"profile {FrameMetadata.EnvironmentLean} method{n}Links {method}Reachable";
+        var closedDecoder = $"Method.ofClosed? {decoderArgs} {method}Closed {method}RawArguments";
+        decoderInputs?.AppendLine($"cil_decoded_method {method} := {closedDecoder}");
+        var rawDecoder = $"Method.ofRaw? {decoderArgs} {method}Original {method}TypeArgumentsRaw";
+        const string equality = "Extraction.SpecializationValid.ofRaw?_eq_ofClosed?";
+        var environment = $"(environment := {FrameMetadata.EnvironmentLean})";
+        var evidence = $"{method}_specialization_validated profile method{n}Links {method}Reachable";
+        var closedProof = $"(congrArg Except.toOption {method}_decoder_eq)";
+        var proof = $"Eq.trans ({equality} {environment} {evidence}) {closedProof}";
+        var inputs = $"{decoderArgs} {method}Closed {method}RawArguments {method}";
+        var code = $"Extraction.methodCode {decoderArgs} {method}Closed";
+        var codeProof = $"@Method.ofClosed?_code {inputs} {method}_decoder_eq";
+        lean.AppendLine($"""
+            cil_decoded_method {method} {fields}:= {closedDecoder}
+            theorem {method}_decoded : {rawDecoder} = some {method} := {proof}
+            theorem {method}_decoded_code : {method}.code = {code} := {codeProof}
+            """);
+    }
+
     internal static Emission Emit(MethodDefinition[] methods, FeatureProfile profile, PinnedAssemblies pinned,
-        ImportResolution? importResolution = null,
-        StaticIdentityRecord[]? staticIdentities = null, bool collectTemplates = false)
+        ResolvedCallSites callSites, ImportResolution? importResolution = null,
+        StaticIdentityRecord[]? staticIdentities = null, bool collectOutlines = false, bool templateInputs = false)
     {
         var methodIndices = methods.Select((method, index) => (method, index))
             .ToDictionary(pair => pair.method, pair => pair.index);
-        var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
-        var callDefinitions = new string?[methods.Length];
+        var outlines = new List<ProofOutline.Method>();
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
+            import CIL.Extraction.DecodedDefinition
             import CIL.SymbolicExecution
             import CIL.InstructionEquations
             import CIL.Safety.Execution
+            import CIL.Safety.ResolutionFacts
 
             namespace Extracted
             open CIL
@@ -172,169 +204,243 @@ internal static class LeanEmitter
 
 
             """.ReplaceLineEndings("\n"));
-        lean.AppendLine($"@[cil_code] def profile : FeatureProfile := {profile.Lean}");
-        lean.AppendLine("theorem profile_valid : profile.Valid := " + Decide);
+        StringBuilder? inputs = templateInputs ? new() : null;
+        var profileDefinition = $"def profile : FeatureProfile := {profile.Lean}";
+        lean.AppendLine($"@[cil_code] {profileDefinition}");
+        inputs?.AppendLine(profileDefinition);
         StaticIdentity.Validate(staticIdentities ?? StaticIdentities(methods, profile));
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
         if (importResolution is not null) layoutContext.AddImported(importResolution.LocalLayouts());
         TypeReference[] types = LayoutTypes(methods, layoutContext);
+        var layouts = new ComputedLayout[types.Length];
         for (int i = 0; i < types.Length; i++)
         {
             int size = layoutContext.Size(types[i]);
-            string fields = string.Join(", ", layoutContext.Fields(types[i])
-                .Select(field =>
-                {
-                    var offset = layoutContext.FieldOffset(types[i], field.Definition);
-                    var width = layoutContext.FieldSize(field.Type);
-                    var aggregate = layoutContext.IsLayout(field.Type);
-                    return $"⟨{offset}, {width}, {aggregate.ToString().ToLowerInvariant()}⟩";
-                }));
-            lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
+            LayoutField[] fields = [.. layoutContext.Fields(types[i]).Select(field => new LayoutField(
+                layoutContext.FieldOffset(types[i], field.Definition), layoutContext.FieldSize(field.Type),
+                layoutContext.IsLayout(field.Type)))];
+            layouts[i] = new ComputedLayout(LayoutEvidence.Identity(types[i]), size, fields);
+            var layout = $"def layout{i} : AggregateLayout := {layouts[i].ToLean()}";
+            lean.AppendLine(layout);
+            inputs?.AppendLine(layout);
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := {Decide}");
         }
         LayoutEvidence layoutEvidence = new(types, layoutContext);
-        layoutEvidence.EmitLayouts(lean);
+        layoutEvidence.EmitLayouts(lean, inputs);
+        // One shared constant, so each method and its evidence name the tables instead of repeating them.
+        const string tables = "{ rawLayouts := rawLayouts, layouts := computedLayouts }";
+        var environment = $"def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := {tables}";
+        lean.AppendLine($"@[cil_code] {environment}");
+        inputs?.AppendLine(environment);
+        // The shape facts are written here once every method has been translated, so admission reports its own
+        // refusals first, and every method's components see them.
+        IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
+        var slots = string.Join(", ", importBindings.Select(ImportResolution.LeanSlot));
+        lean.AppendLine($"""def imports : List ImportSlot := [{slots}]""");
+        if (importBindings.Count != 0)
+            lean.AppendLine("""
+                /-- The package's checked call slots and published layout identities. -/
+                def importIndex : Extraction.ImportSlotIndex := .ofList imports
+                """);
+        var shapeFactsAt = lean.Length;
+        var operandShapes = new OperandShapes(layoutEvidence);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
+        genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
             MethodDefinition m = methods[n];
-            var instructions = new InstructionIndex(m);
             var featureCertificate = Reachability.Certify(m, profile);
             var reachable = featureCertificate.Keys.ToHashSet();
             var scalarCertificate = NativeOperands.Certify(m, reachable, profile);
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
-            var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
             var dispatch = NativeDispatch.For(m);
-            string LocalKind(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
+            LocalKind KindOf(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
                 Kind(type, m.Module, profile.Architecture, layoutContext);
-            string parameters = string.Join(", ", parameterIndices.Select(index =>
-                $"({index}, {LocalKind(MethodArguments.Type(m, index))})"));
-            string locals = string.Join(", ", m.Body.Variables.Select(variable => m.Body.InitLocals
-                ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? ".nullRef" :
-                    Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext) : ".unmodeled"));
-            HashSet<int> addressedLocals = m.Body.Instructions
-                .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
-                .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
-            List<string> ops = [];
-            foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i)
-                    ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
-                    : ".unsupported \"Unreachable under selected profile\"");
-            fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
-                ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
-            var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
-            string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
-                .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
-                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)) : "";
-            string kinds = string.Join(", ", m.Body.Variables.Select(variable => LocalKind(variable.VariableType, variable.Index)));
-            string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
-                .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
-                {
-                    if (StaticValues.IsLoad(s.i))
-                    {
-                        StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
-                        if (value.Opaque) return OpaqueSite(s.pc, value);
-                        var initializer = value.Initializer is null ? 0 : methodIndices.GetValueOrDefault(value.Initializer, -1);
-                        if (initializer < 0)
-                            throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
-                        var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
-                        var construct = value.Construct ? ", construct := true" : "";
-                        StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-                        // Each method definition is emitted on one line, so the entry's line breaks become spaces.
-                        return $$"""
-                            ({{s.pc}}, { identity := {{identity.Identity}},
-                            assemblyIdentity := {{JsonSerializer.Serialize(identity.AssemblyIdentity)}},
-                            fieldName := {{JsonSerializer.Serialize(value.Field.FullName)}},
-                            bytes := {{StaticData.LeanBytes(value.Bytes)}}, scalar := {{StaticValues.Scalar(value.Field)}},
-                            initializer := some { method := {{initializer}},
-                            arguments := [{{string.Join(", ", value.Arguments)}}]{{literal}}{{construct}} } })
-                            """.ReplaceLineEndings(" ");
-                    }
-                    FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
-                    StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);
-                    return $$"""
-                        ({{s.pc}}, { identity := {{fieldIdentity.Identity}},
-                        assemblyIdentity := {{JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}},
-                        fieldName := {{JsonSerializer.Serialize(f.FullName)}},
-                        bytes := {{StaticData.LeanBytes(f)}}, alignment := {{StaticData.Alignment(f)}} })
-                        """.ReplaceLineEndings(" ");
-                }));
-            lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
+            ParameterHome[] homes = [.. parameterIndices.Select(index =>
+                new ParameterHome(index, KindOf(MethodArguments.Type(m, index))))];
+            InitialValue[] locals = [.. m.Body.Variables.Select(variable => m.Body.InitLocals
+                ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? InitialValue.NullRef :
+                    Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext)
+                : InitialValue.Unmodeled)];
+
+            fieldAccesses.AddRange(m.Body.Instructions.Select((site, pc) => reachable.Contains(site)
+                ? ClassViews.Of(site, n, pc, profile.Architecture) : null).OfType<ClassViews.Access>());
+            LocalKind[] kinds =
+                [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
+            StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
+                .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
+                .Select(s => SiteOf(s.i, s.pc, genericEvidence.FieldReferenceOf(m, s.pc), m, methodIndices,
+                    profile))];
+            var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, [], homes, sites,
+                genericEvidence.Declared(m));
+            SortedSet<int>? linkedMethods = templateInputs ? [] : null;
+            var linkEntries = callSites.Links(m, reachable, methodIndices, importResolution,
+                layoutContext, linkedMethods);
+            lean.AppendLine($"def method{n}Signature : String := {IdentityText.Quote(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
-                lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
-                lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
+                var definition = IdentityText.Quote(origin.Definition);
+                var arguments = string.Join(", ", origin.TypeArguments.Select(IdentityText.Quote));
+                lean.AppendLine($"def method{n}GenericDefinition : String := {definition}");
+                lean.AppendLine($"def method{n}TypeArguments : List String := [{arguments}]");
             }
-            var metadata = $"returnsValue := {(ReturnsValue(m) ? "true" : "false")}, " +
-                $"locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], " +
-                $"parameterHomes := [{parameters}], staticSites := [{sites}]";
-            callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
-            if (collectTemplates)
-                templates.Add(new(m.FullName, metadata, ops.ToArray(), sites.Length != 0));
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {metadata}, code := [");
-            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
+            // Each link's text is written once, as a definition the table, the index and its facts name.
+            // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
+            var inputStart = lean.Length;
+            foreach (var (pc, link) in linkEntries)
+                lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
+            // One named table, which the decoder takes, so a decoded method's links are the extractor's and its
+            // link facts name these definitions.
+            var linkTable = $"method{n}Links";
+            lean.AppendLine($"@[cil_code] def {linkTable} : List (Nat × Link) := [" + string.Join(", ",
+                linkEntries.Select(entry => $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]");
+            inputs?.Append(lean, inputStart, lean.Length - inputStart);
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
+            inputStart = lean.Length;
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
-            genericEvidence.EmitMethod(lean, m, n, reachable);
+            var staticInput = "";
+            if (sites.Length != 0)
+            {
+                var table = $"method{n}StaticFields";
+                var entries = sites.Select(site =>
+                {
+                    var descriptor = site.DescriptorLean(LeanText.MethodNumber);
+                    var size = "";
+                    if (site.Detail is StaticDataBlock)
+                    {
+                        var field = (FieldReference)m.Body.Instructions[site.Pc].Operand;
+                        size = $", rvaSize := some {field.FieldType.Resolve().ClassSize}";
+                    }
+                    return $$"""({{site.Pc}}, { descriptor := {{descriptor}}{{size}} })""";
+                });
+                var fields = string.Join(", ", entries);
+                lean.AppendLine($"def {table} : List (Prod Nat Extraction.StaticFieldSite) := [{fields}]");
+                staticInput = $"staticFields := {table}, ";
+            }
+            inputs?.Append(lean, inputStart, lean.Length - inputStart);
+            genericEvidence.EmitMethod(lean, m, n, reachable, methods.Length, staticInput, inputs);
+            // A field access names its operand's definition, so stepping reads that operand's shape fact.
+            var (naming, objectProof) = operandShapes.RecordMethod(m, n, reachable, genericEvidence);
+            if (GenericEvidence.FirstDecodeRefusal(m, reachable, callSites, importResolution) is { } refusal)
+                throw new GenericEvidence.UndecodedInstruction(m, refusal);
+            if (templateInputs)
+            {
+                var features = reachable.Where(site => site.OpCode.Code == Code.Call && callSites.IsModel(site))
+                    .Select(site => FeatureProfile.Getter((MethodReference)site.Operand)).OfType<Feature>()
+                    .Distinct().Order().ToArray();
+                templates.Add(new(m.FullName, frame, features,
+                    [.. m.Body.Instructions.Select(InstructionOperands.RawOpcode)], linkedMethods!.ToArray()));
+            }
+            if (collectOutlines)
+            {
+                var instructions = new InstructionIndex(m);
+                var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
+                var outlineOperations = new List<Operation>(m.Body.Instructions.Count);
+                foreach (var site in m.Body.Instructions)
+                {
+                    if (!reachable.Contains(site))
+                    {
+                        outlineOperations.Add(Unoutlined.Site);
+                        continue;
+                    }
+                    var operation = InstructionTranslation.Translate(site, m, methodIndices, instructions, callSites,
+                        profile, scalarCertificate, parameterHomes, importResolution, layoutContext);
+                    // Each descriptor reads the operand of the closed instruction the decoder checks.
+                    outlineOperations.Add(operation switch
+                    {
+                        ObjectInstruction access => access with { Operand = genericEvidence.ClosedOperandOf(site) },
+                        NewArray allocation => allocation with { Element = genericEvidence.ClosedOperandOf(site) },
+                        TypedElementAccess access => access with { Element = genericEvidence.ClosedOperandOf(site) },
+                        ElementAddress address => address with { Element = genericEvidence.ClosedOperandOf(site) },
+                        _ => operation
+                    });
+                }
+                outlines.Add(new(frame, [.. outlineOperations]));
+            }
+            // The decoder's raw definition is the method's only source; the command states its field facts and
+            // writes each field operand as the definition the operand shapes name.
+            var namedOperands = naming.Length == 0 ? "" : $"[{naming}] ";
+            EmitDecodedMethod(lean, n, namedOperands, inputs);
+
+            const string layoutTables = "Extraction.MethodLayoutsValid rawLayouts computedLayouts";
+            var layoutCheck = $"{layoutTables} method{n} method{n}LayoutUses";
+            lean.AppendLine($"theorem method{n}_layouts_validated : {layoutCheck} := ⟨layouts_validated, {Decide}⟩");
+            lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
+                $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : method{n}.opaqueVectorLocals = [{opaqueLocals}] := rfl");
-            ScalarEvidence.Emit(lean, m, n, scalarCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
-            // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
+            ScalarEvidence.Emit(lean, m, n, scalarCertificate, objectProof);
+            // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
+            // in time linear in the body, so a stepping proof reads a link without evaluating the table lookup.
             lean.AppendLine($"cil_instruction_equations method{n}");
-            foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })
-                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (ReturnsValue(m) ? "true" : "false") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
+            // A modelled call's step reads its model from the fact the command states for its pc.
+            if (reachable.Any(callSites.IsModel)) lean.AppendLine($"cil_runtime_models method{n}");
+            lean.AppendLine($"cil_resolution_facts method{n}");
         }
-        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
-        PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();
-        for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := " +
-                $"{{ identity := {JsonSerializer.Serialize(pins[k].Identity)} }}");
-        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
-            string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
+        // The platform definitions sit after the shape facts' position, so they go in first.
+        genericEvidence.InsertPlatformDefinitions(lean);
+        lean.Insert(shapeFactsAt, operandShapes.Lean());
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
-        IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
-        lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
         // Whole-program data, so it stays after the `specializedMethods` boundary of per-method components;
         // feature obligations read callee certificates through it.
-        lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ",
-            Enumerable.Range(0, methods.Length).Select(n =>
-                $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, " +
-                $"closed := method{n}Closed, parameterInput := method{n}RawArguments, " +
-                $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
-                $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
-                $"dispatchTypes := method{n}DispatchTypes, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
+        var records = Enumerable.Range(0, methods.Length).Select(n =>
+        {
+            var method = $"method{n}";
+            var fields = string.Join(", ",
+                $"original := {method}Original", $"body := {method}Body", $"arguments := {method}TypeArgumentsRaw",
+                $"closed := {method}Closed", $"parameterInput := {method}RawArguments",
+                $"reachable := {method}Reachable",
+                $"featureStates := {method}FeatureStates", $"scalarStates := {method}ScalarStates",
+                $"layoutUses := {method}LayoutUses", $"dispatchTypes := {method}DispatchTypes",
+                $"links := {method}Links",
+                $"assembly := assembly{pinned.Index(methods[n].Module)}", $"signature := {method}Signature");
+            return $$"""{ {{fields}} }""";
+        });
+        lean.AppendLine($"""def methodEvidence : List Extraction.MethodEvidence := [{string.Join(", ", records)}]""");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
-            var facts = $"specializedMethods, imports, Extraction.lowerConstrainedRaw, {callDefinitions[n]}, " +
-                $"method{n}, method{n}Reachable, method{n}DispatchTypes";
-            var proof = callDefinitions[n] is null ? Decide : $"by cil_managed_calls [{facts}]";
+            lean.AppendLine($"theorem method{n}_models_validated : " +
+                $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := " +
+                $"Extraction.RuntimeModelsAgree.of_closed method{n}_decoder_eq method{n}_features_validated");
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
-                $"specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
-                $"method{n}Closed) method{n}Reachable method{n} := {proof}");
+                $"specializedMethods imports (Extraction.callModelled method{n}) " +
+                $"(Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
+                $"method{n}Closed) method{n}Reachable method{n} := {Decide}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
-        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
-        lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
+        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
+        // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
+        lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
-        lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
+        var signatures = string.Join(", ", importBindings.Select(binding => IdentityText.Quote(binding.Identity)));
+        lean.AppendLine($"def importSignatures : List String := [{signatures}]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
         lean.AppendLine("theorem statics_validated : Extraction.StaticValuesValid program := " + Decide);
+        lean.AppendLine("theorem static_identities_validated : Extraction.StaticIdentitiesValid program " +
+            "(methodEvidence.map (·.body)) := " + Decide);
         for (int n = 0; n < methods.Length; n++)
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
             lean.AppendLine($"theorem method{n}_constrained_validated : Extraction.ConstrainedCallsValid method{n}DispatchTypes specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
-            lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_shape_validated : " +
+                $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
+
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
-            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_intrinsics_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated, method{n}_constrained_validated⟩");
+            lean.AppendLine($"theorem method{n}_environment_validated : " +
+                $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
+            lean.AppendLine($"theorem method{n}_declared_validated : " +
+                $"Extraction.DeclaredValid method{n}Closed method{n} := rfl");
+            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
+                $"computedLayouts assemblies platformDefinitions methodEvidence imports methodEvidence[{n}] " +
+                $"method{n} :=");
+            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
+                $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
+                $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
+                $"method{n}_decoder_eq, method{n}_opaque_validated, " +
+                $"method{n}_object_operands_validated, method{n}_scalars_validated, " +
+                $"method{n}_constrained_validated, method{n}_body_validated,");
+            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated, rfl\u27e9");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");
@@ -342,14 +448,26 @@ internal static class LeanEmitter
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem attribution_validated : " +
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
-        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
-        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+            "assemblies platformDefinitions methodEvidence imports program := by");
+        lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated");
+        lean.AppendLine("    statics_validated static_identities_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");
         for (int n = 0; n < methods.Length; n++)
             lean.AppendLine($"  refine Extraction.MethodsChecked.cons method{n}_evidence_validated ?_");
         lean.AppendLine("  exact Extraction.MethodsChecked.nil");
-        for (int n = 0; n < methods.Length; n++)
-            lean.AppendLine($"@[cil_code] theorem lookup{n} : program[{n}]? = some method{n} := rfl");
+        // One index of the program, checked once, serves every closure and run that reads it.
+        lean.AppendLine("/-- The number of methods in the extracted program. -/");
+        lean.AppendLine($"def programLength : Nat := {methods.Length}");
+        lean.AppendLine("theorem programLength_eq : programLength = program.length := by cil_kernel_rfl");
+        lean.AppendLine("/-- The balanced index of the extracted methods in program order. -/");
+        lean.AppendLine("def programIndex : Extraction.FlowIndex Method := program_index% program");
+        lean.AppendLine("""
+            theorem programIndex_eq : programIndex = Extraction.FlowIndex.ofList program := by cil_kernel_rfl
+            """);
+        lean.AppendLine("theorem programIndex_get? (index : Nat) : programIndex.get? index = program[index]? := by");
+        lean.AppendLine("  rw [programIndex_eq]; exact Extraction.FlowIndex.get?_ofList program index");
+        ProgramLookupFacts.Append(lean, "program", "method", methods.Length);
         var classViews = ClassViews.Views(fieldAccesses);
         var views = ClassViews.Emit(fieldAccesses, classViews);
         if (views.Length > 0)
@@ -360,6 +478,74 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), outlines.ToArray(), classViews, layouts,
+            inputs?.ToString().ReplaceLineEndings("\n") ?? "");
+    }
+
+    /// <summary>
+    /// The distinct field and type operands of the reachable field and value-type instructions of every method, each
+    /// written once as a definition beside the fact that states how every method of the extraction resolves it.
+    /// </summary>
+    internal sealed class OperandShapes(LayoutEvidence layouts)
+    {
+        readonly Dictionary<FieldRef, string> fields = [];
+        // TypeExpr has no typed C# form, so a type operand is keyed by its rendered term.
+        readonly Dictionary<string, string> types = new(StringComparer.Ordinal);
+        readonly StringBuilder text = new();
+
+        /// <summary>Records the reachable raw operands and names the shape facts used by this method.</summary>
+        internal (string Names, string? ObjectProof) RecordMethod(MethodDefinition method, int index,
+            IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
+        {
+            var names = new List<string>();
+            var operands = new List<(int Opcode, string Type)>();
+            var needsLayout = false;
+            for (var pc = 0; pc < method.Body.Instructions.Count; pc++)
+            {
+                var instruction = method.Body.Instructions[pc];
+                if (!reachable.Contains(instruction)) continue;
+                if (instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld)
+                    names.Add(RecordField(evidence.FieldReferenceOf(method, pc)));
+                else if (instruction.OpCode.Code is
+                    Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj or Code.Sizeof)
+                {
+                    var type = (TypeReference)instruction.Operand;
+                    var name = RecordType(evidence.ClosedOperandOf(instruction));
+                    names.Add(name);
+                    operands.Add((InstructionOperands.RawOpcode(instruction), name));
+                    needsLayout |= !Spans.Is(type) && MetadataValidation.IsAggregate(type, method.Module);
+                }
+            }
+            // The method names each operand once, but its admission proof checks every object instruction in order.
+            var proof = needsLayout ? ObjectOperandProof.Render($"method{index}", operands) : null;
+            return (string.Join(", ", names.Distinct(StringComparer.Ordinal)), proof);
+        }
+
+        string RecordField(FieldRef field)
+        {
+            if (fields.TryGetValue(field, out var name)) return name;
+            name = $"fieldRef{fields.Count}";
+            fields.Add(field, name);
+            var operand = field with
+            {
+                Owner = layouts.NamedOperandType(field.Owner), Type = layouts.NamedOperandType(field.Type)
+            };
+            text.AppendLine($"def {name} : Extraction.FieldRef := {operand.ToLean()}");
+            text.AppendLine($"cil_field_shape {FrameMetadata.EnvironmentLean} {name}");
+            return name;
+        }
+
+        string RecordType(string type)
+        {
+            if (types.TryGetValue(type, out var name)) return name;
+            name = $"valueType{types.Count}";
+            types.Add(type, name);
+            text.AppendLine($"def {name} : Extraction.TypeExpr := {layouts.NamedOperandType(type)}");
+            text.AppendLine($"cil_value_shape {FrameMetadata.EnvironmentLean} {name}");
+            return name;
+        }
+
+        /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
+        internal string Lean() => text.ToString();
     }
 }

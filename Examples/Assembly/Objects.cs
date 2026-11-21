@@ -344,6 +344,9 @@ public static class Objects
         return amount;
     }
 
+    /// <summary>The balance when the limit is below a small constant, otherwise zero: an unsigned test.</summary>
+    public static ulong UnderFive(Account account) => account.Limit < 5u ? account.Balance : 0;
+
     /// <summary>Two instances of a class with no fields are still two distinct instances.</summary>
     public static bool TwoMarkers()
     {

@@ -47,6 +47,8 @@ public static class DivisionIntrinsics
         return Avx512DQ.MoveMask(Avx512F.CompareGreaterThan(first, second));
     }
     public static ulong UnsafeLow(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(0);
+    // Calls UnsafeLow, so a proof can apply a summary of a method whose body runs vector calls.
+    public static ulong UnsafeLowNext(ulong value) => UnsafeLow(value) + 1;
     public static Vector128<ulong> UnsafeReturn(ulong value) => Vector128.CreateScalarUnsafe(value);
     public static ulong UnsafeCall(ulong value) => ReadLow(Vector128.CreateScalarUnsafe(value));
     private static ulong ReadLow(Vector128<ulong> value) => value.GetElement(0);
@@ -54,11 +56,23 @@ public static class DivisionIntrinsics
         destination = Vector128.CreateScalarUnsafe(value);
     public static ulong UnsafeHigh(ulong value) => Vector128.CreateScalarUnsafe(value).GetElement(1);
     public static bool UnsafeEquals(ulong value) => Vector128.CreateScalarUnsafe(value) == Vector128.CreateScalarUnsafe(value);
+    public static bool EqualWords128(uint a, uint b, uint c, uint d, Vector128<uint> expected) =>
+        Vector128.Create(a, b, c, d) == expected;
+    public static bool EqualBytes256(Vector256<byte> left, Vector256<byte> right) => left == right;
+    public static bool EqualSigned512(Vector512<long> left, Vector512<long> right) => left == right;
     public static void Init128(ref Vector128<ulong> value) => value = default;
     public static void Init256(ref Vector256<ulong> value) => value = default;
     public static void Init512(ref Vector512<ulong> value) => value = default;
     public static Vector256<byte> Shuffle256(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
         Avx2.Shuffle(Vector256.Create(source), Vector256.Create(control));
+    // These compiled variants violate the lane and zero-mask rules of Shuffle256.
+    public static Vector256<byte> ShuffleCrossHalf(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
+        Avx2.Shuffle(Avx2.Permute4x64(Vector256.Create(source).AsUInt64(), 0x4e).AsByte(), Vector256.Create(control));
+
+    public static Vector256<byte> ShuffleIgnoreHighBit(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
+        Avx2.Shuffle(Vector256.Create(source),
+            Avx2.And(Vector256.Create(control).AsUInt64(), Vector256.Create(0x7f7f7f7f7f7f7f7fUL)).AsByte());
+
     public static Vector128<byte> Shuffle128(ReadOnlySpan<byte> source, ReadOnlySpan<byte> control) =>
         Ssse3.Shuffle(Vector128.Create(source), Vector128.Create(control));
     // A portable AES hash round: x86 AESENC, else ARM64 AESE with a zero key, AESMC and the key.

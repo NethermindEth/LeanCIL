@@ -8,7 +8,7 @@ import CIL.TermAccess
 # Loop tactics that carry frame facts
 
 The tactics that walk a loop's `LoopTerminates` goals while keeping its `LoopFrame` current:
-`cil_loop_advance` steps to a call or return, `cil_loop_finish` through a return,
+`cil_loop_advance` steps to a linked call or return, `cil_loop_finish` through a return,
 `cil_loop_call` crosses a call through the callee's contract and continues with the frame after
 it, and `cil_loop_recurse` steps to a loop head and applies the head's hypothesis there. Each walk
 takes the struct zeroings, field stores and numeric local stores on its way through the frame's
@@ -132,37 +132,137 @@ macro "cil_caller_grows" : tactic => `(tactic| first
   | (apply CIL.Safety.Confined.grows; apply CIL.Safety.LoopFrame.confined
      with_reducible assumption))
 
+/-- Whether `left` and `right` can be the same memory. Two different local variables never are,
+    and deciding that by unification unfolds the reads and writes that mention them, which costs
+    more with every memory a walk has passed, so they are told apart syntactically. -/
+def memoryMatches (left right : Expr) : MetaM Bool := do
+  if left == right then return true
+  if left.isFVar && right.isFVar then
+    let leftDeclaration ← left.fvarId!.getDecl
+    let rightDeclaration ← right.fvarId!.getDecl
+    if !leftDeclaration.isLet && !rightDeclaration.isLet then return false
+  withNewMCtxDepth (isDefEq left right)
+
+/-- The variables stepping walks introduced: the memory each store or call produced and the
+    home each snapshot store found. It lives in the environment, so a backtracked step forgets
+    the variables it introduced. -/
+initialize walkVariablesExtension : EnvExtension (PersistentHashSet FVarId) ←
+  registerEnvExtension (pure {}) (asyncMode := .local)
+
+/-- Record `introduced` as a variable a stepping walk introduced. -/
+def recordWalkVariable (introduced : FVarId) : CoreM Unit :=
+  modifyEnv fun env => walkVariablesExtension.modifyState env (·.insert introduced)
+
+/-- Whether `term` is a variable a stepping walk introduced, such as the memory a store
+    produced. A fact at any other memory belongs to the caller, whatever its name. -/
+def producedByWalk (term : Expr) : CoreM Bool := do
+  let .fvar introduced := term | return false
+  return (walkVariablesExtension.getState (← getEnv)).contains introduced
+
+/-- Where the facts about `memory` can start in the context: at the variable itself when it has
+    no value, since every fact that mentions it follows it, and at the start otherwise, since a
+    fact may state a let variable's value or another term equal to `memory`. A store that reads
+    only the facts from there reads a number that does not grow with the walk. -/
+def memoryWindowStart (memory : Expr) : MetaM Nat := do
+  let .fvar memoryVariable := memory | return 0
+  let declaration ← memoryVariable.getDecl
+  return if declaration.isLet then 0 else declaration.index
+
+/-- The declarations of `context` from position `start` on, without the implementation details. -/
+def declarationsFrom (context : LocalContext) (start : Nat) : Array LocalDecl := Id.run do
+  let mut found := #[]
+  for position in [start:context.numIndices] do
+    if let some declaration := context.decls[position]! then
+      unless declaration.isImplementationDetail do found := found.push declaration
+  return found
+
+/-- The declarations of `context` from position `start` that a user name reaches: the last
+    declaration of each name, in context order, found in one pass. -/
+def accessibleDeclarations (context : LocalContext) (start : Nat := 0) : Array LocalDecl :=
+  Id.run do
+  let declarations := declarationsFrom context start
+  let mut latest : Std.HashMap Name FVarId := {}
+  for declaration in declarations do
+    latest := latest.insert declaration.userName declaration.fvarId
+  return declarations.filter fun declaration =>
+    latest[declaration.userName]? == some declaration.fvarId
+
+/-- Clear from the main goal each hypothesis of `superseded` that neither the goal nor a remaining
+    hypothesis mentions, by its type or its value. Only a hypothesis after the earliest of them can
+    mention one, so the pass reads the context from there and not the whole walk's. -/
+def clearSuperseded (superseded : Array FVarId) : TacticM Unit := withMainContext do
+  let context ← getLCtx
+  let mut doomed : Std.HashSet FVarId := {}
+  let mut earliest := context.numIndices
+  for free in superseded do
+    if let some declaration := context.find? free then
+      doomed := doomed.insert free
+      earliest := min earliest declaration.index
+  if doomed.isEmpty then return
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let mentions (expression : Expr) : Array FVarId := (CollectFVars.main expression {}).fvarIds
+  for free in mentions target do doomed := doomed.erase free
+  -- Latest first, so a hypothesis that stays keeps what it mentions, which may itself be doomed.
+  for step in [:context.numIndices - earliest] do
+    let some declaration := context.decls[context.numIndices - 1 - step]! | continue
+    if declaration.isImplementationDetail || doomed.contains declaration.fvarId then continue
+    -- Looking for a doomed variable allocates nothing; the variables are collected only on a hit.
+    let type ← instantiateMVars declaration.type
+    if type.hasAnyFVar doomed.contains then
+      for free in mentions type do doomed := doomed.erase free
+    if let some value := declaration.value? then
+      let value ← instantiateMVars value
+      if value.hasAnyFVar doomed.contains then
+        for free in mentions value do doomed := doomed.erase free
+  if doomed.isEmpty then return
+  let declaration ← goal.getDecl
+  let replacement ← mkFreshExprMVarAt (doomed.fold (·.erase ·) declaration.lctx)
+    declaration.localInstances target MetavarKind.syntheticOpaque declaration.userName
+  goal.assign replacement
+  replaceMainGoal [replacement.mvarId!]
+
 /-- Re-state each named hypothesis about a caller buffer or class instance at `memory` through
     `carry`, a term from its predicate and name, under the same name; a fact `carry` gives nothing
-    for, or whose term does not elaborate, stays as it is. -/
-def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term)) :
-    TacticM Unit := do
+    for, or whose term does not elaborate, stays as it is. A restated fact at a memory the walk
+    introduced supersedes the earlier one, which is added to `superseded` for the caller to clear,
+    or cleared here when no list is given. -/
+def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term))
+    (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit := do
   let carried ← withMainContext do
-    let context ← getLCtx
-    let mut found : Array (LoopCarried × Name) := #[]
-    for declaration in context do
-      if declaration.isImplementationDetail || declaration.userName.hasMacroScopes then continue
-      unless (context.findFromUserName? declaration.userName).any
-        (·.fvarId == declaration.fvarId) do continue
+    let mut found : Array (LoopCarried × LocalDecl) := #[]
+    for declaration in accessibleDeclarations (← getLCtx) (← memoryWindowStart memory) do
+      if declaration.userName.hasMacroScopes then continue
       let type := (← instantiateMVars declaration.type).consumeMData
       let some head := type.getAppFn.constName? | continue
       let some carried := loopCarriedHeads.find? fun carried =>
         carried.head == head && carried.arity == type.getAppNumArgs | continue
       let some carriedMemory := argument? type carried.memory | continue
-      unless ← withNewMCtxDepth (isDefEq carriedMemory memory) do continue
-      found := found.push (carried, declaration.userName)
+      unless ← memoryMatches carriedMemory memory do continue
+      found := found.push (carried, declaration)
     return found
-  for (head, name) in carried do
-    let some term ← carry head (mkIdent name) | continue
+  let produced ← producedByWalk memory
+  let pending ← match superseded with
+    | some pending => pure pending
+    | none => IO.mkRef #[]
+  for (head, earlier) in carried do
+    let some term ← carry head (mkIdent earlier.userName) | continue
     let saved ← saveState
     -- A failed side proof inside `term` is logged, not thrown; `cil_strict` makes it fail here.
-    try evalTactic (← `(tactic| cil_strict have $(mkIdent name):ident := $term))
+    try
+      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent earlier.userName):ident := $term))
+      -- A fact at a memory the walk made is out of reach once restated, and clearing it keeps the
+      -- context from growing with each store. A fact at the caller's memory stays, since the
+      -- restatement does not give it back.
+      if produced then pending.modify (·.push earlier.fvarId)
     catch _ => saved.restore
+  if superseded.isNone then clearSuperseded (← pending.get)
 
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below
     the caller's watermark. -/
-def loopCarryBelow (memory : Expr) (below : Ident) : TacticM Unit :=
-  loopCarryFacts memory fun carried fact => do
+def loopCarryBelow (memory : Expr) (below : Ident)
+    (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit :=
+  loopCarryFacts memory (superseded := superseded) fun carried fact => do
     if carried.grows then
       return some (← `(($fact).after_below $below (by cil_caller_allocation)
         (by cil_caller_grows)))
@@ -200,7 +300,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let some parts ← loopStateParts? source | return false
   let fetched ← observing? (loopFetch facts)
   saved.restore
-  let some { op, found, instruction, .. } := fetched | return false
+  let some { op, valueField, found, instruction, .. } := fetched | return false
   let op ← whnfR op
   let #[_, _, stackList, memory] := parts | return false
   let stack ← listEntries stackList
@@ -210,8 +310,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let below ← loopFreshName `storedBelow
   -- A local store is a `storeLocal` fact the next step reads; a struct store is a whole step.
   let mut takesStep := true
-  let store ← if op.isAppOfArity ``CIL.Op.setFieldAt 2 then do
-      let some offsetTerm := argument? op 0 | return false
+  let store ← if op.isAppOfArity ``CIL.Instruction.stfld 1 then do
+      let some (offsetTerm, _) := valueField | return false
       let some offset ← literalNat? offsetTerm | return false
       let some (_, top) := stack[0]? | return false
       let some (_, address) := stack[1]? | return false
@@ -228,8 +328,17 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let value ← Term.exprToSyntax payload
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.store_field
         $frame $(quote index) $valid $(quote field) $value)
-    else if op.isAppOfArity ``CIL.Op.initAggregate 1 then do
-      let some widthTerm := lastArgument? op | return false
+    else if op.isAppOfArity ``CIL.Instruction.initobj 1 then do
+      let some operand := lastArgument? op | return false
+      let some (_, _, result) := (← instantiateMVars (← inferType found)).consumeMData.eq?
+        | return false
+      let some body := lastArgument? result | return false
+      let shape := mkApp2 (mkConst ``CIL.Method.valueShape) body operand
+      let resolved ← match ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape shape with
+        | some (.done result) => pure result.expr
+        | _ => whnfD shape
+      let widthTerm := mkApp (mkConst ``CIL.ValueShape.size?) resolved
+      let .app (.app (.const ``Option.some _) _) widthTerm ← whnfD widthTerm | return false
       let some width ← literalNat? widthTerm | return false
       let some (_, top) := stack[0]? | return false
       let some home ← loopAddressOf? top | return false
@@ -243,10 +352,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let layoutTerm ← Term.exprToSyntax layout
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.zero_aggregate
         $frame $(quote index) $layoutTerm [$zeros,*] (valid := $valid))
-    else if op.isAppOfArity ``CIL.Op.setLocal 2 then do
-      -- A narrowing store changes the value, which `LoopFrame.store` does not model.
-      let #[slotIndex, narrowing] := op.getAppArgs | return false
-      unless (← whnf narrowing).isAppOf ``Option.none do return false
+    else if op.isAppOfArity ``CIL.Instruction.stloc 1 then do
+      let #[slotIndex] := op.getAppArgs | return false
       let some index ← literalNat? slotIndex | return false
       let some (_, top) := stack[0]? | return false
       let top ← whnf top
@@ -270,6 +377,9 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   catch _ =>
     saved.restore
     return false
+  withMainContext do
+    if let some produced := (← getLCtx).findFromUserName? after.getId then
+      recordWalkVariable produced.fvarId
   -- The slots stay literal, as the next step's frame states them, so the next gathering finds it.
   evalTactic (← `(tactic| try dsimp only at $framed:ident))
   loopCarryBelow memory below
@@ -285,8 +395,20 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   try
     let found ← Term.exprToSyntax found
     let instruction ← Term.exprToSyntax instruction
+    let storing ← match valueField with
+      | some (_, proof) => do
+        let shape ← Term.exprToSyntax proof
+        `($stepped _ _ _ $shape _ _ _ _)
+      | none =>
+        if op.isAppOfArity ``CIL.Instruction.initobj 1 then
+          `($stepped _ _ (by
+              first
+              | cil_step_value_size
+              | rfl
+              | simp only [cil_code, CIL.ValueShape.size?]) _ _ _ _)
+        else `($stepped _ _ _ _ _)
     Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
-      refine CIL.Safety.loop_terminates_next $found $instruction ($stepped _ _ _ _ _) ?_))
+      refine CIL.Safety.loop_terminates_next $found $instruction $storing ?_))
   catch _ => taken.restore
   return true
 
@@ -451,14 +573,14 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
   if let .resume target := mode then
     if position == some target then return
   -- A call or return an advance stops at is left for the next tactic.
-  if mode == .advance && stopped.any fun op => callsCallee op || op == ``CIL.Op.ret then
+  if mode == .advance && stopped.any fun op => callsCallee op || op == ``CIL.Instruction.ret then
     return
   if ← loopFrameStore facts.core layouts footprint then
     return ← loopWalk tactic mode explicit layouts footprint true
   -- Where the walk stopped is the mode's stop, or a store no frame lemma takes.
   let stops : Lean.Name → Bool := match mode with
-    | .finish => (· == ``CIL.Op.ret)
-    | .advance => fun op => callsCallee op || op == ``CIL.Op.ret
+    | .finish => (· == ``CIL.Instruction.ret)
+    | .advance => fun op => callsCallee op || op == ``CIL.Instruction.ret
     | _ => fun _ => false
   loopStuck tactic facts.all prepared stops
 
@@ -466,7 +588,7 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
 def noFootprint : MetaM Expr := do
   mkAppOptM ``List.nil #[← mkAppM ``Prod #[mkConst ``Reference, mkConst ``Nat]]
 
-/-- Step a `LoopTerminates` goal through fetched instructions up to the next call or return,
+/-- Step a `LoopTerminates` goal through fetched instructions up to the next linked call or return,
     with the optional facts and those `gatherLoopFacts` finds, taking each struct zeroing, field
     store and numeric local store on the way through the frame lemmas. Any other instruction it
     cannot step fails, naming the pc, the instruction, the residual step and the fact missing. -/
@@ -537,6 +659,9 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term)
     have $confined:ident := CIL.Safety.CallResult.framed call
     have $returned:ident := CIL.Safety.CallResult.post call
     clear call)))
+  withMainContext do
+    if let some produced := (← getLCtx).findFromUserName? called.getId then
+      recordWalkVariable produced.fvarId
   let unfold : Array Ident := match contract.getAppFn.constName? with
     | some name => #[mkIdent (`_root_ ++ name)]
     | none => #[]
@@ -586,7 +711,8 @@ syntax "cil_loop_call" (&" keeping")? term:max term:max (" at " ident)? (" [" te
 /-- The contract a `MethodContract.Holds` proof's type names, and the tag of its callee's
     precondition (`preconditionTag`). -/
 def loopHeldContract (holds : Term) : TacticM (Expr × Name) := withMainContext do
-  let type ← whnfR (← inferType (← Term.elabTerm holds none))
+  -- A projection such as `summary.holds` types its contract by an assigned metavariable.
+  let type ← whnfR (← instantiateMVars (← inferType (← Term.elabTerm holds none)))
   let contract ← if type.isAppOf ``MethodContract.Holds then argumentAt "cil_loop_call" type 2
     else pure type
   return (contract, preconditionTag type)
@@ -601,9 +727,12 @@ def loopCallFailure (holds input : Term) (facts : Array Term) (position : Nat)
   let prepared ← normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
     (#[← `(CIL.truth)] ++ facts)
   let fetched ← observing? (loopFetch facts)
-  let some { op, step, .. } := fetched
+  let some { op, unlinkedCall, step, .. } := fetched
     | saved.restore
       throwError "cil_loop_call: cannot fetch the instruction at pc {position}"
+  if unlinkedCall then
+    saved.restore
+    throwError "cil_loop_call: pc {position} has no callee link; step it with `cil_loop_advance`"
   unless ((← whnfR op).getAppFn.constName?.map callsCallee).getD false do
     saved.restore
     throwError "cil_loop_call: pc {position} is {op}, not a call; step to the call first with \

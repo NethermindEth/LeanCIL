@@ -51,7 +51,8 @@ partial class Program
         }
         ContractExportManifest manifest = ContractExportManifest.Read(manifestPath);
         byte[] implementation = File.ReadAllBytes(manifest.Assembly);
-        using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
+        using PinnedAssemblies pinned = new(implementation, ContractInterface.Hash(implementation), []);
+        ModuleDefinition module = pinned.Selected;
         output ??= Path.Combine(Path.GetDirectoryName(manifest.Assembly)!,
             module.Assembly.Name.Name + SidecarExtension);
         if (!output.EndsWith(SidecarExtension, StringComparison.Ordinal))
@@ -275,11 +276,9 @@ partial class Program
 
     static string? SnapshotSource(SortedDictionary<string, string> snapshot, string path)
     {
-        StringComparison comparison =
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         path = Path.GetFullPath(path);
         return snapshot.Where(pair => pair.Key.StartsWith(ConsumerKey, StringComparison.Ordinal) &&
-                Path.GetFullPath(pair.Key[ConsumerKey.Length..]).Equals(path, comparison))
+                LocationComparer.Equals(Path.GetFullPath(pair.Key[ConsumerKey.Length..]), path))
             .Select(pair => pair.Value).FirstOrDefault();
     }
 
@@ -378,11 +377,10 @@ partial class Program
         if (settings.schema != 1 || string.IsNullOrWhiteSpace(settings.proof))
             throw new InvalidDataException("Invalid export verification settings.");
         if (settings.proofRoot is not null &&
-            Path.GetFullPath(settings.proofRoot, request.Artifact) != manifest.ProofRoot)
+            !SameLocation(Path.GetFullPath(settings.proofRoot, request.Artifact), manifest.ProofRoot))
             throw new InvalidDataException("Export artifact proofRoot differs from the producer manifest.");
-        string proof = Path.GetFullPath(settings.proof, request.Artifact);
-        Within(manifest.ProofRoot, Path.GetRelativePath(manifest.ProofRoot, proof));
-        return proof;
+        // Spelled under the proof root, as the source snapshot names it.
+        return Within(manifest.ProofRoot, Path.GetFullPath(settings.proof, request.Artifact));
     }
 
     static InterfaceModule[] MergeContractInterfaces(InterfaceModule[] own, IEnumerable<InterfaceModule> imported)

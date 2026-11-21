@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -68,6 +73,9 @@ void Prove(string name, List<string> claims, string definitions = "")
 foreach ((string name, string holder, int width, bool write) in new[]
 {
     ("Read128", "Holder128", 16, false), ("Read256", "Holder256", 32, false),
+    // Each other admitted lane, so a swapped lane tag in the extractor fails against Lean.
+    ("ReadBytes128", "Bytes128", 16, false), ("ReadInts128", "Ints128", 16, false),
+    ("ReadUInts256", "UInts256", 32, false), ("ReadLongs256", "Longs256", 32, false),
     ("Write128", "Holder128", 16, true), ("Write256", "Holder256", 32, true),
     ("WritePacked", "Packed256", 32, true), ("Reinterpret", "Words256", 32, true)
 })
@@ -96,12 +104,14 @@ foreach ((string name, string holder, int width, bool write) in new[]
     if (holder != "Words256")
     {
         claims.Add($"Extracted.layout0.size = {size}");
-        claims.Add($"Extracted.method0.code.any (fun op => match op with | .fieldAt actualOffset actualWidth _ => actualOffset == {offset} && actualWidth == {width} | _ => false) = true");
+        claims.Add($"""Extracted.environment.fieldShape Extracted.fieldRef0 = .value {offset} {width} false""");
     }
     Prove(name, claims, definitions);
 
     object instance = Activator.CreateInstance(type)!;
-    object vector = width == 16 ? (object)Vector128.Create(0x1122334455667788UL) : Vector256.Create(0x1122334455667788UL);
+    Type element = owner.GetMethod(name)!.ReturnType.GetGenericArguments()[0];
+    object vector = (width == 16 ? typeof(Vector128) : typeof(Vector256)).GetMethod("Create", [element])!
+        .Invoke(null, [Convert.ChangeType(0x5A, element)])!;
     if (write)
     {
         object[] arguments = [instance, vector];
@@ -175,33 +185,47 @@ foreach (string mutation in new[] { "element", "width", "scope", "version", "tok
 }
 
 string baseline = File.ReadAllText(Path.Combine(root, "WritePacked", "Extracted.lean"));
-foreach ((string name, string changed) in new[]
+// A field operand naming a field the struct lacks resolves to no layout entry and matches no decoded operand.
+foreach ((string name, string changed, string marker) in new[]
 {
-    ("field-offset", baseline.Replace(".fieldAt 3 32", ".fieldAt 2 32")),
-    ("vector-storage", baseline.Replace("type := .vector256", "type := .unsigned64")),
-    ("computed-width", baseline.Replace("⟨3, 32, false⟩", "⟨3, 16, false⟩")),
-    ("omitted-uses", Regex.Replace(baseline,
-        @"def method0LayoutUses : List Extraction.LayoutUse := [^\r\n]*",
-        "def method0LayoutUses : List Extraction.LayoutUse := []"))
+    ("field-index", baseline.Replace("index := 0, type := .apply", "index := 1, type := .apply"),
+        "the decoded method has no field operand"),
+    ("vector-storage", baseline.Replace("type := (.vector256 .unsigned64)", "type := .unsigned64"), "decide"),
+    ("vector-lane", baseline.Replace("type := (.vector256 .unsigned64)", "type := (.vector256 .signed64)"), "decide"),
+    ("computed-width", baseline.Replace("⟨3, 32, false⟩", "⟨3, 16, false⟩"), "decide")
 })
 {
-    if (changed == baseline) throw new InvalidOperationException("Vector evidence mutation did not change source: " + name);
-    string path = Path.Combine(root, "Evidence-" + name + ".lean");
+    if (changed == baseline)
+        throw new InvalidOperationException($"""Vector evidence mutation did not change source: {name}""");
+    string path = Path.Combine(root, $"""Evidence-{name}.lean""");
     File.WriteAllText(path, changed);
-    (int Code, string Output, string Stdout, string Stderr) result = Execute(["lake", "env", "lean", path], cwd: FixturePackage());
-    if (result.Code == 0 || !result.Output.Contains("decide"))
-        throw new InvalidOperationException("Malformed vector field evidence accepted: " + name + "\n" + result.Output);
-    Console.WriteLine("PASS vector field evidence rejection: " + name);
+    (int Code, string Output, string Stdout, string Stderr) result =
+        Execute(["lake", "env", "lean", path], cwd: FixturePackage());
+    if (result.Code == 0 || !result.Output.Contains(marker))
+        throw new InvalidOperationException($"""
+            Malformed vector field evidence accepted: {name}
+            {result.Output}
+            """);
+    Console.WriteLine($"""PASS vector field evidence rejection: {name}""");
 }
 
 string architectureBaseline = File.ReadAllText(Path.Combine(root, "Read256", "Extracted.lean"));
 string otherArchitecture = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "x64" : "arm64";
-string mismatched = Regex.Replace(architectureBaseline, @"def profile : FeatureProfile := [^\r\n]*",
-    "def profile : FeatureProfile := { architecture := ." + otherArchitecture + " }");
+string mismatched = ProfileDefinition.Replace(architectureBaseline,
+    $"def profile : FeatureProfile := {{ architecture := .{otherArchitecture} }}");
 if (mismatched == architectureBaseline) throw new InvalidOperationException("Architecture mutation did not change source");
 string architecturePath = Path.Combine(root, "Evidence-architecture.lean");
 File.WriteAllText(architecturePath, mismatched);
 (int Code, string Output, string Stdout, string Stderr) architectureResult = Execute(["lake", "env", "lean", architecturePath], cwd: FixturePackage());
-if (architectureResult.Code == 0 || !architectureResult.Output.Contains("decide"))
-    throw new InvalidOperationException("Vector layout accepted under a different method architecture\n" + architectureResult.Output);
+// The layout table is certified at the extraction's architecture, so another profile cannot use that proof.
+if (architectureResult.Code == 0 || !architectureResult.Output.Contains("LayoutsValid", StringComparison.Ordinal))
+    throw new InvalidOperationException(
+        $"Vector layout accepted under a different method architecture\n{architectureResult.Output}");
 Console.WriteLine("PASS vector field evidence rejects method architecture mismatch");
+
+partial class Program
+{
+    /// <summary>The generated feature profile definition, to the end of its line.</summary>
+    [GeneratedRegex(@"def profile : FeatureProfile := [^\r\n]*")]
+    internal static partial Regex ProfileDefinition { get; }
+}

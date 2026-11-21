@@ -12,33 +12,22 @@ internal static class ReferenceArrays
         type is ArrayType { IsVector: true } array && Element(array.ElementType);
 
     /// <summary>
-    /// An admitted class, or a non-generic class outside the model other than <c>System.Object</c>, such as
-    /// <c>string</c>. An array of such a static type holds, at run time, elements of a class derived from it, so
-    /// the stored object's base classes decide covariance exactly; an interface or <c>object</c> element would
-    /// also admit interface arrays, whose check the model cannot decide.
+    /// An admitted class or <c>string</c>. An array of such a static type holds, at run time, elements of a class
+    /// derived from it, so the stored object's base classes decide covariance exactly. Lean binds an element named
+    /// as an object only to a class of a pinned assembly or <c>string</c>: an interface, <c>object</c> or other
+    /// class outside the pins may type an interface array, whose check the model cannot decide.
     /// </summary>
-    internal static bool Element(TypeReference element) => ObjectTypes.Is(element) ||
-        element is not (TypeSpecification or GenericParameter) && !element.IsValueType &&
-        element.FullName != "System.Object" && ObjectTypes.Opaque(element) &&
-        element.Resolve() is { IsInterface: false, HasGenericParameters: false, IsValueType: false };
+    internal static bool Element(TypeReference element) => ObjectTypes.Is(element) || ObjectTypes.IsString(element);
 
     /// <summary>
     /// The checked operation for an array instruction over an array of class references, or null when the
-    /// instruction is not one. <paramref name="arrayOperand"/> says whether <c>ldlen</c> reads such an array.
+    /// instruction is not one; <c>ldlen</c> is the same instruction for every array.
     /// </summary>
-    internal static string? Translate(Instruction instruction, bool arrayOperand) => instruction.OpCode.Code switch
+    internal static Operation? Translate(Instruction instruction) => instruction.OpCode.Code switch
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
-            $".newReferenceArray ({GenericEvidence.ObjectType(element)})",
-        Code.Ldlen when arrayOperand => ".memory .referenceArrayLength",
-        Code.Ldelem_Ref => ".memory .referenceArrayLoad",
-        Code.Stelem_Ref => ".memory .referenceArrayStore",
-        Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any
-            when instruction.Operand is TypeReference element &&
-                (ObjectTypes.Candidate(element) || Element(element)) =>
-            throw new InvalidDataException("Unsupported typed element access on an array of class references: " +
-                instruction.OpCode.Name + " " + element.FullName +
-                "\n  Element addresses would expose a reference slot; only ldelem.ref and stelem.ref are modelled."),
+            new NewArray(new(LayoutEvidence.Scope(element), element.FullName)),
+        Code.Ldelem_Ref or Code.Stelem_Ref => new StackOperation(instruction.OpCode.Code),
         _ => null
     };
 }

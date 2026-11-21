@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 // Deterministic failure taxonomy from the stage, LeanCIL's own messages and Lean's stable error prefixes.
@@ -21,7 +22,40 @@ internal static partial class FailureReports
     internal sealed record Diagnostic(string kind, string? resource, string? module, string? file, int? line, int? column, string message);
     internal sealed record Report(int schema, string kind, string? resource, string stage, string theorem, string module,
         string proof, string output, Method? method, string? file, int? line, int? column, Diagnostic[] diagnostics,
-        string message, string[] rerun);
+        string message, string[] rerun,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BindingFailure? binding = null);
+
+    /// <summary>A failed attempt can identify a rejected check or an incomplete check.</summary>
+    [JsonConverter(typeof(BindingFailureStatusNames))]
+    internal enum BindingFailureStatus { NotCovered, Failed }
+
+    sealed class BindingFailureStatusNames : JsonConverter<BindingFailureStatus>
+    {
+        public override BindingFailureStatus Read(ref Utf8JsonReader reader, Type type,
+            JsonSerializerOptions options) => reader.TokenType == JsonTokenType.String
+            ? reader.GetString() switch
+            {
+                "not covered" => BindingFailureStatus.NotCovered,
+                "failed" => BindingFailureStatus.Failed,
+                _ => throw new JsonException("Expected not covered or failed")
+            }
+            : throw new JsonException("Expected a binding failure status string");
+
+        public override void Write(Utf8JsonWriter writer, BindingFailureStatus value,
+            JsonSerializerOptions options) => writer.WriteStringValue(value switch
+            {
+                BindingFailureStatus.NotCovered => "not covered",
+                BindingFailureStatus.Failed => "failed",
+                _ => throw new JsonException("Invalid binding failure status")
+            });
+    }
+
+    internal sealed record BindingFailureDigest(string path, string sha256);
+    internal sealed record BindingFailureImage(string identity, string sha256,
+        BindingFailureStatus status, string reason);
+    internal sealed record BindingFailureFact(string id, BindingFailureStatus status, string reason);
+    internal sealed record BindingFailure(BindingFailureDigest digests, BindingFailureImage[] images,
+        BindingFailureFact[] facts);
 
     // Elaborator and kernel exhaustion messages.
     static readonly (string Prefix, string Resource)[] Resources =
@@ -40,19 +74,16 @@ internal static partial class FailureReports
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
-    [GeneratedRegex(@"^LeanCIL refutes: (?<name>\S+) at (?<line>\d+):(?<column>\d+)\r?$", RegexOptions.Multiline)]
-    private static partial Regex RefutationMarker();
-
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
-    private static partial Regex Location();
+    private static partial Regex Location { get; }
 
     // The stage line of a nested `leancil check` diagnostic.
     [GeneratedRegex(@"^  Stage: (?<stage>.+?)\r?$", RegexOptions.Multiline)]
-    private static partial Regex ChildStage();
+    private static partial Regex ChildStage { get; }
 
     // Workspace copies of the selected proof, line for line.
     [GeneratedRegex(@"\ALeanCILProof\d*\z")]
-    private static partial Regex ProofModule();
+    private static partial Regex ProofModule { get; }
 
     internal static Report Failed(string stage, Exception error, string theorem, string proof, string output, string? proofRoot) =>
         Classify(stage, error.Message, error.Data[LeanDiagnostics.HiddenModulesKey] as string[], theorem, proof, output,
@@ -66,7 +97,7 @@ internal static partial class FailureReports
         var internalErrors = LeanOutput.InternalErrors(message, hidden).Distinct().Select(error =>
         {
             var (file, line, column) = Place(error.Location, copies);
-            var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
+            var origin = error.Module is { } name && ProofModule.IsMatch(name) ? module : error.Module;
             return new Diagnostic(InternalError, null, origin ?? (file == proof ? module : null), file, line, column,
                 error.Message);
         });
@@ -74,7 +105,7 @@ internal static partial class FailureReports
         {
             var (kind, resource) = KindOf(stage, error.Lines[0]);
             var (file, line, column) = Place(error.Location, copies);
-            var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
+            var origin = error.Module is { } name && ProofModule.IsMatch(name) ? module : error.Module;
             return new Diagnostic(kind, resource, origin ?? (file == proof ? module : null), file, line, column, string.Join("\n", error.Lines));
         })).ToArray();
         string requestKind;
@@ -82,7 +113,7 @@ internal static partial class FailureReports
         if (diagnostics.Length > 0 && diagnostics[0].kind == InternalError)
             requestKind = InternalError;
         else if (stage == "extraction integrity")
-            requestKind = ChildStage().Match(message) is { Success: true } child && child.Groups["stage"].Value == "metadata and CIL validation"
+            requestKind = ChildStage.Match(message) is { Success: true } child && child.Groups["stage"].Value == "metadata and CIL validation"
                 ? UnsupportedExtraction : StaleInput;
         else if (diagnostics.Length > 0)
             (requestKind, requestResource) = (diagnostics[0].kind, diagnostics[0].resource);
@@ -101,16 +132,17 @@ internal static partial class FailureReports
             first?.file, first?.line, first?.column, diagnostics, message, Rerun(theorem, proof, output, proofRoot));
     }
 
-    /// <summary>A refutation report when the audit marks the verified theorem as `Not (contract.Holds ...)`, else null.</summary>
-    internal static Report? Refuted(string audit, string theorem, string proof, string output, string? proofRoot)
-    {
-        var markers = RefutationMarker().Matches(audit);
-        if (markers.Count != 1) return null;
-        var marker = markers[0];
-        return new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output, MethodOf(output),
-            proof, int.Parse(marker.Groups["line"].Value), int.Parse(marker.Groups["column"].Value), [], audit,
-            Rerun(theorem, proof, output, proofRoot));
-    }
+    /// <summary>
+    /// A refutation report when the audit found the verified theorem to state a contract's `Refuted`, else null;
+    /// `audit` is shown as the message and decides nothing.
+    /// </summary>
+    internal static Report? Refuted(Program.VerifiedRefutation? refutation, string audit, string theorem, string proof,
+        string output, string? proofRoot) =>
+        refutation is null ? null
+            : new(1, Refutation, null, "theorem audit", theorem, ModuleOf(proof, proofRoot), proof, output,
+                new(refutation.method.signature, refutation.method.assembly, refutation.method.assemblySha256), proof,
+                refutation.line, refutation.column, [], audit,
+                Rerun(theorem, proof, output, proofRoot));
 
     static (string Kind, string? Resource) KindOf(string stage, string first)
     {
@@ -128,7 +160,7 @@ internal static partial class FailureReports
     static (string? File, int? Line, int? Column) Place(string? location, SourceCopies? copies)
     {
         if (location is null) return (null, null, null);
-        var match = Location().Match(location);
+        var match = Location.Match(location);
         if (!match.Success) return (location, null, null);
         var (file, line, column) = (match.Groups["file"].Value, int.Parse(match.Groups["line"].Value),
             int.Parse(match.Groups["column"].Value));

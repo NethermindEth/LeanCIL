@@ -2,9 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -14,14 +20,87 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericLayouts");
 Directory.CreateDirectory(root);
 var extractor = Assembly.LoadFrom(ExtractorPath);
-using (var module = ModuleDefinition.ReadModule(assembly))
+if (!LayoutVisits() || args.Contains("--layout-visits-only", StringComparer.Ordinal)) return;
+
+bool LayoutVisits()
 {
-    var owner = module.GetType("Examples.GenericPair`1");
+    const BindingFlags members = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+    using var pinned = new PinnedMetadata(extractor, assembly);
+    var module = pinned.Module;
+    var box = module.GetType("Examples.IndirectValues/Box`1");
+    var method = new MethodDefinition("LayoutVisits", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
+    module.GetType("Examples.IndirectValues").Methods.Add(method);
+    var validation = extractor.GetType("Nethermind.LeanCIL.MetadataValidation", true)!;
+    var context = validation.GetNestedType("LayoutContext", members)!;
+    var emitter = extractor.GetType("Nethermind.LeanCIL.LeanEmitter", true)!;
+    var collect = emitter.GetMethod("LayoutTypes", members)!;
+    var signatures = pinned.Context.GetType().GetProperty("Signatures", members)!.GetValue(pinned.Context)!;
+    var visits = signatures.GetType().GetProperty("NodeVisits", members)!;
+    long Count() => (long)visits.GetValue(signatures)!;
+    bool passed = true;
+    foreach (int depth in new[] { 8, 16, 32 })
+    {
+        TypeReference nested = module.TypeSystem.UInt64;
+        for (int index = 0; index < depth; index++)
+        {
+            var instance = new GenericInstanceType(box);
+            instance.GenericArguments.Add(nested);
+            nested = instance;
+        }
+        method.Body.Variables.Clear();
+        method.Body.Variables.Add(new VariableDefinition(nested));
+        var layouts = Activator.CreateInstance(context, members | BindingFlags.Public, null, [module, "scalar"], null);
+        long before = Count();
+        var rows = (TypeReference[])collect.Invoke(null, [new[] { method }, layouts])!;
+        long observed = Count() - before;
+        // Each application, the shared Box constructor and the UInt64 leaf are distinct nodes.
+        int distinct = depth + 2;
+        Console.WriteLine($"Layout depth {depth}: {rows.Length} rows, {observed} visits, {distinct} distinct nodes");
+        passed &= rows.Length == depth && observed == distinct;
+    }
+    if (!passed) Environment.ExitCode = 1;
+    return passed;
+}
+
+// Identities are read from metadata rows, so the same-named definition is written into an image.
+var shadowImage = Path.Combine(root, "Shadowed.dll");
+using (var source = ModuleDefinition.ReadModule(assembly))
+{
     var shadow = new TypeDefinition("System", "UInt64", Mono.Cecil.TypeAttributes.Public |
-        Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout, owner.BaseType);
-    shadow.Fields.Add(new FieldDefinition("First", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
-    shadow.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
-    module.Types.Add(shadow);
+        Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
+        source.GetType("Examples.GenericPair`1").BaseType);
+    shadow.Fields.Add(new FieldDefinition("First", Mono.Cecil.FieldAttributes.Public, source.TypeSystem.UInt64));
+    shadow.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, source.TypeSystem.UInt64));
+    source.Types.Add(shadow);
+    var pair = source.GetType("Examples.GenericPair`1");
+    var closed = new GenericInstanceType(pair);
+    var word = source.TypeSystem.UInt64;
+    closed.GenericArguments.Add(word);
+    var scope = ((AssemblyNameReference)word.Scope).FullName;
+    var literal = new TypeDefinition(pair.Namespace, $"{pair.Name}<{scope}::{word.FullName}>",
+        pair.Attributes, pair.BaseType);
+    foreach (var field in pair.Fields.Where(field => !field.IsStatic))
+        literal.Fields.Add(new FieldDefinition(field.Name, field.Attributes, word));
+    source.Types.Add(literal);
+    // Both locals have the same physical layout. Their metadata identities must still be distinguishable.
+    var method = new MethodDefinition("AmbiguousLocals", Mono.Cecil.MethodAttributes.Static, source.TypeSystem.Void);
+    source.GetType("Examples.GenericLayouts").Methods.Add(method);
+    method.Body.Variables.Add(new VariableDefinition(closed));
+    method.Body.Variables.Add(new VariableDefinition(literal));
+    method.Body.GetILProcessor().Emit(OpCodes.Ret);
+    source.Write(shadowImage);
+}
+var ambiguous = Execute(["dotnet", ExtractorPath, "extract", shadowImage, "GenericLayouts::AmbiguousLocals()",
+    Path.Combine(root, "AmbiguousLocals")]);
+if (ambiguous.Code == 0 || !ambiguous.Output.Contains("Ambiguous layout identity:", StringComparison.Ordinal))
+    throw new InvalidOperationException($"Expected a refusal for the ambiguous layout spelling: {ambiguous.Output}");
+Console.WriteLine("PASS extraction refuses distinct layout identities with the same spelling");
+using (var pinned = new PinnedMetadata(extractor, shadowImage))
+{
+    var module = pinned.Module;
+    var owner = module.GetType("Examples.GenericPair`1");
+    var shadow = module.GetType("System.UInt64") ??
+        throw new InvalidOperationException("Missing same-named definition in the written image");
     var genuine = new GenericInstanceType(owner);
     genuine.GenericArguments.Add(module.TypeSystem.UInt64);
     var shadowed = new GenericInstanceType(owner);
@@ -71,7 +150,7 @@ foreach (var (name, signature) in new[]
             theorem generic_size_{{name}} :
                 (CIL.Safety.invoke Extracted.program 8 0 []
                   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                    views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 32)] := rfl
+                    views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 32)] := by rfl
             #print axioms generic_size_{{name}}
             """;
     }
@@ -173,13 +252,13 @@ foreach (var closedInterface in new[] { false, true })
         theorem interface_owner_size :
             (CIL.Safety.invoke Extracted.program 8 0 []
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := by rfl
         #print axioms interface_owner_size
         """);
     evidence.Add(path, "PASS generic owner with direct interface constraint: " + name, "layouts_validated");
     var invalid = Path.Combine(root, name + "-missing-interface.lean");
     // Same-assembly generic interface identities spell each argument with its assembly scope.
-    const string runtimeScope = "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
+    const string runtimeScope = "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
     var marker = closedInterface ? $"::Examples.IClosedCounter`1<{runtimeScope}::System.Int32>"
         : "::Examples.ICounterValue";
     marker = System.Text.Json.JsonSerializer.Serialize(marker)[1..^1];

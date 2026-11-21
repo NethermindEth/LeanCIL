@@ -1,14 +1,14 @@
 import CIL.Safety.StepComposition
 import CIL.Safety.GuardNormalization
+import CIL.Safety.ResolutionFacts
 
 /-!
 # Value step equations
 
 `@[cil_step]` equations for the value-only ops (arithmetic, comparisons, conversions,
-branches, `switch`, `nop`, explicit throws and feature tests), one per op and i32/i64 operand shape.
+branches, `switch`, `nop` and explicit throws), one per op and i32/i64 operand shape.
 `cil_value_steps` generates them as the library builds by evaluating the dispatcher once, so
-stepping rewrites by constructor instead of unfolding `CIL.step` in every proof. A feature
-test on a known feature is then reduced to the profile field that a caller's fact names.
+stepping rewrites by constructor instead of unfolding `CIL.step` in every proof.
 -/
 
 namespace CIL.Safety
@@ -29,8 +29,8 @@ elab_rules : command
   let widths := match arity.getNat with
     | 0 => [[]]
     | 1 => [[false], [true]]
-    -- Top of stack first: equal widths, and an i32 count over an i64 value for shifts.
-    | _ => [[false, false], [true, true], [false, true]]
+    -- Top of stack first: equal widths and both mixed operand orders.
+    | _ => [[false, false], [true, true], [false, true], [true, false]]
   let params ← (paramName.zip paramType).mapM fun (name, type) =>
     `(Lean.Parser.Term.bracketedBinderF| ($name : $type))
   let paramTerms : Array Term := paramName.map fun name => ⟨name.raw⟩
@@ -75,39 +75,75 @@ elab_rules : command
         ``Except.map, ``Bind.bind, ``Except.bind] (← getSimpTheorems)])
     let mut declared := #[]
     for op in ops.getElems do
-      let checked := #[`checkedArithmetic, `checkedConvert, `divide].contains op.getId
+      let checked := #[`div, `div_un, `rem, `rem_un, `add_ovf, `add_ovf_un, `sub_ovf,
+        `sub_ovf_un, `mul_ovf, `mul_ovf_un, `conv_ovf, `conv_ovf_un].contains op.getId
       let select := if checked then checkedSelect else select
       let cleanup := if checked then checkedCleanup else cleanup
       for shape in widths do
         let names := (if shape.length = 1 then [`v] else [`b, `a]).take shape.length |>.map mkIdent
-        let operands ← (names.zip shape).toArray.mapM fun (name, wide) =>
-          if wide then `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W64))
-          else `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W32))
-        let stack ← (names.zip shape).foldrM (init := (rest : Term)) fun (name, wide) tail =>
-          if wide then `(Value.scalar (CIL.Value.i64 $name) :: $tail)
-          else `(Value.scalar (CIL.Value.i32 $name) :: $tail)
-        let opName := mkIdent (`CIL.Op ++ op.getId)
+        let opName := mkIdent (instructionTypeName ++ op.getId)
         let opTerm ← `(($opName $paramTerms*))
-        let statement ← `(∀ (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
-            (memory : Memory) ($rest : List Value) $params* $operands*,
-            step body $opTerm pc args frame $stack memory =
-              step body $opTerm pc args frame $stack memory)
+        -- The equation at this shape; `asValue` types every operand as an unknown `Value`.
+        let statementOver (asValue : Bool) : TermElabM Term := do
+          let operands ← (names.zip shape).toArray.mapM fun (name, wide) =>
+            if asValue then `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.Value))
+            else if wide then `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W64))
+            else `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W32))
+          let stack ← (names.zip shape).foldrM (init := (rest : Term)) fun (name, wide) tail =>
+            if asValue then `(Value.scalar $name :: $tail)
+            else if wide then `(Value.scalar (CIL.Value.i64 $name) :: $tail)
+            else `(Value.scalar (CIL.Value.i32 $name) :: $tail)
+          `(∀ (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
+              (memory : Memory) ($rest : List Value) $params* $operands*,
+              step body $opTerm pc args frame $stack memory =
+                step body $opTerm pc args frame $stack memory)
+        -- Proves `lhs = rhs` for all `xs`, with `rhs` the arm the dispatcher selects, cleaned up.
+        let reduceEquation (statement : Expr) : TermElabM (Expr × Expr) :=
+          forallTelescope statement fun xs equation => do
+            let some (_, lhs, _) := equation.eq? | throwError "cil_value_steps: not an equation"
+            let mut reduced := lhs
+            repeat
+              let next := (← dsimp (← arms reduced) select).1
+              if next == reduced then break
+              reduced := next
+            let (result, _) ← simp reduced cleanup simprocs
+            -- The proof states `reduced = rhs`; the kernel checks it at `lhs`, definitionally
+            -- equal by `dsimp`.
+            return (← mkForallFVars xs (← mkEq lhs result.expr),
+              ← mkLambdaFVars xs (← result.getProof))
+        let specific ← instantiateMVars (← Term.elabType (← statementOver false))
+        -- On fixed-width operands `whnf` and the kernel evaluate an unsigned overflow bound
+        -- `2 ^ width` in unary, so faulting ops reduce over `Value`s and are instantiated.
+        let (type, value) ← if checked then
+            let (generalType, generalProof) ←
+              reduceEquation (← instantiateMVars (← Term.elabType (← statementOver true)))
+            forallTelescope specific fun xs _ => do
+              let fixed := xs.size - shape.length
+              let mut arguments := xs.extract 0 fixed
+              for (operand, wide) in (xs.extract fixed xs.size).zip shape.toArray do
+                let constructor := if wide then ``CIL.Value.i64 else ``CIL.Value.i32
+                arguments := arguments.push (mkApp (mkConst constructor) operand)
+              let some (_, lhs, guarded) := (← instantiateForall generalType arguments).eq?
+                | throwError "cil_value_steps: not an equation"
+              -- The operand constructors decide the unspecified-operand guard; nothing else
+              -- is reduced.
+              let guard := guarded.getAppArgs
+              unless guarded.isAppOf ``Bool.rec && guard.size > 3 do
+                throwError "cil_value_steps: no unspecified-operand guard in {guarded}"
+              let decided ← whnfD guard[3]!
+              let some branch := if decided.isConstOf ``Bool.false then some guard[1]!
+                  else if decided.isConstOf ``Bool.true then some guard[2]! else none
+                | throwError "cil_value_steps: unspecified-operand guard not decided: {decided}"
+              let selected := (mkAppN branch (guard.extract 4 guard.size)).headBeta
+              -- `id` gives the proof the general statement as its type, so the kernel does not
+              -- compare the dispatcher with the reduced form at fixed widths.
+              let general := mkApp2 (mkConst ``id [.zero]) generalType generalProof
+              return (← mkForallFVars xs (← mkEq lhs selected),
+                ← mkLambdaFVars xs (mkAppN general arguments))
+          else reduceEquation specific
         let suffix := String.join (shape.map fun wide => if wide then "_i64" else "_i32")
         let name := Name.mkSimple s!"step_{op.getId}{suffix}_eq"
-        forallTelescope (← instantiateMVars (← Term.elabType statement)) fun xs equation => do
-          let some (_, lhs, _) := equation.eq? | throwError "cil_value_steps: not an equation"
-          let mut reduced := lhs
-          repeat
-            let next := (← dsimp (← arms reduced) select).1
-            if next == reduced then break
-            reduced := next
-          let (result, _) ← simp reduced cleanup simprocs
-          -- The proof states `reduced = rhs`; the kernel checks it at `lhs`, definitionally
-          -- equal by `dsimp`.
-          addDecl <| .thmDecl {
-            name := ns ++ name, levelParams := []
-            type := ← mkForallFVars xs (← mkEq lhs result.expr)
-            value := ← mkLambdaFVars xs (← result.getProof) }
+        addDecl <| .thmDecl { name := ns ++ name, levelParams := [], type, value }
         declared := declared.push name
     return declared
   for name in declared do
@@ -115,61 +151,76 @@ elab_rules : command
 
 -- Results stay on the stack; compare-branches expose their condition as an `if` that a fact
 -- can decide.
-cil_value_steps [neg, bnot, convI1, convI2, convU2, convI4, convI8, convU1, convU4, convU8, convU] 1
-cil_value_steps [gt, add, sub, mul, band, bor, bxor, shl, shr, shrUn, lt, ltu, gtu, eq] 2
-cil_value_steps (target : Nat) [bgt, ble, bleu, bltu, bgeu, bgtu, bge, blt, beq, bne] 2
+cil_value_steps [neg, not, conv_i1, conv_i2, conv_u2, conv_i4, conv_i8, conv_u1, conv_u4,
+  conv_u8, conv_u, conv_i] 1
+cil_value_steps [cgt, add, sub, mul, and, or, xor, shl, shr, shr_un, clt, clt_un, cgt_un, ceq] 2
+cil_value_steps (target : Nat) [bgt, ble, ble_un, blt_un, bge_un, bgt_un, bge, blt, beq, bne_un] 2
 cil_value_steps (targets : List Nat) [switch] 1
-cil_value_steps (target : Nat) [branch] 0
+cil_value_steps (target : Nat) [br] 0
 cil_value_steps [nop] 0
-cil_value_steps (exception : String) [throw] 0
+cil_value_steps (exception : ExceptionType) [throw] 0
 #print axioms step_throw_eq
 
-cil_value_steps (id : CIL.Feature) [feature] 0
-cil_value_steps (kind : CIL.CheckedBinaryKind) (signed : Bool) [checkedArithmetic] 2
-cil_value_steps (width : Nat) (signed : Bool) (unsignedInput : Bool) [checkedConvert] 1
-cil_value_steps (signed : Bool) (remainder : Bool) [divide] 2
+cil_value_steps (target : CIL.ConvTarget) [conv_ovf, conv_ovf_un] 1
+cil_value_steps [div, div_un, rem, rem_un, add_ovf, add_ovf_un, sub_ovf, sub_ovf_un, mul_ovf,
+  mul_ovf_un] 2
+-- A conversion's generated equation names `target.width` and `target.signed`; a known target
+-- reduces them to the literals a caller's `calculated` fact states.
+attribute [cil_step] CIL.ConvTarget.width CIL.ConvTarget.signed
 
-#print axioms step_checkedArithmetic_i64_i64_eq
-#print axioms step_checkedArithmetic_i32_i32_eq
-#print axioms step_checkedArithmetic_i32_i64_eq
-#print axioms step_checkedConvert_i64_eq
-#print axioms step_checkedConvert_i32_eq
-#print axioms step_divide_i64_i64_eq
-#print axioms step_divide_i32_i32_eq
-#print axioms step_divide_i32_i64_eq
 
-/-- A proved checked arithmetic result advances the instruction without unfolding its check. -/
-theorem step_checkedArithmetic_result {kind : CIL.CheckedBinaryKind} {signed : Bool}
+/-- A proved overflow-checked arithmetic result advances the instruction without unfolding its
+    check; `selected` names the constructor's flags. -/
+theorem step_checked_result {operation : CIL.Instruction} {kind : CIL.CheckedBinaryKind}
+    {signed : Bool} (selected : operation.checkedKind? = some (kind, signed))
     {left right value : CIL.Value} {memory : Memory}
     (calculated : CIL.checkedValues kind signed left right = .ok value)
     (leftKnown : left.hasUnspecified = false) (rightKnown : right.hasUnspecified = false)
     (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
     ∀ body pc args frame rest,
-      step body (.checkedArithmetic kind signed) pc args frame
-        (.scalar right :: .scalar left :: rest) memory =
+      step body operation pc args frame (.scalar right :: .scalar left :: rest) memory =
         .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
   intro body pc args frame rest
-  simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
+  cases operation <;> simp only [CIL.Instruction.checkedKind?, reduceCtorEq,
+    Option.some.injEq, Prod.mk.injEq] at selected
+  all_goals obtain ⟨rfl, rfl⟩ := selected
+  all_goals simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
     leftKnown, rightKnown, calculated, checked, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_checkedArithmetic_result
+#print axioms step_checked_result
 
-/-- A proved checked conversion advances the instruction without unfolding its range check. -/
-theorem step_checkedConvert_result {width : Nat} {signed unsignedInput : Bool}
-    {input value : CIL.Value} {memory : Memory}
-    (calculated : CIL.convertInteger width signed unsignedInput input = .ok value)
+/-- A proved checked conversion of a signed operand advances the instruction without unfolding
+    its range check. -/
+theorem step_conv_ovf_result {target : CIL.ConvTarget} {input value : CIL.Value}
+    {memory : Memory}
+    (calculated : CIL.convertInteger target.width target.signed false input = .ok value)
     (inputKnown : input.hasUnspecified = false)
     (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
     ∀ body pc args frame rest,
-      step body (.checkedConvert width signed unsignedInput) pc args frame
-        (.scalar input :: rest) memory =
+      step body (.conv_ovf target) pc args frame (.scalar input :: rest) memory =
         .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
   intro body pc args frame rest
   simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
     inputKnown, calculated, checked, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
-#print axioms step_checkedConvert_result
+#print axioms step_conv_ovf_result
+
+/-- A proved checked conversion of an unsigned operand advances the instruction without
+    unfolding its range check. -/
+theorem step_conv_ovf_un_result {target : CIL.ConvTarget} {input value : CIL.Value}
+    {memory : Memory}
+    (calculated : CIL.convertInteger target.width target.signed true input = .ok value)
+    (inputKnown : input.hasUnspecified = false)
+    (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
+    ∀ body pc args frame rest,
+      step body (.conv_ovf_un target) pc args frame (.scalar input :: rest) memory =
+        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro body pc args frame rest
+  simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
+    inputKnown, calculated, checked, Except.mapError,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+#print axioms step_conv_ovf_un_result
 
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;
@@ -179,5 +230,152 @@ dsimproc [cil_step] reduceMethodProfile (CIL.Method.profile _) := fun e => do
   let head ← withDefault <| whnf body
   unless head.isAppOf ``CIL.Method.mk do return .continue
   return .done (← withReducible <| whnf (mkApp (mkConst ``CIL.Method.profile) head))
+
+open Lean Meta in
+/-- The link `m.linkAt pc` reads, as `none` or `some` of a link constructor, for a method literal
+    `m` and a literal pc, by evaluating its table; a named, opaque or case-split body, or a table a
+    parameter decides, gives nothing. -/
+def literalLink? (read : Expr) : MetaM (Option Expr) := do
+  let_expr CIL.Method.linkAt body pc := read | return none
+  unless (← instantiateMVars body).isAppOf ``CIL.Method.mk do return none
+  unless (← instantiateMVars pc).nat?.isSome do return none
+  let link ← withDefault <| whnf read
+  match_expr link with
+  | Option.none _ => return some link
+  | Option.some _ value =>
+    let value ← withDefault <| whnf value
+    unless value.getAppFn.isConst do return none
+    return some (mkApp2 (mkConst ``Option.some [Level.zero]) (mkConst ``CIL.Link) value)
+  | _ => return none
+
+open Lean Meta in
+/-- `m.linkAt pc` for a method literal and a literal pc, by `literalLink?`. -/
+dsimproc [cil_step] reduceMethodLinkAt (CIL.Method.linkAt _ _) := fun read => do
+  let some link ← literalLink? read | return .continue
+  return .done link
+
+open Lean Meta in
+/-- The runtime model of a call of a closed method in a method literal or under an environment
+    that is not a named body's, by evaluating the table; a named body's call is left for its
+    `cil_runtime_models` fact. An environment that is a variable decides every entry whose
+    resolution does not read it, and leaves the read of any other unevaluated. -/
+dsimproc [cil_step] reduceRuntimeModel (CIL.Extraction.runtimeModel _ _ _) := fun read => do
+  let_expr CIL.Extraction.runtimeModel environment opcode method := read | return .continue
+  if let some body := environment.app1? ``CIL.Method.environment then
+    unless (← instantiateMVars body).isAppOf ``CIL.Method.mk do return .continue
+  if opcode.hasFVar || opcode.hasMVar || method.hasFVar || method.hasMVar then return .continue
+  let resolved ← withDefault <| whnf read
+  match_expr resolved with
+  | Option.none _ => return .done resolved
+  | Option.some _ model =>
+    return .done (← mkAppM ``Option.some #[← withDefault <| reduce model])
+  | _ => return .continue
+
+open Lean Meta in
+/-- Known return signatures simplify by checked storage lemmas without traversing method code. -/
+simproc [cil_step] reduceReturnNarrow (CIL.Method.returnNarrow _) := fun expression => do
+  let_expr CIL.Method.returnNarrow method := expression | return .continue
+  let returns ← withDefault <| whnf (mkApp (mkConst ``CIL.Method.returnsValue) method)
+  unless returns.isConstOf ``Bool.true || returns.isConstOf ``Bool.false do return .continue
+  let some proof ← ResolutionFacts.returnProof? method
+      (← mkEqRefl (mkApp (mkConst ``CIL.Method.returnsValue) method))
+      (← mkEqRefl (mkApp (mkConst ``CIL.Method.declared) method)) | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
+open Lean Meta in
+/-- How a literal body reads a literal argument index, by the storage lemmas and premises the
+    kernel decides over its homes, local kinds and parameters; a symbolic part is left for a
+    caller's fact. -/
+simproc [cil_step] reduceArgumentAccess (CIL.Method.argumentAccess _ _) := fun expression => do
+  let_expr CIL.Method.argumentAccess method index := expression | return .continue
+  let some proof ← ResolutionFacts.argumentAccessProof? method index | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
+open Lean Meta in
+/-- The shape of a literal type's array elements in a literal body, by the shape lemmas and
+    premises the kernel decides over the body's layout lists; a symbolic part is left for a
+    caller's fact. -/
+simproc [cil_step] reduceElementShape (CIL.Method.elementShape _ _) := fun expression => do
+  let_expr CIL.Method.elementShape method type := expression | return .continue
+  let some (shape, proof) ← ResolutionFacts.elementProof? method type
+      (ResolutionFacts.literalReads method) | return .continue
+  return .done { expr := shape, proof? := some proof }
+
+open Lean Meta in
+/-- How `body` reads argument `index`, reduced to an `ArgumentAccess` constructor where it can
+    be, with its proof: from the declared fact or signature, or else as simp rewrites the access
+    with the facts in scope. -/
+def argumentAccessIn (body index : Expr) : SimpM (Option (Expr × Expr)) := do
+  if let some resolved ← ResolutionFacts.resolvedArgumentAccess? body index then
+    return some resolved
+  let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
+  return some (← whnfR (← instantiateMVars access.expr), ← access.getProof)
+
+open Lean Meta in
+/-- The step an instruction takes by `equation`, whose right side is the result. -/
+def equationStep (equation : Expr) : SimpM Simp.Step := do
+  let some (_, _, stepped) := (← inferType equation).eq? | return .continue
+  return .visit { expr := stepped, proof? := some equation }
+
+open Lean Meta in
+/-- An argument load steps by the equation for how the body reads that argument, as
+    `argumentAccessIn` finds it. A load whose access stays unknown steps to `loadArgument`,
+    whose match a later fact can decide. -/
+simproc [cil_step] reduceArgumentLoad (step _ (.ldarg _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldarg index := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, index, stack]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? ← match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      match (← whnfR narrow).getAppFnArgs with
+      | (``Option.none, _) =>
+        pure (some (mkAppN (mkConst ``step_ldarg_value_eq) (leading.push proof)))
+      | (``Option.some, #[_, kind]) =>
+        pure (some (mkAppN (mkConst ``step_ldarg_narrow_eq) (leading ++ #[kind, proof])))
+      | _ => pure none
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      pure (some (mkAppN (mkConst ``step_ldarg_home_eq) (leading ++ #[slot, proof])))
+    | _ => pure none
+  equationStep (known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading))
+
+open Lean Meta in
+/-- An argument store steps as `stloc` of the argument's home, or faults without one, as
+    `argumentAccessIn` finds it. A store whose access stays unknown steps to `storeArgument`. -/
+simproc [cil_step] reduceArgumentStore (step _ (.starg _) _ _ _ (_ :: _) _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.starg index := operation | return .continue
+  let_expr List.cons _ value rest := stack | return .continue
+  let leading := #[body, pc, args, frame, memory, index, value, rest]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? := match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      some (mkAppN (mkConst ``step_starg_value_eq) (leading ++ #[narrow, proof]))
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      some (mkAppN (mkConst ``step_starg_home_eq) (leading ++ #[slot, proof]))
+    | _ => none
+  equationStep (known?.getD (mkAppN (mkConst ``step_starg_eq) leading))
+
+open Lean Meta in
+/-- An argument address steps as `ldloca` of the argument's home, or faults without one, as
+    `argumentAccessIn` finds it. An address whose access stays unknown steps to
+    `addressArgument`. -/
+simproc [cil_step] reduceArgumentAddress (step _ (.ldarga _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldarga index := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, index, stack]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? := match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      some (mkAppN (mkConst ``step_ldarga_value_eq) (leading ++ #[narrow, proof]))
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      some (mkAppN (mkConst ``step_ldarga_home_eq) (leading ++ #[slot, proof]))
+    | _ => none
+  equationStep (known?.getD (mkAppN (mkConst ``step_ldarga_eq) leading))
 
 end CIL.Safety

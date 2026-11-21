@@ -12,6 +12,7 @@ import CIL.Interface.Headers
 module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
 `--replay INPUT` kernel-checks an exact JSON array of target modules against shared imports.
 `--replay-separately INPUT` reports isolated toolchain replay results for each target.
+`--diagnose-replay INPUT` reports typed isolated checking failures without accepting a proof.
 An audit request with `replayTargets` checks those modules first and reuses their checked kernel
 environment when declaration names are unique and the audit needs no target module metadata.
 
@@ -23,10 +24,13 @@ REQUEST (JSON):
   { "modules":   ["Proof", ...],
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
                     "statement": bool?, "refutation": bool?, "term": bool?,
-                    "expected": { "term": T, "negated": bool? }?, "allowedModules": [M, ...]? }],
+                    "expected": { "term": T, "refuted": bool }?, "allowedModules": [M, ...]? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
     "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
+Keys must be unique within each object, including keys spelled with JSON escapes.
+Each `expected` object must contain exactly `term` and the boolean `refuted`.
+A duplicate key rejects the request. An invalid comparison field gives that theorem an `error`.
 A theorem must be a `theorem` whose type matches `E` (when given) and whose axiom closure is
 in `axioms`. An `allowedModules` scope requires its declaring module and every reachable
 replay-target declaration's module to belong to that set;
@@ -41,6 +45,7 @@ Expected expressions `E`:
   "_"                                any expression
   {"const": N, "levels": [L, ...]}   constant; `levels` defaults to []
   {"app": [E, E1, ..., En]}          `E` applied to exactly the trailing n arguments
+  {"list": {"type": E, "level": L, "items": [E, ...]}}   exact `List.cons`/`List.nil` spine
   {"nat": n}                         the canonical numeral `@OfNat.ofNat Nat n (instOfNatNat n)`
   {"lit": n} / {"str": s}            raw literals
   {"sort": L} / {"bvar": i}
@@ -49,13 +54,19 @@ Levels L: n (the n-th successor of zero), {"param": u}, {"succ": L}, {"max": [L,
 {"imax": [L, L]}.
 Comparison is structural after removing metadata: no unfolding, instances or elaboration.
 `term` reports the theorem's type as a `statementTerm` T, for another audit's `expected`: there the
-theorem `matches` when the kernel accepts it at type T (or `¬ T` when `negated`), structurally or by
-definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why.
+theorem `matches` when the kernel accepts it at type T, or, when `refuted`, at the counterexample
+predicate of the contract whose `Holds` heads T applied to T's arguments, structurally or by
+definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why. `refutation`
+reports a theorem stating a library contract's counterexample predicate as `refutes`, and fails
+one stating `Not` of a library contract's `Holds`, each read through the definitions at the
+statement's head as the kernel comparison unfolds them. A theorem that `matches` when `refuted`
+reports as `refutes` the subject of the counterexample predicate it was compared with.
 
 RESULT (JSON):
   { "modules": { N: olean path },
     "theorems":  [{ "name": N, "error": string?, "axioms": [N, ...], "statement": string?,
-                    "refutes": { "contract": N, "line": n, "column": n }?,
+                    "refutes": { "contract": N, "program": N?, "method": n?, "line": n,
+                                 "column": n }?,
                     "term": T?, "termError": string?, "matches": bool?, "mismatch": string? }],
     "constants": [{ "name": N, "error": string?, "axioms": [N, ...] }],
     "interfaces": { "error": string? },
@@ -68,6 +79,40 @@ Per-item failures are reported in `error`; a missing module or malformed request
 
 namespace LeanCILAudit
 open Lean
+
+/-- A decoded object key and its hash. Equal hashes still require equal text. -/
+private structure RequestKey where
+  hashCode : UInt64
+  text : String
+  deriving BEq
+
+/-- Resizing the set of request keys reads the stored hash in constant time. -/
+private instance : Hashable RequestKey where
+  hash key := key.hashCode
+
+open Std.Internal.Parsec Std.Internal.Parsec.String in
+/-- Checks decoded keys in each open object before JSON parsing can overwrite a duplicate. -/
+private partial def checkUniqueKeys [Hashable String] (objects : List (Std.HashSet RequestKey)) :
+    Parser Unit := do
+  if <- isEof then return
+  match <- any with
+  | '{' => checkUniqueKeys ({} :: objects)
+  | '}' => checkUniqueKeys (objects.drop 1)
+  | '"' =>
+    let key <- Json.Parser.str
+    ws
+    -- Only object keys are followed by a colon outside a string.
+    if (<- peek?) == some ':' then
+      if let keys :: parents := objects then
+        let (duplicate, keys) := keys.containsThenInsert { hashCode := hash key, text := key }
+        if duplicate then fail s!"Duplicate JSON key: {key}"
+        return <- checkUniqueKeys (keys :: parents)
+    checkUniqueKeys objects
+  | _ => checkUniqueKeys objects
+
+/-- Refuses a repeated decoded key within any object of the request text. -/
+def checkRequestKeys [Hashable String] (source : String) : Except String Unit :=
+  (checkUniqueKeys []).run source
 
 /-- The declaration name written as `s`. -/
 def name (s : String) : Name := s.toName
@@ -107,6 +152,20 @@ partial def fits (j : Json) (e : Expr) : Except String Bool := do
     for spec in args, arg in actual.reverse do
       unless ← fits spec arg do return false
     return true
+  if let .ok spec := j.getObjVal? "list" then
+    let elementType ← spec.getObjVal? "type"
+    let expectedLevel ← level (← spec.getObjVal? "level")
+    let items ← spec.getObjValAs? (Array Json) "items"
+    let mut tail := e
+    for item in items do
+      let .app (.app (.app (.const `List.cons [actualLevel]) actualType) head) rest := tail
+        | return false
+      unless actualLevel == expectedLevel do return false
+      unless ← fits elementType actualType do return false
+      unless ← fits item head do return false
+      tail := rest
+    let .app (.const `List.nil [actualLevel]) actualType := tail | return false
+    return actualLevel == expectedLevel && (← fits elementType actualType)
   if let .ok n := j.getObjValAs? Nat "nat" then return e == canonicalNat n
   if let .ok n := j.getObjValAs? Nat "lit" then return e == .lit (.natVal n)
   if let .ok s := j.getObjValAs? String "str" then return e == .lit (.strVal s)
@@ -180,10 +239,61 @@ partial def stripMData (e : Expr) : Expr := e.replace fun
   | .mdata _ b => some (stripMData b)
   | _ => none
 
-/-- The contract predicates whose negation a refutation theorem may state. -/
-def contracts : List Name :=
-  [`CIL.Safety.MethodContract.Holds, `CIL.Safety.OutcomeContract.Holds,
-    `CIL.Safety.OutcomeContract.HoldsCLR]
+/-- A contract predicate, the counterexample predicate that refutes it with the same arguments,
+    and the module that declares both. -/
+structure Contract where
+  holds : Name
+  refuted : Name
+  module : Name
+
+/-- The contracts a refutation theorem may refute, matched by name and declaring module. -/
+def contracts : List Contract :=
+  [⟨`CIL.Safety.MethodContract.Holds, `CIL.Safety.MethodContract.Refuted,
+      `CIL.Safety.MethodContract⟩,
+    ⟨`CIL.Safety.OutcomeContract.Holds, `CIL.Safety.OutcomeContract.Refuted,
+      `CIL.Safety.OutcomeContract⟩,
+    ⟨`CIL.Safety.OutcomeContract.HoldsCLR, `CIL.Safety.OutcomeContract.RefutedCLR,
+      `CIL.Safety.RuntimeExceptions⟩]
+
+/-- How many definitions `unfoldAliases` unfolds at the head of a statement. -/
+def aliasDepth : Nat := 16
+
+/-- `type` with the definition at its head unfolded, at most `depth` times, until the head is
+    `Not`, a contract predicate's name or no definition. Classification reads statements through
+    it, as the kernel comparison of statements unfolds any definition, so an alias of a contract
+    claim is classified as the claim it stands for. -/
+def unfoldAliases (find : Name → Option ConstantInfo) : Nat → Expr → Expr
+  | 0, type => type
+  | depth + 1, type =>
+    match type.getAppFn with
+    | .const name levels =>
+      if name == `Not || contracts.any (fun c => c.holds == name || c.refuted == name) then type
+      else match find name with
+        | some (.defnInfo info) => unfoldAliases find depth <| stripMData <|
+            (info.value.instantiateLevelParams info.levelParams levels).beta type.getAppArgs
+        | _ => type
+    | _ => type
+
+/-- `type` and, under a `Not`, its claim, read through `unfoldAliases`. -/
+def contractClaim (find : Name → Option ConstantInfo) (type : Expr) : Expr :=
+  match unfoldAliases find aliasDepth type with
+  | .app (.const `Not levels) claim =>
+    .app (.const `Not levels) (unfoldAliases find aliasDepth claim)
+  | unfolded => unfolded
+
+/-- Whether `type`, read through `contractClaim`, names a contract predicate by name alone: a
+    `Refuted` application, or `Not` applied to a `Holds` one. -/
+def namesContract (find : Name → Option ConstantInfo) (type : Expr) : Bool :=
+  match contractClaim find type with
+  | .app (.const `Not _) claim => contracts.any (claim.getAppFn.constName? == some ·.holds)
+  | claim => contracts.any (claim.getAppFn.constName? == some ·.refuted)
+
+/-- The library contract whose predicate `select` picks as the head of `claim`, checked against
+    the module `ownerOf` gives. -/
+def contractAt (ownerOf : Name → Option Name) (select : Contract → Name) (claim : Expr) :
+    Option Contract :=
+  claim.getAppFn.constName?.bind fun head =>
+    contracts.find? fun contract => select contract == head && ownerOf head == some contract.module
 
 /-- The context for pretty-printing and source ranges; no elaboration runs in it.
 With no open namespaces or aliases only full names resolve, so `pp.fullNames` prints the same text
@@ -209,17 +319,65 @@ def statement (env : Environment) (thm : Name) (type : Expr) : IO String :=
       catch _ => pure (toString type)
     return s!"{thm} : {text}"
 
-/-- When `type` negates a contract predicate applied to arguments, that contract and the
-    source position of `thm`; otherwise `none`. -/
-def refutation (env : Environment) (thm : Name) (type : Expr) : IO (Option Json) := do
-  let .app (.const `Not _) claim := type | return none
-  let .const contract _ := claim.getAppFn | return none
-  unless contracts.contains contract do return none
+/-- How many definitions `methodIndex?` unfolds to reach a numeral, as `bind_method` defines
+    one. -/
+def methodIndexDepth : Nat := 8
+
+/-- The `Nat` that `e` denotes when it is a canonical numeral, a raw literal, `Nat.zero`, or a
+    definition without universe parameters whose value is one, unfolding at most `depth`
+    definitions. -/
+def methodIndex? (env : Environment) : Nat → Expr → Option Nat
+  | _, .lit (.natVal n) => some n
+  | _, .const `Nat.zero [] => some 0
+  | _, e@(.app (.app (.app _ _) (.lit (.natVal n))) _) =>
+    if e == canonicalNat n then some n else none
+  | depth + 1, .const name [] => match env.find? name with
+    | some (.defnInfo info) => methodIndex? env depth (stripMData info.value)
+    | _ => none
+  | _, _ => none
+
+/-- The constant `e` names, read through definitions without universe parameters whose value is
+    a bare constant, at most `depth` of them, so an alias of a program names that program. -/
+def programConstant? (env : Environment) : Nat → Expr → Option Name
+  | depth + 1, .const name [] => match env.find? name with
+    | some (.defnInfo info) => match stripMData info.value with
+      | target@(.const _ []) => programConstant? env depth target
+      | _ => some name
+    | _ => some name
+  | _, e => e.constName?
+
+/-- When `type` is a library contract's counterexample predicate applied to arguments, the
+    contract it refutes, the program and method it names, and the source position of `thm`;
+    otherwise `none`. The program is reported only as the constant `programConstant?` reads and
+    the method only as the number `methodIndex?` reads, so a caller can bind the refutation to
+    an extraction. A statement `Not` applied to a library contract's `Holds` is an error: a run
+    the model does not cover proves it, so it is no evidence of a counterexample. -/
+def refutation (env : Environment) (ownerOf : Name → Option Name) (thm : Name) (type : Expr) :
+    IO (Except String (Option Json)) := do
+  let type := contractClaim env.find? type
+  if let .app (.const `Not _) claim := type then
+    if let some contract := contractAt ownerOf (·.holds) claim then
+      return .error s!"{thm} states Not ({contract.holds} ...), which a run the model does not \
+        cover can prove, so it is no counterexample; state {contract.refuted} instead"
+  let some contract := contractAt ownerOf (·.refuted) type | return .ok none
   let some ranges ← run env (findDeclarationRanges? thm)
     | throw (IO.userError s!"Missing refutation location for {thm}")
-  return some <| Json.mkObj [("contract", toJson contract.toString),
+  let arguments := type.getAppArgs
+  let program := arguments[3]?.bind (programConstant? env aliasDepth ∘ stripMData)
+  let method := arguments[4]?.bind (methodIndex? env methodIndexDepth ∘ stripMData)
+  return .ok <| some <| Json.mkObj [("contract", toJson contract.holds.toString),
+    ("program", toJson (program.map toString)), ("method", toJson method),
     ("line", toJson ranges.selectionRange.pos.line),
     ("column", toJson ranges.selectionRange.pos.column)]
+
+/-- `holds`, a library contract's `Holds` applied to arguments, as that contract's counterexample
+    predicate applied to the same arguments. -/
+def refutedAt (ownerOf : Name → Option Name) (holds : Expr) : Except String Expr :=
+  match contractAt ownerOf (·.holds) holds, holds.getAppFn with
+  | some contract, .const _ levels =>
+    pure (mkAppN (.const contract.refuted levels) holds.getAppArgs)
+  | _, _ => throw "Production's statement is not a contract's Holds, so no refutation of it \
+      can be compared"
 
 /-- `n` as JSON: its components from the root, strings as strings and numbers as numbers. -/
 def nameJson (n : Name) : Json :=
@@ -410,7 +568,10 @@ def theorem? (env : Environment) (req : Json)
   if req.getObjValAs? Bool "statement" matches .ok true then
     fields := fields ++ [("statement", toJson (← statement env thm info.type))]
   if req.getObjValAs? Bool "refutation" matches .ok true then
-    if let some r ← refutation env thm type then fields := fields ++ [("refutes", r)]
+    match ← refutation env ownerOf thm type with
+    | .ok (some refutes) => fields := fields ++ [("refutes", refutes)]
+    | .ok none => pure ()
+    | .error error => return result (fields ++ [("error", toJson error)])
   if req.getObjValAs? Bool "term" matches .ok true then
     let term := (ownerOf thm).map (statementTerm kernel ownerOf · info.levelParams type)
     fields := fields ++ match term with
@@ -418,14 +579,28 @@ def theorem? (env : Environment) (req : Json)
       | some (.error error) => [("termError", toJson error)]
       | none => [("termError", toJson s!"Theorem has no declaring module: {thm}")]
   if let .ok expected := req.getObjVal? "expected" then
-    let negated := (expected.getObjValAs? Bool "negated").toOption.getD false
-    let target := (expected.getObjVal? "term").bind
-      (decodeStatement kernel ownerOf info.levelParams)
-    fields := fields ++ match target.map (if negated then mkApp (.const ``Not []) else id) with
-      | .ok target => match acceptsAt kernel thm info.levelParams type target with
-        | none => [("matches", toJson true)]
-        | some error => [("matches", toJson false), ("mismatch", toJson error)]
-      | .error error => [("matches", toJson false), ("mismatch", toJson error)]
+    if let .obj members := expected then
+      for (key, _) in members do
+        unless key == "term" || key == "refuted" do
+          return result (fields ++ [("error", toJson s!"Unknown comparison field: {key}")])
+    let .ok refuted := expected.getObjValAs? Bool "refuted"
+      | return result (fields ++
+          [("error", toJson "A statement comparison states expected.refuted as a boolean")])
+    let .ok term := expected.getObjVal? "term"
+      | return result (fields ++
+          [("error", toJson "A statement comparison requires expected.term")])
+    let target := decodeStatement kernel ownerOf info.levelParams term
+    match target.bind (if refuted then refutedAt ownerOf else pure) with
+    | .ok target => match acceptsAt kernel thm info.levelParams type target with
+      | none =>
+        fields := fields ++ [("matches", toJson true)]
+        -- The kernel accepted the theorem at production's counterexample predicate, so it refutes
+        -- that predicate's subject, whatever form the theorem states it in.
+        if refuted then
+          if let .ok (some refutes) ← refutation env ownerOf thm target then
+            fields := fields.filter (·.1 != "refutes") ++ [("refutes", refutes)]
+      | some error => fields := fields ++ [("matches", toJson false), ("mismatch", toJson error)]
+    | .error error => fields := fields ++ [("matches", toJson false), ("mismatch", toJson error)]
   if let .ok spec := req.getObjVal? "type" then
     unless info.levelParams == (names req "levelParams").toList &&
         (← IO.ofExcept (fits spec type)) do
@@ -571,9 +746,7 @@ def needsTargetMetadata (env : Kernel.Environment) (req : Json) : Bool := Id.run
     if entry.getObjValAs? Bool "refutation" matches .ok true then
       let some thm := (entry.getObjValAs? String "name").toOption | return true
       if let some (.thmInfo info) := env.find? (name thm) then
-        if let .app (.const `Not _) claim := stripMData info.type then
-          if let .const contract _ := claim.getAppFn then
-            if contracts.contains contract then return true
+        if namesContract env.find? (stripMData info.type) then return true
   return false
 
 /-- Audits a supplied immutable environment and records the exact resolved module paths. -/
@@ -616,12 +789,17 @@ unsafe def main (args : List String) : IO UInt32 := do
   | ["--replay-separately", input] =>
     let targets ← IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
     return ← CIL.Replay.replayModulesSeparately targets
+  | ["--diagnose-replay", input] =>
+    let targets ← IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+    return ← CIL.Replay.diagnoseModules targets
   | ["--headers", input] => CIL.Interface.writeSourceHeaders input; return 0
   | ["--imports", input, output] => writeImports input output; return 0
   | ["--fingerprints", input] => writeFingerprints input; return 0
   | _ => pure ()
   let [request, output] := args | throw (IO.userError "Usage: leancil-audit REQUEST RESULT")
-  let req ← IO.ofExcept (Json.parse (← IO.FS.readFile request))
+  let source <- IO.FS.readFile request
+  IO.ofExcept (checkRequestKeys source)
+  let req <- IO.ofExcept (Json.parse source)
   let sysroot ← findSysroot
   -- Toolchain modules first: LEAN_PATH may add modules but never replace core ones.
   searchPathRef.set ((← getBuiltinSearchPath sysroot) ++ (← addSearchPathFromEnv {}))
@@ -648,7 +826,9 @@ unsafe def main (args : List String) : IO UInt32 := do
         else none
       try
         writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)]
-          ownerOf closureOwnerOf replayedInterfaces
+          (if fused then ownerOf else fun name =>
+            (env.getModuleIdxFor? name).bind (env.allImportedModuleNames[·.toNat]?))
+          closureOwnerOf replayedInterfaces
       finally unless fused do env.freeRegions
     return 0
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)

@@ -2,8 +2,16 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BatchVerification.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
+#:include GeneratedEvidence.cs
+#:include ContractVariants.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -18,6 +26,8 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
 Directory.CreateDirectory(root);
 
+// One batch elaborates, replays and audits every proof; a pass is reported only after the whole batch is certified.
+var queue = new GeneratedQueue(verification, assembly);
 foreach (var (proof, entry) in new[]
 {
     ("SameObject", "Objects::Same(Examples.Account,Examples.Account)"),
@@ -37,7 +47,6 @@ foreach (var (proof, entry) in new[]
     ("OpaqueTag", "Objects::CopyTag(Examples.Tagged,Examples.Tagged)"),
     ("BaseField", "Objects::IdOf(Examples.Shape)"),
     ("DerivedObject", "Objects::Describe(System.UInt64,System.UInt64)"),
-    ("AnimalLegs", "VirtualCalls::LegsOf(Examples.Animal)"),
     ("AnimalLoudness", "VirtualCalls::LoudnessOf(Examples.Animal)"),
     ("FreshDogLegs", "VirtualCalls::DogLegs()"),
     ("DogTest", "ClassTests::IsDog(Examples.Animal)"),
@@ -60,10 +69,60 @@ foreach (var (proof, entry) in new[]
     ("TileHold",
         "TileArrays::Hold(Examples.AggregateArrays/Pair[],System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])")
 })
+    queue.Add(new(entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof)),
+        () => Console.WriteLine($"PASS {proof}: {entry}"));
+queue.Flush();
+
+const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
+const string legsSelector = "VirtualCalls::LegsOf(Examples.Animal)";
+var wrongLegs = Path.Combine(root, "TwoLeggedDog");
+Directory.CreateDirectory(wrongLegs);
+var wrongLegsAssembly = Path.Combine(wrongLegs, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
 {
-    verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
-    Console.WriteLine($"PASS {proof}: {entry}");
+    var dogLegs = variant.GetType("Examples.Dog").Methods.Single(method => method.Name == "Legs");
+    dogLegs.Body.Instructions.Single(site => site.OpCode == OpCodes.Ldc_I4_4).OpCode = OpCodes.Ldc_I4_2;
+    variant.Write(wrongLegsAssembly);
 }
+verification.VerifyContractVariant(assembly, "Examples", legsSelector, Path.Combine(root, "AnimalLegs"),
+    wrongLegsAssembly, legsSelector, wrongLegs, $$"""
+    /-- Both runtime classes have the same abstract base in the selected assembly. -/
+    private def animalClass (isDog : Bool) : RuntimeType :=
+      ⟨.object "{{animalScope}}" (if isDog then "Examples.Dog" else "Examples.Bird"),
+        [.object "{{animalScope}}" "Examples.Animal"]⟩
+
+    /-- The virtual call returns the leg count of its live receiver and preserves caller memory. -/
+    def legs : MethodContract (Bool × Reference) W64 where
+      args input := [.object (.address input.2)]
+      results value := [.scalar (.i64 value)]
+      pre input memory := formObject memory (.address input.2) = .ok (.object (.address input.2)) ∧
+        runtimeTypeOf memory input.2 = .ok (animalClass input.1)
+      footprint _ := []
+      post input before after value := before = after ∧ value = (if input.1 then 4 else 2)
+    """, """
+    /-- Dispatch selects the corresponding override for every formed dog or bird. -/
+    theorem correctness : legs.Holds Extracted.program 0 := by
+      rintro ⟨isDog, receiver⟩ memory ⟨formed, typed⟩
+      cases isDog
+      · exact MethodContract.Holds.intro (c := legs) (input := (false, receiver)) memory 2
+          (ExampleProof.bird_legs memory receiver formed typed) (Confined.refl _ _) ⟨rfl, rfl⟩
+      · exact MethodContract.Holds.intro (c := legs) (input := (true, receiver)) memory 4
+          (ExampleProof.dog_legs memory receiver formed typed) (Confined.refl _ _) ⟨rfl, rfl⟩
+    """, """
+    /-- Allocation zero contains a live dog whose virtual override the caller must select. -/
+    private def dogMemory : Memory := { Memory.empty with
+      allocations := fun id => if id = 0 then some
+        ⟨.object (animalClass true), ⟨1, 1, []⟩, true, []⟩ else none
+      nextIdentity := 1 }
+
+    /-- The compiled caller returns two for this dog after its override is changed. -/
+    theorem correctness : legs.Refuted Extracted.program 0 :=
+      .of_return (input := (true, ⟨0, 0⟩)) (initial := dogMemory) ⟨rfl, rfl⟩
+        (rfl : invoke Extracted.program 16 0 (legs.args (true, ⟨0, 0⟩)) dogMemory =
+          .ok (dogMemory, [.scalar (.i64 2)]))
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """, example: At("Examples/Proofs/AnimalLegs.lean"));
+Console.WriteLine("PASS virtual caller contract and certified two-legged Dog override");
 
 // Each named field is checked against the operation it names, so a view with another offset, width or
 // element fails its own theorem instead of naming storage the code never touches.
@@ -78,10 +137,9 @@ foreach (var (name, proof, view, forged, marker) in new[]
         "def Value : Safety.WordField 4 := ⟨type, 0⟩", "Value.accessedBy"),
     ("element", "SampleValues", "def Values : Safety.ArrayField .signed32 := ⟨type, 0⟩",
         "def Values : Safety.ArrayField .unsigned32 := ⟨type, 0⟩", "Values.accessedBy"),
-    // A struct element's width is its layout's, so a field operation with another width fails its layout use.
+    // A struct element's width is its layout's, so a view with another width fails its own theorem.
     ("structWidth", "TilePairs", "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 16)",
-        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)",
-        "Extraction.MethodLayoutsValid rawLayouts computedLayouts method0 method0LayoutUses")
+        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)", "Pairs.accessedBy")
 })
 {
     var extracted = File.ReadAllText(Path.Combine(root, proof, "Extracted.lean"));
@@ -94,18 +152,17 @@ foreach (var (name, proof, view, forged, marker) in new[]
 // Lean re-resolves every dispatch table entry from the catalog and requires every concrete class
 // deriving from the slot's class, so a table that swaps bodies or omits a class fails its check.
 var dispatched = File.ReadAllText(Path.Combine(root, "AnimalLegs", "Extracted.lean"));
-const string animalScope = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
 var birdEntry = $"(.object \"{animalScope}\" \"Examples.Bird\", ";
 var dogEntry = $"(.object \"{animalScope}\" \"Examples.Dog\", ";
-var table = Regex.Match(dispatched, @"\.callVirtual \[\(.*?\)\] 1").Value;
-var entries = Regex.Matches(table, @"(\(\.object [^)]*?, )(\d+)\)").Select(entry => entry.Groups).ToArray();
+var table = DispatchPatterns.Table.Match(dispatched).Value;
+var entries = DispatchPatterns.Entry.Matches(table).Select(entry => entry.Groups).ToArray();
 if (entries.Length != 2 || !table.Contains(birdEntry + entries[0][2].Value, StringComparison.Ordinal) ||
     !table.Contains(dogEntry + entries[1][2].Value, StringComparison.Ordinal))
     throw new InvalidOperationException("The extraction does not list Bird and Dog in its dispatch table: " + table);
 foreach (var (name, forged) in new[]
 {
-    ("swapped", $".callVirtual [{birdEntry}{entries[1][2].Value}), {dogEntry}{entries[0][2].Value})] 1"),
-    ("omitted", $".callVirtual [{dogEntry}{entries[1][2].Value})] 1")
+    ("swapped", $".virtual [{birdEntry}{entries[1][2].Value}), {dogEntry}{entries[0][2].Value})]"),
+    ("omitted", $".virtual [{dogEntry}{entries[1][2].Value})]")
 })
 {
     var path = Path.Combine(root, $"ForgedTable-{name}.lean");
@@ -114,34 +171,21 @@ foreach (var (name, forged) in new[]
         "Extraction.ConstrainedCallsValid method0DispatchTypes");
 }
 // Lean binds a type test to its raw opcode and class, so an emitted test of another class or with
-// the other outcome for a failed cast fails the scalar flow check.
+// the other outcome for a failed cast fails the scalar flow check. The method is defined from its decoder, so
+// the forgery edits the decoder's input and leaves the closed definition the check reads.
 var cast = File.ReadAllText(Path.Combine(root, "DogCast", "Extracted.lean"));
-var castTest = $".objectTest ({dogEntry.TrimStart('(').TrimEnd(',', ' ')}) true";
-if (!cast.Contains(castTest, StringComparison.Ordinal))
-    throw new InvalidOperationException("The extraction does not test the cast against Dog: " + castTest);
+var castTest = $"opcode := 116, operand := .type ({dogEntry.TrimStart('(').TrimEnd(',', ' ')})";
 foreach (var (name, forged) in new[]
 {
     ("class", castTest.Replace("Examples.Dog", "Examples.Bird", StringComparison.Ordinal)),
-    ("outcome", castTest[..^" true".Length] + " false")
+    ("outcome", castTest.Replace("opcode := 116", "opcode := 117", StringComparison.Ordinal))
 })
 {
     var path = Path.Combine(root, $"ForgedCast-{name}.lean");
-    File.WriteAllText(path, cast.Replace(castTest, forged, StringComparison.Ordinal));
+    File.WriteAllText(path, ForgeDecodedOriginal(cast, 0, castTest, forged));
     forgedViews.Add(path, $"PASS forged type test rejected: {name}", "Extraction.ScalarFlowValid");
 }
 forgedViews.Check();
-
-// The entry's call proof simplifies with the constructor's closed body; without it the proof
-// falls back to a whole-method kernel decision.
-var constructed = File.ReadAllLines(Path.Combine(root, "FreshObject", "Extracted.lean"));
-var construction = constructed.Single(line => line.StartsWith("  .newObject ", StringComparison.Ordinal));
-var constructor = construction.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1];
-var entryCalls = constructed.Single(line =>
-    line.StartsWith("theorem method0_calls_validated ", StringComparison.Ordinal));
-if (!entryCalls.Contains("by cil_managed_calls [", StringComparison.Ordinal) ||
-    !entryCalls.Contains($"method{constructor}Closed", StringComparison.Ordinal))
-    throw new InvalidOperationException("The constructing method's call proof omits the constructor:\n" + entryCalls);
-Console.WriteLine("PASS construction call proof names the constructor");
 
 foreach (var mutation in new[]
 {
@@ -437,3 +481,12 @@ Console.WriteLine("PASS objects: identity, presence, scalar and reference field,
     "construction, base class field, class reference array, value-array field, virtual dispatch and type " +
     "test proofs, and named rejection of unmodelled class shapes, field and element accesses, calls, " +
     "dispatch tables and type tests");
+
+static partial class DispatchPatterns
+{
+    [GeneratedRegex(@"\.virtual \[\(.*?\)\]")]
+    internal static partial Regex Table { get; }
+
+    [GeneratedRegex(@"(\(\.object [^)]*?, )(\d+)\)")]
+    internal static partial Regex Entry { get; }
+}

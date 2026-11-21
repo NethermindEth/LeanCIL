@@ -17,7 +17,7 @@ private abbrev State (home : Reference) :=
 /-- The loop test, with the remaining count on the stack. It is found as the only conditional
     branch of the compiled code, so no instruction position or block order is assumed. -/
 bind_cutpoint header (home : Reference) (state : State home) :=
-  Extracted.method0 matching (fun op => match op with | .brnonzero _ => true | _ => false)
+  Extracted.method0 matching (fun op => match op with | .brtrue _ => true | _ => false)
   with entry.frame home, [.scalar (.i32 state.values)], state.memory
 
 theorem correctness : CIL.Safety.Ensures Extracted.program 0
@@ -25,7 +25,8 @@ theorem correctness : CIL.Safety.Ensures Extracted.program 0
     (fun _ _ _ values => values = [.scalar (.i32 0)]) := by
   rintro args initial ⟨x, rfl, rfl⟩
   obtain ⟨home, entered, enter⟩ := entry.checked x
-  refine invoke_loop_satisfies Extracted.lookup0 rfl enter.setup (header home) (fun _ => True)
+  refine invoke_loop_satisfies Extracted.program_method0 rfl enter.setup (header home)
+    (fun _ => True)
     (fun s => s.values.toNat) (fun start => ?_) ?_
   · cil_loop_recurse start x
     case invariant => trivial

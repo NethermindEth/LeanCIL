@@ -12,8 +12,7 @@ internal static class Reachability
     {
         FeatureProfile profile = selectedProfile ?? FeatureProfile.Scalar;
         profile.Validate();
-        MemoryPrefixes.Validate(method);
-        TailCalls.ValidateStructure(method);
+        InstructionPrefixes.Validate(method);
         var instructions = method.Body.Instructions;
         var boundaries = instructions.ToHashSet();
         foreach (Instruction instruction in instructions)
@@ -38,7 +37,6 @@ internal static class Reachability
         // Facts only move from a constant to unknown, so this reaches a fixed point.
         var typeTests = TypeTests.Analyze(method);
         var throws = Throws.Analyze(method);
-        var spans = Spans.Analyze(method, profile);
         InstructionIndex? positions = null;
         Queue<Instruction> pending = new();
         HashSet<Instruction> queued = [instructions[0]];
@@ -69,7 +67,7 @@ internal static class Reachability
                 if (queued.Add(target)) pending.Enqueue(target);
             }
 
-            // Folded operands push nothing, so a fold must be entered at its start.
+            // A jump must not bypass the operands used to establish a folded result.
             void ValidateJump(Instruction target)
             {
                 if (TailCalls.IsInterior(target))
@@ -78,8 +76,6 @@ internal static class Reachability
                     throw new InvalidDataException($"Branch into a folded type comparison: {i}");
                 if (throws.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded throw: {i}");
-                if (spans.Interior.Contains(target))
-                    throw new InvalidDataException($"Branch into a folded span receiver: {i}");
             }
 
             if (i.Operand is Instruction target)

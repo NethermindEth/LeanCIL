@@ -17,7 +17,7 @@ internal static class SpanReferences
     static bool ReadOnly(ParameterDefinition parameter) =>
         parameter.IsIn && !parameter.IsOut && parameter.CustomAttributes.Count(attribute =>
             attribute.AttributeType.FullName is IsReadOnly or RequiresLocation &&
-            RuntimeModels.ExactScope(attribute.AttributeType.Scope, "System.Runtime")) == 1;
+            RuntimeModels.ExactScope(attribute.AttributeType, PlatformAssemblies.SystemRuntime)) == 1;
 
     internal static void ValidateParameter(MethodDefinition method, ParameterDefinition parameter,
         ModuleDefinition module, string architecture)
@@ -53,10 +53,26 @@ internal static class SpanReferences
             _ => null
         };
         if (source is not ByReferenceType { ElementType: var element } || !Spans.Is(element) ||
-            MethodSpecialization.SignatureType(element) != MethodSpecialization.SignatureType(type) ||
+            StructuralSignatures.Current.Type(element) != StructuralSignatures.Current.Type(type) ||
             instructions.IsTarget(copy))
             throw new InvalidDataException("Unsupported span copy source: " + copy +
                 "\n  The span must be loaded directly from its own argument, parameter or local address.");
+    }
+
+    /// <summary>
+    /// Requires a span reset to follow the address of its own local or parameter directly, so its home names the
+    /// slot it empties.
+    /// </summary>
+    internal static void ValidateReset(Instruction reset, InstructionIndex instructions)
+    {
+        var type = (TypeReference)reset.Operand;
+        if (Spans.AddressedType(reset.Previous) is not { } addressed ||
+            StructuralSignatures.Current.Type(addressed) != StructuralSignatures.Current.Type(type) ||
+            instructions.IsTarget(reset))
+            throw new InvalidDataException($"""
+                Unsupported span reset: {reset}
+                  The span must be reset directly through its own local or parameter address.
+                """);
     }
 
     static int ArgumentIndex(MethodDefinition method, Instruction load) => load.OpCode.Code switch

@@ -1,6 +1,10 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ConsumerTraceDirectory.cs
@@ -68,9 +72,22 @@ if (!baseline)
     // Checkout inputs enumerate these folders; the packaged corpus has no sources in them.
     foreach (var folder in new[] { "Extractor", "Examples", "Tests" })
         Directory.CreateDirectory(Path.Combine(corpus, folder));
-    foreach (var name in new[]
-             { "PrepareLibrary.cs", "Verification.cs", "ConsumerVerification.cs", "LeanDiagnostics.cs" })
-        File.Copy(At("scripts/" + name), Path.Combine(scripts, name));
+    // An included source may include further sources by paths relative to its own folder.
+    var copiedSources = new HashSet<string>(StringComparer.Ordinal);
+    var pendingSources = new Queue<string>(["PrepareLibrary.cs"]);
+    while (pendingSources.TryDequeue(out var name))
+    {
+        var source = Path.GetFullPath(Path.Combine(At("scripts"), name));
+        var relative = Path.GetRelativePath(At("scripts"), source);
+        if (!copiedSources.Add(relative)) continue;
+        var copy = Path.GetFullPath(Path.Combine(scripts, relative));
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.Copy(source, copy);
+        foreach (var included in File.ReadLines(source)
+            .Where(line => line.StartsWith("#:include ", StringComparison.Ordinal))
+            .Select(line => line["#:include ".Length..].Trim()))
+            pendingSources.Enqueue(Path.Combine(Path.GetDirectoryName(relative) ?? "", included));
+    }
     foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
         File.Copy(At(name), Path.Combine(corpus, name));
     var prepared = Path.Combine(importedRoot, "prepared");
@@ -136,4 +153,3 @@ var measurements = new
 };
 File.WriteAllText(Path.Combine(importedRoot, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("PASS CLI imported helper preparation counts: " + JsonSerializer.Serialize(measurements));
-

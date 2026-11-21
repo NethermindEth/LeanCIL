@@ -10,7 +10,7 @@ Part of the per-step `LiveState` invariant.
 
 namespace CIL.Safety
 
-theorem step_values_valid (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_values_valid (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed) (valid : ValuesValid m stack)
     (h : step body operation pc args frame stack m = .ok action) : action.LiveValues :=

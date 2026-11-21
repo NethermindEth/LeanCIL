@@ -17,9 +17,8 @@ namespace CIL.MethodBinding
 
 open Lean Meta Elab Tactic
 
--- Diagnostic comparison only; proofs never depend on these instances.
-deriving instance BEq for MemoryOp
-deriving instance BEq for Op
+-- Diagnostic comparison only; proofs never depend on this instance.
+deriving instance BEq for Instruction
 
 /-- The first index where two lists differ, with the element of each side there. -/
 def firstDifference [BEq T] :
@@ -29,6 +28,21 @@ def firstDifference [BEq T] :
     if a == b then firstDifference as bs (index + 1) else some (index, some a, some b)
   | a :: _, [], index => some (index, some a, none)
   | [], b :: _, index => some (index, none, some b)
+
+/-- First program counter where decoded instructions or their ordered call links differ.
+    A caller comparing profiles relocates both link tables to the same callee numbering. -/
+def firstCodeOrLinkDifference (left right : Method) : Option Nat :=
+  let code := (firstDifference left.code right.code 0).map Prod.fst
+  let link := (firstDifference left.links right.links 0).bind fun (_, lhs, rhs) =>
+    match lhs, rhs with
+    | some a, some b => some (min a.1 b.1)
+    | some a, none => some a.1
+    | none, some b => some b.1
+    | none, none => none
+  match code, link with
+  | some pc, some site => some (min pc site)
+  | _, none => code
+  | none, _ => link
 
 /-- An element for a diagnostic, or a marker when one list has ended. -/
 private def element [Repr T] : Option T -> String
@@ -47,16 +61,36 @@ def valueField [BEq T] [Repr T] (field : String) (left right : T) : Option Strin
   if left == right then none
   else some s!"field {field}:\n  left:  {reprStr left}\n  right: {reprStr right}"
 
+/-- The environment difference, without printing the layout tables. -/
+def environmentField (left right : LayoutEnvironment) : Option String :=
+  if left == right then none
+  else some (s!"field environment: the layout tables differ\n" ++
+    s!"  left:  {left.rawLayouts.length} raw layouts, {left.layouts.size} computed\n" ++
+    s!"  right: {right.rawLayouts.length} raw layouts, {right.layouts.size} computed")
+
+/-- How to bind the pc-indexed links of a replacement body. -/
+def linksHint : String :=
+  "\n  a body written as `{ method with code := ... }` keeps the links of `method`, keyed by its \
+    own pcs. `Method.withCode` clears the table. Supply the links at the replacement body's pcs \
+    in ascending order with `{ body with links := [(pc, link), ...] }`"
+
+/-- What to do when a body's static sites differ: `Method.withCode` resets them. -/
+def staticSitesHint : String :=
+  "\n  static sites are keyed by pc; `Method.withCode` resets them, so a body that reads statics \
+    supplies its own after it: `{ body with staticSites := [(pc, descriptor), ...] }`, one entry \
+    per static access at the body's pc, with the descriptor the extraction has for that access"
+
 /-- One line per differing `Method` field, in declaration order. -/
 def methodDifferences (left right : Method) : List String :=
   [ valueField "profile" left.profile right.profile,
     listField "code" left.code right.code,
     listField "locals" left.locals right.locals,
     listField "localKinds" left.localKinds right.localKinds,
-    listField "staticSites" left.staticSites right.staticSites,
-    listField "vectorLocals" left.vectorLocals right.vectorLocals,
-    listField "vectorArgs" left.vectorArgs right.vectorArgs,
+    (listField "staticSites" left.staticSites right.staticSites).map (· ++ staticSitesHint),
     listField "parameterHomes" left.parameterHomes right.parameterHomes,
+    valueField "declared" left.declared right.declared,
+    environmentField left.environment right.environment,
+    (listField "links" left.links right.links).map (· ++ linksHint),
     valueField "returnsValue" left.returnsValue right.returnsValue ].filterMap id
 
 /-- The type `CIL.Method` as an expression, for evaluating a side. -/

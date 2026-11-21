@@ -13,7 +13,8 @@ namespace CIL.Safety
 
 /-- A step keeps every allocation the resulting frame owns live and tagged with its activation,
     including a home the step just allocated. -/
-theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_preserves_frame_allocations (body : CIL.Method) (operation : CIL.Instruction)
+    (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed)
     (owns : FrameAllocations m frame.activation frame.owned)

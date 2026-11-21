@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
@@ -21,7 +20,7 @@ internal sealed record ContractType(string Kind, string Scope, string Name, Cont
     internal string Lean => Kind switch
     {
         "void" => ".void",
-        "atom" => ".atom " + JsonSerializer.Serialize(Scope) + " " + JsonSerializer.Serialize(Name),
+        "atom" => $".atom {IdentityText.Quote(Scope)} {IdentityText.Quote(Name)}",
         "byref" when Element is not null => ".byref (" + Element.Lean + ")",
         _ => throw new InvalidDataException("Invalid imported type metadata.")
     };
@@ -36,10 +35,17 @@ internal sealed record ContractMethodSignature(ContractType Owner, string Name, 
         CallReturnType.Parameters(reference).Select(ContractType.Read).ToArray(),
         definition.Parameters.Select(parameter => (int)parameter.Attributes).ToArray());
 
-    internal string Lean => "{ owner := " + Owner.Lean + ", name := " + JsonSerializer.Serialize(Name) +
-        ", arguments := [" + string.Join(", ", Arguments.Select(type => type.Lean)) + "]" +
-        ", returnType := " + ReturnType.Lean + ", parameters := [" +
-        string.Join(", ", Parameters.Select(type => type.Lean)) + "] }";
+    internal string Lean
+    {
+        get
+        {
+            var owner = $"owner := {Owner.Lean}, name := {IdentityText.Quote(Name)}";
+            var arguments = string.Join(", ", Arguments.Select(type => type.Lean));
+            var parameters = string.Join(", ", Parameters.Select(type => type.Lean));
+            var signature = $"arguments := [{arguments}], returnType := {ReturnType.Lean}";
+            return $$"""{ {{owner}}, {{signature}}, parameters := [{{parameters}}] }""";
+        }
+    }
 }
 
 internal static class ContractMethodMetadata
@@ -127,7 +133,8 @@ internal static class ContractMethodMetadata
     }
 
     internal static bool Primitive(TypeReference type) => type is not TypeSpecification &&
-        RuntimeModels.ExactScope(type.Scope, "System.Runtime") && type.IsValueType && PrimitiveName(type.FullName);
+        RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime) && type.IsValueType &&
+        PrimitiveName(type.FullName);
 
     static bool PrimitiveName(string name) => name is
         "System.SByte" or "System.Byte" or "System.Boolean" or "System.Int16" or "System.UInt16" or
@@ -153,7 +160,7 @@ internal static class ContractMethodMetadata
                 { IsValueType: true, HasGenericParameters: false } referenced)
                 throw new InvalidDataException("Closed entry type argument is not a non-generic value type of " +
                     owner[0].Assembly.Name.FullName + ": " + name);
-            return module.ImportReference(referenced);
+            return referenced;
         }
         return module.GetType(name) is { IsValueType: true, HasGenericParameters: false } local
             ? local : throw new InvalidDataException(
@@ -210,13 +217,13 @@ internal static class ContractMethodMetadata
         MethodDefinition closed = new MethodSpecialization(definition.Module, architecture).Instantiate(reference);
         // Scalar certificates read the closed return and parameter types from the identity.
         // Keep definition and scoped argument keys before the parameter list.
-        string definitionHash = ContractInterface.Hash(Encoding.UTF8.GetBytes(DefinitionKey(definition, entry)));
+        string definitionKey = Convert.ToHexString(Encoding.UTF8.GetBytes(DefinitionKey(definition, entry)));
         StringBuilder identity = new(definition.Module.Assembly.Name.FullName + "::" + closed.ReturnType.FullName + " " +
-            closed.DeclaringType.FullName + "::" + closed.Name + "|definition|" + definitionHash + "|arguments|");
+            closed.DeclaringType.FullName + "::" + closed.Name + "|definition|" + definitionKey + "|arguments|");
         foreach (TypeReference argument in arguments)
         {
             string scoped = OpenType(argument);
-            identity.Append(scoped.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(scoped);
+            identity.Append(Part(scoped));
         }
         identity.Append('(').AppendJoin(',', closed.Parameters.Select(parameter => parameter.ParameterType.FullName)).Append(')');
         return new(definition, closed, reference, arguments, identity.ToString());
@@ -280,7 +287,8 @@ internal static class ContractMethodMetadata
     {
         Func<TypeReference, string> parameterKey = entry ? EntryParameter : OpenParameter;
         StringBuilder key = new("contract-definition-v1:");
-        key.Append(Part(OpenType(definition.DeclaringType))).Append(Part(definition.Name))
+        string owner = Part(LayoutEvidence.Scope(definition.DeclaringType)) + Part(definition.DeclaringType.FullName);
+        key.Append(Part(owner)).Append(Part(definition.Name))
             .Append(Part(definition.GenericParameters.Count.ToString(CultureInfo.InvariantCulture)))
             .Append(Part(((byte)definition.CallingConvention).ToString(CultureInfo.InvariantCulture)))
             .Append(Part(definition.HasThis ? "1" : "0")).Append(Part(definition.ExplicitThis ? "1" : "0"))
@@ -291,7 +299,8 @@ internal static class ContractMethodMetadata
         return key.ToString();
     }
 
-    static string Part(string value) => value.Length.ToString(CultureInfo.InvariantCulture) + ":" + value;
+    static string Part(string value) =>
+        Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture) + ":" + value;
 
     // The `in:` tag keeps an `in` reference distinct from a plain one; plain parameters keep their encoding.
     static string OpenParameter(TypeReference type) =>

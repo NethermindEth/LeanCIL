@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -194,14 +199,15 @@ if (!source.Contains(argumentEvidence, StringComparison.Ordinal))
 var forged = Path.Combine(root, "Forged-argument.lean");
 File.WriteAllText(forged, source.Replace(argumentEvidence, "arguments := [.span 1 false]", StringComparison.Ordinal));
 rejected.Add(forged, "PASS span reference argument evidence rejection",
-    "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments");
-// A span copy may emit only the empty operation; any load would reinterpret the view as bytes.
-var copy = NarrowEvidence(File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean")),
-    "method0_features_validated");
-const string copied = "  .arg 0,\n  .nop,";
-if (!copy.Contains(copied, StringComparison.Ordinal)) throw new InvalidOperationException("Missing span copy");
+    ClosedArgumentsMismatch);
+// Replacing the decoded span load by an eight-byte indirect load must fail feature validation.
+var copy = File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean"));
+var forgedCopy = IsDecodedMethod(copy, 0)
+    ? ForgeDecodedMethod(copy, 0, "code := method.code.set 1 (.ldind .i8)")
+    : copy.Replace("  .ldobj (valueType0),", "  .ldind .i8,", StringComparison.Ordinal);
+if (copy == forgedCopy) throw new InvalidOperationException("Missing span copy");
 var loaded = Path.Combine(root, "Forged-copy.lean");
-File.WriteAllText(loaded, copy.Replace(copied, "  .arg 0,\n  .loadScalar 8,", StringComparison.Ordinal));
+File.WriteAllText(loaded, NarrowEvidence(forgedCopy, "method0_features_validated"));
 rejected.Add(loaded, "PASS span copy evidence rejection", "FeatureFlowValid", "is false");
 rejected.Check();
 
@@ -222,7 +228,7 @@ foreach (var (name, marker) in new[]
 foreach (var (mutation, marker) in new[]
 {
     ("store", "Unsupported store to a span home"),
-    ("reset", "Unsupported store to a span home"),
+    ("reset", "Unsupported span reset"),
     ("rebind", "Unsupported store to or address of a readonly span reference"),
     ("address", "Unsupported store to or address of a readonly span reference"),
     ("writable", "Unsupported writable by-reference span parameter"),

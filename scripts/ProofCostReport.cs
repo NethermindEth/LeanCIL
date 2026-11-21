@@ -331,21 +331,21 @@ internal static partial class ProofCostReport
     }
 
     [GeneratedRegex("""(?ms)^\[\[lean_lib\]\][ \t]*\r?$(?<body>.*?)(?=^\[|\z)""")]
-    private static partial Regex LibraryTable();
+    private static partial Regex LibraryTable { get; }
 
     [GeneratedRegex("""^name[ \t]*=[ \t]*"(?<name>[^"]+)"$""")]
-    private static partial Regex LibraryName();
+    private static partial Regex LibraryName { get; }
 
     // Test libraries are the tables that only name a library: no source directory, roots or facets.
-    internal static string[] TestLibraries(string lakefile) => LibraryTable().Matches(lakefile)
+    internal static string[] TestLibraries(string lakefile) => LibraryTable.Matches(lakefile)
         .Select(table => table.Groups["body"].Value.Split('\n').Select(line => line.Trim())
             .Where(line => line.Length > 0 && !line.StartsWith('#')).ToArray())
-        .Where(body => body.Length == 1 && LibraryName().IsMatch(body[0]))
-        .Select(body => LibraryName().Match(body[0]).Groups["name"].Value)
+        .Where(body => body.Length == 1 && LibraryName.IsMatch(body[0]))
+        .Select(body => LibraryName.Match(body[0]).Groups["name"].Value)
         .Where(name => name != "CIL").ToArray();
 
     [GeneratedRegex("""^(?:(?:public|meta|private)[ \t]+)*import[ \t]+(?:all[ \t]+)?(?<modules>[^-/]+)""")]
-    private static partial Regex ImportLine();
+    private static partial Regex ImportLine { get; }
 
     // Imports end at the first command; comments may precede or separate them.
     internal static string[] Imports(string source)
@@ -367,7 +367,7 @@ internal static partial class ProofCostReport
                 continue;
             }
             if (line == "module" || line == "prelude") continue;
-            if (ImportLine().Match(line) is not { Success: true } import) break;
+            if (ImportLine.Match(line) is not { Success: true } import) break;
             modules.AddRange(import.Groups["modules"].Value
                 .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         }
@@ -412,13 +412,77 @@ internal static partial class ProofCostReport
             ?? $"lean exited with code {code} and no diagnostic";
     }
 
+    // Each module has one task, and its factory never recurses on the caller's stack.
+    internal sealed class ModuleTasks
+    {
+        readonly ConcurrentDictionary<string, Lazy<Task<string?>>> modules = new(StringComparer.Ordinal);
+
+        internal Task<string?> Get(string module, Func<string, Task<string?>> measure) => modules.GetOrAdd(module,
+            name => new Lazy<Task<string?>>(() => Task.Run(() => measure(name)))).Value;
+    }
+
+    // Import graphs are checked once before scheduling, so cycles cannot become mutually waiting tasks.
+    internal sealed class ModuleImports
+    {
+        internal sealed record Entry(string[] Imports, string? Failure);
+
+        sealed class Pending(string name, string[] imports)
+        {
+            internal readonly string Name = name;
+            internal readonly string[] Imports = imports;
+            internal int Next;
+            internal string? Failure;
+        }
+
+        readonly Dictionary<string, Entry> resolved = new(StringComparer.Ordinal);
+
+        internal Entry Resolve(string module, Func<string, string[]> read)
+        {
+            lock (resolved)
+            {
+                if (resolved.TryGetValue(module, out var known)) return known;
+                var pending = new Stack<Pending>();
+                var visiting = new HashSet<string>(StringComparer.Ordinal);
+                void Push(string name)
+                {
+                    pending.Push(new Pending(name, read(name)));
+                    visiting.Add(name);
+                }
+                Push(module);
+                while (pending.TryPeek(out var current))
+                {
+                    if (current.Failure is null && current.Next < current.Imports.Length)
+                    {
+                        var dependency = current.Imports[current.Next];
+                        if (resolved.TryGetValue(dependency, out var entry))
+                        {
+                            current.Failure = entry.Failure;
+                            current.Next++;
+                        }
+                        else if (visiting.Contains(dependency))
+                            current.Failure = "import cycle at " + dependency;
+                        else Push(dependency);
+                    }
+                    else
+                    {
+                        resolved.Add(current.Name, new Entry(current.Imports, current.Failure));
+                        visiting.Remove(current.Name);
+                        pending.Pop();
+                    }
+                }
+                return resolved[module];
+            }
+        }
+    }
+
     // Measures the modules of one checkout against one compiled library.
     sealed class Measurer(string tree, string library, string work, int jobs)
     {
         readonly string frontend = Path.Combine(ScriptDirectory(), "ProofCost.lean");
         readonly string shared = Path.Combine(work, "modules");
         readonly SemaphoreSlim slots = new(jobs);
-        readonly ConcurrentDictionary<string, Task<string?>> modules = new(StringComparer.Ordinal);
+        readonly ModuleTasks modules = new();
+        readonly ModuleImports imports = new();
         readonly ConcurrentDictionary<string, Lazy<string[]>> consumerDirectories = new(StringComparer.Ordinal);
         internal readonly ConcurrentBag<Row> Rows = [];
         internal readonly ConcurrentBag<Unmeasured> Lost = [];
@@ -429,10 +493,12 @@ internal static partial class ProofCostReport
             File.Exists(path) ? path : null;
 
         // Returns why the module could not be measured, or null once its rows and olean exist.
-        async Task<string?> Compile(string group, string module, string source, string root)
+        async Task<string?> Compile(string group, string module, string source, string root,
+            string[]? treeImports = null)
         {
-            foreach (var import in Imports(File.ReadAllText(source)))
-                if (!File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean")) &&
+            foreach (var import in treeImports ?? Imports(File.ReadAllText(source)))
+                if ((root == shared ||
+                    !File.Exists(Path.Combine(root, import.Replace('.', Path.DirectorySeparatorChar) + ".olean"))) &&
                     TreeSource(import) is not null && await TreeModule(import) is { } reason)
                     return $"its import {import} was not measured: {reason}";
             var olean = Path.Combine(root, module.Replace('.', Path.DirectorySeparatorChar) + ".olean");
@@ -443,7 +509,7 @@ internal static partial class ProofCostReport
             {
                 var path = string.Join(Path.PathSeparator, new[] { root, shared, library }.Distinct());
                 var result = await Task.Run(() => Execute(["lean", "--run", frontend, module, source, report, olean],
-                    tree, new Dictionary<string, string> { ["LEAN_PATH"] = path }));
+                    tree, new Dictionary<string, string> { ["LEAN_PATH"] = path, ["LEAN_NUM_THREADS"] = "1" }));
                 if (result.Code != 0 || !File.Exists(report)) return Diagnostic(result.Code, result.Output);
             }
             finally { slots.Release(); }
@@ -458,9 +524,12 @@ internal static partial class ProofCostReport
         }
 
         // A module of the checkout is measured once, however many modules import it.
-        internal Task<string?> TreeModule(string module) => modules.GetOrAdd(module, async name =>
+        internal Task<string?> TreeModule(string module) => modules.Get(module, async name =>
         {
-            var reason = await Compile(name, name, TreeSource(name)!, shared);
+            var dependencies = imports.Resolve(name, dependency => Imports(File.ReadAllText(TreeSource(dependency)!))
+                .Where(import => TreeSource(import) is not null).ToArray());
+            var reason = dependencies.Failure ??
+                await Compile(name, name, TreeSource(name)!, shared, dependencies.Imports);
             if (reason is not null) Lost.Add(new Unmeasured(name, reason));
             return reason;
         });
@@ -470,8 +539,15 @@ internal static partial class ProofCostReport
         {
             var output = Path.GetRelativePath(artifacts, directory).Replace('\\', '/');
             var stage = Path.Combine(work, "verified", output.Replace('/', Path.DirectorySeparatorChar));
+            var certificate = File.ReadAllText(Path.Combine(directory, "verified.json"));
+            // A report no default run would accept names no proof this measurement can trust.
+            if (Program.CertificateProblem(certificate, Program.BindingMode.Default) is { } problem)
+            {
+                Lost.Add(new Unmeasured(output, "the report is not a certificate verify accepts: " + problem));
+                return;
+            }
             Directory.CreateDirectory(stage);
-            using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "verified.json")));
+            using var report = JsonDocument.Parse(certificate);
             var proofs = report.RootElement.TryGetProperty("inputs", out var inputs)
                 ? inputs.EnumerateObject().Where(input => input.Name.StartsWith("proof:", StringComparison.Ordinal))
                     .Select(input => (Path: input.Name["proof:".Length..], Sha256: input.Value.GetString())).ToArray()
@@ -607,7 +683,7 @@ internal static partial class ProofCostReport
         : [];
 
     [GeneratedRegex("^-[0-9a-f]+$")]
-    private static partial Regex RunSuffix();
+    private static partial Regex RunSuffix { get; }
 
     // The proof suite whose declared directory holds the output, by its path under the artifacts root.
     internal static string? Owner(string output) => VerificationSuites.ProofOutputs
@@ -616,7 +692,7 @@ internal static partial class ProofCostReport
             if (!output.StartsWith(owned, StringComparison.Ordinal)) return false;
             var rest = output[owned.Length..];
             var name = rest.Split('/')[0];
-            return rest.Length == 0 || rest[0] == '/' || RunSuffix().IsMatch(name);
+            return rest.Length == 0 || rest[0] == '/' || RunSuffix.IsMatch(name);
         }))
         .Select(suite => suite.Key).SingleOrDefault();
 

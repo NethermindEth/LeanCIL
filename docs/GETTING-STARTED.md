@@ -47,6 +47,19 @@ Verified: ExampleProof.correctness
   Extraction entry: System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)
   Proof: Examples/Proofs/Add.lean
   Axioms: propext, Quot.sound
+  Binding: default
+  body-bytes: trusted
+  metadata-rows: trusted
+  platform-type-kinds: trusted
+  enum-underlying-types: trusted
+  value-tuple-field-order: trusted
+  object-fields: trusted
+  layout-content: trusted
+  dispatch-catalogs: trusted
+  static-data: trusted
+  generic-constraints: trusted
+  public-key-tokens: trusted
+  import-identities: trusted
   Settings: artifacts/Add/verification.json
   Report: artifacts/Add/verified.json
   Statement:
@@ -61,6 +74,10 @@ Verified: ExampleProof.correctness
   Lean messages (1):
     Examples/Proofs/Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]
 ```
+
+`Binding:` lists the facts this run trusts about the assembly image. With the assembly digests,
+`verify --deep-checks` reconfirms `body-bytes`, `metadata-rows` and `static-data`. Supplying the
+matching platform reference images also checks `object-fields`. See [deep verification](CLI.md#deep-verification).
 
 `Subject:` is the method the theorem's conclusion is about and `Extraction entry:` the method the
 extraction started from; see [reading the report](CLI.md#reading-the-report).
@@ -87,8 +104,8 @@ leancil check artifacts/Add
 ```
 
 `Examples/Proofs/Add.lean` derives execution from the generated program for all inputs.
-`Examples/Proofs/WrongAdd.lean` proves a counterexample to the addition contract for a subtracting
-implementation, for every successful fuel budget.
+`Examples/Proofs/WrongAdd.lean` proves the addition contract `Refuted` for a subtracting
+implementation: at inputs `(0, 1)` it returns `2^64 - 1`, not `1`.
 
 ## Break the implementation
 

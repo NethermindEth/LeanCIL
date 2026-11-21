@@ -1,4 +1,5 @@
 import CIL.TypeExpr
+import CIL.Extraction.KernelEquation
 
 /-!
 # Exact named metadata identities
@@ -30,10 +31,10 @@ private def leaf (scope name : List Char) : Option (List Char × List Char) :=
   if plainScope scope && plainName name then some (scope, name) else none
 
 /-- Decode ASCII without repeated indexed UTF-8 reads during kernel reduction. -/
-def asciiChars : List UInt8 → Option (List Char)
-  | [] => some []
-  | byte :: bytes =>
-    if byte.toNat < 128 then (Char.ofNat byte.toNat :: ·) <$> asciiChars bytes else none
+def asciiChars (bytes : List UInt8) : Option (List Char) :=
+  if bytes.all (fun byte => byte.toNat < 128) then
+    some (bytes.map fun byte => Char.ofNat byte.toNat)
+  else none
 
 /-- An ASCII byte is the complete UTF-8 encoding of its character. -/
 private theorem asciiByte (byte : UInt8) (small : byte.toNat < 128) :
@@ -48,19 +49,17 @@ private theorem asciiByte (byte : UInt8) (small : byte.toNat < 128) :
 private theorem asciiChars_encode (bytes : List UInt8) (chars : List Char)
     (decoded : asciiChars bytes = some chars) :
     chars.utf8Encode.data.toList = bytes := by
-  induction bytes generalizing chars with
-  | nil => simp [asciiChars] at decoded; subst chars; rfl
-  | cons byte bytes ih =>
-    simp only [asciiChars] at decoded
-    split at decoded
-    next small =>
-      cases tail : asciiChars bytes with
-      | none => simp [tail] at decoded
-      | some rest =>
-        simp [tail] at decoded
-        subst chars
-        simpa [List.utf8Encode, List.flatMap_cons, asciiByte byte small] using ih rest tail
-    next large => simp at decoded
+  unfold asciiChars at decoded
+  split at decoded
+  next small =>
+    cases decoded
+    simp only [List.all_eq_true, decide_eq_true_eq] at small
+    induction bytes with
+    | nil => rfl
+    | cons byte bytes ih =>
+      simp only [List.mem_cons, forall_eq_or_imp] at small
+      simpa [List.utf8Encode, List.flatMap_cons, asciiByte byte small.1] using ih small.2
+  next => cases decoded
 
 #print axioms asciiChars_encode
 
@@ -68,13 +67,24 @@ private theorem asciiChars_encode (bytes : List UInt8) (chars : List Char)
 def metadataChars (value : String) : List Char :=
   match asciiChars value.toByteArray.data.toList with
   | some chars => chars
-  | none => value.toList
+  | none =>
+    let bytes := value.toByteArray.data.toList.map UInt8.toNat
+    (utf8Characters bytes.length bytes).getD []
 
 /-- Metadata decoding preserves the original character sequence for every string. -/
 theorem metadataChars_eq (value : String) : metadataChars value = value.toList := by
   unfold metadataChars
   cases decoded : asciiChars value.toByteArray.data.toList with
-  | none => rfl
+  | none =>
+    obtain ⟨chars, rfl⟩ : ∃ chars, value = String.ofList chars :=
+      ⟨value.toList, String.ofList_toList.symm⟩
+    have bytes : (String.ofList chars).toByteArray.data.toList.map UInt8.toNat =
+        chars.flatMap fun char => (String.utf8EncodeChar char).map UInt8.toNat := by
+      simp [String.toByteArray_ofList, List.utf8Encode, List.map_flatMap]
+    rw [bytes]
+    dsimp only
+    rw [utf8Characters_decode chars _ (Nat.le_refl _), String.toList_ofList]
+    rfl
   | some chars =>
     have encoded := asciiChars_encode _ _ decoded
     have same : String.ofList chars = value := by
@@ -84,9 +94,45 @@ theorem metadataChars_eq (value : String) : metadataChars value = value.toList :
 
 #print axioms metadataChars_eq
 
+/-- Splitting a metadata identity consumes exactly the first double colon. -/
+private theorem splitIdentity_parts {reversed input scope name : List Char}
+    (split : splitIdentity reversed input = some (scope, name)) :
+    reversed.reverse ++ input = scope ++ ':' :: ':' :: name := by
+  fun_induction splitIdentity reversed input <;> simp_all [List.append_assoc]
+
+#print axioms splitIdentity_parts
+
+/-- The assembly prefix of a flat metadata identity. Generic arguments may carry further scopes. -/
+def flatOwnerScope? (identity : String) : Option String := do
+  let (scope, name) ← splitIdentity [] (metadataChars identity)
+  if plainScope scope && !name.isEmpty then return String.ofList scope else none
+
+/-- Every scope returned by the parser is followed by the metadata ownership separator. -/
+theorem flatOwnerScope?_prefix {identity scope : String}
+    (found : flatOwnerScope? identity = some scope) :
+    (metadataChars scope ++ [':', ':']).isPrefixOf (metadataChars identity) = true := by
+  unfold flatOwnerScope? at found
+  cases split : splitIdentity [] (metadataChars identity) with
+  | none => simp [split] at found
+  | some pair =>
+    obtain ⟨assembly, suffix⟩ := pair
+    simp only [split] at found
+    change (if plainScope assembly && !suffix.isEmpty then some (String.ofList assembly)
+      else none) = some scope at found
+    split at found
+    · cases found
+      have parts := splitIdentity_parts split
+      simp only [List.reverse_nil, List.nil_append] at parts
+      rw [parts, metadataChars_eq]
+      simp [List.isPrefixOf_iff_prefix, List.IsPrefix, List.append_assoc]
+    · contradiction
+#print axioms flatOwnerScope?_prefix
+
+
 /-- A named type as its referencing scope and full name. -/
 def namedType : TypeExpr → Option (List Char × List Char)
-  | .atom scope name | .constructor scope name => leaf (metadataChars scope) (metadataChars name)
+  | .atom scope name | .constructor scope name | .objectConstructor scope name =>
+    leaf (metadataChars scope) (metadataChars name)
   | .aggregate identity _ | .enum identity _ => do
     let (scope, name) ← splitIdentity [] (metadataChars identity)
     leaf scope name
@@ -95,7 +141,8 @@ def namedType : TypeExpr → Option (List Char × List Char)
 /-- The fast metadata decoder retains the original named-type rule, including Unicode. -/
 theorem namedType_eq_original (type : TypeExpr) : namedType type =
     match type with
-    | .atom scope name | .constructor scope name => leaf scope.toList name.toList
+    | .atom scope name | .constructor scope name | .objectConstructor scope name =>
+      leaf scope.toList name.toList
     | .aggregate identity _ | .enum identity _ => do
       let (scope, name) ← splitIdentity [] identity.toList
       leaf scope name
@@ -104,9 +151,9 @@ theorem namedType_eq_original (type : TypeExpr) : namedType type =
 
 #print axioms namedType_eq_original
 
-/-- A named type's plain full name; an atom's or constructor's scope is left undecoded. -/
+/-- A named type's plain full name; an atom's or generic definition's scope is left undecoded. -/
 def plainTypeName : TypeExpr → Option (List Char)
-  | .atom _ name | .constructor _ name =>
+  | .atom _ name | .constructor _ name | .objectConstructor _ name =>
     let name := metadataChars name
     if plainName name then some name else none
   | type => Prod.snd <$> namedType type
@@ -154,7 +201,7 @@ private def unscopedArguments : Nat → List Char → List Char
 
 /-- The runtime signature spelling of a scoped aggregate identity, nested arguments included. -/
 def aggregateName (identity : String) : Option (List Char) := do
-  let name ← afterArgumentScope identity.toList
+  let name ← afterArgumentScope (metadataChars identity)
   let name := unscopedArguments name.length name
   if name.isEmpty then none else return name
 

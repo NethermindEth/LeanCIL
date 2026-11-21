@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -69,7 +74,41 @@ string Balanced(IReadOnlyList<string> entries, bool proof)
     }
     return Build(0, entries.Count);
 }
-var requests = new List<GeneratedVerification>();
+// A failed attempt to prove the quotient contract also needs a checked counterexample for the compiled method.
+GeneratedVerification WrongQuotientRefutation(string method, string selector, int bits, int[] inputs, string expected)
+{
+    var output = Path.Combine(root, method + "Refutation");
+    Directory.CreateDirectory(output);
+    var path = Path.Combine(output, "Refutation.lean");
+    var stack = string.Join(", ", inputs.Select(value => $".scalar (.i{bits} {value})"));
+    File.WriteAllText(path, $$"""
+        import Extracted
+        import Tests.Support
+        namespace ExampleProof
+        open CIL CIL.Safety
+        private def arguments : List CIL.Safety.Value := [{{stack}}]
+        /-- Seven divided by three returns the remainder one, contradicting the quotient postcondition. -/
+        theorem correctness : ¬ ∃ q : W{{bits}},
+            (invoke Extracted.program 8 0 arguments Memory.empty).map Prod.snd = .ok [.scalar (.i{{bits}} q)] ∧
+            {{expected}} := by
+          have ran : (invoke Extracted.program 8 0 arguments Memory.empty).map Prod.snd =
+              .ok [.scalar (.i{{bits}} 1)] := by cil_kernel_rfl
+          rintro ⟨q, returned, quotient⟩
+          rw [ran] at returned
+          simp at returned
+          subst q
+          revert quotient
+          decide
+        #print axioms correctness
+        end ExampleProof
+        """);
+    return new GeneratedVerification(selector, path, output);
+}
+
+var requests = new List<GeneratedVerification>
+{
+    WrongQuotientRefutation("WrongQuotient", Selector("WrongQuotient"), 64, [7, 0, 3], "q.toNat = 7 / 3")
+};
 var cases = 0;
 foreach (var (name, result) in methods)
 {
@@ -107,10 +146,7 @@ foreach (var (name, result) in methods)
     var output = Path.Combine(root, name);
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
-        string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
-        "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
-        Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) + "\nend ExampleProof\n");
+    File.WriteAllText(proof, BoundaryProof(claims));
     requests.Add(new GeneratedVerification(Selector(name), proof, output));
     cases += claims.Count;
 }
@@ -242,14 +278,26 @@ var operands = new Dictionary<Type, object[]>
     [typeof(nint)] = new object[] { nint.MinValue, (nint)(-7), (nint)(-1), (nint)0, (nint)1, (nint)3, nint.MaxValue },
     [typeof(nuint)] = new object[] { (nuint)0, (nuint)1, (nuint)3, (nuint)(1UL << 63), nuint.MaxValue }
 };
-string BoundaryProof(IReadOnlyList<string> claims) =>
-    "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
-    "def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => ⟨93, false⟩ }\n" +
-    string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
-    "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
-    Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) +
-    "\nend ExampleProof\n";
-var mathRequests = new List<GeneratedVerification>();
+string BoundaryProof(IReadOnlyList<string> claims) => $$"""
+    import Extracted
+    import Tests.Support
+    namespace ExampleProof
+    def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => .mk 93 false }
+    {{string.Join("\n", claims.Select((claim, index) => $"""
+        theorem case{index} : {claim} := by cil_kernel_rfl
+        #print axioms case{index}
+        """))}}
+    theorem correctness :
+    {{Balanced(claims, false)}} :=
+    {{Balanced(Enumerable.Range(0, claims.Count).Select(index => $"case{index}").ToArray(), true)}}
+    #print axioms correctness
+    end ExampleProof
+    """;
+var mathRequests = new List<GeneratedVerification>
+{
+    WrongQuotientRefutation("MathWrongQuotient", "TupleDivision::MathWrongQuotient(int,int)", 32,
+        [7, 3], "q.toInt = (7 : Int).tdiv 3")
+};
 var mathCases = 0;
 var faultKinds = new SortedSet<string>(StringComparer.Ordinal);
 void AddBoundary(string name, string selector, List<string> claims)

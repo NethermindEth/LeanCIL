@@ -8,18 +8,28 @@ using Nethermind.LeanCIL;
 partial class Program
 {
     sealed record VerificationSettings(int schema, string proof, string theorem, string? proofRoot = null);
-    sealed record BatchRequest(string output, string proof, string theorem, string? expect = null);
+    /// <summary>
+    /// One request of a batch. A `rejected` request names in `refutes` the index of the request, expecting
+    /// verification, whose contract its theorem refutes; `unproved` is the gate runner's own expectation of a proof
+    /// that fails at proof checking.
+    /// </summary>
+    sealed record BatchRequest(string output, string proof, string theorem, string? expect = null,
+        int? refutes = null);
     sealed record BatchManifest(int schema, string proofRoot, BatchRequest[] requests);
     sealed record BatchResult(string output, string proof, string theorem, string expect, string status, string stage,
         string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure,
         double elapsedSeconds);
+
+    const string BatchManifestError = "Invalid batch manifest: expected schema 1, proofRoot and requests with " +
+        "output, proof, theorem, optional expect (verified or rejected), and refutes exactly when a request expects " +
+        "rejected.";
 
     const string BatchUsage = "Usage: leancil verify-batch requests.json [--fresh] [--rebuild-library] " +
         "[--parallel count] [--results results.json] [--format text|json] [--trace] [--check]";
 
     const string VerifyUsage = "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
         "[--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] " +
-        "[--full-artifact Lib=directory] [--format text|json] [--trace] [--goals]";
+        "[--full-artifact Lib=directory] [--deep-checks digests.sha256] [--format text|json] [--trace] [--goals]";
 
     /// <summary>
     /// The tool version, the LeanCIL revision and Lean toolchain its framework comes from, and the
@@ -52,7 +62,7 @@ partial class Program
     static void RejectRepositoryImports(string proof)
     {
         var repository = RepositoryModules();
-        var imported = SourceImport().Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
+        var imported = SourceImport.Matches(File.ReadAllText(proof)).Select(import => import.Groups[1].Value)
             .FirstOrDefault(repository.Contains);
         if (imported is not null)
             throw new InvalidDataException($"{CliPaths.Display(proof)} imports {imported}, a LeanCIL repository " +
@@ -79,6 +89,8 @@ partial class Program
         var manifest = JsonSerializer.Deserialize<BatchManifest>(File.ReadAllText(manifestPath),
             new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow })
             ?? throw new InvalidDataException("Missing batch manifest.");
+        if (manifest.requests?.Any(request => request?.expect == "unproved") == true)
+            throw new InvalidDataException(BatchManifestError);
         var run = RunBatch(manifest, Path.GetDirectoryName(manifestPath)!, options);
         var count = run.Results.Length;
         var failed = run.Results.Count(result => result.status == "failed");
@@ -158,7 +170,11 @@ partial class Program
     }
 
     /// <summary>
-    /// Verifies every request of `manifest`, whose paths are relative to `directory`, in one session.
+    /// Verifies every request of `manifest`, whose paths are relative to `directory`. A `rejected` request is met
+    /// only when its theorem verifies as a refutation of the contract whose `Holds` the request it `refutes`
+    /// verified: the kernel accepts it at that statement's counterexample predicate, read in its own extraction.
+    /// Requests that expect verification run first, so each refutation is compared with a verified statement; an
+    /// `unproved` request, which only gates send, passes when its proof fails at proof checking.
     /// Prints each request's text outcome as soon as it is final, unless the options ask for JSON.
     /// `statements`, parallel to the requests, says what each request's theorem audit reports of its statement.
     /// </summary>
@@ -171,15 +187,23 @@ partial class Program
         if (manifest.schema != 1 || string.IsNullOrWhiteSpace(manifest.proofRoot) || manifest.requests is null || manifest.requests.Length == 0 ||
             manifest.requests.Any(request => request is null || string.IsNullOrWhiteSpace(request.output) ||
                 string.IsNullOrWhiteSpace(request.proof) || string.IsNullOrWhiteSpace(request.theorem) ||
-                request.expect is not (null or "verified" or "rejected")))
-            throw new InvalidDataException("Invalid batch manifest: expected schema 1, proofRoot and requests with output, proof, theorem and optional expect (verified or rejected).");
-        var proofRoot = Path.GetFullPath(manifest.proofRoot, directory);
-        if (checkOnly && manifest.requests.Any(request => request.expect == "rejected"))
-            throw new ArgumentException("--check accepts compilation requests, not rejection expectations.");
+                request.expect is not (null or "verified" or "rejected" or "unproved") ||
+                (request.refutes is null) == (request.expect == "rejected")))
+            throw new InvalidDataException(BatchManifestError);
         var count = manifest.requests.Length;
+        for (var i = 0; i < count; i++)
+            if (manifest.requests[i].refutes is { } target &&
+                (target < 0 || target >= count || manifest.requests[target].expect is not (null or "verified")))
+                throw new InvalidDataException($"Request {i} refutes request {target}, which is not a request " +
+                    "of this batch that expects verification.");
+        if (statements is not null && manifest.requests.Any(request => request.expect == "rejected"))
+            throw new ArgumentException("A batch with given statements compares no refutation of its own.");
+        var proofRoot = Path.GetFullPath(manifest.proofRoot, directory);
+        if (checkOnly && manifest.requests.Any(request => request.expect is "rejected" or "unproved"))
+            throw new ArgumentException("--check accepts compilation requests, not rejection expectations.");
         var outcomes = new ConsumerOutcome?[count];
-        var requests = new List<ConsumerRequest>();
-        var indices = new List<int>();
+        var assemblies = new string?[count];
+        var settings = new string?[count];
         var outputs = manifest.requests.Select(request => Path.GetFullPath(request.output, directory)).ToArray();
         var proofs = manifest.requests.Select(request => Path.GetFullPath(request.proof, directory)).ToArray();
         var lastForOutput = Enumerable.Range(0, count).GroupBy(i => outputs[i], OperatingSystem.IsWindows()
@@ -205,18 +229,32 @@ partial class Program
                     File.WriteAllText(settingsPath, JsonSerializer.Serialize(new VerificationSettings(1,
                         Path.GetRelativePath(outputs[i], proofs[i]).Replace('\\', '/'), request.theorem,
                         Path.GetRelativePath(outputs[i], proofRoot).Replace('\\', '/')), Json) + "\n");
+                    settings[i] = settingsPath;
                 }
                 stage = "extraction integrity";
                 var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json")));
-                var assembly = Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, outputs[i]);
-                requests.Add(new(assembly, outputs[i], proofs[i], request.theorem, lastForOutput.Contains(i) ? settingsPath : null,
-                    request.expect == "rejected", Statement: statements?[i]));
-                indices.Add(i);
+                assemblies[i] = Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, outputs[i]);
             }
             catch (Exception error)
             {
                 outcomes[i] = new ConsumerOutcome { Stage = stage, Error = error };
             }
+        }
+        var refuted = manifest.requests.Where(request => request.refutes is not null)
+            .Select(request => request.refutes!.Value).ToHashSet();
+
+        // A refutation that verified but does not refute its target's contract fails at statement identity.
+        void JudgeRefutation(int i, ConsumerOutcome outcome)
+        {
+            if (manifest.requests[i].refutes is not { } target || outcome.Error is not null || outcome.Report is null)
+                return;
+            var origin = outcomes[target]!;
+            var (_, error) = CompareStatement(refutes: true, manifest.requests[i].theorem,
+                $"Request {target} ({CliPaths.Display(outputs[target])} {manifest.requests[target].theorem})",
+                origin.Stage, origin.Error is null ? origin.Report : null, outcome.Report);
+            if (error is null) return;
+            (outcome.Stage, outcome.Error) = (StatementIdentityStage, new InvalidOperationException(error));
+            if (lastForOutput.Contains(i)) File.Delete(Path.Combine(outputs[i], "verified.json"));
         }
 
         // Print each request as soon as it is final, so a long batch shows progress; workspaces run in parallel.
@@ -227,7 +265,7 @@ partial class Program
             var request = manifest.requests[i];
             var expect = checkOnly ? "checked" : request.expect ?? "verified";
             var passed = outcome.Error is null && (checkOnly ? outcome.Checked
-                : expect == "rejected" ? outcome.Rejected : outcome.Report is not null);
+                : expect == "unproved" ? outcome.Rejected : outcome.Report is not null);
             lock (gate)
             {
                 if (printed[i]) return passed;
@@ -238,14 +276,19 @@ partial class Program
                     Console.WriteLine(checkOnly
                         ? $"PASS Checked {CliPaths.Display(outputs[i])} {request.theorem} " +
                             $"({outcome.ElapsedSeconds:F3}s batch-to-result latency)"
-                        : expect == "rejected"
-                        ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
+                        : expect == "unproved"
+                        ? $"PASS unproved {CliPaths.Display(outputs[i])} {request.theorem} ({outcome.Stage})"
+                        : expect == "rejected" && outcome.Report?.refutation is { } refutation
+                        ? $"PASS rejected {CliPaths.Display(outputs[i])} {request.theorem} (refutes {
+                            refutation.contract} for {refutation.method.signature})"
                         : $"PASS verified {CliPaths.Display(outputs[i])} {request.theorem} " +
                             $"({outcome.ElapsedSeconds:F3}s batch-to-result latency)");
                 else
                 {
                     var error = outcome.Located() ?? new InvalidOperationException("Verification produced no result.");
-                    Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {outcome.Stage})");
+                    Console.WriteLine($"FAIL {CliPaths.Display(outputs[i])} {request.theorem} (stage: {
+                        outcome.Stage})" + (expect == "rejected" ? $", no verified refutation of request {
+                            request.refutes}" : ""));
                     CliDiagnostics.Write(new CliFailure(outcome.Stage, error), outcome.Stage, true);
                 }
                 if (trace) Console.Write(TraceReport(Traced(outcome.ProofMessages(proofs[i]), true).Trace, proofs[i]));
@@ -254,18 +297,40 @@ partial class Program
             return passed;
         }
 
-        using (var verification = new Program
+        // Each refutation is compared with the statement of the request it refutes, so those run first; both
+        // passes share one session and its library.
+        using var verification = new Program
         {
             freshProofs = fresh, freshLibrary = rebuildLibrary, structuredFailures = json, tracesSteps = trace
-        })
+        };
+        var selected = Enumerable.Range(0, count).Where(i => outcomes[i] is null).ToArray();
+        var (refutations, others) = (selected.Where(i => manifest.requests[i].expect == "rejected").ToArray(),
+            selected.Where(i => manifest.requests[i].expect != "rejected").ToArray());
+        Verify(others, i => statements?[i] ?? (refuted.Contains(i) ? new(Term: true) : null));
+        Verify(refutations, i => outcomes[manifest.requests[i].refutes!.Value] is
+            { Error: null, Report: { } origin } && origin.statementIdentity?.term is { } term && StatesContract(term)
+                ? new(false, term.GetRawText(), Refuted: true) : null);
+
+        void Verify(int[] indices, Func<int, StatementRequest?> statement)
         {
-            var verified = requests.Count == 0 ? [] : verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
-                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8),
-                (k, outcome) => Print(indices[k], outcome), checkOnly: checkOnly);
-            for (var k = 0; k < verified.Length; k++) outcomes[indices[k]] = verified[k];
+            if (indices.Length == 0) return;
+            var requests = indices.Select(i => new ConsumerRequest(assemblies[i]!, outputs[i], proofs[i],
+                manifest.requests[i].theorem, settings[i], manifest.requests[i].expect == "unproved",
+                Statement: statement(i))).ToList();
+            var verified = verification.VerifyConsumerRequests(proofRoot, requests, null, batch: true,
+                parallelism ?? Math.Max(1, Environment.ProcessorCount / 8), (k, outcome) =>
+                {
+                    JudgeRefutation(indices[k], outcome);
+                    Print(indices[k], outcome);
+                }, checkOnly: checkOnly);
+            for (var k = 0; k < verified.Length; k++)
+            {
+                JudgeRefutation(indices[k], verified[k]);
+                outcomes[indices[k]] = verified[k];
+            }
         }
-        // A rejected last request leaves no certificate for its output, as in sequential runs.
-        foreach (var i in lastForOutput.Where(i => !indices.Contains(i)))
+        // A last request rejected before verification leaves no certificate for its output, as in sequential runs.
+        foreach (var i in lastForOutput.Where(i => assemblies[i] is null))
             File.Delete(Path.Combine(outputs[i], "verified.json"));
 
         var results = new List<BatchResult>();
@@ -280,7 +345,8 @@ partial class Program
             // A verified refutation is a certificate and a failed contract; any other pass leaves no failure.
             var failure = outcome.Located() is { } error
                 ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
-                : outcome.Report is { } report ? FailureReports.Refuted(report.theoremAudit, request.theorem, proofs[i], outputs[i], proofRoot)
+                : outcome.Report is { } report ? FailureReports.Refuted(report.refutation, report.theoremAudit,
+                    request.theorem, proofs[i], outputs[i], proofRoot)
                 : outcome.Checked ? null
                 : FailureReports.Classify(outcome.Stage, outcome.Detail ?? "Verification produced no result.", outcome.Hidden,
                     request.theorem, proofs[i], outputs[i], proofRoot, outcome.Sources);
@@ -289,8 +355,11 @@ partial class Program
                 if (failure is null) FailureReports.Delete(outputs[i]);
                 else FailureReports.Write(outputs[i], failure);
             }
+            var message = outcome.Error?.Message ?? "Verification produced no result.";
             results.Add(new(outputs[i], proofs[i], request.theorem, expect, status, outcome.Stage,
-                passed ? null : (outcome.Error?.Message ?? "Verification produced no result."),
+                passed ? null : expect == "rejected"
+                    ? $"No verified refutation of request {request.refutes} (stage: {outcome.Stage}): {message}"
+                    : message,
                 outcome.Report?.axioms, outcome.Report?.libraryBuild, failure, outcome.ElapsedSeconds));
             if (json) reports.Add(BatchEntry(outcome, failure, expect, status, request.theorem, proofs[i], outputs[i]));
         }
@@ -315,8 +384,29 @@ partial class Program
             var report = VerifyReports.Result(verified ? "verified" : "failed", failure, theorem, proof, output,
                 proofRoot, verified ? null : outcome.Stage, outcome.Report?.axioms,
                 outcome.Report is { } checkedReport ? StatementOf(checkedReport) : null, JsonMessages(messages), trace,
-                messages is not null);
+                messages is not null, binding: verified ? outcome.Report!.binding : null);
             return new JsonObject { ["expect"] = expect, ["status"] = status, ["report"] = report };
+        }
+    }
+
+    /// <summary>The binding facts and inputs recorded by the completed verification.</summary>
+    static IEnumerable<string> BindingLines(BindingSection binding)
+    {
+        static string Name<T>(T value) => JsonSerializer.SerializeToElement(value).GetString()!;
+        yield return "Binding: " + Name(binding.mode);
+        if (binding.digests is { } digests)
+            yield return "Digests: " + CliPaths.Display(digests.path) + " (SHA-256 " + digests.sha256 + ")";
+        foreach (var fact in binding.facts)
+            yield return Name(fact.id) + ": " + Name(fact.status) +
+                (fact.theorem is { } theorem ? " (" + theorem + ")"
+                    : fact.reason is { } reason ? " (" + reason + ")" : "");
+        foreach (var image in binding.images)
+            yield return "Image " + image.identity + ": SHA-256 " + image.sha256 + ", " + Name(image.role) +
+                ", " + Name(image.status) + " (" + (image.theorem ?? image.reason) + ")";
+        if (binding.sources is { } sources)
+        {
+            yield return "StrictBinding sources: " + sources.strictBinding;
+            yield return "Lean toolchain: " + sources.leanToolchain + " (ran " + sources.lean + ")";
         }
     }
 
@@ -337,6 +427,8 @@ partial class Program
         var rebuildLibrary = false;
         string? proofRoot = null;
         bool forceFull = false;
+        string? digestFile = null;
+        DeepCheckRun? deepRun = null;
         Dictionary<string, string> fullArtifacts = new(StringComparer.Ordinal);
 
         for (var index = 1; index < args.Length; index++)
@@ -381,6 +473,9 @@ partial class Program
                     if (artifact.Length != 2 || string.IsNullOrWhiteSpace(artifact[0]) || string.IsNullOrWhiteSpace(artifact[1]) ||
                         !fullArtifacts.TryAdd(artifact[0], Path.GetFullPath(artifact[1])))
                         throw Rejected(new ArgumentException("--full-artifact requires unique Lib=directory values."));
+                    break;
+                case "--deep-checks" when digestFile is null:
+                    digestFile = args[index];
                     break;
                 case "--proof-root" when proofRoot is null:
                     proofRoot = Path.GetFullPath(args[index]);
@@ -438,14 +533,6 @@ partial class Program
                 theorem ??= saved.theorem;
                 if (saved.proofRoot is not null) proofRoot ??= Path.GetFullPath(saved.proofRoot, output);
             }
-            else if (proof is null && File.Exists(reportPath))
-            {
-                // Migrate proof selection from reports created before settings were separate.
-                var previous = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath))
-                    ?? throw new InvalidDataException("Missing verification report.");
-                proof = previous.inputs.Keys.Single(key => key.StartsWith("proof:", StringComparison.Ordinal))[6..];
-                theorem ??= previous.theorem;
-            }
 
             File.Delete(reportPath);
             File.Delete(Path.Combine(output, ProofMessagesText));
@@ -474,6 +561,13 @@ partial class Program
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
             var entry = manifest.GetProperty("entry").GetString()!;
 
+            if (digestFile is not null)
+            {
+                stage = "arguments";
+                deepRun = new(DeepCheckInputs.Read(digestFile));
+                stage = "extraction integrity";
+            }
+
             verification = new()
             {
                 freshProofs = fresh || forceFull,
@@ -496,8 +590,10 @@ partial class Program
             if (forceFull) verification.PreflightFullImports(output, fullArtifacts);
             var report = proofRoot is null
                 ? verification.Verify(assembly, identity, entry, proof, output,
-                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: Advance)
-                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, Advance);
+                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: Advance,
+                    deepChecks: deepRun?.Inputs, deepRun: deepRun)
+                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, Advance,
+                    deepChecks: deepRun?.Inputs, deepRun: deepRun);
             RequireNoOpenGoals();
 
             var view = verification.VerifiedStatement;
@@ -507,13 +603,14 @@ partial class Program
                     JsonSerializer.Serialize(report with { specification = specification }, Json) + "\n");
             if (json)
             {
-                var refutation = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
+                var refutation = FailureReports.Refuted(report.refutation, report.theoremAudit, theorem, proof,
+                    output, proofRoot);
                 if (refutation is not null) FailureReports.Write(output, refutation);
                 ProofMessagesReport(Observed(verification.ProofMessages, trace, goals).Messages, proof, output);
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("verified", refutation, report.theorem,
                     proof, output, proofRoot, null, report.axioms, view?.statement ?? StatementOf(report),
                     JsonMessages(verification.ProofMessages), trace, verification.ProofMessages is not null,
-                    goals, Specification(view))));
+                    goals, Specification(view), report.binding)));
                 reported = true;
                 return;
             }
@@ -547,7 +644,9 @@ partial class Program
                 Console.WriteLine("  Independently composed theorem: " + report.compositionTheorem);
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
-            var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
+            foreach (var line in BindingLines(report.binding)) Console.WriteLine("  " + line);
+            var refuted = FailureReports.Refuted(report.refutation, report.theoremAudit, theorem, proof, output,
+                proofRoot);
             if (refuted is not null)
             {
                 FailureReports.Write(output, refuted);
@@ -575,6 +674,7 @@ partial class Program
                 (stage, error) = (OpenGoalsStage, OpenGoals(open));
             var failed = FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
                 proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
+            failed = failed with { binding = deepRun?.Attempt?.Failure(stage, error.Message) };
             FailureReports.Write(output, failed);
             var (proofMessages, steps, openGoals) = Observed(verification?.ProofMessages, trace, goals);
             // With --goals the terminal shows the goals alone; the proof's messages stay in their file.

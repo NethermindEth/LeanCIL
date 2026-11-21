@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // The outcome proofs verify against the compiled build; an off-by-one threshold or a different
 // exception type must fail them and provably violate the callee's contract.
@@ -15,7 +20,8 @@ string Build(string name, string percent)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Outcomes.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Outcomes.cs"),
         "using System; namespace Outcomes; public static class Calls { " + percent + " " + Callers + " }");
@@ -59,24 +65,20 @@ def empty : Memory := { allocations := fun _ => none, cells := fun _ _ => ⟨0, 
 """;
 const string RefuteThreshold = Empty + """
 /-- This build throws for `100`; the contract requires it to return. -/
-theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
-  intro holds
-  obtain ⟨_, _, _, ran, -⟩ := holds.returning (input := 100) (initial := empty) trivial (by decide)
-  have thrown : invoke Extracted.program 16 percent (percentContract.args 100) empty =
-      .error ⟨percent, 6, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
-  cases invoke_unique (by trivial) (by simp [Settled]) ran thrown
+theorem correctness : percentContract.Refuted Extracted.program percent :=
+  .of_fault (input := 100) (initial := empty) trivial (by decide)
+    (rfl : invoke Extracted.program 16 percent (percentContract.args 100) empty =
+      .error ⟨percent, 6, .thrown .argumentOutOfRange⟩)
+    (by simp [OutcomeContract.Violates, MethodContract.Violates, percentContract])
 
 """;
 const string RefuteException = Empty + """
 /-- This build throws `ArgumentException` for `101`; the contract names `ArgumentOutOfRangeException`. -/
-theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
-  intro holds
-  obtain ⟨_, fault, ran, named⟩ := holds.raising (input := 101) (initial := empty)
-    (exception := "System.ArgumentOutOfRangeException") trivial (by decide)
-  have thrown : invoke Extracted.program 16 percent (percentContract.args 101) empty =
-      .error ⟨percent, 6, .thrown "System.ArgumentException"⟩ := rfl
-  cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
-  simp at named
+theorem correctness : percentContract.Refuted Extracted.program percent :=
+  .of_fault (input := 101) (initial := empty) trivial (by decide)
+    (rfl : invoke Extracted.program 16 percent (percentContract.args 101) empty =
+      .error ⟨percent, 6, .thrown .argument⟩)
+    (by simp [OutcomeContract.Violates, percentContract])
 
 """;
 foreach (var (name, assembly, refutation) in new[] { ("Threshold", threshold, RefuteThreshold), ("Exception", exception, RefuteException) })

@@ -6,17 +6,17 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 // Named fields of the admitted classes an extraction's methods access, so proofs say `Account.Balance`
-// instead of an owner and offset. Each name is checked in Lean against an emitted field operation.
+// instead of an owner and offset. Each name is checked in Lean against an emitted field access.
 internal static partial class ClassViews
 {
     /// <summary>What a class instance field holds: a word, an object reference, or the origin of a whole array of
     /// a value element.</summary>
     internal enum FieldKind { Word, Reference, Array }
 
-    /// <summary>A class instance field operation as emitted: a load or store at model offset `Offset` of an
-    /// instance of `Owner`, of a word of `Width` bytes, an object reference, or an array of `Element`.</summary>
+    /// <summary>A class instance field access: a load or store at model offset `Offset` of an instance of
+    /// `Owner`, of a word of `Width` bytes, an object reference, or an array of `Element`.</summary>
     internal sealed record FieldOperation(bool Store, string Owner, int Offset, FieldKind Kind, int? Width,
-        bool Signed, string? Element);
+        bool Signed, Arrays.Element? Element);
 
     /// <summary>One field access: the method and pc whose emitted operation loads or stores the field.</summary>
     internal sealed record Access(FieldDefinition Field, TypeReference Owner, int Method, int Pc,
@@ -24,7 +24,8 @@ internal static partial class ClassViews
 
     /// <summary>A named field of a class: where it lives, what it holds, and which methods load and store it.
     /// </summary>
-    internal sealed record Field(string Name, int Offset, FieldKind Kind, int? Width, string? Element, int[] Loaders,
+    internal sealed record Field(string Name, int Offset, FieldKind Kind, int? Width, Arrays.Element? Element,
+        int[] Loaders,
         int[] Storers)
     {
         /// <summary>The name as a Lean identifier.</summary>
@@ -34,31 +35,16 @@ internal static partial class ClassViews
     /// <summary>A class's `Extracted.Classes` namespace: its full name, Lean path and named fields.</summary>
     internal sealed record View(string FullName, string Path, string Type, Field[] Fields);
 
-    /// <summary>The field operation an emitted op performs, or none; every reader of field ops decodes here.
-    /// </summary>
-    internal static FieldOperation? Decode(string op)
+    /// <summary>The named class field accessed by a reachable load or store.</summary>
+    internal static Access? Of(Instruction instruction, int method, int pc, string architecture)
     {
-        var match = FieldOperationPattern().Match(op);
-        if (!match.Success) return null;
-        var name = match.Groups["kind"].Value;
-        var kind = name switch
-        {
-            "arrayField" or "setArrayField" => FieldKind.Array,
-            "objectReferenceField" or "setObjectReferenceField" => FieldKind.Reference,
-            _ => FieldKind.Word
-        };
-        return new(name.StartsWith("set", StringComparison.Ordinal), match.Groups["owner"].Value,
-            int.Parse(match.Groups["offset"].Value), kind,
-            match.Groups["width"].Success ? int.Parse(match.Groups["width"].Value) : null,
-            match.Groups["signed"].Value == "true",
-            match.Groups["element"].Success ? match.Groups["element"].Value : null);
+        if (instruction is not { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } ||
+            !ObjectTypes.Candidate(field.DeclaringType)) return null;
+        var resolved = field.Resolve() ?? throw new InvalidDataException("Unresolved field");
+        var operation = ObjectTypes.FieldOperation(field, resolved, instruction.OpCode.Code == Code.Stfld,
+            address: false, architecture);
+        return new(resolved, field.DeclaringType, method, pc, operation);
     }
-
-    /// <summary>The access a <c>ldfld</c> or <c>stfld</c> on a class instance field emitted, or none.</summary>
-    internal static Access? Of(Instruction instruction, int method, int pc, string op) =>
-        instruction is { OpCode.Code: Code.Ldfld or Code.Stfld, Operand: FieldReference field } &&
-        Decode(op) is { } operation && field.Resolve() is { } resolved
-            ? new(resolved, field.DeclaringType, method, pc, operation) : null;
 
     /// <summary>The views of the classes whose fields the accesses touch, each field named once per class.
     /// </summary>
@@ -115,14 +101,15 @@ internal static partial class ClassViews
                 var descriptor = field.Kind switch
                 {
                     FieldKind.Word => $"Safety.WordField {field.Width}",
-                    FieldKind.Array => $"Safety.ArrayField {field.Element}",
+                    FieldKind.Array => $"Safety.ArrayField {field.Element!.Expression}",
                     _ => "Safety.ReferenceField"
                 };
                 lean.AppendLine($"/-- `{access.Field.FieldType.FullName} {view.FullName}::{access.Field.Name}`, " +
                     $"at model offset {field.Offset}. -/");
                 lean.AppendLine($"@[reducible] def {field.Lean} : {descriptor} := ⟨type, {field.Offset}⟩");
                 lean.AppendLine($"theorem {Identifier(field.Name + "_accessed")} : " +
-                    $"(method{access.Method}.code[{access.Pc}]?).any {field.Lean}.accessedBy = true := " +
+                    $"(method{access.Method}.code[{access.Pc}]?).any " +
+                    $"({field.Lean}.accessedBy method{access.Method}) = true := " +
                     LeanEmitter.Decide);
             }
             lean.AppendLine($"end {view.Path}");
@@ -135,14 +122,14 @@ internal static partial class ClassViews
 
     /// <summary>The name C# source gives a field: an auto-property's backing field takes its property's.</summary>
     internal static string FieldName(FieldDefinition field) =>
-        BackingField().Match(field.Name) is { Success: true } backing ? backing.Groups[1].Value : field.Name;
+        BackingField.Match(field.Name) is { Success: true } backing ? backing.Groups[1].Value : field.Name;
 
     [GeneratedRegex(@"\A<([A-Za-z_][A-Za-z0-9_]*)>k__BackingField\z")]
-    private static partial Regex BackingField();
+    private static partial Regex BackingField { get; }
 
     // Metadata names may hold characters Lean identifiers cannot, such as a closure class's `<>c__DisplayClass1_0`.
     static string Identifier(string name) =>
-        LeanIdentifier().IsMatch(name) && !Keywords.Contains(name) ? name : $"«{name}»";
+        LeanIdentifier.IsMatch(name) && !Keywords.Contains(name) ? name : $"«{name}»";
 
     static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
@@ -154,11 +141,5 @@ internal static partial class ClassViews
     };
 
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*\z")]
-    private static partial Regex LeanIdentifier();
-
-    // The owner is matched lazily, since an array element such as an enumeration is parenthesized too.
-    [GeneratedRegex(@"\A\.memory \(\.(?<kind>objectField|setObjectField|objectReferenceField|" +
-        @"setObjectReferenceField|arrayField|setArrayField) \((?<owner>.*?)\) (?<offset>\d+)" +
-        @"(?: (?<width>\d+)(?: (?<signed>true|false))?| (?<element>\.\w+|\(.*\)))?\)\z")]
-    private static partial Regex FieldOperationPattern();
+    private static partial Regex LeanIdentifier { get; }
 }

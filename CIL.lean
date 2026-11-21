@@ -2,15 +2,17 @@
 -- modules are tried in every consumer, so regrouping could change proof behaviour.
 
 -- Reference semantics, feature profiles, method embeddings and extraction metadata
-import CIL.AggregateMemory
 import CIL.CodeSuffix
 import CIL.ExecutionLemmas
 import CIL.Embedding.Basic
 import CIL.Embedding.BaseStep
 import CIL.Embedding.Tactic
 import CIL.Features
+import CIL.Identity
+import CIL.ExceptionType
 import CIL.Imports
 import CIL.InstructionEquations
+import CIL.Extraction.TemplateCode
 import CIL.Instructions
 import CIL.Layout
 import CIL.LiteralDisplay
@@ -48,7 +50,6 @@ import CIL.Safety.AccessRequirements
 import CIL.Safety.AccessSlices
 import CIL.Safety.AllocationExtension
 import CIL.Safety.ArgumentEquivalence
-import CIL.Safety.ArgumentHomeValues
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.AggregateLocals
 import CIL.Safety.ValueBitCasts
@@ -73,6 +74,8 @@ import CIL.Safety.ConfinedSnapshots
 import CIL.Safety.ConstructComposition
 import CIL.Safety.ConstructContract
 import CIL.Safety.ConstructSetup
+import CIL.Safety.DecodedSegment
+import CIL.Safety.DecodedSummary
 import CIL.Safety.Equations
 import CIL.Safety.Execution
 import CIL.Safety.ExecutionTrace
@@ -116,6 +119,7 @@ import CIL.Safety.OutcomeContract
 import CIL.Safety.RuntimeExceptions
 import CIL.Safety.Imports
 import CIL.Safety.Linking
+import CIL.Safety.ProgramClosure
 import CIL.Safety.StepFlow
 import CIL.Safety.RegionRun
 import CIL.Safety.NegationReturn
@@ -193,6 +197,9 @@ import CIL.Safety.WideMultiply
 import CIL.Safety.TupleDivision
 import CIL.Extraction.LayoutProjection
 import CIL.Extraction.Translation
+import CIL.Extraction.DecodedMethod
+import CIL.Extraction.Prefixes
+import CIL.Extraction.DecodedDefinition
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence
 import CIL.Safety.ExecutionEquivalence
@@ -204,6 +211,7 @@ import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import CIL.Safety.Segment
 import CIL.Safety.SegmentLocals
+import CIL.Safety.SegmentContract
 import CIL.Safety.LocalCalls
 
 /-!
@@ -214,6 +222,11 @@ Allocation-renaming proofs are optional: import `CIL.Safety.AllocationRefinement
 
 * `CIL.Types`, `CIL.Instructions`, `CIL.Layout` and `CIL.Memory`: values, opcodes, aggregate
   layouts and byte memory.
+* `CIL.Identity`: metadata names, user strings, assemblies, type identities, primitive types and
+  type kinds as values whose equality the kernel decides on codes, with `name!` and `str!`
+  literals.
+* `CIL.ExceptionType`: the .NET exceptions the model raises, as a closed enumeration whose
+  members stand for distinct type identities.
 * `CIL.Semantics`: the shared single-instruction evaluator (`CIL.step`). Checked execution
   delegates value-only instructions to it; `CIL.SymbolicExecution` supplies shared simp sets.
 * `CIL.Features`, `CIL.SIMD.*` and `CIL.ProfileEquivalence`: hardware feature profiles, the

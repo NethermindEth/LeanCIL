@@ -31,13 +31,6 @@ theorem makeLocals_preserves_caller_memory (m result : Memory) (activation : Nat
     MemoryBelow m.nextIdentity m result := by
   exact (makeLocals_setup _ _ _ _ _ _ _ h).below
 
-theorem makeArgumentHomes_preserves_caller_memory (m result : Memory) (activation : Nat)
-    (indices : List Nat) (args : List Value) (homes : List (Nat × LocalSlot))
-    (owned : List AllocationId)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    MemoryBelow m.nextIdentity m result := by
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).below
-
 theorem initialize_parameter_preserves_caller_memory (m home result : Memory) (activation : Nat)
     (kind : CIL.LocalKind) (slot final : LocalSlot) (owned : List AllocationId) (value : Value)
     (made : makeLocal activation kind .unmodeled m = .ok (slot, owned, home))
@@ -60,7 +53,6 @@ theorem enterFrame_preserves_caller_memory (body : CIL.Method) (args : List Valu
 #print axioms allocateHome_preserves_caller_memory
 #print axioms makeLocal_preserves_caller_memory
 #print axioms makeLocals_preserves_caller_memory
-#print axioms makeArgumentHomes_preserves_caller_memory
 #print axioms enterFrame_preserves_caller_memory
 
 

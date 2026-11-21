@@ -20,12 +20,20 @@ partial class Program
         var compiled = Path.Combine(session, ".lake/build/lib/lean");
         var records = new ConcurrentDictionary<string, PreparedLeanModule>(StringComparer.Ordinal);
         foreach (var module in modules)
-            if (!Regex.IsMatch(module, @"\ATests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z"))
+            if (!FixtureModule.IsMatch(module))
                 throw new ArgumentException("Expected a test fixture module: " + module);
-        var dependencies = modules.ToDictionary(module => module, module => Regex.Matches(
-                File.ReadAllText(At(module.Replace('.', '/') + ".lean")), @"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")
-            .Select(match => match.Groups[1].Value).ToArray(), StringComparer.Ordinal);
-        var pending = modules.ToHashSet(StringComparer.Ordinal);
+        // A fixture's imports of other test modules are compiled and recorded with it, so no list has to name them.
+        var dependencies = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var unread = new Stack<string>(modules);
+        while (unread.TryPop(out var module))
+        {
+            if (dependencies.ContainsKey(module)) continue;
+            var text = File.ReadAllText(At(module.Replace('.', '/') + ".lean"));
+            dependencies[module] = [.. TestImport.Matches(text)
+                .Select(match => match.Groups[1].Value)];
+            foreach (var dependency in dependencies[module]) unread.Push(dependency);
+        }
+        var pending = dependencies.Keys.ToHashSet(StringComparer.Ordinal);
         while (pending.Count != 0)
         {
             var ready = pending.Where(module => dependencies[module].All(dependency => !pending.Contains(dependency)))
@@ -99,4 +107,10 @@ partial class Program
         if (!PreparedLeanFixturesMatch([module]))
             Run(["lake", "env", "lean", At(module.Replace('.', '/') + ".lean")], FixturePackage());
     }
+
+    [GeneratedRegex(@"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")]
+    private static partial Regex TestImport { get; }
+
+    [GeneratedRegex(@"\ATests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z")]
+    private static partial Regex FixtureModule { get; }
 }

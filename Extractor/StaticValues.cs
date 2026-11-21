@@ -21,9 +21,10 @@ internal static partial class StaticValues
         instruction.OpCode.Code == Code.Ldsflda && instruction.Operand is FieldReference reference &&
         reference.Resolve() is { } field && (field.Attributes & FieldAttributes.HasFieldRVA) == 0;
 
-    internal static string Scalar(FieldDefinition field) => MetadataValidation.IsAggregate(field.FieldType, field.Module)
-        ? "none" : "some " + (EnumTypes.Storage(field.FieldType).FullName is "System.SByte" or "System.Int16"
-            ? "true" : "false");
+    /// <summary>Whether a scalar field's loads sign-extend, or null for an aggregate field.</summary>
+    internal static bool? ScalarSign(FieldDefinition field) =>
+        MetadataValidation.IsAggregate(field.FieldType, field.Module) ? null :
+            EnumTypes.Storage(field.FieldType).FullName is "System.SByte" or "System.Int16";
 
     static int Width(FieldDefinition field, string architecture) =>
         MetadataValidation.IsAggregate(field.FieldType, field.Module)

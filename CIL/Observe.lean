@@ -154,6 +154,34 @@ def residualOf (step : MVarId) : MetaM (Option (Array Expr)) := step.withContext
     result.set (← stepResidual step (← facts.mapM fun fact => Term.exprToSyntax fact))
   result.get
 
+/-- The step goal `step` of a call or construction that runs its runtime model, rewritten to
+    that model's step; nothing for one that enters a callee. -/
+def modelledStepOf (step : MVarId) : MetaM (Option MVarId) := step.withContext do
+  let result ← IO.mkRef none
+  discard <| Term.TermElabM.run' <| Tactic.run step do result.set (← modelledCallStep? step)
+  result.get
+
+/-- The step goal `step` of a memory operation with each home among its view operands read as
+    the view its literal frame slot holds, as `viewedStack` reads them for operation facts;
+    `step` itself when no operand is such a home. -/
+def viewedStepGoal (step : MVarId) : MetaM MVarId := step.withContext do
+  let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | return step
+  let some #[body, op, pc, args, frame, stack, memory] :=
+      argumentsOf? action `CIL.Safety.step 7 | return step
+  let some #[operation] := argumentsOf? (← whnfR op) `CIL.Instruction.memory 1 | return step
+  let viewed ← viewedStack frame operation stack
+  if viewed == stack then return step
+  let stepTerm ← mkAppM `CIL.Safety.step #[body, op, pc, args, frame, viewed, memory]
+  let goal ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar (← inferType stepTerm)))
+  return goal.mvarId!
+
+/-- Whether the step goal `step` is of a call or construction with neither a link nor a
+    runtime model, which no step crosses. -/
+def unmodelledStepOf (step : MVarId) : MetaM Bool := step.withContext do
+  let result ← IO.mkRef false
+  discard <| Term.TermElabM.run' <| Tactic.run step do result.set (← unmodelledCall step)
+  result.get
+
 /-! ## Failure records -/
 
 /-- The non-null object references among the literal arguments `args`. -/
@@ -236,26 +264,45 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
   let record := { record with instruction := op }
   let calling := tactic.endsWith "_call"
   -- A receiver-checked call crosses into its callee as a direct call does.
-  let isCall := (← whnfR op).isAppOf `CIL.Op.call || (← whnfR op).isAppOf `CIL.Op.callInstance
-  if isCall && !calling then
-    return { record with
-      missing := some "calleeContract",
-      suggestions := #[m!"cross the call with the call tactic of its stepping family and the \
-        callee's contract"] }
+  let isCall := (← whnfR op).isAppOf ``CIL.Instruction.call ||
+    (← whnfR op).isAppOf ``CIL.Instruction.callvirt
   if calling && !isCall then
     return { record with
       missing := some "callSite",
       suggestions := #[m!"step to the call first"] }
-  let some frame := stepping.parts.find? (·.1 == "frame") | return record
-  let some stack := stepping.parts.find? (·.1 == "stack") | return record
-  let some memory := stepping.parts.find? (·.1 == "memory") | return record
+  let callee := { record with
+    missing := some "calleeContract",
+    suggestions := #[m!"cross the call with the call tactic of its stepping family and the \
+      callee's contract"] }
+  let unmodelled := { record with
+    missing := some "linkOrModel",
+    suggestions := #[m!"the site has neither a link nor a runtime model, so no step crosses it"] }
+  let entersCallee := isCall && !calling
+  let constructs := (← whnfR op).isAppOf ``CIL.Instruction.newobj
+  let unread := if entersCallee then callee else record
+  let some frame := stepping.parts.find? (·.1 == "frame") | return unread
+  let some stack := stepping.parts.find? (·.1 == "stack") | return unread
+  let some memory := stepping.parts.find? (·.1 == "memory") | return unread
   let stepTerm ← mkAppM `CIL.Safety.step #[body, op, pcTerm, stepping.args, frame.2, stack.2,
     memory.2]
   let resultType ← inferType stepTerm
   let step ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar resultType))
   let .mvar stepGoal := step
     | throwError "analyze: expected a fresh metavariable, but found{indentExpr step}"
-  let residual := (← residualOf stepGoal).getD #[← instantiateMVars (← inferType step)]
+  -- A call or construction without a link runs its runtime model in this method, so its residual
+  -- is the model's; with no model either, nothing steps it.
+  let stepGoal ← if entersCallee || constructs then
+      match ← modelledStepOf stepGoal with
+      | some modelled => pure modelled
+      | none =>
+        if ← unmodelledStepOf stepGoal then return unmodelled
+        if entersCallee then return callee
+        pure stepGoal
+    else pure stepGoal
+  -- Reading a home's slot needs only the view's validity, which the stepping facts give, so the
+  -- operation's own missing fact is read from the step on the view the slot holds.
+  let stepGoal ← viewedStepGoal stepGoal
+  let residual := (← residualOf stepGoal).getD #[← instantiateMVars (← stepGoal.getType)]
   let missing := missingFactOf residual
   return { record with
     missing := missing.name, residual,

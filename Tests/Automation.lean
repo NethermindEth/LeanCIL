@@ -1,8 +1,18 @@
+import Tests.Support.IntrinsicMethods
 import Tests.FeatureExecution
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.MethodContract
+import CIL.Safety.LoopAutomation
+import CIL.Safety.OutcomeContract
+import CIL.Safety.LocalSnapshotSteps
 import CIL.SIMD.VectorLemmas
+import Tests.Support
+import Tests.WordFields
 
 namespace Tests.Automation
+
+attribute [local cil_code] Tests.supportedGetter_avx2_model
+open Tests.WordFields
 
 def candidate : Nat := 7
 if_extracted Tests.Automation.candidate {
@@ -22,7 +32,7 @@ run_cmd do
     throwError "Failed summary escaped its transaction"
 
 @[cil_code] def branchMethod : CIL.Method := {
-  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 4, .ldarg 1, .ret, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 @[cil_code] def branchProgram : CIL.Program := [branchMethod]
 
@@ -48,7 +58,7 @@ example : True := by
     Lean.Core.setMessageLog earlier
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .const32 1, .shl, .add, .const32 0, .gtu, .ret]
+  code := [.ldarg 0, .ldarg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 -- Symbolic values still reduce definitionally, including the final return.
@@ -62,7 +72,8 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 #guard_msgs in #print axioms checked_arithmetic
 
 @[cil_code] def narrowEqualityMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .bxor, .const32 0, .eq, .ret (some .unsigned8)]
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  code := [.ldarg 0, .ldarg 1, .xor, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
 def scalarDifference (left right : CIL.W32) : CIL.W32 := left ^^^ right
@@ -86,7 +97,8 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
 #print axioms checked_narrow_return
 
 @[cil_code] def decidedNarrowMethod : CIL.Method := {
-  code := [.const32 0, .const32 0, .eq, .ret (some .unsigned8)]
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  code := [.ldc_i4 0, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
 /-- A comparison of literals decides to `1#32` before the narrowed return, which keeps it, so
@@ -110,7 +122,7 @@ theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Fr
 /-! Run-to-run goals: a prefix of a method rewritten to the `run` it continues with. -/
 
 @[cil_code] def prefixMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .add, .arg 0, .add, .ret]
+  code := [.ldarg 0, .ldarg 1, .add, .ldarg 0, .add, .ret]
   locals := [], returnsValue := true }
 
 -- Symbolic remaining fuel stops the unbounded stepper at the target, which cleanup closes.
@@ -193,10 +205,11 @@ theorem run_prefix_bounded_two_goals (memory : CIL.Safety.Memory) (frame : CIL.S
   cil_checked_steps 3 []
 
 @[cil_code] def identityCallee : CIL.Method := {
-  code := [.arg 0, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ret], locals := [], returnsValue := true }
 
 @[cil_code] def callPrefixMethod : CIL.Method := {
-  code := [.arg 0, .call 1 1, .arg 0, .add, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .ldarg 0, .add,
+    .ret], links := [(1, .direct 1)], locals := [], returnsValue := true }
 
 -- A bounded step over a call runs the callee but stops before the caller's continuation.
 theorem run_call_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (a : CIL.W64) :
@@ -266,7 +279,8 @@ theorem checked_negative_literal_return (memory : CIL.Safety.Memory) (frame : CI
 #print axioms checked_negative_literal_return
 /-- A reusable body, bound to an extraction only through a lookup hypothesis. -/
 def wordBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.arg 0, .bnot, .arg 1, .bnot, .bor, .bnot, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.ldarg 0, .not, .ldarg 1, .not, .or,
+      .not, .ret] }
 
 theorem word_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (wordBody profile)) (memory : CIL.Safety.Memory) (a b : BitVec 64) :
@@ -276,7 +290,8 @@ theorem word_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featur
 
 /-- A profile-dependent body: its instructions are fetched only once the feature test is decided. -/
 @[cil_code] def featureBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := if profile.avx2 then [.arg 1, .ret] else [.arg 0, .ret] }
+  { profile, returnsValue := true, locals := [], code := if profile.avx2 then [.ldarg 1,
+      .ret] else [.ldarg 0, .ret] }
 
 theorem feature_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (scalar : profile.avx2 = false) (found : program[index]? = some (featureBody profile))
@@ -296,18 +311,20 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
 
 /-- A 27-instruction read-only leaf over symbolic memory: each field load comes from a fact, every step from an
     equation, so no step unfolds the dispatcher. -/
-def leafBody (profile : CIL.FeatureProfile) : CIL.Method := { profile, returnsValue := true, locals := [], code := [
-  .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .bxor,
-  .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .bxor, .bor,
-  .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .bxor, .bor,
-  .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .bxor, .bor,
-  .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+def leafBody (profile : CIL.FeatureProfile) : CIL.Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  profile, environment := wordsEnvironment, returnsValue := true, locals := [], code := [
+  .ldarg 0, .ldfld word0, .ldarg 1, .ldfld word0, .xor,
+  .ldarg 0, .ldfld word1, .ldarg 1, .ldfld word1, .xor, .or,
+  .ldarg 0, .ldfld word2, .ldarg 1, .ldfld word2, .xor, .or,
+  .ldarg 0, .ldfld word3, .ldarg 1, .ldfld word3, .xor, .or,
+  .ldc_i4 0, .conv_i8, .ceq, .ret] }
 
 open CIL.Safety in
 theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (leafBody profile)) (memory : Memory) (left right : Reference)
     (limb : Reference → Nat → BitVec 64) (fl : form memory left = .ok left) (fr : form memory right = .ok right)
-    (field : ∀ r offset rest, instruction (.fieldAt offset 8) (.reference (.address r) :: rest) memory =
+    (field : ∀ r offset rest, loadValueField offset 8 false (.reference (.address r) :: rest) memory =
       .ok (memory, .scalar (.i64 (limb r offset)) :: rest)) :
     let difference := (limb left 0 ^^^ limb right 0) ||| (limb left 8 ^^^ limb right 8) |||
       (limb left 16 ^^^ limb right 16) ||| (limb left 24 ^^^ limb right 24)
@@ -316,7 +333,8 @@ theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featur
   cil_checked_steps [fl, fr, field]
 
 def boundBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.arg 0, .arg 1, .bltu 5, .arg 0, .ret, .arg 1, .ret] }
+  { profile, returnsValue := true, locals := [],
+    code := [.ldarg 0, .ldarg 1, .blt_un 5, .ldarg 0, .ret, .ldarg 1, .ret] }
 
 /-- A fact decides an unsigned i64 branch, so the run falls through to pc 3. -/
 theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -328,7 +346,8 @@ theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featu
 
 /-- A signed branch takes its fact in the interpreter's own form, so no linear-arithmetic restatement is needed. -/
 theorem signed_bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
-    (found : program[index]? = some { boundBody profile with code := [.arg 0, .arg 1, .blt 5, .arg 0, .ret, .arg 1, .ret] })
+    (found : program[index]? = some { boundBody profile with code := [.ldarg 0, .ldarg 1, .blt 5,
+        .ldarg 0, .ret, .ldarg 1, .ret] })
     (memory : CIL.Safety.Memory) (x y : CIL.W64) (above : ¬ x.toInt < y.toInt) :
     CIL.Safety.invoke program 8 index [.scalar (.i64 x), .scalar (.i64 y)] memory =
       .ok (memory, [.scalar (.i64 x)]) := by
@@ -337,7 +356,8 @@ theorem signed_bound_checked (program : CIL.Program) (index : Nat) (profile : CI
 -- The step equations alone rewrite a compare-branch; the dispatcher stays folded.
 example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame) (m : CIL.Safety.Memory)
     (x y : CIL.W64) (above : ¬ x < y) :
-    CIL.Safety.step body (.bltu 5) 2 args frame [.scalar (.i64 y), .scalar (.i64 x)] m = .ok (.next 3 [] frame m) := by
+    CIL.Safety.step body (.blt_un 5) 2 args frame [.scalar (.i64 y), .scalar (.i64 x)] m =
+      .ok (.next 3 [] frame m) := by
   simp only [cil_step, above, ↓reduceIte]
 
 -- Guard reduction inspects only consumed values, even with an unknown stack tail.
@@ -384,7 +404,7 @@ theorem guard_unknown_requires_fact (value : CIL.Value) (known : value.hasUnspec
 open CIL.Safety in
 theorem scalar_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
     (memory : Memory) (left right : CIL.W64) (word : Nat) (unrelated : word = 7) :
-    ∃ stack, step body .bxor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
+    ∃ stack, step body .xor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.i64 (left ^^^ right))] := by
   refine ⟨?_, ?_, ?_⟩
   rotate_left
@@ -413,7 +433,7 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
 
 @[cil_code] def permuteStoreMethod : CIL.Method := {
   profile := { architecture := .x64, avx2 := true }
-  code := [.intrinsic (.avx2 .permute4x64) 2, .memory .store256, .ret]
+  code := [.call Tests.IntrinsicMethods.permute, .memory .store256, .ret]
   locals := [], returnsValue := false }
 
 @[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
@@ -480,6 +500,21 @@ info: 'Tests.Automation.store_from_static_fact' depends on axioms: [propext, Quo
 -/
 #guard_msgs in #print axioms store_from_static_fact
 
+open CIL.Safety in
+/-- A static load steps by a fact about `staticLoad`, which `staticLoad_initialized` gives from
+    the descriptor a `staticAt` fact binds to the pc. -/
+theorem static_load_from_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+    (field : CIL.Extraction.FieldRef) (value : CIL.Value) (memory : Memory)
+    (loaded : staticLoad body 0 memory = .ok (memory, .scalar value)) :
+    step body (.ldsfld field) 0 args frame [] memory =
+      .ok (.next 1 [.scalar value] frame memory) := by
+  cil_checked_step [loaded]
+
+/--
+info: 'Tests.Automation.static_load_from_fact' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms static_load_from_fact
+
 /-- Two vector stores; reached through a lookup hypothesis, so facts can name the body. -/
 def twoStoresMethod : CIL.Method := {
   code := [.memory .store256, .memory .store256, .ret], locals := [], returnsValue := false }
@@ -544,7 +579,7 @@ theorem permute_then_store_value (a b c d : CIL.W64) (destination : Reference) (
 
 /-- A feature test steps from a fact about the profile field, through a body neither unfolded nor tagged. -/
 def featureTestBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.call (Tests.supportedGetter "X86.Avx2"), .ret] }
 
 theorem feature_step_from_fact (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (wide : profile.avx2 = true) (found : program[index]? = some (featureTestBody profile))
@@ -553,16 +588,17 @@ theorem feature_step_from_fact (program : CIL.Program) (index : Nat) (profile : 
   cil_checked_steps [wide]
 
 theorem feature_step_free_body (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (wide : body.profile.avx2 = false) (code : body.code = [.feature .avx2, .ret])
+    (wide : body.profile.avx2 = false) (unlinked : body.linkAt 0 = none)
+    (code : body.code = [.call (Tests.supportedGetter "X86.Avx2"), .ret])
     (returns : body.returnsValue = true) (found : program[index]? = some body)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [wide, code, returns]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [unlinked, wide, code, returns, narrow]
 
 -- A literal profile decides the test with no fact.
 theorem feature_step_literal_profile (memory : CIL.Safety.Memory) :
-    CIL.Safety.invoke [{ permuteStoreMethod with code := [.feature .avx2, .ret], returnsValue := true }] 3 0 []
+    CIL.Safety.invoke [{ permuteStoreMethod with code := [.call (Tests.supportedGetter "X86.Avx2"), .ret], returnsValue := true }] 3 0 []
       memory = .ok (memory, [.scalar (.i32 1)]) := by
   cil_checked_steps
 
@@ -631,19 +667,20 @@ theorem feature_step_evaluate_fact (program : CIL.Program) (index : Nat) (profil
   cil_checked_steps [wide]
 
 theorem feature_step_evaluate_free_body (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (wide : body.profile.evaluate .avx2 = false) (code : body.code = [.feature .avx2, .ret])
+    (wide : body.profile.evaluate .avx2 = false) (unlinked : body.linkAt 0 = none)
+    (code : body.code = [.call (Tests.supportedGetter "X86.Avx2"), .ret])
     (returns : body.returnsValue = true) (found : program[index]? = some body)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [wide, code, returns]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [unlinked, wide, code, returns, narrow]
 
 -- A supplied proof term, not just a local name, is normalized to the profile field.
 theorem feature_step_evaluate_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (wide : body.profile.evaluate .avx2 = true) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (wide : body.profile.evaluate .avx2 = true) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [(show body.profile.evaluate .avx2 = true from wide)]
+  cil_checked_step [unlinked, (show body.profile.evaluate .avx2 = true from wide)]
 
 theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (wide : profile.evaluate .avx2 = true) (found : program[index]? = some (featureTestBody profile))
@@ -653,28 +690,31 @@ theorem feature_steps_evaluate_term (program : CIL.Program) (index : Nat) (profi
 
 -- A fact over every feature is instantiated at each constructor, so it still decides the field test.
 theorem feature_step_evaluate_forall (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (all : ∀ f, body.profile.evaluate f = true) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (all : ∀ f, body.profile.evaluate f = true) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [all]
+  cil_checked_step [unlinked, all]
 
 theorem feature_steps_evaluate_forall (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (all : ∀ f, body.profile.evaluate f = false) (code : body.code = [.feature .avx2, .ret])
+    (all : ∀ f, body.profile.evaluate f = false) (unlinked : body.linkAt 0 = none)
+    (code : body.code = [.call (Tests.supportedGetter "X86.Avx2"), .ret])
     (returns : body.returnsValue = true) (found : program[index]? = some body)
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [all, code, returns]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [unlinked, all, code, returns, narrow]
 
 /-- A fact about a symbolic feature rewrites the pushed test by hand: `cil_step` keeps
     `body.profile.evaluate f` folded instead of splitting on `f`. -/
 theorem feature_step_symbolic_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
-    (memory : CIL.Safety.Memory) (feature : CIL.Feature)
+    (memory : CIL.Safety.Memory) (feature : CIL.Feature) (getter : CIL.Extraction.MethodRef)
+    (unlinked : body.linkAt 0 = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call getter = some (.feature feature))
     (enabled : body.profile.evaluate feature = true) :
-    CIL.Safety.step body (.feature feature) 0 [] frame [] memory =
+    CIL.Safety.step body (.call getter) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  simp only [cil_step, enabled, ite_true]
-  rfl
+  rw [CIL.Safety.step_call_feature _ _ _ _ _ unlinked model rfl]
+  simp only [enabled, ite_true]
 
 open Lean Elab Tactic in
 /-- Fails if normalising `facts` restates any of them as a new hypothesis. -/
@@ -687,12 +727,14 @@ elab "expect_facts_already_normal " "[" facts:term,* "]" : tactic => do
 /-- Checked stepping uses the fact as stated: the normaliser leaves a symbolic feature test
     folded, as the step leaves it, rather than restating the fact as a match on `f`. -/
 theorem checked_symbolic_feature_fact (body : CIL.Method) (frame : CIL.Safety.Frame)
-    (memory : CIL.Safety.Memory) (feature : CIL.Feature)
+    (memory : CIL.Safety.Memory) (feature : CIL.Feature) (getter : CIL.Extraction.MethodRef)
+    (unlinked : body.linkAt 0 = none)
+    (model : CIL.Extraction.runtimeModel body.environment .call getter = some (.feature feature))
     (disabled : body.profile.evaluate feature = false) :
-    CIL.Safety.step body (.feature feature) 0 [] frame [] memory =
+    CIL.Safety.step body (.call getter) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 0)] frame memory) := by
   expect_facts_already_normal [disabled]
-  cil_checked_step [disabled]
+  cil_checked_step [unlinked, model, disabled]
 
 /-- info: 'Tests.Automation.feature_step_symbolic_fact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms feature_step_symbolic_fact
@@ -709,15 +751,15 @@ theorem wideProfile_avx2 : wideProfile.evaluate .avx2 = true := rfl
 attribute [irreducible] wideProfile
 
 theorem feature_step_evaluate_global (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (profile : body.profile = wideProfile) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (profile : body.profile = wideProfile) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [profile, wideProfile_avx2]
+  cil_checked_step [unlinked, profile, wideProfile_avx2]
 
 -- A fact on a method's profile projection lands where `cil_step` reduces the projection.
 theorem feature_step_projection_fact (profile : CIL.FeatureProfile) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (wide : (featureTestBody profile).profile.evaluate .avx2 = true) :
-    CIL.Safety.step (featureTestBody profile) (.feature .avx2) 0 [] frame [] memory =
+    CIL.Safety.step (featureTestBody profile) (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
   cil_checked_step [wide]
 
@@ -729,16 +771,16 @@ theorem feature_steps_projection_fact (program : CIL.Program) (index : Nat) (pro
 
 theorem feature_step_projection_field (profile : CIL.FeatureProfile) (frame : CIL.Safety.Frame)
     (memory : CIL.Safety.Memory) (wide : (featureTestBody profile).profile.avx2 = true) :
-    CIL.Safety.step (featureTestBody profile) (.feature .avx2) 0 [] frame [] memory =
+    CIL.Safety.step (featureTestBody profile) (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
   cil_checked_step [wide]
 
 -- Quantified feature facts given as proof terms or global theorems are instantiated like local ones.
 theorem feature_step_forall_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (all : ∀ f, body.profile.evaluate f = true) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (all : ∀ f, body.profile.evaluate f = true) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) := by
-  cil_checked_step [(show ∀ f, body.profile.evaluate f = true from all)]
+  cil_checked_step [unlinked, (show ∀ f, body.profile.evaluate f = true from all)]
 
 def bareProfile : CIL.FeatureProfile := {}
 
@@ -747,14 +789,15 @@ theorem bareProfile_none : ∀ f, bareProfile.evaluate f = false := by intro f; 
 attribute [irreducible] bareProfile
 
 theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
-    (profile : body.profile = bareProfile) :
-    CIL.Safety.step body (.feature .avx2) 0 [] frame [] memory =
+    (unlinked : body.linkAt 0 = none) (profile : body.profile = bareProfile) :
+    CIL.Safety.step body (.call (Tests.supportedGetter "X86.Avx2")) 0 [] frame [] memory =
       .ok (.next 1 [.scalar (.i32 0)] frame memory) := by
-  cil_checked_step [profile, bareProfile_none]
+  cil_checked_step [unlinked, profile, bareProfile_none]
 
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, .const32 8, .memory (.add 8 true), .pop, .const32 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ldc_i4 8, .memory (.add 8 true), .pop,
+      .ldc_i4 1, .ret] }
 
 open CIL.Safety in
 theorem add_run (memory : Memory) (source moved : Reference)
@@ -856,15 +899,15 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 /-- A supplied step fact is used before the op's own equation, which here cannot read the frame's slot;
     the body is `cil_code`, so the fact must be tried before the lookup unfolds it. -/
 @[cil_code] def slotBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.stloc 0, .ldloc 0, .ret] }
 
 open CIL.Safety in
 theorem step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (slotBody profile)) (args : List Value) (frame stored : Frame)
     (memory written : Memory) (value : CIL.W32)
-    (store : step (slotBody profile) (.setLocal 0) 0 args frame [.scalar (.i32 value)] memory =
+    (store : step (slotBody profile) (.stloc 0) 0 args frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written))
-    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+    (load : ∀ stack, step (slotBody profile) (.ldloc 0) 1 args stored stack written =
       .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
     run program 3 index 0 args frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -878,9 +921,10 @@ open CIL.Safety in
 theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (slotBody profile)) (args : List Value) (frame stored : Frame)
     (memory written : Memory) (value : CIL.W32)
-    (store : ∀ value : CIL.W32, step (slotBody profile) (.setLocal 0) 0 args frame [.scalar (.i32 value)] memory =
+    (store : ∀ value : CIL.W32,
+      step (slotBody profile) (.stloc 0) 0 args frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written))
-    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+    (load : ∀ stack, step (slotBody profile) (.ldloc 0) 1 args stored stack written =
       .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
     run program 3 index 0 args frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -891,14 +935,14 @@ theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile 
 
 /-- An extracted program's lookup unfolds the body to its literal, so a fact on the named body must still match. -/
 @[cil_code] def slotMethod : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.setLocal 0, .local 0, .ret] }
+  { returnsValue := true, locals := [], code := [.stloc 0, .ldloc 0, .ret] }
 @[cil_code] def slotProgram : CIL.Program := [slotMethod]
 
 open CIL.Safety in
 theorem named_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
-    (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+    (store : step slotMethod (.stloc 0) 0 [] frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written))
-    (load : ∀ stack, step slotMethod (.local 0) 1 [] stored stack written =
+    (load : ∀ stack, step slotMethod (.ldloc 0) 1 [] stored stack written =
       .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
     run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -910,9 +954,9 @@ theorem named_body_step_facts (frame stored : Frame) (memory written : Memory) (
 -- A fact quantified over the body matches the literal directly.
 open CIL.Safety in
 theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
-    (store : ∀ body pc args, step body (.setLocal 0) pc args frame [.scalar (.i32 value)] memory =
+    (store : ∀ body pc args, step body (.stloc 0) pc args frame [.scalar (.i32 value)] memory =
       .ok (.next (pc + 1) [] stored written))
-    (load : ∀ body pc args stack, step body (.local 0) pc args stored stack written =
+    (load : ∀ body pc args stack, step body (.ldloc 0) pc args stored stack written =
       .ok (.next (pc + 1) (.scalar (.i32 value) :: stack) stored written)) :
     run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -923,11 +967,11 @@ theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memo
 
 open CIL.Safety in
 /-- A supplied step fact is found after an earlier tactic `have` wraps the target in metadata;
-    the `setLocal` equation alone cannot read the abstract frame's slot. -/
+    the `stloc` equation alone cannot read the abstract frame's slot. -/
 theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
-    (store : step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+    (store : step slotMethod (.stloc 0) 0 [] frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written)) :
-    step slotMethod (.setLocal 0) 0 [] frame [.scalar (.i32 value)] memory =
+    step slotMethod (.stloc 0) 0 [] frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written) := by
   have unchanged : value = value := rfl
   cil_checked_step [store]
@@ -936,7 +980,7 @@ theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (v
 #guard_msgs in #print axioms step_fact_after_have
 
 @[cil_code] def nonzeroMethod : CIL.Method := {
-  code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
+  code := [.ldarg 0, .brtrue 4, .ldarg 1, .ret, .ldarg 0, .ret]
   locals := [], returnsValue := true }
 
 -- A branch pc is decided from the condition's own fact, not only from a `CIL.truth` restatement.
@@ -958,7 +1002,7 @@ theorem branch_from_zero (memory : CIL.Safety.Memory) (condition value : CIL.W32
 
 -- A literal condition is decided by evaluation, with no fact at all.
 @[cil_code] def literalBranchMethod : CIL.Method := {
-  code := [.const32 5, .brnonzero 4, .arg 0, .ret, .arg 1, .ret]
+  code := [.ldc_i4 5, .brtrue 4, .ldarg 0, .ret, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) :
@@ -973,13 +1017,13 @@ theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) 
 
 /-- A body whose instructions, not its code list, depend on a feature. -/
 def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [],
-    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+  { profile, environment := wordsEnvironment, returnsValue := true, locals := [],
+    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .ldfld word0, .ret] }
 
 -- The lookup decides the feature test, so the fetched op is a constructor with a step equation.
 -- A term-mode `by`, as the contract and loop tactics call it, must still assign the op.
 example (profile : CIL.FeatureProfile) (scalar : profile.avx2 = false) :
-    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .arg 0 :=
+    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .ldarg 0 :=
   ⟨_, by cil_lookup [scalar], by with_reducible rfl⟩
 
 open CIL.Safety in
@@ -987,7 +1031,7 @@ theorem feature_op_checked (program : CIL.Program) (index : Nat) (profile : CIL.
     (scalar : profile.avx2 = false) (found : program[index]? = some (featureOpBody profile))
     (frame : Frame) (memory : Memory) (left right : Reference) (limb : BitVec 64)
     (formed : form memory left = .ok left)
-    (field : ∀ rest, instruction (.fieldAt 0 8) (.reference (.address left) :: rest) memory =
+    (field : ∀ rest, loadValueField 0 8 false (.reference (.address left) :: rest) memory =
       .ok (memory, .scalar (.i64 limb) :: rest)) :
     run program 4 index 0 [.reference (.address left), .reference (.address right)] frame [] memory =
       .ok (leaveFrame frame memory, [.scalar (.i64 limb)]) := by
@@ -1061,7 +1105,7 @@ theorem intrinsic_without_facts (a b c d : CIL.W64) (destination : Reference) (m
 #guard_msgs in #print axioms intrinsic_without_facts
 
 @[cil_code] def checkedAdd64Method : CIL.Method := {
-  code := [.arg 0, .arg 1, .checkedArithmetic .add false, .ret]
+  code := [.ldarg 0, .ldarg 1, .add_ovf_un, .ret]
   locals := [], returnsValue := true }
 @[cil_code] def checkedAdd64Program : CIL.Program := [checkedAdd64Method]
 
@@ -1131,7 +1175,7 @@ theorem store_from_wrapped_fact (body : CIL.Method) (args : List Value) (frame :
 
 /-- Compare two words and reinterpret the result as a Boolean. -/
 @[cil_code] def comparedBoolean : CIL.Method := {
-  code := [.arg 0, .arg 1, .eq, .memory .bitcastByteBool, .ret]
+  code := [.ldarg 0, .ldarg 1, .ceq, .memory .bitcastByteBool, .ret]
   locals := [], returnsValue := true }
 
 open CIL.Safety in
@@ -1169,14 +1213,15 @@ theorem widened_boolean_cast (body : CIL.Method) (frame : Frame) (field : CIL.W6
 #print axioms widened_boolean_cast
 
 open CIL.Safety in
-/-- A value known only to be numeric loads as an argument: the fact meets the checked value
-    test in the unfolded form stepping leaves it in. -/
+/-- A value known only to be numeric loads as a plain argument: the facts meet the argument
+    access and the checked value test in the unfolded form stepping leaves them in. -/
 theorem opaque_numeric_argument (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
-    (memory : Memory) (numeric : numericValue argument = true) :
-    step body (.arg 0) 0 [.scalar argument] frame [] memory =
+    (memory : Memory) (plain : body.argumentAccess 0 = .value none)
+    (numeric : numericValue argument = true) :
+    step body (.ldarg 0) 0 [.scalar argument] frame [] memory =
       .ok (.next 1 [.scalar argument] frame memory) := by
-  fail_if_success cil_checked_step []
-  cil_checked_step [numeric]
+  fail_if_success cil_checked_step [numeric]
+  cil_checked_step [plain, numeric]
 
 #print axioms opaque_numeric_argument
 
@@ -1184,11 +1229,11 @@ open CIL.Safety in
 /-- The same fact passes an opaque numeric value to a call. -/
 theorem opaque_numeric_call (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
     (memory : Memory) (numeric : numericValue argument = true)
-    (known : argument.hasUnspecified = false) :
-    step body (.call 1 1) 0 [] frame [.scalar argument] memory =
+    (known : argument.hasUnspecified = false) (linked : body.linkAt 0 = some (.direct 1)) :
+    step body (.call (Tests.callee 1)) 0 [] frame [.scalar argument] memory =
       .ok (.call 1 [.scalar argument] [] memory) := by
-  fail_if_success cil_checked_step [known]
-  cil_checked_step [numeric, known]
+  fail_if_success cil_checked_step [known, linked]
+  cil_checked_step [numeric, known, linked]
 
 #print axioms opaque_numeric_call
 
@@ -1198,12 +1243,914 @@ open CIL.Safety in
 theorem inferred_read_load (memory : Memory) (limb : Reference) (word : CIL.W64)
     (loaded : read memory limb 8 1 = .ok (numberBytes word.toNat 8))
     (body : CIL.Method) (frame : Frame) :
-    step body .load64 0 [] frame [.reference (.address limb)] memory =
+    step body (.ldind .i8) 0 [] frame [.reference (.address limb)] memory =
       .ok (.next 1 [.scalar (.i64 word)] frame memory) := by
   have restated := loaded
   clear loaded
   cil_checked_step [restated]
 
 #print axioms inferred_read_load
+
+open Lean in
+/-- A step names its hypotheses from the first suffix that leaves every base unused, found in
+    one pass: suffixes in use are skipped, and spellings no step produces are not counted. -/
+example : True := by
+  run_tac do
+    let declare (context : LocalContext) (name : String) : MetaM LocalContext :=
+      return context.mkLocalDecl (← mkFreshFVarId) (Name.mkSimple name) (mkConst ``Nat)
+    let bases := #["stored", "written"]
+    let mut context : LocalContext := {}
+    unless CIL.firstUnusedSuffix context bases == 0 do throwError "an empty context uses no suffix"
+    for name in
+        ["stored_1", "written_2", "stored_01", "stored_0", "other", "other_1", "stored1"] do
+      context ← declare context name
+    unless CIL.firstUnusedSuffix context bases == 0 do
+      throwError "names that no step produces made suffix 0 look used"
+    context ← declare context "written"
+    unless CIL.firstUnusedSuffix context bases == 3 do
+      throwError "suffixes 0, 1 and 2 are in use, so the first free suffix is 3"
+  trivial
+
+open Lean in
+/-- Choosing a suffix against a context takes one pass over it, so four times as many names cost
+    about four times as many heartbeats; a probe per suffix costs sixteen times as many. -/
+example : True := by
+  run_tac do
+    let cost (names : Nat) : MetaM Nat := do
+      let mut context : LocalContext := {}
+      for index in [:names] do
+        let name := if index == 0 then "stored" else s!"stored_{index}"
+        context := context.mkLocalDecl (← mkFreshFVarId) (Name.mkSimple name) (mkConst ``Nat)
+      let started ← IO.getNumHeartbeats
+      let suffix ← IO.lazyPure fun _ => CIL.firstUnusedSuffix context #["stored", "written"]
+      unless suffix == names do throwError "expected suffix {names}, found {suffix}"
+      return (← IO.getNumHeartbeats) - started
+    let small ← cost 2000
+    let large ← cost 8000
+    unless large * 10 < small * 54 do
+      throwError "choosing a suffix cost {small} heartbeats at 2000 names and {large} at 8000"
+  trivial
+
+/-! ### The record of normal-form nodes
+
+A stepping driver skips the terms that earlier steps of the run left unchanged. These tests check
+what the record keeps, when it is dropped, and that skipping never changes the goal a step
+leaves. `cil.stepping.record` turns it off to give the goal that plain simplification reaches. -/
+
+open CIL.Safety
+
+-- The record is used from the first step here; a driver uses it after a dozen steps.
+set_option cil.stepping.warmup 0
+
+open Lean Elab Tactic Meta in
+/-- The goal that `steps` leaves, with the record of normal-form nodes on or off. The state is
+    restored afterwards. -/
+def steppedTarget (record : Bool) (steps : TSyntax `tactic) : TacticM Expr := do
+  let saved ← saveState
+  try
+    withOptions (fun options => cil.stepping.record.set options record) (evalTactic steps)
+    instantiateMVars (← getMainTarget)
+  finally saved.restore
+
+open Lean Elab Tactic Meta in
+/-- Fails unless `steps` leaves the same goal with the record and without it. -/
+def sameGoal (steps : TSyntax `tactic) : TacticM Unit := do
+  let recorded ← steppedTarget true steps
+  let plain ← steppedTarget false steps
+  unless recorded == plain do
+    throwError "the record changed the goal:{indentExpr recorded}\n\
+      against plain:{indentExpr plain}"
+
+open Lean Elab Tactic in
+/-- Whether a record is active or kept. -/
+def recordIsLeft : TacticM Bool := do
+  let record ← getNormalNodes
+  return record.driven || record.active || !record.nodes.isEmpty ||
+    record.equations.covered != 0 || record.equationLocals.isSome ||
+    !record.contexts.isEmpty || !record.others.isEmpty
+
+open Lean Elab Tactic in
+/-- Fails unless no record is active or kept. -/
+def recordIsEmpty : TacticM Unit := do
+  if ← recordIsLeft then throwError "a stepping record outlived its run"
+
+/-- Adds two arguments. -/
+@[cil_code] def recordBody : CIL.Method := {
+  code := [.ldarg 0, .ldarg 1, .add, .ret], locals := [], returnsValue := true }
+
+/-- The program of `recordBody`. -/
+@[cil_code] def recordProgram : CIL.Program := [recordBody]
+
+/-- Adds the arguments in the other order, so its goals differ from those of `recordBody`. -/
+@[cil_code] def otherBody : CIL.Method := {
+  code := [.ldarg 1, .ldarg 0, .add, .ret], locals := [], returnsValue := true }
+
+/-- The program of `otherBody`. -/
+@[cil_code] def otherProgram : CIL.Program := [otherBody]
+
+section
+-- Declarations rather than theorems, elaborated on the main branch, keep what a failure leaves.
+set_option Elab.async false
+
+-- A step that cannot fetch its instruction fails inside the run, which leaves no record.
+#guard_msgs (drop all) in
+theorem failedRun (memory : Memory) (frame : Frame) :
+    ∃ result, run recordProgram 5 7 0 [] frame [] memory = result :=
+  ⟨_, by cil_checked_steps 1 []⟩
+
+/-- The declaration after a failed run finds no record, and steps to the goal that plain
+    simplification gives for a different body. -/
+theorem runAfterFailure (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run otherProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run otherProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 left), .scalar (.i64 right)] memory := by
+  run_tac recordIsEmpty
+  run_tac sameGoal (← `(tactic| cil_checked_steps 1 []))
+  cil_checked_steps 2 []
+  all_goals rfl
+
+-- A bare step that fails drops the record it started.
+#guard_msgs (drop all) in
+theorem failedBareStep (memory : Memory) (frame : Frame) :
+    ∃ result, run recordProgram 5 7 0 [] frame [] memory = result :=
+  ⟨_, by cil_checked_run_step []⟩
+
+/-- The declaration after a failed bare step finds no record. -/
+theorem runAfterBareFailure : True := by
+  run_tac recordIsEmpty
+  trivial
+
+/-- A `first` alternative that steps and then fails leaves no record to the next alternative. -/
+theorem backtracked (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  first
+  | (cil_checked_steps 2 []; fail "undone")
+  | (cil_checked_run_step []; fail "undone")
+  | run_tac recordIsEmpty
+  cil_checked_steps 2 []
+  all_goals rfl
+
+open Lean Elab Tactic in
+/-- A diagnostic that steps and restores its state leaves no record behind. -/
+theorem diagnosed (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  run_tac do
+    let saved ← saveState
+    evalTactic (← `(tactic| cil_checked_run_step []))
+    saved.restore
+  run_tac recordIsEmpty
+  cil_checked_steps 2 []
+  all_goals rfl
+
+open Lean Elab Tactic in
+/-- A completed bare step leaves no step running, so a later simplification is plain. -/
+theorem completedBareStep (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  cil_checked_run_step []
+  run_tac do unless !(← getNormalNodes).active do throwError "a step is still marked running"
+  cil_checked_steps 1 []
+  all_goals rfl
+
+end
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Facts that print alike but state different things are keyed apart, and a record made for one
+    is not used for the other. A step that only adds hypotheses keeps the record, which a step
+    that rewrites one in place does not. -/
+example (one : (1 : Nat) = 1) (two : (2 : Nat) = 2) : True := by
+  run_tac withMainContext do
+    -- Unhygienic names, since a quoted `one` would carry a macro scope no hypothesis has.
+    let first ← factsKey #[mkIdent `one]
+    let second ← factsKey #[mkIdent `two]
+    unless first.isSome && second.isSome && first != second do
+      throwError "different facts were keyed alike"
+    let hole (name : Ident) : TacticM Term := do
+      Term.exprToSyntax (← elabTerm name none)
+    let holeFirst ← hole (mkIdent `one)
+    let holeSecond ← hole (mkIdent `two)
+    unless (← factsKey #[holeFirst]) != (← factsKey #[holeSecond]) do
+      throwError "facts that print alike were keyed alike"
+    withNormalRun do
+      let remember (facts : Array Term) : TacticM Unit :=
+        withNormalNodes facts <| withMainContext <| liftM (recordNormalNodes "probe" #[mkNatLit 7])
+      let recorded (facts : Array Term) : TacticM Bool :=
+        withNormalNodes facts <| withMainContext <| liftM do
+          return (← normalNodesFor "probe").contains (mkNatLit 7)
+      remember #[holeFirst]
+      unless ← recorded #[holeFirst] do
+        throwError "a record was not kept between steps with the same facts"
+      if ← recorded #[holeSecond] then throwError "a record was used for different facts"
+      remember #[holeSecond]
+      unless ← recorded #[holeFirst] do
+        throwError "the record of the earlier facts was dropped when a step read other facts"
+      -- Steps that add hypotheses, as stores and calls do, keep what the run recorded.
+      for extra in [`extraOne, `extraTwo] do
+        evalTactic (← `(tactic| have $(mkIdent extra) : True := trivial))
+        unless ← recorded #[holeSecond] do
+          throwError "the record was dropped when a step added the hypothesis {extra}"
+        unless ← recorded #[holeFirst] do
+          throwError "the record of the other facts was dropped when a step added {extra}"
+      -- A hypothesis outside the facts, rewritten in place, keeps its name and identity but not
+      -- what it states, and a simplification may use it.
+      let goal ← getMainGoal
+      let declaration ← withMainContext (getLocalDeclFromUserName `one)
+      let sum ← mkAppM ``HAdd.hAdd #[mkNatLit 1, mkNatLit 0]
+      replaceMainGoal [← goal.replaceLocalDeclDefEq declaration.fvarId
+        (← mkEq (mkNatLit 1) sum)]
+      if ← recorded #[holeSecond] then throwError "a record was used after a hypothesis changed"
+    recordIsEmpty
+  trivial
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Lemmas with implicit arguments and universe parameters among the facts are keyed, so the
+    run keeps the record and finds it again when the same lemmas elaborate anew. -/
+example : True := by
+  run_tac withMainContext do
+    let facts : Array Term := #[← `(List.length_append), ← `(List.map_map)]
+    withNormalRun do
+      let probed : TacticM Bool := withNormalNodes facts <| withMainContext <| liftM do
+        return (← normalNodesFor "probe").contains (mkNatLit 7)
+      withNormalNodes facts <| withMainContext do
+        unless (← getNormalNodes).active do
+          throwError "lemma facts with metavariables switched the record off"
+        liftM (recordNormalNodes "probe" #[mkNatLit 7])
+      unless ← probed do throwError "the record was not found again for the same lemma facts"
+    recordIsEmpty
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- The goals `cil_try_simp_only` leaves for a sequence of statements run one after another in
+    one record, with the record on or off. -/
+def simpSequence (record : Bool) (statements : Array Term) : TacticM (Array Expr) := do
+  let saved ← saveState
+  let seen ← IO.mkRef (#[] : Array Expr)
+  try
+    withOptions (fun options => cil.stepping.record.set options record) do
+      withNormalRun do
+        for statement in statements do
+          let goal ← mkFreshExprMVar (← elabTerm statement none)
+          setGoals [goal.mvarId!]
+          withNormalNodes #[] do
+            withMainContext do
+              evalTactic (← `(tactic| cil_try_simp_only [Nat.reduceAdd, id_eq, Nat.add_zero]))
+          seen.modify (·.push (← instantiateMVars (← getMainTarget)))
+  finally saved.restore
+  seen.get
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Terms that appear first where simplification does not enter them and later where it does,
+    under a binder, as a dependent argument and as an instance argument, simplify as without the
+    record. -/
+example (p : Nat → Prop) : True := by
+  run_tac withMainContext do
+    let p := mkIdent `p
+    let statements : Array Term := #[← `($p (id (2 + 3))),
+      ← `($p ((fun x : Nat => x + (2 + 3)) 1)),
+      ← `($p (((2 + 3, 1 + 1) : Nat × Nat).1 + (2 + 3))),
+      ← `($p ((⟨2 + 3, by omega⟩ : { n : Nat // n < 10 }).val + (2 + 3 + 0))),
+      ← `($p (Nat.succ (2 + 3) + id (id (2 + 3))))]
+    let recorded ← simpSequence true statements
+    let plain ← simpSequence false statements
+    for (kept, reference) in recorded.zip plain do
+      unless kept == reference do
+        throwError "the record changed a simplification:{indentExpr kept}\nagainst:\
+          {indentExpr reference}"
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- The goals `cil_literal_operands` leaves for a persistent operand it cannot evaluate and an
+    operand that appears later and can be evaluated, with the record on or off. -/
+def literalSequence (record : Bool) : TacticM (Array Expr) := do
+  let saved ← saveState
+  let seen ← IO.mkRef (#[] : Array Expr)
+  try
+    withOptions (fun options => cil.stepping.record.set options record) do
+      withNormalRun do
+        let (w, a, b) := (mkIdent `w, mkIdent `a, mkIdent `b)
+        for statement in #[← `(BitVec.signExtend $w (5#4) = $a),
+            ← `(BitVec.signExtend $w (5#4) = $a ∧ BitVec.setWidth 8 (3#4) = $b)] do
+          let goal ← mkFreshExprMVar (← elabTerm statement none)
+          setGoals [goal.mvarId!]
+          withNormalNodes #[] (withMainContext (evalTactic (← `(tactic| cil_literal_operands))))
+          seen.modify (·.push (← instantiateMVars (← getMainTarget)))
+  finally saved.restore
+  seen.get
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- A persistent literal operand that cannot be evaluated does not stop a later one from being
+    evaluated, and the goal is the one without the record. -/
+example (w : Nat) (a : BitVec w) (b : BitVec 8) : True := by
+  run_tac withMainContext do
+    let recorded ← literalSequence true
+    let plain ← literalSequence false
+    unless recorded == plain do throwError "the record changed the literal operands"
+    let [_, evaluated] := recorded.toList | throwError "expected two goals"
+    unless (evaluated.find? (·.isConstOf ``BitVec.setWidth)).isNone do
+      throwError "the later operand was not evaluated:{indentExpr evaluated}"
+  trivial
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- The detector flags the operands the `cil_literal` simprocs evaluate and no others: a width
+    conversion to a symbolic width stays, and `BitVec.ofInt` of literals is evaluated. -/
+example (w : Nat) (a : BitVec w) (b : BitVec 8) : True := by
+  run_tac withMainContext do
+    let symbolic ← elabTerm (← `(BitVec.signExtend $(mkIdent `w) (5#4))) none
+    if closedLiteralOperand symbolic then
+      throwError "a conversion to a symbolic width was taken for a literal operand"
+    let statement ← elabTerm (← `(BitVec.ofInt 8 (-3) = $(mkIdent `b))) none
+    unless (statement.find? closedLiteralOperand).isSome do
+      throwError "BitVec.ofInt of literals was not found"
+    let goals ← getGoals
+    setGoals [(← mkFreshExprMVar statement).mvarId!]
+    evalTactic (← `(tactic| cil_literal_operands))
+    let reduced ← instantiateMVars (← getMainTarget)
+    unless (reduced.find? (·.isConstOf ``BitVec.ofInt)).isNone do
+      throwError "BitVec.ofInt of literals was not evaluated:{indentExpr reduced}"
+    setGoals goals
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- A term whose tree doubles at each of sixty levels, as `.dup` then `.add` build it, has sixty
+    nodes as a DAG. Recording it visits each node once and costs heartbeats in proportion. -/
+example : True := by
+  run_tac do
+    let mut shared := mkNatLit 1
+    for _ in [:60] do
+      shared := mkApp2 (mkConst ``Nat.add) shared shared
+    let (found, (_, clean)) := (cleanWalk (fun _ => false) {} shared).run ({}, #[])
+    -- Two applications per level, and the nodes of the base: far fewer than the tree's 2^60.
+    unless !found && clean.size < 200 do
+      throwError "expected a node count linear in the depth, found {clean.size}"
+    withNormalRun do
+      withNormalNodes #[] do
+        recordNormalNodes "probe" clean
+        unless (← getNormalNodes).count == clean.size do
+          throwError "a node was recorded twice"
+  trivial
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Simplifying under a binder opens temporary free variables, and the terms that carry them can
+    never occur again, so the record keeps none of them while it keeps the closed terms. The goal
+    is the one that plain simplification gives. -/
+example (p : Nat → Prop) : True := by
+  run_tac withMainContext do
+    let statement ← `(∀ x : Nat, $(mkIdent `p) (x + 0) ∧ $(mkIdent `p) (2 + 3 + (x + 0)))
+    let context ← getLCtx
+    let mut goals := #[]
+    for record in [true, false] do
+      let goal ← mkFreshExprMVar (← elabTerm statement none)
+      let saved ← getGoals
+      setGoals [goal.mvarId!]
+      withOptions (fun options => cil.stepping.record.set options record) do
+        withNormalRun do
+          withNormalNodes #[] do
+            withMainContext (evalTactic (← `(tactic|
+              cil_try_simp_only [Nat.add_zero, Nat.reduceAdd])))
+          if record then
+            let kept ← getNormalNodes
+            let mut recorded := 0
+            for (_, nodes) in kept.nodes do
+              for node in nodes.toList do
+                recorded := recorded + 1
+                if node.hasAnyFVar (!context.contains ·) then
+                  throwError "a term with a temporary free variable was recorded:{indentExpr node}"
+            if recorded == 0 then throwError "no node was recorded, so the test checks nothing"
+      goals := goals.push (← instantiateMVars (← getMainTarget))
+      setGoals saved
+    unless goals[0]! == goals[1]! do
+      throwError "the record changed the goal:{indentExpr goals[0]!}\n\
+        against:{indentExpr goals[1]!}"
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- Every goal that `steps` leaves, with its hypotheses, as printed text, with the record on or
+    off. Printing makes the comparison independent of the identifiers of fresh variables. The
+    state is restored afterwards. -/
+def steppedGoals (record : Bool) (steps : TSyntax `tactic) : TacticM (Array String) := do
+  let saved ← saveState
+  try
+    withOptions (fun options => cil.stepping.record.set options record) (evalTactic steps)
+    let mut printed := #[]
+    for goal in ← getGoals do
+      printed := printed.push (toString (← withOptions (·.setBool `pp.mvars false) (ppGoal goal)))
+    return printed
+  finally saved.restore
+
+open Lean Elab Tactic in
+/-- Fails unless `steps` leaves the same goals, hypotheses included, with the record and without
+    it. Unless `mayClose`, it also fails when the steps close every goal, since the comparison
+    would check nothing. -/
+def sameGoals (steps : TSyntax `tactic) (mayClose := false) : TacticM Unit := do
+  let recorded ← steppedGoals true steps
+  let plain ← steppedGoals false steps
+  if recorded.isEmpty && !mayClose then
+    throwError "the steps closed every goal, so the test checks nothing"
+  unless recorded == plain do
+    throwError "the record changed the goals:\n{recorded}\nagainst plain:\n{plain}"
+
+/-- A body the loop tactics walk: two operands added, ending in a `nop`. -/
+@[cil_code] def loopRecordBody : CIL.Method := {
+  code := [.ldarg 0, .ldarg 1, .add, .nop], locals := [], returnsValue := true }
+
+/-- A body that stores an argument into a numeric local and loads it back. -/
+@[cil_code] def snapshotRecordBody : CIL.Method := {
+  code := [.ldarg 0, .stloc 0, .ldloc 0, .ret], locals := [.i64 0],
+  localKinds := [.word64], returnsValue := true }
+
+/-- Contract stepping leaves the goals that plain simplification gives. -/
+example (memory : Memory) (left right : CIL.W64) :
+    WP (Execution (fun fuel => invoke [recordBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left + right))]) := by
+  run_tac sameGoals (← `(tactic| cil_contract_steps 2 []))
+  cil_contract_steps []
+  exact ⟨rfl, rfl⟩
+
+open Lean Elab Tactic Meta in
+/-- Raise stepping leaves the goals that plain simplification gives. -/
+example (memory : Memory) (left right : CIL.W64) (exception : CIL.ExceptionType) : True := by
+  run_tac withMainContext do
+    let original ← getGoals
+    let statement ← `(Raises recordProgram 0 [.scalar (.i64 $(mkIdent `left)),
+      .scalar (.i64 $(mkIdent `right))] $(mkIdent `memory) $(mkIdent `exception))
+    setGoals [(← mkFreshExprMVar (← elabTerm statement none)).mvarId!]
+    sameGoals (← `(tactic| cil_raise_steps []))
+    setGoals original
+  trivial
+
+/-- Loop stepping leaves the goals that plain simplification gives. -/
+example (memory : Memory) (left right : CIL.W64) (frame : Frame) :
+    LoopReaches [loopRecordBody] 0 [.scalar (.i64 left), .scalar (.i64 right)]
+      (LoopState.mk 0 frame [] memory)
+      (LoopState.mk 3 frame [.scalar (.i64 (left + right))] memory) := by
+  run_tac sameGoals (← `(tactic| cil_loop_steps)) (mayClose := true)
+  cil_loop_steps
+
+/-- Snapshot stepping leaves the goals that plain simplification gives, including the
+    hypotheses a store adds and clears. -/
+example (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary snapshotRecordBody.localKinds slots)
+    (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
+    (word : BitVec 64) :
+    WP (Execution (fun fuel => run [snapshotRecordBody] fuel 0 0 [.scalar (.i64 word)]
+      ⟨0, slots, [], 0⟩ [] memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have formed := valid.wellFormed
+  have preserved := MemoryBelow.refl boundary memory
+  have authority := (MemoryBelow.refl memory.nextIdentity memory).accessBelow
+  have snapshots := LocalSnapshots.empty memory slots
+  run_tac sameGoals (← `(tactic| cil_contract_steps (snapshots := snapshots) 2 []))
+  cil_contract_steps (snapshots := snapshots) []
+  exact rfl
+
+open Lean Elab Tactic Meta in
+/-- A loop walk restates a caller buffer fact at a memory the walk introduced and clears the one
+    it restated, and keeps a fact at any other memory, which the restatement does not give back,
+    even one the caller names `stored` as the walk names its own. -/
+example (produced stored entry : Memory) (base : Reference) (x : BitVec 32)
+    (producedFact : Contents produced base 4 [x]) (namedFact : Contents stored base 4 [x])
+    (callerFact : Contents entry base 4 [x]) : True := by
+  run_tac withMainContext do
+    let count (memory : Name) : TacticM Nat := withMainContext do
+      let memory ← elabTerm (mkIdent memory) none
+      return (← getLCtx).foldl (init := 0) fun found declaration =>
+        if declaration.type.isAppOf ``Contents &&
+            (declaration.type.getAppArgs[0]? == some memory) then found + 1 else found
+    let carry : LoopCarried → Ident → TacticM (Option Term) := fun _ fact => pure (some fact)
+    recordWalkVariable (← elabTerm (mkIdent `produced) none).fvarId!
+    for memory in [`produced, `stored, `entry] do
+      loopCarryFacts (← elabTerm (mkIdent memory) none) carry
+    unless (← count `produced) == 1 do
+      throwError "the fact at the walk's memory was not replaced"
+    unless (← count `stored) == 2 do throwError "the fact at the memory named stored was cleared"
+    unless (← count `entry) == 2 do throwError "the caller's fact was cleared"
+  trivial
+
+open Lean Elab Tactic in
+/-- Closes the goal with `cil_lookup_assumption` both outside a stepping driver, where it scans the
+    local context, and in a step of one, where it reads the driver's equation index; either may
+    find an equation the other misses, so each test runs both. -/
+elab "cil_lookup_both_ways" : tactic => do
+  let saved ← saveState
+  evalTactic (← `(tactic| cil_lookup_assumption))
+  saved.restore
+  withNormalRun (withNormalNodes #[] (evalTactic (← `(tactic| cil_lookup_assumption))))
+
+/-- The lookup it is given, under a name that reducible unfolding removes. -/
+abbrev sameLookup (found : Option Nat) : Option Nat := found
+
+-- A lookup whose left side unfolds at reducible transparency to a variable is stated by an
+-- equation about that variable, although the lookup is written with a constant head.
+example (found : Option Nat) (stated : found = some 3) : sameLookup found = some 3 := by
+  cil_lookup_both_ways
+
+/-- A list that reducible unfolding spells out. -/
+abbrev lookupList : List Nat := [1, 2]
+
+/-- The first entry of a list, under a name that reducible unfolding removes. -/
+abbrev firstEntry (entries : List Nat) : Option Nat := entries[0]?
+
+/-- Twice a natural number, which reducible unfolding turns into a product. -/
+abbrev twice (count : Nat) : Nat := 2 * count
+
+/-- Another name for natural numbers, which reducible unfolding removes. -/
+abbrev Position := Nat
+
+-- Both lookups find every hypothesis that unification may equate with the lookup: an
+-- abbreviation of a list literal meets an equation about the literal, and arithmetic on natural
+-- numbers meets its result whichever side writes the arithmetic.
+example (stated : ([1, 2] : List Nat)[0]? = some 1) : lookupList[0]? = some 1 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[Nat.succ 1]? = some 3) :
+    entries[Nat.add 1 1]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[2 * 1]? = some 3) : entries[2]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[2]? = some 3) : entries[2 * 1]? = some 3 := by
+  cil_lookup_both_ways
+-- A local definition unfolds during unification, in a lookup and in a hypothesis alike, and so
+-- does the arithmetic it names.
+example (entries : List Nat) (stated : entries[1]? = some 3) :
+    let position := 1; entries[position]? = some 3 := by
+  intro position
+  cil_lookup_both_ways
+example (entries : List Nat) :
+    let found := entries[1]?; found = some 3 → entries[1]? = some 3 := by
+  intro found stated
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[2]? = some 3) :
+    let position := 2 * 1; entries[position]? = some 3 := by
+  intro position
+  cil_lookup_both_ways
+example (entries : List Nat) :
+    let position := 2 * 1; entries[position]? = some 3 → entries[2]? = some 3 := by
+  intro position stated
+  cil_lookup_both_ways
+-- A reducible definition unfolds on either side, and so does the arithmetic it names or a type
+-- it renames.
+example (entries : List Nat) (stated : entries[twice 1]? = some 3) : entries[2]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[2]? = some 3) : entries[twice 1]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[((2 : Position) * 1 : Position)]? = some 3) :
+    entries[2]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : firstEntry entries = some 3) : entries[0]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[0]? = some 3) : firstEntry entries = some 3 := by
+  cil_lookup_both_ways
+-- Unification matches a pair against its projections and any two values of a type with one value.
+example (pair : Nat × Nat) (read : Nat × Nat → Option Nat)
+    (stated : read (pair.1, pair.2) = some 1) : read pair = some 1 := by
+  cil_lookup_both_ways
+example (pair : Nat × Nat) (read : Nat × Nat → Option Nat) (stated : read pair = some 1) :
+    read (pair.1, pair.2) = some 1 := by
+  cil_lookup_both_ways
+example (first second : Unit) (read : Unit → Option Nat) (stated : read first = some 1) :
+    read second = some 1 := by
+  cil_lookup_both_ways
+example (first : Unit) (read : Unit → Option Nat) (stated : read () = some 1) :
+    read first = some 1 := by
+  cil_lookup_both_ways
+-- A quantified lookup is closed by the quantified hypothesis that states it.
+example (entries : List Nat) (stated : ∀ position : Nat, entries[position]? = some 1) :
+    ∀ position : Nat, entries[position]? = some 1 := by
+  cil_lookup_both_ways
+
+open Lean Elab Tactic Meta in
+-- A hypothesis whose left side holds a metavariable that is assigned after a step indexed it
+-- still states the lookup at the next step.
+example (entries : List Nat) : entries = entries := by
+  run_tac withMainContext do
+    let list ← elabTerm (mkIdent `entries) none
+    let position ← mkFreshExprSyntheticOpaqueMVar (mkConst ``Nat)
+    let found ← mkAppM ``Option.some #[mkNatLit 1]
+    let stated ← mkEq (← mkAppM ``GetElem?.getElem? #[list, position]) found
+    let wanted ← mkEq (← mkAppM ``GetElem?.getElem? #[list, mkNatLit 2]) found
+    let (_, lookup) ← (← mkFreshExprMVar (← mkArrow stated wanted)).mvarId!.intro1P
+    let saved ← getGoals
+    setGoals [lookup]
+    withNormalRun do
+      withNormalNodes #[] (pure ())
+      position.mvarId!.assign (mkNatLit 2)
+      withNormalNodes #[] (evalTactic (← `(tactic| cil_lookup_assumption)))
+    unless (← getGoals).isEmpty do throwError "the lookup was not closed"
+    setGoals saved
+  rfl
+
+/-- A running sum of fifteen additions, long enough for the stepping record to be used. -/
+@[cil_code] def runningSum : CIL.Method := {
+  locals := [], returnsValue := true,
+  code := [.ldarg 0, .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add,
+    .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add,
+    .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add, .ldarg 1, .add,
+    .ldarg 1, .add, .ret] }
+
+open Lean Elab Tactic Meta in
+/-- Run `steps` and fail when its comparisons of local contexts read more positions than one
+    whole-context comparison per instruction of `runningSum`. Comparing the whole context at each
+    read of the record costs no heartbeats, so only this count shows it. -/
+elab "cil_reads_at_most_one_context_per_instruction " steps:tactic : tactic => do
+  let size := (← withMainContext getLCtx).numIndices
+  let before ← contextReads
+  evalTactic steps
+  let reads := (← contextReads) - before
+  let limit := size * runningSum.code.length
+  unless reads <= limit do
+    throwError "the steps read {reads} context positions; at most {limit} were expected"
+
+-- A step whose goal keeps the local context of the record reads none of its positions, however
+-- many hypotheses are in scope; checking each read of the record against the whole context
+-- read fifteen to twenty contexts per instruction.
+theorem running_sum_reads (memory : Memory) (left right : CIL.W64) (first : right + 1 = right + 1)
+    (second : right + 2 = right + 2) (third : right + 3 = right + 3) :
+    invoke [runningSum] 32 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
+      .ok (memory, [.scalar (.i64 (left + right + right + right + right + right + right + right +
+        right + right + right + right + right + right + right + right))]) := by
+  cil_reads_at_most_one_context_per_instruction cil_checked_steps
+
+#print axioms running_sum_reads
+
+theorem running_sum_contract_reads (memory : Memory) (left right : CIL.W64)
+    (first : right + 1 = right + 1) (second : right + 2 = right + 2) :
+    WP (Execution (fun fuel => invoke [runningSum] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left + right + right +
+        right + right + right + right + right + right + right + right + right + right + right +
+        right + right))]) := by
+  cil_reads_at_most_one_context_per_instruction
+    (cil_contract_steps []; exact And.intro rfl rfl)
+
+#print axioms running_sum_contract_reads
+
+open Lean Elab Tactic Meta in
+/-- A step that runs out of heartbeats leaves no record behind. The exception is a runtime
+    exception, which `try` does not catch, so the cleanup must not depend on a handler. -/
+example (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  run_tac do
+    let saved ← saveState
+    -- The limit is the cost of preparing the facts plus a little, so it is the step that runs out.
+    let started ← IO.getNumHeartbeats
+    evalTactic (← `(tactic| cil_checked_steps 0 []))
+    let preparation := (← IO.getNumHeartbeats) - started
+    saved.restore
+    -- A handler restores the state, which would empty the record, so it is read as the
+    -- exception passes.
+    let left ← IO.mkRef false
+    let exhausted ← tryCatchRuntimeEx
+      (Core.withCurrHeartbeats <| withTheReader Core.Context
+        (fun context => { context with maxHeartbeats := preparation + 20000 }) do
+          tryFinally (do evalTactic (← `(tactic| cil_checked_steps 2 [])); pure false)
+            (do left.set (← recordIsLeft)))
+      (fun exception => if exception.isRuntime then pure true else throw exception)
+    unless exhausted do
+      throwError "the steps did not run out of heartbeats, so the test checks nothing"
+    if ← left.get then throwError "a stepping record outlived the step that ran out of heartbeats"
+    saved.restore
+  cil_checked_steps 2 []
+  all_goals rfl
+
+open Lean Elab Tactic Meta in
+/-- A driver uses the record from its thirteenth step: twelve steps run plainly and build no key,
+    and the thirteenth builds one and records. -/
+example : True := by
+  run_tac do
+    withOptions (fun options => cil.stepping.warmup.set options 12) do
+      withNormalRun do
+        let step : TacticM Bool := withNormalNodes #[] do return (← getNormalNodes).active
+        for count in [:12] do
+          if ← step then throwError "step {count + 1} used the record during the warm-up"
+          unless (← getNormalNodes).key.isNone do
+            throwError "step {count + 1} built a key during the warm-up"
+        unless ← step do throwError "step 13 did not use the record"
+        unless (← getNormalNodes).key.isSome do throwError "step 13 built no key"
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- No `cil_step` equation about `CIL.Safety.step` is an rfl lemma. Simp applies an rfl lemma
+    without a proof term, and the kernel then reduces `step` again at every use. -/
+example : True := by
+  run_tac do
+    let some extension ← getSimpExtension? `cil_step | throwError "cil_step is not a simp set"
+    let mut examined := 0
+    let mut rflEquations := #[]
+    for origin in (← extension.getTheorems).lemmaNames.toList do
+      let .decl name .. := origin | continue
+      let aboutStep ← forallTelescope (← getConstInfo name).type fun _ conclusion =>
+        pure <| conclusion.eq?.any fun (_, lhs, _) => lhs.getAppFn.isConstOf ``CIL.Safety.step
+      unless aboutStep do continue
+      examined := examined + 1
+      if (← isRflTheorem name) || (← isBackwardRflTheorem name) then
+        rflEquations := rflEquations.push name
+    if examined == 0 then throwError "cil_step holds no equation about CIL.Safety.step"
+    unless rflEquations.isEmpty do
+      throwError "cil_step equations about CIL.Safety.step proved by rfl: {rflEquations.toList}"
+  trivial
+
+/-- A constructor whose explicit link table keys only its later call: the `System.Object`
+    constructor call at pc 1 states no link and runs its runtime model. -/
+def modelledConstructor : CIL.Method :=
+  { locals := [], returnsValue := true, links := [(3, .direct 1)],
+    code := [.ldarg 0, .call CIL.Extraction.objectConstructorMethod {}, .ldarg 1,
+      .call (Tests.callee 1) {}, .ret] }
+cil_instruction_equations modelledConstructor
+cil_runtime_models modelledConstructor
+/-- The method the linked call enters; it returns its argument. -/
+def passThrough : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
+cil_instruction_equations passThrough
+
+/-- The model call consumes the receiver and the linked call returns the second argument. -/
+theorem modelled_then_linked (memory : Memory) (object : Reference) (word : CIL.W64)
+    (formed : formObject memory (.address object) = .ok (.object (.address object))) :
+    invoke [modelledConstructor, passThrough] 10 0
+      [.object (.address object), .scalar (.i64 word)] memory =
+      .ok (memory, [.scalar (.i64 word)]) := by
+  cil_checked_steps [formed]
+#print axioms modelled_then_linked
+
+/-- The unlinked constructor consumes its receiver and preserves the caller's frame and memory. -/
+theorem contract_steps_modelled_call (program : CIL.Program)
+    (caller : program[0]? = some modelledConstructor) (frame : Frame) (memory : Memory)
+    (object : Reference) (args : List Value) (post : Memory → List Value → Prop)
+    (continuation : ∃ fuel final returned,
+      run program fuel 0 2 args frame [] memory = .ok (final, returned) ∧ post final returned) :
+    ∃ fuel final returned,
+      run program fuel 0 1 args frame [.object (.address object)] memory =
+        .ok (final, returned) ∧ post final returned := by
+  cil_contract_steps 1 [caller]
+  exact continuation
+#print axioms contract_steps_modelled_call
+
+/-- `IntPtr.get_Size`, a call the runtime table models. -/
+def nativeSizeGetter : CIL.Extraction.MethodRef :=
+  { owner := .atom CIL.Extraction.runtimeScope "System.IntPtr", name := name!"get_Size",
+    hasThis := false, genericArity := 0, parameters := [],
+    returnType := .atom CIL.Extraction.runtimeScope "System.Int32" }
+
+/-- Two calls of the modelled size getter. Only the second has a link, which enters method 1. -/
+def linkedModelCalls : CIL.Method :=
+  { locals := [], returnsValue := true, links := [(2, .direct 1)],
+    code := [.call nativeSizeGetter {}, .pop, .call nativeSizeGetter {}, .ret] }
+cil_instruction_equations linkedModelCalls
+cil_runtime_models linkedModelCalls
+/-- The method the linked getter call enters; it returns 4, where the model pushes 8. -/
+def fourWord : CIL.Method := { locals := [], returnsValue := true, code := [.ldc_i4 4, .ret] }
+cil_instruction_equations fourWord
+
+/-- A linked site enters its callee although its method has a model, so the run returns the
+    callee's 4 rather than the model's native size. -/
+theorem linked_model_site (memory : Memory) :
+    invoke [linkedModelCalls, fourWord] 10 0 [] memory = .ok (memory, [.scalar (.i32 4)]) := by
+  cil_checked_steps []
+#print axioms linked_model_site
+
+/-- The callee of the linked getter call returns 4 and touches no memory. -/
+def fourContract : MethodContract Unit CIL.W32 where
+  args _ := []
+  results value := [.scalar (.i32 value)]
+  pre _ _ := True
+  footprint _ := []
+  post _ _ _ value := value = 4
+
+/-- Contract stepping runs the unlinked call's model and crosses the linked call with its callee's
+    contract, so the result is the contract's 4 rather than the model's native size. -/
+theorem contract_steps_linked_model_site (program : CIL.Program) (memory : Memory)
+    (caller : program[0]? = some linkedModelCalls) (holds : fourContract.Holds program 1) :
+    ∃ fuel final returned,
+      run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (final, returned) ∧
+        returned = [.scalar (.i32 4)] := by
+  cil_contract_steps [caller, holds, fourContract]
+  obtain rfl := call.post
+  rfl
+#print axioms contract_steps_linked_model_site
+
+-- The stepper enters the model call by its one equation, not by `step_call_eq`, whose rewrite
+-- under the call's continuation the kernel rechecks at every call.
+open Lean in
+run_meta do
+  let info ← getConstInfo ``modelled_then_linked
+  let some proof := info.value? (allowOpaque := true) | throwError "no proof"
+  let used := proof.getUsedConstants
+  for name in [``CIL.Safety.step_call_model, ``CIL.Safety.step_call_direct] do
+    unless used.contains name do throwError "modelled_then_linked does not use {name}"
+
+/-- A return whose list spine depends on the flag. -/
+def conditionalReturn (flag : Bool) : CIL.Method :=
+  { returnsValue := false, locals := [], code := if flag then [.ret, .nop] else [.ret] }
+
+/-- The same body with the return visible at the head. -/
+def leadingReturn (flag : Bool) : CIL.Method :=
+  { returnsValue := false, locals := [], code := .ret :: (if flag then [.nop] else []) }
+
+/-- A program with one conditional body. -/
+def returnProgram (flag : Bool) : CIL.Program := [conditionalReturn flag]
+
+/-- The generated lookup finds the stored body. -/
+@[cil_code] theorem returnProgram_method0 (flag : Bool) :
+    (returnProgram flag)[0]? = some (conditionalReturn flag) := rfl
+#print axioms returnProgram_method0
+
+/-- The preferred lookup exposes the return for both values of the flag. -/
+theorem returnProgram_leading (flag : Bool) :
+    (returnProgram flag)[0]? = some (leadingReturn flag) := by cases flag <;> rfl
+#print axioms returnProgram_leading
+
+/-- A caller can supply the lookup that exposes the return. -/
+theorem supplied_return_steps (flag : Bool) (memory : Memory) :
+    invoke (returnProgram flag) 1 0 [] memory = .ok (memory, []) := by
+  cil_checked_steps [returnProgram_leading flag]
+#print axioms supplied_return_steps
+
+/-- The preferred lookup can describe the indexing function before its position is supplied. -/
+theorem returnProgram_lookup (flag : Bool) :
+    (GetElem?.getElem? (returnProgram flag) : Nat → Option CIL.Method) =
+      (fun index => match index with | 0 => some (leadingReturn flag) | _ + 1 => none) := by
+  funext index
+  cases index with
+  | zero => cases flag <;> rfl
+  | succ => rfl
+#print axioms returnProgram_lookup
+
+section
+attribute [local cil_code high] returnProgram_lookup
+
+/-- Stepping uses the partially applied lookup at method zero. -/
+theorem partial_lookup_return_steps (flag : Bool) (memory : Memory) :
+    invoke (returnProgram flag) 1 0 [] memory = .ok (memory, []) := by
+  cil_checked_steps
+#print axioms partial_lookup_return_steps
+end
+
+attribute [cil_code high] returnProgram_leading
+
+/-- Stepping honors the higher-priority lookup with the flag still symbolic. -/
+theorem conditional_return_steps (flag : Bool) (memory : Memory) :
+    invoke (returnProgram flag) 1 0 [] memory = .ok (memory, []) := by
+  cil_checked_steps
+#print axioms conditional_return_steps
+
+namespace MethodLookup
+
+/-- The immediate return shared by both branches of the program. -/
+def body : CIL.Method := { returnsValue := false, locals := [], code := [.ret] }
+
+/-- Both program lengths have the same first method. -/
+def prog (flag : Bool) : CIL.Program := if flag then [body] else [body, body]
+
+/-- The first method is available before the branch is known. -/
+@[cil_code] theorem prog_method0 (flag : Bool) : (prog flag)[0]? = some body := by
+  cases flag <;> rfl
+#print axioms prog_method0
+
+example (flag : Bool) : (prog flag)[0]? = some body := by cil_lookup [prog]
+
+example (flag : Bool) (memory : Memory) :
+    invoke (prog flag) 1 0 [] memory = .ok (memory, []) := by cil_checked_steps [prog]
+
+section
+attribute [local cil_code] prog
+
+example (flag : Bool) : (prog flag)[0]? = some body := by cil_lookup []
+
+example (flag : Bool) (memory : Memory) :
+    invoke (prog flag) 1 0 [] memory = .ok (memory, []) := by cil_checked_steps
+end
+
+/-- A program with no method at position zero. -/
+def vacant : CIL.Program := []
+
+/-- The lookup equation can certify an absent method. -/
+@[cil_code] theorem vacant_method0 : vacant[0]? = none := rfl
+#print axioms vacant_method0
+
+example : vacant[0]? = none := by cil_lookup_equation
+
+/-- The named result of a successful method lookup. -/
+def hit : Option CIL.Method := some body
+
+/-- A program with a named lookup result. -/
+def singleton : CIL.Program := [body]
+
+/-- The generated equation can state its result by name. -/
+@[cil_code] theorem singleton_method0 : singleton[0]? = hit := rfl
+#print axioms singleton_method0
+
+example : singleton[0]? = hit := by cil_lookup_equation
+
+end MethodLookup
 
 end Tests.Automation

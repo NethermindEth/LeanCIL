@@ -2,7 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include DirectoryLinks.cs
 
 using System.Text.Json;
 using Mono.Cecil;
@@ -24,7 +31,7 @@ var requests = new[]
     new Request(modified, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Modified"), "scalar"),
     new Request(assembly, "Examples", "GenericMethods::Repeated(ulong)", Path.Combine(root, "Arm"), "arm64-advsimd"),
     new Request(assembly, "Examples", "GenericMethods::Repeated(ulong)", Path.Combine(root, "Repeated"), "scalar"),
-    new Request(assembly, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Original"), "x64-sse2"),
+    new Request(assembly, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Original"), "x64-sse42"),
     new Request(assembly, "Examples", "Capabilities::Flags()", Path.Combine(root, "ScalarFlags"), "scalar"),
     new Request(assembly, "Examples", "Capabilities::Flags()", Path.Combine(root, "X64Flags"), "x64-v3"),
     new Request(assembly, "Examples", "Loops::Countdown(uint)", Path.Combine(root, "Loop"), "scalar"),
@@ -48,6 +55,49 @@ Batch("extract", [requests[^1]]);
 Require(File.Exists(Path.Combine(requests[0].Output, "Symbols.lean")), "Expected matching PDB symbols");
 Require(!File.Exists(Path.Combine(requests[1].Output, "Symbols.lean")), "Symbols leaked into another DLL");
 Console.WriteLine("PASS mixed DLLs, profiles, repeated generic specialization and symbol identities match direct extraction");
+
+// Two extractions of one input, in separate processes and separate directories, write the same bytes in every file.
+// A batch in the opposite request order and a reversed --assume-initialized list must not change any file either.
+var determinism = Path.Combine(root, "Determinism");
+Request[] repeated =
+[
+    .. requests,
+    new(assembly, "Examples", "GenericLayouts::Create(ulong,ulong)", "", "scalar"),
+    new(assembly, "Examples", "GenericLayouts::Nested(uint,uint)", "", "x64-v3"),
+    requests[^1] with { InitializedTypes = ["Examples.Word256", "Examples.InitializedTypes"] }
+];
+if (Directory.Exists(determinism)) Directory.Delete(determinism, recursive: true);
+Request[] RunOf(string name, Func<Request, string[]?> initialized) => [.. repeated.Select((request, index) =>
+    request with { Output = Path.Combine(determinism, name + "-" + index), InitializedTypes = initialized(request) })];
+var firstRun = RunOf("first", request => request.InitializedTypes);
+var secondRun = RunOf("second", request =>
+    request.InitializedTypes is { } types ? [.. Enumerable.Reverse(types)] : null);
+var batchRun = RunOf("batch", request => request.InitializedTypes);
+foreach (var request in firstRun.Concat(secondRun))
+    Run([.. Extract("extract", request.Assembly, request.Identity, request.Entry, request.Output, request.Profile),
+        .. (request.InitializedTypes ?? []).SelectMany(type => new[] { "--assume-initialized", type })]);
+Batch("extract", [.. Enumerable.Reverse(batchRun)]);
+string[] writtenFiles = ["Extracted.lean", "Symbols.lean", "identity.json"];
+for (var index = 0; index < repeated.Length; index++)
+{
+    var context = repeated[index].Entry + " (" + repeated[index].Profile + ")";
+    var (first, second, batched) = (firstRun[index].Output, secondRun[index].Output, batchRun[index].Output);
+    Require(FirstDifference(first, second) is null,
+        "Two extractions of " + context + " differ: " + FirstDifference(first, second));
+    Require(FirstDifference(first, batched) is null,
+        "A reversed batch of " + context + " differs: " + FirstDifference(first, batched));
+    var files = Directory.GetFiles(first).Select(path => Path.GetFileName(path)).ToArray();
+    Require(files.Contains("Extracted.lean") && files.Contains("identity.json") && files.All(writtenFiles.Contains),
+        "An extraction of " + context + " wrote unexpected files: " + string.Join(", ", files));
+    // The consumer path splits Extracted.lean into content-addressed components, so equal text must split alike.
+    var (left, right) = (SplitExtractionComponents(File.ReadAllText(Path.Combine(first, "Extracted.lean"))),
+        SplitExtractionComponents(File.ReadAllText(Path.Combine(second, "Extracted.lean"))));
+    Require(left.Aggregate == right.Aggregate && left.Sources.Count == right.Sources.Count &&
+        left.Sources.All(pair => right.Sources.TryGetValue(pair.Key, out var text) && text == pair.Value),
+        "Components of " + context + " differ between two extractions");
+}
+Console.WriteLine("PASS repeated, reversed-batch and reordered-assumption extractions write identical " +
+    "files and components");
 
 var generated = Path.Combine(requests[0].Output, "Extracted.lean");
 var source = File.ReadAllText(generated);
@@ -81,6 +131,31 @@ using (var verification = new Program())
     }
     Require(rejected, "Generated verification accepted aliased output directories");
 }
+// Two requests writing one directory, one through a link, would overwrite each other's extraction.
+var throughLink = Path.Combine(Path.GetTempPath(), "leancil-batch-link-" + Guid.NewGuid().ToString("N"));
+if (TryLinkDirectory(throughLink, root))
+{
+    try
+    {
+        var linked = Path.Combine(throughLink, Path.GetFileName(duplicates[0].Output));
+        Reject("extract", [duplicates[0], duplicates[1] with { Output = linked }], "outputs must be distinct");
+        using var verification = new Program();
+        var rejected = false;
+        try
+        {
+            verification.VerifyGeneratedBatch(assembly, "Examples",
+                [new(requests[0].Entry, "unused.lean", duplicates[0].Output),
+                    new(requests[1].Entry, "unused.lean", linked)]);
+        }
+        catch (ArgumentException error) when (error.Message == "Batch outputs must be distinct")
+        {
+            rejected = true;
+        }
+        Require(rejected, "Generated verification accepted an output reached through a link");
+    }
+    finally { Directory.Delete(throughLink); }
+}
+else Console.WriteLine("SKIP batch outputs through a link: no directory link or junction could be made");
 var invalid = requests[0] with { Entry = "Missing::Method()", Output = Path.Combine(root, "Invalid") };
 var never = requests[0] with { Output = Path.Combine(root, "Never") };
 Reject("extract", [requests[0], invalid, never], "Missing::Method()");

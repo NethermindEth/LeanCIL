@@ -17,21 +17,26 @@ theorem home_slots : (argumentHomeIndex [2, 0, 2] 5)[2]? = some 5 ∧
     (argumentHomeIndex [2, 0, 2] 5)[1]? = none := by decide +kernel
 #print axioms home_slots
 
-/-- Indexed argument validation rejects missing arguments, incorrect slots and short masks. -/
+/-- Indexed argument validation accepts a store to a homed argument and rejects missing
+    arguments, incorrect indexes, a store to the home slot and short masks. -/
 theorem argument_bounds :
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
+      [true] [.starg 0] = true ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 1]⟩ [1]
-      [true] [.setLocal 0] = false ∧
+      [true] [.starg 1] = false ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
-      [true] [.setLocal 1] = false ∧
+      [true] [.starg 1] = false ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
-      [] [.setLocal 0] = false := by decide +kernel
+      [true] [.stloc 0] = false ∧
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
+      [] [.starg 0] = false := by decide +kernel
 #print axioms argument_bounds
 
-/-- Pruned instructions must remain unsupported, even when their indexes are invalid. -/
+/-- Pruned instructions must be holes, even when their indexes are invalid. -/
 theorem pruned_argument :
     argumentInstructionsValid ⟨[], [], [.load 99]⟩ []
-      [false] [.unsupported "dead"] = true ∧
-    argumentInstructionsValid ⟨[], [], [.load 99]⟩ [] [false] [.arg 99] = false := by
+      [false] [.unadmitted 0x0E] = true ∧
+    argumentInstructionsValid ⟨[], [], [.load 99]⟩ [] [false] [.ldarg 99] = false := by
   decide +kernel
 #print axioms pruned_argument
 /-- A minimal raw body for metadata-only validation. -/
@@ -53,31 +58,50 @@ theorem opaque_edges : opaqueLocalIndices { raw with
   decide +kernel
 #print axioms opaque_edges
 
-/-- A one-byte unsigned static field descriptor. -/
-def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, "", 1, false⟩
-
 /-- The matching raw static field load. -/
 def load : RawInstruction :=
-  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") true⟩
+  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") name!"Value" true⟩
+
+/-- The field `load` names. -/
+def loaded : FieldRef :=
+  { owner := .void, index := 0, type := .atom runtimeScope "System.Byte", name := name!"Value" }
+
+/-- A one-byte unsigned static field descriptor of `loaded`. -/
+def descriptor : StaticDescriptor := ⟨0, loaded, [0], none, some false, 1, false⟩
 
 /-- An emitted scalar load with caller-provided static metadata. -/
 def body (sites : List (Nat × StaticDescriptor)) : Method := {
-  code := [.memory (.staticValue [0])], locals := [], returnsValue := false, staticSites := sites }
+  code := [.ldsfld loaded], locals := [], returnsValue := false, staticSites := sites }
 
 /-- Duplicate static sites use the first descriptor, rather than overwriting it. -/
 theorem first_static_wins :
-    methodShapeInstructions [] { raw with code := [load] }
+    methodShapeInstructions { raw with code := [load] }
       (body [(0, descriptor), (0, { descriptor with scalar := some true })]) = true ∧
-    methodShapeInstructions [] { raw with code := [load] }
+    methodShapeInstructions { raw with code := [load] }
       (body [(0, { descriptor with scalar := some true }), (0, descriptor)]) = false := by
   decide +kernel
 #print axioms first_static_wins
 
+/-- A scalar static load with matching enum identities and a descriptor of the given width. -/
+private def enumLoad (name : String) (width : Nat) (scalar : Option Bool := some false) : Bool :=
+  let field := { loaded with type := .enum "E" (.atom runtimeScope name) }
+  let operand := RawOperand.field field.owner field.index field.type field.name true
+  let site := { descriptor with field, bytes := List.replicate width 0, scalar }
+  methodShapeInstructions { raw with code := [{ load with operand }] }
+    { body [(0, site)] with code := [.ldsfld field] }
+
+/-- The load admits an Int32 enum and rejects Boolean, Char and native integer bases. -/
+theorem staticEnumNeedsInteger :
+    [enumLoad "System.Boolean" 1, enumLoad "System.Char" 2, enumLoad "System.IntPtr" 8,
+      enumLoad "System.Boolean" 1 none, enumLoad "System.Int32" 4] =
+      [false, false, false, false, true] := by decide +kernel
+#print axioms staticEnumNeedsInteger
+
 /-- Missing raw instructions, absent descriptors and wrong raw opcodes cannot pass. -/
 theorem missing_static_rejects :
-    methodShapeInstructions [] raw (body [(0, descriptor)]) = false ∧
-    methodShapeInstructions [] { raw with code := [load] } (body []) = false ∧
-    methodShapeInstructions [] { raw with code := [{ load with opcode := 0 }] }
+    methodShapeInstructions raw (body [(0, descriptor)]) = false ∧
+    methodShapeInstructions { raw with code := [load] } (body []) = false ∧
+    methodShapeInstructions { raw with code := [{ load with opcode := 0 }] }
       (body [(0, descriptor)]) = false := by decide +kernel
 #print axioms missing_static_rejects
 

@@ -18,9 +18,9 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
   cases source <;> simp [Except.bind]
 
 /-- Managed dispatch produces a next step or child invocation, never a method return. -/
-private theorem managedStep_not_returned (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
-    (stack : List Value) (memory final : Memory) (values : List Value) :
-    managedStep operation pc frame stack memory ≠ .ok (.returned values final) := by
+private theorem managedStep_not_returned (operation : CIL.ManagedOp) (link : Option CIL.Link)
+    (pc : Nat) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value) :
+    managedStep operation link pc frame stack memory ≠ .ok (.returned values final) := by
   intro executed
   unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
@@ -29,16 +29,21 @@ private theorem managedStep_not_returned (operation : CIL.ManagedOp) (pc : Nat) 
 
 set_option maxHeartbeats 400000 in
 /-- A successful return has its declared arity and exposes no unspecified SIMD lanes. -/
-theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.length = (if body.returnsValue then 1 else 0) ∧
       values.any Value.hasUnspecified = false := by
-  unfold step at executed
+  unfold step observedCall referenceCompareCall referenceSubtractCall newobjStep
+    constructAggregate constructObject at executed
   dsimp only at executed
+  generalize narrowing : body.returnNarrow = narrow at executed
   repeat' first
-    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ executed)
+    | unfold returnFrom at executed
+    | unfold localAllocation at executed
+    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ _ executed)
+    | solve | (obtain ⟨_, _, _, returned, _⟩ := modelStep_frame executed; cases returned)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
           reduceCtorEq, and_false, exists_false] at executed
@@ -49,18 +54,19 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Na
       simp_all [observerCount, unspecifiedOperands, List.take_of_length_le,
         Value.hasUnspecified, CIL.Value.hasUnspecified]
     | solve |
-        simp_all only [reduceCtorEq, implies_true, Bool.or_false, Bool.not_eq_true,
+        simp_all only [reduceCtorEq, implies_true, Bool.not_eq_true,
           List.reverse_cons, List.reverse_nil, List.nil_append, List.length_cons,
           List.length_nil, Nat.zero_add, ↓reduceIte, List.any_cons, Value.hasUnspecified,
           CIL.Value.hasUnspecified, List.any_nil, Bool.or_self, and_self]
     | cases executed
+    | unfold initializeSpanHome at executed
     | obtain ⟨_, _, executed⟩ := bind_success.mp executed
     | simp only [Bind.bind, Pure.pure, Except.pure] at executed
 
 #print axioms step_return_properties
 
 /-- A checked return has the arity declared by its actual method body. -/
-theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_return_length (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
@@ -95,7 +101,7 @@ theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body :
 #print axioms run_return_length
 
 /-- Successful returns never expose unspecified SIMD lanes. -/
-theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_return_known (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
@@ -120,25 +126,43 @@ theorem invoke_return_known {program : CIL.Program} {fuel method : Nat}
 #print axioms invoke_return_known
 
 /-- A successful ordinary call exposes only fully specified arguments. -/
-theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
+theorem step_call_known {body : CIL.Method} {method : Extraction.MethodRef}
+    {prefixes : CallPrefixes} {callee pc : Nat}
     {args stack arguments rest : List Value} {frame : Frame} {memory final : Memory}
-    (executed : step body (.call callee argc) pc args frame stack memory =
+    (executed : step body (.call method prefixes) pc args frame stack memory =
       .ok (.call callee arguments rest final)) :
     arguments.any Value.hasUnspecified = false := by
-  simp only [step, observerCount, Bool.or_false] at executed
+  simp only [step] at executed
   split at executed
   · cases executed
-  · rename_i known
-    split at executed
+  split at executed
+  · split at executed
     · cases executed
-    · cases checked : (stack.take argc).reverse.mapM (checkedValue memory) with
-      | error fault => simp [checked, Bind.bind, Except.bind] at executed
-      | ok checkedArgs =>
-        simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure,
-          Except.ok.injEq, FrameAction.call.injEq] at executed
-        obtain ⟨_, rfl, rfl, rfl⟩ := executed
-        rw [(checkedValues_valid _ _ _ checked).1]
-        simpa [unspecifiedOperands] using known
+    · obtain ⟨_, _, _, called, _⟩ := modelStep_frame executed
+      cases called
+  rename_i link _
+  unfold observedCall at executed
+  split at executed
+  · cases executed
+  rename_i known
+  cases link <;> try (first | (cases executed; done) | (simp at executed; done))
+  dsimp only at executed
+  split at executed
+  · split at executed
+    · cases executed
+    · cases checked : stack.reverse.mapM (callArgument frame memory) <;>
+        simp [checked, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  split at executed
+  · cases executed
+  · cases checked :
+        (stack.take method.argumentCount).reverse.mapM (callArgument frame memory) with
+    | error fault => simp [checked, Bind.bind, Except.bind] at executed
+    | ok checkedArgs =>
+      simp only [checked, Bind.bind, Except.bind, Pure.pure, Except.pure,
+        Except.ok.injEq, FrameAction.call.injEq] at executed
+      obtain ⟨_, rfl, rfl, rfl⟩ := executed
+      rw [callArguments_hasUnspecified checked]
+      simpa [unspecifiedOperands] using known
 
 #print axioms step_call_known
 end CIL.Safety

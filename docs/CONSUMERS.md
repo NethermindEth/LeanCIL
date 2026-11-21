@@ -146,7 +146,7 @@ included.
 
 `program` compares the method bodies of the variant's `Extracted.lean` with those of production's
 extraction, or of the `programOf` variant's, for the same gate and profile: `same` when the bodies
-and the method signatures are equal, `renamed` when only the signatures differ, `different`
+(for a method defined from its decoder, its raw definition) and the method signatures are equal, `renamed` when only the signatures differ, `different`
 otherwise. Assembly identities, digests, paths and metadata tokens are ignored. A comparison that
 does not hold fails the variant at stage `program comparison`, and its proof is not checked.
 
@@ -167,23 +167,33 @@ proof.
 import Extracted
 import CIL.Safety.MethodContract
 open CIL.Safety
-theorem Witness.refuted : ¬ ∀ (left right : CIL.W64) (memory : Memory),
-    ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
-      memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
-  intro holds
-  obtain ⟨fuel, ran⟩ := holds @LEFT@ @RIGHT@ Memory.empty
-  have returned := congrArg Prod.snd (invoke_ok_unique ran (rfl : invoke Extracted.program 16 0
-    [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _))
-  revert returned
-  decide
+/-- Production's contract: the wrapping sum, with caller memory unchanged. -/
+def Witness.contract : MethodContract (CIL.W64 × CIL.W64) where
+  args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+  pre _ _ := True
+  footprint _ := []
+  post input initial final values :=
+    final = initial ∧ values = [.scalar (.i64 (input.1 + input.2))]
+/-- The witness inputs make the extracted method return other than their wrapping sum. -/
+theorem Witness.refuted : Witness.contract.Refuted Extracted.program 0 :=
+  .of_return (input := (@LEFT@, @RIGHT@)) (initial := Memory.empty) trivial
+    (rfl : invoke Extracted.program 16 0 [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _)
+    (by rintro ⟨-, out, rfl, -, wrong⟩; revert wrong; decide)
 ```
+
+Production's theorem states `MethodContract.Holds`, `OutcomeContract.Holds` or
+`OutcomeContract.HoldsCLR` of a contract, and a refutation states the matching `Refuted` with
+the same arguments: a definite counterexample, as in
+[Refute a contract](PROOFS-CONTRACTS.md#refute-a-contract). A gate whose production theorem states
+anything else has no refutation to compare, so each of its `rejected` variants fails at stage
+`statement identity`.
 
 A variant passes as follows:
 
 | `expect` | Passes when |
 | --- | --- |
 | `certifies` | Its proof verifies against its extraction, as for production, at production's statement unless `statement` is `independent`. |
-| `rejected` | Its refutation verifies against its extraction, with the same kernel replay and axiom audit as any theorem, at the negation of production's statement, and its proof fails at proof checking. |
+| `rejected` | Its refutation verifies against its extraction, with the same kernel replay and axiom audit as any theorem, at the `Refuted` form of production's contract statement, and its proof fails at proof checking. |
 | `unchanged` | Its program comparison holds. No proof is requested. |
 
 A build, extraction, program comparison or template failure, a missing proof, and a proof whose
@@ -198,7 +208,8 @@ Production's theorem audit reports its statement `T` as a term in which each con
 the module that declares it, and a definition or theorem of production's own proof file is
 replaced by its value. Production verifies first; the variants compared with it verify in a
 second batch, where the theorem audit decodes `T` in the variant's replayed environment and the
-kernel checks the variant's theorem, or its refutation, at `T` or `¬ T`. The check is
+kernel checks the variant's theorem at `T`, or its refutation at `T` with the contract's `Holds`
+replaced by its `Refuted`. The check is
 structural first and then definitional, so a variant may state `T` through definitions, such as
 `Extracted.entryIndex` for `0`, that unfold to the same term. A constant of `T` that the variant's
 environment lacks, or declares in another module, fails the check, and so does a check that
@@ -646,15 +657,16 @@ leancil verify-batch requests.json [--check] [--fresh] [--rebuild-library] [--tr
   "proofRoot": ".",
   "requests": [
     { "output": "artifacts/Add", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness" },
-    { "output": "artifacts/Mutant", "proof": "proofs/Refutation.lean", "theorem": "Mutant.refuted" },
-    { "output": "artifacts/Mutant", "proof": "proofs/Add.lean", "theorem": "MyProof.correctness", "expect": "rejected" }
+    { "output": "artifacts/Mutant", "proof": "proofs/Refutation.lean", "theorem": "Mutant.refuted",
+      "expect": "rejected", "refutes": 0 }
   ]
 }
 ```
 
 Paths are relative to the manifest. Each `output` is an extraction directory written by
 `leancil extract` and must lie outside the consumer sources (for example under `artifacts/`).
-A request's optional `expect` is `verified` (the default) or `rejected`. Unknown manifest
+A request's optional `expect` is `verified` (the default) or `rejected`; a `rejected` request
+names in `refutes` the index, from 0, of a `verified` request of the same manifest. Unknown manifest
 properties are rejected. `verify-batch` does not extract again: an output whose assembly changed
 is reported as a stale input.
 
@@ -682,9 +694,15 @@ expectation.
   workspace cleanup. Requests that share work can finish together, so do not sum these times as
   independent costs. Normal verification and compile checks report the same measure.
 
-A request with `"expect": "rejected"` passes only when its proof fails during proof checking
-with unchanged inputs and an intact extraction. It stops there, never writes a certificate,
-removes any earlier `verified.json` and writes `failed.json` describing the rejection.
+A request with `"expect": "rejected"` passes only when its theorem is a verified refutation of the
+contract that the request it `refutes` proves: the counterexample predicate
+(`MethodContract.Refuted`) of that request's `Holds` statement, accepted by the kernel and bound
+to a method of the rejected request's own extraction. Requests it refutes run first, in the same
+session. Its line reads `PASS rejected` with the refuted contract and method signature. A failed
+extraction, a proof that does not build, a refutation of another contract, a theorem that states
+no counterexample predicate or a target that did not verify fails it, and the `FAIL` line ends
+with `no verified refutation of request N`. A failed refutation removes its `verified.json` and
+writes `failed.json`.
 
 The session takes one source snapshot, restores certified support once and checks each
 extraction's integrity. Requests share work as follows:
@@ -923,8 +941,8 @@ compose.
 
 An export that can run after its tables are loaded, including a repeated call, should take
 `StaticWorldValid published memory` as its precondition and restate it for the final memory in
-its postcondition. `published` lists literal descriptors (identity, assembly identity, field
-name and bytes) in an interface module. A published descriptor that differs from the extracted
+its postcondition. `published` lists literal descriptors (identity, the field as the reading
+instruction names it, and bytes) in an interface module. A published descriptor that differs from the extracted
 one leaves the author proof unprovable, so no separate equality audit is needed.
 `StaticIdentitiesAbsent` suits only a first-use contract: after the first call the field is
 loaded and the premise is false.

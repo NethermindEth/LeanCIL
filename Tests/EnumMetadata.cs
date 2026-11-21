@@ -2,6 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -13,9 +19,11 @@ var begin = enumTypes.GetMethod("BeginScope", flags)!;
 var arrays = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!;
 var descriptor = arrays.GetMethod("Storage", flags)!;
 var runtime = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
-var span = runtime.GetMethod("ElementSpan", flags)!;
-var spanOperations = runtime.GetMethod("BuildSpanOperations", flags)!;
-using var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll"));
+var span = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("Member", flags)!;
+var staticSpan = runtime.GetMethod("StaticSpanModel", flags)!;
+var constructor = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("ConstructorOperation", flags)!;
+using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
+var module = pinned.Module;
 var owner = module.GetType("Examples.EnumBuffers");
 var element = owner.NestedTypes.Single(type => type.Name == "Small");
 var field = element.Fields.Single(field => !field.IsStatic);
@@ -24,7 +32,13 @@ var getter = (MethodReference)owner.Methods.Single(method => method.Name == "Rea
 
 IDisposable Scope() => (IDisposable)begin.Invoke(null, null)!;
 object Describe() => descriptor.Invoke(null, [element, null])!;
-string Span() => (string)span.Invoke(null, [getter, "scalar"])!;
+// The width of the span item the getter models, read from the operation and not from its rendering.
+int ItemWidth()
+{
+    var item = span.Invoke(null, [getter, "scalar"]);
+    return item?.GetType().Name == "SpanItem" ? Width(item)
+        : throw new InvalidOperationException("The getter is not a span item");
+}
 int Width(object value) => (int)value.GetType().GetProperty("Width")!.GetValue(value)!;
 void Reject(string reason)
 {
@@ -45,20 +59,31 @@ using (Scope())
     for (var index = 0; index < 1000; index++)
         if (!ReferenceEquals(original, Describe()))
             throw new InvalidOperationException("Enum descriptor was not reused within a request");
-    if (Width(original) != 1 || Span() != ".memory (.spanItem 1)")
+    if (Width(original) != 1 || ItemWidth() != 1)
         throw new InvalidOperationException("Wrong initial enum storage");
 
     var aggregate = module.GetType("Examples.AggregateArrays").NestedTypes.Single(type => type.Name == "Pair");
     var vector = ((ArrayType)module.GetType("Examples.AggregateArrays").Methods
         .Single(method => method.Name == "ReadVector").Parameters[0].ParameterType).ElementType;
+    var words = module.GetType("Examples.SpanTables").Methods.Single(method => method.Name == "get_Words");
+    var create = (GenericInstanceMethod)words.Body.Instructions.Single(instruction =>
+        instruction.Operand is GenericInstanceMethod).Operand;
+    var arrayMethod = module.GetType("Examples.MemorySpans").Methods
+        .Single(method => method.Name == "ArrayConstructor");
+    var arrayConstructor = arrayMethod.Body.Instructions.Select(instruction => instruction.Operand)
+        .OfType<MethodReference>().Single(reference => reference.Name == ".ctor");
     foreach (var (type, admitted) in new[]
         { (module.TypeSystem.Int32, true), ((TypeReference)element, true), (aggregate, false), (vector, false) })
     {
-        var operations = (Dictionary<string, string>)spanOperations.Invoke(null, [type, "scalar"])!;
-        var createsStaticSpan = operations.Keys.Any(name =>
-            name.Contains("System.Runtime.CompilerServices.RuntimeHelpers::CreateSpan<", StringComparison.Ordinal));
-        if (createsStaticSpan != admitted ||
-            !operations.Values.Any(operation => operation.StartsWith(".memory (.arraySpan ", StringComparison.Ordinal)))
+        var spanOwner = new GenericInstanceType(((GenericInstanceType)arrayConstructor.DeclaringType).ElementType);
+        spanOwner.GenericArguments.Add(type);
+        var arrayCall = new MethodReference(".ctor", module.TypeSystem.Void, spanOwner) { HasThis = true };
+        arrayCall.Parameters.Add(new ParameterDefinition(arrayConstructor.Parameters[0].ParameterType));
+        var call = new GenericInstanceMethod(create.ElementMethod);
+        call.GenericArguments.Add(type);
+        var createsStaticSpan = staticSpan.Invoke(null, [call, "scalar"]) is not null;
+        var createsArraySpan = constructor.Invoke(null, [arrayCall, "scalar"])?.GetType().Name == "ArraySpan";
+        if (createsStaticSpan != admitted || !createsArraySpan)
             throw new InvalidOperationException("Static and supplied array span admission were conflated: " + type.FullName);
     }
 }
@@ -66,7 +91,7 @@ field.FieldType = module.TypeSystem.Int32;
 using (Scope())
 {
     var changed = Describe();
-    if (ReferenceEquals(original, changed) || Width(changed) != 4 || Span() != ".memory (.spanItem 4)")
+    if (ReferenceEquals(original, changed) || Width(changed) != 4 || ItemWidth() != 4)
         throw new InvalidOperationException("New request reused an old enum width or span signature table");
 }
 field.FieldType = module.TypeSystem.Boolean;

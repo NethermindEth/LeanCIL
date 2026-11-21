@@ -1,7 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include ContractVariants.cs
 
 using System.Reflection;
 using System.Runtime.Loader;
@@ -58,9 +64,10 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
     queue.Add(new($"Arithmetic::{name}({parameters})", proof, output), () =>
     {
         var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-        if (name is "Calls" or "Mutate" && !extracted.Contains(".call "))
+        // A compiled call's target is the direct link at its pc.
+        if (name is "Calls" or "Mutate" && !extracted.Contains(" : Link := .direct ", StringComparison.Ordinal))
             throw new InvalidOperationException($"{name} no longer exercises compiled method calls");
-        if (name == "Mutate" && !extracted.Contains(".newAggregate "))
+        if (name == "Mutate" && !extracted.Contains(": Link := .aggregate "))
             throw new InvalidOperationException("Mutate no longer exercises struct construction");
         cases += claims.Count;
         Console.WriteLine($"PASS F# {name}: {claims.Count} runtime comparisons");
@@ -79,19 +86,28 @@ foreach (var (selector, contract, name) in new[]
 
 queue.Flush();
 
-var wrongOutput = Path.Combine(root, "WrongAddition");
-var failed = false;
-try
-{
-    verification.Verify(assembly, "Examples.FSharp", "Arithmetic::WrongAdd(ulong,ulong)",
-        At("Examples/Proofs/Add.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect F# addition accepted");
+verification.VerifyContractVariant(assembly, "Examples.FSharp", "Arithmetic::Add(ulong,ulong)",
+    Path.Combine(root, "AdditionContract"), assembly, "Arithmetic::WrongAdd(ulong,ulong)",
+    Path.Combine(root, "WrongAddition"), """
+    /-- Addition returns the wrapping sum and preserves caller memory. -/
+    def addition : MethodContract (W64 × W64) W64 where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input initial final value := final = initial ∧ value = input.1 + input.2
+    """, """
+    /-- The compiled F# addition meets the contract for every pair of words. -/
+    theorem correctness : addition.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      exact MethodContract.Holds.intro memory (left + right) ⟨4, rfl⟩ (Confined.refl _ _) ⟨rfl, rfl⟩
+    """, """
+    /-- Subtraction at (0, 1) returns the largest word. The addition contract requires one. -/
+    theorem correctness : addition.Refuted Extracted.program 0 :=
+      .of_return (input := (0, 1)) (initial := Memory.empty) trivial
+        (rfl : invoke Extracted.program 4 0 (addition.args (0, 1)) Memory.empty = .ok _)
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """);
 
 var rejectedOutput = Path.Combine(root, "UnsupportedList");
 var rejected = Execute(Extract("extract", assembly, "Examples.FSharp", "Arithmetic::UnsupportedList(ulong)", rejectedOutput));

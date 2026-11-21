@@ -2,6 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ContractVariants.cs
+#:include StoreReturnVariants.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Buffers.Binary;
@@ -338,19 +345,11 @@ var wrongDll = Fixture("WrongWrite", (module, method) =>
     method.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 });
 var wrongOutput = Path.Combine(root, "WrongWrite");
-var failed = false;
-try
-{
-    verification.Verify(wrongDll, "Examples", "PrimitiveOperations::ReadWrite(int&,int)",
-        At("Examples/Proofs/PrimitiveReadWrite.lean"), wrongOutput);
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Proof.lean") && error.Message.Contains("error:"))
-{
-    failed = true;
-}
-if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
-    throw new InvalidOperationException("Incorrect write accepted");
+verification.VerifyStoreReturn(assembly, "PrimitiveOperations::ReadWrite(int&,int)",
+    At("Examples/Proofs/PrimitiveReadWrite.lean"),
+    wrongDll, "PrimitiveOperations::ReadWrite(int&,int)", wrongOutput, 32);
 
 queue.Flush();
 
 Console.WriteLine($"Primitive operation proofs passed: {cases} cases; incorrect write rejected.");
+Run(["dotnet", "run", "--file", At("Tests/Strings.cs")], streamOutput: true, progress: "Strings as opaque references");

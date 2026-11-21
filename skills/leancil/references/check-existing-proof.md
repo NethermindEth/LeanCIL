@@ -26,7 +26,7 @@ Read this when the user has a `.lean` file that imports `Extracted` and states a
 
 ```sh
 dotnet build path/to/Lib.csproj -c Release
-leancil extract path/to/bin/Release/net10.0/Lib.dll 'Type::Method(ulong,ulong)' artifacts/Method [profile]
+leancil extract path/to/bin/Release/net11.0/Lib.dll 'Type::Method(ulong,ulong)' artifacts/Method [profile]
 leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.correctness
 ```
 
@@ -61,5 +61,6 @@ leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean
 ```
 
-Running the same proof against `Arithmetic::WrongAdd(ulong,ulong)`, which subtracts, fails with
-kind `elaboration-error` and the message ``Tactic `rfl` failed``.
+Against `Arithmetic::WrongAdd(ulong,ulong)`, which subtracts, `Examples/Proofs/WrongAdd.lean`
+verifies a refutation of the addition contract: at inputs `(0, 1)` the method returns
+`2^64 - 1`, not `1`.

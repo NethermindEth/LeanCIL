@@ -2,11 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -14,6 +18,8 @@ var root = At("artifacts/NativeManagedDispatch");
 Directory.CreateDirectory(root);
 var dll = Path.Combine(root, "NativeManagedDispatch.dll");
 string selector;
+int loadPc;
+int addPc;
 using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll")))
 {
     var methods = module.GetType("Examples.NativeManagedDispatch").Methods;
@@ -35,21 +41,52 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
     processor.InsertBefore(first, Instruction.Create(OpCodes.Stloc, numeric));
     processor.InsertBefore(first, Instruction.Create(OpCodes.Ldloc, numeric));
     processor.InsertBefore(first, Instruction.Create(OpCodes.Pop));
+    var instructions = dispatch.Body.Instructions;
+    var load = instructions.Single(instruction => instruction.OpCode.Code == Code.Ldind_I);
+    if (load.Previous?.OpCode.Code != Code.Add) throw new InvalidOperationException("Missing native table offset");
+    loadPc = instructions.IndexOf(load);
+    addPc = loadPc - 1;
     selector = dispatch.FullName;
     module.Write(dll);
 }
 var output = Path.Combine(root, "extracted");
 Run(["dotnet", ExtractorPath, "extract", dll, selector, output]);
 var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-if (Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count != 2)
+if (DefinedMethods(source).Length != 2)
     throw new InvalidOperationException("Native dispatch did not retain a bounded cyclic catalog");
 var scalar = NarrowEvidence(source, "method0_scalars_validated");
-var proof = source + "\n" + CheckedEvidenceControl(source, scalar, ["method0_scalars_validated"], 0) + "\n" + """
+var indirect = SingleLink(source, 0, ".indirect ");
+var decode = $$"""
+
+    open CIL CIL.Extraction in
+    example :
+        let code := Extracted.method0Closed.code
+        let pc := {{indirect.Pc}}
+        let before := rawBefore (fun index => code[index]?) pc
+        ((code[pc]?).bind (Instruction.ofRaw? before) matches
+          some (.managed (.call _ true))) = true := by decide +kernel
+
+    """;
+var control = CheckedEvidenceControl(source, scalar, ["method0_scalars_validated"], 0);
+var proof = $$"""
+{{source}}
+{{decode}}
+{{control}}
+
 open CIL CIL.Safety
 private def nativeSignature : ManagedSignature :=
   ⟨Extracted.method1Closed.returnType, Extracted.method1Closed.parameters⟩
 private def nativeIdentity : ManagedIdentity :=
   ⟨Extracted.method1Closed.owner, Extracted.method1Closed.token, []⟩
+/-- The decoded calli accepts the handler's slot and refuses its identity paired with slot zero. -/
+theorem native_catalog_binding :
+    let records := Extracted.methodEvidence
+    let changed := records.modify 0 fun item => { item with links := item.links.map fun entry =>
+      if entry.1 == {{indirect.Pc}} then (entry.1, .indirect [⟨nativeIdentity, 0⟩]) else entry }
+    let decode := Extraction.decodedProgram? Extracted.profile Extracted.environment
+    decode records = some Extracted.program ∧ decode changed = none := by
+  constructor <;> cil_kernel_rfl
+#print axioms native_catalog_binding
 private def nativeMemory : CIL.Safety.Memory :=
   { allocations := fun index => if index == 0 then
       some { kind := .immutableStatic, layout := ⟨8, 8, []⟩ } else none
@@ -58,7 +95,7 @@ private def nativeMemory : CIL.Safety.Memory :=
     nextIdentity := 1
     staticBindings := [(42, ⟨0, 0⟩)] }
 private def nativeTable : MethodTable :=
-  ⟨nativeSignature, some #[nativeIdentity], some ⟨42, 0⟩⟩
+  ⟨nativeSignature, some #[nativeIdentity], some ⟨42, 0⟩, 1, by decide⟩
 private def nativeRun (table : MethodTable) (index : Nat) (marker : BitVec 64)
     (memory : CIL.Safety.Memory := nativeMemory) :=
   CIL.Safety.invoke Extracted.program 128 0
@@ -72,7 +109,7 @@ theorem native_cycle : (match nativeRun nativeTable 0 0 with
 /-- The same supplied native entry may terminate with its named modeled exception. -/
 theorem native_throw : (match nativeRun nativeTable 0 (-1) with
     | .error fault => some fault.fault | .ok _ => none) =
-      some (.thrown "System.InvalidOperationException") := by decide +kernel
+      some (.thrown .invalidOperation) := by decide +kernel
 #print axioms native_throw
 /-- A numeric local beside the authenticated target keeps its ordinary scalar representation. -/
 theorem numeric_local : Extracted.method0.localKinds[1]? = some .word64 := by decide +kernel
@@ -92,8 +129,10 @@ theorem native_invalid_storage :
 #print axioms native_invalid_storage
 /-- The catalog reauthenticates opaque identities obtained from supplied storage. -/
 theorem native_forged_identity :
-    (nativeRun { nativeTable with targets := some #[{ nativeIdentity with token := 0 }] } 0 0).isOk =
-      false := by decide +kernel
+    (nativeRun
+      { nativeTable with
+        targets := some #[{ nativeIdentity with token := 0 }], counted := by decide }
+      0 0).isOk = false := by decide +kernel
 #print axioms native_forged_identity
 """;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.NativeMethodTables");
@@ -102,15 +141,17 @@ var path = Path.Combine(root, "NativeProof.lean");
 File.WriteAllText(path, proof);
 evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local and storage checks");
 var rejected = new RejectedEvidence(root);
-var load = Regex.Match(scalar, @"(?m)^  \.managed \(\.tableLoad [^\r\n]+$").Value;
-if (load.Length == 0) throw new InvalidOperationException("Missing native table load");
+// The decoder still reads the genuine body when a mutation changes the closed evidence.
+string ChangeRaw(string narrowed, int pc, string field) =>
+    ForgeClosedCode(narrowed, 0, $$"""modify {{pc}} (fun raw => { raw with {{field}} })""");
 foreach (var (name, mutated) in new[]
 {
-    ("signature", scalar.Replace(load, load.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal),
-        StringComparison.Ordinal)),
-    ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
-        StringComparison.Ordinal)),
-    ("offset", scalar.Replace(".managed .tableOffset", ".nativeBinary (.add)", StringComparison.Ordinal)),
+    ("load-kind", ForgeDecodedInstruction(scalar, 0, loadPc, "fun _ => .ldind .i8")),
+    ("raw-load", ChangeRaw(scalar, loadPc, "opcode := 76")),
+    ("emitted-sub", ForgeDecodedInstruction(scalar, 0, addPc, "fun _ => .sub")),
+    ("emitted-add-ovf", ForgeDecodedInstruction(scalar, 0, addPc, "fun _ => .add_ovf")),
+    ("raw-sub", ChangeRaw(scalar, addPc, "opcode := 89")),
+    ("raw-operand", ChangeRaw(scalar, addPc, "operand := .local 0")),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
         ".pointer (.atom Extraction.runtimeScope \"System.Int64\")", StringComparison.Ordinal))
 })
@@ -121,6 +162,19 @@ foreach (var (name, mutated) in new[]
     rejected.Add(rejectedPath, "PASS independently rejected native dispatch evidence: " + name,
         "Extraction.ScalarFlowValid");
 }
+// No emitted instruction carries the table's signature; the call-site check binds the calli signature to the raw
+// operand, so a changed signature is rejected there.
+var calls = NarrowEvidence(source, "method0_calls_validated");
+const string changeCall = """
+    fun op => match op with
+      | .managed (.call signature tail) => .managed (.call { signature with result := .void } tail)
+      | _ => op
+    """;
+var changedCalls = ForgeDecodedInstruction(calls, 0, indirect.Pc, changeCall.ReplaceLineEndings(" "));
+var signaturePath = Path.Combine(root, "Rejected-call-signature.lean");
+File.WriteAllText(signaturePath, changedCalls);
+rejected.Add(signaturePath, "PASS independently rejected native dispatch evidence: call-signature",
+    "ManagedCallsValid");
 var numericDll = Path.Combine(root, "NumericTarget.dll");
 using (var module = ModuleDefinition.ReadModule(dll))
 {
@@ -139,10 +193,10 @@ using (var module = ModuleDefinition.ReadModule(dll))
 {
     var dispatch = module.GetType("Examples.NativeManagedDispatch").Methods.Single(method => method.Name == "Dispatch");
     var addition = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Add);
-    var tableLoad = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
+    var tableArgument = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
     var processor = dispatch.Body.GetILProcessor();
-    processor.Remove(tableLoad);
-    processor.InsertBefore(addition, tableLoad);
+    processor.Remove(tableArgument);
+    processor.InsertBefore(addition, tableArgument);
     module.Write(commutedDll);
 }
 var commutedOutput = Path.Combine(root, "Commuted");
@@ -164,9 +218,7 @@ theorem commuted_native_kind :
 #print axioms commuted_native_kind
 """);
 evidence.Add(commutedProof, "PASS commuted native table extraction, certificate and exact offset kinds");
-var wrongAddition = commutedScalar.Replace("opcode := 88, operand := .none",
-    "opcode := 89, operand := .none", StringComparison.Ordinal);
-if (wrongAddition == commutedScalar) throw new InvalidOperationException("Missing commuted native addition");
+var wrongAddition = ChangeRaw(commutedScalar, addPc, "opcode := 89");
 var wrongAdditionPath = Path.Combine(root, "Rejected-CommutedAddition.lean");
 File.WriteAllText(wrongAdditionPath, wrongAddition);
 rejected.Add(wrongAdditionPath, "PASS independently rejected commuted subtraction evidence",

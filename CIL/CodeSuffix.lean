@@ -9,13 +9,15 @@ method would cost time quadratic in its length. The command instead names the su
 code at each block boundary, proves each named suffix from the one before it with `advance`,
 and proves each instruction from the suffix that starts its block with `lookup`. No proof
 then walks more than one block, and the equations cost time linear in the method's length.
+The lemmas hold for any list; `cil_resolution_facts` reads parameter types, parameter homes and
+layout lists through named suffixes the same way.
 -/
 
 namespace CIL.CodeSuffix
 
-variable {code suffix next : List Op} {start : Nat}
+variable {α : Type} {code suffix next : List α} {start : Nat}
 
-/-- Dropping `count` more instructions from the suffix at `start` leaves the suffix at
+/-- Dropping `count` more elements from the suffix at `start` leaves the suffix at
     `start + count`. -/
 theorem advance (count : Nat) (placed : code.drop start = suffix)
     (rest : suffix.drop count = next) : code.drop (start + count) = next := by
@@ -24,9 +26,9 @@ theorem advance (count : Nat) (placed : code.drop start = suffix)
 /-- info: 'CIL.CodeSuffix.advance' depends on axioms: [propext] -/
 #guard_msgs in #print axioms advance
 
-/-- The instruction at `index` of the suffix at `start` is the code's instruction at
+/-- The element at `index` of the suffix at `start` is the list's element at
     `start + index`. -/
-theorem lookup {op : Op} (index : Nat) (placed : code.drop start = suffix)
+theorem lookup {op : α} (index : Nat) (placed : code.drop start = suffix)
     (found : suffix[index]? = some op) : code[start + index]? = some op := by
   rw [← placed, List.getElem?_drop] at found
   exact found

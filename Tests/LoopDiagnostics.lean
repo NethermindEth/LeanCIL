@@ -1,6 +1,7 @@
 import CIL.Safety.LoopScaffold
 import CIL.Safety.Execution
 import CIL.Observe
+import Tests.Support
 
 /-! Loop stepping over a struct local, and over an int local and a call through a contract with
 a footprint in a caller buffer, with the facts gathered by default, and the failures that name
@@ -14,19 +15,42 @@ open CIL (W32)
 /-- A struct of two 32-bit fields: `count` at offset 0 and `sum` at offset 4. -/
 def layout : CIL.AggregateLayout := ⟨8, [⟨0, 4, false⟩, ⟨4, 4, false⟩]⟩
 
+/-- The type token for the two-field loop counter. -/
+def tallyType : CIL.Extraction.TypeExpr := .aggregate "Tally" 0
+
+/-- The storage metadata for the counter's two words. -/
+private def tallyEnvironment : CIL.LayoutEnvironment := {
+  rawLayouts := [{
+    identity := "Tally", explicit := false, packing := 0, declaredSize := 0
+    fields := [⟨.unsigned32, none⟩, ⟨.unsigned32, none⟩] }]
+  layouts := #[⟨layout, 4⟩] }
+
+def tallyCount : CIL.Extraction.FieldRef :=
+  { owner := tallyType, index := 0, name := name!"Count",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+
+def tallySum : CIL.Extraction.FieldRef :=
+  { owner := tallyType, index := 1, name := name!"Sum",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+
+cil_field_shape tallyEnvironment tallyCount
+cil_field_shape tallyEnvironment tallySum
+
 /-- The layout's fields are in bounds and apart. -/
 theorem layout_valid : layout.Valid := by decide +kernel
 
 /-- `for (t = default; t.count != value; t.count++) t.sum = addTwo(t.sum); return t.sum;` -/
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
-  code := [.localAddr 0, .initAggregate 8, .branch 14, .localAddr 0, .local 0, .fieldAt 4 4,
-    .call 1 1, .setFieldAt 4 4, .localAddr 0, .local 0, .fieldAt 0 4, .const32 1, .add,
-    .setFieldAt 0 4, .local 0, .fieldAt 0 4, .arg 0, .bne 3, .local 0, .fieldAt 4 4, .ret] }
+  environment := tallyEnvironment
+  code := [.ldloca 0, .initobj tallyType, .br 14, .ldloca 0, .ldloc 0, .ldfld tallySum,
+    .call (Tests.callee 1) {}, .stfld tallySum, .ldloca 0, .ldloc 0, .ldfld tallyCount, .ldc_i4 1, .add,
+    .stfld tallyCount, .ldloc 0, .ldfld tallyCount, .ldarg 0, .bne_un 3, .ldloc 0, .ldfld tallySum, .ret]
+  links := [(6, .direct 1)] }
 
 /-- `return x + 2;` -/
 @[cil_code] def addTwo : CIL.Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .const32 2, .add, .ret] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .ldc_i4 2, .add, .ret] }
 
 /-- The program, with `tally` calling `addTwo` as method 1. -/
 @[cil_code] def program : CIL.Program := [tally, addTwo]
@@ -57,7 +81,7 @@ abbrev State (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `count` on the stack. -/
 bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
     (state : State memory home) :=
-  tally matching (fun op => op matches .bne _) with entry.frame memory home,
+  tally matching (fun op => op matches .bne_un _) with entry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values.1)], state.memory
 
 /-- The frame lemmas compose by hand: the struct's zeroing and stores are named, the call is
@@ -73,6 +97,7 @@ theorem doubles (memory : Memory) (value : W32) (wellFormed : memory.WellFormed)
     (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
   · obtain ⟨zeroed, zeroing, frame, -⟩ :=
       (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+    have zeroTally := zeroing tally tallyType rfl
     exact loop_reaches_terminates (target := header memory value home ⟨(0, 0), zeroed, frame⟩)
       (by cil_loop_steps) (start _ rfl)
   rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
@@ -140,6 +165,42 @@ theorem doubles_by_default (memory : Memory) (value : W32) (wellFormed : memory.
       bv_omega
 #print axioms doubles_by_default
 
+/-- A contract held by a structure whose parameters name it, as a decoded summary holds one. -/
+structure HeldContract (contract : MethodContract W32 W32) (index : Nat) : Prop where
+  /-- The contract of the method at `index`. -/
+  holds : contract.Holds program index
+
+/-- `cil_loop_call` reads the contract of a projection, whose type names it through the
+    structure's parameters, and unfolds its footprint as for a named contract proof. -/
+theorem doubles_through_projection (held : HeldContract addTwoContract 1) (memory : Memory)
+    (value : W32) (wellFormed : memory.WellFormed) :
+    ∃ fuel final, invoke program fuel 0 [.scalar (.i32 value)] memory =
+      .ok (final, [.scalar (.i32 (2 * value))]) ∧
+      MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
+  refine invoke_loop_induction (by rfl) rfl enter.setup (header memory value home)
+    (fun state => state.values.2 = 2 * state.values.1)
+    (fun state => (value - state.values.1).toNat) (fun start => ?_) ?_
+  · cil_loop_recurse start (0, 0)
+    rfl
+  rintro ⟨⟨count, sum⟩, current, frame⟩ doubled recurse
+  dsimp only at doubled
+  by_cases done : count = value
+  · subst done
+    rw [← doubled]
+    cil_loop_finish
+  · cil_loop_advance
+    cil_loop_call held.holds sum
+    cil_loop_recurse recurse (count + 1, sum + 2)
+    case measure =>
+      show (value - (count + 1)).toNat < (value - count).toNat
+      bv_omega
+    case invariant =>
+      show sum + 2 = 2 * (count + 1)
+      rw [doubled]
+      bv_omega
+#print axioms doubles_through_projection
+
 -- Loop values that are not the reached head state's are refused, showing the reached state.
 /-- error: cil_loop_recurse: the reached state is not the head of recurse at -/
 #guard_msgs (whitespace := lax, substring := true) in
@@ -153,7 +214,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_recurse recurse (count + 1, sum)
 
 -- A store whose home has no frame fact at its memory stops the walk at that store.
-/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Instruction.stfld tallySum) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
@@ -165,7 +226,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
   cil_loop_recurse recurse (0, sum + 2)
 
 -- A contract applied before the loop reaches its call names the instruction it is at.
-/-- error: cil_loop_call: pc 3 is CIL.Op.localAddr 0, not a call; step to the call first with
+/-- error: cil_loop_call: pc 3 is CIL.Instruction.ldloca 0, not a call; step to the call first with
 `cil_loop_advance` -/
 #guard_msgs (whitespace := lax) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -176,7 +237,8 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_call addTwo_holds sum
 
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.
-/-- error: cil_loop_steps: pc 6 is a call (CIL.Op.call 1 1); cross it with `cil_loop_call` -/
+/-- error: cil_loop_steps: pc 6 is a call (CIL.Instruction.call (callee 1)); cross it with
+`cil_loop_call` -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
     (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
@@ -187,7 +249,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A store with no frame fact at its memory fails naming the pc, the instruction and the
 -- memory, and what to supply.
-/-- error: cil_loop_steps: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+/-- error: cil_loop_steps: cannot step pc 7 (CIL.Instruction.stfld tallySum) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) :
@@ -202,6 +264,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) 
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
   obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
   obtain ⟨zeroed, zeroing, frame, -⟩ := (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  have zeroTally := zeroing tally tallyType rfl
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory (value + 1) home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -229,12 +292,42 @@ example (memory current : Memory) (home : Reference)
 -- A by-value read of a field narrower than the value it lists cannot name the value.
 /-- error: could not synthesize default value for parameter 'exact' using tactics -/
 #guard_msgs (substring := true) in
-example := step_fieldAt_encode layout_valid 0 [.i64 0, .i32 0]
+example := step_ldfld_encode layout_valid 0 [.i64 0, .i32 0]
 
 /-- A struct of a flag byte at 0, a signed 16-bit count at 2, a 32-bit total at 4 and a nested
     8-byte struct at 8. -/
 def mixed : CIL.AggregateLayout :=
   ⟨16, [⟨0, 1, false⟩, ⟨2, 2, false⟩, ⟨4, 4, false⟩, ⟨8, 8, true⟩]⟩
+
+/-- The storage metadata for the mixed local and its nested counter. -/
+private def mixedEnvironment : CIL.LayoutEnvironment := {
+  rawLayouts := tallyEnvironment.rawLayouts ++ [{
+    identity := "Mixed", explicit := false, packing := 0, declaredSize := 0
+    fields := [⟨.unsigned8, none⟩, ⟨.signed16, none⟩, ⟨.unsigned32, none⟩, ⟨.aggregate 0, none⟩] }]
+  layouts := tallyEnvironment.layouts.push ⟨mixed, 4⟩ }
+
+def mixedFlag : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Mixed" 1, index := 0, name := name!"Flag",
+    type := .atom CIL.Extraction.runtimeScope "System.Byte" }
+
+def mixedCount : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Mixed" 1, index := 1, name := name!"Count",
+    type := .atom CIL.Extraction.runtimeScope "System.Int16" }
+
+def mixedTotal : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Mixed" 1, index := 2, name := name!"Total",
+    type := .atom CIL.Extraction.runtimeScope "System.UInt32" }
+
+cil_field_shape mixedEnvironment mixedFlag
+cil_field_shape mixedEnvironment mixedCount
+cil_field_shape mixedEnvironment mixedTotal
+
+/-- Both fixtures use the recomputed layouts of the local and its nested fields. -/
+theorem loop_layouts_valid :
+    CIL.Extraction.LayoutsValid tallyEnvironment.rawLayouts tallyEnvironment.layouts ∧
+    CIL.Extraction.LayoutsValid mixedEnvironment.rawLayouts mixedEnvironment.layouts := by
+  decide +kernel
+#print axioms loop_layouts_valid
 
 /-- The layout's fields are in bounds and apart. -/
 theorem mixed_valid : mixed.Valid := by decide +kernel
@@ -247,8 +340,9 @@ example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)
     the signed `count` through the struct's address. -/
 @[cil_code] def flagged : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .branch 6, .localAddr 0, .const32 1, .setFieldAt 0 1,
-    .local 0, .fieldAt 0 1, .brzero 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
+  environment := mixedEnvironment
+  code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 6, .ldloca 0, .ldc_i4 1,
+    .stfld mixedFlag, .ldloc 0, .ldfld mixedFlag, .brfalse 3, .ldloca 0, .ldfld mixedCount, .ret] }
 
 /-- The program of `flagged` alone. -/
 @[cil_code] def flaggedProgram : CIL.Program := [flagged]
@@ -265,7 +359,7 @@ abbrev Flagged (memory : Memory) (home : Reference) :=
 
 /-- The loop test, with nothing on the stack. -/
 bind_cutpoint flaggedHeader (memory : Memory) (home : Reference) (state : Flagged memory home) :=
-  flagged matching (fun op => op matches .local _) with flaggedEntry.frame memory home, [],
+  flagged matching (fun op => op matches .ldloc _) with flaggedEntry.frame memory home, [],
     state.memory
 
 /-- `cil_loop_recurse` zeroes a struct with 1-, 2- and 4-byte and nested fields through its
@@ -313,28 +407,34 @@ example (memory current : Memory) (home : Reference)
 -- A narrow read of a 4-byte field is refused; that field reads back exactly.
 /-- error: could not synthesize default value for parameter 'narrow' using tactics -/
 #guard_msgs (substring := true) in
-example := step_fieldAt_encode_narrow mixed_valid 2
+example := step_ldfld_encode_narrow mixed_valid 2
   [.i32 0, .i32 0, .i32 7, .aggregate (List.replicate 8 0)]
 
 -- A stored byte reads back truncated to its field: 0x1FF in the flag byte loads as 0xFF, and
 -- as -1 signed.
 example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
-    (rest : List Value) :
-    step body (.fieldAt 0 1 false) pc args frame (.scalar (.aggregate (mixed.encode
+    (rest : List Value) (unsigned signed : CIL.Extraction.FieldRef)
+    (zeroExtended : body.fieldShape unsigned = .value 0 1 false)
+    (signExtended : body.fieldShape signed = .value 0 1 true) :
+    step body (.ldfld unsigned) pc args frame (.scalar (.aggregate (mixed.encode
       [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 0xFF) :: rest) frame memory) ∧
-    step body (.fieldAt 0 1 true) pc args frame (.scalar (.aggregate (mixed.encode
+    step body (.ldfld signed) pc args frame (.scalar (.aggregate (mixed.encode
       [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)])) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (-1)) :: rest) frame memory) := by
-  constructor <;> rw [step_fieldAt_encode_narrow mixed_valid 0 _] <;> rfl
+  have read := step_ldfld_encode_narrow mixed_valid 0
+    [.i32 0x1FF, .i32 0, .i32 0, .aggregate (List.replicate 8 0)]
+  exact ⟨read body unsigned false zeroExtended pc args frame memory rest,
+    read body signed true signExtended pc args frame memory rest⟩
 
 /-- `s = default; while (s.total != value) s.total++; s.flag = 1; return s.flag;`, storing the
     flag byte on the exit path. -/
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .branch 9, .localAddr 0, .local 0, .fieldAt 4 4,
-    .const32 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne 3, .localAddr 0,
-    .const32 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
+  environment := mixedEnvironment
+  code := [.ldloca 0, .initobj (.aggregate "Mixed" 1), .br 9, .ldloca 0, .ldloc 0, .ldfld mixedTotal,
+    .ldc_i4 1, .add, .stfld mixedTotal, .ldloc 0, .ldfld mixedTotal, .ldarg 0, .bne_un 3, .ldloca 0,
+    .ldc_i4 1, .stfld mixedFlag, .ldloc 0, .ldfld mixedFlag, .ret] }
 
 /-- The program of `marked` alone. -/
 @[cil_code] def markedProgram : CIL.Program := [marked]
@@ -352,7 +452,7 @@ abbrev Marked (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `total` on the stack. -/
 bind_cutpoint markedHeader (memory : Memory) (value : W32) (home : Reference)
     (state : Marked memory home) :=
-  marked matching (fun op => op matches .bne _) with markedEntry.frame memory home,
+  marked matching (fun op => op matches .bne_un _) with markedEntry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values)], state.memory
 
 /-- `cil_loop_finish` takes a store on the exit path through the frame and returns the stored
@@ -427,16 +527,119 @@ open Lean in
   let env ← getEnv
   [``entry.checked, ``header].mapM fun name => liftM (findDocString? env name : IO _)
 
+/-- The signed element offset of the loop's reference to an Int32. -/
+private def stampOffset : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  { owner := CIL.Extraction.unsafeOwner, name := name!"Add", hasThis := false,
+    genericArity := 1, methodArguments := [word], parameters := [.byref word, word],
+    returnType := .byref word }
+
 /-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.const32 0, .setLocal 0, .branch 12, .arg 1, .local 0, .memory (.add 4 true),
-    .local 0, .call 1 2, .local 0, .const32 1, .add, .setLocal 0, .local 0, .arg 0, .bne 3,
-    .local 0, .ret] }
+  code := [.ldc_i4 0, .stloc 0, .br 12, .ldarg 1, .ldloc 0, .call stampOffset {},
+    .ldloc 0, .call (Tests.callee
+      2) {}, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .ldarg 0, .bne_un 3,
+    .ldloc 0, .ret], links := [(7, .direct 1)] }
+
+cil_runtime_models stamps
+
+/-- Both calls name the native word size getter. Only the second site has a link. -/
+@[cil_code] private def sizeCalls : CIL.Method :=
+  let getter : CIL.Extraction.MethodRef := {
+    owner := .atom CIL.Extraction.runtimeScope "System.IntPtr", name := name!"get_Size",
+    hasThis := false, genericArity := 0, parameters := [],
+    returnType := .atom CIL.Extraction.runtimeScope "System.Int32" }
+  { returnsValue := true, locals := [], code := [.call getter {}, .call getter {}, .ret],
+    links := [(1, .direct 1)] }
+
+cil_runtime_models sizeCalls
+
+/-- The model leaves its result on the stack at the linked call and preserves frame and memory. -/
+theorem advance_size_call (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop)
+    (linked : LoopTerminates [sizeCalls, sizeCalls] 0 [] post
+      ⟨1, frame, [.scalar (.i32 8)], memory⟩) :
+    LoopTerminates [sizeCalls, sizeCalls] 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_advance
+  exact linked
+
+#print axioms advance_size_call
+
+-- A call without a link runs its model, so `cil_loop_call` refuses it and names the tactic that
+-- steps it.
+/-- error: cil_loop_call: pc 0 has no callee link; step it with `cil_loop_advance` -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop) (sum : W32) :
+    LoopTerminates [sizeCalls, sizeCalls] 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_call addTwo_holds sum
+
+/-- A call without a link of a method the runtime table does not model. -/
+@[cil_code] private def modelessCall : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.call (Tests.callee 0) {}, .ret] }
+
+/-- The modeless call as method 0 of a program. -/
+@[cil_code] private def modelessProgram : CIL.Program := [modelessCall]
+
+/-- The modeless call after a `nop`, so a run stops at it after one step. -/
+@[cil_code] private def lateModeless : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.nop, .call (Tests.callee 0) {}, .ret] }
+
+/-- The late modeless call as method 0 of a program. -/
+@[cil_code] private def lateModelessProgram : CIL.Program := [lateModeless]
+
+-- No step crosses a call with neither a link nor a model, and the walk says so.
+/-- error: cil_loop_advance: pc 0 (CIL.Instruction.call (callee 0)) has neither a link nor a
+runtime model, so no step crosses it -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop) :
+    LoopTerminates [modelessCall] 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_advance
+
+-- The failure record names the same gap instead of a callee contract.
+/-- "missing":"linkOrModel" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (frame : Frame) (memory : Memory) (post : Memory → List Value → Prop) :
+    LoopTerminates modelessProgram 0 [] post ⟨0, frame, [], memory⟩ := by
+  cil_loop_advance
+
+-- A run stopped at the modeless call reports the same gap.
+/-- "missing":"linkOrModel","obligation":null,"pc":1 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (frame : Frame) (memory : Memory)
+    (result : Except LocatedFault (Memory × List Value)) :
+    run lateModelessProgram 100 0 0 [] frame [] memory = result := by
+  cil_checked_steps 1
+
+/-- `new Span<int>(ref value)` without a link, a construction the runtime table models. -/
+@[cil_code] private def spanOfReference : CIL.Method :=
+  let int := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  { returnsValue := true, locals := [], code := [.ldarg 0, .newobj {
+      owner := .apply (.constructor CIL.Extraction.runtimeScope "System.Span`1") int,
+      name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
+      parameters := [.byref int] }, .ret] }
+
+cil_runtime_models spanOfReference
+
+-- A construction without a link stops at its model's step, not at the raw constructor's.
+/-- (CIL.Instruction.memory (CIL.MemoryOp.spanSingleReference 4 true)) 1 -/
+#guard_msgs (whitespace := lax, substring := true) in
+example (frame : Frame) (memory : Memory) (value : Value) (post : Memory → List Value → Prop) :
+    LoopTerminates [spanOfReference] 0 [value] post ⟨1, frame, [value], memory⟩ := by
+  cil_loop_advance
+
+-- The failure record at the construction reads the model's step, not the raw constructor's.
+/-- "missing":"spanValidity","obligation":null,"pc":1 -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (frame : Frame) (memory : Memory) (value : Value) (post : Memory → List Value → Prop) :
+    LoopTerminates [spanOfReference] 0 [value] post ⟨1, frame, [value], memory⟩ := by
+  cil_loop_advance
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
-  returnsValue := false, locals := [], code := [.arg 0, .arg 1, .storeScalar 4, .ret] }
+  returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .stind .i4, .ret] }
 
 /-- The program, with `stamps` calling `stamp` as method 1. -/
 @[cil_code] def stampsProgram : CIL.Program := [stamps, stamp]
@@ -455,7 +658,7 @@ theorem stamp_holds : stampContract.Holds stampsProgram 1 := by
   dsimp only [stampContract] at writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
   refine MethodContract.Holds.intro after () ?_ confined filled
-  cil_checked_steps [step_storeScalar_of_write wrote, formed]
+  cil_checked_steps [step_stind_narrow_of_write .i4 wrote, formed]
 /-- info: 'Tests.LoopDiagnostics.stamp_holds' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms stamp_holds
@@ -474,7 +677,7 @@ abbrev Stamping (memory : Memory) (buffer : Reference) (count : Nat) (home : Ref
 /-- The loop test, with the count and the index on the stack. -/
 bind_cutpoint stampsHeader (memory : Memory) (count : W32) (buffer : Reference)
     (home : Reference) (state : Stamping memory buffer count.toNat home) :=
-  stamps matching (fun op => op matches .bne _) with stampsEntry.frame memory home,
+  stamps matching (fun op => op matches .bne_un _) with stampsEntry.frame memory home,
     [.scalar (.i32 count), .scalar (.i32 state.values)], state.memory
 
 /-- The index stays within the count, and the rest of the buffer stays writable. -/
@@ -532,8 +735,55 @@ theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference
 #guard_msgs (whitespace := lax) in
 #print axioms stamps_returns_count
 
+/-- A theorem may name its own memory `stored`, as the loop tactics name a store's memory: the
+    walk clears a restated fact only at a memory it introduced, so the caller's write authority
+    at `stored` stays in scope after the index store restates it at the store's memory. -/
+theorem stamps_keep_caller_facts (stored : Memory) (count : W32) (buffer : Reference)
+    (wellFormed : stored.WellFormed) (formed : form stored buffer = .ok buffer)
+    (small : count.toNat < 2 ^ 31) (writable : Writable stored buffer 4 0 count.toNat) :
+    ∃ fuel final, invoke stampsProgram fuel 0
+        [.scalar (.i32 count), .reference (.address buffer)] stored =
+      .ok (final, [.scalar (.i32 count)]) ∧
+      Confined [(buffer, 4 * count.toNat)] stored final := by
+  obtain ⟨home, entered, enter⟩ :=
+    stampsEntry.checked stored count buffer wellFormed
+  refine invoke_loop_induction (by rfl) ?_ enter.setup (stampsHeader stored count buffer home)
+    (StampingInvariant count buffer) (fun state => count.toNat - state.values.toNat)
+    (fun start => ?_) ?_
+  · simp [cil_checked, formed]
+  · cil_loop_recurse start 0
+    exact ⟨by simp, by simpa using writable⟩
+  rintro ⟨index, current, frame⟩ ⟨bounded, rest⟩ recurse
+  dsimp only at bounded rest
+  by_cases done : index = count
+  · subst done
+    cil_loop_finish
+  · have lower : index.toNat < count.toNat := by
+      have := BitVec.toNat_ne.mp done
+      omega
+    have offset := writable.add_int wellFormed formed (index := index) (by omega) (by omega)
+      (by omega)
+    have slot := rest.sub (index := index.toNat) (length := 1) (by omega) (by omega)
+    cil_loop_advance
+    cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
+    have next : (index + 1).toNat = index.toNat + 1 := by bv_omega
+    cil_loop_recurse recurse (index + 1)
+    case invariant =>
+      have _ : Writable stored buffer 4 0 count.toNat := by assumption
+      refine ⟨show (index + 1).toNat ≤ count.toNat by omega, ?_⟩
+      have later := (Writable.append (left := 1)).mp
+        (show Writable _ buffer 4 index.toNat (1 + (count.toNat - (index.toNat + 1))) by
+          rwa [show 1 + (count.toNat - (index.toNat + 1)) = count.toNat - index.toNat by omega])
+      rw [next]
+      simpa [Nat.add_comm] using later.2
+    case measure =>
+      dsimp only
+      omega
+
+#print axioms stamps_keep_caller_facts
+
 -- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
-/-- error: cil_loop_advance: cannot step pc 5 (CIL.Op.memory (CIL.MemoryOp.add 4 true)) -/
+/-- error: cil_loop_advance: cannot step pc 5 (CIL.Instruction.call stampOffset) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -544,7 +794,7 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
   cil_loop_advance
 
 -- The stuck step shows its pc as a literal, as the message's first line does.
-/-- (CIL.Op.memory (CIL.MemoryOp.add 4 true)) 5 -/
+/-- (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) 5 -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -568,10 +818,10 @@ stack -/
 open Lean Meta in
 #eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``True])
 
-/-- `i = (byte) 0x1FF; return i;`, storing the int local through a byte narrowing. -/
+/-- `i = (byte) 0x1FF; return i;`: the byte local keeps the low byte of the stored word. -/
 @[cil_code] def narrowed : CIL.Method := {
-  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.const32 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
+  returnsValue := true, locals := [.i32 0], localKinds := [.narrow .unsigned8]
+  code := [.ldc_i4 0x1FF, .stloc 0, .ldloc 0, .ret] }
 
 /-- The program of `narrowed` alone. -/
 @[cil_code] def narrowedProgram : CIL.Program := [narrowed]
@@ -580,13 +830,11 @@ open Lean Meta in
 bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
   narrowed with [] from memory allocating wellFormed
 
--- A narrowing local store is not one `LoopFrame.store` models, so the walk stops at it.
-/-- error: cil_loop_finish: cannot step pc 1 (CIL.Op.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
-#guard_msgs (whitespace := lax, substring := true) in
+-- A store to a byte home records the truncated word, which the load and the return read back.
 example (memory current : Memory) (home : Reference)
-    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
+    (frame : LoopFrame [] memory current [.narrow .unsigned8] [.bytes (.narrow .unsigned8) home]
       (knownLocals [some (.i32 0)])) :
-    LoopTerminates narrowedProgram 0 [] (fun _ _ => True)
+    LoopTerminates narrowedProgram 0 [] (fun _ results => results = [.scalar (.i32 0xFF)])
       ⟨0, narrowedEntry.frame memory home, [], current⟩ := by
   cil_loop_finish
 
@@ -609,8 +857,8 @@ example (memory current : Memory) (count index : W32) (buffer home slotted : Ref
 
 -- A call whose address argument has no `form` fact does not step, and the failure names the
 -- check and the fact it needs.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not step: its argument checks
-reduce to -/
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call (callee 2)) does not step: its
+argument checks reduce to -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (home slotted : Reference)
     (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
@@ -638,8 +886,8 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
   case postcondition.part3 => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
-arguments for this input, or is not the named site. -/
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call (callee 2)) does not take the
+contract's arguments for this input, or is not the named site. -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -757,6 +1005,7 @@ macro "walk_to_head" : tactic => `(tactic| (
   obtain ⟨home, entered, enter⟩ := entry.checked memory value wellFormed
   obtain ⟨zeroed, zeroing, frame, -⟩ :=
     (enter.frame []).zero_aggregate 0 layout [.i32 0, .i32 0]
+  have zeroTally := zeroing tally tallyType rfl
   have : LoopReaches program 0 [.scalar (.i32 value)] ⟨0, entry.frame memory home, [], entered⟩
       (header memory value home ⟨(0, 0), zeroed, frame⟩) := by
     cil_loop_steps
@@ -767,11 +1016,11 @@ macro "walk_to_head" : tactic => `(tactic| (
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
   walk_to_head
 
--- A step names each hypothesis its step proof used: the zeroing fact steps `initAggregate`.
-/-- [CIL.step] pc 1: CIL.Op.initAggregate (8 % 2 ^ 64)
+-- A step names each hypothesis its step proof used: the zeroing fact steps `initobj`.
+/-- [CIL.step] pc 1: CIL.Instruction.initobj tallyType
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
-  used zeroing : -/
+  used zeroTally : -/
 #guard_msgs (whitespace := lax, substring := true) in
 set_option trace.CIL.step true in
 example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True := by
@@ -779,7 +1028,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
 
 -- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
 -- context; the tactic's summary names the goals it left by obligation tag.
-/-- [CIL.step] pc 2: CIL.Op.branch 14
+/-- [CIL.step] pc 2: CIL.Instruction.br 14
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
   changes pc: 1 + 1 ⟶ 14 -/
@@ -808,7 +1057,9 @@ example (memory : Memory) (value : W32) (frame : Frame) :
 
 -- A call tactic applied before the walk reaches a call records the instruction it is at and
 -- that the call site is missing.
-/-- "instruction":"CIL.Op.localAddr 0","method":0,"missing":"callSite","obligation":null,"pc":3 -/
+/--
+"instruction":"CIL.Instruction.ldloca 0","method":0,"missing":"callSite","obligation":null,"pc":3
+-/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -848,7 +1099,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A tactic that stops without an error, leaving a step for the proof, is recorded as stopped
 -- there, with the instruction it did not take.
-/-- "instruction":"CIL.Op.const32 2","method":1,"missing" -/
+/-- "instruction":"CIL.Instruction.ldc_i4 2","method":1,"missing" -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value : W32) (frame : Frame)
@@ -928,5 +1179,203 @@ example (memory : Memory) (home : Reference) : True := by
     unless message.contains "does not establish that access is forbidden" do
       throwError "The missing-authority diagnostic asserted a violation: {message}"
   trivial
+
+/-- Two operands added on the stack, then a `nop` at the state the path reaches. -/
+@[cil_code] def addPair : CIL.Method := {
+  returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .add, .nop] }
+
+/-- The program holding only `addPair`. -/
+@[cil_code] def addPairProgram : CIL.Program := [addPair]
+
+-- A fact that is no simp lemma fails the whole-goal rewrite without a message: the walk goes on
+-- and the step takes the facts it can use.
+#guard_msgs in
+example (memory : Memory) (left right : CIL.W64) (frame : Frame) :
+    LoopReaches addPairProgram 0 [.scalar (.i64 left), .scalar (.i64 right)]
+      ⟨0, frame, [], memory⟩ ⟨3, frame, [.scalar (.i64 (left + right))], memory⟩ := by
+  cil_loop_steps [(0 : Nat)]
+
+open Lean Meta Elab Tactic in
+/-- Local reference classification uses the current list and reduces stored slot terms afresh. -/
+theorem localReferenceClassification
+    (_body : CIL.Method) (_memory : Memory) (_home : Reference) (_tail : List LocalSlot) :
+    True := by
+  run_tac withMainContext do
+    let slotType := mkConst ``LocalSlot
+    let body ← Term.elabTerm (mkIdent `_body) none
+    let memory ← Term.elabTerm (mkIdent `_memory) none
+    let home ← Term.elabTerm (mkIdent `_home) none
+    let byteSlot := mkApp2 (mkConst ``LocalSlot.bytes) (mkConst ``CIL.LocalKind.word32) home
+    let spanSlot ← Term.elabTerm (← `(LocalSlot.span 1 true none)) none
+    let unknownTail ← Term.elabTerm (mkIdent `_tail) none
+    let makeList (slots : List Expr) := mkListLit slotType slots
+    let makeStep (locals : Expr) (position : Nat) (load := false) := do
+      let instruction := mkApp (mkConst (if load then ``CIL.Instruction.ldloc
+        else ``CIL.Instruction.ldloca)) (mkNatLit position)
+      let frame ← mkAppM ``Frame.mk #[mkNatLit 0, locals,
+        ← mkListLit (mkConst ``AllocationId) [], mkNatLit 0]
+      let values ← mkListLit (mkConst ``Value) []
+      let result := mkAppN (mkConst ``step)
+        #[body, instruction, mkNatLit 0, values, frame, values, memory]
+      let goal ← mkFreshExprMVar (← mkEq result result)
+      pure (instruction, goal.mvarId!)
+    let check (locals : Expr) (position : Nat) (expected : Bool)
+        (cache : LoopLocalIndex) (load := false) := do
+      let (instruction, goal) ← makeStep locals position load
+      let (actual, cache) ← (loopReadsReferences instruction goal).run cache
+      unless actual == expected do throwError "incorrect local reference classification"
+      pure cache
+    let cache ← check (← makeList [byteSlot]) 0 false {}
+    let cache ← check (← makeList [spanSlot]) 0 true cache
+    let cache ← check (← makeList [byteSlot]) 1 true cache
+    let partialList := mkApp3 (mkConst ``List.cons [Level.zero]) slotType byteSlot unknownTail
+    let cache ← check partialList 0 false cache
+    let _ ← check partialList 1 true cache
+    let unknownSlot ← mkFreshExprMVar slotType
+    let locals ← makeList [unknownSlot]
+    let cache ← check locals 0 true {}
+    unknownSlot.mvarId!.assign byteSlot
+    let _ ← check locals 0 false cache
+    withLetDecl `slot slotType byteSlot fun slot => do
+      let locals ← makeList [slot]
+      let cache ← check locals 0 false {}
+      let declaration ← slot.fvarId!.getDecl
+      let changed := (← getLCtx).modifyLocalDecl declaration.fvarId
+        (fun declaration => declaration.setValue spanSlot)
+      withLCtx changed (← getLocalInstances) do
+        let _ ← check locals 0 true cache
+    withLetDecl `kind (mkConst ``CIL.LocalKind) (mkConst ``CIL.LocalKind.word32) fun kind => do
+      let locals ← makeList [mkApp2 (mkConst ``LocalSlot.bytes) kind home]
+      let cache ← check locals 0 false {} true
+      let changed := (← getLCtx).modifyLocalDecl kind.fvarId!
+        (fun declaration => declaration.setValue (mkConst ``CIL.LocalKind.reference))
+      withLCtx changed (← getLocalInstances) do
+        let _ ← check locals 0 true cache true
+    let measure (localCount addresses : Nat) := do
+      let locals ← makeList (List.replicate localCount byteSlot)
+      let (instruction, goal) ← makeStep locals (localCount - 1)
+      let start ← IO.getNumHeartbeats
+      let mut cache : LoopLocalIndex := {}
+      for _ in [:addresses] do
+        let (reads, updated) ← (loopReadsReferences instruction goal).run cache
+        unless !reads do throwError "a byte address unexpectedly reads a reference"
+        cache := updated
+      return (← IO.getNumHeartbeats) - start
+    let small ← measure 64 64
+    let manyLocals ← measure 512 64
+    let manyBoth ← measure 512 512
+    logInfo m!"local address classification heartbeats: {small}, {manyLocals}, {manyBoth}"
+    unless manyLocals < small * 3 && manyBoth < small * 12 do
+      throwError "local address costs grew too quickly: {small}, {manyLocals}, {manyBoth}"
+  trivial
+
+#print axioms localReferenceClassification
+
+open Lean Meta Elab Tactic in
+/-- Fact-list traversal preserves positions, raw heads and incomplete prefixes in linear work. -/
+theorem factListTraversal (_tail : List (Option Nat)) : True := by
+  run_tac withMainContext do
+    let itemType := mkApp (mkConst ``Option [Level.zero]) (mkConst ``Nat)
+    let unknownTail ← Term.elabTerm (mkIdent `_tail) none
+    let absent := mkApp (mkConst ``Option.none [Level.zero]) (mkConst ``Nat)
+    let present := mkApp2 (mkConst ``Option.some [Level.zero]) (mkConst ``Nat) (mkNatLit 7)
+    withLetDecl `entry itemType present fun entry => do
+      let heads := #[entry, absent, present]
+      let mut list := unknownTail
+      for head in heads.reverse do
+        list := mkApp3 (mkConst ``List.cons [Level.zero]) itemType head list
+      let entries ← listEntries list 4
+      unless entries == #[(4, entry), (5, absent), (6, present)] do
+        throwError "fact entries lost positions, raw heads or an incomplete prefix"
+      unless (← rememberedIndices list 4) == #[4, 6] do
+        throwError "remembered positions lost a reducible head or an incomplete prefix"
+      unless (← listEntries unknownTail 4).isEmpty &&
+          (← rememberedIndices unknownTail 4).isEmpty do
+        throwError "an unknown list has no visible entries"
+    let measure (count : Nat) := do
+      let list ← mkListLit itemType (List.replicate count present)
+      let start ← IO.getNumHeartbeats
+      let entries ← listEntries list 3
+      let entriesCost := (← IO.getNumHeartbeats) - start
+      unless entries.size == count && entries.back?.map Prod.fst == some (count + 2) do
+        throwError "fact traversal lost the last entry"
+      let start ← IO.getNumHeartbeats
+      let indices ← rememberedIndices list 3
+      let indicesCost := (← IO.getNumHeartbeats) - start
+      unless indices.size == count && indices.back? == some (count + 2) do
+        throwError "remembered traversal lost the last position"
+      return (entriesCost, indicesCost)
+    let small ← measure 128
+    let medium ← measure 512
+    let large ← measure 2048
+    logInfo m!"fact-list heartbeats: {small}, {medium}, {large}"
+    unless medium.1 < small.1 * 6 && large.1 < medium.1 * 6 &&
+        medium.2 < small.2 * 6 && large.2 < medium.2 * 6 do
+      throwError "fact-list traversal costs grew too quickly"
+    let measureCopies (count : Nat) := do
+      let mut list := mkApp (mkConst ``List.nil [Level.zero]) itemType
+      for _ in [:count] do
+        list := mkApp3 (mkConst ``List.cons [Level.zero]) itemType present list
+      let _ ← listEntries list
+      let _ ← rememberedIndices list
+      let mut entriesTimes := #[]
+      let mut indicesTimes := #[]
+      for _ in [:3] do
+        let start ← IO.monoMsNow
+        let entries ← listEntries list
+        let middle ← IO.monoMsNow
+        let indices ← rememberedIndices list
+        let stop ← IO.monoMsNow
+        unless entries.size == count && indices.size == count do
+          throwError "fact-list traversal lost entries in a deep list"
+        entriesTimes := entriesTimes.push (middle - start)
+        indicesTimes := indicesTimes.push (stop - middle)
+      return ((entriesTimes.qsort (fun left right => left < right))[0]!,
+        (indicesTimes.qsort (fun left right => left < right))[0]!)
+    let shorter ← measureCopies 16384
+    let longer ← measureCopies 65536
+    logInfo m!"fact-list minimum milliseconds: {shorter}, {longer}"
+    -- Heartbeats count small allocations; array copying also needs an elapsed-time check.
+    unless longer.1 < shorter.1 * 8 + 20 && longer.2 < shorter.2 * 8 + 20 do
+      throwError "fact-list copying costs grew too quickly"
+  trivial
+
+#print axioms factListTraversal
+
+-- A failure record prints an unassigned metavariable as `?_`, so the record a run logs does not
+-- depend on how many metavariables the run created before it.
+run_meta do
+  let hole ← Lean.Meta.mkFreshExprMVar (Lean.mkConst ``Nat)
+  let record : FailureRecord := { tactic := "probe", residual := #[hole] }
+  let rendered ← record.render
+  unless (rendered.splitOn "\"residual\":[\"?_\"]").length == 2 do
+    throwError "the failure record printed a metavariable by its number: {rendered}"
+
+/-- A static field whose value the caller's memory binds, so no step can compute its load. -/
+def opaqueField : CIL.Extraction.FieldRef :=
+  { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "System.Int32",
+    name := name!"Value" }
+
+/-- The site of `opaqueField`: an opaque value of four bytes. -/
+def opaqueSite : CIL.StaticDescriptor :=
+  { identity := 0, field := opaqueField, bytes := [0, 0, 0, 0],
+    initializer := some { method := 1, arguments := [] }, scalar := some true,
+    opaqueValue := true }
+
+/-- A loop that loads `opaqueField` and drops it on every iteration. -/
+def staticLoop : CIL.Method := {
+  code := [.ldsfld opaqueField, .pop, .br 0], locals := [], returnsValue := false,
+  staticSites := [(0, opaqueSite)] }
+
+/-- `cil_loop_steps` takes the `staticLoad` fact from the context and cannot cross the load
+    without it. -/
+theorem static_load_gathered (memory : Memory) (frame : Frame) (value : W32)
+    (loaded : staticLoad staticLoop 0 memory = .ok (memory, .scalar (.i32 value))) :
+    LoopReaches [staticLoop] 0 [] (LoopState.mk 0 frame [] memory)
+      (LoopState.mk 2 frame [] memory) := by
+  fail_if_success (clear loaded; cil_loop_steps)
+  cil_loop_steps
+
+#print axioms static_load_gathered
 
 end Tests.LoopDiagnostics

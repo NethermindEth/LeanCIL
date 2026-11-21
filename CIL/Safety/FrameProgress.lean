@@ -108,33 +108,6 @@ theorem makeLocals_succeeds (m : Memory) (activation : Nat)
       exact ⟨slot :: slots, ids ++ other, result, by
         simp [makeLocals, prepared, rest, Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
 
-/-- Aggregate-home indices must designate actual by-value aggregate arguments.
-    This is signature/type compatibility, not an access or future-run condition. -/
-def AggregateArgumentsFit (indices : List Nat) (args : List Value) : Prop :=
-  ∀ index ∈ indices, ∃ bits, args[index]? = some (.scalar (.v256 bits))
-
-theorem makeArgumentHomes_succeeds (m : Memory) (activation : Nat) (indices : List Nat)
-    (args : List Value) (wellFormed : m.WellFormed) (fits : AggregateArgumentsFit indices args) :
-    ∃ homes owned result,
-      makeArgumentHomes activation indices args m = .ok (homes, owned, result) := by
-  induction indices generalizing m with
-  | nil => exact ⟨[], [], m, rfl⟩
-  | cons index indices ih =>
-    obtain ⟨bits, argument⟩ := fits index (by simp)
-    obtain ⟨reference, memory, home⟩ :=
-      allocateHome_succeeds (alignment := 1) m activation (localWidth .vector256) wellFormed
-        (localWidth_bounded _) (by decide)
-    obtain ⟨slot, stored, store⟩ := fresh_home_storeLocal_succeeds m memory activation .vector256
-      reference (.v256 bits) bits.toNat home rfl
-    have valid := storeLocal_preserves_wellFormed _ _ _ _ _
-      (allocateHome_preserves_wellFormed _ _ _ _ _ wellFormed home) store
-    obtain ⟨homes, owned, result, rest⟩ :=
-      ih stored valid (fun i member => fits i (by simp [member]))
-    exact ⟨(index, slot) :: homes, reference.allocation :: owned, result, by
-      simp [makeArgumentHomes, argument, home, store, rest,
-        Value.hasUnspecified, CIL.Value.hasUnspecified,
-        Bind.bind, Except.bind, Pure.pure, Except.pure]⟩
-
 /-- An argument matches its numeric home, reference root, or typed span view. -/
 def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .methodPointer pointer => kind = .methodPointer pointer.signature
@@ -146,6 +119,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .readOnlyReference _ => kind = .reference
   | .bufferSpan view => kind = .span view.width view.writable ∧ (0 < view.width ∧ view.width < 2^64)
   | .array view => kind = .array view.elementType
+  | .spanHome _ => False
 
 /-- Every parameter home names an existing argument that fits its kind. -/
 def ParameterArgumentsFit (parameters : List (Nat × CIL.LocalKind)) (args : List Value) :
@@ -159,6 +133,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       makeLocal activation kind .unmodeled m = .ok (slot, owned, home) ∧
       storeLocal home slot value = .ok (final, result) := by
   cases value with
+  | spanHome _ => exact fits.elim
   | methodPointer pointer =>
     change kind = .methodPointer pointer.signature at fits
     subst kind
@@ -175,7 +150,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | readOnlyReference reference =>
     change kind = .reference at fits
     subst kind
-    have formed := checkedValue_of_valid m (.readOnlyReference reference) valid
+    have formed := checkedValue_of_valid m (.readOnlyReference reference) valid rfl
     refine ⟨.root none, [], m, .readOnlyRoot reference, m, rfl, ?_⟩
     cases reference <;> simp_all [checkedValue, formValue, Value.Valid, checkedAt,
       Except.mapError, storeLocal, Value.hasUnspecified, Bind.bind, Except.bind,
@@ -200,7 +175,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | reference r =>
     change kind = .reference at fits
     subst kind
-    have formed := checkedValue_of_valid m (.reference r) valid
+    have formed := checkedValue_of_valid m (.reference r) valid rfl
     exact ⟨.root none, [], m, .root (some r), m, rfl, by
       simp only [checkedValue] at formed
       simp [storeLocal, formed, Value.hasUnspecified,
@@ -208,7 +183,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
   | object reference =>
     change kind = .object at fits
     subst kind
-    have formed := checkedValue_of_valid m (.object reference) valid
+    have formed := checkedValue_of_valid m (.object reference) valid rfl
     exact ⟨.object none, [], m, .object (some reference), m, rfl, by
       simp only [checkedValue] at formed
       simp [storeLocal, formed, Value.hasUnspecified,
@@ -323,8 +298,7 @@ theorem makeSelectedLocals_succeeds (m : Memory) (activation : Nat) (indices : L
 /-- A method's frame metadata fits its arguments, so `enterFrame` cannot fault on a
     well-formed memory with valid arguments (`enterFrame_succeeds`). -/
 def FrameSetupFits (body : CIL.Method) (args : List Value) : Prop :=
-  InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args ∧
-    ParameterArgumentsFit body.parameterHomes args ∧
+  InitializersFit body.localKinds body.locals ∧ ParameterArgumentsFit body.parameterHomes args ∧
     SelectedKindsFit body.opaqueVectorLocals 0 body.localKinds
 
 @[simp] theorem selectedKindsFit_nil (index : Nat) (kinds : List CIL.LocalKind) :
@@ -337,7 +311,7 @@ def FrameSetupFits (body : CIL.Method) (args : List Value) : Prop :=
 theorem frameSetupFits_of_no_opaque (body : CIL.Method) (args : List Value)
     (none : body.opaqueVectorLocals = []) :
     FrameSetupFits body args ↔
-      InitializersFit body.localKinds body.locals ∧ AggregateArgumentsFit body.vectorArgs args ∧
+      InitializersFit body.localKinds body.locals ∧
         ParameterArgumentsFit body.parameterHomes args := by
   simp only [FrameSetupFits, none, selectedKindsFit_nil, and_true]
 #print axioms frameSetupFits_of_no_opaque
@@ -348,20 +322,14 @@ theorem enterFrame_succeeds (body : CIL.Method) (args : List Value) (m : Memory)
     ∃ frame memory, enterFrame body args m = .ok (frame, memory) := by
   obtain ⟨locals, owned, memory, prepared⟩ :=
     makeSelectedLocals_succeeds m m.nextIdentity body.opaqueVectorLocals body.localKinds
-      body.locals wellFormed fits.1 fits.2.2.2
+      body.locals wellFormed fits.1 fits.2.2
   have setup := makeSelectedLocals_setup _ _ _ _ _ _ _ _ prepared
   have valid := setup.wellFormed wellFormed
-  obtain ⟨arguments, ids, result, homes⟩ :=
-    makeArgumentHomes_succeeds memory m.nextIdentity body.vectorArgs args valid fits.2.1
-  have resultWF := makeArgumentHomes_preserves_wellFormed _ _ _ _ _ _ _ valid homes
-  have ext := setup.fresh.1.trans
-    (makeArgumentHomes_fresh _ _ _ _ _ _ _ homes).1
-  obtain ⟨parameters, other, final, parametersMade⟩ := makeParameterHomes_succeeds result
-    m.nextIdentity body.parameterHomes args resultWF (validArgs.preserve wellFormed ext)
-    fits.2.2.1
-  exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, (owned ++ ids) ++ other,
-    arguments, 0⟩, final, by
-    simp [enterFrame, prepared, homes, parametersMade, Bind.bind, Except.bind, Pure.pure,
+  obtain ⟨parameters, other, final, parametersMade⟩ := makeParameterHomes_succeeds memory
+    m.nextIdentity body.parameterHomes args valid (validArgs.preserve wellFormed setup.fresh.1)
+    fits.2.1
+  exact ⟨⟨m.nextIdentity, locals ++ parameters.map Prod.snd, owned ++ other, 0⟩, final, by
+    simp [enterFrame, prepared, parametersMade, Bind.bind, Except.bind, Pure.pure,
       Except.pure]⟩
 
 /-- Entering a frame whose metadata fits its arguments succeeds and starts the callee in a
@@ -377,7 +345,6 @@ theorem enterFrame_live_succeeds (program : CIL.Program) (body : CIL.Method)
 
 #print axioms makeLocal_succeeds
 #print axioms makeLocals_succeeds
-#print axioms makeArgumentHomes_succeeds
 #print axioms enterFrame_succeeds
 #print axioms enterFrame_live_succeeds
 

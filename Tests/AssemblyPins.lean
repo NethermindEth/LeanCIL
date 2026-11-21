@@ -51,4 +51,17 @@ theorem default_pin_rejected : AttributionValid [({}, "::Fixture.Application")] 
   decide +kernel
 #print axioms default_pin_rejected
 
+/-- A generic argument's scope does not change the declaring aggregate's or enum's scope. -/
+theorem flat_scopes :
+    (TypeExpr.aggregate "Lib::Box<App::Value>" 0).headScope = some "Lib" ∧
+    (TypeExpr.enum "Λ::Flag" (.atom "Other" "Byte")).headScope = some "Λ" := by
+  decide +kernel
+#print axioms flat_scopes
+
+/-- Flat owners without a scope, separator or type name supply no assembly identity. -/
+theorem incomplete_flat_scopes :
+    ["Value", "::Value", "Lib:Value", "Lib::"].all
+      (fun owner => (TypeExpr.aggregate owner 0).headScope.isNone) := by decide +kernel
+#print axioms incomplete_flat_scopes
+
 end Tests.AssemblyPins

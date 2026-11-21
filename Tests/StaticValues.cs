@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include PreparedLeanFixtures.cs
 
@@ -146,14 +151,24 @@ pending.Flush();
 // The certificate recomputes the initializer: forged bytes in the extracted program fail translation_valid.
 var source = File.ReadAllText(Path.Combine(root, "One", "Extracted.lean"));
 var one = "bytes := [(BitVec.ofNat 8 1), ";
-if (!source.Contains(one) || !source.Contains(".staticValue [(BitVec.ofNat 8 1), "))
+// The decoded load names the field whose descriptor holds the initializer bytes.
+if (!source.Contains(one) || !source.Contains("cil_decoded_method method0 ") ||
+    !source.Contains("name := name!\"One\" }"))
     throw new InvalidOperationException("Missing One descriptor in the extraction");
-var forged = Path.Combine(root, "One-forged.lean");
-File.WriteAllText(forged, source.Replace("[(BitVec.ofNat 8 1), ", "[(BitVec.ofNat 8 2), "));
-var forgedResult = Execute(["lake", "env", "lean", forged], cwd: verification.CheckoutPackage());
-if (forgedResult.Code == 0 || !forgedResult.Output.Contains("Extraction.StaticValuesValid program"))
-    throw new InvalidOperationException("Forged static value was accepted\n" + forgedResult.Output);
-Console.WriteLine("PASS forged static value rejected by the extraction certificate");
+void RejectInitializer(string name, string original, string changed)
+{
+    if (!source.Contains(original, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Missing {name} mutation target.");
+    var forged = Path.Combine(root, $"One-forged-{name}.lean");
+    File.WriteAllText(forged, source.Replace(original, changed, StringComparison.Ordinal));
+    var result = Execute(["lake", "env", "lean", forged], cwd: verification.CheckoutPackage());
+    if (result.Code == 0 || !result.Output.Contains("Extraction.StaticValuesValid program"))
+        throw new InvalidOperationException($"Expected StaticValuesValid to reject {name}.\n{result.Output}");
+}
+
+RejectInitializer("bytes", one, "bytes := [(BitVec.ofNat 8 2), ");
+RejectInitializer("callee", "initializer := some { method := 1,", "initializer := some { method := 0,");
+Console.WriteLine("PASS changed initializer bytes and callee rejected by the extraction certificate");
 
 void Reject(string dll, string selector, string name, string marker, bool assume = true)
 {

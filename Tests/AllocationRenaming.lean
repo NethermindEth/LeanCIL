@@ -110,14 +110,14 @@ def sourceBody : CIL.Method := {
   returnsValue := true
   locals := [.unmodeled]
   localKinds := [.word64]
-  code := [.local 0, .ret] }
+  code := [.ldloc 0, .ret] }
 
 /-- Dead numeric declarations occur both before and after the retained local. -/
 def targetBody : CIL.Method := {
   returnsValue := true
   locals := [.unmodeled, .unmodeled, .unmodeled]
   localKinds := [.word32, .word64, .word32]
-  code := [.local 1, .ret] }
+  code := [.ldloc 1, .ret] }
 
 /-- The first source operand relocates past the preceding dead numeric local. -/
 def indices : LocalIndexMap := .skip (.keep (.skip .nil))
@@ -174,9 +174,9 @@ theorem initialized_helper_frames :
       Memory.Renamed later (enterScopes Eq 1 1) sourceAfter targetAfter ∧
       Frame.Renamed indices later (enterScopes Eq 1 1) sourceFrame targetFrame := by
   have sourceReady : OrdinaryFrame initializedSource :=
-    ⟨rfl, rfl, rfl, entry_ready.1.layouts⟩
+    ⟨rfl, rfl, entry_ready.1.layouts⟩
   have targetReady : OrdinaryFrame initializedTarget :=
-    ⟨rfl, rfl, rfl, entry_ready.2.layouts⟩
+    ⟨rfl, rfl, entry_ready.2.layouts⟩
   have selected : LocalDeclarations indices initializedSource.localKinds initializedSource.locals
       initializedTarget.localKinds initializedTarget.locals :=
     .skip .word32 .unmodeled (by simp [InitializerFits])

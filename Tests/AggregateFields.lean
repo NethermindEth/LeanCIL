@@ -103,12 +103,14 @@ theorem store_then_load {entered memory : Memory} {boundary : Nat} {kinds slots}
     (writable : access memory home 12 1 true = .ok ()) (bits : BitVec 32) (word : Nat)
     (present : (packet.values bytes)[0]? = some word) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.setFieldAt 8 4) pc args frame
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef) (signed : Bool),
+        body.fieldShape operand = .value 8 4 signed → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar (.i32 bits) :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
-      ∀ body pc args frame rest,
-        step body (.fieldAt 0 8 false) pc args frame (.reference (.address home) :: rest) after =
+      ∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .value 0 8 false → ∀ pc args frame rest,
+        step body (.ldfld operand) pc args frame (.reference (.address home) :: rest) after =
           .ok (.next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 word)) :: rest) frame after) := by
   obtain ⟨after, stored, storedSnapshots, storedFormed, -, -, -, storedValues, -⟩ :=
     snapshots.store_field homes formed slot specified writable packet_checked.1 packet_checked.2
@@ -137,10 +139,20 @@ theorem store_unavailable {entered memory : Memory} {boundary : Nat} {kinds slot
 #print axioms store_then_load
 #print axioms store_unavailable
 
+private def packetTag : CIL.Extraction.FieldRef :=
+  { owner := .aggregate "Packet" 0, index := 1, name := name!"Tag",
+    type := .atom CIL.Extraction.runtimeScope "System.Int32" }
+
 /-- Zero a struct local, store its int field, then store and reload a word local. -/
 @[cil_code] def structAndWord : CIL.Method := {
-  code := [.localAddr 0, .initAggregate 12, .localAddr 0, .arg 0, .setFieldAt 8 4,
-    .arg 1, .setLocal 1, .local 0, .ret]
+  environment := {
+    rawLayouts := [{
+      identity := "Packet", explicit := false, packing := 4, declaredSize := 12
+      fields := [⟨.unsigned64, none⟩, ⟨.signed32, none⟩] }]
+    layouts := #[⟨packet, 4⟩] }
+  code := [.ldloca 0, .initobj (.aggregate "Packet" 0), .ldloca 0, .ldarg 0,
+    .stfld packetTag,
+    .ldarg 1, .stloc 1, .ldloc 0, .ret]
   locals := [.aggregate zeros, .i64 0], localKinds := [.aggregate 12, .word64],
   returnsValue := true }
 
@@ -163,9 +175,10 @@ theorem struct_beside_word {entered memory : Memory} {frame : Frame} {boundary :
       packet_checked.2 rfl rfl (fieldIndex := 1) rfl (.i32 bits) rfl
   have wordTagged := snapshot_access_after_write
     (snapshot_access_after_write wordReady zeroWrite) tagWrite
-  cil_checked_steps (snapshots := tagSnapshots) [structSlot, wordSlot, tagFormed, zeroStep,
-    tagStep, access_reference_valid _ _ _ _ _ structReady, zeroForm, wordTagged, zeros,
-    localAddress]
+  cil_checked_steps (snapshots := tagSnapshots)
+    [structSlot, access_reference_valid _ _ _ _ _ structReady,
+      zeroStep structAndWord (.aggregate "Packet" 0) rfl, wordSlot, tagFormed,
+      tagStep, zeroForm, wordTagged, zeros, localAddress]
 
 #print axioms struct_beside_word
 
@@ -199,11 +212,13 @@ theorem signed_byte_load {entered memory : Memory} {boundary : Nat} {kinds slots
     (specified : known 0 = some (.aggregate bytes))
     (writable : access memory home 40 1 true = .ok ()) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.fieldAt 0 1 true) pc args frame (.reference (.address home) :: rest) after =
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .value 0 1 true → ∀ pc args frame rest,
+        step body (.ldfld operand) pc args frame (.reference (.address home) :: rest) after =
           .ok (.next (pc + 1) (.scalar (.i32 (-1)) :: rest) frame after)) ∧
-      ∀ body pc args frame rest,
-        step body (.fieldAt 0 1 false) pc args frame (.reference (.address home) :: rest) after =
+      ∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .value 0 1 false → ∀ pc args frame rest,
+        step body (.ldfld operand) pc args frame (.reference (.address home) :: rest) after =
           .ok (.next (pc + 1) (.scalar (.i32 255) :: rest) frame after) := by
   obtain ⟨after, -, stored, storedFormed, -, -, -, storedValues, -⟩ :=
     snapshots.store_field homes formed slot specified writable mixed_checked.1 mixed_checked.2
@@ -238,22 +253,27 @@ theorem vector_and_nested_store_then_load {entered memory : Memory} {boundary : 
     (inner : List (BitVec 8)) (innerSized : inner.length = 12) (sign : Nat)
     (present : (mixed.values bytes)[0]? = some sign) :
     ∃ vectored nested,
-      (∀ body pc args frame rest,
-        step body (.setFieldAt 8 16) pc args frame
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef) (signed : Bool),
+        body.fieldShape operand = .value 8 16 signed → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar (.v128 bits) :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame vectored)) ∧
-      (∀ body pc args frame rest,
-        step body (.setAggregateFieldAt 24 12) pc args frame
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .aggregate 24 12 → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar (.aggregate inner) :: .reference (.address home) :: rest) vectored =
           .ok (.next (pc + 1) rest frame nested)) ∧
-      (∀ body pc args frame rest,
-        step body (.aggregateFieldAt 24 12) pc args frame (.reference (.address home) :: rest)
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .aggregate 24 12 →
+        ∀ pc args frame rest, step body (.ldfld operand) pc args frame (.reference (.address home) :: rest)
           nested = .ok (.next (pc + 1) (.scalar (.aggregate inner) :: rest) frame nested)) ∧
-      (∀ body pc args frame rest,
-        step body (.fieldAt 8 16 false) pc args frame (.reference (.address home) :: rest)
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .value 8 16 false → ∀ pc args frame rest,
+        step body (.ldfld operand) pc args frame (.reference (.address home) :: rest)
           nested = .ok (.next (pc + 1) (.scalar (.v128 bits) :: rest) frame nested)) ∧
-      ∀ body pc args frame rest,
-        step body (.fieldAt 0 1 true) pc args frame (.reference (.address home) :: rest)
+      ∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .value 0 1 true → ∀ pc args frame rest,
+        step body (.ldfld operand) pc args frame (.reference (.address home) :: rest)
           nested = .ok (.next (pc + 1) (.scalar (signedOfWidth 1 sign) :: rest) frame nested) := by
   obtain ⟨vectored, storeVector, vectorSnapshots, vectorFormed, -, vectorReady, -,
     vectorValues, -⟩ :=
@@ -309,8 +329,9 @@ theorem narrow_vector_load_unavailable {memory : Memory} {slots : List LocalSlot
     (slot : slots[0]? = some (.bytes (.aggregate 40) home))
     (specified : known 0 = some (.aggregate bytes)) (vectorValue : Nat)
     (present : (mixed.values bytes)[2]? = some vectorValue) :
-    (∀ body pc args frame rest,
-      step body (.fieldAt 8 16 false) pc args frame (.reference (.address home) :: rest) memory =
+    (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+      body.fieldShape operand = .value 8 16 false → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (numericOfWidth 16 vectorValue) :: rest) frame memory)) ∧
       (⟨8, 8, false⟩ : FieldLayout).numberIn (vector.setIn zeros40 vectorOnes) ≠ vectorOnes := by
   fail_if_success

@@ -17,11 +17,12 @@ inductive FrameAction.Renamed (indices : LocalIndexMap) (mapping : AllocationRen
       (memory : Memory.Renamed mapping scopes sourceMemory targetMemory)
       (frame : Frame.Renamed indices mapping scopes sourceFrame targetFrame) :
       Renamed indices mapping scopes (.next pc stack sourceFrame sourceMemory)
-        (.next pc (stack.map mapping.value) targetFrame targetMemory)
+        (.next pc (stack.map (indices.value mapping)) targetFrame targetMemory)
   | call {sourceMemory targetMemory callee arguments rest}
       (memory : Memory.Renamed mapping scopes sourceMemory targetMemory) :
       Renamed indices mapping scopes (.call callee arguments rest sourceMemory)
-        (.call callee (arguments.map mapping.value) (rest.map mapping.value) targetMemory)
+        (.call callee (arguments.map mapping.value) (rest.map (indices.value mapping))
+          targetMemory)
   | tailCall {sourceMemory targetMemory callee arguments}
       (memory : Memory.Renamed mapping scopes sourceMemory targetMemory) :
       Renamed indices mapping scopes (.tailCall callee arguments sourceMemory)
@@ -33,8 +34,8 @@ inductive FrameAction.Renamed (indices : LocalIndexMap) (mapping : AllocationRen
       (temporaryBound : temporary.allocation < mapping.sourceLimit) :
       Renamed indices mapping scopes
         (.construct callee arguments rest sourceFrame temporary kind sourceMemory)
-        (.construct callee (arguments.map mapping.value) (rest.map mapping.value) targetFrame
-          (mapping.reference temporary) kind targetMemory)
+        (.construct callee (arguments.map mapping.value) (rest.map (indices.value mapping))
+          targetFrame (mapping.reference temporary) kind targetMemory)
   | returned {sourceMemory targetMemory values}
       (memory : Memory.Renamed mapping scopes sourceMemory targetMemory) :
       Renamed indices mapping scopes (.returned values sourceMemory)

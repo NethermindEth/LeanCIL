@@ -2,9 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
-#:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -44,14 +49,19 @@ foreach (var method in methods.Where(method => method.IsPublic))
             claims.Add($"({Run(length, length == 0)}).map Prod.snd = " +
                 $".ok [{View(length * sourceWidth / targetWidth, targetWidth, length == 0)}]");
         if (sourceWidth > targetWidth)
-            claims.Add($"({Run(int.MaxValue)}).map Prod.snd = .error ⟨0, 1, .thrown \"System.OverflowException\"⟩");
+            claims.Add($"({Run(int.MaxValue)}).map Prod.snd = .error ⟨0, 1, .thrown .overflow⟩");
         var uninitialized = Run(7).Replace("] memory", "] { memory with cells := fun _ _ => ⟨0, false⟩ }",
             StringComparison.Ordinal);
         claims.Add($"({uninitialized}).map Prod.snd = .ok [{View(7 * sourceWidth / targetWidth, targetWidth)}]");
         var noAuthority = Run(7).Replace("] memory", "] { memory with views := [] }", StringComparison.Ordinal);
         claims.Add($"({noAuthority}).map Prod.snd = .ok [{View(7 * sourceWidth / targetWidth, targetWidth)}]");
     }
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    var correctness = claims.Count == 1 ? "by rfl"
+        : $"by exact ⟨{string.Join(", ", claims.Select(_ => "by rfl"))}⟩";
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
         /-- Sparse caller storage permits boundary lengths without allocating their byte contents. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
@@ -60,31 +70,22 @@ foreach (var method in methods.Where(method => method.IsPublic))
           views := [⟨0, 0, 2^35, true, true⟩]
           nextIdentity := 1 }
         /-- Empty, truncated, overflow and unreadable views retain their exact runtime behavior. -/
-        """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := " + (claims.Count == 1 ? "by rfl" :
-            "by exact ⟨" + string.Join(", ", claims.Select(_ => "by rfl")) + "⟩") +
-        "\n#print axioms correctness\nend ExampleProof\n");
+        theorem correctness :
+        {{string.Join(" ∧\n", claims)}} := {{correctness}}
+        #print axioms correctness
+        end ExampleProof
+
+        """);
     queue.Add(new(method.FullName, proof, output), () => Console.WriteLine("PASS reinterpreted span: " + name));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-var index = 0;
-foreach (var (name, before, after) in new[]
-{
-    ("Bytes", ".spanReinterpret 4 1 true", ".spanReinterpret 8 1 true"),
-    ("Words", ".spanReinterpret 1 4 true", ".spanReinterpret 1 8 true"),
-    ("ReadOnlyWords", ".spanReinterpret 1 2 false", ".spanReinterpret 1 2 true"),
-    ("SameWidth", ".spanReinterpret 4 4 true", ".spanReadOnly")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_scalars_validated");
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing reinterpret mutation");
-    var path = Path.Combine(root, $"Rejected{index++}.lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS exact reinterpret evidence rejection: " + name, "ScalarFlowValid");
-}
-rejected.Check();
+CheckMarshalModels(root,
+[
+    ("Bytes", 1, ".spanReinterpret 4 1 true", ".spanReinterpret 2 1 true"),
+    ("Words", 1, ".spanReinterpret 1 4 true", ".spanReinterpret 2 4 true"),
+    ("ReadOnlyWords", 1, ".spanReinterpret 1 2 false", ".spanReinterpret 2 2 false"),
+    ("SameWidth", 1, ".spanReinterpret 4 4 true", ".spanReinterpret 2 4 true")
+]);
 
 partial class Program
 {
@@ -113,6 +114,4 @@ partial class Program
         catch (OverflowException) { }
     }
 }
-
-
 

@@ -61,9 +61,8 @@ static class CertifiedLibraryArchive
         source = Path.GetFullPath(source);
         archive = Path.GetFullPath(archive);
         RequireDigest(Path.Combine(source, "cache-manifest.json"), manifestDigest);
-        var relativeArchive = Path.GetRelativePath(source, archive);
-        if (File.Exists(archive) || Directory.Exists(archive) || (!Path.IsPathRooted(relativeArchive) &&
-            !relativeArchive.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+        // An archive reached through a link into the library would be packed into itself.
+        if (File.Exists(archive) || Directory.Exists(archive) || Program.Inside(source, archive))
             throw new InvalidDataException("Archive must be new and outside the library");
         Directory.CreateDirectory(Path.GetDirectoryName(archive)!);
         using var process = Start(["-T2", "-6", "-q", "-o", archive], input: true);
@@ -137,8 +136,8 @@ static class CertifiedLibraryArchive
                 try
                 {
                     using var reader = new TarReader(process.StandardOutput.BaseStream, leaveOpen: true);
-                    var seen = new HashSet<string>(OperatingSystem.IsWindows()
-                        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+                    // Entry names differing only in case are one file unless the staging volume tells case apart.
+                    var seen = new HashSet<string>(Program.CollidingLocationComparer);
                     while (reader.GetNextEntry() is { } entry)
                     {
                         var path = EntryPath(staging, entry.Name);

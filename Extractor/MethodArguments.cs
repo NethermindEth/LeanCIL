@@ -17,6 +17,10 @@ internal static class MethodArguments
         return InReferences.Parameter(method.Parameters[parameter].ParameterType);
     }
 
+    /// <summary>Whether argument <paramref name="index"/> is read as the whole word it holds, its declared type
+    /// being no narrow integer.</summary>
+    internal static bool Plain(MethodDefinition method, int index) => LeanEmitter.Narrow(Type(method, index)) is null;
+
     internal static int Index(MethodDefinition method, ParameterDefinition parameter)
     {
         if (method.HasThis && parameter == method.Body.ThisParameter) return 0;

@@ -1,4 +1,5 @@
 import CIL.Safety.FrameEquivalence
+import CIL.Safety.NativeMethodTableEquivalence
 
 /-!
 # Equivalent memories run instructions alike
@@ -239,7 +240,7 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
   unfold CIL.Safety.otherMemoryInstruction
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
-    same.arrayValidate, same.arrayElement, same.loadTransfer]
+    same.loadTransfer]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -283,14 +284,53 @@ private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same
     | split
 #print axioms Memory.Equivalent.wideArithmeticInstruction
 
-/-- Object field accesses locate the same field and perform equivalent checked accesses. -/
-private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : m.Equivalent n)
-    (operation : CIL.MemoryOp) (stack : List Value) :
-    ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
-      (objectFieldInstruction operation stack n) := by
-  unfold CIL.Safety.objectFieldInstruction
+/-- Array lengths and element accesses, and the two reads of a handler table, locate the same
+    element and perform equivalent checked accesses. -/
+private theorem Memory.Equivalent.elementInstruction {m n : Memory}
+    (same : m.Equivalent n) (op : CIL.Instruction) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (elementInstruction op stack m)
+      (elementInstruction op stack n) := by
+  unfold CIL.Safety.elementInstruction CIL.Safety.arrayLoad CIL.Safety.arrayStore
+    CIL.Safety.methodTableElement
+  split <;> try simp only [same.loadSlot, same.referenceArrayOf, same.referenceArraySlot,
+    same.storableIn, same.loadValue, same.arrayValidate, same.arrayElement, same.loadNativeTable]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind (same.storeSlot _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.elementInstruction
+
+/-- Class field loads locate the same field and read equivalent memories alike. -/
+theorem Memory.Equivalent.classFieldLoad {m n : Memory} (same : m.Equivalent n)
+    (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (classFieldLoad owner offset slot stack m)
+      (classFieldLoad owner offset slot stack n) := by
+  unfold CIL.Safety.classFieldLoad
   split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
-    same.referenceArrayOf, same.referenceArraySlot, same.storableIn, same.loadArraySlot]
+    same.loadArraySlot]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.classFieldLoad
+
+/-- Class field stores locate the same field and perform equivalent checked writes. -/
+theorem Memory.Equivalent.classFieldStore {m n : Memory} (same : m.Equivalent n)
+    (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (classFieldStore owner offset slot stack m)
+      (classFieldStore owner offset slot stack n) := by
+  unfold CIL.Safety.classFieldStore
+  split <;> try simp only [same.objectFieldAddress]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
@@ -305,7 +345,7 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
        intro left right related
        exact .ok ⟨related, rfl⟩)
     | split
-#print axioms Memory.Equivalent.objectFieldInstruction
+#print axioms Memory.Equivalent.classFieldStore
 
 /-- A string literal loads the same bound object from equivalent memories. -/
 private theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same : m.Equivalent n)
@@ -417,6 +457,46 @@ theorem Memory.Equivalent.arrayTransferInstruction {m n : Memory} (same : m.Equi
     | split
 #print axioms Memory.Equivalent.arrayTransferInstruction
 
+/-- A typed element access takes the same access from its element's shape and performs it alike
+    over equivalent memories. -/
+theorem Memory.Equivalent.typedElementInstruction {m n : Memory} (same : m.Equivalent n)
+    (shape : CIL.ElementShape) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (typedElementInstruction shape store stack m)
+      (typedElementInstruction shape store stack n) := by
+  unfold CIL.Safety.typedElementInstruction
+  split
+  any_goals split
+  any_goals exact same.arrayTransferInstruction _ _ _
+  all_goals (try unfold CIL.Safety.arrayLoad); (try unfold CIL.Safety.arrayStore)
+  all_goals try unfold CIL.Safety.methodTableElement
+  all_goals try simp only [same.loadValue, same.arrayElement, same.loadNativeTable]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.typedElementInstruction
+
+/-- An element address takes its element from the shape and gives the same reference over
+    equivalent memories. -/
+theorem Memory.Equivalent.elementAddressInstruction {m n : Memory} (same : m.Equivalent n)
+    (shape : CIL.ElementShape) (readOnly : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (elementAddressInstruction shape readOnly stack m)
+      (elementAddressInstruction shape readOnly stack n) := by
+  unfold CIL.Safety.elementAddressInstruction
+  split
+  all_goals try unfold CIL.Safety.arrayAddress
+  all_goals try simp only [same.arrayElement]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.elementAddressInstruction
+
 /-- Aligned transfers retain exact access failures and the existing typed transfer equivalence. -/
 theorem Memory.Equivalent.pointerTransferInstruction {m n : Memory} (same : m.Equivalent n)
     (kind : CIL.TransferKind) (alignment : Nat) (store : Bool) (stack : List Value) :
@@ -452,6 +532,20 @@ theorem Memory.Equivalent.vector128UnsafeInstruction {m n : Memory} (same : m.Eq
     | split
 #print axioms Memory.Equivalent.vector128UnsafeInstruction
 
+/-- A static span reads only equivalent allocation metadata and leaves memory unchanged. -/
+theorem Memory.Equivalent.staticSpanInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (staticSpanInstruction operation stack m)
+      (staticSpanInstruction operation stack n) := by
+  unfold CIL.Safety.staticSpanInstruction
+  split <;> try simp only [checkedAt, liveAllocation, same.allocations, same.formValue]
+  all_goals repeat first
+    | exact .ok ⟨same, rfl⟩
+    | exact .error _
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.staticSpanInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -464,7 +558,6 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.referenceAddInstruction _ _ _
     · exact same.pointerTransferInstruction _ _ _ _
     · exact same.vector128UnsafeInstruction _ _ _
-    · exact same.arrayTransferInstruction _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.binaryTransferInstruction _ _ _ _ _ _
     · exact same.singleSpanInstruction _ _ _
@@ -474,30 +567,127 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.arrayFillInstruction _ _ _
     · exact same.wideArithmeticInstruction _ _
     · exact same.wideArithmeticInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
+    · exact same.staticSpanInstruction _ _
+    · exact same.staticSpanInstruction _ _
     · exact same.stringLiteralInstruction _ _
     · exact same.throwIfNullInstruction _
     · exact same.zeroGuardInstruction _ _ _ _
     · exact same.comparisonGuardInstruction _ _ _ _
     · exact same.otherMemoryInstruction _ _
 
+/-- Equivalent memories return the same value from a checked value field. -/
+theorem Memory.Equivalent.loadValueField {m n : Memory} (same : m.Equivalent n)
+    (offset width : Nat) (signed : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (loadValueField offset width signed stack m)
+      (loadValueField offset width signed stack n) := by
+  unfold CIL.Safety.loadValueField
+  simp only [same.add, same.loadValue]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.loadValueField
+
+/-- Equivalent memories preserve equivalence when writing a checked value field. -/
+theorem Memory.Equivalent.storeValueField {m n : Memory} (same : m.Equivalent n)
+    (offset width : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (storeValueField offset width stack m)
+      (storeValueField offset width stack n) := by
+  unfold CIL.Safety.storeValueField
+  simp only [same.add]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.storeValueField
+
+/-- Equivalent memories read the same nested field from a struct or a reference. -/
+theorem Memory.Equivalent.loadAggregateField {m n : Memory} (same : m.Equivalent n)
+    (offset size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (loadAggregateField offset size stack m)
+      (loadAggregateField offset size stack n) := by
+  unfold CIL.Safety.loadAggregateField
+  simp only [same.add, same.read, same.loadSnapshot]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.loadAggregateField
+
+/-- A nested struct write produces equivalent memories for initialized bytes and snapshots. -/
+theorem Memory.Equivalent.storeAggregateField {m n : Memory} (same : m.Equivalent n)
+    (offset size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (storeAggregateField offset size stack m)
+      (storeAggregateField offset size stack n) := by
+  unfold CIL.Safety.storeAggregateField
+  simp only [same.add]
+  repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.storeAggregateField
+
+/-- Equivalent memories give the same typed load and equivalent scalar, snapshot and vector stores. -/
+theorem Memory.Equivalent.transferValues {m n : Memory} (same : m.Equivalent n)
+    (kind : CIL.TransferKind) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (transferValues kind store stack m)
+      (transferValues kind store stack n) := by
+  unfold CIL.Safety.transferValues
+  split <;> try simp only [same.dereference, same.loadValue, same.loadSnapshot]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind ((same.writeSnapshot _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.transferValues
+
+/-- Equivalent memories share every observable transfer outcome and its operand guard. -/
+theorem Memory.Equivalent.observedTransfer {m n : Memory} (same : m.Equivalent n)
+    (kind : CIL.TransferKind) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (observedTransfer kind store stack m)
+      (observedTransfer kind store stack n) := by
+  unfold CIL.Safety.observedTransfer
+  by_cases observed : unspecifiedOperands (if store then 2 else 1) stack = true
+  · simp only [observed, ite_true]
+    exact .error _
+  · simp only [observed, ite_false]
+    exact same.transferValues _ _ _
+#print axioms Memory.Equivalent.observedTransfer
+
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
-    (operation : CIL.Op) (stack : List Value) :
+    (operation : CIL.Instruction) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction
   split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot,
-    same.formValue, same.add]
+    same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
+    | exact same.transferValues _ _ _
     | exact same.memoryInstruction _ _
+    | exact same.elementInstruction _ _
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)
@@ -516,5 +706,60 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
 #print axioms Memory.Equivalent.memoryInstruction
 #print axioms Memory.Equivalent.loadValue
 #print axioms Memory.Equivalent.storeValue
+
+/-- Equivalent memories give equivalent results for a typed copy. -/
+theorem Memory.Equivalent.copyInitializedBytes {m n : Memory} (same : m.Equivalent n)
+    (size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (copyInitializedBytes size stack m)
+      (copyInitializedBytes size stack n) := by
+  unfold CIL.Safety.copyInitializedBytes
+  split <;> try simp only [same.read]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.copyInitializedBytes
+
+/-- Equivalent memories give equivalent results for a zero initialization. -/
+theorem Memory.Equivalent.initializeBytes {m n : Memory} (same : m.Equivalent n)
+    (size : Nat) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (initializeBytes size stack m)
+      (initializeBytes size stack n) := by
+  unfold CIL.Safety.initializeBytes
+  split <;> try simp only [same.read]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.initializeBytes
+
+/-- Equivalent memories give equivalent results for a typed object transfer. -/
+theorem Memory.Equivalent.transferObject {m n : Memory} (same : m.Equivalent n)
+    (shape : ValueShape) (store : Bool) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (transferObject shape store stack m)
+      (transferObject shape store stack n) := by
+  unfold CIL.Safety.transferObject
+  split <;> try simp only [same.read]
+  all_goals repeat first
+    | exact same.memoryInstruction _ _
+    | exact same.observedTransfer _ _ _
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.transferObject
 
 end CIL.Safety

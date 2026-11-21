@@ -50,8 +50,8 @@ manifest's `historicalDivergences` field: the expectation is the zero-extension 
 the extractor rejects the case.
 
 `NativeOperands` rejects mixed `bne.un`, `blt.un`, `bgt.un`, `ble.un`, and `bge.un`, including
-every short form. The checked native wrapper rejects them too. The diagnostic requires explicit
-`conv.i` or `conv.u`; those same-width forms are supported and tested. Accepting argument-only
+every short form. `CIL.step` and the checked interpreter reject them too. The diagnostic requires
+explicit `conv.i` or `conv.u`; those same-width forms are supported and tested. Accepting argument-only
 cases would require an extra runtime assumption: inlining can expose constant actual arguments,
 and propagation can change local provenance. Neither inlining nor propagation is part of the
 verification contract.
@@ -93,7 +93,7 @@ isolated directory. Run its `dotnet` executable, rather than a system installati
 /path/to/isolated-runtime/dotnet Tests/NativeProbe/bin/NativeProbe.dll /path/to/results
 ```
 
-The project pins runtime 10.0.0 and disables roll-forward. To run on a second machine without
+The project pins runtime 11.0.0 and disables roll-forward. To run on a second machine without
 installing an SDK, copy `NativeProbe.dll`, `NativeProbe.deps.json`,
 `NativeProbe.runtimeconfig.json`, and `Mono.Cecil.dll` from the build directory. The generated
 fixture uses a deterministic MVID and timestamp. An admitted mismatch returns exit code 1;

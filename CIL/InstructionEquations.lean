@@ -1,6 +1,7 @@
 import Lean
 import CIL.Instructions
 import CIL.SymbolicExecution
+import CIL.Extraction.LinkIndex
 
 /-!
 # Instruction equations
@@ -12,7 +13,7 @@ after each generated template, and a hand-written body calls it itself, so `cil_
 from an extracted body and from a parametric one, such as
 `def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method`, by one rewrite instead of unfolding
 the body and walking its code list. An instruction that depends on a parameter is stated as
-written, for example `if avx2 then op else .unsupported ...`, and `cil_lookup` decides it from
+written, for example `if avx2 then op else .unadmitted opcode`, and `cil_lookup` decides it from
 the caller's facts or literal flags.
 
 The proofs follow `CIL.CodeSuffix`: the command names the suffix of the code at every
@@ -21,6 +22,12 @@ suffix before it, and proves each equation from the suffix that starts its block
 walks more than one block, so the equations of a body cost time linear in its length. The
 kernel checks every declaration, so the command proves nothing about the body beyond what its
 definition says.
+
+The command also states `body_link{pc} : (body xs).linkAt pc = some link`, tagged
+`@[cil_code ↓]`, at every call site; a call reads its target from `linkAt`, so stepping one
+uses the named fact. For ascending literal keys, the proof uses `body_links_ascend` and the
+entry in the named suffix `body_linkSuffix{start}`. The command skips tables with symbolic
+cells or keys.
 -/
 
 namespace CIL.InstructionEquations
@@ -31,22 +38,31 @@ open Lean Meta Elab Term Command
     body's code than this. -/
 def suffixBlock : Nat := 16
 
+/-- The elements of `list`, one per cell and each as written, and whether the cells reached
+    end in `[]`. The walk stops early at a cell that does not reduce to `::` or `[]`, as
+    when a parameter decides the list's length or the list is irreducible or opaque. -/
+def listElements (list : Expr) : MetaM (Array Expr × Bool) := do
+  let mut cell := list
+  let mut found := #[]
+  repeat
+    match (← whnf cell).getAppFnArgs with
+    | (``List.cons, #[_, element, tail]) =>
+      found := found.push (← instantiateMVars element).headBeta
+      cell := tail
+    | (``List.nil, _) => return (found, true)
+    | _ => return (found, false)
+  return (found, false)
+
 /-- The instructions of `code`, one per list cell and each as written in the body. Fails when
     a cell cannot be reached by reduction, as when a parameter decides the code's length or
     the body is irreducible or opaque. -/
 def instructions (body : Name) (code : Expr) : MetaM (Array Expr) := do
-  let mut cell := code
-  let mut found := #[]
-  repeat
-    match (← whnf cell).getAppFnArgs with
-    | (``List.cons, #[_, op, tail]) =>
-      found := found.push (← instantiateMVars op).headBeta
-      cell := tail
-    | (``List.nil, _) => break
-    | _ => throwError "cil_instruction_equations: the instruction at pc {found.size} of \
-        {body} is not determined by its parameters, or the body does not unfold; state each \
-        feature-dependent instruction as an `if` on the instruction, padding the shorter side \
-        with `.unsupported`, so every profile has the same pcs"
+  let (found, complete) ← listElements code
+  unless complete do
+    throwError "cil_instruction_equations: the instruction at pc {found.size} of \
+      {body} is not determined by its parameters, or the body does not unfold; state each \
+      feature-dependent instruction as an `if` on the instruction, padding the shorter side \
+      with `.unadmitted`, so every profile has the same pcs"
   return found
 
 /-- A body whose equations are being declared: its name, universe parameters, parameters and
@@ -85,46 +101,141 @@ def Body.prove (body : Body) (tail doc : String) (statement proof : Expr) : Term
     type := ← mkForallFVars body.parameters statement
     value := ← mkLambdaFVars body.parameters proof }
 
-/-- `[Op]`, the type of a code list. -/
-def codeType : Expr := mkApp (mkConst ``List [.zero]) (mkConst ``CIL.Op)
+/-- The literal list of `elements` of type `elementType` followed by `rest`. -/
+def listLiteral (elementType : Expr) (elements : Array Expr) (rest : Expr) : Expr :=
+  elements.foldr (init := rest) (mkApp3 (mkConst ``List.cons [.zero]) elementType)
 
-/-- `Eq.refl list` for a code list. -/
-def codeRefl (list : Expr) : Expr := mkApp2 (mkConst ``Eq.refl [.one]) codeType list
+/-- The positions at which `declareSuffixes` names a suffix of a list of `length` elements. -/
+def suffixStarts (length : Nat) : List Nat :=
+  (List.range ((length + suffixBlock - 1) / suffixBlock)).map (· * suffixBlock)
 
-/-- Declares `body_suffix{start}`, the code of `body` from each block boundary on, and
-    `body_suffix{start}_placed : (body xs).code.drop start = body_suffix{start} xs`, each
-    proved from the suffix one block earlier. -/
-def declareSuffixes (body : Body) (code : Expr) (ops : Array Expr) : TermElabM Unit := do
-  let suffix (start : Nat) := body.constant s!"_suffix{start}"
-  let starts := (List.range ((ops.size + suffixBlock - 1) / suffixBlock)).map (· * suffixBlock)
+/-- The suffix of a list of `elements` from `position` on as a literal: the rest of its block,
+    then the next named suffix `body{stem}{start}` or `[]`. -/
+def suffixFrom (body : Body) (stem : String) (elementType : Expr) (elements : Array Expr)
+    (position : Nat) : Expr :=
+  let stop := min (position - position % suffixBlock + suffixBlock) elements.size
+  let rest := if stop < elements.size then body.constant s!"{stem}{stop}" else
+    mkApp (mkConst ``List.nil [.zero]) elementType
+  listLiteral elementType (elements.extract position stop) rest
+
+/-- A proof of `list[position]? = some element` from the named suffix that starts the
+    position's block; it walks at most one block. -/
+def foundAt (body : Body) (stem : String) (elementType list : Expr) (elements : Array Expr)
+    (position : Nat) : MetaM Expr := do
+  let offset := position % suffixBlock
+  let start := position - offset
+  let element := elements[position]!
+  return mkApp8 (mkConst ``CIL.CodeSuffix.lookup) elementType list
+    (body.constant s!"{stem}{start}") (mkNatLit start) element (mkNatLit offset)
+    (body.constant s!"{stem}{start}_placed") (← mkEqRefl (← mkAppM ``Option.some #[element]))
+
+/-- Declares `body{stem}{start}`, the elements of `list` from each block boundary on, and
+    `body{stem}{start}_placed : list.drop start = body{stem}{start} xs`, each proved from the
+    suffix one block earlier; `describe start` names what the suffix at `start` holds. -/
+def declareSuffixes (body : Body) (elementType : Expr) (stem : String)
+    (describe : Nat → String) (list : Expr) (elements : Array Expr) : TermElabM Unit := do
+  let suffix (start : Nat) := body.constant s!"{stem}{start}"
+  let listType := mkApp (mkConst ``List [.zero]) elementType
+  let refl (value : Expr) := mkApp2 (mkConst ``Eq.refl [.one]) listType value
+  let starts := suffixStarts elements.size
   -- Each suffix is its block followed by the next suffix, so the last one is declared first.
   for start in starts.reverse do
-    let stop := min (start + suffixBlock) ops.size
-    let rest := if stop < ops.size then suffix stop else
-      mkApp (mkConst ``List.nil [.zero]) (mkConst ``CIL.Op)
-    let value ← mkLambdaFVars body.parameters <| (ops.extract start stop).foldr (init := rest)
-      (mkApp3 (mkConst ``List.cons [.zero]) (mkConst ``CIL.Op))
-    let name := body.name.appendAfter s!"_suffix{start}"
-    body.declare name s!"The code of `{body.name}` from pc {start} on." <| .defnDecl {
+    let value ← mkLambdaFVars body.parameters (suffixFrom body stem elementType elements start)
+    let name := body.name.appendAfter s!"{stem}{start}"
+    body.declare name s!"{describe start}." <| .defnDecl {
       name, levelParams := body.levelParams, value, safety := .safe
-      type := ← mkForallFVars body.parameters codeType
+      type := ← mkForallFVars body.parameters listType
       hints := .regular (getMaxHeight (← getEnv) value + 1) }
     -- Proofs alone read the suffixes, so they have no compiled code.
     modifyEnv (addNoncomputable · name)
   for start in starts do
     let previous := start - suffixBlock
-    let dropped := mkApp3 (mkConst ``List.drop [.zero]) (mkConst ``CIL.Op) (mkNatLit start) code
-    body.prove s!"_suffix{start}_placed"
-      s!"The code of `{body.name}` from pc {start} on is `{body.name}_suffix{start}`."
-      (mkApp3 (mkConst ``Eq [.one]) codeType dropped (suffix start))
-      (if start = 0 then codeRefl (suffix start) else
-        mkApp7 (mkConst ``CIL.CodeSuffix.advance) code (suffix previous) (suffix start)
-          (mkNatLit previous) (mkNatLit suffixBlock)
-          (body.constant s!"_suffix{previous}_placed") (codeRefl (suffix start)))
+    let dropped := mkApp3 (mkConst ``List.drop [.zero]) elementType (mkNatLit start) list
+    body.prove s!"{stem}{start}_placed"
+      s!"{describe start} is `{body.name}{stem}{start}`."
+      (mkApp3 (mkConst ``Eq [.one]) listType dropped (suffix start))
+      (if start = 0 then refl (suffix start) else
+        mkApp8 (mkConst ``CIL.CodeSuffix.advance) elementType list (suffix previous)
+          (suffix start) (mkNatLit previous) (mkNatLit suffixBlock)
+          (body.constant s!"{stem}{previous}_placed") (refl (suffix start)))
+
+/-- The entries of an explicit link table, each as written with its literal key, when every
+    cell reduces and the keys ascend from 0; `none` otherwise. -/
+def explicitLinks (method : Expr) : MetaM (Option (Array Expr × Array (Nat × Expr))) := do
+  let (entries, complete) ← listElements (mkApp (mkConst ``CIL.Method.links) method)
+  unless complete do return none
+  let mut keyed := #[]
+  let mut lowest := 0
+  for entry in entries do
+    let some (_, _, key, link) := (← whnfR entry).app4? ``Prod.mk | return none
+    let some pc ← (evalNat (← instantiateMVars key)).run | return none
+    unless lowest ≤ pc do return none
+    lowest := pc + 1
+    keyed := keyed.push (pc, link)
+  return some (entries, keyed)
+
+/-- Declares `body_links_ascend`, the suffixes `body_linkSuffix{start}` of the table and, at each
+    entry, `body_link{pc} : ∀ xs, (body xs).linkAt pc = some link` from the entry's position. At
+    each `call` of `ops` the table gives no key it declares `body_link{pc} : ∀ xs,
+    (body xs).linkAt pc = none`, read from the suffix of the block where `pc` would sit, so the
+    kernel walks at most one block of the table. -/
+def declareExplicitLinks (body : Body) (simpSet : SimpExtension) (method : Expr)
+    (ops : Array Expr) (entries : Array Expr) (keyed : Array (Nat × Expr)) :
+    TermElabM Unit := do
+  let links := mkApp (mkConst ``CIL.Method.links) method
+  let entryType := mkApp2 (mkConst ``Prod [.zero, .zero]) (mkConst ``Nat) (mkConst ``CIL.Link)
+  declareSuffixes body entryType "_linkSuffix"
+    (fun start => s!"The link table of `{body.name}` from entry {start} on") links entries
+  let ascending ← mkEq (mkApp3 (mkConst ``CIL.Extraction.keysAscend) (mkConst ``CIL.Link)
+    (mkNatLit 0) links) (mkConst ``Bool.true)
+  body.prove "_links_ascend" s!"The keys of the link table of `{body.name}` ascend."
+    ascending (← mkEqRefl (mkConst ``Bool.true))
+  for inRange : position in [0:keyed.size] do
+    let (pc, link) := keyed[position]
+    withCurrHeartbeats do
+      let statement ← mkEq (mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc))
+        (← mkAppM ``Option.some #[link])
+      let proof ← mkAppM ``CIL.Extraction.linkAt_of_position #[body.constant "_links_ascend",
+        ← foundAt body "_linkSuffix" entryType links entries position]
+      body.prove s!"_link{pc}" s!"The link of the call site at pc {pc} of `{body.name}`."
+        statement proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
+        (inv := false) .global (eval_prio default)
+  let mut position := 0
+  for inRange : pc in [0:ops.size] do
+    if let some (key, _) := keyed[position]? then
+      if key == pc then
+        position := position + 1
+        continue
+    unless (← whnfR ops[pc]).isAppOf ``CIL.Instruction.call do continue
+    withCurrHeartbeats do
+      let read := mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc)
+      let absent := mkApp (mkConst ``Option.none [.zero]) (mkConst ``CIL.Link)
+      -- A pc past the last key of a full last block starts that block, as no suffix follows it.
+      let block := position - position % suffixBlock
+      let start := if block < entries.size then block else block - suffixBlock
+      let ascending := body.constant "_links_ascend"
+      let readFrom ← if start = 0 then
+          mkAppM ``CIL.Extraction.linkAt_eq_readHead #[ascending, mkNatLit pc]
+        else
+          let previous := entries[start - 1]!
+          let below ← mkDecideProof (← mkAppM ``LT.lt
+            #[← mkAppM ``Prod.fst #[previous], mkNatLit pc])
+          mkAppM ``CIL.Extraction.linkAt_eq_readHead_suffix #[ascending,
+            body.constant s!"_linkSuffix{start}_placed",
+            ← foundAt body "_linkSuffix" entryType links entries (start - 1), below]
+      let walked := (← inferType readFrom).eq?.map (·.2.2) |>.getD absent
+      let proof ← mkEqTrans readFrom
+        (← mkExpectedTypeHint (← mkEqRefl absent) (← mkEq walked absent))
+      body.prove s!"_link{pc}" s!"The call at pc {pc} of `{body.name}` states no link."
+        (← mkEq read absent) proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
+        (inv := false) .global (eval_prio default)
 
 /-- `cil_instruction_equations body` declares `body_instruction{pc}`, the `@[cil_code ↓]`
     equation `∀ xs, (body xs).code[pc]? = some op`, for every pc of the method-valued
-    definition `body`, with the named suffixes `body_suffix{start}` its proofs go through. -/
+    definition `body`, with the named suffixes `body_suffix{start}` its proofs go through, and
+    the link fact `body_link{pc}` at each call site its table gives a link. -/
 syntax (name := instructionEquations) "cil_instruction_equations " ident : command
 
 elab_rules : command
@@ -145,20 +256,19 @@ elab_rules : command
         let method := body.constant ""
         let code := mkApp (mkConst ``CIL.Method.code) method
         let ops ← instructions name code
-        declareSuffixes body code ops
+        declareSuffixes body (mkConst instructionTypeName) "_suffix"
+          (fun start => s!"The code of `{name}` from pc {start} on") code ops
         for inRange : pc in [0:ops.size] do
-          let index := pc % suffixBlock
-          let start := pc - index
           -- A window per equation, so a long body's statements do not exhaust the command's.
           withCurrHeartbeats do
             let found ← mkAppM ``Option.some #[ops[pc]]
             body.prove s!"_instruction{pc}" s!"The instruction at pc {pc} of `{name}`."
               (← mkEq (lookup.beta #[method, mkNatLit pc]) found)
-              (mkApp7 (mkConst ``CIL.CodeSuffix.lookup) code (body.constant s!"_suffix{start}")
-                (mkNatLit start) ops[pc] (mkNatLit index)
-                (body.constant s!"_suffix{start}_placed") (← mkEqRefl found))
+              (← foundAt body "_suffix" (mkConst instructionTypeName) code ops pc)
             -- Pre-order, as `@[cil_code ↓]`: simp rewrites the lookup before unfolding the body.
             addSimpTheorem simpSet (name.appendAfter s!"_instruction{pc}") (post := false)
               (inv := false) .global (eval_prio default)
+        if let some (entries, keyed) ← explicitLinks method then
+          declareExplicitLinks body simpSet method ops entries keyed
 
 end CIL.InstructionEquations

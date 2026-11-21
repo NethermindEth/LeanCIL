@@ -3,7 +3,13 @@
 #:include ConsumerTraceDirectory.cs
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ImportReviewRegressions.cs
+#:include PinnedMetadata.cs
 #:include StagedBundleMutation.cs
 
 using System.Numerics;
@@ -11,6 +17,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+
+if (args is ["--imports-only", var sidecar, var implementation])
+{
+    ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
+        ExtractorPath, sidecar, implementation, At("artifacts/ImportAmbiguity-" + Guid.NewGuid().ToString("N")));
+    Console.WriteLine("PASS identical imports deduplicate and different versions reject ambiguous simple names");
+    return;
+}
 
 if (args is ["--staged-bundle-mutation", var fixture])
 {
@@ -29,7 +43,7 @@ string Project(string name, params string[] references)
     string directory = Path.Combine(root, name);
     Directory.CreateDirectory(directory);
     File.WriteAllText(Path.Combine(directory, name + ".csproj"),
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework>" +
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework>" +
         "<AssemblyName>ImportFixture." + name + "</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup>" +
         string.Join("", references.Select(reference => "<ProjectReference Include=\"../" + reference + "/" + reference + ".csproj\" />")) +
         "</ItemGroup></Project>");

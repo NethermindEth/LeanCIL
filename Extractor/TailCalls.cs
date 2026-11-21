@@ -13,18 +13,6 @@ internal static class TailCalls
         instruction.Previous?.OpCode.Code == Code.Tail ||
         instruction.Previous?.Previous?.OpCode.Code == Code.Tail;
 
-    internal static void ValidateStructure(MethodDefinition method)
-    {
-        foreach (var prefix in method.Body.Instructions)
-        {
-            if (prefix.OpCode.Code != Code.Tail) continue;
-            if (prefix.Operand is not null || prefix.Next is not { } call ||
-                call.OpCode.Code is not (Code.Call or Code.Callvirt or Code.Calli) ||
-                call.Next is not { OpCode.Code: Code.Ret, Operand: null })
-                throw new InvalidDataException("Unsupported tail prefix: requires an adjacent call and return");
-        }
-    }
-
     internal static void ValidateReachable(MethodDefinition method, Instruction prefix, string architecture = "scalar")
     {
         if (prefix.Next is { OpCode.Code: Code.Calli, Operand: Mono.Cecil.CallSite indirect })
@@ -38,9 +26,9 @@ internal static class TailCalls
         if (prefix.Next is not { OpCode.Code: Code.Call, Operand: MethodReference target } ||
             InitAccessors.Return(target.ReturnType).FullName !=
                 InitAccessors.Return(method.ReturnType).FullName ||
-            target.DeclaringType.Scope != method.Module ||
-            InstructionTranslation.RuntimeModel(target) is not null)
+            target.DeclaringType.Scope != method.Module)
             throw new InvalidDataException(
                 "Unsupported tail prefix: requires same-assembly direct call with matching return type");
+        RuntimeModels.ValidateCallScope(target);
     }
 }

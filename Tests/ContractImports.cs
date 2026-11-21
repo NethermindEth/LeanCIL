@@ -2,8 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include GeneratedEvidence.cs
+#:include DeepImportChecks.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -188,6 +194,106 @@ void CheckInterfaceReuse()
     if (builds.Length != 2 || compiled != 1 || replayed < 2)
         throw new InvalidOperationException($"Interface reuse mismatch: {builds.Length} checks, {compiled} builds, {replayed} replays.");
     Console.WriteLine("PASS identical published interfaces compile once across fresh extraction groups and replay independently");
+    var selected = requests[0];
+    var pinManifest = Path.Combine(reuseRoot, "images.sha256");
+    File.WriteAllText(pinManifest, Sha(app) + "  " + Path.GetRelativePath(reuseRoot, app) + "\n");
+    var deepInputs = DeepCheckInputs.Read(pinManifest);
+    var extractionIdentity = ExtractionIdentity.Read(selected.output);
+    if (deepInputs.MatchPins(extractionIdentity.Root).Count != 1 || extractionIdentity.Imports.Length == 0)
+        throw new InvalidOperationException(
+            "Imported-interface deep fixture lost its executable pin or typed import.");
+    using Program deepConsumer = new();
+    var deepReport = deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness",
+        reusePackage, null, null, deepInputs);
+    if (deepReport.binding.mode != BindingMode.Deep ||
+        deepReport.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed)
+        throw new InvalidOperationException("Consumer deep verification did not check the imported caller body.");
+    Console.WriteLine("PASS consumer deep audit checks the caller with an independently audited published interface");
+    RequireDeepImports(deepConsumer.deepImports, "published-interface consumer");
+    var reuseHits = deepConsumer.deepCacheHits;
+    deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null, null,
+        deepInputs);
+    if (deepConsumer.deepCacheHits != reuseHits + 1)
+        throw new InvalidOperationException("An unchanged published-interface deep request did not reuse its result.");
+    Console.WriteLine("PASS an unchanged published-interface deep request reuses its result");
+    // Neither module is in the deep import closure, so a restored result meets the change only in later guards.
+    foreach (var changedModule in new[] { "ExtractedImports", interfaceModule })
+    {
+        var changeToken = Guid.NewGuid().ToString("N");
+        File.AppendAllText(proof, "\n-- " + changeToken + "\n");
+        var beforeChange = Receipts();
+        var publications = deepConsumer.publishedSuccess.Count;
+        var hits = deepConsumer.deepCacheHits;
+        bool changed = false;
+        string? diagnostic = null;
+        try
+        {
+            deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null,
+                stage =>
+                {
+                    // The key is read after this stage, so the change meets the restore decision.
+                    if (stage != "deep-check sources" || changed) return;
+                    var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                        .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
+                            File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
+                                .Contains(changeToken, StringComparison.Ordinal));
+                    SameLengthChange(Path.Combine(session, ".lake/packages/leancil_generated/.lake/build/lib/lean",
+                        changedModule + ".olean"));
+                    changed = true;
+                }, deepInputs);
+        }
+        catch (Exception error) when (error is InvalidOperationException or InvalidDataException &&
+            error.Message.Contains("changed", StringComparison.Ordinal)) { diagnostic = error.Message; }
+        var afterChange = Receipts();
+        if (!changed || diagnostic is null || deepConsumer.deepCacheHits != hits + 1 ||
+            File.Exists(Path.Combine(selected.output, "verified.json")) ||
+            deepConsumer.publishedSuccess.Count != publications || !Same(beforeChange, afterChange))
+            throw new InvalidOperationException("A same-length change to " + changedModule +
+                " beside a restored deep result was not rejected without receipts: " + diagnostic + "; restored " +
+                (deepConsumer.deepCacheHits - hits) + ", report " +
+                File.Exists(Path.Combine(selected.output, "verified.json")) + ", published " +
+                string.Join(", ", deepConsumer.publishedSuccess.Skip(publications)) + ", changed " +
+                string.Join(", ", beforeChange.Keys.Union(afterChange.Keys).Where(path =>
+                    beforeChange.GetValueOrDefault(path) != afterChange.GetValueOrDefault(path))));
+        Console.WriteLine("PASS a same-length " + changedModule + " change beside a restored deep result is " +
+            "rejected without receipts: " + diagnostic.Split('\n')[0]);
+    }
+    var token = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + token + "\n");
+    // Other sessions on the machine share the success cache, so only this driver's own entries are compared.
+    SortedDictionary<string, string> Receipts() => HashFiles(deepConsumer.publishedSuccess
+        .Distinct(StringComparer.Ordinal).SelectMany(key => new[] { "receipt.json", "receipt.hmac" }
+            .Select(name => Path.Combine(SuccessCacheRoot, key, name)))
+        .Where(File.Exists).Select(path => (path, path)));
+    var receipts = Receipts();
+    var publishedBefore = deepConsumer.publishedSuccess.Count;
+    bool mutated = false;
+    bool rejected = false;
+    try
+    {
+        deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null,
+            stage =>
+            {
+                if (stage != "deep checks" || mutated) return;
+                var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                    .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
+                        File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
+                            .Contains(token, StringComparison.Ordinal));
+                var artifact = Path.Combine(session, ".lake/packages/leancil_generated/.lake/build/lib/lean",
+                    interfaceModule + ".olean");
+                if (!File.Exists(artifact))
+                    throw new InvalidOperationException("Accepted interface artifact is missing.");
+                File.WriteAllBytes(artifact + ".unexpected", [0]);
+                mutated = true;
+            }, deepInputs);
+    }
+    catch (InvalidOperationException error) when (error.Message.Contains("Compiled artifacts changed",
+        StringComparison.Ordinal)) { rejected = true; }
+    if (!mutated || !rejected || File.Exists(Path.Combine(selected.output, "verified.json")) ||
+        deepConsumer.publishedSuccess.Count != publishedBefore || !Same(receipts, Receipts()))
+        throw new InvalidOperationException(
+            "Changed published interface escaped deep inventory or published a receipt.");
+    Console.WriteLine("PASS consumer deep audit rejects a new published-interface companion without receipts");
     Reset();
 }
 
@@ -235,7 +341,7 @@ Reject([.. cli, "check", output], "Unsupported extraction manifest schema; run l
 File.WriteAllText(identityPath, currentIdentity);
 string generated = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 if (identity.GetProperty("schema").GetInt32() != 3 || identity.GetProperty("imports").GetArrayLength() != 1 ||
-    !generated.Contains(".call 1 1", StringComparison.Ordinal) || generated.Contains(expectedHash, StringComparison.Ordinal) ||
+    DirectLinks(generated, 1).Length == 0 || generated.Contains(expectedHash, StringComparison.Ordinal) ||
     !File.ReadAllText(Path.Combine(output, "ExtractedImports.lean")).Contains("@_root_.CIL.Safety.MethodContract.Holds _ _ _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Import slot, conditional contract or implementation-independent extraction missing.");
 string deletedProofs = Path.Combine(directory, "deleted-library-proofs");
@@ -275,7 +381,8 @@ if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
+if (report.GetProperty("schema").GetInt32() != CertificateSchema ||
+    report.GetProperty("contractImports").GetArrayLength() != 1 ||
     report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
@@ -865,7 +972,9 @@ void RejectReplayWindowSwap(string expectedDiagnostic, Func<string?> locate, Act
         });
     }
     catch (Exception error) { rejected = error; }
-    if (!replaced) throw new InvalidOperationException("Precondition: verification never reached the interface replay window.");
+    if (!replaced)
+        throw new InvalidOperationException(
+            "Precondition: verification never reached the interface replay window: " + rejected?.Message);
     if (rejected is null || !rejected.Message.Contains(expectedDiagnostic, StringComparison.Ordinal) ||
         File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Incorrect rejection of an interface olean replaced before replay: " + rejected?.Message);
@@ -874,9 +983,28 @@ string? savedHashCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUC
 try
 {
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
-    RejectReplayWindowSwap("Published contract canonical closure digest mismatch: ImportFixture.addOne", () => Directory.EnumerateDirectories(output, "proof-*")
-            .Select(fresh => Path.Combine(fresh, interfaceModule + ".olean")).SingleOrDefault(File.Exists),
-        stage => { using Program single = new(); single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true, stage: stage); });
+    // A directory a killed run left behind holds an interface olean too, and must not be mistaken for this run's.
+    string staleProof = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(staleProof);
+    File.WriteAllBytes(Path.Combine(staleProof, interfaceModule + ".olean"), unauditedArtifact);
+    // This run's directory is the one the listing taken before the step lacks, whatever the file system's clock.
+    HashSet<string> earlierProofs = [.. new DirectoryInfo(output).EnumerateDirectories("proof-*")
+        .Select(earlier => earlier.FullName)];
+    try
+    {
+        RejectReplayWindowSwap("Published contract canonical closure digest mismatch: ImportFixture.addOne",
+            () => new DirectoryInfo(output).EnumerateDirectories("proof-*")
+                .Where(fresh => !earlierProofs.Contains(fresh.FullName))
+                .Select(fresh => Path.Combine(fresh.FullName, interfaceModule + ".olean"))
+                .SingleOrDefault(File.Exists),
+            stage =>
+            {
+                using Program single = new();
+                single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true,
+                    stage: stage);
+            });
+    }
+    finally { Directory.Delete(staleProof, recursive: true); }
     Console.WriteLine("PASS single-file verification binds interface oleans before their closure audit");
     // A token in the proof tells this session apart from concurrent consumer sessions.
     string token = Guid.NewGuid().ToString("N");

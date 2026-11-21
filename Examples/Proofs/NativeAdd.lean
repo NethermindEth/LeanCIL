@@ -10,22 +10,23 @@ theorem correctness (x y : W64) :
       Memory.empty).map Prod.snd =
       .ok [.scalar (.i64 (x + y))] := by
   let args : List CIL.Safety.Value := [.scalar (.i64 x), .scalar (.i64 y)]
-  let frame : Frame := ⟨0, [], [], [], 0⟩
-  have first : CIL.Safety.step Extracted.method0 (.arg 0) 0 args frame [] Memory.empty =
+  let frame : Frame := ⟨0, [], [], 0⟩
+  have first : CIL.Safety.step Extracted.method0 (.ldarg 0) 0 args frame [] Memory.empty =
       .ok (.next 1 [.scalar (.i64 x)] frame Memory.empty) := rfl
   have second :
-      CIL.Safety.step Extracted.method0 (.arg 1) 1 args frame [.scalar (.i64 x)] Memory.empty =
+      CIL.Safety.step Extracted.method0 (.ldarg 1) 1 args frame [.scalar (.i64 x)] Memory.empty =
       .ok (.next 2 [.scalar (.i64 y), .scalar (.i64 x)] frame Memory.empty) := rfl
   have added : CIL.Safety.step Extracted.method0 .add 2 args frame
       [.scalar (.i64 y), .scalar (.i64 x)] Memory.empty =
       .ok (.next 3 [.scalar (.i64 (x + y))] frame Memory.empty) := rfl
   have ran : CIL.Safety.run Extracted.program 4 0 0 args frame [] Memory.empty =
       .ok (Memory.empty, [.scalar (.i64 (x + y))]) := by
-    rw [run_next Extracted.lookup0 Extracted.method0_instruction0 first]
-    rw [run_next Extracted.lookup0 Extracted.method0_instruction1 second]
-    rw [run_next Extracted.lookup0 Extracted.method0_instruction2 added]
+    rw [run_next Extracted.program_method0 Extracted.method0_instruction0 first]
+    rw [run_next Extracted.program_method0 Extracted.method0_instruction1 second]
+    rw [run_next Extracted.program_method0 Extracted.method0_instruction2 added]
     rfl
-  have invoked := invoke_of_run (memory := Memory.empty) Extracted.lookup0 (by rfl) (by rfl) ran
+  have invoked := invoke_of_run (memory := Memory.empty)
+    Extracted.program_method0 (by rfl) (by rfl) ran
   rw [invoked]
   rfl
 

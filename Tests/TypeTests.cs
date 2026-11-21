@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
@@ -22,13 +27,46 @@ var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.TypeT
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution",
     "Tests.TypeTestEvidence");
 
-string[] Ops(string source, int method) => ExtractedInstructions(source)
-    .Where(instruction => instruction.Method == method).Select(instruction => instruction.Op).ToArray();
+// Read each instruction from its generated lookup equation and check the method covers the complete raw body.
+string[][] Ops(string folder, int length, params int[] methods)
+{
+    var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
+    var probe = Path.Combine(folder, "FoldedInstructions.lean");
+    var queries = methods.Select(method =>
+    {
+        var equations = Enumerable.Range(0, length).Select(pc => $"tag Extracted.method{method}_instruction{pc}");
+        return $$"""
+            example : Extracted.method{{method}}.code.length = {{length}} := rfl
+            #eval IO.println ("FOLDED " ++ String.intercalate "|" [{{string.Join(", ", equations)}}])
+            """;
+    });
+    File.WriteAllText(probe, $$"""
+        {{source}}
+
+        /-- Classify a generated instruction at its proven program counter. -/
+        private def tag {code : List CIL.Instruction} {pc : Nat} {op : CIL.Instruction}
+            (_ : code[pc]? = some op) : String :=
+          match op with
+          | .nop => ".nop"
+          | .br target => ".br " ++ toString target
+          | .ldc_i4 word => ".ldc_i4 " ++ toString word.toNat
+          | .unadmitted opcode => ".unadmitted " ++ toString opcode
+          | _ => "other"
+
+        {{string.Join("\n", queries)}}
+        """);
+    const string prefix = "FOLDED ";
+    var rows = Run(["lake", "env", "lean", probe], cwd: FixturePackage()).ReplaceLineEndings("\n").Split('\n')
+        .Where(line => line.StartsWith(prefix, StringComparison.Ordinal))
+        .Select(line => line[prefix.Length..].Split('|')).ToArray();
+    if (rows.Length != methods.Length) throw new InvalidOperationException("Missing decoded instruction equations");
+    return rows;
+}
 
 // A fold is exactly four emitted no-ops followed by the decided word.
 List<(int Pc, string Word)> Folds(string[] ops) => Enumerable.Range(4, Math.Max(0, ops.Length - 4))
-    .Where(pc => ops[(pc - 4)..pc].All(op => op == ".nop") && ops[pc].StartsWith(".const32 ", StringComparison.Ordinal))
-    .Select(pc => (pc, ops[pc][".const32 ".Length..])).ToList();
+    .Where(pc => ops[(pc - 4)..pc].All(op => op == ".nop") && ops[pc].StartsWith(".ldc_i4 ", StringComparison.Ordinal))
+    .Select(pc => (pc, ops[pc][".ldc_i4 ".Length..])).ToList();
 
 void QueueRuntime(string name, string folder)
 {
@@ -47,51 +85,75 @@ void QueueRuntime(string name, string folder)
 }
 
 // Matching and non-matching type arguments decide opposite edges and prune the dead code.
+using var examples = ModuleDefinition.ReadModule(assembly);
+var bodies = examples.GetType("Examples.TypeTests").Methods;
+var classify = bodies.Single(method => method.Name == "Classify").Body.Instructions;
+var comparisonPcs = classify.Where(op => op.OpCode.Code == Code.Call && op.Operand is MethodReference
+    { Name: "op_Equality" or "op_Inequality" }).Select(classify.IndexOf).ToArray();
+int longPc = -1;
 foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), ("Other", new[] { "0", "1" }, 2) })
 {
     var folder = Path.Combine(root, name);
     Run(Extract("extract", assembly, "Examples", $"TypeTests::{name}(int)", folder));
     var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
-    var ops = Ops(source, 1);
+    var ops = Ops(folder, classify.Count, 1).Single();
     var folds = Folds(ops);
+    // Each pruned pc is a hole carrying the raw opcode at that pc of the shared generic body.
+    var holes = Enumerable.Range(0, ops.Length)
+        .Where(pc => ops[pc].StartsWith(".unadmitted ", StringComparison.Ordinal)).ToArray();
     if (!folds.Select(fold => fold.Word).SequenceEqual(expected) ||
-        !ops.Any(op => op.StartsWith(".unsupported", StringComparison.Ordinal)) ||
-        ops.Where((op, pc) => folds.All(fold => fold.Pc != pc)).Count(op => op.StartsWith(".const32", StringComparison.Ordinal)) != 1 ||
-        !ops.Contains($".const32 {offset}"))
+        !folds.Select(fold => fold.Pc).SequenceEqual(comparisonPcs.Take(expected.Length)) ||
+        holes.Length == 0 || holes.Any(pc => ops[pc] != $".unadmitted {(ushort)classify[pc].OpCode.Value}") ||
+        ops.Where((op, pc) => folds.All(fold => fold.Pc != pc)).Count(op => op.StartsWith(".ldc_i4", StringComparison.Ordinal)) != 1 ||
+        !ops.Contains($".ldc_i4 {offset}"))
         throw new InvalidOperationException($"Unexpected folded body for {name}: {string.Join(" | ", ops)}");
     Console.WriteLine($"PASS {name}: folded {string.Join(", ", expected)}, dead branches pruned and certificate checked");
 
     QueueRuntime(name, folder);
+    if (name == "Marker") longPc = holes.First(pc => classify[pc].OpCode.Code == Code.Ldarg_0);
 
     // The lookup equations follow the forged definition, so only the feature certificate can reject the word.
-    var pc = folds[0].Pc;
-    var lines = source.Split('\n');
-    var start = Array.FindIndex(lines, line => line.StartsWith("def method1 : Method :=", StringComparison.Ordinal));
-    var forged = expected[0] == "1" ? ".const32 0" : ".const32 1";
-    var site = start + 1 + pc;
-    if (lines[site].Trim().TrimEnd(',') != $".const32 {expected[0]}")
-        throw new InvalidOperationException("Could not locate the folded site in " + name);
-    lines[site] = lines[site].Replace($".const32 {expected[0]}", forged);
+    var forged = expected[0] == "1" ? ".ldc_i4 0" : ".ldc_i4 1";
     var mutated = Path.Combine(root, name + "-forged.lean");
     const string obligation = "method1_features_validated";
     var control = Path.Combine(root, name + "-control.lean");
-    File.WriteAllText(control, NarrowEvidence(source, obligation));
-    controls.Add(control, "PASS unchanged type-test feature obligation: " + name, obligation);
-    File.WriteAllText(mutated, NarrowEvidence(string.Join('\n', lines), obligation));
+    var evidence = NarrowEvidence(source, obligation);
+    File.WriteAllText(control, evidence);
+    controls.Add(control, $"PASS unchanged type-test feature obligation: {name}", obligation);
+    File.WriteAllText(mutated, ForgeDecodedInstruction(evidence, 1, comparisonPcs[0],
+        $"fun _ => {forged}"));
     rejected.Add(mutated, $"PASS {name}: forged type-test word rejected by the feature certificate",
-        "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-            "method1Closed", "is false");
+        "Extraction.FeatureFlowValid", FeatureObligation(1), "is false");
 }
+
+// A two-byte opcode at a pruned pc is written as 0xFE00 plus its second byte, here the long form of ldarg.
+const int TwoBytePrefix = 0xFE00, LdargSecondByte = 0x09;
+var longFolder = Path.Combine(root, "LongOpcode");
+Directory.CreateDirectory(longFolder);
+var longDll = Path.Combine(longFolder, "Examples.dll");
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.TypeTests").Methods.Single(m => m.Name == "Classify");
+    var code = method.Body.Instructions;
+    code[longPc].OpCode = OpCodes.Ldarg;
+    code[longPc].Operand = method.Parameters[0];
+    module.Write(longDll);
+}
+Run(Extract("extract", longDll, "Examples", "TypeTests::Marker(int)", longFolder));
+var longOps = Ops(longFolder, classify.Count, 1).Single();
+if (longOps[longPc] != $".unadmitted {TwoBytePrefix + LdargSecondByte}")
+    throw new InvalidOperationException($"Two-byte opcode hole at pc {longPc}: {string.Join(" | ", longOps)}");
+Console.WriteLine($"PASS two-byte opcode hole: pc {longPc} carries {TwoBytePrefix + LdargSecondByte}");
 
 var referenceFolder = Path.Combine(root, "ReferenceCases");
 Run(Extract("extract", assembly, "Examples", "TypeTests::ReferenceCases(int)", referenceFolder));
-var referenceSource = File.ReadAllText(Path.Combine(referenceFolder, "Extracted.lean"));
-var referenceOps = Enumerable.Range(1, 3).Select(index => Ops(referenceSource, index)).ToArray();
+var reference = bodies.Single(method => method.Name == "ReferenceClassify").Body.Instructions;
+var referenceOps = Ops(referenceFolder, reference.Count, 1, 2, 3);
 if (referenceOps.Any(ops => ops.Length == 0) ||
     !referenceOps.SelectMany(ops => Folds(ops).Select(fold => fold.Word)).Order().SequenceEqual(["0", "0", "1"]) ||
     referenceOps.Sum(ops => Enumerable.Range(4, ops.Length - 4).Count(pc =>
         ops[(pc - 4)..pc].All(op => op == ".nop") &&
-        ops[pc].StartsWith(".branch ", StringComparison.Ordinal))) != 3)
+        ops[pc].StartsWith(".br ", StringComparison.Ordinal))) != 3)
     throw new InvalidOperationException("Missing exact typeof result or branch folds");
 QueueRuntime("ReferenceCases", referenceFolder);
 queue.Flush();
@@ -105,14 +167,19 @@ if (live.Code == 0 || !live.Output.Contains("External managed dependency: System
 Console.WriteLine("PASS Word: the live non-matching branch is still validated");
 
 // Anything other than the exact closed encoding stays unsupported.
+const string externalTypeCall = "External managed dependency: System.Type System.Type::GetTypeFromHandle";
 foreach (var (mutation, marker) in new[]
 {
-    ("operand-gap", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("handle-return-scope", externalTypeCall),
+    ("handle-parameter-scope", externalTypeCall),
+    ("equality-parameter-scope", externalTypeCall),
+    ("vararg-handle", externalTypeCall),
+    ("operand-gap", externalTypeCall),
     ("type-local", "Unsupported type: System.Type"),
-    ("forwarded-scope", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
-    ("reference-equality", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("forwarded-scope", externalTypeCall),
+    ("reference-equality", externalTypeCall),
     ("interior-branch", "Branch into a folded type comparison"),
-    ("branch-forwarded-scope", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("branch-forwarded-scope", externalTypeCall),
     ("branch-interior-branch", "Branch into a folded type comparison")
 })
 {
@@ -135,6 +202,22 @@ foreach (var (mutation, marker) in new[]
         var fromHandle = (MethodReference)code[at + 1].Operand;
         switch (branchFold ? mutation["branch-".Length..] : mutation)
         {
+            case "handle-return-scope":
+            case "handle-parameter-scope":
+            case "equality-parameter-scope":
+                var wrongScope = new AssemblyNameReference("TypeSignatureFixture", new Version(1, 0, 0, 0));
+                module.AssemblyReferences.Add(wrongScope);
+                var equality = (MethodReference)code[at + 4].Operand;
+                if (mutation == "handle-parameter-scope")
+                    fromHandle.Parameters[0].ParameterType = new TypeReference("System", "RuntimeTypeHandle",
+                        module, wrongScope, valueType: true);
+                else if (mutation == "handle-return-scope")
+                    fromHandle.ReturnType = new TypeReference("System", "Type", module, wrongScope);
+                else equality.Parameters[1].ParameterType = new TypeReference("System", "Type", module, wrongScope);
+                break;
+            case "vararg-handle":
+                fromHandle.CallingConvention = MethodCallingConvention.VarArg;
+                break;
             case "operand-gap": il.InsertAfter(code[at + 1], il.Create(OpCodes.Nop)); break;
             case "type-local":
                 var local = new VariableDefinition(fromHandle.ReturnType);

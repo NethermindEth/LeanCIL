@@ -1,20 +1,60 @@
 import CIL.Extraction.Lockstep
 import Init.Omega
+import Lean
 
 /-!
 # Certificate successor lookup
 
 A balanced index serves branch targets, while adjacent successor states are read directly
 from the remaining certificate. The lookup theorem preserves the list-based validation rules.
+Monotone reads of indexed method data share list suffixes in the kernel and use array access
+in compiled code. `program_index% values` writes `FlowIndex.ofList values` as a literal whose
+leaves are the list's own cell terms. The kernel checks it equal to `ofList` by comparing those
+terms without unfolding them.
 -/
 
 namespace CIL.Extraction
+
+/-- The suffix at an index, shared by kernel reduction with the lookup at the next index. -/
+private def suffixAt (values : List α) : Nat → List α
+  | 0 => values
+  | index + 1 => (suffixAt values index).tail
+
+/-- The shared suffix contains exactly the elements starting at the given index. -/
+private theorem suffixAt_eq_drop (values : List α) (index : Nat) :
+    suffixAt values index = values.drop index := by
+  induction index with
+  | zero => rfl
+  | succ index ih => rw [suffixAt, ih, List.tail_drop]
+#print axioms suffixAt_eq_drop
+
+/-- Repeated reads share the preceding suffix in the kernel and use array indexing at runtime. -/
+def indexedRead? (values : Array α) (index : Nat) : Option α :=
+  if index < values.size then (suffixAt values.toList index).head? else none
+
+/-- The compiled read of an indexed certificate or method body. -/
+private def arrayRead? (values : Array α) (index : Nat) := values[index]?
+
+/-- Kernel and compiled reads agree both inside and outside the array. -/
+@[csimp] private theorem indexedRead?_eq_arrayRead? : @indexedRead? = @arrayRead? := by
+  funext α values index
+  simp only [indexedRead?, arrayRead?, suffixAt_eq_drop, List.head?_drop, Array.getElem?_toList]
+  split
+  · rfl
+  · exact (getElem?_neg values index (by assumption)).symm
+#print axioms indexedRead?_eq_arrayRead?
+
+/-- Indexed reads return the element at the requested position. -/
+@[simp] theorem indexedRead?_eq (values : Array α) (index : Nat) :
+    indexedRead? values index = values[index]? := by rw [indexedRead?_eq_arrayRead?]; rfl
+#print axioms indexedRead?_eq
 
 /-- A certificate index with explicit subtree lengths and no implicit default values. -/
 inductive FlowIndex (α : Type) where
   | empty
   | leaf (value : α)
   | branch (leftSize : Nat) (left right : FlowIndex α)
+  deriving DecidableEq
 
 /-- Lookup rejects every index outside the indexed certificate. -/
 def FlowIndex.get? : FlowIndex α → Nat → Option α
@@ -104,6 +144,49 @@ theorem FlowIndex.get?_ofList (values : List α) (index : Nat) :
     (FlowIndex.build_spec values.length values.length values (Nat.le_refl _) (Nat.le_refl _)).2 index
 
 #print axioms FlowIndex.get?_ofList
+
+open Lean Meta in
+/-- The cells of a list term, unfolded until its spine is literal; the cells stay as written. -/
+def literalCells (list : Expr) : MetaM (Array Expr) := do
+  let mut cells := #[]
+  let mut rest := list
+  repeat
+    -- A literal tail already exposes its constructor, even in a long shared list spine.
+    let literal := rest.isAppOf ``List.cons || rest.isAppOf ``List.nil
+    let spine ← if literal then pure rest else whnf rest
+    match_expr spine with
+    | List.cons _ head tail =>
+      cells := cells.push head
+      rest := tail
+    | List.nil _ => return cells
+    | _ => throwError "the list does not unfold to literal cells: {spine}"
+  return cells
+
+open Lean Meta in
+/-- The literal index of `cells`, split at the same middles as `FlowIndex.build`. -/
+partial def literalFlowIndex (type : Expr) (cells : Array Expr) : Expr :=
+  build 0 cells.size
+where
+  /-- The subtree covering `count` consecutive cells starting at `start`. -/
+  build (start count : Nat) : Expr :=
+    if count = 0 then mkApp (mkConst ``FlowIndex.empty) type
+    else if count = 1 then mkApp2 (mkConst ``FlowIndex.leaf) type cells[start]!
+    else
+      let middle := count / 2
+      mkApp4 (mkConst ``FlowIndex.branch) type (mkNatLit middle)
+        (build start middle) (build (start + middle) (count - middle))
+
+open Lean Meta Elab Term in
+/-- `program_index% values` is `FlowIndex.ofList values` written out as a literal tree whose
+    leaves are the cell terms of `values`, so the kernel never measures or splits the list. -/
+elab "program_index% " values:term : term => do
+  let list ← instantiateMVars (← elabTerm values none)
+  synthesizeSyntheticMVarsNoPostponing
+  let list ← instantiateMVars list
+  let listType ← whnf (← inferType list)
+  let some type := listType.app1? ``List
+    | throwError "program_index%: {list} is not a list"
+  return literalFlowIndex type (← literalCells list)
 
 /-- Check parallel lists using the next certificate entry for fallthrough edges. -/
 def all3Flow (check : (Nat → Option β) → α → β → γ → Bool)

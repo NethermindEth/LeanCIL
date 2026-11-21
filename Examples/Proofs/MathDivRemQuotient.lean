@@ -16,6 +16,8 @@ open CIL CIL.Safety
 /-- The two `int` arguments as stack values. -/
 def inputs (left right : W32) : List CIL.Safety.Value := [.scalar (.i32 left), .scalar (.i32 right)]
 
+-- Comparing the two fully assembly-qualified tuple arguments needs additional reduction depth.
+set_option maxRecDepth 2048 in
 /-- `Math.DivRem(left, right).Quotient` returns the exact truncated quotient whenever `div`
     succeeds, and otherwise raises its divide-by-zero or overflow fault. -/
 theorem correctness (left right : W32) :

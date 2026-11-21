@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
 
 using System.Text.Json;
@@ -11,7 +16,8 @@ var directory = At("artifacts/ExcludedBranchScaling");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Excluded.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(source, "Excluded.cs"),
     "public static class Excluded { public static ulong Accumulate(ulong x, ulong y) { " +
@@ -60,19 +66,36 @@ if (liveSites < 800 || liveExtracted.Contains("set_option maxHeartbeats"))
 Run(["lake", "env", "lean", Path.Combine(liveOutput, "Extracted.lean")], cwd: FixturePackage());
 Console.WriteLine($"PASS {liveSites} live sites validate at the default heartbeat budget");
 
-// Each validator must still reach and reject a forged claim at the last pruned site it checks.
-void Reject(string name, string validator, string obligation, Func<int, bool> site, bool forgeState)
+// Each validator must still reach and reject a forged claim at the last pruned site it checks. A decoded method
+// decodes the mask it is given, so a pinned run decodes the extracted mask and keeps its holes.
+void Reject(string name, string validator, string obligation, Func<int, bool> site, bool forgeState,
+    bool pinnedCode = false)
 {
     var live = Entries("method0Reachable");
     var facts = Entries("method0FeatureStates");
     var pc = Enumerable.Range(0, live.Count).Last(i => live[i] == "false" && site(i));
     live[pc] = "true";
+    // The method has no locals, so the forged state is well shaped and only the check at the claimed site rejects it.
+    var closed = extracted.Split('\n').Single(l => l.StartsWith("def method0Closed ", StringComparison.Ordinal));
+    if (forgeState && !closed.Contains("], locals := [], initLocals", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "The excluded-branch method has locals; the forged state may be badly shaped.");
     if (forgeState) facts[pc] = "some { stack := [], locals := [] }";
     var tampered = Path.Combine(directory, name + ".lean");
     var changed = string.Join('\n', extracted.Split('\n').Select(line =>
         line.StartsWith("def method0Reachable ", StringComparison.Ordinal) ? $"def method0Reachable : List Bool := [{string.Join(", ", live)}]" :
         line.StartsWith("def method0FeatureStates ", StringComparison.Ordinal) ? $"def method0FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", facts)}]" :
         line));
+    if (pinnedCode)
+    {
+        var decoder = DecodedDefinition(changed, 0);
+        if (!decoder.Success) throw new InvalidOperationException("The excluded-branch method is not decoded.");
+        var mask = extracted.Split('\n').Single(l => l.StartsWith("def method0Reachable ", StringComparison.Ordinal));
+        changed = changed.Replace(decoder.Value, $"""
+            {mask.Replace("def method0Reachable ", "def method0ExtractedReachable ", StringComparison.Ordinal)}
+            {decoder.Value.Replace(" method0Reachable ", " method0ExtractedReachable ", StringComparison.Ordinal)}
+            """, StringComparison.Ordinal);
+    }
     File.WriteAllText(tampered, NarrowEvidence(changed, obligation));
     var rejected = Execute(["lake", "env", "lean", tampered], cwd: FixturePackage());
     if (rejected.Code == 0 || !rejected.Output.Contains($"Extraction.{validator} ", StringComparison.Ordinal) ||
@@ -82,9 +105,12 @@ void Reject(string name, string validator, string obligation, Func<int, bool> si
 }
 var argumentCode = extracted.Split('\n').Single(l => l.StartsWith("def method0RawArguments ", StringComparison.Ordinal));
 var operations = argumentCode[(argumentCode.LastIndexOf("code := [", StringComparison.Ordinal) + 9)..argumentCode.LastIndexOf(']')].Split(", ");
+bool ArgumentLoad(int pc) => operations[pc].StartsWith(".load", StringComparison.Ordinal);
 Reject("ForgedFeatureSite", "FeatureFlowValid", featureObligation, _ => true, forgeState: true);
-Reject("ForgedArgumentSite", "ParameterHomesValid", parameterObligation,
-    pc => operations[pc].StartsWith(".load", StringComparison.Ordinal), forgeState: true);
+// Code decoded from the forged mask loads the argument there, so the feature flow refuses the site.
+Reject("ForgedArgumentFeatures", "FeatureFlowValid", featureObligation, ArgumentLoad, forgeState: true);
+Reject("ForgedArgumentSite", "ParameterHomesValid", parameterObligation, ArgumentLoad, forgeState: true,
+    pinnedCode: true);
 
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);

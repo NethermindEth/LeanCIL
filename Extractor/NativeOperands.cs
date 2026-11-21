@@ -9,15 +9,57 @@ internal static class NativeOperands
 {
     internal enum Kind
     {
-        Other, Word32, Word64, Native, Reference, NullObject, Object, MethodPointer, MethodTable, NativeMethodTable,
+        Other, Word32, Word64, Native, Reference, NullObject, Object, Opaque, MethodPointer, MethodTable,
+        NativeMethodTable,
         ArraySigned8, ArrayUnsigned8, ArraySigned16, ArrayUnsigned16, ArraySigned32, ArrayUnsigned32,
         ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter, ArrayComposite
     }
 
-    internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, StackType[]> Incoming);
+    internal sealed record Certificate(Dictionary<Instruction, StackType[]> Incoming);
 
-    internal readonly record struct StackType(Kind Kind, string? Metadata = null)
+    /// <summary>
+    /// A stack slot's type. A callable pointer or table is named by its metadata alone, so its kind is read from
+    /// the metadata and cannot disagree with it.
+    /// </summary>
+    internal readonly record struct StackType
     {
+        readonly Kind shape;
+
+        internal StackType(Kind kind, LocalKind? metadata = null)
+        {
+            Metadata = metadata;
+            shape = kind;
+            if (CallableKind(metadata) is { } callable)
+            {
+                if (kind != callable)
+                    throw new ArgumentException($"A {callable} slot is not of kind {kind}.", nameof(kind));
+                shape = Kind.Other;
+            }
+            else if (kind is Kind.MethodPointer or Kind.MethodTable or Kind.NativeMethodTable)
+                throw new ArgumentException($"A {kind} slot names its signature.", nameof(metadata));
+        }
+
+        internal LocalKind? Metadata { get; }
+
+        internal Kind Kind => CallableKind(Metadata) ?? shape;
+
+        /// <summary>The signature of a callable pointer or table.</summary>
+        internal string Signature => Metadata switch
+        {
+            LocalKind.MethodPointer pointer => pointer.Signature,
+            LocalKind.MethodTable table => table.Signature,
+            LocalKind.NativeMethodTable native => native.Signature,
+            _ => throw new InvalidOperationException("The slot is not a callable pointer or table.")
+        };
+
+        static Kind? CallableKind(LocalKind? metadata) => metadata switch
+        {
+            LocalKind.MethodPointer => Kind.MethodPointer,
+            LocalKind.MethodTable => Kind.MethodTable,
+            LocalKind.NativeMethodTable => Kind.NativeMethodTable,
+            _ => null
+        };
+
         public static implicit operator StackType(Kind kind) => new(kind);
     }
 
@@ -35,7 +77,7 @@ internal static class NativeOperands
             return CallableType(pointer, type is ArrayType);
         if (Arrays.Of(type) is { } array)
             return array.Kind == Kind.ArrayComposite || type is ArrayType buffer && EnumTypes.IsEnum(buffer.ElementType)
-                ? new StackType(array.Kind, $".array {array.Expression}") : array.Kind;
+                ? new StackType(array.Kind, new LocalKind.Array(array)) : array.Kind;
         var reference = type is ByReferenceType;
         var value = reference ? ((ByReferenceType)type).ElementType : type;
         if (Spans.Is(value) && value is GenericInstanceType span &&
@@ -43,15 +85,17 @@ internal static class NativeOperands
         {
             var element = Arrays.Storage(span.GenericArguments[0])!;
             return new(reference ? Kind.Reference : Kind.Other,
-                $".enumSpan {element.Expression} {Spans.Writable(value).ToString().ToLowerInvariant()} " +
-                reference.ToString().ToLowerInvariant());
+                new LocalKind.EnumSpan(element, Spans.Writable(value), reference));
         }
         return PrimitiveType(type);
     }
 
-    static StackType CallableType(IMethodSignature signature, bool table = false) =>
-        new(table ? Kind.MethodTable : Kind.MethodPointer,
-            $".{(table ? "methodTable" : "methodPointer")} {ManagedPointers.SignatureEvidence(signature)}");
+    static StackType CallableType(IMethodSignature signature, bool table = false)
+    {
+        var evidence = ManagedPointers.SignatureEvidence(signature);
+        return table ? new(Kind.MethodTable, new LocalKind.MethodTable(evidence))
+            : new(Kind.MethodPointer, new LocalKind.MethodPointer(evidence));
+    }
 
     static StackType CallType(MethodReference method, FeatureProfile profile)
     {
@@ -59,9 +103,10 @@ internal static class NativeOperands
         if (result is RequiredModifierType { ModifierType.FullName:
             "System.Runtime.InteropServices.InAttribute", ElementType: ByReferenceType })
         {
-            var operation = InstructionTranslation.RuntimeModel(method, profile);
-            if (operation == ".memory (.observeView .spanPinnable)" ||
-                operation?.StartsWith(".memory (.spanItem ", StringComparison.Ordinal) == true)
+            if (RuntimeModels.CallModel(method, profile) is not null &&
+                method.Name is "get_Item" or "GetPinnableReference" &&
+                method.DeclaringType is GenericInstanceType
+                    { ElementType.FullName: "System.Span`1" or "System.ReadOnlySpan`1" })
                 return Kind.Reference;
         }
         return Type(result);
@@ -77,6 +122,10 @@ internal static class NativeOperands
             MetadataType.Int16 or MetadataType.UInt16 or MetadataType.Int32 or MetadataType.UInt32 => Kind.Word32,
         _ => Kind.Other
     };
+
+    // A reference of a generic class instance or System.Object, which only a store, a type test or a null test takes.
+    static bool UnnamedClassField(FieldReference field) =>
+        OpaqueClassField(field) && FieldType(field) is GenericInstanceType or { MetadataType: MetadataType.Object };
 
     // An object reference whose class is outside the model; it only ever reaches a field, a test or a comparison.
     static bool OpaqueClassField(FieldReference field) =>
@@ -98,12 +147,12 @@ internal static class NativeOperands
     {
         var dispatch = NativeDispatch.For(method);
         StackType Slot(TypeReference type, int? local = null) => dispatch.Kind(type, local) is { } kind
-            ? kind.StartsWith(".methodTable ", StringComparison.Ordinal)
-                ? new(Kind.NativeMethodTable, kind.Replace(".methodTable ", ".nativeMethodTable ", StringComparison.Ordinal))
+            ? kind is LocalKind.MethodTable table
+                ? new(Kind.NativeMethodTable, new LocalKind.NativeMethodTable(table.Signature))
                 : new(Kind.MethodPointer, kind)
             : Type(type);
         var incoming = new Dictionary<Instruction, StackType[]> { [method.Body.Instructions[0]] = [] };
-        var mixed = new HashSet<Instruction>();
+
         var pending = new Queue<Instruction>();
         pending.Enqueue(method.Body.Instructions[0]);
         while (pending.TryDequeue(out var instruction))
@@ -136,8 +185,8 @@ internal static class NativeOperands
             else if (code == Code.Ldind_I && stack.Count > 0 && stack[^1].Kind == Kind.NativeMethodTable)
             {
                 var table = Pop();
-                stack.Add(new(Kind.MethodPointer, table.Metadata!.Replace(".nativeMethodTable ", ".methodPointer ",
-                    StringComparison.Ordinal)));
+                stack.Add(new(Kind.MethodPointer,
+                    new LocalKind.MethodPointer(table.Signature)));
             }
             else if (code == Code.Localloc)
             {
@@ -184,7 +233,7 @@ internal static class NativeOperands
                     if (code is Code.Bne_Un or Code.Bne_Un_S or Code.Bgt_Un or Code.Bgt_Un_S or
                         Code.Bge_Un or Code.Bge_Un_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble_Un or Code.Ble_Un_S)
                         throw new InvalidDataException($"Unsupported mixed native/int32 unsigned branch; insert explicit conv.i or conv.u: {instruction}");
-                    mixed.Add(instruction);
+
                 }
                 if (instruction.OpCode.FlowControl != FlowControl.Cond_Branch)
                     stack.Add(code is Code.Ceq or Code.Clt or Code.Clt_Un or Code.Cgt or Code.Cgt_Un ? Kind.Word32 :
@@ -215,7 +264,7 @@ internal static class NativeOperands
                     throw new InvalidDataException("Managed table index must be an integer");
                 var table = Pop();
                 stack.Add(new(Kind.MethodPointer,
-                    table.Metadata!.Replace(".methodTable ", ".methodPointer ", StringComparison.Ordinal)));
+                    new LocalKind.MethodPointer(table.Signature)));
             }
             else if (code is Code.Call or Code.Callvirt or Code.Newobj)
             {
@@ -271,6 +320,7 @@ internal static class NativeOperands
                         Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3 =>
                             Slot(method.Body.Variables[FeatureConstants.Local(instruction)].VariableType,
                                 FeatureConstants.Local(instruction)),
+                        Code.Ldfld when UnnamedClassField((FieldReference)instruction.Operand) => Kind.Opaque,
                         Code.Ldfld when OpaqueClassField((FieldReference)instruction.Operand) => Kind.Object,
                         Code.Ldfld or Code.Ldsfld => Type(FieldType((FieldReference)instruction.Operand)),
                         Code.Ldobj or Code.Ldelem_Any or Code.Castclass or Code.Isinst =>
@@ -321,6 +371,6 @@ internal static class NativeOperands
             if (instruction.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(instruction.Next);
         }
-        return new Certificate(mixed, incoming);
+        return new Certificate(incoming);
     }
 }

@@ -5,10 +5,10 @@ import CIL.Safety.InstructionMemory
 
 `staticReference` resolves an extracted readonly static field to immutable storage, creating
 it on first use and revalidating a cached binding on every later use. An opaque field's value
-is not extracted, so it must already be bound by the caller and is never created.
-`staticInstruction` runs the static and span instructions on top of it and hands every other
-memory instruction to `memoryInstruction`. `staticSpanAligned` is the element alignment a typed
-static span needs.
+is not extracted, so it must already be bound by the caller and is never created. `staticLoad`
+and `staticAddress` run `ldsfld`, `ldsflda` and a field `ldtoken` through the descriptor
+bound to their pc. `staticInstruction` hands every memory instruction, static spans included, to
+`memoryInstruction`.
 -/
 
 namespace CIL.Safety
@@ -63,61 +63,36 @@ def staticReference (descriptor : CIL.StaticDescriptor) (m : Memory) :
       views := ⟨id, 0, descriptor.bytes.length, true, false⟩ :: memory.views
       staticBindings := (descriptor.identity, reference) :: memory.staticBindings }, reference)
 
-/-- CoreCLR's `CreateSpan<T>` throws unless the field data is aligned to `sizeof(T)`, so a typed
-    span needs `width` to divide the allocation's guaranteed alignment. -/
-def staticSpanAligned (allocation : Allocation) (width : Nat) : Bool :=
-  0 < width && allocation.layout.alignment % width == 0
+/-- `ldsfld` at `pc`: an opaque value read from the caller's binding, or the value an initializer
+    was checked to produce. RVA data has no extracted value to load. -/
+def staticLoad (body : CIL.Method) (pc : Nat) (memory : Memory) :
+    ExecutionResult (Memory × Value) := do
+  let some descriptor := body.staticAt pc |
+    .error (.unsupported "Missing extracted static field identity")
+  if descriptor.opaqueValue then
+    let (memory, reference) ← staticReference descriptor memory
+    let loaded ← checkedAt (.address reference) descriptor.bytes.length
+      (read memory reference descriptor.bytes.length 1)
+    let some value := staticLoadedValue { descriptor with bytes := loaded } | .error .invalidState
+    return (memory, .scalar value)
+  -- The translation certificate checks each initializer's result against these bytes.
+  else if descriptor.initializer.isSome then
+    let some value := staticLoadedValue descriptor | .error .invalidState
+    return (memory, .scalar value)
+  else .error (.unsupported "Static field value is not extracted")
 
-/-- Runs a memory instruction at `pc`. Static loads use the field identity extracted for that
-    pc; span constructors over raw pointers are accepted only inside extracted static data. -/
-def staticInstruction (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
-    (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
-  match operation, stack with
-  | .staticAddress bytes, _ =>
-    let some (_, descriptor) := body.staticSites.find? (fun site => site.1 == pc) |
-      .error (.unsupported "Missing extracted static field identity")
-    if descriptor.bytes == bytes then pure () else .error .invalidState
-    let (memory, reference) ← staticReference descriptor m
-    return (memory, .reference (.address reference) :: stack)
-  | .staticValue bytes, _ =>
-    let some (_, descriptor) := body.staticSites.find? (fun site => site.1 == pc) |
-      .error (.unsupported "Missing extracted static field identity")
-    -- An opaque value is whatever the caller's binding holds; `bytes` fixes only its width.
-    if descriptor.opaqueValue then
-      if descriptor.bytes == bytes then
-        let (memory, reference) ← staticReference descriptor m
-        let loaded ← checkedAt (.address reference) bytes.length
-          (read memory reference bytes.length 1)
-        let some value := staticLoadedValue { descriptor with bytes := loaded } |
-          .error .invalidState
-        return (memory, .scalar value :: stack)
-      else .error .invalidState
-    -- The translation certificate checks each initializer's result against these bytes.
-    else if descriptor.bytes == bytes && descriptor.initializer.isSome then
-      let some value := staticLoadedValue descriptor | .error .invalidState
-      return (m, .scalar value :: stack)
-    else .error .invalidState
-  | .spanCreate, .scalar (.i32 length) :: .reference (.address reference) :: rest =>
-    if length.toInt < 0 then .error .invalidState else pure ()
-    let allocation ← checkedAt (.address reference) length.toNat
-      (liveAllocation m reference.allocation)
-    if allocation.kind == .immutableStatic then pure () else
-      .error (.unsupported "Span pointer constructor outside extracted static data")
-    let _ ← formValue m (.address reference)
-    if reference.offset + length.toNat ≤ allocation.layout.size then pure () else
-      .error (.memory .outsideAllocation (.address reference) length.toNat)
-    return (m, .span (.address reference) length.toNat :: rest)
-  | .createSpan width, .reference (.address reference) :: rest =>
-    let allocation ← checkedAt (.address reference) 0 (liveAllocation m reference.allocation)
-    if allocation.kind == .immutableStatic && reference.offset == 0 && 0 < width &&
-        allocation.layout.size % width == 0 then
-      if staticSpanAligned allocation width then
-        return (m, .span (.address reference) (allocation.layout.size / width) :: rest)
-      else .error (.unsupported "Typed span element width does not divide the field alignment")
-    else .error (.unsupported "Typed span outside a whole extracted static field")
-  | .spanCreate, .scalar (.i32 length) :: .reference .null :: rest =>
-    if length == 0 then return (m, .span .null 0 :: rest)
-    else .error (.memory .nullDereference .null length.toNat)
-  | _, _ => memoryInstruction operation stack m
+/-- `ldsflda` or a field `ldtoken` at `pc`: the reference to the read-only storage of the
+    descriptor bound there. -/
+def staticAddress (body : CIL.Method) (pc : Nat) (memory : Memory) :
+    ExecutionResult (Memory × Value) := do
+  let some descriptor := body.staticAt pc |
+    .error (.unsupported "Missing extracted static field identity")
+  let (memory, reference) ← staticReference descriptor memory
+  return (memory, .reference (.address reference))
+
+/-- Runs a memory instruction, reading neither the method nor the pc. -/
+def staticInstruction (_body : CIL.Method) (_pc : Nat) (operation : CIL.MemoryOp)
+    (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) :=
+  memoryInstruction operation stack m
 
 end CIL.Safety

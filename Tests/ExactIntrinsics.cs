@@ -2,9 +2,17 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include ModelOperandChecks.cs
+#:include HardwareExamples.cs
+#:include ContractVariants.cs
 
 using System.Buffers.Binary;
 using System.Reflection;
@@ -12,15 +20,59 @@ using System.Text.Json;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 using Program verification = new();
+Run(["lake", "build", "Tests.ExactIntrinsics"], verification.CheckoutPackage());
 string assembly = At("Examples/Assembly/bin/Examples.dll");
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
-Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrinsics").Methods
-    .ToDictionary(method => method.Name, method => method.FullName);
+var divisionMethods = metadata.GetType("Examples.DivisionIntrinsics").Methods.ToDictionary(method => method.Name);
+var selectors = divisionMethods.ToDictionary(pair => pair.Key, pair => pair.Value.FullName);
 Type runtime = Assembly.LoadFile(assembly).GetType("Examples.DivisionIntrinsics")!;
 string root = At("artifacts/DivisionIntrinsics");
+verification.EnsureExtractorBuilt();
+var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
+    .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
+var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
+string DeclareAes(string name, string flag)
+{
+    var profile = JsonSerializer.SerializeToNode(selectProfile.Invoke(null, [name]),
+        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+    profile["name"] = $"{name}-{flag}";
+    profile[flag] = true;
+    var path = Path.Combine(root, $"{name}-{flag}.json");
+    File.WriteAllText(path, profile.ToJsonString());
+    return $"@{path}";
+}
+var hardwareRoot = Path.Combine(root, "HardwareMembers");
+Directory.CreateDirectory(hardwareRoot);
+var hardwareImage = Path.Combine(hardwareRoot, "HardwareMembers.dll");
+var hardwareExamples = HardwareExamples.Write(assembly, hardwareImage,
+    DeclareAes("x64-v4", "aes"), DeclareAes("arm64-advsimd", "armAes"));
+ExtractBatch("extract", "Examples", hardwareExamples.Select(example =>
+    new GeneratedExtraction(hardwareImage, example.Selector,
+        Path.Combine(hardwareRoot, example.Name), example.Profile)));
+using (var hardware = ModuleDefinition.ReadModule(hardwareImage))
+{
+    var members = hardware.GetType("Examples.HardwareMembers").Methods.ToDictionary(method => method.Name);
+    // Each evidence batch keeps the kernel's memory bounded across the independent wrappers.
+    foreach (var group in hardwareExamples.Chunk(8))
+    {
+        var evidence = new GeneratedEvidence(Path.Combine(hardwareRoot, $"Batch-{group[0].Name}"));
+        foreach (var example in group)
+        {
+            var folder = Path.Combine(hardwareRoot, example.Name);
+            var proof = Path.Combine(folder, "Operand.lean");
+            File.Copy(Path.Combine(folder, "Extracted.lean"), proof, true);
+            ModelOperandChecks.Append(proof, members[example.Name], _ => example.Model, example.NeedsFeature);
+            evidence.Add(proof, $"PASS checked hardware MemberRef in {example.Selector}");
+        }
+        evidence.Check(replay: false);
+    }
+}
+
+
 var pending = new List<(GeneratedVerification Request, string Profile, Action Passed)>();
 void Flush()
 {
@@ -34,7 +86,7 @@ void Flush()
 
 foreach (var name in new[] { "DefinedLocal", "PrunedUnsafeLocal" })
 {
-    var method = metadata.GetType("Examples.DivisionIntrinsics").Methods.Single(method => method.Name == name);
+    var method = divisionMethods[name];
     var local = method.Body.Variables.First(variable => variable.VariableType.FullName ==
         "System.Runtime.Intrinsics.Vector128`1<System.UInt64>").Index;
     var output = Path.Combine(root, name);
@@ -130,14 +182,18 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
         "ShiftRight" => ShiftProof("shr64Count", 3, "shiftRight"),
         _ => "\n  apply ok_of_toOption\n  decide +kernel"
     };
-    string BroadcastProof(string operation, int lane, string lemma) =>
-        $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word " +
-        $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
-    string ShiftProof(string operation, int lane, string lemma) =>
-        $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift " +
-        $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+    string BroadcastProof(string operation, int lane, string lemma) => $$"""
+        exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word
+          Extracted.profile .{{operation}} {{lane}} {{left}} {{right}} {{expected}} CIL.Safety.Memory.empty
+          rfl rfl rfl Extracted.method0_model4 rfl (by decide)
+          (CIL.Safety.checked_broadcast_{{lemma}} {{left}} {{right}}))
+        """;
+    string ShiftProof(string operation, int lane, string lemma) => $$"""
+        exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift
+          Extracted.profile .{{operation}} {{lane}} {{left}} {{right}} {{expected}} CIL.Safety.Memory.empty
+          rfl rfl rfl Extracted.method0_model6 rfl (by decide)
+          (CIL.Safety.checked_broadcast_{{lemma}} {{left}} {{right}}))
+        """;
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\n" +
         "import CIL.Safety.IntrinsicExecution\nnamespace ExampleProof\n" +
         (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +
@@ -160,6 +216,150 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
 }
 
 Flush();
+
+// Change only the AVX2 member reference in the compiled AND entry, keeping its broadcast and lane.
+var wrongAnd = Path.Combine(root, "OrInsteadOfAnd");
+Directory.CreateDirectory(wrongAnd);
+var wrongAndAssembly = Path.Combine(wrongAnd, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
+    var andMethod = methods.Single(method => method.Name == "And");
+    var orMethod = methods.Single(method => method.Name == "Or");
+    static bool IsAvx2Member(object? operand) => operand is MethodReference target &&
+        target.DeclaringType.FullName == "System.Runtime.Intrinsics.X86.Avx2";
+    andMethod.Body.Instructions.Single(site => IsAvx2Member(site.Operand)).Operand =
+        orMethod.Body.Instructions.Single(site => IsAvx2Member(site.Operand)).Operand;
+    variant.Write(wrongAndAssembly);
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["And"], Path.Combine(root, "AndContract"),
+    wrongAndAssembly, selectors["And"], wrongAnd, """
+    /-- Every pair of words returns its bitwise intersection and preserves caller memory. -/
+    def intersection : MethodContract (W64 × W64) W64 where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.i64 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧ value = (input.1 &&& input.2)
+    """, """
+    /-- The selected lane of the compiled AVX2 broadcast returns the intersection. -/
+    theorem correctness : intersection.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory -
+      apply MethodContract.Holds.intro (c := intersection) (input := (left, right))
+        memory (left &&& right) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨256, invoke_broadcastBinary_word Extracted.profile .band 0 left right _ memory
+        rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_and left right)⟩
+    """, """
+    /-- On disjoint words one and two the replacement returns three. The intersection is zero. -/
+    theorem correctness : intersection.Refuted Extracted.program 0 :=
+      .of_return (input := (1, 2)) (initial := Memory.empty) trivial
+        (invoke_broadcastBinary_word Extracted.profile .bor 0 1 2 3 Memory.empty
+          rfl rfl rfl Extracted.method0_model4 rfl (by decide) (checked_broadcast_or 1 2))
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """, profile: "x64-v3", imports: "import CIL.Safety.IntrinsicExecution");
+Console.WriteLine("PASS AVX2 AND contract and certified OR replacement at (1, 2)");
+
+// Keep the broadcasts, vector local and MoveMask while reversing the unsigned comparison.
+var wrongLess = Path.Combine(root, "GreaterInsteadOfLess");
+Directory.CreateDirectory(wrongLess);
+var wrongLessAssembly = Path.Combine(wrongLess, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var methods = variant.GetType("Examples.DivisionIntrinsics").Methods;
+    static Instruction Comparison(MethodDefinition method, string name) =>
+        method.Body.Instructions.Single(site => site.Operand is MethodReference target &&
+            target.DeclaringType.FullName == "System.Runtime.Intrinsics.X86.Avx512F" && target.Name == name);
+    Comparison(methods.Single(method => method.Name == "Less"), "CompareLessThan").Operand =
+        Comparison(methods.Single(method => method.Name == "Greater"), "CompareGreaterThan").Operand;
+    variant.Write(wrongLessAssembly);
+}
+if (Avx512F.IsSupported && Avx512DQ.IsSupported)
+{
+    const ulong high = 1UL << 63;
+    var changedType = Assembly.LoadFile(wrongLessAssembly).GetType("Examples.DivisionIntrinsics")!;
+    var original = runtime.GetMethod("Less")!.CreateDelegate<Func<ulong, ulong, int>>();
+    var changed = changedType.GetMethod("Less")!.CreateDelegate<Func<ulong, ulong, int>>();
+    if (original(1, high) != 255 || changed(1, high) != 0)
+        throw new InvalidOperationException("AVX-512 comparison masks differ from the unsigned high-bit witness.");
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["Less"], Path.Combine(root, "LessContract"),
+    wrongLessAssembly, selectors["Less"], wrongLess, """
+    /-- An unsigned comparison returns eight identical mask bits in well-formed caller memory. -/
+    def unsignedMask : MethodContract (W64 × W64) W32 where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.i32 value)]
+      pre _ memory := memory.WellFormed
+      footprint _ := []
+      post input _ _ value := value = if input.1.ult input.2 then 255 else 0
+    """, """
+    open CIL
+    /-- The same unsigned word in all eight lanes. -/
+    private abbrev splat (word : W64) := Vector.pack512 word word word word word word word word
+    /-- The comparison sets every mask bit precisely when the left word is smaller. -/
+    private theorem mask (left right : W64) :
+        Vector.moveMask512 (Vector.zip512 (fun x y => Vector.mask64 (x.ult y))
+          (splat left) (splat right)) = (if left.ult right then 255 else 0) := by
+      simp only [splat, Vector.zip512, Vector.lane512_0, Vector.lane512_1,
+        Vector.lane512_2, Vector.lane512_3, Vector.lane512_4, Vector.lane512_5,
+        Vector.lane512_6, Vector.lane512_7]
+      cases left.ult right <;> rfl
+
+    #print axioms mask
+
+    set_option maxRecDepth 8192
+    set_option exponentiation.threshold 1024
+    /-- The compiled method initializes one 512-bit vector local. -/
+    private def localSpec : NumericLocalSpec := ⟨.vector512, .v512 0, 0, rfl⟩
+    /-- The checked call returns the comparison mask and confines its write to the fresh local. -/
+    theorem correctness : unsignedMask.Holds Extracted.program 0 := by
+      rintro ⟨left, right⟩ memory formed
+      let args : List CIL.Safety.Value := [.scalar (.i64 left), .scalar (.i64 right)]
+      obtain ⟨frame, entered, setup, homes, _, _⟩ :=
+        numeric_frame_setup Extracted.method0 [localSpec] rfl rfl rfl rfl memory args formed
+      obtain ⟨home, slot, fresh, _, writable⟩ := homes.home_at 0 localSpec rfl
+      obtain ⟨after, stored, written, readback⟩ := step_store_numeric_local
+        (body := Extracted.method0) (pc := 10) (args := args) (rest := [.scalar (.v512 (splat left))])
+        .vector512 (.v512 (splat right)) (splat right).toNat rfl slot writable
+      have loaded := step_load_numeric_local (body := Extracted.method0) (pc := 11)
+        (args := args) (stack := [.scalar (.v512 (splat left))]) .vector512
+        (.v512 (splat right)) (splat right).toNat rfl slot readback
+      have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh written
+      have final := Confined.frame_round_trip setup preserved (Nat.le_of_eq (write_nextIdentity written).symm)
+      apply MethodContract.Holds.intro (c := unsignedMask) (input := (left, right)) (leaveFrame frame after)
+        (if left.ult right then 255 else 0) ?_ final rfl
+      refine ⟨64, invoke_of_run Extracted.program_method0 rfl setup ?_⟩
+      cil_checked_steps []
+      refine (run_next (fuel := 53) Extracted.program_method0 (by rfl) stored).trans ?_
+      refine (run_next (fuel := 52) Extracted.program_method0 (by rfl) loaded).trans ?_
+      rw [← mask left right]
+      rfl
+    """, """
+    set_option maxRecDepth 8192
+    set_option exponentiation.threshold 1024
+    /-- Returning zero violates the postcondition regardless of the final memory. -/
+    private theorem wrongMask (after : Memory) :
+        ¬ unsignedMask.Returns (1, 0x8000000000000000) Memory.empty after [.scalar (.i32 0)] := by
+      rintro ⟨value, encoded, rfl⟩
+      exact (by decide : ¬ ([Value.scalar (.i32 0)] = [.scalar (.i32 255)])) encoded
+
+    #print axioms wrongMask
+
+    /-- Reversing the comparison clears every mask bit on this unsigned input. -/
+    theorem correctness : unsignedMask.Refuted Extracted.program 0 := by
+      let high : W64 := 0x8000000000000000
+      let call := invoke Extracted.program 64 0 [.scalar (.i64 1), .scalar (.i64 high)] Memory.empty
+      have observed : call.map Prod.snd = .ok [.scalar (.i32 0)] := by decide +kernel
+      cases ran : call with
+      | error fault => simp [ran, Except.map] at observed
+      | ok result =>
+        obtain ⟨after, values⟩ := result
+        have actual : values = [.scalar (.i32 0)] := by simpa [ran, Except.map] using observed
+        subst values
+        exact MethodContract.Refuted.of_return (c := unsignedMask) (input := (1, high))
+          (program := Extracted.program) (fuel := 64) (method := 0) (final := after)
+          (values := [.scalar (.i32 0)]) Memory.empty_wellFormed ran (fun h => wrongMask after h.2)
+    """, profile: "x64-v4", imports: "import CIL.Safety.LocalSnapshots\nimport CIL.SIMD.PackedLanes");
+Console.WriteLine("PASS AVX-512 unsigned comparison contract and certified greater-than replacement");
 
 string rejectedEncoding = Path.Combine(root, "Reject-Vector512Encoding");
 Directory.CreateDirectory(rejectedEncoding);
@@ -230,7 +430,7 @@ const int ShuffleCases = 12;
 var shuffleRandom = new Random(0x5348);
 foreach ((string name, int width, string profile, string unavailable, string feature) in new[]
 {
-    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "x64-sse2", "Ssse3")
+    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "scalar", "Ssse3")
 })
 {
     var cases = new List<(byte[] Source, byte[] Control)>();
@@ -283,7 +483,7 @@ foreach ((string name, int width, string profile, string unavailable, string fea
     foreach ((int sourceLength, int controlLength, int pc) in new[] { (width - 1, width, 1), (width, width - 1, 3) })
     {
         claims.Add(Claim(sourceLength, controlLength, "[]", "[]",
-            $".error ⟨0, {pc}, .thrown \"System.ArgumentOutOfRangeException\"⟩"));
+            $".error ⟨0, {pc}, .thrown .argumentOutOfRange⟩"));
         proofs.Add("by rfl");
     }
     File.WriteAllText(proof, $$"""
@@ -330,43 +530,105 @@ foreach ((string name, int width, string profile, string unavailable, string fea
 
 Flush();
 
-// Forged evidence must not substitute another load width or another intrinsic for the shuffle.
-var rejectedShuffles = new RejectedEvidence(Path.Combine(root, "RejectedShuffles"));
-foreach ((string name, string theorem, string before, string after, string validator) in new[]
+static string ShuffleProof(int width, string contract) => $$"""
+        set_option maxRecDepth 8192 in
+        /-- The compiled shuffle reads each valid span once and leaves caller memory unchanged. -/
+        theorem correctness : {{contract}}.Holds Extracted.program 0 := by
+          rintro ⟨s, c⟩ memory ⟨⟨sv, ss, sr⟩, cv, cs, cr⟩
+          apply MethodContract.Holds.intro (c := {{contract}}) (input := (s, c)) memory
+            (CIL.Vector.shuffleBytes{{width}} s.bits c.bits) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+          refine ⟨32, ?_⟩
+          change invoke Extracted.program 32 0
+            [.bufferSpan (byteSpan s.address s.length), .bufferSpan (byteSpan c.address c.length)] memory =
+              .ok (memory, [.scalar (.v{{width}} (CIL.Vector.shuffleBytes{{width}} s.bits c.bits))])
+          have first := read_span memory s.address s.length (.v{{width}} s.bits) sv ss sr []
+          have second := read_span memory c.address c.length (.v{{width}} c.bits) cv cs cr [.scalar (.v{{width}} s.bits)]
+          cil_checked_steps [sv, cv, first, second]
+        """;
+
+// The AVX2 source halves contain ones and twos. Bit 7 masks every low byte.
+static byte[] Halves(byte low, byte high) =>
+    Enumerable.Repeat(low, 16).Concat(Enumerable.Repeat(high, 16)).ToArray();
+var shuffleSource = Halves(1, 2);
+var shuffleMask = Halves(0x80, 0);
+if (!RuntimeShuffle(runtime.GetMethod("Shuffle256")!, shuffleSource, shuffleMask).SequenceEqual(Halves(0, 2)))
+    throw new InvalidOperationException("AVX2 did not mask the low half or select byte two in the high half.");
+foreach ((string name, byte low, byte high) in new (string, byte, byte)[]
 {
-    ("Shuffle256", "method0_unsafe_validated", ".snapshot .vector256", ".snapshot .vector128", "UnsafeCallsValid"),
-    ("Shuffle256", "method0_intrinsics_validated", ".avx2 .shuffleBytes", ".avx2 .add64", "ExactIntrinsicsValid"),
-    ("Shuffle128", "method0_intrinsics_validated", ".sse .shuffleBytes", ".sse .shiftLeftBytes",
-        "ExactIntrinsicsValid")
+    ("ShuffleCrossHalf", 0, 1), ("ShuffleIgnoreHighBit", 1, 2)
 })
 {
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing shuffle mutation: {before}");
-    var path = Path.Combine(root, "RejectedShuffles", $"{name}-{validator}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejectedShuffles.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
+    if (!RuntimeShuffle(runtime.GetMethod(name)!, shuffleSource, shuffleMask).SequenceEqual(Halves(low, high)))
+        throw new InvalidOperationException($"The compiled {name} differs from its counterexample.");
+    verification.VerifyContractVariant(assembly, "Examples", selectors["Shuffle256"],
+        Path.Combine(root, "ShuffleContract"), assembly, selectors[name], Path.Combine(root, name),
+        "open Tests.ShuffleContract", ShuffleProof(256, "shuffle"), $$"""
+        set_option maxRecDepth 16384 in
+        /-- The extracted mutant returns the wrong bytes for the two readable spans. -/
+        theorem correctness : shuffle.Refuted Extracted.program 0 := by
+          apply refuted_of_shuffle (fuel := 64) (actual := halves {{low}} {{high}}) (by decide)
+          rfl
+        """, profile: "x64-v3", imports: "import Tests.ShuffleContract");
+    Console.WriteLine($"PASS AVX2 byte shuffle contract and checked {name} counterexample");
 }
-rejectedShuffles.Check();
+
+
+var reversed = Path.Combine(root, "Shuffle128Reversed");
+Directory.CreateDirectory(reversed);
+var reversedImage = Path.Combine(reversed, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "Shuffle128");
+    var loads = method.Body.Instructions.Where(i => i.OpCode.Code is Code.Ldarg_0 or Code.Ldarg_1).ToArray();
+    if (loads.Length != 2 || loads[0].OpCode.Code != Code.Ldarg_0 || loads[1].OpCode.Code != Code.Ldarg_1)
+        throw new InvalidOperationException("Expected the shuffle to load source and then control.");
+    (loads[0].OpCode, loads[1].OpCode) = (loads[1].OpCode, loads[0].OpCode);
+    variant.Write(reversedImage);
+}
+if (Ssse3.IsSupported)
+{
+    var source = Enumerable.Repeat((byte)1, 16).ToArray();
+    var control = Enumerable.Repeat((byte)0x80, 16).ToArray();
+    var reversedMethod = Assembly.Load(File.ReadAllBytes(reversedImage))
+        .GetType("Examples.DivisionIntrinsics")!.GetMethod("Shuffle128")!;
+    if (!RuntimeShuffle(runtime.GetMethod("Shuffle128")!, source, control).SequenceEqual(new byte[16]) ||
+        !RuntimeShuffle(reversedMethod, source, control).SequenceEqual(control))
+        throw new InvalidOperationException("The SSSE3 shuffle or its reversed variant disagrees with the witness.");
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["Shuffle128"], Path.Combine(root, "Shuffle128Contract"),
+    reversedImage, selectors["Shuffle128"], reversed, "open Tests.ShuffleContract", ShuffleProof(128, "shuffle128"), """
+    set_option maxRecDepth 8192 in
+    /-- Reversing the two loads returns sixteen 0x80 bytes where the masked shuffle requires zeros. -/
+    theorem correctness : shuffle128.Refuted Extracted.program 0 := by
+      apply refuted_of_reversed128 (fuel := 32)
+      rfl
+    """, profile: "x64-sse42", imports: "import Tests.ShuffleContract");
+Console.WriteLine("PASS SSSE3 byte shuffle contract and checked operand reversal");
+
+// A forged operation at the hardware call must fail the model agreement of the complete method.
+var rejectedHardware = new RejectedEvidence(Path.Combine(root, "RejectedHardware"));
+void RejectHardware(string folder, string example, string member, string replacement, string label)
+{
+    var method = divisionMethods[example];
+    var pc = method.Body.Instructions.Index().Single(item =>
+        item.Item.Operand is MethodReference reference &&
+        reference.FullName.Contains(member, StringComparison.Ordinal)).Index;
+    var source = File.ReadAllText(Path.Combine(root, folder, "Extracted.lean"));
+    var changed = "import Tests.Support.IntrinsicMethods\n" +
+        ForgeModelEmission(source, pc, $".call Tests.IntrinsicMethods.{replacement}");
+    var output = Path.Combine(root, "RejectedHardware");
+    Directory.CreateDirectory(output);
+    var path = Path.Combine(output, $"{folder}-{label}.lean");
+    File.WriteAllText(path, changed);
+    rejectedHardware.Add(path, $"PASS {folder} rejects {replacement}", "Extraction.RuntimeModelsAgree", "is false");
+}
+RejectHardware("Shuffle256", "Shuffle256", "Avx2::Shuffle(", "add64", "add");
+RejectHardware("Shuffle128", "Shuffle128", "Ssse3::Shuffle(", "shiftLeftBytes", "shift");
 
 // The hash round is compared with the host CPU's AESENC under a custom x64 and a custom ARM64 AES
 // profile; the ARM64 extraction must agree, since AESE with a zero key, AESMC and the key are AESENC.
 if (!X86Aes.IsSupported) throw new InvalidOperationException("The AES differential test needs an x86 AES host");
-verification.EnsureExtractorBuilt();
-var profileType = Assembly.Load(File.ReadAllBytes(ExtractorPath))
-    .GetType("Nethermind.LeanCIL.FeatureProfile", throwOnError: true)!;
-var selectProfile = profileType.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
-string DeclareAes(string name, string flag)
-{
-    var profile = JsonSerializer.SerializeToNode(selectProfile.Invoke(null, [name]),
-        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
-    profile["name"] = $"{name}-{flag}";
-    profile[flag] = true;
-    var path = Path.Combine(root, $"{name}-{flag}.json");
-    File.WriteAllText(path, profile.ToJsonString());
-    return "@" + path;
-}
+
 const int AesCases = 8;
 var aesRandom = new Random(20261102);
 ulong RandomWord()
@@ -418,6 +680,69 @@ foreach (var (label, profile) in new[]
         () => Console.WriteLine($"PASS hash round matches the host CPU's AESENC on {AesCases} blocks: {label}")));
 }
 Flush();
+// Both profiles must implement the same round for every input and reject a lost high key half.
+var wrongAes = Path.Combine(root, "AesRoundLowKeyTwice");
+Directory.CreateDirectory(wrongAes);
+var wrongAesImage = Path.Combine(wrongAes, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var round = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "AesRound");
+    var highKey = round.Body.Instructions.Single(i => i.OpCode.Code == Code.Ldarg_3);
+    if (highKey.Previous?.OpCode.Code != Code.Ldarg_2 ||
+        highKey.Next?.Operand is not MethodReference { Name: "Create" })
+        throw new InvalidOperationException("Expected the two key halves before Vector128.Create.");
+    highKey.OpCode = OpCodes.Ldarg_2;
+    variant.Write(wrongAesImage);
+}
+var wrongRound = Assembly.Load(File.ReadAllBytes(wrongAesImage)).GetType("Examples.DivisionIntrinsics")!.GetMethod("AesRound")!;
+var keyWitness = new object[] { 0UL, 0UL, 0UL, 1UL };
+var expectedZeroRound = Vector128.Create((byte)0x63).AsUInt64();
+var observedRound = ((Vector128<byte>)aesRound.Invoke(null, keyWitness)!).AsUInt64();
+var observedWrongRound = ((Vector128<byte>)wrongRound.Invoke(null, keyWitness)!).AsUInt64();
+if (observedWrongRound != expectedZeroRound || observedRound != (expectedZeroRound ^ Vector128.Create(0UL, 1UL)))
+    throw new InvalidOperationException("The CLR AES results disagree with the high-key witness.");
+
+foreach (var (label, profile, arm) in new[]
+{
+    ("x64", DeclareAes("x64-v4", "aes"), false), ("arm64", DeclareAes("arm64-advsimd", "armAes"), true)
+})
+{
+    var result = arm ? """
+          change [Value.scalar (.v128 (CIL.Vector.aesMixColumns (CIL.Vector.armAesEncrypt state 0) ^^^ key))] =
+            [Value.scalar (.v128 (CIL.Vector.aesEncryptRound state key))]
+          rw [CIL.Vector.armAes_round_eq_aesEncryptRound]
+        """ : "  rfl";
+    verification.VerifyContractVariant(assembly, "Examples", selectors["AesRound"], Path.Combine(root, "AesRoundContract-" + label),
+        wrongAesImage, selectors["AesRound"], Path.Combine(wrongAes, label), "open Tests.AesRoundContract", $$"""
+        bind_entry entry (memory : Memory) (a b k l : W64) (wf : memory.WellFormed) :=
+          Extracted.method0 with [.scalar (.i64 a), .scalar (.i64 b), .scalar (.i64 k), .scalar (.i64 l)]
+          from memory allocating wf
+
+        set_option maxRecDepth 8192 in
+        /-- The compiled round uses its two fresh vector locals and preserves caller storage. -/
+        theorem correctness : roundContract.Holds Extracted.program 0 := by
+          rintro ⟨a, b, k, l⟩ memory wf
+          obtain ⟨stateHome, keyHome, entered, enter⟩ := entry.checked memory a b k l wf
+          let state := CIL.Vector.pack128 a b
+          let key := CIL.Vector.pack128 k l
+          obtain ⟨first, stateStore, frame1, -⟩ := (enter.frame []).store 0 (.v128 state) rfl
+          obtain ⟨second, keyStore, frame2, -⟩ := frame1.store 1 (.v128 key) rfl
+          apply WP.enter (by rfl) (by rfl) enter.setup
+          have stateRead := frame2.snapshots.read_vector128 (index := 0) (bits := state) rfl (by rfl)
+          have keyRead := frame2.snapshots.read_vector128 (index := 1) (bits := key) rfl (by rfl)
+          cil_contract_steps [stateStore, keyStore, entry.frame, stateRead, keyRead, state, key]
+          refine ⟨(frame2.leave enter.setup).1, CIL.Vector.aesEncryptRound state key, ?_, rfl⟩
+        {{result}}
+        """, """
+        set_option maxRecDepth 8192 in
+        /-- Reusing the low key half drops the high bit set by the witness. -/
+        theorem correctness : roundContract.Refuted Extracted.program 0 := by
+          apply refuted_of_dropped_key (fuel := 64)
+          rfl
+        """, profile: profile, imports: "import CIL\nimport CIL.Safety.LoopScaffold\nimport Tests.AesRoundContract");
+    Console.WriteLine($"PASS {label} AES round contract and verified high-key counterexample");
+}
+
 // Without AES the x86 getter folds false, so the reachable ARM64 calls are rejected on every built-in.
 foreach (var profile in new[] { "x64-v4", "arm64-advsimd" })
 {
@@ -432,23 +757,8 @@ foreach (var profile in new[] { "x64-v4", "arm64-advsimd" })
     Console.WriteLine($"PASS AesRound rejected under {profile}");
 }
 // Forged evidence must not substitute another AES step for the one the raw call names.
-var rejectedRounds = new RejectedEvidence(Path.Combine(root, "RejectedAes"));
-foreach ((string name, string before, string after) in new[]
-{
-    ("AesRound-x64", ".aes .encrypt", ".armAes .encrypt"),
-    ("AesRound-arm64", ".armAes .mixColumns", ".armAes .encrypt")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")),
-        "method0_intrinsics_validated");
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing AES mutation: {before}");
-    var path = Path.Combine(root, "RejectedAes", $"{name}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejectedRounds.Add(path, $"PASS forged {name} evidence rejected by ExactIntrinsicsValid", "ExactIntrinsicsValid");
-}
-rejectedRounds.Check();
+RejectHardware("AesRound-x64", "AesRound", "X86.Aes::Encrypt(", "armEncrypt", "encrypt");
+RejectHardware("AesRound-arm64", "AesRound", "Arm.Aes::MixColumns(", "armEncrypt", "mix");
 Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
 Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
@@ -501,6 +811,84 @@ foreach ((string mutant, int tableBit, bool swapTables) in new[]
         .All(same => same))
         throw new InvalidOperationException($"Permutation inputs do not reject the {mutant} mutant");
 }
+// Change the VPERMQ immediate to broadcast limb zero's sign to all four upper-table lanes.
+var lowSign = Path.Combine(root, "SignWindowLowSign");
+Directory.CreateDirectory(lowSign);
+var lowSignImage = Path.Combine(lowSign, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "SignWindow");
+    var permute = method.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Call && instruction.Operand is MethodReference
+            { Name: "Permute4x64", DeclaringType.FullName: "System.Runtime.Intrinsics.X86.Avx2" });
+    var control = permute.Previous;
+    if (control.OpCode != OpCodes.Ldc_I4 || control.Operand is not 255)
+        throw new InvalidDataException("The sign broadcast must select lane three for all four lanes.");
+    control.OpCode = OpCodes.Ldc_I4_0;
+    control.Operand = null;
+    variant.Write(lowSignImage);
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["SignWindow"], Path.Combine(root, "SignWindowContract"),
+    lowSignImage, selectors["SignWindow"], lowSign, "open Tests.SignWindowContract CIL.Vector", """
+    set_option maxRecDepth 12288
+    set_option exponentiation.threshold 1024
+
+    /-- The compiled method stores a 256-bit sign-fill table in one frame-local slot. -/
+    private def localSpec : NumericLocalSpec := ⟨.vector256, .v256 0, 0, rfl⟩
+
+    /-- SignWindow implements the lane selector and preserves caller storage on x64-v4. -/
+    theorem correctness : signWindow.Holds Extracted.program 0 := by
+      rintro ⟨v, i⟩ memory formed
+      let args := signWindow.args (v, i)
+      let value := pack256 v.a v.b v.c v.d
+      let indices := pack256 i.a i.b i.c i.d
+      let fill := permute4x64 (zip256 (fun x y => mask64 (x.slt y)) value 0) 255
+      obtain ⟨frame, entered, setup, homes, _, _⟩ :=
+        numeric_frame_setup Extracted.method0 [localSpec] rfl rfl rfl rfl memory args formed
+      obtain ⟨home, slot, fresh, _, writable⟩ := homes.home_at 0 localSpec rfl
+      obtain ⟨after, stored, written, readback⟩ := step_store_numeric_local
+        (body := Extracted.method0) (pc := 12) (args := args) (rest := [.scalar (.v256 value)])
+        .vector256 (.v256 fill) fill.toNat rfl slot writable
+      have loaded := step_load_numeric_local (body := Extracted.method0) (pc := 18)
+        (args := args) (stack := [.scalar (.v256 indices), .scalar (.v256 value)])
+        .vector256 (.v256 fill) fill.toNat rfl slot readback
+      have preserved := write_preserves_memory_below _ _ _ _ _ _ fresh written
+      have final := Confined.frame_round_trip setup preserved (Nat.le_of_eq (write_nextIdentity written).symm)
+      apply MethodContract.Holds.intro (c := signWindow) (input := (v, i)) (leaveFrame frame after)
+        (permuteVar4x64x2 value indices fill) ?_ final ?_
+      · refine ⟨64, invoke_of_run Extracted.program_method0 rfl setup ?_⟩
+        dsimp only [args, signWindow] at *
+        cil_checked_steps []
+        refine (run_next (fuel := 51) Extracted.program_method0 (by rfl) stored).trans ?_
+        cil_checked_steps []
+        refine (run_next (fuel := 45) Extracted.program_method0 (by rfl) loaded).trans ?_
+        rfl
+      · exact signWindow_result v i
+    """, """
+    set_option maxRecDepth 12288
+    /-- The sign bit is set only in limb three. Each selector requests the sign-fill table. -/
+    private def witness : Limbs × Limbs := (⟨0, 1, 2, 0x8000000000000000⟩, ⟨4, 5, 6, 7⟩)
+
+    /-- Broadcasting the sign of the low limb returns zero in every lane at the witness. -/
+    theorem correctness : signWindow.Refuted Extracted.program 0 := by
+      let call := invoke Extracted.program 64 0 (signWindow.args witness) Memory.empty
+      have observed : call.map Prod.snd = .ok [.scalar (.v256 0)] := by decide +kernel
+      cases ran : call with
+      | error fault => simp [ran, Except.map] at observed
+      | ok result =>
+        obtain ⟨after, values⟩ := result
+        have actual : values = [.scalar (.v256 0)] := by simpa [ran, Except.map] using observed
+        subst values
+        apply MethodContract.Refuted.of_return (c := signWindow) (input := witness)
+          (program := Extracted.program) (fuel := 64) (method := 0) (final := after)
+          (values := [.scalar (.v256 0)]) Memory.empty_wellFormed ran
+        rintro ⟨_, value, encoded, rfl⟩
+        exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 0)] =
+          [.scalar (.v256 (pack256 (selected witness.1 witness.2.a) (selected witness.1 witness.2.b)
+            (selected witness.1 witness.2.c) (selected witness.1 witness.2.d)))])) encoded
+    """, profile: "x64-v4", imports: "import Tests.SignWindowContract\nimport CIL.Safety.LocalSnapshots");
+Console.WriteLine("PASS AVX-512 sign window for every selector and certified low-limb sign replacement");
+
 uint[] words = Enumerable.Range(0, 8).Select(_ => (uint)WindowWord()).ToArray();
 var wordBytes = new byte[32];
 ((Vector256<uint>)runtime.GetMethod("CreateWords")!.Invoke(null, words.Cast<object>().ToArray())!)
@@ -542,14 +930,19 @@ foreach ((string name, string[] claims) in new[]
         () => Console.WriteLine($"PASS {name} extraction matches its reference on {claims.Length} inputs")));
 }
 
-// No host here runs AdvSimd, so REV64 is checked against BinaryPrimitives.ReverseEndianness of each lane. The
-// halves are checked against the host's own Load/StoreUnsafe; a destination one byte short faults on the second store.
+// The compiled REV64 result is checked against BinaryPrimitives.ReverseEndianness of each lane.
 var reverseClaims = new[] { (0x0706050403020100UL, 0x0f0e0d0c0b0a0908UL), (WindowWord(), WindowWord()) }
     .Select(input =>
     {
         var bytes = new byte[16];
         Vector128.Create(BinaryPrimitives.ReverseEndianness(input.Item1),
             BinaryPrimitives.ReverseEndianness(input.Item2)).AsByte().CopyTo(bytes);
+        if (System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported)
+        {
+            var observed = (Vector128<ulong>)runtime.GetMethod("ReverseLimbs")!.Invoke(null, [input.Item1, input.Item2])!;
+            if (observed.AsByte() != Vector128.Create((ReadOnlySpan<byte>)bytes))
+                throw new InvalidOperationException("Host REV64 differs from byte reversal within each input lane.");
+        }
         return Invocation([$".scalar (.i64 {input.Item1})", $".scalar (.i64 {input.Item2})"],
             $".v128 {VectorBits(bytes)}");
     }).ToArray();
@@ -569,6 +962,105 @@ File.WriteAllText(reverseProof, $$"""
     """);
 pending.Add((new(selectors["ReverseLimbs"], reverseProof, reverseOutput), "arm64-advsimd",
     () => Console.WriteLine("PASS ReverseLimbs reverses the bytes of each lane under arm64-advsimd")));
+// Exchange the two leading loads and preserve the intrinsic and the rest of the body.
+(string Assembly, string Output) SwapFirstArguments(string methodName)
+{
+    var output = Path.Combine(root, "Swapped" + methodName);
+    Directory.CreateDirectory(output);
+    var image = Path.Combine(output, "Examples.dll");
+    using var variant = ModuleDefinition.ReadModule(assembly);
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == methodName);
+    var code = method.Body.Instructions;
+    if (code[0].OpCode != OpCodes.Ldarg_0 || code[1].OpCode != OpCodes.Ldarg_1)
+        throw new InvalidDataException($"{methodName} must load arguments zero and one first.");
+    (code[0].OpCode, code[1].OpCode) = (code[1].OpCode, code[0].OpCode);
+    variant.Write(image);
+    return (image, output);
+}
+
+var wordArguments = SwapFirstArguments("CreateWords");
+verification.VerifyContractVariant(assembly, "Examples", selectors["CreateWords"], Path.Combine(root, "WordsContract"),
+    wordArguments.Assembly, selectors["CreateWords"], wordArguments.Output, """
+    /-- The eight input words in argument order. -/
+    structure Words where
+      a : W32
+      b : W32
+      c : W32
+      d : W32
+      e : W32
+      f : W32
+      g : W32
+      h : W32
+
+    /-- Lane zero contains the first word, and lane seven contains the last. -/
+    def lanes (w : Words) : BitVec 256 :=
+      ((w.h ++ w.g) ++ (w.f ++ w.e)) ++ ((w.d ++ w.c) ++ (w.b ++ w.a))
+
+    /-- Creating the vector packs all eight words and preserves caller memory. -/
+    def createWords : MethodContract Words (BitVec 256) where
+      args w := [.scalar (.i32 w.a), .scalar (.i32 w.b), .scalar (.i32 w.c), .scalar (.i32 w.d),
+        .scalar (.i32 w.e), .scalar (.i32 w.f), .scalar (.i32 w.g), .scalar (.i32 w.h)]
+      results v := [.scalar (.v256 v)]
+      pre _ _ := True
+      footprint _ := []
+      post w before after v := after = before ∧ v = lanes w
+    """, """
+    set_option maxRecDepth 8192 in
+    /-- The compiled method puts every word in its declared lane. -/
+    theorem correctness : createWords.Holds Extracted.program 0 := by
+      intro w memory _
+      apply MethodContract.Holds.intro (c := createWords) (input := w) memory (lanes w)
+        ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      exact ⟨64, rfl⟩
+    """, """
+    private def input : Words := ⟨1, 0, 0, 0, 0, 0, 0, 0⟩
+
+    set_option maxRecDepth 8192 in
+    /-- Swapping the leading loads puts the only nonzero word in lane one. -/
+    theorem correctness : createWords.Refuted Extracted.program 0 := by
+      apply MethodContract.Refuted.of_return (input := input) (initial := Memory.empty)
+        (fuel := 64) (values := [.scalar (.v256 4294967296)]) trivial rfl
+      rintro ⟨_, v, encoded, _, rfl⟩
+      exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v256 4294967296)] =
+        [.scalar (.v256 (lanes input))])) encoded
+    """);
+Console.WriteLine("PASS vector creation packs every input lane and refutes swapped low words");
+
+var (swappedAssembly, swapped) = SwapFirstArguments("ReverseLimbs");
+verification.VerifyContractVariant(assembly, "Examples", selectors["ReverseLimbs"],
+    Path.Combine(root, "ReverseContract"), swappedAssembly, selectors["ReverseLimbs"], swapped, """
+    open CIL (reverseBytes)
+    open CIL.Vector (pack128 map128_pack128)
+
+    /-- Both limbs stay in their original lanes, with the bytes in each limb reversed. -/
+    def reversed : MethodContract (W64 × W64) (BitVec 128) where
+      args input := [.scalar (.i64 input.1), .scalar (.i64 input.2)]
+      results value := [.scalar (.v128 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧
+        value = pack128 (reverseBytes input.1) (reverseBytes input.2)
+    """, """
+    /-- REV64 reverses each input limb and preserves the caller's memory. -/
+    theorem correctness : reversed.Holds Extracted.program 0 := by
+      rintro ⟨low, high⟩ memory -
+      apply MethodContract.Holds.intro (c := reversed) (input := (low, high)) memory
+        (pack128 (reverseBytes low) (reverseBytes high)) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      refine ⟨64, ?_⟩
+      change invoke Extracted.program 64 0 [.scalar (.i64 low), .scalar (.i64 high)] memory =
+        .ok (memory, [.scalar (.v128 (pack128 (reverseBytes low) (reverseBytes high)))])
+      rw [← map128_pack128]
+      rfl
+    """, """
+    /-- Distinct limbs expose the swapped argument loads on a successful execution. -/
+    theorem correctness : reversed.Refuted Extracted.program 0 := by
+      have ran : invoke Extracted.program 64 0 [.scalar (.i64 1), .scalar (.i64 2)] Memory.empty =
+          .ok (Memory.empty, [.scalar (.v128 (pack128 (reverseBytes 2) (reverseBytes 1)))]) := rfl
+      exact .of_return (input := (1, 2)) trivial ran
+        (by rintro ⟨-, value, encoded, -, rfl⟩; revert encoded; decide)
+    """, profile: "arm64-advsimd", imports: "import CIL.SIMD.PackedLanes");
+Console.WriteLine("PASS ARM64 REV64 contract and certified swapped lanes at (1, 2)");
+
 var halves = new byte[32];
 windowRandom.NextBytes(halves);
 var swappedHalves = new byte[32];
@@ -630,31 +1122,89 @@ foreach ((string name, string profile, string feature) in new[]
             $"{name} admitted without {feature} under {profile}: {rejectedCall.Output}");
     Console.WriteLine($"PASS {name} rejected under {profile}");
 }
-// Forged evidence must not change the table select, the lane reversal, or a transfer's offset form.
-var rejectedEndian = new RejectedEvidence(Path.Combine(root, "RejectedEndian"));
-foreach ((string name, string theorem, string before, string after, string validator, int index) in new[]
+// Exercise every portable vector declaration over pinned example metadata.
+var vectorWitnesses = new (string Name, string Profile)[]
 {
-    ("SignWindow", "method0_intrinsics_validated", ".avx512 .permuteVar4x64x2", ".avx512 .ternaryLogic",
-        "ExactIntrinsicsValid", 0),
-    ("ReverseLimbs", "method0_intrinsics_validated", ".advSimd .reverseElement8", ".avx2 .shuffleBytes",
-        "ExactIntrinsicsValid", 1),
-    ("SwapHalves", "method0_unsafe_validated", ".vector128Unsafe true true", ".vector128Unsafe true false",
-        "UnsafeCallsValid", 2),
-    ("SwapHalves", "method0_unsafe_validated", ".memory (.vector128Unsafe false false)", ".memory .load128",
-        "UnsafeCallsValid", 3)
-})
+    ("And", "x64-v3"), ("Less", "x64-v4"), ("SignWindow", "x64-v4"),
+    ("DefinedLocal", "scalar"), ("UnsafeEquals", "scalar"), ("ReverseLimbs", "arm64-advsimd"),
+    ("Shuffle128", "x64-v3"), ("Shuffle256", "x64-v3"), ("CreateWords", "scalar"),
+    ("SwapHalves", "arm64-advsimd"), ("EqualWords128", "scalar"),
+    ("EqualBytes256", "scalar"), ("EqualSigned512", "scalar")
+};
+var operandRoot = Path.Combine(root, "VectorOperands");
+ExtractBatch("extract", "Examples", vectorWitnesses.Select(witness =>
+    new GeneratedExtraction(assembly, selectors[witness.Name], Path.Combine(operandRoot, witness.Name),
+        witness.Profile)));
+var operands = new GeneratedEvidence(operandRoot);
+foreach (var (name, _) in vectorWitnesses)
 {
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException($"Missing {name} mutation: {before}");
-    var path = Path.Combine(root, "RejectedEndian", $"{name}-{index}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejectedEndian.Add(path, $"PASS forged {name} evidence rejected by {validator}", validator);
+    var folder = Path.Combine(operandRoot, name);
+    var proof = Path.Combine(folder, "Operand.lean");
+    File.Copy(Path.Combine(folder, "Extracted.lean"), proof, true);
+    var method = divisionMethods[name];
+    ModelOperandChecks.Append(proof, method, VectorModel);
+    if (name == "Shuffle256") CheckShuffleReadWidth(proof, method);
+    operands.Add(proof, $"PASS vector operands of {name}");
 }
-rejectedEndian.Check();
+operands.Check(replay: false);
 
-// PMULUDQ runs on the host CPU and its x64-sse2 extraction must return the same products.
+// Each of the two source spans must provide all 32 bytes of its vector.
+static void CheckShuffleReadWidth(string proof, MethodDefinition method)
+{
+    var reads = method.Body.Instructions.Index()
+        .Where(item => item.Item.Operand is MethodReference call &&
+            VectorModel(call) == ".memory (.marshalRead (.snapshot .vector256) false)")
+        .Select(item => item.Index).ToArray();
+    if (reads.Length != 2) throw new InvalidDataException($"Expected two vector reads in {method.FullName}");
+    File.AppendAllText(proof, $$"""
+
+        namespace Extracted
+        open CIL CIL.Extraction
+        /-- Neither 256-bit read can emit a direct 128-bit snapshot read. -/
+        theorem shuffle_rejects_narrow_read :
+            [{{string.Join(", ", reads)}}].all (fun pc => (fixtureOperandCode[pc]?).any fun raw =>
+              let closed := { method0Closed with code := [raw] }
+              let narrow := Instruction.memory (.marshalRead (.snapshot .vector128) false)
+              let emitted := { method0 with code := [narrow], links := [] }
+              !(decide (RuntimeModelsAgree closed [true] emitted))) = true := by cil_kernel_rfl
+        #print axioms shuffle_rejects_narrow_read
+        end Extracted
+
+        """);
+}
+
+// The fixture's declaration fixes the expected operation independently of the extractor.
+static string? VectorModel(MethodReference call)
+{
+    if (call.DeclaringType.Namespace != "System.Runtime.Intrinsics") return null;
+    int width = call.DeclaringType.Name switch
+    {
+        "Vector128" or "Vector128`1" => 128, "Vector256" or "Vector256`1" => 256,
+        "Vector512" or "Vector512`1" => 512, _ => 0
+    };
+    if (width == 0) return null;
+    var count = call.Parameters.Count;
+    var hasOffset = call.Parameters.LastOrDefault()?.ParameterType.MetadataType == MetadataType.UIntPtr;
+    var offset = hasOffset ? "true" : "false";
+    return call.Name switch
+    {
+        "op_Equality" => $".intrinsic (.vector (.equalsAll {width})) 2",
+        "LoadUnsafe" => $".memory (.vector128Unsafe false {offset})",
+        "StoreUnsafe" => $".memory (.vector128Unsafe true {offset})",
+        "Create" when width == 512 => ".intrinsic (.vector .combine256) 2",
+        "Create" when call is GenericInstanceMethod => $".memory (.marshalRead (.snapshot .vector{width}) false)",
+        "Create" when call.Parameters[0].ParameterType.MetadataType == MetadataType.UInt32 =>
+            $".intrinsic (.vector (.create32 {width})) {count}",
+        "Create" => $".intrinsic (.vector (.create64 {width})) {count}",
+        _ => null
+    };
+}
+
+// Forged evidence cannot change the table select or the lane reversal.
+RejectHardware("SignWindow", "SignWindow", "::PermuteVar4x64x2(", "ternaryLogic", "permute");
+RejectHardware("ReverseLimbs", "ReverseLimbs", "::ReverseElement8(", "shuffle256", "reverse");
+
+// PMULUDQ runs on the host CPU and its x64-sse42 extraction must return the same products.
 // Lanes with set high halves and both 32-bit extremes come first, then seeded random words.
 const int MultiplyCases = 12;
 var multiplyRandom = new Random(0x4d55);
@@ -717,9 +1267,97 @@ File.WriteAllText(multiplyProof, $$"""
     #print axioms correctness
     end ExampleProof
     """);
-pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse2",
+pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse42",
     () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs")));
 Flush();
+// Shift each input's odd UInt32 element into the even position before the original SSE2 multiply.
+var oddProducts = Path.Combine(root, "OddProducts128");
+Directory.CreateDirectory(oddProducts);
+var oddProductsAssembly = Path.Combine(oddProducts, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods
+        .Single(method => method.Name == "MultiplyEven128");
+    var loads = method.Body.Instructions.Where(site =>
+        site.OpCode.Code is Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or Code.Ldarg_3).ToArray();
+    Code[] expected = [Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3];
+    if (!loads.Select(load => load.OpCode.Code).SequenceEqual(expected))
+        throw new InvalidDataException("MultiplyEven128 must load the four words in lane order.");
+    var il = method.Body.GetILProcessor();
+    foreach (var load in loads)
+    {
+        var count = il.Create(OpCodes.Ldc_I4_S, (sbyte)32);
+        il.InsertAfter(load, count);
+        il.InsertAfter(count, il.Create(OpCodes.Shr_Un));
+    }
+    variant.Write(oddProductsAssembly);
+}
+if (Sse2.IsSupported)
+{
+    var changedType = Assembly.LoadFile(oddProductsAssembly).GetType("Examples.DivisionIntrinsics")!;
+    static Vector128<ulong> Products(Type type) => type.GetMethod("MultiplyEven128")!
+        .CreateDelegate<Func<ulong, ulong, ulong, ulong, Vector128<ulong>>>()
+        (0x100000002, 0x300000004, 0x500000006, 0x700000008);
+    if (!Products(runtime).Equals(Vector128.Create(12UL, 32UL)) ||
+        !Products(changedType).Equals(Vector128.Create(5UL, 21UL)))
+        throw new InvalidOperationException("SSE2 products differ from the unsigned low- and high-half witness.");
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["MultiplyEven128"],
+    Path.Combine(root, "EvenProductsContract"), oddProductsAssembly, selectors["MultiplyEven128"], oddProducts, """
+    open CIL.Vector (pack128 sseMultiplyEven32_pack128)
+
+    /-- Each unsigned 32-bit operand comes from the low half of its 64-bit lane. -/
+    private def product (left right : W64) : W64 :=
+      (left.setWidth 32).zeroExtend 64 * (right.setWidth 32).zeroExtend 64
+
+    /-- PMULUDQ returns two full-width products and preserves caller memory. -/
+    def evenProducts : MethodContract ((W64 × W64) × (W64 × W64)) (BitVec 128) where
+      args input := [.scalar (.i64 input.1.1), .scalar (.i64 input.1.2),
+        .scalar (.i64 input.2.1), .scalar (.i64 input.2.2)]
+      results value := [.scalar (.v128 value)]
+      pre _ _ := True
+      footprint _ := []
+      post input before after value := after = before ∧
+        value = pack128 (product input.1.1 input.2.1) (product input.1.2 input.2.2)
+    """, """
+    set_option maxRecDepth 8192 in
+    /-- The compiled SSE2 method multiplies the low halves for all four arguments. -/
+    theorem correctness : evenProducts.Holds Extracted.program 0 := by
+      rintro ⟨⟨a, b⟩, c, d⟩ memory -
+      apply MethodContract.Holds.intro (c := evenProducts) (input := ((a, b), (c, d))) memory
+        (pack128 (product a c) (product b d)) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+      refine ⟨64, ?_⟩
+      change invoke Extracted.program 64 0 _ memory =
+        .ok (memory, [.scalar (.v128 (pack128 (product a c) (product b d)))])
+      unfold product
+      rw [← sseMultiplyEven32_pack128]
+      rfl
+    """, """
+    set_option maxRecDepth 8192
+    /-- Each high half and its low half contribute different products at this input. -/
+    private def witness : (W64 × W64) × (W64 × W64) :=
+      ((0x100000002, 0x300000004), (0x500000006, 0x700000008))
+
+    /-- The observed high-half products violate the low-half postcondition. -/
+    private theorem wrongProducts :
+        ¬ evenProducts.Returns witness Memory.empty Memory.empty [.scalar (.v128 (pack128 5 21))] := by
+      rintro ⟨value, encoded, -, rfl⟩
+      exact (by decide : ¬ ([CIL.Safety.Value.scalar (.v128 (pack128 5 21))] =
+        [.scalar (.v128 (pack128 12 32))])) encoded
+
+    #print axioms wrongProducts
+
+    /-- Selecting the odd UInt32 elements instead returns the two high-half products. -/
+    theorem correctness : evenProducts.Refuted Extracted.program 0 := by
+      have ran : invoke Extracted.program 64 0 (evenProducts.args witness) Memory.empty =
+          .ok (Memory.empty, [.scalar (.v128 (pack128 5 21))]) := by
+        simp only [evenProducts, witness]
+        cil_checked_steps [] <;> rfl
+      exact MethodContract.Refuted.of_return (c := evenProducts) (input := witness)
+        (program := Extracted.program) (fuel := 64) (method := 0) (final := Memory.empty)
+        (values := [.scalar (.v128 (pack128 5 21))]) trivial ran (fun h => wrongProducts h.2)
+    """, profile: "x64-sse42", imports: "import CIL.SIMD.PackedLanes");
+Console.WriteLine("PASS SSE2 even-lane product contract and certified odd-lane replacement");
 // Without SSE2 the reachable call is rejected before any evidence is written.
 var multiplyRejectedOutput = Path.Combine(root, "MultiplyEven128-scalar");
 Directory.CreateDirectory(multiplyRejectedOutput);
@@ -733,22 +1371,10 @@ if (rejectedMultiply.Code == 0 || File.Exists(Path.Combine(multiplyRejectedOutpu
 }
 Console.WriteLine("PASS MultiplyEven128 rejected under scalar");
 // Forged evidence must not substitute the 256-bit multiply or another exact SSE call for PMULUDQ.
-var rejectedMultiplies = new RejectedEvidence(Path.Combine(root, "RejectedMultiply"));
-var multiplySource = NarrowEvidence(File.ReadAllText(Path.Combine(multiplyOutput, "Extracted.lean")),
-    "method0_intrinsics_validated");
-if (!multiplySource.Contains(".sse .multiplyEven32", StringComparison.Ordinal))
-{
-    throw new InvalidOperationException("Missing multiply mutation: .sse .multiplyEven32");
-}
-foreach ((string after, int index) in new[] { (".avx2 .multiplyEven32", 0), (".sse .shuffleBytes", 1) })
-{
-    var path = Path.Combine(root, "RejectedMultiply", $"MultiplyEven128-{index}.lean");
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, multiplySource.Replace(".sse .multiplyEven32", after, StringComparison.Ordinal));
-    rejectedMultiplies.Add(path, "PASS forged MultiplyEven128 evidence rejected by ExactIntrinsicsValid",
-        "ExactIntrinsicsValid");
-}
-rejectedMultiplies.Check();
+RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", "multiplyEven32", "wide");
+RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", "shuffle128", "shuffle");
+BuildLeanTestLibraries("Checking replacement hardware method signatures", "+Tests.Support.IntrinsicMethods");
+rejectedHardware.Check(FixtureLeanPath());
 
 // Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
 static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)

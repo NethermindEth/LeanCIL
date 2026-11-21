@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include CheckedExtractionPrefix.cs
 #:include RejectedEvidence.cs
@@ -15,7 +20,7 @@ Directory.CreateDirectory(output);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples", "Arithmetic::Add(ulong,ulong)", output));
 var baseline = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-var declaration = new Regex(@"theorem translation_valid\s*:[\s\S]*?(?=@\[cil_code\] theorem lookup0)");
+var declaration = TranslationPatterns.Certificate;
 if (declaration.Matches(baseline).Count != 1)
     throw new InvalidOperationException("Expected exactly one complete extraction certificate");
 var prefix = new CheckedExtractionPrefix(baseline, "theorem translation_valid :", output);
@@ -35,15 +40,19 @@ void Audit(string name, string source, bool accepted, bool emitted = true)
 
 Audit("valid", baseline, true);
 // Definitionally equal, so elaboration accepts it, but not the statement the extractor emits.
-Audit("wrapped-statement", baseline.Replace("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by",
-    "theorem translation_valid : id (Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program) := by"), true, emitted: false);
+Audit("wrapped-statement", baseline.Replace(
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
+    "platformDefinitions methodEvidence imports program := by",
+    "theorem translation_valid : id (Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
+    "platformDefinitions methodEvidence imports program) := by"), true, emitted: false);
 Audit("missing-certificate", declaration.Replace(baseline, ""), false);
 Audit("unrelated-true", declaration.Replace(baseline, "theorem translation_valid : True := True.intro"), false);
 Audit("definition-instead-of-theorem", baseline.Replace("theorem translation_valid", "def translation_valid"), false);
 // A certificate over another import table does not certify the emitted `Extracted.imports`.
 Audit("other-import-table", declaration.Replace(baseline,
-    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence [{ identity := \"forged\", closureDigest := \"\", parameterCount := 0, hasThis := false, returnsValue := false }] program := " +
-    "by decide +kernel\n"), false);
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
+    "platformDefinitions methodEvidence [{ identity := \"forged\", closureDigest := \"\", parameterCount := 0, " +
+    "hasThis := false, returnsValue := false }] program := by decide +kernel\n"), false);
 
 string Wrapper(int index) => ExtractionAuditSource.Replace("import Extracted\n", "", StringComparison.Ordinal)
     .Replace("Extracted.translation_valid", $"AuditCase{index}.Extracted.translation_valid", StringComparison.Ordinal)
@@ -54,7 +63,7 @@ var requests = new List<AuditRequest>();
 for (var index = 0; index < cases.Count; index++)
 {
     batch.AppendLine($"namespace AuditCase{index}\nopen _root_.Extracted");
-    batch.AppendLine(Regex.Replace(cases[index].Source, @"(?m)^import [^\r\n]+\r?\n", ""));
+    batch.AppendLine(TranslationPatterns.ImportLine.Replace(cases[index].Source, ""));
     batch.AppendLine($"end AuditCase{index}");
     requests.Add(ExtractionCertificate($"AuditCase{index}.Extracted.translation_valid"));
     if (cases[index].Accepted) batch.AppendLine(Wrapper(index));
@@ -94,3 +103,13 @@ for (var index = 0; index < cases.Count; index++)
             diagnostic.Contains("Type mismatch", StringComparison.Ordinal));
 }
 rejected.Check(prefix.LeanPath);
+
+/// <summary>The certificate and imports of an extracted Lean module.</summary>
+static partial class TranslationPatterns
+{
+    [GeneratedRegex(@"theorem translation_valid\s*:[\s\S]*?(?=\r?\ndef programLength)")]
+    internal static partial Regex Certificate { get; }
+
+    [GeneratedRegex(@"(?m)^import [^\r\n]+\r?\n")]
+    internal static partial Regex ImportLine { get; }
+}

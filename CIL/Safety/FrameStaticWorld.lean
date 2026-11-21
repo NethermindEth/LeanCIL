@@ -64,14 +64,6 @@ theorem makeLocals_preserves_static_world (descriptors : List CIL.StaticDescript
     StaticWorldValid descriptors result := by
   exact (makeLocals_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
 
-theorem makeArgumentHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (m result : Memory) (activation : Nat) (indices : List Nat) (args : List Value)
-    (homes : List (Nat × LocalSlot)) (owned : List AllocationId) (hm : m.WellFormed)
-    (world : StaticWorldValid descriptors m)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    StaticWorldValid descriptors result := by
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).staticWorld descriptors hm world
-
 theorem makeParameterHomes_preserves_static_world (descriptors : List CIL.StaticDescriptor)
     (m result : Memory) (activation : Nat) (parameters : List (Nat × CIL.LocalKind))
     (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)

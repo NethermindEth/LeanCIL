@@ -15,7 +15,7 @@ by recursive execution. No consumer supplies or assumes a step simulation obliga
 namespace CIL.Safety.StepRenaming
 
 /-- Nonlocal nonallocating instructions retain their exact opcode under local relocation. -/
-private theorem fixedOperation (indices : LocalIndexMap) (operation : CIL.Op)
+private theorem fixedOperation (indices : LocalIndexMap) (operation : CIL.Instruction)
     (fixed : fixedStepFamily operation ≠ .excluded) : indices.operation operation = operation := by
   cases operation <;> try rfl
   all_goals exact False.elim (fixed rfl)
@@ -46,49 +46,111 @@ theorem stepTransport : StepTransport := by
       metadata operation family pc arguments stack bounds observable⟩
   | excluded =>
     cases operation <;> try cases family
-    case newArray.refl element =>
-      exact memories.stepNewArray frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody element pc arguments stack bounds observable
-    case newReferenceArray.refl element =>
-      exact memories.stepNewReferenceArray frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody element pc arguments stack bounds observable
-    case newObject.refl callee argc owner bases size =>
-      exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
-        callee argc owner bases size pc arguments stack bounds observable
+    case newarr.refl element =>
+      exact memories.stepNewarr frames sourceFormed targetFormed staticBounds
+        sourceBody targetBody metadata element pc arguments stack bounds observable
+    case newobj.refl constructor =>
+      exact memories.stepNewobj frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody constructor pc metadata arguments stack bounds observable
+    case ldobj.refl | stobj.refl | cpobj.refl | initobj.refl | sizeof.refl =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      simp only [LocalIndexMap.operation, step, observerCount, indices.unspecifiedOperands mapping,
+        Extraction.CallLayouts.valueShape_eq, Method.valueShape, metadata.environment]
+        at observable ⊢
+      rename_i type
+      first
+        | (let count := if Extraction.spanLocal type then 0 else 1
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+        | (let count := 2
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+        | (let count := 1
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+        | (let count := 0
+           change SuccessOrThrow (if unspecifiedOperands count stack then _ else _) at observable)
+      by_cases observed : unspecifiedOperands count stack = true <;>
+        simp only [count] at observed observable <;>
+        simp only [observed, Bool.false_eq_true, ite_true, ite_false] at observable ⊢
+      all_goals try exact .error _
+      all_goals try cases width : (sourceBody.environment.valueShape type).size? <;>
+        simp only [width] at observable ⊢
+      all_goals try exact .error _
+      all_goals first
+        | exact .ok (.next memories frames)
+        | (cases shape : sourceBody.environment.valueShape type <;>
+             simp only [shape] at observable ⊢ <;>
+             first
+             | exact .error _
+             | exact frames.initializeSpanHome memories pc stack)
+        | (first
+            | apply (memories.copyInitializedBytesResult _ sourceFormed stack bounds
+                observable.bind_left).bind
+            | apply (memories.initializeBytesResult _ sourceFormed stack bounds
+                observable.bind_left).bind
+            | apply (memories.transferObjectResult _ _ sourceFormed stack bounds
+                observable.bind_left).bind
+           rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
+           exact .ok (.next related frames))
+        | (apply (frames.viewOperands memories _ stack bounds).bindWithSuccess
+           intro viewed otherViewed sourceViewed operandsRelated
+           obtain ⟨rfl, viewedBounds⟩ := operandsRelated
+           apply (memories.transferObjectResult _ _ sourceFormed viewed viewedBounds
+             (observable.bind_right sourceViewed).bind_left).bind
+           rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
+           exact .ok (.next related frames))
+    case ldelem_any.refl element =>
+      exact ⟨mapping, .refl mapping, memories.stepLdelemAny frames sourceFormed sourceBody
+        targetBody metadata element pc arguments stack bounds observable⟩
+    case stelem_any.refl element =>
+      exact ⟨mapping, .refl mapping, memories.stepStelemAny frames sourceFormed sourceBody
+        targetBody metadata element pc arguments stack bounds observable⟩
+    case ldelema.refl element readOnly =>
+      exact ⟨mapping, .refl mapping, memories.stepLdelema frames sourceFormed sourceBody
+        targetBody metadata element readOnly pc arguments stack bounds observable⟩
+    case ldsfld.refl field =>
+      exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
+        targetBody metadata field pc arguments stack⟩
+    case ldsflda.refl field =>
+      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
+        observable
+    case ldtoken.refl operand =>
+      cases operand
+      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
+        observable
+    case stsfld.refl field =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      dsimp only [LocalIndexMap.operation]
+      rw [step_stsfld_eq, step_stsfld_eq, indices.unspecifiedOperands mapping]
+      split <;> exact .error _
+    case ldfld.refl field =>
+      exact memories.stepFieldLoad frames sourceFormed sourceBody targetBody metadata field pc
+        arguments stack bounds observable
+    case stfld.refl field =>
+      exact memories.stepFieldStore frames sourceFormed sourceBody targetBody metadata field pc
+        arguments stack bounds observable
+    case ldflda.refl field =>
+      exact memories.stepFieldAddress frames sourceFormed sourceBody targetBody metadata field pc
+        arguments stack bounds observable
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
+    | exact memories.stepMemory frames sourceFormed sourceBody targetBody _ pc arguments stack
+        bounds observable
+    | exact memories.stepLocalloc frames sourceFormed targetFormed staticBounds
+        sourceBody targetBody metadata.declared pc arguments stack observable
     | exact ⟨mapping, .refl mapping,
-        frames.stepInitializeSpanLocal memories sourceFormed sourceBody targetBody _ pc _
-          arguments stack bounds observable⟩
-    | exact memories.stepMemory frames sourceFormed targetFormed staticBounds sourceBody targetBody
-        metadata _ pc arguments stack bounds observable
-    | exact memories.stepStackAlloc frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody _ pc arguments stack observable
-    | exact memories.stepNewVector256 frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody _ _ pc arguments stack bounds
-    | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody _ _ pc _ arguments stack bounds
+        frames.stepLdloc memories sourceBody targetBody _ pc arguments stack⟩
     | exact ⟨mapping, .refl mapping,
-        frames.stepLocal memories sourceBody targetBody _ pc _ arguments stack⟩
-    | exact ⟨mapping, .refl mapping,
-        frames.stepLocalAddress memories sourceBody targetBody _ pc arguments stack⟩
-    | exact ⟨mapping, .refl mapping,
-        frames.stepVectorLocal memories sourceBody targetBody _ pc arguments stack⟩
-    | exact ⟨mapping, .refl mapping,
-        frames.stepVectorLocalAddress memories sourceBody targetBody _ pc arguments stack⟩
+        frames.stepLdloca memories sourceBody targetBody _ pc arguments stack⟩
     | (cases stack with
        | nil =>
          simp only [step, observerCount, unspecifiedOperands, List.take_nil, List.any_nil,
-           Bool.false_or, Bool.false_eq_true, ite_false, pureArity, instruction] at observable
+           Bool.false_eq_true, ite_false, pureArity, instruction] at observable
          cases observable
        | cons value rest =>
-         first
-         | exact ⟨mapping, .refl mapping,
-             frames.stepSetLocal memories sourceBody targetBody _ pc _ arguments rest value
-               (bounds value (List.mem_cons_self ..))⟩
-         | exact ⟨mapping, .refl mapping,
-             frames.stepSetVectorLocal memories sourceBody targetBody _ pc arguments rest value
-               (bounds value (List.mem_cons_self ..))⟩)
+         exact ⟨mapping, .refl mapping,
+           frames.stepStloc memories sourceBody targetBody _ pc arguments rest value
+             (bounds value (List.mem_cons_self ..))⟩)
 #print axioms stepTransport
 
 end CIL.Safety.StepRenaming

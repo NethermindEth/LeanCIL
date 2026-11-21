@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // PDB names and locations only locate: extraction is byte-identical without a PDB, a proof
 // naming locals by scope survives an inserted local, and diagnostics gain `file:line:column`.
@@ -44,7 +49,8 @@ string Build(string name, string inserted, string debugType)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Names.csproj"), $"""
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><DebugType>{debugType}</DebugType></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize><DebugType>{debugType}</DebugType></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Names.cs"), Source(inserted));
     Run(["dotnet", "build", Path.Combine(source, "Names.csproj"), "-c", "Release"]);
@@ -87,9 +93,9 @@ string Proof(string name, string[] slots, string imports = "  import ExtractedSy
 
     -- Each block stores its call's result in its own `carry`, and the second block reads its own back.
     theorem correctness :
-        sumBody.code[atMix + 1]? = some (.setLocal {{slots[0]}}) ∧
-        sumBody.code[atWide + 1]? = some (.setLocal {{slots[1]}}) ∧
-        sumBody.code[atWide + 2]? = some (.local {{slots[2]}}) :=
+        sumBody.code[atMix + 1]? = some (.stloc {{slots[0]}}) ∧
+        sumBody.code[atWide + 1]? = some (.stloc {{slots[1]}}) ∧
+        sumBody.code[atWide + 2]? = some (.ldloc {{slots[2]}}) :=
       ⟨rfl, rfl, rfl⟩
 
     end ExampleProof

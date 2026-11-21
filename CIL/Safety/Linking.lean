@@ -30,58 +30,53 @@ theorem ManagedTarget.find?_relocate (f : Nat → Nat) (catalog : List ManagedTa
 
 #print axioms ManagedTarget.find?_relocate
 
-/-- Renames the methods an instruction calls or constructs with; `.nativeBinary` never
-    dispatches its operand. -/
-def Op.relocate (f : Nat → Nat) : Op → Op
-  | .call method argc => .call (f method) argc
-  | .callInstance method argc => .callInstance (f method) argc
-  | .callVirtual targets argc =>
-    .callVirtual (targets.map fun (type, method) => (type, f method)) argc
-  | .tailCall method argc => .tailCall (f method) argc
-  | .newVector256 method argc => .newVector256 (f method) argc
-  | .newAggregate method argc size => .newAggregate (f method) argc size
-  | .newObject method argc owner bases size => .newObject (f method) argc owner bases size
-  | .managed (.call signature catalog tail) =>
-    .managed (.call signature (catalog.map (ManagedTarget.relocate f)) tail)
-  | op => op
+/-- Renames every method index a link enters. -/
+def Link.relocate (f : Nat → Nat) : Link → Link
+  | .direct method => .direct (f method)
+  | .address method => .address method
+  | .virtual targets => .virtual (targets.map fun (type, method) => (type, f method))
+  | .aggregate constructor size => .aggregate (f constructor) size
+  | .object constructor bases size => .object (f constructor) bases size
+  | .indirect catalog => .indirect (catalog.map (ManagedTarget.relocate f))
 
--- Together these fail if a method-index constructor is added to only one of `relocate`
--- and `callees`.
-theorem Op.callees_relocate (f : Nat → Nat) (op : Op) :
-    (op.relocate f).callees = op.callees.map f := by
-  cases op <;> simp [Op.relocate, Op.callees]
-  case managed operation =>
-    cases operation <;> simp [List.map_map,
-      Function.comp_def, ManagedTarget.relocate]
+/-- A relocated link enters exactly the renamed methods of the original. -/
+theorem Link.callees_relocate (f : Nat → Nat) (link : Link) :
+    (link.relocate f).callees = link.callees.map f := by
+  cases link <;> simp [Link.relocate, Link.callees, List.map_map, Function.comp_def,
+    ManagedTarget.relocate]
 
-theorem Op.relocate_of_callees_nil (f : Nat → Nat) (op : Op) (none : op.callees = []) :
-    op.relocate f = op := by
-  cases op <;> simp_all [Op.relocate, Op.callees]
-  case managed operation =>
-    cases operation <;> simp_all
+#print axioms Link.callees_relocate
 
-/-- Renames the method indices in a body; pcs, locals, profile and static sites are unchanged. -/
+/-- Renames the method indices in a body's link table; its code, pcs, locals, profile and static
+    sites are unchanged, since a call reads the method it enters from the table. -/
 def Method.relocate (f : Nat → Nat) (body : Method) : Method :=
-  { body with code := body.code.map (Op.relocate f) }
+  { body with links := body.links.map fun entry => (entry.1, entry.2.relocate f) }
+
+/-- A relocated body gives each pc the relocated link of the original. -/
+theorem Method.linkAt_relocate (f : Nat → Nat) (body : Method) (pc : Nat) :
+    (body.relocate f).linkAt pc = (body.linkAt pc).map (Link.relocate f) := by
+  simp only [Method.linkAt, linkLookup, Method.relocate, List.find?_map, Option.map_map]
+  rfl
+
+#print axioms Method.linkAt_relocate
 
 end CIL
 
 namespace CIL.Safety
 
-/-- Every method index that `lib`'s code names is one of its own methods. -/
+/-- Every method index the link tables of `lib`'s bodies enter is one of its own methods. -/
 def Closed (lib : CIL.Program) : Prop :=
   ∀ (i : Nat) (body : CIL.Method), lib[i]? = some body →
-    ∀ (pc : Nat) (op : CIL.Op), body.code[pc]? = some op →
-      ∀ callee ∈ op.callees, callee < lib.length
+    ∀ entry ∈ body.links, ∀ callee ∈ entry.2.callees, callee < lib.length
 
 /-- Decides `Closed` for a concrete library. -/
 def closedCheck (lib : CIL.Program) : Bool :=
-  lib.all fun body => body.code.all fun op => op.callees.all (· < lib.length)
+  lib.all fun body => body.links.all fun entry => entry.2.callees.all (· < lib.length)
 
 theorem Closed.of_check {lib : CIL.Program} (checked : closedCheck lib = true) : Closed lib := by
-  intro i body found pc op fetched callee member
+  intro i body found entry listed callee member
   simp only [closedCheck, List.all_eq_true, decide_eq_true_eq] at checked
-  exact checked body (List.mem_of_getElem? found) op (List.mem_of_getElem? fetched) callee member
+  exact checked body (List.mem_of_getElem? found) entry listed callee member
 
 /-- Method `i` of `lib` sits at `f i` in `linked`, relocated by `f`. -/
 def RelocatesInto (lib linked : CIL.Program) (f : Nat → Nat) : Prop :=
@@ -99,6 +94,21 @@ def FrameAction.relocate (f : Nat → Nat) : FrameAction → FrameAction
     .construct (f callee) arguments rest frame temporary kind memory
   | action => action
 
+/-- A call's runtime model enters no callee, so relocating the body's links changes nothing it
+    does. -/
+theorem modelStep_relocate (f : Nat → Nat) (model : Option CIL.RuntimeModel) (body : Method)
+    (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    modelStep model (body.relocate f) pc frame stack memory =
+      (modelStep model body pc frame stack memory).map (FrameAction.relocate f) := by
+  rw [modelStep_profile_congr (moved := body.relocate f) (body := body) rfl]
+  cases executed : modelStep model body pc frame stack memory with
+  | error => rfl
+  | ok action =>
+    obtain ⟨_, _, _, rfl, _⟩ := modelStep_frame executed
+    rfl
+
+#print axioms modelStep_relocate
+
 theorem FrameAction.relocate_of_callee_none (f : Nat → Nat) (action : FrameAction)
     (none : action.callee = .none) : action.relocate f = action := by
   cases action <;> simp_all [FrameAction.relocate, FrameAction.callee]
@@ -106,40 +116,55 @@ theorem FrameAction.relocate_of_callee_none (f : Nat → Nat) (action : FrameAct
 theorem enterFrame_relocate (f : Nat → Nat) (body : CIL.Method) (args : List Value) (m : Memory) :
     enterFrame (body.relocate f) args m = enterFrame body args m := rfl
 
-/-- Relocating the body does not change how an unrelocated instruction steps. -/
-theorem step_body_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) :
-    step (body.relocate f) op pc args frame stack m = step body op pc args frame stack m := rfl
+/-- Relocating a catalog renames the body an indirect call selects and selects no other. -/
+theorem indirectTarget_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
+    (catalog : List CIL.ManagedTarget) (pointer : CIL.MethodPointer) :
+    indirectTarget signature (catalog.map (CIL.ManagedTarget.relocate f)) pointer =
+      (indirectTarget signature catalog pointer).map f := by
+  unfold indirectTarget
+  cases pointer.signature != signature with
+  | true => rfl
+  | false =>
+    cases pointer.target with
+    | none => rfl
+    | some identity =>
+      simp only [Bool.false_eq_true, ite_false, Option.bind, CIL.ManagedTarget.find?_relocate,
+        Option.map_map]
+      rfl
 
-/-- Relocating an indirect catalog changes only the body index of its selected action. -/
+#print axioms indirectTarget_relocate
+
+/-- Relocating the catalog an indirect call reads from its link changes only the body index of
+    its selected action. -/
 private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
-    (catalog : List CIL.ManagedTarget) (tail : Bool) (pc : Nat) (frame : Frame)
-    (stack : List Value) (memory : Memory) :
-    managedStep (.call signature (catalog.map (CIL.ManagedTarget.relocate f)) tail)
-        pc frame stack memory =
-      (managedStep (.call signature catalog tail) pc frame stack memory).map
+    (tail : Bool) (link : Option CIL.Link) (pc : Nat)
+    (frame : Frame) (stack : List Value) (memory : Memory) :
+    managedStep (.call signature tail) (link.map (CIL.Link.relocate f)) pc frame stack
+        memory =
+      (managedStep (.call signature tail) link pc frame stack memory).map
         (FrameAction.relocate f) := by
   cases stack with
   | nil => rfl
   | cons value values =>
     cases value <;> try rfl
     rename_i pointer
-    cases target : pointer.target with
-    | none => simp [managedStep, target, Bind.bind, Except.bind, Except.map]
-    | some identity =>
-      cases found : catalog.find? (·.identity == identity) with
-      | none =>
-        simp only [managedStep, target, CIL.ManagedTarget.find?_relocate, found,
-          Bind.bind, Except.bind, Except.map, Option.map_none]
-        split <;> rfl
-      | some selected =>
-        simp only [managedStep, target, CIL.ManagedTarget.find?_relocate, found,
-          Option.map_some]
-        repeat' first
-          | rfl
-          | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-              Except.map, CIL.ManagedTarget.relocate, FrameAction.relocate]
-          | split
+    rcases link with _ | link
+    · rfl
+    cases link <;> try rfl
+    rename_i catalog
+    cases selected : indirectTarget signature catalog pointer with
+    | none =>
+      simp only [managedStep, Option.map_some, CIL.Link.relocate, indirectTarget_relocate,
+        selected, Option.map_none]
+      rfl
+    | some method =>
+      simp only [managedStep, Option.map_some, CIL.Link.relocate, indirectTarget_relocate,
+        selected]
+      repeat' first
+        | rfl
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map,
+            FrameAction.relocate]
+        | split
 
 #print axioms managedStep_relocate
 
@@ -166,69 +191,111 @@ private theorem virtualTarget_relocate (f : Nat → Nat) (memory : Memory)
 
 #print axioms virtualTarget_relocate
 
-/-- A relocated instruction steps exactly as the original, entering the renamed method. -/
-theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Op) (pc : Nat)
+/-- An instruction that reads no link steps alike whatever link table its body carries. -/
+private theorem step_relinked {body : CIL.Method} (links : List (Nat × CIL.Link))
+    {op : CIL.Instruction} (unlinked : op.readsLink = false) (pc : Nat) (args : List Value)
+    (frame : Frame) (stack : List Value) (m : Memory) :
+    step { body with links := links } op pc args frame stack m =
+      step body op pc args frame stack m := by
+  -- A matcher stuck on the stack carries the call arms, which read the table; split the
+  -- stack as deep as the patterns look so the matcher selects this instruction's arm.
+  cases op <;> simp only [CIL.Instruction.readsLink, reduceCtorEq] at unlinked
+  case managed operation =>
+    cases operation <;> simp only [Bool.true_eq_false] at unlinked
+    all_goals first
+      | rfl
+      | (rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩
+         all_goals (try (cases first <;> try cases ‹ManagedReference›))
+         all_goals (try (cases second <;> try cases ‹ManagedReference›))
+         all_goals rfl)
+  all_goals first
+    | rfl
+    | (rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩
+       all_goals (try cases first) <;> (try cases second) <;> rfl)
+
+#print axioms step_relinked
+
+/-- A relocated body steps each instruction exactly as the original, entering the renamed
+    method. -/
+theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) :
-    step (body.relocate f) (op.relocate f) pc args frame stack m =
+    step (body.relocate f) op pc args frame stack m =
       (step body op pc args frame stack m).map (FrameAction.relocate f) := by
-  rw [step_body_relocate]
-  cases hc : op.callees with
-  | nil =>
-    rw [CIL.Op.relocate_of_callees_nil f op hc]
-    cases hs : step body op pc args frame stack m with
+  cases linked : op.readsLink with
+  | false =>
+    rw [CIL.Method.relocate, step_relinked _ linked]
+    cases stepped : step body op pc args frame stack m with
     | error => rfl
     | ok action =>
       have none : action.callee = .none := by
         cases enters : action.callee with
         | none => rfl
-        | some callee => simpa [hc] using step_callee hs enters
+        | some callee => simpa [linked] using (step_callee stepped enters).1
       simp only [Except.map, FrameAction.relocate_of_callee_none f action none]
-  | cons callee rest =>
-    cases op <;> simp only [CIL.Op.callees, reduceCtorEq] at hc
+  | true =>
+    cases op <;> simp only [CIL.Instruction.readsLink, Bool.false_eq_true] at linked
     case managed operation =>
-      cases operation <;> simp only [CIL.Op.callees, reduceCtorEq] at hc
-      case call signature catalog tail =>
-        simp only [step, CIL.Op.relocate, observerCount, Bool.or_false]
-        split
-        · rfl
-        · exact managedStep_relocate f signature catalog tail pc frame stack m
-    case callVirtual targets argc =>
-      simp only [step, CIL.Op.relocate, observerCount, Bool.or_false, virtualTarget_relocate]
+      cases operation <;> simp only [Bool.false_eq_true] at linked
+      simp only [step, CIL.Method.linkAt_relocate]
+      rw [apply_ite (Except.map (FrameAction.relocate f))]
+      refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
+      exact managedStep_relocate f _ _ (body.linkAt pc) pc frame stack m
+    case callvirt method =>
+      simp only [step, observerCount, CIL.Method.linkAt_relocate]
+      by_cases unknown : unspecifiedOperands method.argumentCount stack = true
+      · simp only [unknown, ite_true]
+        rfl
+      simp only [unknown, Bool.false_eq_true, ite_false]
+      rcases body.linkAt pc with _ | link
+      · rfl
+      cases link <;> try rfl
+      case direct index =>
+        simp only [Option.map_some, CIL.Link.relocate]
+        repeat' first
+          | rfl
+          | (split <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure,
+              Except.map, FrameAction.relocate])
+      rename_i table
+      simp only [Option.map_some, CIL.Link.relocate, virtualTarget_relocate]
       split
       · rfl
-      split
-      · rfl
-      cases (stack.take argc).reverse.mapM (checkedValue m) with
+      cases (stack.take method.argumentCount).reverse.mapM (callArgument frame m) with
       | error => rfl
       | ok arguments =>
         simp only [Bind.bind, Except.bind]
         split
         · rename_i receiver _
-          cases virtualTarget m targets receiver <;> rfl
+          cases virtualTarget m table receiver <;> rfl
         all_goals rfl
     all_goals
-      unfold step
-      simp only [CIL.Op.relocate, observerCount, Bool.or_false,
-        Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
-      repeat' (split <;> simp_all [FrameAction.relocate])
-    all_goals
-      split <;> try rfl
-      split <;> rfl
+      simp only [step, observedCall, CIL.Method.linkAt_relocate]
+      rw [apply_ite (Except.map (FrameAction.relocate f))]
+      refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
+      rcases body.linkAt pc with _ | link
+      · first
+        | rfl
+        | exact modelStep_relocate ..
+        | (dsimp only
+           rw [apply_ite (Except.map (FrameAction.relocate f))]
+           exact ite_congr rfl (fun _ => rfl) (fun _ => modelStep_relocate ..))
+      cases link <;> try rfl
+      all_goals simp only [Option.map_some, CIL.Link.relocate, newobjStep, constructAggregate,
+        constructObject]
+      all_goals repeat' first
+        | rfl
+        | (split <;> try simp only [*, Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map,
+            FrameAction.relocate])
 
-/-- A method that `step` enters is a callee its instruction names, so it is in a closed library. -/
+/-- A method that `step` enters is one its link table lists, so it is in a closed library. -/
 theorem Closed.callee {lib : CIL.Program} (closed : Closed lib) {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args : List Value} {frame : Frame} {stack : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args : List Value} {frame : Frame}
+    {stack : List Value}
     {m : Memory} {action : FrameAction} {callee : Nat} (found : lib[method]? = some body)
-    (fetched : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) :
-    callee < lib.length :=
-  closed method body found pc op fetched callee
-    (step_callee stepped enters)
-
-theorem Method.relocate_code {f : Nat → Nat} {body : CIL.Method} {pc : Nat} :
-    (body.relocate f).code[pc]? = (body.code[pc]?).map (CIL.Op.relocate f) := by
-  simp [CIL.Method.relocate]
+    callee < lib.length := by
+  obtain ⟨entry, listed, _, member⟩ := CIL.Method.calleesAt_mem (step_callee stepped enters).2
+  exact closed method body found entry listed callee member
 
 /-- A closed library runs in the linked program exactly as alone; only a fault's method index
     is renamed. -/
@@ -239,40 +306,40 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
       (run lib fuel method pc args frame stack memory).mapError
         (LocatedFault.relocateMethod f) := by
   induction fuel generalizing method pc args frame stack memory with
-  | zero => simp only [run, Except.mapError, LocatedFault.relocateMethod]
+  | zero => simp only [run_zero, Except.mapError, LocatedFault.relocateMethod]
   | succ fuel ih =>
     have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
     have moved := relocates method bound
     generalize lib[method] = body at found moved
     cases ho : body.code[pc]? with
     | none =>
-      have lo : (body.relocate f).code[pc]? = none := by rw [Method.relocate_code, ho]; rfl
-      simp only [run, found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
+      have lo : (body.relocate f).code[pc]? = none := ho
+      simp only [run_succ, found, moved, ho, lo, Except.mapError, LocatedFault.relocateMethod]
     | some op =>
-      have lo : (body.relocate f).code[pc]? = some (op.relocate f) := by
-        rw [Method.relocate_code, ho]; rfl
+      have lo : (body.relocate f).code[pc]? = some op := ho
       have ls := step_relocate f body op pc args frame stack memory
       cases hs : step body op pc args frame stack memory with
       | error fault =>
-        simp only [run, found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind,
+        simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, Bind.bind, Except.bind,
           Except.mapError, LocatedFault.relocateMethod]
       | ok action =>
         cases action with
         | next target values nextFrame updated =>
-          simp only [run, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate, Bind.bind,
-            Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
+            Bind.bind, Except.bind, Except.mapError]
           exact ih method target args nextFrame values updated bound
         | returned values updated =>
-          simp only [run, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate, Bind.bind,
-            Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, Except.map, FrameAction.relocate,
+            Bind.bind, Except.bind, Except.mapError]
           cases values.mapM (checkedValue (leaveFrame frame updated)) <;> rfl
         | call callee arguments rest updated =>
-          have inside := closed.callee found ho hs rfl
+          have inside := closed.callee found hs rfl
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved, enterFrame_relocate,
-            Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+            enterFrame_relocate, Except.map, FrameAction.relocate, Bind.bind, Except.bind,
+            Except.mapError]
           cases he : enterFrame callBody arguments updated with
           | error fault => rfl
           | ok entered =>
@@ -285,11 +352,11 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
               obtain ⟨final, values⟩ := result
               exact ih method (pc + 1) args frame (values ++ rest) final bound
         | tailCall callee arguments updated =>
-          have inside := closed.callee found ho hs rfl
+          have inside := closed.callee found hs rfl
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved,
+          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
             Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
           change (if (callBody.returnsValue != body.returnsValue) then _ else _) = _
           cases returns : callBody.returnsValue != body.returnsValue with
@@ -304,12 +371,13 @@ theorem run_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : Clos
               | error fault => rfl
               | ok setup => exact ih callee 0 values setup.1 [] setup.2 inside
         | construct callee arguments rest nextFrame temporary kind updated =>
-          have inside := closed.callee found ho hs rfl
+          have inside := closed.callee found hs rfl
           have child : lib[callee]? = some lib[callee] := List.getElem?_eq_getElem inside
           have childMoved := relocates callee inside
           generalize lib[callee] = callBody at child childMoved
-          simp only [run, found, moved, ho, lo, ls, hs, child, childMoved, enterFrame_relocate,
-            Except.map, FrameAction.relocate, Bind.bind, Except.bind, Except.mapError]
+          simp only [run_succ, found, moved, ho, lo, ls, hs, child, childMoved,
+            enterFrame_relocate, Except.map, FrameAction.relocate, Bind.bind, Except.bind,
+            Except.mapError]
           cases he : enterFrame callBody arguments updated with
           | error fault => rfl
           | ok entered =>
@@ -338,7 +406,7 @@ theorem invoke_relocate {lib linked : CIL.Program} {f : Nat → Nat} (closed : C
   have found : lib[method]? = some lib[method] := List.getElem?_eq_getElem bound
   have moved := relocates method bound
   generalize lib[method] = body at found moved
-  simp only [invoke, found, moved, enterFrame_relocate, Bind.bind, Except.bind, Except.mapError]
+  simp only [invoke_eq, found, moved, enterFrame_relocate, Bind.bind, Except.bind, Except.mapError]
   cases args.mapM (checkedValue memory) with
   | error fault => rfl
   | ok checked =>
@@ -360,7 +428,7 @@ theorem invoke_bound {lib : CIL.Program} {fuel method : Nat} {args : List Value}
 
 /-- A raised exception is raised by the relocated method. -/
 theorem Raises.relocate {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat}
-    {args : List Value} {memory : Memory} {exception : String}
+    {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises lib method args memory exception)
     (closed : Closed lib) (relocates : RelocatesInto lib linked f) :
     Raises linked (f method) args memory exception := by

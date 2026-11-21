@@ -18,6 +18,8 @@ statement.
 | A scalar method returns a value, at fixed fuel | `(CIL.Safety.invoke Extracted.program fuel 0 args memory).map Prod.snd = .ok [result]`, as in [Add](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Add.lean) |
 | A method terminates with a postcondition, for inputs meeting a precondition | `CIL.Safety.Ensures Extracted.program method pre post`, with `pre : args initial` and `post : args initial final values`, as in [Countdown](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/Countdown.lean) |
 | A method meets an interface that callers reuse, with the memory it may change | A `MethodContract` (`args`, `pre`, `footprint`, `results`, `post`) and `contract.Holds Extracted.program method` |
+| A callee contract that callers reuse only for the metadata method and body bytes it was proved for, including a callee whose vector calls run through runtime models | A `DecodedSummary` built with `DecodedSummary.of_decoded` ([decoded summaries](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#bind-a-contract-to-a-decoded-method)) |
+| A callee summary reused in another program that holds the callee and the methods it reaches | A `DecodedSummary` over the callee's `Program.closure`, carried by `DecodedSummary.relocate` ([carry a summary](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#carry-a-summary-to-other-programs)) |
 | A method returns or throws a named exception | An `OutcomeContract`, as in [CountUntil](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/CountUntil.lean) |
 | A run from the current state reaches a postcondition, inside a larger proof | `WP (Execution (fun fuel => invoke ...)) post` ([WP](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-STEPPING.md#state-goals-with-wp)) |
 
@@ -25,6 +27,11 @@ The entry method is index `0`; name any other method with `bind_method` instead 
 index. Arguments are `CIL.Safety.Value`s such as `.scalar (.i32 x)` and `.scalar (.i64 x)`, with
 `x : CIL.W32` (`BitVec 32`) or `CIL.W64` (`BitVec 64`). Fuel exhaustion, a fault and an
 unsupported state are never successes, so `Ensures` and `Holds` state total correctness.
+
+An extracted object instruction names its closed type as `Extracted.valueType{k}`.
+Use its `_shape` fact when a proof needs the byte width or signedness of a load, store,
+initialization, copy or size. A span load preserves a stack whose top is a span view and faults
+on any other operand, so pass a span argument as `.bufferSpan` of its view.
 
 ## 2. Generate a starting proof
 
@@ -114,11 +121,11 @@ and the snapshot forms need it, written `[]` when empty.
 | The same, and the path stores or loads numeric locals over symbolic caller memory | `cil_contract_steps (snapshots := snapshots) [facts]` or `cil_checked_steps (snapshots := snapshots) [facts]`, with `snapshots : LocalSnapshots memory frame.locals known` ([snapshot walks](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots)) |
 | One call, keeping its precondition as a goal | `cil_contract_call holds input at site [facts]` |
 | A loop path to the next loop head | `cil_loop_recurse hypothesis values [facts]`, leaving `case invariant` and `case measure` |
-| A loop path to a call, then the call | `cil_loop_advance [facts]`, then `cil_loop_call holds input at site [facts]` |
+| A loop path through runtime models to a linked call | `cil_loop_advance [facts]`, then `cil_loop_call holds input at site [facts]` |
 | A loop exit and its postcondition | `cil_loop_finish [facts]`, leaving `case postcondition` |
 | An element write's authority, bound and footprint membership | `cil_loop_obligation [definitions]` |
 | A `Raises` goal | `cil_raise_steps [facts]` |
-| `Extracted.program[i]? = some body` | `cil_body` |
+| `Extracted.program[i]? = some body` | `cil_body`; write `body` as `Extracted.methodN.withCode [...]` so it carries the extraction's `declared` and `environment`, with `{ ... with links := [(pc, .direct callee)] }` after it when the body calls |
 
 In a counted form a call is one step. The complete tables are in
 [writing proofs](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS.md#choose-a-tactic).
@@ -163,6 +170,8 @@ Read `firstCall.post` (the postcondition), `firstCall.framed` (`Confined` to the
 `firstCall.invoked` by field name. A proof that steps to its return with `cil_contract_steps`
 closes the remaining footprint and result goal with `MethodContract.Holds.returns framed post`
 ([contract stepping](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#step-a-caller-through-its-callees)).
+A proof that composes calls with `WP.local_call` clears each call's `LoopFrame` once the next
+call's frame is introduced, or every later step pays for reading it.
 
 ### Loops
 
@@ -171,7 +180,8 @@ states the loop-head state. The proof supplies an invariant and a natural-number
 from entry to the first head, then splits each iteration on its test:
 
 ```lean excerpt Examples/Proofs/Countdown.lean
-refine invoke_loop_satisfies Extracted.lookup0 rfl enter.setup (header home) (fun _ => True)
+refine invoke_loop_satisfies Extracted.program_method0 rfl enter.setup (header home)
+  (fun _ => True)
   (fun s => s.values.toNat) (fun start => ?_) ?_
 · cil_loop_recurse start x
   case invariant => trivial
@@ -224,7 +234,9 @@ and the [examples index](https://github.com/NethermindEth/LeanCIL/blob/main/docs
 Report a property that does not hold as a result. Show the user the failing input, or prove the
 counterexample as its own theorem:
 [WrongAdd](https://github.com/NethermindEth/LeanCIL/blob/main/Examples/Proofs/WrongAdd.lean)
-proves a counterexample to the addition contract for a subtracting implementation, and
-`MethodContract.not_holds_of_fault` refutes a contract from a located fault on an input meeting
-its precondition
+proves a counterexample to the addition contract for a subtracting implementation. State a refutation
+as `MethodContract.Refuted` (or `OutcomeContract.Refuted`, `OutcomeContract.RefutedCLR`), never as
+`¬ Holds`: `MethodContract.Refuted.of_fault` takes a located definite fault on an input meeting
+the precondition, `.of_return` a wrong return and `.of_diverges` exhaustion at every fuel; an
+`unsupported` fault and one exhausted budget are not counterexamples
 ([refutation](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#refute-a-contract)).

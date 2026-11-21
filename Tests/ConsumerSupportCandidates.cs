@@ -1,8 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include DirectoryLinks.cs
 
 bool includeLake = args switch
 {
@@ -38,6 +43,23 @@ try
             throw new Exception("Unexpected candidate union: " + string.Join(',', modules));
     }
     Console.WriteLine("PASS candidate union is order independent and excludes transitive generated imports");
+    // One source directory listed in two spellings, as Lake's resolved path beside the spelled package root.
+    var alias = root + "-alias";
+    if (TryLinkDirectory(alias, root))
+    {
+        try
+        {
+            var modules = ConsumerSupportCandidates([first, second], [alias, root], ["ImportedInterface"],
+                Path.Combine(root, "Toolchain"));
+            if (!modules.SequenceEqual(new[] { "Early", "Late" }))
+                throw new Exception("A source directory reached through a link made its modules ambiguous: " +
+                    string.Join(',', modules));
+        }
+        finally { Directory.Delete(alias); }
+        Console.WriteLine("PASS a source directory reached through a link is one location");
+    }
+    else if (!OperatingSystem.IsWindows()) throw new Exception("Could not make a directory symbolic link.");
+    else Console.WriteLine("SKIP source directories through links: no directory link or junction could be made");
 }
 finally { Directory.Delete(root, true); }
 

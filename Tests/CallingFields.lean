@@ -2,6 +2,8 @@ import CIL.Safety.CallingFields
 import CIL.Safety.LoopFrames
 import CIL.Safety.CallSegments
 import CIL.Safety.Forwarders
+import Tests.Support
+import Tests.WordFields
 
 /-!
 # Checked by-reference field evidence
@@ -12,18 +14,28 @@ The stepper obtains field reads and formed references from `ValidCall` itself.
 
 namespace Tests.CallingFields
 open CIL.Safety
+open Tests.WordFields
 
 /-- A four-word argument range. -/
 def words (reference : Reference) : ArgumentView := ⟨reference, 32⟩
 
+/-- The instantiated byref argument of Unsafe.SkipInit<T::Words>. -/
+def skipWords : CIL.Extraction.MethodRef :=
+  { owner := CIL.Extraction.unsafeOwner, name := name!"SkipInit", hasThis := false,
+    genericArity := 1, returnType := .void, parameters := [.byref (.aggregate "T::Words" 0)],
+    methodArguments := [.aggregate "T::Words" 0] }
+
 /-- Read every input field before any output could be written. -/
 @[cil_code] def reader : CIL.Method :=
-  { locals := [], returnsValue := true, code := [
-    .arg 2, .skipInit,
-    .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .add,
-    .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .add, .add,
-    .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .add, .add,
-    .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .add, .add, .ret] }
+  { locals := [], returnsValue := true, environment := wordsEnvironment, code := [
+    .ldarg 2, .call skipWords {},
+    .ldarg 0, .ldfld word0, .ldarg 1, .ldfld word0, .add,
+    .ldarg 0, .ldfld word1, .ldarg 1, .ldfld word1, .add, .add,
+    .ldarg 0, .ldfld word2, .ldarg 1, .ldfld word2, .add, .add,
+    .ldarg 0, .ldfld word3, .ldarg 1, .ldfld word3, .add, .add, .ret] }
+
+cil_instruction_equations Tests.CallingFields.reader
+cil_runtime_models Tests.CallingFields.reader
 
 /-- Field evidence is gathered with no per-field hypotheses or stepper arguments. -/
 theorem reads_four_words (memory : Memory) (left right output : Reference)
@@ -53,8 +65,11 @@ theorem overlapping_read (memory : Memory) (left right : Reference)
 
 /-- Sum all input words and write the result only after reading every input. -/
 @[cil_code] def writer : CIL.Method :=
-  { locals := [], returnsValue := false,
-    code := [.arg 2] ++ reader.code.dropLast ++ [.store64, .ret] }
+  { locals := [], returnsValue := false, environment := wordsEnvironment,
+    code := [.ldarg 2] ++ reader.code.dropLast ++ [.stind .i8, .ret] }
+
+cil_instruction_equations Tests.CallingFields.writer
+cil_runtime_models Tests.CallingFields.writer
 
 /-- The checksum uses the original input snapshots, including when output overlaps an input. -/
 def checksum (memory : Memory) (left right : Reference) : CIL.W64 :=
@@ -79,12 +94,12 @@ theorem writes_after_reads (memory : Memory) (left right output : Reference)
 
 /-- Four writes followed by a read exercise argument evidence at each new memory. -/
 @[cil_code] def repeatedWriter : CIL.Method :=
-  { locals := [], returnsValue := true, code := [
-    .arg 2, .const64 1, .storeScalar 8,
-    .arg 2, .const64 2, .setFieldAt 8 8,
-    .arg 2, .const64 3, .setFieldAt 16 8,
-    .arg 2, .const64 4, .setFieldAt 24 8,
-    .arg 0, .fieldAt 0 8, .ret] }
+  { environment := wordsEnvironment, locals := [], returnsValue := true, code := [
+    .ldarg 2, .ldc_i8 1, .stind .i8,
+    .ldarg 2, .ldc_i8 2, .stfld word1,
+    .ldarg 2, .ldc_i8 3, .stfld word2,
+    .ldarg 2, .ldc_i8 4, .stfld word3,
+    .ldarg 0, .ldfld word0, .ret] }
 
 /-- Later loads observe the current memory, even when output aliases either input. -/
 theorem reads_after_writes (memory : Memory) (left right output : Reference)
@@ -102,13 +117,39 @@ theorem reads_after_writes (memory : Memory) (left right output : Reference)
 
 #print axioms reads_after_writes
 
+/-- `repeatedWriter` with its field accesses decoded: each store and the load name a field. -/
+@[cil_code] def decodedWriter : CIL.Method :=
+  { locals := [], returnsValue := true, environment := wordsEnvironment, code := [
+    .ldarg 2, .ldc_i8 1, .stind .i8,
+    .ldarg 2, .ldc_i8 2, .stfld word1,
+    .ldarg 2, .ldc_i8 3, .stfld word2,
+    .ldarg 2, .ldc_i8 4, .stfld word3,
+    .ldarg 0, .ldfld word0, .ret] }
+
+/-- A decoded field store writes an output word through `ValidCall` as the lowered store of its
+    shape does. -/
+theorem decoded_reads_after_writes (memory : Memory) (left right output : Reference)
+    (call : ValidCall memory [words left, words right] [words output]) :
+    WP (Execution (fun fuel => invoke [decodedWriter] fuel 0
+      [.reference (.address left), .reference (.address right),
+        .reference (.address output)] memory))
+      (fun (final, values) =>
+        values = [.scalar (.i64 ((words left).word final 0))] ∧
+        read final { output with offset := output.offset + 24 } 8 1 =
+          .ok (numberBytes 4 8) ∧
+        ValidCall final [words left, words right] [words output]) := by
+  cil_contract_steps []
+  exact ⟨rfl, readback_3, storedCall_3⟩
+
+#print axioms decoded_reads_after_writes
+
 /-- An explicit successful write retains its exact final memory when automation can derive
     another existential write from the same permissions. -/
 theorem supplied_write_priority (memory after : Memory) (output : Reference) (word : CIL.W64)
     (_call : ValidCall memory [] [⟨output, 8⟩])
     (written : write memory output (numberBytes word.toNat 8) 1 = .ok after) :
     WP (Execution (fun fuel => run
-      [{ locals := [], returnsValue := false, code := [.store64, .ret] }] fuel 0 0 []
+      [{ locals := [], returnsValue := false, code := [.stind .i8, .ret] }] fuel 0 0 []
       { activation := 0, locals := [], owned := [] }
       [.scalar (.i64 word), .reference (.address output)] memory))
       (fun (final, values) => final = after ∧ values = []) := by
@@ -122,14 +163,14 @@ theorem output_bounds_and_permissions (memory : Memory) (output _other : Referen
     (_call : ValidCall memory [] [⟨output, 8⟩]) : True := by
   fail_if_success
     have outside : WP (Execution (fun fuel => run
-      [{ locals := [], returnsValue := false, code := [.setFieldAt 8 8, .ret] }] fuel 0 0 []
+      [{ environment := wordsEnvironment, locals := [], returnsValue := false, code := [.stfld word1, .ret] }] fuel 0 0 []
       { activation := 0, locals := [], owned := [] }
       [.scalar (.i64 1), .reference (.address output)] memory)) (fun _ => True) := by
       cil_contract_steps []
       trivial
   fail_if_success
     have unauthorized : WP (Execution (fun fuel => run
-      [{ locals := [], returnsValue := false, code := [.store64, .ret] }] fuel 0 0 []
+      [{ locals := [], returnsValue := false, code := [.stind .i8, .ret] }] fuel 0 0 []
       { activation := 0, locals := [], owned := [] }
       [.scalar (.i64 1), .reference (.address _other)] memory)) (fun _ => True) := by
       cil_contract_steps []
@@ -141,7 +182,7 @@ theorem output_bounds_and_permissions (memory : Memory) (output _other : Referen
 /-- The two scalar helpers differ only in their checked arithmetic instruction. -/
 @[cil_code] def helper (subtract : Bool) : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.arg 0, .arg 1, if subtract then .sub else .add, .ret] }
+    code := [.ldarg 0, .ldarg 1, if subtract then .sub else .add, .ret] }
 
 /-- A helper preserves memory and returns its specified wrapping arithmetic result. -/
 def arithmetic (subtract : Bool) : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
@@ -164,7 +205,9 @@ theorem helper_checked (subtract : Bool) {program : CIL.Program} {callee : Nat}
 
 /-- Both helper choices share the same caller segment and return convention. -/
 @[cil_code] def caller (callee : Nat) : CIL.Method :=
-  { locals := [], returnsValue := false, code := loadCallStoreCode callee ++ [.ret] }
+  { environment := wordsEnvironment, locals := [], returnsValue := false,
+    code := loadCallStoreCode (Tests.callee 2) word0 word0 ++ [.ret],
+    links := [(5, .direct callee)] }
 
 /-- The shared segment writes the chosen operation on the original input snapshots. -/
 def Composed (subtract : Bool) : Prop :=
@@ -187,7 +230,7 @@ theorem composed (subtract : Bool) : Composed subtract := by
   apply WP.load_call_store (helper_checked subtract rfl)
     ((⟨left, 8⟩ : ArgumentView).word memory 0,
       (⟨right, 8⟩ : ArgumentView).word memory 0) id left right output
-    rfl (by rfl) call rfl trivial (fun _ => rfl)
+    rfl (by rfl) rfl rfl rfl rfl (fun _ _ => rfl) call rfl trivial (fun _ => rfl)
   intro middle value after result written
   have readback := write_readback _ _ _ _ _ written
   simp only [numberBytes, List.length_map, List.length_range] at readback
@@ -217,11 +260,18 @@ def viewResult (value : CIL.Value) : MethodContract Reference Unit where
 
 /-- The result helper keeps the argument's exact scalar or aggregate encoding. -/
 @[cil_code] def resultHelper : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.arg 1, .ret] }
+  { locals := [], returnsValue := true, code := [.ldarg 1, .ret] }
 
 /-- A wrapper forwards both arguments and the helper's checked result. -/
 @[cil_code] def resultWrapper (narrow : Option CIL.NarrowKind) : CIL.Method :=
-  { locals := [], returnsValue := true, code := forwarderCode (plainLoads [0, 1]) 1 narrow }
+  { locals := [], returnsValue := true, code := forwarderCode [0, 1] (Tests.callee 2),
+    links := [(2, .direct 1)],
+    declared := { returnType := match narrow with
+      | none => .atom CIL.Extraction.runtimeScope "System.Int64"
+      | some .signed8 => .atom CIL.Extraction.runtimeScope "System.SByte"
+      | some .unsigned8 => .atom CIL.Extraction.runtimeScope "System.Byte"
+      | some .signed16 => .atom CIL.Extraction.runtimeScope "System.Int16"
+      | some .unsigned16 => .atom CIL.Extraction.runtimeScope "System.UInt16" } }
 
 /-- The same forwarding proof preserves the valid-call precondition and exact result encoding. -/
 theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind)
@@ -240,15 +290,16 @@ theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind
     apply WP.enter (body := resultHelper) rfl
       (by simp [viewResult, checkedValue, formValue, checkedAt, numeric, formed,
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) rfl
-    apply WP.step rfl rfl (step_load_unchanged (narrow := none) rfl (valid memory) trivial)
+    apply WP.step rfl rfl (step_load_unchanged rfl (valid memory) (.plain rfl))
     apply WP.returned rfl rfl
-      (step_return_unchanged (narrow := none) rfl
+      (step_return_unchanged (narrow := none) rfl rfl
         (by simpa [Value.hasUnspecified] using known)
         (by simp [valid] <;> rfl) trivial) (by simp [valid] <;> rfl)
     exact ⟨Confined.refl [] memory, (), rfl, rfl⟩
-  exact helperHolds.forward (loads := plainLoads [0, 1]) (narrow := narrow)
-    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  exact helperHolds.forward (loads := [0, 1]) (narrow := narrow)
+    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl,
+      by cases narrow with | none => rfl | some kind => cases kind <;> rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (fun _ _ => rfl) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => by simpa only [viewResult, List.any_cons, List.any_nil,
       Value.hasUnspecified, Bool.false_or, Bool.or_false] using known)

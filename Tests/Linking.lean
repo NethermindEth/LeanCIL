@@ -1,5 +1,6 @@
-import CIL.Safety.Linking
+import CIL.Safety.ProgramClosure
 import Tests.Imports
+import Tests.Support
 
 /-! `AddTo(in a, in b, out res) { res = Sum(a, b); }` extracted alone, with its helper `Sum` at local index 1. -/
 namespace Tests.Linking.Calls
@@ -7,10 +8,11 @@ namespace Tests.Linking.Calls
 open CIL CIL.Safety
 open Tests.Imports.Calls (addContract AddInput rootContract root root_given)
 
-@[cil_code] def addEntry : Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 0, .arg 1, .call 1 2, .store64, .ret] }
+@[cil_code] def addEntry : Method := {
+  returnsValue := false, locals := [], links := [(3, .direct 1)], code :=
+    [.ldarg 2, .ldarg 0, .ldarg 1, .call (Tests.callee 2) {}, .stind .i8, .ret] }
 @[cil_code] def sumHelper : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .load64, .arg 1, .load64, .add, .ret] }
+  [.ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .ret] }
 def addLib : Library := { entry := addEntry, helpers := [sumHelper] }
 @[cil_code] def addProgram : CIL.Program := [addEntry, sumHelper]
 
@@ -32,8 +34,9 @@ theorem add_holds : addContract.Holds addProgram 0 := by
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]
 
-/-- The entry fills import slot 0 at index 2 and its call to the helper is renamed from 1 to 3. -/
-example : linked.map (fun body => body.code.flatMap Op.callees) = [[2, 1], [], [3], []] := by decide
+/-- The entry fills import slot 0 at index 2 and its link to the helper is renamed from 1 to 3. -/
+example : linked.map (fun body => body.links.flatMap (·.2.callees)) =
+    [[2, 1], [], [3], []] := by decide
 
 /-- `Root`'s conditional proof, discharged by the library proved alone and relocated. -/
 theorem root_composed : rootContract.Holds linked root :=
@@ -71,13 +74,13 @@ open CIL CIL.Safety
 open Tests.Imports.Outcomes (percentContract rootContract strictRaises root root_given percentBody)
 
 @[cil_code] def percentEntry : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .ret] }
+  [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 1)] }
 def percentLib : Library := { entry := percentEntry, helpers := [percentBody] }
 @[cil_code] def percentProgram : CIL.Program := [percentEntry, percentBody]
 
 theorem percentLib_closed : Closed percentLib.program := Closed.of_check (by decide)
 
-theorem checkSite.call : percentEntry.code[1]? = some (.call 1 1) := rfl
+theorem checkSite.call : percentEntry.code[1]? = some (.call (Tests.callee 1)) := rfl
 
 theorem check_holds : percentContract.Holds percentProgram 1 := by
   rintro v m -
@@ -112,7 +115,8 @@ theorem percent_holds : percentContract.Holds percentProgram 0 := by
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Outcomes.Extracted.program [percentLib]
 
-example : linked.map (fun body => body.code.flatMap Op.callees) = [[1], [2], [3], []] := by decide
+example : linked.map (fun body => body.links.flatMap (·.2.callees)) =
+    [[1], [2], [3], []] := by decide
 
 theorem root_composed : rootContract.Holds linked root :=
   composed (specs := [percentContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
@@ -137,11 +141,12 @@ theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1
   rfl
 
 /-- The relocated helper's exception reaches `Root` through two relocated calls. -/
-example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
+example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m .argumentOutOfRange :=
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Two libraries: entries fill slots 0 and 1, then each library's helpers follow in order. -/
-example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => body.code.flatMap Op.callees) =
+example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map
+    (fun body => body.links.flatMap (·.2.callees)) =
     [[2], [3], [], []] := by decide
 
 #print axioms check_holds
@@ -150,3 +155,109 @@ example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => bo
 #print axioms root_prefix_relocated
 
 end Tests.Linking.Outcomes
+
+/-! A relocated body renames its link table and keeps its code. -/
+namespace Tests.Linking.Links
+
+open CIL
+
+def body : Method := {
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .callvirt (.arity 0),
+    .newobj (.arity 0), .ret]
+  links := [(1, .direct 1), (3, .virtual [(.void, 2)]), (4, .aggregate 3 8)]
+  locals := [], returnsValue := false }
+
+/-- Direct, virtual and aggregate entries all move by the renaming. -/
+example : (body.relocate (· + 10)).links =
+    [(1, .direct 11), (3, .virtual [(.void, 12)]), (4, .aggregate 13 8)] := rfl
+
+/-- The pcs of the entries stay. -/
+example : (body.relocate (· + 10)).links.map Prod.fst = body.links.map Prod.fst := rfl
+
+example : (body.relocate (· + 10)).linkAt 1 = some (.direct 11) := rfl
+
+/-- A relocated catalog keeps its identities and renames only the body indices. -/
+example (identity : ManagedIdentity) :
+    (Link.indirect [⟨identity, 2⟩]).relocate (· + 5) = .indirect [⟨identity, 7⟩] := rfl
+
+/-- The code, operands included, is unchanged, since a call reads its target from the table. -/
+example : (body.relocate (· + 10)).code = body.code := rfl
+
+/-- An address that the root discards reaches no callee, even when the target has a body. -/
+theorem discarded_address_closure :
+    let root : Method :=
+      { code := [.managed (.address ⟨"T", 1, []⟩ ⟨.void, []⟩), .pop, .ret],
+        links := [(0, .address 1)], locals := [], returnsValue := false }
+    (Program.closure [root, body] 0).map Prod.snd = some [0] := rfl
+#print axioms discarded_address_closure
+
+end Tests.Linking.Links
+
+/-! How a proof reads `linkAt` for an extracted method, a template and a literal body. -/
+namespace Tests.Linking.Resolution
+
+open CIL
+
+/-- The link of the call at pc 1, named and tagged as an extraction names it. -/
+@[cil_code] def callLink : Link := .direct 3
+
+/-- An extraction's method: its table and call-site fact are generated, with the table explicit. -/
+def extracted : Method := {
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .ret], locals := [], returnsValue := false
+  links := [(1, callLink)] }
+
+/-- The generated fact of the table. -/
+@[cil_code] theorem extracted_links : extracted.links = [(1, callLink)] := rfl
+
+/-- The generated fact of the call site at pc 1. -/
+@[cil_code] theorem extracted_link1 : extracted.linkAt 1 = some callLink := rfl
+
+/-- A call site: the generated fact and the tagged link definition reach the constructor, so the
+    match of a stepping-style read reduces under `simp only [cil_code]`. -/
+example : (match extracted.linkAt 1 with | some (.direct callee) => callee | _ => 0) = 3 := by
+  simp only [cil_code]
+
+/-- A pc that is not a call site: no fact exists, and the table is read by the listed keys. -/
+example : extracted.linkAt 0 = none :=
+  Method.linkAt_of_unlisted (by simp [extracted_links])
+
+/-- The same read through a scan of the table, which is bounded by the number of calls. -/
+example : extracted.linkAt 2 = none := by
+  simp [Method.linkAt, linkLookup, extracted_links]
+
+/-- A literal body states the link of its call, which its code does not imply. -/
+def literal : Method := {
+  code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .ret], links := [(1, .direct 3)],
+  locals := [], returnsValue := false }
+
+/-- Link facts for a literal virtual call come from the explicit table. -/
+def virtualBody : Method :=
+  { code := [.ldarg 0, .callvirt (.arity 0), .pop, .ret], locals := [],
+    links := [(1, .virtual [(.void, 3)])], returnsValue := false }
+
+cil_instruction_equations virtualBody
+
+example : virtualBody.linkAt 1 = some (.virtual [(.void, 3)]) := virtualBody_link1
+
+example : virtualBody.linkAt 0 = none := rfl
+
+/-- A literal table is read by evaluation. -/
+example : literal.linkAt 1 = some (.direct 3) := rfl
+
+example : literal.linkAt 0 = none := Method.linkAt_of_unlisted (by decide)
+
+/-- A template body takes its callee as a parameter, so its read stays symbolic. -/
+def template (profile : FeatureProfile) (callee : Nat) : Method := {
+  profile, code := [.ldarg 0, .call (Tests.callee 1) {}, .pop, .ret],
+  links := [(1, .direct callee)], locals := [], returnsValue := false }
+
+example (profile : FeatureProfile) (callee : Nat) :
+    (template profile callee).linkAt 1 = some (.direct callee) := rfl
+
+example (profile : FeatureProfile) (callee : Nat) : (template profile callee).linkAt 2 = none :=
+  Method.linkAt_of_unlisted (by simp [template])
+
+/-- A body built with `withCode` clears all pc-indexed links. -/
+example : (literal.withCode [.call (Tests.callee 0), .ret]).linkAt 0 = none := rfl
+
+end Tests.Linking.Resolution

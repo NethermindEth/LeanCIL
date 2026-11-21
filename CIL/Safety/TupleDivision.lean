@@ -21,25 +21,25 @@ theorem byteNumber_numberBytes_word (word : CIL.W64) :
 
 /-- `ldfld Item1` on a returned `(ulong, ulong)` reads the first word. -/
 theorem item1_of_tuple (first second : CIL.W64) (rest : List Value) (m : Memory) :
-    instruction (.fieldAt 0 8)
+    loadValueField 0 8 false
       (.scalar (.aggregate (numberBytes first.toNat 8 ++ numberBytes second.toNat 8)) :: rest) m =
       .ok (m, .scalar (.i64 first) :: rest) := by
   have taken : ((numberBytes first.toNat 8 ++ numberBytes second.toNat 8).drop 0).take 8 =
       numberBytes first.toNat 8 := by
     simp [numberBytes_length]
-  simp only [instruction, List.length_append, numberBytes_length, taken,
+  simp only [loadValueField, List.length_append, numberBytes_length, taken,
     byteNumber_numberBytes_word, BitVec.ofNat_toNat, BitVec.setWidth_eq]
   rfl
 
 /-- `ldfld Item2` on a returned `(ulong, ulong)` reads the second word. -/
 theorem item2_of_tuple (first second : CIL.W64) (rest : List Value) (m : Memory) :
-    instruction (.fieldAt 8 8)
+    loadValueField 8 8 false
       (.scalar (.aggregate (numberBytes first.toNat 8 ++ numberBytes second.toNat 8)) :: rest) m =
       .ok (m, .scalar (.i64 second) :: rest) := by
   have taken : ((numberBytes first.toNat 8 ++ numberBytes second.toNat 8).drop 8).take 8 =
       numberBytes second.toNat 8 := by
     simp [numberBytes_length, List.take_of_length_le]
-  simp only [instruction, List.length_append, numberBytes_length, taken,
+  simp only [loadValueField, List.length_append, numberBytes_length, taken,
     byteNumber_numberBytes_word, BitVec.ofNat_toNat, BitVec.setWidth_eq]
   rfl
 
@@ -50,11 +50,11 @@ theorem divRem_fields {lower upper divisor : CIL.W64} (fits : upper.toNat < divi
     ∃ quotient remainder : CIL.W64,
       checkedIntrinsic (.x86Base .divRem64) [.i64 lower, .i64 upper, .i64 divisor] =
         .ok (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8)) ∧
-      instruction (.fieldAt 0 8)
+      loadValueField 0 8 false
           (.scalar (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8)) ::
             rest) m =
         .ok (m, .scalar (.i64 quotient) :: rest) ∧
-      instruction (.fieldAt 8 8)
+      loadValueField 8 8 false
           (.scalar (.aggregate (numberBytes quotient.toNat 8 ++ numberBytes remainder.toNat 8)) ::
             rest) m =
         .ok (m, .scalar (.i64 remainder) :: rest) ∧
@@ -87,7 +87,7 @@ theorem mathDivRem32_eq (signed : Bool) (left right : CIL.W32) :
 
 /-- `ldfld Item1` on a returned `(int, int)` reads the quotient's four bytes back exactly. -/
 theorem item1_of_int_tuple (first second : CIL.W32) (rest : List Value) (m : Memory) :
-    instruction (.fieldAt 0 4)
+    loadValueField 0 4 false
       (.scalar (.aggregate (numberBytes first.toNat 4 ++
         numberBytes second.toNat 4)) :: rest) m =
       .ok (m, .scalar (.i32 first) :: rest) := by
@@ -97,7 +97,7 @@ theorem item1_of_int_tuple (first second : CIL.W32) (rest : List Value) (m : Mem
   have number : byteNumber (numberBytes first.toNat 4) = first.toNat := by
     rw [byteNumber_numberBytes]
     exact Nat.mod_eq_of_lt first.isLt
-  simp only [instruction, List.length_append, numberBytes_length, taken, number, BitVec.ofNat_toNat,
+  simp only [loadValueField, List.length_append, numberBytes_length, taken, number, BitVec.ofNat_toNat,
     BitVec.setWidth_eq]
   rfl
 

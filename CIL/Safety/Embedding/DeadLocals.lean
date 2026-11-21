@@ -21,27 +21,31 @@ namespace CIL.Safety
 
 open CIL.Embedding
 
-/-- Replacing a body's locals keeps every step that succeeds or throws: steps read the
-    profile, return arity and static sites, never the local declarations. -/
-theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Op) (pc : Nat)
+/-- Replacing the locals of a body without parameter homes keeps every step that succeeds or
+    throws: steps read the profile, return arity, signature and static sites, and only a home's
+    slot depends on the local declarations. -/
+theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
-    (outcome : ExecutionResult FrameAction)
+    (outcome : ExecutionResult FrameAction) (homes : actual.parameterHomes = [])
     (stepped : step (actual.withLocalsOf expected) op pc args frame stack memory = outcome)
     (kept : StepKept outcome) :
     step actual op pc args frame stack memory = outcome := by
   have context : StepContext (actual.withLocalsOf expected) actual id op pc pc :=
-    ⟨rfl, rfl, rfl, fun _ => rfl⟩
+    ⟨rfl, rfl, rfl, rfl, by
+      funext index
+      simp only [Method.argumentAccess, Method.withLocalsOf, homes, List.findIdx?_nil],
+      rfl, rfl, fun _ => rfl⟩
   cases outcome with
   | ok action =>
     have same := step_relabel op _ actual id pc pc args frame stack memory action context stepped
-    rw [Op.relabel_id] at same
+    rw [Instruction.relabel_id] at same
     rw [same]
     cases action <;> rfl
   | error fault =>
     obtain ⟨exception, thrown⟩ := kept
     subst thrown
     have same := step_raise op _ actual id pc pc args frame stack memory exception context stepped
-    rwa [Op.relabel_id] at same
+    rwa [Instruction.relabel_id] at same
 
 #print axioms step_withLocalsOf
 
@@ -186,7 +190,6 @@ theorem enterFrame_deadLocals {expected actual : CIL.Method} {map : List Nat}
   simp only [enterFrame, Method.withLocalsOf, selected, embeds.parameterHomes, bind_map_left,
     map_bind]
   refine bind_congr fun ⟨slots, owned, entered⟩ => ?_
-  refine bind_congr fun ⟨arguments, argumentIds, entered⟩ => ?_
   simp [makeParameterHomes, padSlots, deadSlots, Frame.appendLocals]
 
 #print axioms enterFrame_deadLocals
@@ -213,14 +216,21 @@ theorem returnsValue_of_steps (body target : CIL.Method) (frame : Frame) (memory
     target.returnsValue = body.returnsValue := by
   cases original : body.returnsValue <;> cases actual : target.returnsValue
   · rfl
-  · have kept := steps (.ret none) 0 [] frame [] memory (.ok (.returned [] memory))
-      (by simp [step, original, observerCount, unspecifiedOperands, Pure.pure, Except.pure]) trivial
-    simp [step, actual, observerCount, unspecifiedOperands] at kept
-  · have kept := steps (.ret none) 0 [] frame [.scalar (.i32 0)] memory
+  · have kept := steps .ret 0 [] frame [] memory (.ok (.returned [] memory))
+      (by simp [step, returnFrom, CIL.Method.returnNarrow, original,
+        observerCount, unspecifiedOperands,
+        Pure.pure, Except.pure]) trivial
+    cases narrow : target.returnNarrow <;>
+      simp [step, returnFrom, narrow, actual, observerCount, unspecifiedOperands] at kept
+  · have kept := steps .ret 0 [] frame [.scalar (.i32 0)] memory
       (.ok (.returned [.scalar (.i32 0)] memory))
-      (by simp [step, original, observerCount, unspecifiedOperands, Value.hasUnspecified,
-        CIL.Value.hasUnspecified, checkedValue, numericValue, Pure.pure, Except.pure]) trivial
-    simp [step, actual, observerCount, unspecifiedOperands, Value.hasUnspecified,
+      (by
+        cases narrow : body.returnNarrow <;>
+          simp [step, returnFrom, narrow, original, observerCount, unspecifiedOperands,
+            Value.hasUnspecified, CIL.Value.hasUnspecified, checkedValue, numericValue,
+            CIL.NarrowKind.extend_zero, Pure.pure, Except.pure]) trivial
+    simp [step, returnFrom, CIL.Method.returnNarrow, actual, observerCount,
+      unspecifiedOperands, Value.hasUnspecified,
       CIL.Value.hasUnspecified] at kept
   · rfl
 #print axioms returnsValue_of_steps
@@ -242,7 +252,7 @@ theorem run_padded {unpadded program : CIL.Program} {extra : Nat → List LocalS
     cases thrown
   | succ fuel ih =>
     intro method pc args frame stack memory outcome ran transported
-    rw [run] at ran ⊢
+    rw [run_succ] at ran ⊢
     cases fetched : unpadded[method]? with
     | none =>
       simp only [fetched] at ran
@@ -395,7 +405,7 @@ theorem invoke_padded {unpadded program : CIL.Program} {extra : Nat → List Loc
     {memory : Memory} {outcome : Except LocatedFault (Memory × List Value)}
     (invoked : invoke unpadded fuel method args memory = outcome)
     (transported : Transported outcome) : invoke program fuel method args memory = outcome := by
-  unfold invoke at invoked ⊢
+  rw [invoke_eq] at invoked ⊢
   cases fetched : unpadded[method]? with
   | none =>
     simp only [fetched] at invoked
@@ -433,7 +443,8 @@ theorem _root_.CIL.EmbedsDeadLocals.padded {program : CIL.Program} {index : Nat}
     simp only [bound, ite_true, Option.some.injEq] at fetched
     subst fetched
     refine ⟨actual, found, rfl, fun op pc args frame stack memory outcome stepped kept =>
-      step_withLocalsOf actual expected op pc args frame stack memory outcome stepped kept,
+      step_withLocalsOf actual expected op pc args frame stack memory outcome
+        embeds.parameterHomes stepped kept,
       fun args memory => ?_⟩
     simp only [ite_true]
     exact enterFrame_deadLocals embeds args memory
@@ -490,7 +501,7 @@ theorem _root_.CIL.MethodEmbedsDeadLocals.invoke {program : CIL.Program} {index 
 theorem _root_.CIL.EmbedsDeadLocals.invoke_raise {program : CIL.Program} {index : Nat}
     {expected actual : CIL.Method} {map : List Nat} (found : program[index]? = some actual)
     (embeds : EmbedsDeadLocals expected actual map) {fuel method : Nat} {args : List Value}
-    {memory : Memory} {fault : LocatedFault} {exception : String}
+    {memory : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (invoked : invoke (program.set index expected) fuel method args memory = .error fault)
     (thrown : fault.fault = .thrown exception) :
     invoke program fuel method args memory =
@@ -503,7 +514,7 @@ theorem _root_.CIL.EmbedsDeadLocals.invoke_raise {program : CIL.Program} {index 
     `program`. -/
 theorem _root_.CIL.MethodEmbedsDeadLocals.raises {program : CIL.Program} {index : Nat}
     {expected : CIL.Method} (embeds : MethodEmbedsDeadLocals program index expected)
-    {method : Nat} {args : List Value} {memory : Memory} {exception : String}
+    {method : Nat} {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises (program.set index expected) method args memory exception) :
     Raises program method args memory exception := by
   obtain ⟨_, _, found, embedded⟩ := embeds

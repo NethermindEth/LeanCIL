@@ -4,6 +4,7 @@ import CIL.Safety.Imports
 import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
+import Tests.Support
 
 /-! `Root(ref r, in b) { AddTo(in r, in b, out r); r = Mix(r, b); }` with `AddTo` imported at slot 0. -/
 namespace Tests.Imports.Calls.Extracted
@@ -13,9 +14,11 @@ open CIL
 def method0Signature : String := "System.Void Contracts.Calls::Root(System.UInt64&,System.UInt64&)"
 def method1Signature : String := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 0, .arg 1, .arg 0, .call 2 3, .arg 0, .arg 0, .load64, .arg 1, .load64, .call 1 2, .store64, .ret] }
+  [.ldarg 0, .ldarg 1, .ldarg 0, .call (Tests.callee 3) {}, .ldarg 0, .ldarg 0, .ldind .i8, .ldarg
+    1, .ldind .i8,
+      .call (Tests.callee 2) {}, .stind .i8, .ret], links := [(3, .direct 2), (9, .direct 1)] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 3, .convI8, .mul, .arg 1, .add, .ret] }
+  [.ldarg 0, .ldc_i4 3, .conv_i8, .mul, .ldarg 1, .add, .ret] }
 @[cil_code] def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -127,7 +130,7 @@ example : ∀ linked, Links Extracted.program linked → addContract.Holds linke
 /-! One concrete implementation of the import, appended at its slot. -/
 
 @[cil_code] def addBody : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ret] }
 @[cil_code] def linkedProgram : CIL.Program := Extracted.program ++ [addBody]
 
 theorem add_linked : importsAdd linkedProgram := by
@@ -155,7 +158,7 @@ theorem invoke_eq_of_run {program : CIL.Program} {fuel method : Nat} {body : CIL
     (setup : enterFrame body args memory = .ok (frame, entered))
     (executed : run program fuel method 0 args frame [] entered = outcome) :
     invoke program fuel method args memory = outcome := by
-  simp only [invoke, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
+  simp only [invoke_eq, found, checked, setup, Except.mapError, Bind.bind, Except.bind]
   exact executed
 
 theorem root_unlinked (input : RootInput) (m : Memory) (permitted : rootContract.pre input m) (fuel : Nat) :
@@ -177,7 +180,8 @@ theorem root_unlinked (input : RootInput) (m : Memory) (permitted : rootContract
 theorem root_unlinked_never_returns (input : RootInput) (m : Memory) (permitted : rootContract.pre input m)
     (fuel : Nat) (result : Memory × List Value) :
     invoke Extracted.program fuel root (rootContract.args input) m ≠ .ok result := fun returned =>
-  nomatch invoke_unique (first := .ok result) trivial (by simp [Settled]) returned (root_unlinked input m permitted 0)
+  nomatch invoke_unique (first := .ok result) trivial (by simp [Stable]) returned
+    (root_unlinked input m permitted 0)
 
 /-- So the unlinked contract holds only vacuously: no input meets its precondition. -/
 theorem root_unlinked_vacuous (holds : rootContract.Holds Extracted.program root) (input : RootInput) (m : Memory) :
@@ -199,10 +203,13 @@ open CIL
 
 def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
 def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
-@[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
-@[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 2 1, .brzero 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
+@[cil_code] def method0 : Method := {
+  returnsValue := true, locals := [], links := [(1, .direct 1)], code :=
+    [.ldarg 0, .call (Tests.callee 1) {}, .ldc_i4 1, .conv_i8, .add, .ret] }
+@[cil_code] def method1 : Method := {
+  returnsValue := true, locals := [], links := [(1, .direct 2)], code :=
+    [.ldarg 0, .call (Tests.callee 1) {}, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
+      .throw .argument] }
 @[cil_code] def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -224,11 +231,11 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 
-def strictRaises (v : CIL.W64) : Option String :=
-  if v ≤ 100 then if v = 0 then some "System.ArgumentException" else none
-  else some "System.ArgumentOutOfRangeException"
+def strictRaises (v : CIL.W64) : Option CIL.ExceptionType :=
+  if v ≤ 100 then if v = 0 then some .argument else none
+  else some .argumentOutOfRange
 
 def strictContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
@@ -309,8 +316,8 @@ theorem root_given :
     exact MethodContract.Holds.returns call.framed rfl
 
 @[cil_code] def percentBody : CIL.Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,
-    .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
+  [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
+    .throw .argumentOutOfRange, .ldarg 0, .ret] }
 @[cil_code] def linkedProgram : CIL.Program := Extracted.program ++ [percentBody]
 
 theorem percent_linked : importsPercent linkedProgram := by
@@ -328,7 +335,7 @@ theorem root_linked : rootContract.Holds linkedProgram root :=
   root_given.discharge ⟨[percentBody], rfl⟩ percent_linked
 
 /-- The imported exception reaches `Root` in the linked program. -/
-example (m : Memory) : Raises linkedProgram root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
+example (m : Memory) : Raises linkedProgram root [.scalar (.i64 101)] m .argumentOutOfRange :=
   root_linked.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Linking further keeps both outcomes. -/

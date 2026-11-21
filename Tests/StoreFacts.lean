@@ -1,25 +1,35 @@
 import CIL.Safety.MethodContract
 import CIL.Safety.OutcomeContract
+import Tests.Support
+import Tests.WordFields
 
 /-! Store facts stated in their source form, as a carry or borrow helper's proof
     states them, rather than in the form the checked steps compute. -/
 namespace Tests.StoreFacts
+open Tests.WordFields
 
 open CIL.Safety
 
 /-- `*sum = a + b + c; *carry = (a + b + c < a) ? 1 : 0`. -/
 @[cil_code] def carryMethod : CIL.Method := {
-  code := [.arg 3, .arg 0, .arg 1, .add, .arg 2, .add, .store64,
-    .arg 4, .arg 0, .arg 1, .add, .arg 2, .add, .arg 0, .ltu, .convU8, .store64, .ret]
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .stind .i8,
+    .ldarg 4, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .ldarg 0, .clt_un, .conv_u8, .stind .i8,
+    .ret]
   locals := [], returnsValue := false }
 @[cil_code] def carryProgram : CIL.Program := [carryMethod]
 
 /-- `*difference = a - b - c; *borrow = (a < b) | (c & (a == b))`, with sign-extended flags. -/
 @[cil_code] def borrowMethod : CIL.Method := {
-  code := [.arg 3, .arg 0, .arg 1, .sub, .arg 2, .sub, .store64,
-    .arg 4, .arg 0, .arg 1, .ltu, .convI8, .arg 2, .arg 0, .arg 1, .eq, .convI8, .band, .bor, .store64, .ret]
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .sub, .ldarg 2, .sub, .stind .i8,
+    .ldarg 4, .ldarg 0, .ldarg 1, .clt_un, .conv_i8, .ldarg 2, .ldarg 0, .ldarg 1, .ceq, .conv_i8,
+    .and, .or, .stind .i8, .ret]
   locals := [], returnsValue := false }
 @[cil_code] def borrowProgram : CIL.Program := [borrowMethod]
+
+/-- `*target = word` through a native-int store. -/
+@[cil_code] def nativeWordMethod : CIL.Method := {
+  code := [.ldarg 1, .ldarg 0, .stind .i, .ret], locals := [], returnsValue := false }
+@[cil_code] def nativeWordProgram : CIL.Program := [nativeWordMethod]
 
 def carryOut (a b c : CIL.W64) : CIL.W64 := (if a + b + c < a then (1 : CIL.W32) else 0).zeroExtend 64
 
@@ -52,6 +62,16 @@ theorem borrow_stores (a b c : CIL.W64) (difference borrow : Reference) (m m1 m2
     formedBorrow1, differenceWrite, borrowWrite]
 
 #print axioms borrow_stores
+
+/-- An eight-byte write fact steps `stind.i` as it steps `stind.i8`. -/
+theorem native_word_stores (word : CIL.W64) (target : Reference) (m m1 : Memory)
+    (formed : form m target = .ok target)
+    (written : write m target (numberBytes word.toNat 8) 1 = .ok m1) :
+    invoke nativeWordProgram (CIL.executionBound nativeWordProgram 0) 0
+      [.scalar (.i64 word), .reference (.address target)] m = .ok (m1, []) := by
+  cil_checked_steps [formed, written]
+
+#print axioms native_word_stores
 
 -- The same facts drive `cil_contract_steps` on an existential run.
 theorem carry_contract_steps (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
@@ -141,12 +161,13 @@ theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (_zero :
   exact ⟨rfl, rfl⟩
 
 @[cil_code] def twentySevenRaises : CIL.Method :=
-  { code := List.replicate 26 .nop ++ [.throw "Test.Exception"], locals := [], returnsValue := false }
+  { code := List.replicate 26 .nop ++ [.throw .baseException], locals := [],
+    returnsValue := false }
 
 @[cil_code] def twentySevenRaisesProgram : CIL.Program := [twentySevenRaises]
 
 theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
-    Raises twentySevenRaisesProgram 0 [] memory "Test.Exception" := by
+    Raises twentySevenRaisesProgram 0 [] memory .baseException := by
   fact_normalizations 1 in
     cil_raise_steps [_zero]
 
@@ -154,7 +175,8 @@ theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : wo
   { code := [.nop, .ret], locals := [], returnsValue := false }
 
 @[cil_code] def normalizationCaller : CIL.Method :=
-  { code := [.call 1 0, .ret], locals := [], returnsValue := false }
+  { code := [.call (Tests.callee 0) {}, .ret], links := [(0, .direct 1)], locals := [],
+    returnsValue := false }
 
 @[cil_code] def normalizationCallProgram : CIL.Program := [normalizationCaller, normalizationCallee]
 
@@ -169,29 +191,29 @@ theorem large_indexed_fact (words : Fin 65536 → Nat) (all : ∀ index, words i
   cil_fact_simp [] [all]
 
 @[cil_code] def fourLimb : CIL.Method :=
-  { code := [.arg 0, .fieldAt 0 8, .arg 0, .fieldAt 8 8, .arg 0, .fieldAt 16 8,
-      .arg 0, .fieldAt 24 8, .pop, .pop, .pop, .ret], locals := [], returnsValue := true }
+  { environment := wordsEnvironment, code := [.ldarg 0, .ldfld word0, .ldarg 0, .ldfld word1, .ldarg 0, .ldfld word2,
+      .ldarg 0, .ldfld word3, .pop, .pop, .pop, .ret], locals := [], returnsValue := true }
 
 @[cil_code] def fourLimbProgram : CIL.Program := [fourLimb]
 
 theorem indexed_fields (memory : Memory) (left : Reference) (words : Fin 4 → CIL.W64)
     (formed : form memory left = .ok left)
     (limbs : ∀ (index : Fin 4) rest,
-      instruction (.fieldAt (8 * index.val) 8) (.reference (.address left) :: rest) memory =
+      loadValueField (8 * index.val) 8 false (.reference (.address left) :: rest) memory =
         .ok (memory, .scalar (.i64 (words index)) :: rest)) :
     invoke fourLimbProgram 12 0 [.reference (.address left)] memory =
       .ok (memory, [.scalar (.i64 (words 0))]) := by
   cil_checked_steps [formed, limbs]
 
 @[cil_code] def literalBranch : CIL.Method :=
-  { code := [.arg 0, .fieldAt 8 8, .brzero 5, .const32 9, .ret, .const32 0, .ret],
+  { environment := wordsEnvironment, code := [.ldarg 0, .ldfld word1, .brfalse 5, .ldc_i4 9, .ret, .ldc_i4 0, .ret],
     locals := [], returnsValue := true }
 
 @[cil_code] def literalBranchProgram : CIL.Program := [literalBranch]
 
 theorem constructor_index_branch (memory : Memory) (left : Reference) (words : Fin 4 → CIL.W64)
     (bound : 1 < 4) (formed : form memory left = .ok left)
-    (field : ∀ rest, instruction (.fieldAt 8 8) (.reference (.address left) :: rest) memory =
+    (field : ∀ rest, loadValueField 8 8 false (.reference (.address left) :: rest) memory =
       .ok (memory, .scalar (.i64 (words ⟨1, bound⟩)) :: rest))
     (zero : words 1 = 0) :
     invoke literalBranchProgram 7 0 [.reference (.address left)] memory =

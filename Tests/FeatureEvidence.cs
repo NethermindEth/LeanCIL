@@ -2,11 +2,17 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include ../scripts/BatchVerification.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/RuntimeProfileValidation.cs
+#:include PinnedMetadata.cs
 
 using System.Text.RegularExpressions;
 using System.Reflection;
@@ -32,7 +38,7 @@ var sharedCases = RuntimeProfileValidation.Observations(
 // that omit or split a nested flag are refused.
 foreach (var (nested, baseFlag, getter, _) in RuntimeProfileValidation.NestedGetters)
 {
-    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net10.json" : "windows-x64-net10.json";
+    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net10.json" : "windows-x64-net11.json";
     var recorded = JsonNode.Parse(File.ReadAllText(At($"docs/evidence/runtime-profiles/{evidence}")))!;
     foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
     {
@@ -53,7 +59,7 @@ foreach (var (nested, baseFlag, getter, _) in RuntimeProfileValidation.NestedGet
         Console.WriteLine($"PASS {getter} observation rejected: {name}");
     }
 }
-foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
+foreach (var name in new[] { "scalar", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
     sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
 foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",
     "x64-bmi2", "x64-vector256", "x64-sse41", "arm64-armbase" })
@@ -74,7 +80,7 @@ foreach (var (name, flag, value, accepted) in new[]
     ("x64-v4", "avx512Vbmi", true, true), ("x64-v3", "avx512Vbmi", true, false),
     ("arm64-advsimd", "avx512Vbmi", true, false),
     // AES is an optional group on each architecture that needs only that architecture's base.
-    ("x64-sse2", "aes", true, true), ("x64-v4", "aes", true, true), ("arm64-advsimd", "aes", true, false),
+    ("x64-sse42", "aes", true, true), ("x64-v4", "aes", true, true), ("arm64-advsimd", "aes", true, false),
     ("arm64-advsimd", "armAes", true, true), ("x64-v4", "armAes", true, false), ("scalar", "aes", true, false),
     ("scalar", "armAes", true, false)
 })
@@ -92,6 +98,29 @@ foreach (var (name, flag, value, accepted) in new[]
     catch (TargetInvocationException exception) when (!accepted && exception.InnerException is InvalidDataException) { }
 }
 Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vector width");
+// No .NET 11 x64 process reports SSE2 without SSSE3, SSE4.1 and SSE4.2, so that set is rejected with the gap.
+var belowBaseline = JsonSerializer.SerializeToNode(SelectProfile("x64-sse42"), jsonOptions)!;
+foreach (var flag in new[] { "ssse3", "sse41", "sse42" }) belowBaseline[flag] = false;
+belowBaseline["name"] = "sse2-only";
+sharedCases.Add((belowBaseline.ToJsonString(), false));
+var belowBaselinePath = Path.Combine(output, "sse2-only.json");
+File.WriteAllText(belowBaselinePath, belowBaseline.ToJsonString());
+const string missingBaseline = "sse2-only: below the .NET 11 x64 baseline (x86-64-v2); missing Ssse3, Sse41, Sse42";
+try
+{
+    _ = SelectProfile("@" + belowBaselinePath);
+    throw new InvalidOperationException("Profile below the x64 baseline accepted: " + belowBaselinePath);
+}
+catch (TargetInvocationException exception) when (exception.InnerException is InvalidDataException below &&
+    below.Message.Contains(missingBaseline, StringComparison.Ordinal)) { }
+try
+{
+    _ = SelectProfile("x64-sse2");
+    throw new InvalidOperationException("Built-in profile below the x64 baseline accepted: x64-sse2");
+}
+catch (TargetInvocationException exception) when (exception.InnerException is ArgumentException unknown &&
+    unknown.Message.Contains("Unknown execution profile: x64-sse2", StringComparison.Ordinal)) { }
+Console.WriteLine("PASS x64 feature sets below the .NET 11 baseline rejected with the missing sets");
 RequireLeanFixtures("CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var sharedEvidence = Path.Combine(output, "RuntimeProfiles.lean");
 RuntimeProfileValidation.Check(sharedCases, ExtractorPath, sharedEvidence);
@@ -118,16 +147,16 @@ void Reject(string name, string mutated)
         "Extraction.FeatureFlowValid", "is false");
 }
 
-string MutateState(string source, string update) => Regex.Replace(source,
-    @"(?m)^(def method0FeatureStates : Extraction.FeatureCertificate := )([^\r\n]+)",
-    match => match.Groups[1].Value + "(" + match.Groups[2].Value + ")." + update);
+string MutateState(string source, string update) => FeatureLayoutPattern.FeatureStates.Replace(source,
+    match => $"""{match.Groups[1].Value}({match.Groups[2].Value}).{update}""");
 
 // Each mutation checks feature flow independently, without unrelated validator proofs
 // or instruction lookup equations that could reject it for a different reason.
-Reject("wrong-feature", baseline.Replace(".feature .avx2", ".feature .sse2"));
-Reject("wrong-branch", baseline.Replace(".brzero 10", ".brzero 11"));
+Reject("wrong-feature", ForgeDecodedInstruction(baseline, 0, 3, "fun _ => .call { owner := .atom Extraction.intrinsicsScope \"System.Runtime.Intrinsics.X86.Sse2\", " +
+    "name := name!\"get_IsSupported\", hasThis := false, genericArity := 0, returnType := .atom Extraction.runtimeScope \"System.Boolean\", parameters := [] }"));
+Reject("wrong-branch", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
-Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], locals := [none] })"));
+Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [], locals := [(0, BitVec.ofInt 32 (0))] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
 Reject("omitted-states", MutateState(baseline, "take 17"));
 var unsupported = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)",
@@ -136,6 +165,20 @@ if (unsupported.Code == 0 || !unsupported.Output.Contains("Unsupported instructi
     throw new InvalidOperationException("Enabled feature failed to expose unsupported array code: " + unsupported.Output);
 // X86Base.X64 and Vector128 getters decide their branches from the profile alone.
 var capabilitiesQueue = new GeneratedQueue(verification, assembly);
+
+static void WriteResultProof(string path, int value) =>
+    File.WriteAllText(path, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        theorem correctness :
+            (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
+              .ok [.scalar (.i32 {{value}})] := by rfl
+        #print axioms correctness
+        end ExampleProof
+
+        """);
+
 var platformResult = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Capabilities")!
     .GetMethod("Platform")!.Invoke(null, []);
 if (!Equals(platformResult, 17)) throw new InvalidOperationException("Platform comparison requires a 64-bit process");
@@ -144,29 +187,22 @@ foreach (var (profile, flags) in new[] { ("scalar", 0), ("x64-v3", 3), ("arm64-a
     var capabilities = Path.Combine(output, "Capabilities-" + profile);
     Directory.CreateDirectory(capabilities);
     var proof = Path.Combine(capabilities, "Proof.lean");
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
-        $"  (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i32 {flags})] := rfl\nend ExampleProof\n");
+    WriteResultProof(proof, flags);
     capabilitiesQueue.Add(new("Capabilities::Flags()", proof, Path.Combine(capabilities, "Verified"), Profile: profile),
         () => Console.WriteLine($"PASS Capabilities::Flags under {profile} returns {flags}"));
     var platform = Path.Combine(capabilities, "Platform.lean");
-    File.WriteAllText(platform, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-        ".ok [.scalar (.i32 17)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    WriteResultProof(platform, 17);
     capabilitiesQueue.Add(new("Capabilities::Platform()", platform, Path.Combine(capabilities, "Platform"), Profile: profile),
         () => Console.WriteLine($"PASS platform constants and pruned unsupported branch under {profile}"));
     // AdvSimd.Arm64 and AdvSimd share one answer, so ArmFlags is 0 or 3 and never 1 or 2.
     var armFlags = profile == "arm64-advsimd" ? 3 : 0;
     var armProof = Path.Combine(capabilities, "ArmFlags.lean");
-    File.WriteAllText(armProof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-        $".ok [.scalar (.i32 {armFlags})] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    WriteResultProof(armProof, armFlags);
     capabilitiesQueue.Add(
         new("Capabilities::ArmFlags()", armProof, Path.Combine(capabilities, "ArmFlags"), Profile: profile),
         () => Console.WriteLine($"PASS AdvSimd.Arm64 follows AdvSimd under {profile}: {armFlags}"));
     var endianProof = Path.Combine(capabilities, "Endian.lean");
-    File.WriteAllText(endianProof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-        "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-        ".ok [.scalar (.i32 1)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+    WriteResultProof(endianProof, 1);
     capabilitiesQueue.Add(
         new("Capabilities::Endian()", endianProof, Path.Combine(capabilities, "Endian"), Profile: profile),
         () => Console.WriteLine($"PASS BitConverter.IsLittleEndian prunes the big-endian branch under {profile}"));
@@ -186,16 +222,7 @@ foreach (var (profile, label, vbmiFlags) in new[]
     var vbmiFolder = Path.Combine(output, $"Vbmi-{label}");
     Directory.CreateDirectory(vbmiFolder);
     var vbmiProof = Path.Combine(vbmiFolder, "VbmiFlags.lean");
-    File.WriteAllText(vbmiProof, $$"""
-        import Extracted
-        import CIL.Safety.Execution
-        namespace ExampleProof
-        theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
-            .ok [.scalar (.i32 {{vbmiFlags}})] := rfl
-        #print axioms correctness
-        end ExampleProof
-
-        """);
+    WriteResultProof(vbmiProof, vbmiFlags);
     capabilitiesQueue.Add(
         new("Capabilities::VbmiFlags()", vbmiProof, Path.Combine(vbmiFolder, "VbmiFlags"), Profile: profile),
         () => Console.WriteLine($"PASS Avx512Vbmi.VL follows Avx512Vbmi under {label}: {vbmiFlags}"));
@@ -239,16 +266,7 @@ foreach (var (profile, label, aesFlags) in new[]
     var aesFolder = Path.Combine(output, $"Aes-{label}");
     Directory.CreateDirectory(aesFolder);
     var aesProof = Path.Combine(aesFolder, "AesFlags.lean");
-    File.WriteAllText(aesProof, $$"""
-        import Extracted
-        import CIL.Safety.Execution
-        namespace ExampleProof
-        theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd =
-            .ok [.scalar (.i32 {{aesFlags}})] := rfl
-        #print axioms correctness
-        end ExampleProof
-
-        """);
+    WriteResultProof(aesProof, aesFlags);
     capabilitiesQueue.Add(
         new("Capabilities::AesFlags()", aesProof, Path.Combine(aesFolder, "AesFlags"), Profile: profile),
         () => Console.WriteLine($"PASS Aes getters follow their architecture's flag under {label}: {aesFlags}"));
@@ -288,50 +306,53 @@ var referenceQueryProof = Path.Combine(referenceQueryFolder, "Proof.lean");
 var referenceResult = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.Capabilities")!
     .GetMethod("ReferenceFree")!.Invoke(null, null);
 if (!Equals(referenceResult, 73)) throw new InvalidOperationException("Unexpected CLR reference-content result");
-File.WriteAllText(referenceQueryProof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" +
-    "theorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [] CIL.Safety.Memory.empty).map Prod.snd = " +
-    ".ok [.scalar (.i32 73)] := rfl\n#print axioms correctness\nend ExampleProof\n");
+WriteResultProof(referenceQueryProof, 73);
 capabilitiesQueue.Add(new("Capabilities::ReferenceFree()", referenceQueryProof,
     Path.Combine(referenceQueryFolder, "Verified")),
     () => Console.WriteLine("PASS validated reference-free queries and pruned unsupported branch"));
 capabilitiesQueue.Flush();
 var referenceQuerySource = File.ReadAllText(Path.Combine(referenceQueryFolder, "Verified", "Extracted.lean"));
 var queryControls = new GeneratedEvidence(Path.Combine(output, "ReferenceQueryControls"));
-foreach (var obligation in new[] { featureObligation, "method0_scalars_validated" })
+foreach (var obligation in new[] { featureObligation, "method0_models_validated" })
 {
     var narrowed = NarrowEvidence(referenceQuerySource, obligation);
     var controlPath = Path.Combine(output, obligation + "-reference-query.lean");
     File.WriteAllText(controlPath, narrowed);
     queryControls.Add(controlPath, "PASS exact reference-content control: " + obligation, obligation);
-    var aggregate = Regex.Match(narrowed, "typeArguments := \\[\\.aggregate \"[^\"]+\" [0-9]+\\]").Value;
-    if (aggregate.Length == 0) throw new InvalidOperationException("Missing query-only aggregate layout");
-    foreach (var (name, before, after) in new[]
+    var answer = ForgeDecodedInstruction(referenceQuerySource, 0, 0, "fun _ => .ldc_i4 1");
+    var answerPath = Path.Combine(output, $"{obligation}-wrong-reference-answer.lean");
+    File.WriteAllText(answerPath, NarrowEvidence(answer, obligation));
+    rejected.Add(answerPath, $"PASS wrong reference-content answer rejected by {obligation}",
+        obligation == featureObligation ? "FeatureFlowValid" : "RuntimeModelsAgree");
+    foreach (var (name, pc, update) in new[]
     {
-        ("answer", ".const32 0", ".const32 1"),
-        ("scope", ".atom Extraction.runtimeScope \"System.Runtime.CompilerServices.RuntimeHelpers\"",
-            ".atom \"forged\" \"System.Runtime.CompilerServices.RuntimeHelpers\""),
-        ("byref", "typeArguments := [.atom Extraction.runtimeScope \"System.Int32\"]",
-            "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Int32\")]"),
-        ("layout", aggregate, Regex.Replace(aggregate, "\"[^\"]+\"", "\"forged\"")),
-        ("signature", "parameterCount := 0, hasThis := false, returnsValue := true",
-            "parameterCount := 1, hasThis := false, returnsValue := true")
+        ("scope", 0, """method.owner := .atom "forged" "System.Runtime.CompilerServices.RuntimeHelpers" """),
+        ("byref", 0, "typeArguments := site.typeArguments.map Extraction.TypeExpr.byref"),
+        ("layout", 6, """
+            typeArguments := site.typeArguments.map (fun | .aggregate _ i => .aggregate "forged" i | t => t)
+            """),
+        ("signature", 0, "parameterCount := 1")
     })
     {
-        var changed = narrowed.Replace(before, after, StringComparison.Ordinal);
-        if (changed == narrowed) throw new InvalidOperationException("Missing reference-query mutation: " + name);
-        var forged = Path.Combine(output, obligation + "-reference-query-" + name + ".lean");
-        File.WriteAllText(forged, changed);
-        rejected.Add(forged, "PASS reference-content forgery rejected: " + name + " " + obligation,
-            obligation == featureObligation ? "FeatureFlowValid" : "ScalarFlowValid");
+        var code = $$"""
+            modify {{pc}} (fun raw => match raw.operand with
+              | .call site => { raw with operand := .call { site with {{update}} } }
+              | _ => raw)
+            """;
+        var changed = ForgeClosedCode(referenceQuerySource, 0, code);
+        var forged = Path.Combine(output, $"{obligation}-reference-query-{name}.lean");
+        File.WriteAllText(forged, NarrowEvidence(changed, obligation));
+        rejected.Add(forged, $"PASS {name} forgery rejected by {obligation}",
+            obligation == featureObligation ? "FeatureFlowValid" : "RuntimeModelsAgree");
     }
 }
 queryControls.Check(replay: false);
 // A cached type validation belongs to its module and architecture within this request.
-using (var module = ModuleDefinition.ReadModule(assembly))
-using (var other = ModuleDefinition.CreateModule("OtherQueryOwner", ModuleKind.Dll))
+using (var pinned = new PinnedMetadata(profileType.Assembly, assembly))
 using (var scope = (IDisposable)profileType.Assembly.GetType("Nethermind.LeanCIL.EnumTypes", true)!
     .GetMethod("BeginScope", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!)
 {
+    var module = pinned.Module;
     var validate = profileType.Assembly.GetType("Nethermind.LeanCIL.ReferenceQueries", true)!
         .GetMethod("Constant", BindingFlags.Static | BindingFlags.NonPublic)!;
     var method = module.Types.Single(type => type.FullName == "Examples.Capabilities")
@@ -341,12 +362,12 @@ using (var scope = (IDisposable)profileType.Assembly.GetType("Nethermind.LeanCIL
     if (!Equals(validate.Invoke(null, [validQuery, "scalar"]), 0) ||
         !Equals(validate.Invoke(null, [validQuery, "scalar"]), 0))
         throw new InvalidOperationException("Reference-content cache control failed");
-    var owner = validQuery.DeclaringType;
-    var definition = new MethodReference(validQuery.Name, validQuery.ReturnType,
-        new TypeReference(owner.Namespace, owner.Name, other, owner.Scope))
-        { CallingConvention = MethodCallingConvention.Generic };
-    definition.GenericParameters.Add(new GenericParameter("T", definition));
-    var foreignQuery = new GenericInstanceMethod(definition);
+    using var foreign = new PinnedMetadata(profileType.Assembly, assembly);
+    var foreignMethod = foreign.Module.GetType("Examples.Capabilities")
+        .Methods.Single(candidate => candidate.Name == "ReferenceFree");
+    var foreignQuery = foreignMethod.Body.Instructions.Select(instruction => instruction.Operand)
+        .OfType<GenericInstanceMethod>().Single(call => call.GenericArguments[0].Name == "EnumRecord");
+    foreignQuery.GenericArguments.Clear();
     foreignQuery.GenericArguments.Add(validQuery.GenericArguments[0]);
     try
     {
@@ -385,7 +406,9 @@ foreach (var mutation in new[] { "span", "byref", "pointer", "class", "float", "
             diagnostic = "Unsupported field type";
             break;
         case "scope":
-            query.ElementMethod.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0));
+            var forgedQueryScope = new AssemblyNameReference("Forged", new Version(10, 0));
+            module.AssemblyReferences.Add(forgedQueryScope);
+            query.ElementMethod.DeclaringType.Scope = forgedQueryScope;
             diagnostic = "Unsupported reference-content query signature";
             break;
     }
@@ -425,7 +448,8 @@ foreach (var mutation in new[] { "missing-switch-target", "switch-tail-interior"
     module.Write(mutatedAssembly);
     var result = Execute(Extract("extract", mutatedAssembly, "Examples", "Capabilities::Platform()",
         Path.Combine(output, mutation)));
-    var diagnostic = mutation == "missing-switch-target" ? "Malformed switch targets" : "middle of a tail transfer";
+    var diagnostic = mutation == "missing-switch-target" ? "Malformed switch targets"
+        : "Branch enters the instruction after a prefix";
     if (result.Code == 0 || !result.Output.Contains(diagnostic, StringComparison.Ordinal))
         throw new InvalidOperationException("Invalid unselected target accepted: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS invalid unselected control-flow target rejected: " + mutation);
@@ -441,17 +465,16 @@ foreach (var (obligation, diagnostic) in new[]
     var controlPath = Path.Combine(output, obligation + "-platform.lean");
     File.WriteAllText(controlPath, narrowed);
     platformControls.Add(controlPath, "PASS exact platform constant control: " + diagnostic, obligation);
-    const string literal = ".const32 8";
-    var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
-    if (position < 0) throw new InvalidOperationException("Missing initial platform getter constant");
     var forged = Path.Combine(output, obligation + "-wrong-platform.lean");
-    File.WriteAllText(forged, narrowed[..position] + ".const32 4" + narrowed[(position + literal.Length)..]);
+    var changed = ForgeDecodedInstruction(platformSource, 0, 0, "fun _ => .ldc_i4 4");
+    File.WriteAllText(forged, NarrowEvidence(changed, obligation));
     rejected.Add(forged, "PASS exact platform constant rejection: " + diagnostic, diagnostic);
 }
 platformControls.Check(replay: false);
 // Lean binds the raw endianness load to System.Runtime's BitConverter Boolean and the value 1.
 var endianSource = File.ReadAllText(Path.Combine(output, "Capabilities-scalar", "Endian", "Extracted.lean"));
 var endianControls = new GeneratedEvidence(Path.Combine(output, "EndianControls"));
+const string endianOwner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
 foreach (var (obligation, diagnostic) in new[]
 {
     (featureObligation, "FeatureFlowValid"), ("method0_scalars_validated", "ScalarFlowValid")
@@ -461,21 +484,30 @@ foreach (var (obligation, diagnostic) in new[]
     var controlPath = Path.Combine(output, obligation + "-endian.lean");
     File.WriteAllText(controlPath, narrowed);
     endianControls.Add(controlPath, "PASS exact endianness constant control: " + diagnostic, obligation);
-    const string literal = ".const32 1";
-    var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
-    if (position < 0) throw new InvalidOperationException("Missing endianness constant");
+    var changedValue = ForgeDecodedInstruction(endianSource, 0, 0, "fun _ => .ldc_i4 0");
     var forgedValue = Path.Combine(output, obligation + "-wrong-endian.lean");
-    File.WriteAllText(forgedValue, narrowed[..position] + ".const32 0" + narrowed[(position + literal.Length)..]);
+    File.WriteAllText(forgedValue, NarrowEvidence(changedValue, obligation));
     rejected.Add(forgedValue, "PASS endianness constant value rejection: " + diagnostic, diagnostic);
-    const string owner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
-    if (!narrowed.Contains(owner, StringComparison.Ordinal))
+    if (!narrowed.Contains(endianOwner, StringComparison.Ordinal))
         throw new InvalidOperationException("Missing endianness owner");
     var forgedOwner = Path.Combine(output, obligation + "-forged-endian-owner.lean");
-    File.WriteAllText(forgedOwner,
-        narrowed.Replace(owner, ".atom \"forged\" \"System.BitConverter\"", StringComparison.Ordinal));
+    var changedOwner = ForgeClosedCode(endianSource, 0, """
+        modify 0 (fun raw => match raw.operand with
+          | .field _ index type name isStatic =>
+            { raw with operand := .field (.atom "forged" "System.BitConverter") index type name isStatic }
+          | _ => raw)
+        """);
+    File.WriteAllText(forgedOwner, NarrowEvidence(changedOwner, obligation));
     rejected.Add(forgedOwner, "PASS endianness owner forgery rejection: " + diagnostic, diagnostic);
 }
 endianControls.Check(replay: false);
+
+var refusedOwner = Path.Combine(output, "forged-endian-decoder.lean");
+var refusedEndian = ForgeDecodedOriginal(endianSource, 0, endianOwner,
+    ".atom \"forged\" \"System.BitConverter\"");
+File.WriteAllText(refusedOwner, NarrowEvidence(refusedEndian, featureObligation));
+rejected.Add(refusedOwner, "PASS forged endianness owner refuses raw decoding",
+    "cil_decoded_method: the decoder gives no method");
 foreach (var mutation in new[] { "scope", "field", "module-type" })
 {
     using var module = ModuleDefinition.ReadModule(assembly);
@@ -486,7 +518,11 @@ foreach (var mutation in new[] { "scope", "field", "module-type" })
     var diagnostic = "Only System.Runtime's static readonly BitConverter.IsLittleEndian is a platform constant";
     switch (mutation)
     {
-        case "scope": field.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0)); break;
+        case "scope":
+            var forgedScope = new AssemblyNameReference("Forged", new Version(10, 0));
+            module.AssemblyReferences.Add(forgedScope);
+            field.DeclaringType.Scope = forgedScope;
+            break;
         case "field":
             load.Operand = new FieldReference("IsBigEndian", field.FieldType, field.DeclaringType);
             diagnostic = "Only same-assembly static readonly";
@@ -513,18 +549,17 @@ foreach (var mutation in new[] { "scope", "field", "module-type" })
             "Endianness lookalike accepted or misreported: " + mutation + "\n" + result.Output);
     Console.WriteLine("PASS endianness lookalike rejected: " + mutation);
 }
-var comparisonEvidence = NarrowEvidence(platformSource, featureObligation);
-foreach (var (name, before, after) in new[]
+foreach (var (name, pattern, replacement) in new[]
 {
-    ("branch", ".bne ", ".beq "), ("signedness", ".gt,", ".gtu,"),
-    ("unsigned-comparison", ".ltu,", ".lt,")
+    ("branch", ".bne_un target", ".beq target"), ("signedness", ".cgt", ".cgt_un"),
+    ("unsigned-comparison", ".clt_un", ".clt")
 })
 {
-    if (!comparisonEvidence.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException("Missing comparison mutation target: " + name);
-    var forged = Path.Combine(output, "wrong-comparison-" + name + ".lean");
-    File.WriteAllText(forged, comparisonEvidence.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(forged, "PASS exact constant comparison rejection: " + name, "FeatureFlowValid");
+    var update = $"code := method.code.map (fun | {pattern} => {replacement} | op => op)";
+    var changed = ForgeDecodedMethod(platformSource, 0, update);
+    var forged = Path.Combine(output, $"wrong-comparison-{name}.lean");
+    File.WriteAllText(forged, NarrowEvidence(changed, featureObligation));
+    rejected.Add(forged, $"PASS exact constant comparison rejection for {name}", "FeatureFlowValid");
 }
 rejected.Check();
 var scalarCapabilities = Path.Combine(output, "Capabilities-scalar");
@@ -556,3 +591,10 @@ if (invalid.Code == 0 || !invalid.Output.Contains("bmi2-only: x86 ISA flags requ
     throw new InvalidOperationException("Profile without X86Base64 was not rejected by name: " + invalid.Output);
 Console.WriteLine("PASS x86 ISA flags without X86Base64 rejected with the rule");
 Console.WriteLine("PASS raw feature analysis, join/backedge weakening, local eligibility, switches and emitted-code binding");
+
+static partial class FeatureLayoutPattern
+{
+    [GeneratedRegex(@"(?m)^(def method0FeatureStates : Extraction.FeatureCertificate := )([^\r\n]+)")]
+    internal static partial Regex FeatureStates { get; }
+
+}

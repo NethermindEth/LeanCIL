@@ -1,5 +1,7 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -9,7 +11,7 @@ internal static partial class ProofOutline
 {
     /// <summary>A field an extraction names, as `Path.Name`: a word of `Width` bytes, an object reference, or the
     /// origin of a whole array of `Element`, a Lean `ArrayElement` term.</summary>
-    sealed record ViewField(string Path, string Name, ClassViews.FieldKind Kind, int? Width, string? Element,
+    sealed record ViewField(string Path, string Name, ClassViews.FieldKind Kind, int? Width, Arrays.Element? Element,
         int Offset, bool Stored, int[] Loaders, int[] Storers)
     {
         internal string Lean => Path + "." + Name;
@@ -30,7 +32,7 @@ internal static partial class ProofOutline
         }
 
         /// <summary>The short name of an array element some named field holds arrays of, or none.</summary>
-        internal string? ElementType(string element) => classes.Values.SelectMany(fields => fields)
+        internal string? ElementType(Arrays.Element element) => classes.Values.SelectMany(fields => fields)
             .FirstOrDefault(field => field.Kind == ClassViews.FieldKind.Array && field.Element == element) is { } named
             ? named.Lean + ".elementType" : null;
 
@@ -89,7 +91,7 @@ internal static partial class ProofOutline
 
     /// <summary>A scalar element read and the field footprints its contents must be disjoint from.</summary>
     sealed record WordRead(Parameter Array, string Index, int Stores, string Name,
-        (Access Write, string Apart)[] Writes, bool CallerIndex);
+        (Access Write, string Apart)[] Writes, bool CallerIndex, Arrays.NumericAccess Load);
 
     enum AccessKind { Load, Store, Read, Own }
 
@@ -122,7 +124,8 @@ internal static partial class ProofOutline
     /// the body reaches as `Target`, null, or a reference outside the model whose formation in the caller's memory
     /// `Formed` states. A `Reread` load reads back what an earlier store on its path wrote.</summary>
     sealed record ElementAccess(string Array, ElementKind Kind, int Stores, string? Index = null,
-        string? Value = null, Reached? Target = null, string? Formed = null, string? Slot = null, bool Reread = false)
+        string? Value = null, Reached? Target = null, string? Formed = null, string? Slot = null, bool Reread = false,
+        bool LiteralIndex = false)
     {
         /// <summary>The premise that the stored object passes the covariance check of the array's element class.
         /// </summary>
@@ -182,17 +185,22 @@ internal static partial class ProofOutline
     /// which objects a body with loops touches; its steps are not a proof.</remarks>
     /// <remarks>With `throws`, for a callee, a path may end in a throw, which its contract's `pre` must exclude.
     /// </remarks>
-    sealed class ObjectWalk(Specification spec, string[] ops, FieldViews views, Func<int, Callee?> callees,
-        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null, bool throws = false)
+    sealed class ObjectWalk(Specification spec, Operation[] ops, FieldViews views, Func<int, Callee?> callees,
+        bool linear = false, bool numericHomes = false, Func<int, Stub?>? stubs = null, bool throws = false,
+        int methodIndex = 0)
     {
         internal string? Stopped { get; private set; }
         internal string? Returned { get; private set; }
+
+        /// <summary>The constant the returned word spells, when the body returns one.</summary>
+        internal Constant? ReturnedOrigin { get; private set; }
         internal List<Reached> Objects { get; private init; } = [];
         internal List<object> Steps { get; } = [];
         internal bool NumericHomes => numericHomes;
 
         abstract record Item;
-        sealed record Word(string? Term, int Width) : Item;
+        /// <summary>A word the walk names by `Term`; `Origin` is the constant it spells, when it is one.</summary>
+        sealed record Word(string? Term, int Width, Constant? Origin = null) : Item;
         sealed record Instance(Reached Object) : Item;
         sealed record Null : Item;
         /// <summary>A reference to an object outside the model, as the field it was loaded from names it before any
@@ -294,7 +302,6 @@ internal static partial class ProofOutline
             for (var pc = start; pc < ops.Length; pc++)
             {
                 var op = ops[pc];
-                Match match;
                 Item? Pop()
                 {
                     if (stack.Count == 0) return null;
@@ -302,9 +309,9 @@ internal static partial class ProofOutline
                     stack.RemoveAt(stack.Count - 1);
                     return top;
                 }
-                bool Stop(string reason)
+                bool Stop(string reason, bool showInstruction = false)
                 {
-                    Stopped = $"{reason} at {location(pc)}";
+                    Stopped = StopAt(spec.Method, pc, reason, showInstruction);
                     return false;
                 }
                 // Walks each side of a test from where it continues, with what the path holds so far.
@@ -312,7 +319,8 @@ internal static partial class ProofOutline
                 {
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     var walks = new[] { holds, fails }.Select(next => (Next: next, Walk: new ObjectWalk(spec, ops,
-                        views, callees, linear, numericHomes, stubs, throws) { Objects = Objects, Arrays = Arrays,
+                        views, callees, linear, numericHomes, stubs, throws, methodIndex)
+                    { Objects = Objects, Arrays = Arrays,
                         Slots = Slots, Stored = Stored, ArrayApart = ArrayApart,
                         stores = stores, fieldMemory = fieldMemory,
                         calls = calls, splits = splits + 1, Fresh = Fresh, previous = [.. PathSteps] })).ToArray();
@@ -327,9 +335,9 @@ internal static partial class ProofOutline
                     return true;
                 }
                 if (!visited.Add(pc)) return Stop("a backward jump");
-                if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
                 {
-                    var parameter = spec.Parameters[int.Parse(match.Groups[1].Value)];
+                    var parameter = spec.Parameters[argument.Index];
                     Item? item = parameter.Shape switch
                     {
                         ParameterShape.Object => new Instance(Objects.First(reached => reached.Name == parameter.Name)),
@@ -344,7 +352,7 @@ internal static partial class ProofOutline
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     stack.Add(item);
                 }
-                else if ((match = Regex.Match(op, @"\A\.setLocal (\d+)\z")).Success)
+                else if (op is SetLocal setLocal)
                 {
                     if (Pop() is not { } item) return Stop("a local store of an empty stack");
                     // An array home checks the view it takes and the view it gives back.
@@ -353,116 +361,120 @@ internal static partial class ProofOutline
                     {
                         if (item is not Word { Term: { } value } word)
                             return Stop("a numeric local store whose value the outline cannot name");
-                        Steps.Add(new LocalAccess(int.Parse(match.Groups[1].Value), value, word.Width, stores++, true));
+                        Steps.Add(new LocalAccess(setLocal.Index, value, word.Width, stores++, true));
                     }
-                    locals[int.Parse(match.Groups[1].Value)] = item;
+                    locals[setLocal.Index] = item;
                 }
-                else if ((match = Regex.Match(op, @"\A\.local (\d+)\z")).Success)
+                else if (op is Local local)
                 {
-                    if (!locals.TryGetValue(int.Parse(match.Groups[1].Value), out var item))
+                    if (!locals.TryGetValue(local.Index, out var item))
                         return Stop("a local the body reads before it stores it");
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     if (numericHomes && item is Word { Term: { } value } word)
-                        Steps.Add(new LocalAccess(int.Parse(match.Groups[1].Value), value, word.Width, stores, false));
+                        Steps.Add(new LocalAccess(local.Index, value, word.Width, stores, false));
                     stack.Add(item);
                 }
-                else if (op == ".memory .nullObject") stack.Add(new Null());
-                else if (op == ".dup")
+                else if (op is StackOperation { Kind: Code.Ldnull }) stack.Add(new Null());
+                else if (op is StackOperation { Kind: Code.Dup })
                 {
                     if (stack.Count == 0) return Stop("a duplicate of an empty stack");
                     stack.Add(stack[^1]);
                 }
-                else if (op == ".pop") { if (Pop() is null) return Stop("a pop of an empty stack"); }
-                else if (linear && Regex.Match(op, @"\A\.(\w+) \d+\z") is { Success: true } jump &&
-                    Body.Target(op) is not null)
+                else if (op is StackOperation { Kind: Code.Pop })
                 {
-                    var operands = jump.Groups[1].Value switch { "branch" => 0, "brzero" or "brnonzero" => 1, _ => 2 };
-                    for (var operand = 0; operand < operands; operand++)
-                        if (Pop() is null) return Stop($"`{op}` on an empty stack");
+                    if (Pop() is null) return Stop("a pop of an empty stack");
                 }
-                else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success &&
+                else if (linear && op is Jump jump)
+                {
+                    for (var operand = 0; operand < jump.Operands; operand++)
+                        if (Pop() is null) return Stop(" on an empty stack", showInstruction: true);
+                }
+                else if (op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } nullTest &&
                     stack.Count > 0 && stack[^1] is Opaque)
                 {
                     var tested = (Opaque)Pop()!;
                     if (stores > 0) return Stop(Unformed(tested));
                     // `brfalse` takes its target when the reference is null.
-                    return Branch($"{tested.Term[1..^1]} = .null", match.Groups[1].Value == "brzero",
-                        int.Parse(match.Groups[2].Value));
+                    return Branch($"{tested.Term[1..^1]} = .null", nullTest.Kind == ILOpCode.Brfalse, nullTest.Target);
                 }
-                else if ((match = Regex.Match(op, @"\A\.(beq|bne) (\d+)\z")).Success && stack.Count > 1 &&
+                else if (op is Jump { Kind: ILOpCode.Beq or ILOpCode.Bne_un } equalityTest && stack.Count > 1 &&
                     (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
                     var left = Pop();
-                    if (Compared(left, right) is not { } condition) return Stop(Uncompared(op));
-                    return Branch(condition, match.Groups[1].Value == "beq", int.Parse(match.Groups[2].Value));
+                    if (Compared(left, right) is not { } condition) return Stop(Uncompared, showInstruction: true);
+                    return Branch(condition, equalityTest.Kind == ILOpCode.Beq, equalityTest.Target);
                 }
-                else if (op is ".eq" or ".gtu" && stack.Count > 1 && (stack[^1] is Opaque || stack[^2] is Opaque))
+                else if (op is StackOperation { Kind: Code.Ceq or Code.Cgt_Un } comparison
+                    && stack.Count > 1 &&
+                    (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
                     var left = Pop();
                     // `cgt.un` on references is defined only against null.
-                    if (Compared(left, right) is null || op == ".gtu" && right is not Null)
-                        return Stop(Uncompared(op));
+                    if (Compared(left, right) is null || comparison.Kind == Code.Cgt_Un && right is not Null)
+                        return Stop(Uncompared, showInstruction: true);
                     stack.Add(new Word(null, 4));
                 }
-                else if ((match = Regex.Match(op, @"\A\.(brzero|brnonzero) (\d+)\z")).Success &&
+                else if (op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } objectTest &&
                     stack.Count > 0 && stack[^1] is not Word)
                 {
                     // An argument object is never null, so its test always goes one way.
                     var zero = Pop() is Null;
-                    if (zero == (match.Groups[1].Value == "brzero")) pc = int.Parse(match.Groups[2].Value) - 1;
+                    if (zero == (objectTest.Kind == ILOpCode.Brfalse)) pc = objectTest.Target - 1;
                 }
-                else if (Body.Conditional(op))
+                else if (op is Jump { Conditional: true } test)
                 {
-                    var name = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
-                    var operands = new Word?[name is "brzero" or "brnonzero" ? 1 : 2];
+                    var operands = new Word?[test.Operands];
                     for (var position = operands.Length - 1; position >= 0; position--)
                         operands[position] = Pop() as Word;
                     if (operands.Any(operand => operand?.Term is null) ||
                         operands.Any(operand => operand!.Width != operands[0]!.Width))
-                        return Stop($"`{op}` on a value the outline does not name");
-                    var (condition, takenWhenTrue) =
-                        Body.Test(name, [.. operands.Select(operand => operand!.Term!)], 8 * operands[0]!.Width);
-                    return Branch(condition, takenWhenTrue, Body.Target(op)!.Value);
+                        return Stop(" on a value the outline does not name", showInstruction: true);
+                    var terms = operands.Select(operand => new Body.Operand(operand!.Term!,
+                        operand.Origin is { Numeral: true } origin ? origin.Value : null)).ToArray();
+                    var (condition, takenWhenTrue) = Body.Test(test, terms, 8 * operands[0]!.Width);
+                    return Branch(condition, takenWhenTrue, test.Target);
                 }
-                else if ((match = Regex.Match(op, @"\A\.branch (\d+)\z")).Success)
-                    pc = int.Parse(match.Groups[1].Value) - 1;
-                else if ((match = Regex.Match(op,
-                    @"\A\.const(32|64) (?:(\d+)|\(BitVec\.ofInt \d+ \((-?\d+)\)\))\z")).Success)
-                    stack.Add(new Word(match.Groups[2].Success ? match.Groups[2].Value : $"({match.Groups[3].Value})",
-                        match.Groups[1].Value == "64" ? 8 : 4));
-                else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+                else if (op is Jump { Kind: ILOpCode.Br } branch) pc = branch.Target - 1;
+                else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
+                    stack.Add(new Word(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
+                        constant.Width == 64 ? 8 : 4, constant));
+                else if (op is StackOperation { IsArithmetic: true } arithmetic)
                 {
                     if (Pop() is not Word right || Pop() is not Word left || left.Width != right.Width)
                         return Stop("arithmetic on a value the outline cannot name");
-                    var symbol = match.Groups[1].Value switch
-                    {
-                        "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                    };
+                    var symbol = arithmetic.Symbol;
                     stack.Add(new Word(left.Term is null || right.Term is null ? null
                         : $"({left.Term} {symbol} {right.Term})", left.Width));
                 }
-                else if (op is ".convU8" or ".convI8")
+                else if (op is StackOperation { Kind: Code.Conv_U8 or Code.Conv_I8 or Code.Conv_I }
+                    widening)
                 {
                     if (Pop() is not Word { Width: 4 } word)
                         return Stop("a widening of a value the outline cannot name");
-                    var widen = op == ".convU8" ? "setWidth" : "signExtend";
+                    var widen = widening.Kind == Code.Conv_U8 ? "setWidth" : "signExtend";
                     stack.Add(new Word(word.Term is null ? null : $"({word.Term}.{widen} 64)", 8));
                 }
                 // Values the steps compute but the outline does not name: they may be returned, not stored.
-                else if (Regex.IsMatch(op, @"\A\.(shl|shr|shrUn|div|divUn|rem|remUn|eq|gt|gtu|lt|ltu)\z"))
+                else if (op is StackOperation { Kind: Code.Shl or Code.Shr or Code.Shr_Un
+                    or Code.Ceq or Code.Cgt or
+                    Code.Cgt_Un or Code.Clt or Code.Clt_Un } unnamed)
                 {
                     if (Pop() is not Word || Pop() is not Word left)
-                        return Stop($"`{op}` on a value that is not a word");
-                    stack.Add(new Word(null, op is ".eq" or ".gt" or ".gtu" or ".lt" or ".ltu" ? 4 : left.Width));
+                        return Stop(" on a value that is not a word", showInstruction: true);
+                    stack.Add(new Word(null, unnamed.Kind is Code.Ceq or Code.Cgt or Code.Cgt_Un
+                        or Code.Clt or Code.Clt_Un
+                        ? 4 : left.Width));
                 }
-                else if ((match = Regex.Match(op, @"\A\.(neg|not|conv[UI][124])\z")).Success)
+                else if (op is StackOperation { Kind: Code.Neg or Code.Conv_I1 or Code.Conv_I2
+                    or Code.Conv_I4 or
+                    Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4 } unary)
                 {
-                    if (Pop() is not Word word) return Stop($"`{op}` on a value that is not a word");
-                    stack.Add(new Word(null, op.StartsWith(".conv", StringComparison.Ordinal) ? 4 : word.Width));
+                    if (Pop() is not Word word) return Stop(" on a value that is not a word", showInstruction: true);
+                    stack.Add(new Word(null, unary.Kind == Code.Neg ? word.Width : 4));
                 }
-                else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Word } load)
+                else if (op is ClassField { Field: { Store: false, Kind: ClassViews.FieldKind.Word } load })
                 {
                     if (Pop() is not Instance instance || Field(instance, load) is not { } field)
                         return Stop("a field load of an object the outline cannot name");
@@ -476,7 +488,7 @@ internal static partial class ProofOutline
                         _ => new Word(term, field.Width!.Value)
                     });
                 }
-                else if (ClassViews.Decode(op) is { Store: true, Kind: ClassViews.FieldKind.Word } store)
+                else if (op is ClassField { Field: { Store: true, Kind: ClassViews.FieldKind.Word } store })
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, store) is not { } field)
@@ -492,7 +504,8 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++, word.Term));
                     fieldMemory = stores;
                 }
-                else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Reference } referenceLoad)
+                else if (op is ClassField
+                    { Field: { Store: false, Kind: ClassViews.FieldKind.Reference } referenceLoad })
                 {
                     if (Pop() is not Instance instance || Field(instance, referenceLoad) is not { } field)
                         return Stop("a reference field load of an object the outline cannot name");
@@ -524,7 +537,8 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Target: reached));
                     stack.Add(new Instance(reached));
                 }
-                else if (ClassViews.Decode(op) is { Store: true, Kind: ClassViews.FieldKind.Reference } referenceStore)
+                else if (op is ClassField
+                    { Field: { Store: true, Kind: ClassViews.FieldKind.Reference } referenceStore })
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, referenceStore) is not { } field)
@@ -547,7 +561,7 @@ internal static partial class ProofOutline
                     Steps.Add(stored);
                     stores++;
                 }
-                else if (ClassViews.Decode(op) is { Store: false, Kind: ClassViews.FieldKind.Array } arrayLoad)
+                else if (op is ClassField { Field: { Store: false, Kind: ClassViews.FieldKind.Array } arrayLoad })
                 {
                     if (Pop() is not Instance instance || Field(instance, arrayLoad) is not { } field)
                         return Stop("an array field load of an object the outline cannot name");
@@ -563,7 +577,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Load, false, stores, Array: held));
                     stack.Add(new Values(held));
                 }
-                else if (ClassViews.Decode(op) is { Store: true, Kind: ClassViews.FieldKind.Array } arrayStore)
+                else if (op is ClassField { Field: { Store: true, Kind: ClassViews.FieldKind.Array } arrayStore })
                 {
                     var value = Pop();
                     if (Pop() is not Instance instance || Field(instance, arrayStore) is not { } field)
@@ -580,12 +594,13 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
                         $"(.address {values.Array.Name})", Array: values.Array));
                 }
-                else if ((match = Regex.Match(op, @"\A\.memory \(\.arrayLoad (4|8) false\)\z")).Success)
+                else if (LeanCIL.Arrays.Numeric(op, pc, methodIndex) is
+                    { Store: false, Width: 4 or 8, Signed: false } elementLoad)
                 {
                     var index = Pop();
                     if (Pop() is not Values { Array.Words: { } array } ||
                         index is not Word { Term: { } term, Width: 4 } ||
-                        array.Width != int.Parse(match.Groups[1].Value))
+                        array.Width != elementLoad.Width)
                         return Stop("an array element read without a named word array and index");
                     if (linear) { stack.Add(new Word(null, array.Width)); continue; }
                     var callerIndex = !Regex.IsMatch(term, @"\bstored\d+\b");
@@ -602,18 +617,30 @@ internal static partial class ProofOutline
                             ArrayApart.Add(key, apart = "arrayApart" + ArrayApart.Count);
                         return (write, apart);
                     }).ToArray();
-                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes, callerIndex));
+                    Steps.Add(new WordRead(array, $"({term} : W32).toNat", stores, name, writes, callerIndex,
+                        elementLoad));
                     stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
                 }
-                else if (op == ".memory .arrayLength")
+                else if (op is StackOperation { Kind: Code.Ldlen })
                 {
-                    if (Pop() is not Values values) return Stop("`ldlen` of an array the outline cannot name");
-                    Steps.Add(new ArrayUse(values.Array, stores, Length: true));
-                    stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
+                    switch (Pop())
+                    {
+                        case Values values:
+                            Steps.Add(new ArrayUse(values.Array, stores, Length: true));
+                            stack.Add(new Word($"(BitVec.ofNat 64 {values.Array.Length})", 8));
+                            break;
+                        case ArrayArgument array:
+                            Steps.Add(new ElementAccess(array.Name, ElementKind.Length, stores));
+                            var length = array.Name == Fresh?.Array ? $"{Fresh.Length}" : array.Name + "Length";
+                            stack.Add(new Word($"(BitVec.ofNat 64 {length})", 8));
+                            break;
+                        default:
+                            return Stop("`ldlen` of an array the outline cannot name");
+                    }
                 }
-                else if ((match = Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Success)
+                else if (op is Call { ReturnsToCaller: true } invocation)
                 {
-                    var index = int.Parse(match.Groups[1].Value);
+                    var index = invocation.Method;
                     // A contract read whole from the callee's body comes first, then a stub over words.
                     var callee = callees(index);
                     if (callee is null or { Open: true } && !linear && stubs?.Invoke(index) is { } stub)
@@ -639,7 +666,7 @@ internal static partial class ProofOutline
                     if (arguments.Any(argument => argument is Word { Term: null }) && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}` with a value the outline does not name");
                     if (Call(callee, arguments) is { } reason) return Stop(reason);
-                    var width = callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4;
+                    var width = callee.Spec.Result is { Width: 8 } ? 8 : 4;
                     if (callee.Open)
                     {
                         // The caller learns of the result only what the contract's `post` states.
@@ -663,40 +690,34 @@ internal static partial class ProofOutline
                     {
                         var call = (CallStep)Steps[^1];
                         stack.Add(new Word(Substitute(returned, callee, arguments, Memory(call.FieldMemory),
-                            call.Found), callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
+                            call.Found), callee.Spec.Result is { Width: 8 } ? 8 : 4,
+                            callee.Walk.ReturnedOrigin));
                     }
                     else if (callee.Spec.Result is not null && !linear)
                         return Stop($"a call to `{callee.Spec.Method.Name}`, whose result the outline cannot name");
                     else if (callee.Spec.Result is not null)
-                        stack.Add(new Word(null, callee.Spec.Result is { Constructor: ".i64" } ? 8 : 4));
+                        stack.Add(new Word(null, callee.Spec.Result is { Width: 8 } ? 8 : 4));
                 }
-                else if (op == ".memory .referenceArrayLength")
-                {
-                    if (Pop() is not ArrayArgument array) return Stop("`ldlen` of an array the outline cannot name");
-                    Steps.Add(new ElementAccess(array.Name, ElementKind.Length, stores));
-                    var length = array.Name == Fresh?.Array ? $"{Fresh.Length}" : array.Name + "Length";
-                    stack.Add(new Word($"(BitVec.ofNat 64 {length})", 8));
-                }
-                else if ((match = Regex.Match(op, @"\A\.newReferenceArray \(\.object (""[^""]*"") (""[^""]*"")\)\z"))
-                    .Success)
+                // An array of a runtime class, such as `string[]`, is not stepped.
+                else if (op is NewArray { Class: { } allocated } && allocated.Scope != TypeTests.RuntimeScope)
                 {
                     // Facts stated of the caller's memory carry into the fresh one only across this first write.
-                    if (Pop() is not Word { Width: 4, Term: { } count } || !Numeral(count) || int.Parse(count) == 0)
+                    if (Pop() is not Word { Width: 4, Origin: { Numeral: true, Value: > 0 } count })
                         return Stop("`newarr` of a length that is not a positive literal");
                     if (linear || stores > 0 || calls > 0 || Fresh is not null)
                         return Stop("`newarr` after a write, a call or another allocation");
-                    Fresh = new Allocation("fresh1", match.Groups[1].Value, match.Groups[2].Value, int.Parse(count),
-                        stores);
+                    Fresh = new Allocation("fresh1", GenericEvidence.Quote(allocated.Scope),
+                        GenericEvidence.Quote(allocated.Name), (int)count.Value, stores);
                     Steps.Add(Fresh);
                     stores++;
                     stack.Add(new ArrayArgument(Fresh.Array));
                 }
-                else if (op == ".memory .referenceArrayLoad")
+                else if (op is StackOperation { Kind: Code.Ldelem_Ref })
                 {
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`ldelem.ref` of an array or index the outline cannot name");
                     if ((Outside(array.Name, at) ?? Unseparated(array.Name, at)) is { } reason) return Stop(reason);
-                    var slot = Slot(array.Name, at);
+                    var slot = Slot(array.Name, at.Term);
                     // The element holds what this path last stored into it, or what it held in the caller's memory.
                     if (PathSteps.OfType<ElementAccess>().LastOrDefault(access => access.Kind == ElementKind.Store &&
                         access.Slot == slot) is { } written)
@@ -715,32 +736,35 @@ internal static partial class ProofOutline
                     // Every element of a fresh array holds null until a store.
                     if (array.Name == Fresh?.Array)
                     {
-                        Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at, ".null", Slot: slot,
-                            Reread: true));
+                        Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at.Term, ".null", Slot: slot,
+                            Reread: true, LiteralIndex: at.Literal is not null));
                         stack.Add(new Null());
                         continue;
                     }
-                    var held = new Opaque($"(ReferenceArray.of initial {array.Name} {at})", slot + "Forms.formed");
+                    var held = new Opaque($"(ReferenceArray.of initial {array.Name} {at.Term})",
+                        slot + "Forms.formed");
                     if (CallWrote) return Stop(Uncarried(held));
-                    Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at, held.Term,
-                        Formed: held.Formed, Slot: slot));
+                    Steps.Add(new ElementAccess(array.Name, ElementKind.Load, stores, at.Term, held.Term,
+                        Formed: held.Formed, Slot: slot, LiteralIndex: at.Literal is not null));
                     stack.Add(held);
                 }
-                else if (op == ".memory .referenceArrayStore")
+                else if (op is StackOperation { Kind: Code.Stelem_Ref })
                 {
                     var value = Pop();
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`stelem.ref` into an array or at an index the outline cannot name");
                     if ((Outside(array.Name, at) ?? Unseparated(array.Name, at)) is { } reason) return Stop(reason);
                     if (value is Opaque late && CallWrote) return Stop(Uncarried(late));
-                    var slot = Slot(array.Name, at);
+                    var slot = Slot(array.Name, at.Term);
                     ElementAccess? stored = value switch
                     {
-                        Instance target => new(array.Name, ElementKind.Store, stores, at,
-                            $"(.address {target.Object.Name})", target.Object, Slot: slot),
-                        Null => new(array.Name, ElementKind.Store, stores, at, ".null", Slot: slot),
-                        Opaque opaque => new(array.Name, ElementKind.Store, stores, at, opaque.Term,
-                            Formed: opaque.Formed, Slot: slot),
+                        Instance target => new(array.Name, ElementKind.Store, stores, at.Term,
+                            $"(.address {target.Object.Name})", target.Object, Slot: slot,
+                            LiteralIndex: at.Literal is not null),
+                        Null => new(array.Name, ElementKind.Store, stores, at.Term, ".null", Slot: slot,
+                            LiteralIndex: at.Literal is not null),
+                        Opaque opaque => new(array.Name, ElementKind.Store, stores, at.Term, opaque.Term,
+                            Formed: opaque.Formed, Slot: slot, LiteralIndex: at.Literal is not null),
                         _ => null
                     };
                     if (stored is null) return Stop("`stelem.ref` of a value the outline cannot name");
@@ -751,13 +775,13 @@ internal static partial class ProofOutline
                     Steps.Add(stored);
                     stores++;
                 }
-                else if (op == ".nop") { }
-                else if (throws && !linear && op.StartsWith(".throw ", StringComparison.Ordinal))
+                else if (op.IsNop) { }
+                else if (throws && !linear && op is Throw)
                 {
                     Steps.Add(new Thrown(location(pc)));
                     return true;
                 }
-                else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal))
+                else if (op is Return)
                 {
                     if (spec.Result is not null)
                     {
@@ -772,6 +796,8 @@ internal static partial class ProofOutline
                             Values values when spec.Result.Array => values.Array.View,
                             _ => null
                         };
+                        ReturnedOrigin =
+                            Returned is not null && result is Word returnedWord ? returnedWord.Origin : null;
                         // The return checks a returned array in the memory it leaves.
                         if (result is Values returned && spec.Result.Array)
                             Steps.Add(new ArrayUse(returned.Array, stores));
@@ -781,7 +807,7 @@ internal static partial class ProofOutline
                     }
                     if (!linear) return true;
                 }
-                else return Stop($"`{op}`, which the outline does not step");
+                else return Stop(", which the outline does not step", showInstruction: true);
             }
             if (linear) return true;
             Stopped = "the end of the body without a return";
@@ -912,20 +938,18 @@ internal static partial class ProofOutline
 
         /// <summary>Why the facts of element `index` of `array` do not carry across this path's element stores:
         /// one into another array, which may be the same one, or one at an index not provably different.</summary>
-        string? Unseparated(string array, string index)
+        string? Unseparated(string array, ElementIndex at)
         {
             foreach (var store in PathSteps.OfType<ElementAccess>().Where(access => access.Kind == ElementKind.Store))
             {
                 if (store.Array != array)
                     return $"an access of `{array}` after a store into `{store.Array}`, which may be the same array";
-                if (store.Index != index && !(Numeral(store.Index!) && Numeral(index)))
-                    return $"an access of element `{index}` of `{array}` after a store into element `{store.Index}`, " +
-                        "which the statement cannot tell apart";
+                if (store.Index != at.Term && !(store.LiteralIndex && at.Literal is not null))
+                    return $"an access of element `{at.Term}` of `{array}` after a store into element " +
+                        $"`{store.Index}`, which the statement cannot tell apart";
             }
             return null;
         }
-
-        static bool Numeral(string index) => Regex.IsMatch(index, @"\A\d+\z");
 
         /// <summary>The element facts of `array`, with the index each names.</summary>
         internal (string Slot, string Index)[] SlotsOf(string array) =>
@@ -933,18 +957,21 @@ internal static partial class ProofOutline
 
         /// <summary>Why element `index` of the fresh array is not one its proof names: an index that is not a
         /// literal inside its length, which may throw.</summary>
-        string? Outside(string array, string index) =>
-            array == Fresh?.Array && !(Numeral(index) && int.Parse(index) < Fresh.Length)
-                ? $"an element `{index}` of `{array}` not provably inside its {Fresh.Length} elements" : null;
+        string? Outside(string array, ElementIndex at) =>
+            array == Fresh?.Array && !(at.Literal < Fresh.Length)
+                ? $"an element `{at.Term}` of `{array}` not provably inside its {Fresh.Length} elements" : null;
 
         /// <summary>The element number a named int32 index selects, as the CLR reads it: unsigned.</summary>
-        static string? Index(Word index) => index switch
+        static ElementIndex? Index(Word index) => index switch
         {
             { Width: not 4 } or { Term: null } => null,
-            { Term: var term } when Regex.IsMatch(term, @"\A\d+\z") => term,
-            { Term: var term } when term.StartsWith("(-", StringComparison.Ordinal) => null,
-            { Term: var term } => term + ".toNat"
+            { Origin: { Numeral: true } origin } => new(index.Term, origin.Value),
+            { Origin: { Numeral: false, Value: < 0 } } => null,
+            { Term: var term } => new(term + ".toNat")
         };
+
+        /// <summary>The term naming an element number, and the number itself when it is a literal.</summary>
+        sealed record ElementIndex(string Term, long? Literal = null);
 
         /// <summary>The fact naming element `index` of `array`, numbered in the order the body reaches them.
         /// </summary>
@@ -956,7 +983,7 @@ internal static partial class ProofOutline
             return name;
         }
 
-        static string Uncompared(string op) => $"`{op}` of a reference with a value the outline cannot name";
+        const string Uncompared = " of a reference with a value the outline cannot name";
 
         /// <summary>The equation a reference test decides, or null when an operand is not a reference the outline
         /// names or a store has come first, since the statement forms each reference in the caller's memory.
@@ -1093,7 +1120,7 @@ internal static partial class ProofOutline
     /// <summary>A term's words, keeping each short innermost parenthesized group such as `(by decide)` whole, as
     /// parts the writer may wrap between. A longer group splits so no part outgrows the line.</summary>
     static string[] Terms(this string term) =>
-        [.. InnermostGroup()
+        [.. InnermostGroup
             .Replace(term, group => group.Length <= ShortGroup ? group.Value.Replace(' ', Glue) : group.Value)
             .Split(' ').Select(part => part.Replace(Glue, ' '))];
 
@@ -1101,7 +1128,7 @@ internal static partial class ProofOutline
     const char Glue = '\u0001';
 
     [GeneratedRegex(@"\([^()]*\)")]
-    private static partial Regex InnermostGroup();
+    private static partial Regex InnermostGroup { get; }
 
     /// <summary>The contract of a callee whose body the walk steps with no call of its own and at most one store,
     /// or reference field loads and no store: `pre` its facts, `post` its store and its result, and its proof.
@@ -1119,8 +1146,8 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
-            var walk = new ObjectWalk(spec, extraction.Emitted[index].Ops, views, _ => null,
-                numericHomes: HasNumericObjectHomes(method), throws: splits);
+            var walk = new ObjectWalk(spec, SlotOperations(extraction.Emitted[index]), views, _ => null,
+                numericHomes: HasNumericObjectHomes(method), throws: splits, methodIndex: index);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.
             if (!walk.Run(pc => Location(method, pc)) || walk.Flattened.Any(step => step is CallStep) ||
@@ -1179,7 +1206,7 @@ internal static partial class ProofOutline
         var summaries = new Dictionary<int, Callee?>();
         Callee? Summary(int index) => summaries.TryGetValue(index, out var known) ? known
             : summaries[index] = Summarize(extraction, index, names.Claim("callee" + index, "callee" + index), views);
-        var walk = new ObjectWalk(spec, body.Ops, views, Summary, linear: true);
+        var walk = new ObjectWalk(spec, body.Operations, views, Summary, linear: true);
         if (walk.Run(pc => Location(spec.Method, pc)) && walk.Objects.All(reached => reached.Holder is null) &&
             walk.Arrays.Count == 0)
             spec.Plan = walk.Plan();
@@ -1618,12 +1645,12 @@ internal static partial class ProofOutline
             var name = array.Name + "LengthStep" + stores;
             var memory = ObjectWalk.Memory(stores);
             lean.Line($"{indent}have {name} : ∀ body pc args frame rest,");
-            lean.Line($"{indent}    step body (.memory .arrayLength) pc args frame (.array {array.Name} :: rest)");
+            lean.Line($"{indent}    step body .ldlen pc args frame (.array {array.Name} :: rest)");
             lean.Line($"{indent}      {memory} = .ok (.next (pc + 1)");
             lean.Line($"{indent}        (.scalar (.i64 (BitVec.ofNat 64 {array.Name}.length)) :: rest) frame");
             lean.Line($"{indent}        {memory}) := by");
             lean.Line($"{indent}  intros");
-            lean.Line($"{indent}  simp [step_memory_arrayLength_eq, {WordValid(array, stores)}, " +
+            lean.Line($"{indent}  simp [step_ldlen_array_eq, {WordValid(array, stores)}, " +
                 $"{array.Name}Reference, checkedAt, Except.mapError] <;> rfl");
             Add(name);
         }
@@ -1659,7 +1686,7 @@ internal static partial class ProofOutline
             });
             lean.Wrapped($"{indent}obtain ⟨{read.Name}Reference, {read.Name}Found, {read.Name}Loaded⟩ :=",
                 $"{contents}.array_load {WordValid(array, read.Stores)} (by decide) {read.Name}Bound".Terms(), "");
-            Add($"step_arrayLoad_of_element (index := .i32 _) rfl {read.Name}Found {read.Name}Loaded");
+            Add($"{read.Load.LoadLemma} (index := .i32 _) rfl {read.Name}Found {read.Name}Loaded");
         }
 
         /// <summary>A `newarr` charged to the budget premise, confined to no caller memory, with a `Holds` of null

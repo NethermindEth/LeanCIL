@@ -10,9 +10,9 @@ require their features; portable operations use software semantics. Profile vali
 but the verifier does not discover a deployment's actual CPU, runtime or resource availability.
 See [runtime profiles](RUNTIME-PROFILES.md).
 
-`IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` use the profile's required
-64-bit process assumption. Their exact getters translate to constants `8`, `8` and `true`;
-they do not inspect the verifier host or establish a deployment's actual process width.
+`IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` use the profile's required
+64-bit process assumption. The interpreter runs their calls as constant models returning 8, 8 and true.
+Hardware getter models read their named flag from the method's profile, including a false flag.
 
 `RuntimeHelpers.IsReferenceOrContainsReferences<T>()` returns `false` only for supported primitive
 integers, booleans, characters, integer enums and vectors, or a reference-free aggregate admitted
@@ -21,11 +21,11 @@ aggregate is admissible when its validated fields contain neither references nor
 arrays, classes, open generic arguments and unsupported storage are rejected. The query establishes
 neither initialized padding nor memory access, lifetime or escape authority.
 
-The exact runtime signature and generic argument bind the constant independently of extraction.
-Feature and scalar certificates receive `rawLayouts.toArray`, including types used only by queries;
-the enclosing translation certificate checks the complete layout table. Aggregate queries compare
-their index and identity without repeating layout computation. Runtime correspondence assumes the
-.NET 10 helper's reference-and-byref classification, rather than inspecting the verifier host.
+The call keeps its member reference. The runtime model checks the open declaration and closed
+signature, then reads the queried element through the indexed layout reader. Feature-flow
+validation uses the same storage test to propagate zero. An aggregate must match the raw
+layout identity at its index. The deployment's runtime helper must agree with this classification of
+references and byrefs.
 
 | Area | Model convention / deployment premise | Excluded claim |
 | --- | --- | --- |
@@ -51,27 +51,107 @@ assumes .NET 10's native-width multiplication by `sizeof(T)` followed by additio
 They admit existing storage for supported integer,
 enum, vector and reference-free aggregate types; neither fabricates addresses nor grants authority.
 Negative offsets wrap at native width before the resulting reference is checked for lifetime and
-bounds. Null and invalid resulting references fail. Exact signature checks bind the pointer overload;
-primitive/vector stride and signedness are checked directly, and aggregate stride uses layout evidence.
+bounds. Null and invalid resulting references fail. The pointer overload binds the exact external
+target and generic declaration. Its signed Int32 displacement scales by the element size from
+the indexed layout reader.
 
 ### Unspecified vector lanes
 
 Portable 128-, 256- and 512-bit integer vector bitwise operators, whole-vector equality, `Zero` and
 `AllBitsSet` share their bit-level semantics for byte, signed/unsigned 32-bit and signed/unsigned
-64-bit elements. The intrinsic certificate checks the exact runtime call, element, width, generic
-arguments and emitted operation. Floating-point equality and unspecified-lane observations are excluded.
+64-bit elements. Hardware model entries bind the open declaration and external identity of each overload.
+The closed reference selects its operation and arity. `runtimeModels_hardware` proves that every
+hardware reference, `DivRem` among them, resolves through the rows of its own slot, and
+`runtimeModels_exactHardware` that every exact-family reference resolves to `exactIntrinsic` in
+every layout environment.
+The decoder checks availability under the method's profile. A live unresolved or unavailable
+call prevents construction of the decoded method. Portable
+vector constructors and byte-reference loads and stores retain their calls. Their model entries
+bind the exact external target, open declaration, closed element and operand types. Floating-point equality and unspecified-lane observations are excluded.
 
 `v128Low64 low` represents every vector with that low lane. `checkedIntrinsic` admits only consumers
 proved independent of the upper lane: reinterpretation, lane-zero extraction and the count operands
 of the admitted AVX2 logical shifts. Reinterpretation preserves uncertainty. Other observations,
-byte stores, bitcasts, returns and call/constructor arguments reject unspecified bits. Internal
+byte stores, bitcasts, returns, constructor arguments and the arguments of a linked call reject
+unspecified bits. A call without a link checks only the operands its runtime model observes, so a
+call modelled as an intrinsic reads its operands as that intrinsic does. Internal
 dup/pop and eligible opaque locals may forward them. `invoke_return_known` and `step_call_known`
 state the boundary guarantees; a contract cannot expose an unknown lane as a concrete value.
 
-`OpaqueLocalsValid` requires a reachable admitted producer and independently recomputes eligibility
+`OpaqueLocalsValid` requires a reachable call whose runtime model is `CreateScalarUnsafe` and
+independently recomputes eligibility
 from raw local uses, excluding address-taken locals. Opaque by-value helper parameters are unsupported.
 Agreement between the permitted consumers and the actual JIT remains a runtime assumption.
 See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory](COMPILER-COVERAGE.md).
+
+`runtimeModel` resolves the typed method reference of a `call` or `newobj` through a table of
+model entries, searched by method name; at the leaf the entry's name, opcode and owner head are
+compared and the entry resolves the whole reference. A `call` the table models keeps its call
+and states no link, and the checked interpreter runs the model when the pc has no link;
+`ManagedCallsValid` checks a retained call's link to another method. At a live unlinked modelled
+call, `RuntimeModelsAgree` requires the same method reference and an available model. Its entry
+also checks the member's calling-convention byte and its return and parameter types before
+generic substitution. For an overloaded name, the closed reference selects one overload.
+The validator checks that overload's declaration and raw operand, and execution uses its resolver.
+An exact external operand binds the member name, target, argument counts and return flag.
+A reserved name produces the opcode's hole when its overload fails to resolve. Both validation
+and execution read storage, shape and aggregate alignment from the same indexed layout metadata.
+The entries for `Unsafe.SizeOf`, `AreSame`, `IsAddressLessThan`,
+`IsAddressGreaterThan`, `ByteOffset`, `Add`, `Subtract`, `AddByteOffset`, `SubtractByteOffset`
+and `SkipInit` claim their names on the exact runtime owner. Each checks
+its static generic declaration and closed operand. Each requires a sized element. For a struct,
+the raw layout at the stated index must name that struct and the computed layout must exist.
+`SizeOf` returns its checked byte size. The comparisons observe allocation-relative references.
+`ByteOffset` returns the signed native displacement between two references in the same allocation.
+Element offsets use the checked width of the selected type. Byte offsets use a unit stride.
+The unsigned native overload zero-extends its offset. Subtraction wraps at native width.
+`SkipInit` forms its reference without writing to it. The table also holds
+the `System.Object` constructor, `Vector128.CreateScalarUnsafe(ulong)`, `GetElement<ulong>` of
+`Vector128` and `Vector256`, and the integer helpers `Min`, `Max`, `Clamp`, `Abs` and
+`Sign` of `System.Math` and of each integer type that declares them, the bit helpers of
+`System.Numerics.BitOperations` and of each integer type that declares them, and
+`BinaryPrimitives.ReverseEndianness`, whose calls keep their calls, so the table accounts for no
+lowered emission. `Unsafe.Read` and `Write` run pointer transfers at the element's natural
+alignment. `ReadUnaligned` and `WriteUnaligned` run typed loads and stores at byte alignment.
+These models support integer vectors of 16, 32 and 64 bytes under every profile.
+A helper entry gives the scalar intrinsic of its integer type only to a static,
+non-generic reference of that owner and exact runtime assembly whose parameters and result have
+that type; a bit count's result is `int` under `BitOperations` and the integer type under the
+type that declares it. A model the table gives a kept call must be
+available in the method's profile, and `Instruction.ProfileAgreement` reads a call through the
+model its method has; `ManagedCallsValid` requires a live call of a modelled method to keep its call, and
+`UnsafeCallsValid` rejects `pop` at every `call`, `calli`, `callvirt` or `newobj` site, where it
+would drop the call. A proof about the models the table gives (`Extraction.runtimeModel_yields`)
+holds for each entry's models.
+
+The core span entries cover indexing, length, slicing, emptiness, pinnable references, the
+empty span and implicit conversions. Both span types accept an array. A writable span also
+converts to a readonly span. Each overload binds its open declaration, closed signature and
+exact external target. Aggregate elements require a matching indexed layout and computed width.
+Array conversions also reject byref-like elements. The three array overloads of
+`System.MemoryExtensions.AsSpan<T>` bind the open method variable in the array and return
+type and require the exact System.Memory target. Their calls construct writable views using
+the checked array element storage and layout width.
+
+The bulk entries bind `Clear` and `Fill` on writable spans and both copy members on writable
+and readonly spans. The receiver is the view on the evaluation stack. The checked memory
+operation uses the closed element width for copies, fills and clears under every profile.
+Both `Array.Fill<T>` overloads bind the method parameter in the open declaration and require
+a primitive or enum element. The range overload also requires two int32 bounds.
+
+The runtime table binds ten static `System.Runtime.InteropServices.MemoryMarshal` members.
+The open declaration distinguishes writable and readonly spans and fixes the positions of
+the method parameters. The closed reference fixes their types. `transferKind?` reads the
+scalar width and signedness, integer-vector width or aggregate size from the layout environment.
+A resolved call runs the corresponding memory instruction via `step_call_memory`.
+
+The decoder reads the checked fold role before resolving a call. An exact runtime
+`System.Type` comparison supplies its Boolean result. The constructor of an allowlisted
+exception emits `nop` inside the matching throw sequence.
+
+At other unlinked sites, `siteClaim` refuses a call that no model claims, and the decoder emits
+a hole tagged with the raw opcode, which closed method construction refuses at a live site. An
+unknown member or unsupported overload therefore cannot occur at a live site.
 
 ### Arrays, views and bulk memory
 
@@ -83,7 +163,11 @@ Valid null/index failures raise their named exceptions; invalid descriptors, exp
 missing authority remain model faults and cannot discharge those exceptional contracts.
 
 `newarr` allocates primitive integer/bool/char/native arrays, same-assembly integer-backed enums,
-validated reference-free aggregates and supported integer vectors. Enum payloads start at zero
+validated reference-free aggregates and supported integer vectors. The instruction carries its raw
+type token, which the extraction check compares exactly, and the step reads the element's shape
+from the body's checked layouts (`Method.elementShape`): a struct's stride is the size of its
+checked layout, and a struct the layouts do not hold, a by-ref-like struct or `System.Object` has
+no shape, so its `newarr` is unsupported. Enum payloads start at zero
 even when the enum declares no zero member. Fresh non-null
 identities survive frame return, including for empty arrays. Payloads start zeroed and writable.
 Negative lengths raise `OverflowException`; lengths above `0x7fffffc7`, invalid native extents and
@@ -121,16 +205,22 @@ and write capability remain bound to the exact span type; aggregate widths and i
 checked against the layout table. Resetting a local replaces its view without modifying backing
 memory, granting authority or extending a lifetime.
 
-A readonly span reference parameter (`in` or `ref readonly`) carries the referenced view rather
-than the address of the caller's span home, as span-local addresses already do. Carrying the view
-is sound only because the home cannot change during the call: the extractor rejects `starg` and
+`ldloca` and `ldarga` of a span local or homed span parameter push a home, a value that names
+the frame's slot, and each consumer reads the slot's view when it runs, so a store to the local
+after its address was taken is visible through the address, as in the CLR. A home never leaves its
+frame: call, return and entry arguments are checked values, which a home is not
+(`FrameAction.HomeFree`, `invokeWith_spanHome`), and admission refuses an address where a callee
+takes a span by value. A readonly span reference parameter (`in` or `ref readonly`) therefore
+carries the view the caller's home holds when the call runs rather than the address of that home.
+Carrying the view is sound only because the home cannot change during the call: the extractor rejects `starg` and
 `ldarga` of such a parameter, span `stobj`, `initobj` and `cpobj` outside the checked local
 reset, `ref` and `out` span parameters, and span references in locals, returns and fields, so no
 admitted code can rebind, address or overwrite a span home. The parameter's readonly attributes,
 which a generic specialization copies from its definition, and these rejections are trusted
-extractor decisions; the Lean validators still bind the raw argument to
-a managed reference, reject its address and accept an empty emission for `ldobj` only at a span
-type. Loads, stores and comparisons that expect a byte reference fault on a view rather than
+extractor decisions. Lean binds the raw argument to a managed reference and rejects its address.
+A decoded span `ldobj` forwards a span value and reads a local or parameter home as the view its
+slot holds when the load runs. Its preceding instruction must load or address that
+exact span home, and the copy must have no incoming branch. Loads, stores and comparisons that expect a byte reference fault on a view rather than
 reading it as an address.
 
 An `in` parameter of a virtual member carries `modreq(InAttribute)` on its reference. The
@@ -147,6 +237,13 @@ signature string keeps it. The extractor admits the modifier only directly on `S
 naming `System.Runtime.CompilerServices.IsExternalInit` from any assembly, as C# does; and the
 same twin rejection covers a method equal to the accessor once the modifier is erased.
 
+The model of `Unsafe.As` forms a reference and preserves its address between field or vector
+storage. A span, array or class reference is not the address of bytes the other type can name,
+so an `As` site naming one decodes to the call hole.
+Both `Unsafe.AsRef` overloads keep their call and form a reference for field or vector storage.
+The closed parameter selects the byref or void-pointer overload and its exact external target.
+`Unsafe.NullRef` and `Unsafe.IsNullRef` accept an indexed storage kind other than byref storage.
+Their models push the null managed reference and test a managed reference for null, respectively.
 Equal-size aggregate/vector `Unsafe.BitCast` uses the same snapshot representation for validated
 `byte`, `int`, `uint`, `long` and `ulong` vector elements. Element signedness does not initialize
 unknown bytes or change their bits. Aggregate/vector loads and stores preserve initialization masks.
@@ -164,13 +261,21 @@ Nonempty destinations need write authority, not prior readability. Copy requires
 bytes. Empty operations grant no authority. Empty spans have null pinnable references; empty arrays
 retain their data reference. Null array data-reference access raises its named exception.
 
+The four Unsafe block helpers retain their calls. The closed signature selects the byte-reference
+or void-pointer overload. The raw operand must match its external target and open declaration.
+Each member takes a `uint` byte count and returns void. Copy takes two addresses of the same type,
+and initialization takes an address and a byte. The aligned helpers require eight-byte alignment
+and the unaligned helpers require one-byte alignment on every supported profile.
+
 Block copies require disjoint regions; `cpobj` permits identical addresses but rejects partial
 overlap. Nonempty block accesses check lifetime, bounds, permissions, initialization, alignment and
 GC-reference exclusion. Block alignment is eight unless a valid `unaligned.` prefix selects 1/2/4.
 Zero-byte blocks access no memory, including through null. Prefix operands/followers and entry edges
 are validated; correspondence to CoreCLR remains assumed.
 
-`BinaryPrimitives` span operations bind width, endian order, signedness and try behavior exactly.
+The runtime table binds each endian member of `BinaryPrimitives` to its open declaration,
+closed signature and external target. The retained call executes the checked span operation
+for its width, byte order, signedness and try behavior.
 Native integer overloads use eight-byte transfers under the validated 64-bit deployment profile.
 Short ordinary operations raise `ArgumentOutOfRangeException`; short try-reads initialize the output
 to zero and short try-writes preserve memory. Reads capture source before writing an aliased output.
@@ -179,9 +284,24 @@ runtime implementations.
 
 ### Static storage
 
+The method decoder retains the storage descriptor at each static load or address. An opaque
+scalar load requires the caller's binding. A reachable `stsfld` fails extraction and is refused
+by the method decoder, and executing a hand-built store returns the unsupported static field
+store error.
+
 RVA storage is immutable and extraction-bound. Static keys hash full assembly/field identities;
-hash injectivity is not assumed: extraction/import checks reject collisions, and composed full
-verification proves `linkChecked`. Raw `link` alone supplies no collision guarantee.
+hash injectivity is not assumed. Within one extraction, `TranslationValid` requires each identity
+to name exactly one field and each field to have one identity, by the metadata row its token
+resolves to (`StaticIdentitiesValid`). Across imports, extraction/import checks reject
+collisions, and composed full verification proves `linkChecked`, which compares the linked
+descriptors and fails with the first `StaticCollision`. Raw `link` alone supplies no collision
+guarantee.
+
+At a live RVA field token or address, the decoder compares the operand's owner, index, type and
+name with the descriptor at that instruction. It checks that the blob has the declared nonzero
+size. The extractor supplies the PE bytes, class size and packing. The runtime model for
+`RuntimeHelpers.CreateSpan<T>` checks the generic declaration and selects the element width
+from the closed scalar type. Execution checks the storage alignment before constructing the view.
 
 An RVA field's descriptor alignment is its packing. The extractor checks the RVA, and that its
 section's virtual address and file offset agree modulo 8; the runtime premise is that CoreCLR
@@ -235,34 +355,40 @@ locals and parameters are roots without bytes and have no address.
 bytes in the object's allocation (`objectFieldAddress`). The model chooses the layout
 independently of CoreCLR: one 8-byte slot per instance field, the fields of the furthest base
 first and each class's own in declaration order after its base's (`objectFieldOffset`), so a
-field keeps its offset in every derived instance. Lean rechecks the offset against each
-instruction's raw field index and type; that the raw index counts the fields of the declaring
-class's bases first is metadata the extractor decodes. The model's layout needs no
-correspondence with CoreCLR's layout because code cannot observe it: `ldflda` on a class is
-rejected, and object references have no integer form. Each access checks that the field's
+field keeps its offset in every derived instance. Each `ldfld` and `stfld` carries the field
+reference its raw operand names, and its step resolves the slot from the field's index and type
+(`Method.fieldShape`); that the raw index counts the fields of the declaring class's bases first
+is metadata the extractor decodes. The model's layout needs no correspondence with CoreCLR's
+layout because code cannot observe it: the extractor refuses a method with `ldflda` on a class
+field at admission, a hand-written body holding one faults as `unsupported` when stepped, and
+object references have no integer form. Each access checks that the field's
 declaring class is in the allocation's lineage, so a field of a base class is reached on every
 derived instance and a field of an unrelated class on none, and a null receiver throws
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
 `nullDereference` fault.
 
-`newobj` of an admitted class (`.newObject`) checks the constructor's arguments, then allocates
-a fresh live instance (`allocateObject`): an allocation of kind `.object` with the class and its
+`newobj` of an admitted class (`.newobj` of the constructor's `MethodRef`, under an `.object` link
+in the method's table) checks the constructor's arguments, then allocates a fresh live instance
+(`allocateObject`): an allocation of kind `.object` with the constructor's class and the link's
 bases as its runtime type, one zeroed 8-byte slot per instance field, inherited fields included,
 and authority over all of it. It charges the
 instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
 `allocationFailure` when the budget is short; that fault is a model resource fault and is not a
 CLR exception, so no proof of an expected exception can rest on it. The budget never grows back:
 it is a conservative bound that ignores collection. The constructor then runs with the
-instance as its receiver, and the instance is pushed once it returns. Lean rechecks that the
-call site's declaring class is the instance's class, that its bases are those the constructor's
-raw method records (`RawMethod.objectBases`), that the constructor takes an object receiver, and
-that the size is one slot per instance field of the constructor's class, inherited fields
-included. `newobj` of an abstract class is rejected by name, as the runtime rejects it. A derived
+instance as its receiver, and the instance is pushed once it returns. Lean rechecks
+(`validateConstructionWith`) that the raw instruction is `newobj` of a managed site naming exactly
+the instruction's constructor, that the linked method is the one the site names, that a class
+constructor takes an object receiver and is linked `.object` while a value-type constructor is
+linked `.aggregate`, that the link's bases are those the constructor's raw method records
+(`RawMethod.objectBases`), and that the size is one slot per instance field of the constructor's
+class, inherited fields included. `newobj` of an abstract class is rejected by name, as the runtime rejects it. A derived
 constructor's chained call to its base's constructor is an ordinary instance `call` with the new
 instance as receiver ([DerivedObject](../Examples/Proofs/DerivedObject.lean)).
 Inside an admitted constructor, `call System.Object::.ctor()` with the exact `System.Runtime`
-scope only pops the receiver: the runtime's constructor has no effect on an instance, and Lean
-rechecks that exact target wherever `.pop` stands for a call. No frame owns
+scope stays a call with no link, and its runtime model only consumes the receiver: the runtime's
+constructor has no effect on an instance. The model entry matches that exact method reference, so
+a constructor of another scope or signature has no model. No frame owns
 an instance, so leaving the method that created it never expires it: an instance lives as long
 as a reference can observe it, which is the reachability the collector maintains.
 
@@ -280,9 +406,9 @@ instances of two unrelated cataloged classes.
 
 A caller states the premise once, for its entry memory, and execution keeps it
 ([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` and `newarr` of a class
-create instances: `newobj` of the class and bases it records, `newarr` an array of its element
-type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
-program` checks every such site of the program text against the catalog, once per extraction by
+create instances: `newobj` of its constructor's class with the bases its `.object` link states,
+`newarr` an array of its element type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
+program` checks every such site of the program text and link tables against the catalog, once per extraction by
 `decide`. Given it, `step_preserves_classes`,
 `run_preserves_classes` and `invoke_preserves_classes` keep the premise through every step,
 nested call and frame exit. Formed calls and constructions hand their continuation the same
@@ -296,8 +422,8 @@ held reference to name an identity already issued, so a later allocation can nev
 dangling reference live; `Confined`, `MemoryBelow`, `Memory.Equivalent` and `Memory.Renamed`
 each relate field references alongside bytes, the last through the allocation map.
 
-`ldfld` and `stfld` of a field whose type is an admitted class (`.objectReferenceField`,
-`.setObjectReferenceField`) locate the field like a scalar one, so a null receiver throws
+`ldfld` and `stfld` of a field whose type is an admitted class (a `.reference` slot) locate the
+field like a scalar one, so a null receiver throws
 `NullReferenceException` and the owner is checked against the runtime type, then check the
 field's 8-byte slot for read or write authority inside the object. A load pushes the reference
 the slot holds once it forms again (`loadSlot`); a store requires the value to form, that is to
@@ -317,6 +443,13 @@ runtime type the model never inspects. Fields of generic parameter type or a mod
 rejected, as are fields holding multi-dimensional arrays, whose shape a slot cannot recover from
 the allocation it names.
 
+Such a field names a generic class instance as an `apply` chain over a class head
+(`TypeExpr.objectConstructor`), which binding checks against a class, interface or delegate
+definition, and `object` as `System.Object` of the primitive assembly. A load of either pushes the
+stack kind `opaque`, which only a store into a field of either type, `castclass`, `isinst` and a
+null test take, so the reference reaches a receiver, an admitted class field or an array operation
+only through a type test, which checks its runtime type.
+
 `System.String` of `System.Runtime`, matched exactly, is the one such class that is also admitted
 as the type of an argument, a local and a result ([StringValues](../Examples/Proofs/StringValues.lean),
 [StringLabel](../Examples/Proofs/StringLabel.lean)). A string is an object reference on the stack
@@ -334,33 +467,26 @@ receiver (`objectReceiver`), from which Lean derives the receiver's storage and 
 rejects the address of the receiver and of any class-typed local or argument, so no byref can
 stand in for an object receiver.
 
-`callvirt` without a `constrained.` prefix, which C# emits for every instance call on a class,
-is admitted when its target is a non-virtual method of an admitted class. It has exactly one
-target, so it is a call (`callInstance`) that first checks its receiver: a null receiver throws
-`System.NullReferenceException` at the `callvirt`, in the caller, before the callee is entered
-(ECMA-335 III.3.19), and a receiver that is no object reference is ill-typed. Lean admits a
-`callInstance` only at `callvirt`, only into a method whose receiver is an object, counting the
-receiver among its arguments, and rejects a plain `call` emitted for `callvirt`, which would skip
-the check. It also rejects a `callInstance` into a method whose metadata attributes mark it
-virtual, since `callvirt` selects such a body by runtime type; the attributes are metadata the
-extractor decodes, as it decodes `hasThis`.
+An unprefixed `callvirt` names the method in its raw operand. A direct link selects a
+non-virtual method of an admitted class. Lean checks the method reference, the callee's
+metadata and its object receiver, and counts the receiver among the arguments. A null
+receiver throws `System.NullReferenceException` in the caller (ECMA-335 III.3.19).
 
-`callvirt` of a virtual method of an admitted class is a `callVirtual` whose table names the body
-for each class of the extraction's assemblies that derives from the slot's class
-([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). It checks the receiver for null
-like `callInstance`, then enters the body listed for the receiver's runtime type, which the
-allocation records. Lean admits a `callVirtual` only at `callvirt` and only into virtual methods
-with the slot's signature and an object receiver
-([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)).
+A virtual link maps each admitted class derived from the slot's class to the body for its
+instances. Lean checks the slot reference, the signature and virtual attributes of its
+implementations, and the selected body for every concrete class. Execution checks the receiver
+for null and reads its exact runtime class from its allocation to select the implementation.
+See [virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch) and
+[AnimalLegs](../Examples/Proofs/AnimalLegs.lean).
 
-`castclass` and `isinst` of an admitted class other than `System.Object` are an `objectTest` of
-that class. It keeps a reference whose runtime type, its own class or one of the admitted bases
+`castclass` and `isinst` of an admitted class other than `System.Object` test against that
+class. Each keeps a reference whose runtime type, its own class or one of the admitted bases
 the allocation records, is the class, passes null through, and otherwise gives null (`isinst`)
 or throws `System.InvalidCastException` (`castclass`) (ECMA-335 III.4.3, III.4.6). Those classes
 are the instance's whole lineage below `System.Object`, so the test is exact. For an instance
 the method does not construct, the runtime type, class and bases alike, is the theorem's
 hypothesis, as for field access and dispatch; one it constructs records its constructor's bases.
-Lean admits an `objectTest` only at `castclass` or `isinst` of the same class, on an object reference, and only
+Lean admits each only at the raw opcode of the same name and class, on an object reference, and only
 against a pinned catalog class that is no interface
 ([DogTest](../Examples/Proofs/DogTest.lean), [DogCast](../Examples/Proofs/DogCast.lean)).
 
@@ -386,8 +512,8 @@ proofs.
 
 ## Arrays of class references
 
-An array of a class `E` is itself a class instance: `.newReferenceArray E` allocates,
-through `allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
+An array of a class `E` is itself a class instance: `.newarr E` allocates, through
+`allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
 (`referenceArrayType`) with no bases, one 8-byte slot per element and nothing else, so its
 length is its size over the slot width. Its elements are references held in
 `Memory.slots`, as class-typed fields are, and fresh elements are null. The array is charged
@@ -396,8 +522,8 @@ does not lay out, and a short budget is the model's `allocationFailure`. The len
 `newarr` decodes it for value arrays: a negative `int32` or native length throws
 `System.OverflowException`, and one above `0x7fffffc7` is unsupported.
 
-`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (`.referenceArrayLength`,
-`.referenceArrayLoad`, `.referenceArrayStore`) locate it with `referenceArrayOf`: a null array
+`ldlen`, `ldelem.ref` and `stelem.ref` on such an array (the object arms of `elementInstruction`)
+locate it with `referenceArrayOf`: a null array
 throws `NullReferenceException`, and a reference to anything but offset 0 of a live array of
 class references is an ill-typed state. An index read unsigned at or past the length then
 throws `IndexOutOfRangeException` (`referenceArraySlot`), so a negative int32 index is out of
@@ -416,7 +542,7 @@ index, then type.
 
 ## Value-array fields
 
-A class field typed as an array of a value element `E` (`.arrayField`, `.setArrayField`) holds
+A class field typed as an array of a value element `E` (an `.array` slot) holds
 the array's reference in the object's slot for that field, as a class-typed field does; the
 array's bytes stay in their own allocation. The field is located like any other, so a null
 receiver throws `NullReferenceException`, and the slot needs read or write authority. A store
@@ -435,27 +561,29 @@ so the field's declared element is what the load trusts.
 The extractor emits these operations for a field typed as a single-dimensional array of an
 integer, Boolean, char, integer-backed enum, reference-free struct or integer vector, and Lean
 rechecks the emitted element against the raw field token, and a stored value against an array of
-that element on the evaluation stack. A vector's width is fixed by its type. A struct's comes
-from its layout: the raw body names the field access as a layout use of the struct
-(`LayoutUsesComplete`), and `MethodLayoutsValid` requires the emitted width to be the size Lean
-computes for that layout, as for any other array of the struct
-([TilePairs](../Examples/Proofs/TilePairs.lean)).
+that element on the evaluation stack. A vector's type fixes its width. For an array of structs,
+`Method.fieldShape` resolves the field through the method's checked layout environment and reads
+the element size from the struct's computed layout. See [TilePairs](../Examples/Proofs/TilePairs.lean).
 
-The extractor admits a single-dimensional array of an admitted class, or of a non-generic class
-outside the model other than `System.Object`, such as `string`, as a parameter, local, return or
-`newarr` type, typed as an object on the evaluation stack. An array of such a static type holds
-elements of a class derived from it at run time, so its element type is a class, as the
-covariance check needs; an array typed by an interface or `object` may be an interface array and
-is rejected. An element of an array of a class outside the model is an opaque reference, which
-is loaded, stored, compared and tested for null but never read through. The extractor names the
-element class as an object in the raw array type, and Lean rechecks each
-`newarr`, `ldlen`, `ldelem.ref` and `stelem.ref` against its raw opcode and operand kinds. An
+The extractor admits a single-dimensional array of an admitted class or of `string` as a
+parameter, local, return or `newarr` type, typed as an object on the evaluation stack. An array of
+such a static type holds elements of a class derived from it at run time, so its element type is
+a class, as the covariance check needs. Lean binds a type named as an object, outside the type a
+class instance field holds, only to a class of a pinned assembly or to `string`
+(`objectNamed`), so no signature, local, type operand or generic argument names an array of an
+interface, of `object` or of another class outside the pins, any of which may type an interface
+array. An element of a `string` array is an opaque reference, which is loaded, stored, compared
+and tested for null but never read through. The extractor names the
+element class as an object in the raw array type and the `newarr` token, and Lean requires each
+`newarr` to carry that token and rechecks `ldlen`, `ldelem.ref` and `stelem.ref` against their raw
+opcode and operand kinds. An
 element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rejected by name,
 since a byref to a reference slot is outside the model, as is the address of an argument or
 local holding such an array. A class field typed as such an array holds the array's reference
 in its slot and is read and written as a class-typed field is, the raw field type rechecked as
-an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, generic
-instantiations or value types other than the admitted value arrays are rejected.
+an array of a class. Multi-dimensional arrays, arrays of interfaces, `object`, classes outside
+the model other than `string`, generic instantiations or value types other than the admitted
+value arrays are rejected.
 
 ## String literals
 
@@ -487,7 +615,7 @@ surrogate, backspace or form feed, which a Lean string literal cannot carry exac
 `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`,
 `ThrowIfLessThan` and `ThrowIfLessThanOrEqual` run as checked operations
 ([CIL/ArgumentGuards.lean](../CIL/ArgumentGuards.lean)). Each ends in the named outcome
-`.thrown "System.ArgumentNullException"` or `.thrown "System.ArgumentOutOfRangeException"` exactly
+`.thrown .argumentNull` or `.thrown .argumentOutOfRange` exactly
 when its condition holds, and otherwise pops its operands and leaves memory unchanged
 ([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean),
 [GuardRequired](../Examples/Proofs/GuardRequired.lean)). The contracts follow the .NET 10 sources:
@@ -510,9 +638,8 @@ integers take the 64-bit target. Only the exception type is claimed. Its message
 The `paramName` argument, a compiler-supplied literal, is popped unread, so a proof binds that
 literal like any other.
 
-The extractor maps each exact signature (`Extractor/ArgumentGuards.cs`) and Lean decodes each
-emitted guard again from the raw call's owner, name, type argument, parameter types and external
-identity (`CIL.Extraction.guardCallMatches`); no other instruction may emit a guard. Other
+Each guard keeps its call. The runtime model binds the open declaration and the exact external
+target before selecting the checked memory operation at the closed type and signedness. Other
 instantiations, among them `char`, floating-point and `decimal`, the `void*` overload of
 `ThrowIfNull`, and the string guards such as `ThrowIfNullOrEmpty`, which read characters, are
 rejected calls. `ThrowIfNull` on a value array or any other operand that is not a class instance or
@@ -522,13 +649,14 @@ null is rejected by name, since the model tests only object references.
 
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported
 integers/enums, nested aggregates and admitted vectors. Closed same-assembly generic owners bind
-their original fields, arguments and constraints to substituted layouts. Field order, packing, size
-and target architecture determine offsets. Unset packing is a limit of 64 bytes; nested alignment
+their original fields, arguments and constraints to substituted layouts. A generic layout's owner
+is a struct's generic definition, and a class application never closes to a layout entry. Field
+order, packing, size and target architecture determine offsets. Unset packing is a limit of 64 bytes; nested alignment
 comes from the child layout, capped by packing. Inferred sizes include tail padding, declared size cannot
 truncate fields, and empty structs occupy at least one byte. Explicit overlap follows byte storage.
 
-Open generic owners, explicit/auto generic layouts, reference/float fields, inline arrays and
-recursive/depth-over-128 layouts are rejected. Vector512 fields are excluded because their aggregate
+Open or class generic owners, explicit/auto generic layouts, reference/float fields, inline arrays
+and recursive/depth-over-128 layouts are rejected. Vector512 fields are excluded because their aggregate
 alignment is not modeled. Storage is managed layout and is not interop marshalling.
 Correspondence to
 [CoreCLR layout](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/vm/classlayoutinfo.cpp)
@@ -544,7 +672,7 @@ assumptions; [tuple tests](../Tests/TupleDivision.cs) probe both admitted and re
 
 ## Typed copies
 
-`copyObject_writes_snapshot` proves destination bytes equal the source snapshot and are initialized,
+`cpobj_writes_snapshot` proves destination bytes equal the source snapshot and are initialized,
 including padding. Access and initialization premises remain mandatory. References have provenance
 and offsets, not nominal CLR type tags: relating `cpobj` to the runtime additionally assumes both
 storage regions are compatible with its validated type token. Runtime tests are not a JIT proof.
@@ -552,8 +680,13 @@ storage regions are compatible with its validated type token. Runtime tests are 
 ## Struct instance calls
 
 Admitted direct instance calls use a managed-reference `this`; by-value arguments have private homes.
-Existing-storage constructors do not allocate or bypass initialization checks. Aggregate `newobj`
-uses zeroed caller-owned temporary storage, a void constructor and checked snapshot readback.
+Existing-storage constructors use the receiver's storage and retain its initialization checks.
+An unlinked `newobj` for either span type resolves its constructor by opcode, closed signature
+and open declaration. The model consumes the array and optional bounds, pointer and length, or
+single reference and pushes the checked view. Array views require admissible array storage. The
+owner determines write capability and the element layout determines stride. An absent model faults
+with `unlinkedCall` after the operand observation check. Aggregate `newobj` uses zeroed
+caller-owned temporary storage, a void constructor and checked snapshot readback.
 Padding/layout correspondence and resource availability remain assumptions.
 
 Tail transfers retire the caller frame before checking callee arguments, so references into retired
@@ -596,6 +729,11 @@ Correspondence to these primitive methods and the selected .NET BitOperations an
 overloads remains a runtime assumption backed by exact signature checks and boundary/runtime
 comparisons.
 See [SIMD](SIMD.md) and [OPCODES](OPCODES.md).
+
+The runtime table owns the static `System.Math.DivRem` and `System.Math.BigMul` call entries.
+Each overload binds the raw MemberRef declaration to the selected closed signature and external
+target. A tuple result requires both raw fields to match the declared integer, default packing,
+natural alignment, and two consecutive element-width fields in the checked layout.
 
 `Math.DivRem` and the 32-bit and signed 64-bit `Math.BigMul` overloads are modelled from the
 pinned .NET 10 `Math.cs` source: the quotient reuses CIL `div`, narrow operands divide in

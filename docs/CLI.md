@@ -9,6 +9,7 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 | `leancil extract` | Validate a method and its reachable calls and translate them to Lean | [Extract](#extract) |
 | `leancil blockers` | Report everything that stops `extract` for a list of methods | [Report extraction blockers](#report-extraction-blockers) |
 | `leancil check` | Compare extraction artifacts with their assembly and settings | [Check](#check) |
+| `leancil verify --deep-checks` | Reconfirm in the kernel that an extraction's method bodies and carried metadata rows are those of assembly files with stated digests | [Deep verification](#deep-verification) |
 | `leancil new-proof` | Write a starting proof with marked holes | [Start a proof](#start-a-proof) |
 | `leancil verify` | Check, kernel-replay and audit one theorem | [Verify](#verify) |
 | `leancil verify-batch` | Verify many requests in one session | [Batch verification](CONSUMERS.md#batch-verification) |
@@ -113,7 +114,7 @@ The output directory holds:
 
 | File | Content |
 | --- | --- |
-| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. |
+| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. Every method, Add included, is defined from its raw definition by [`cil_decoded_method`](PROOFS-BINDING.md#methods-defined-from-their-decoder); extraction refuses a method whose decoder refuses a live instruction. |
 | `identity.json` | The manifest: assembly path, identity and SHA-256, entry, profile, assumptions, references, imports and extractor hash. |
 | `Symbols.lean` | PDB names and source locations, written only when the assembly has a matching portable PDB. |
 
@@ -252,6 +253,12 @@ whatever the entries' status. Each entry has one status:
 | `blocked` | At least one blocker is listed. An entry the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of an open generic type, is `blocked`, and its definition is analysed as an entry. |
 | `notChecked` | Nothing was analysed, for the reason given: a selector that matches no method or several, a malformed type argument, an unknown profile, or an assembly, import or assumption that fails before any method is checked. |
 
+An admitted entry lists its extracted methods in `decodedMethods`; the extraction defines each
+from its decoder. A reachable method whose decoder refuses a live pc blocks its entry: the
+blocker's site names that method, the IL offset and instruction, and its message the pc and why
+the decoder refuses it (an unsupported opcode, or a call or construction whose translation differs
+from the decoder's instruction). Dead pcs decode to holes carrying their raw opcodes.
+
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source
 location when one is present, and every affected entry with the call chains from it to those
@@ -305,6 +312,104 @@ in memory, and compares it with the saved files without overwriting them. It run
 or extractor, or a saved file that differs from the regenerated one, fails at the
 `extraction integrity` stage; run `leancil extract` again. A manifest whose `schema` is not `3` is
 rejected the same way.
+
+## Deep verification
+
+`leancil verify extraction-directory --deep-checks digests.sha256` jointly checks the proof,
+extraction certificate and image binding theorems in one audited environment. The option also
+works with `--proof-root`. Supply a sha256sum file containing the selected assembly and every
+reference pinned by the extraction:
+
+```text
+<64 hexadecimal digits>  path/to/App.dll
+<64 hexadecimal digits>  path/to/Library.dll
+```
+
+Paths are relative to the digest file. Each supplied file is read and checked against its stated
+digest before Lean preparation. Missing pins, malformed records and mismatching digests fail as
+arguments. The verifier retains the checked bytes and matches pins after any required extraction
+rebuild. Each request must explicitly supply the option; saved verification settings contain no
+deep-check input. Batch verification, gates, watch and workspace reject the option.
+
+The report lists twelve binding facts. Default verification lists them as `trusted` and performs
+no image binding work. Deep verification reconfirms `body-bytes`, `metadata-rows`, `static-data` and the
+digests of pinned images. For RVA fields the audit reads the field signature, packing, class
+size and relative virtual address, then compares the entire byte range in the mapped section.
+Constructor-initialized fields must have no RVA.
+
+To check `object-fields`, add the platform reference assembly used at compilation, such as
+`ref/net11.0/System.Runtime.dll`, to the digest file. The audit resolves the version, culture
+and public key token of the core scopes in the certified method evidence. In the corresponding
+image it finds the public `System.Object` class and checks the flags of each field the class
+declares. A facade that forwards the type also needs the destination image in the digest file.
+The audit follows the exact assembly reference recorded in each forwarding row. Static fields are allowed. An instance field fails verification even when the supplied
+image matches its stated digest. Without the required platform image, `object-fields` has
+status `not covered`.
+
+For a selected `System.ValueTuple<T1,T2>` layout, the same option checks
+`value-tuple-field-order`. Supply the defining image or the complete forwarding chain for
+the pair's own System.Runtime reference. The audit checks the two generic parameter slots
+and reads the instance fields in declaration order: `Item1` has type `T1` and `Item2` has
+type `T2`. The object and pair can have different forwarding destinations. A missing pair
+destination leaves this fact uncovered. Runtime byte offsets remain a layout assumption.
+
+For `platform-type-kinds`, supply the defining assembly and any intervening facades for every
+external type in the extraction's platform table. Lean checks each scoped type's flags, base
+and generic arity against its TypeDef and GenericParam rows. A missing assembly leaves the
+fact uncovered. A conflicting supplied definition fails verification even when another assembly
+is missing.
+
+For `enum-underlying-types`, supply the assemblies that define the selected enums and any
+facades that forward them. Lean follows the scoped name, including the enclosing type for a
+nested enum, and reads the integer signature of the defining row's instance field `value__`.
+An extraction with no enum or a missing destination reports `not covered`. A supplied
+definition with the wrong storage code fails verification.
+
+For `public-key-tokens`, include the image for each direct assembly reference of the selected
+assembly and its pinned references. Lean reads each physical AssemblyRef, compares the tokens
+carried by the extraction with those rows, and computes each publisher token from the full key
+in the referenced image. An empty definition key denotes an unsigned assembly. A missing
+target leaves the fact `not covered`. The report records additional images
+used for this check with role `reference`.
+
+A fact is reconfirmed exactly when a theorem stating it passed the joint audit. Supplied images that no
+pin or checked claim uses are listed as unused and not covered. Successful reports include the
+digest file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
+
+Generated image modules hold checked SHA-256 theorems. Each page of an image is one
+`CIL.Extraction.fixedDigitsWithin` term that splits a code joined from numerals of at most 256
+bytes into the page's 64-byte chunks, so chunks that end in the same bytes cost the kernel no more
+than others. The image association theorem ties each
+pinned identity to its image. `StrictBinding.BodiesBound` relates the method evidence to the
+bytes at the offsets decoded from the PE container and MethodDef rows.
+`StrictBinding.MetadataRowsBound` checks each metadata block the evidence carries against the
+pinned image its identity names: its table header, Assembly row, table rows and `#Strings`,
+`#Blob` and `#US` entries are the image's, with MethodDef RVAs zeroed, under one numbering of the
+`#Strings` and `#Blob` offsets per heap for the table rows and another for the Assembly row. The
+assembly identity, key token, core library, links, the `#GUID` heap, the `Module` table and the
+RVAs of MethodDefs outside the evidence are not part of that check. Both facts are checked in pages
+of about 250 methods, capped at eight pages, and each page decodes the pinned images again; the
+metadata check also checks each distinct Assembly block once, in one more lemma. These
+theorems join the extraction certificate and the selected proof for kernel replay, expected-type
+checks and axiom checks. Source, artifact, identity and toolchain guards run before successful
+publication.
+
+A failed request produces no successful certificate. Once selection and pin matching succeed,
+its failure report includes all facts and matched images. A named rejected binding theorem marks
+only its own subject `failed`; this means the check was rejected. Unclassified build/replay,
+resource and integrity failures leave subjects `not covered` with the failure stage and diagnostic.
+Selection, digest parsing, pin matching and full-import preflight failures precede the attempt
+and have no binding payload. A failed attempt never reports a fact as trusted or reconfirmed.
+
+The image decoder supports metadata tables through `0x2C`, without pointer or edit-and-continue
+tables, and the `#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams. Unsupported image structure
+rejects the request. A deep request reuses the generated modules of an earlier successful request
+in the same certified environment, with the same StrictBinding sources, toolchain, pins and
+generated sources, which hold the image bytes, and the same bytes of every compiled module they
+import, transitively, outside the Lean toolchain: the extraction, StrictBinding and `CIL`
+modules. It skips their build and kernel replay but still audits every deep theorem's type and
+axioms against the current extraction. Under `--proof-root` the key also binds the certified
+library.
 
 ## Start a proof
 
@@ -592,9 +697,10 @@ closed from `pre` by `cil_loop_obligation`. The outline handles these shapes:
   stores a field beside a test: the hole names the callee's method index and the `MethodContract`
   to write and prove with `Holds Extracted.program` at that index.
 
-Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`,
-names what it met and what that step needs, and gives the source line to continue from. The
-`Holes` line counts these apart from the obligations. The unedited file elaborates with only
+Where the outline cannot step a path, it leaves a hole whose comment starts with `not outlined:`
+and explains what that step needs. When the comment names the instruction, it gives the IL offset,
+CIL opcode and operand, for example `IL_0001: stloc.0`. Source lines are included when available.
+The `Holes` line counts these paths apart from the obligations. The unedited file elaborates with only
 warnings that a declaration uses `sorry`, and `leancil verify` rejects it at the theorem audit for
 `sorryAx` until every hole is filled.
 
@@ -636,7 +742,7 @@ abbrev State (home0 : Reference) :=
 
 -- The cutpoint is the loop's back-edge test at Loops.cs:38.
 bind_cutpoint header (home0 : Reference) (state : State home0) :=
-  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  Extracted.method0 at loop.latch matching (· matches .brtrue _)
   with entry.frame home0, [.scalar (.i32 state.values)], state.memory
 
 set_option linter.unusedVariables false in
@@ -656,7 +762,7 @@ theorem correctness (value : W32) : Ensures Extracted.program 0
   obtain ⟨home0, entered, enter⟩ := entry.checked value
   have setup := enter.setup
   have entryFrame := enter.frame
-  refine invoke_loop_satisfies Extracted.lookup0 rfl setup (header home0) (invariant value)
+  refine invoke_loop_satisfies Extracted.program_method0 rfl setup (header home0) (invariant value)
       (measure value) (fun start => ?_) ?_
   · have entryFrame := entryFrame []
     cil_loop_recurse start value
@@ -713,6 +819,7 @@ Lean and Lake must be installed.
 | `--proof` | The proof file. The default is the saved setting, else `Proof.lean` in the output directory. |
 | `--theorem` | The theorem to check. The default is the saved setting, else `ExampleProof.correctness`. |
 | `--proof-root` | The Lake package holding the proof's own modules; see [consumer proof packages](CONSUMERS.md#consumer-proof-packages). |
+| `--deep-checks digests.sha256` | Joint image binding checks using consumer-stated digests; see [deep verification](#deep-verification). |
 | `--fresh` | Bypass proof and support reuse; the source-bound library cache is kept. |
 | `--rebuild-library` | Rebuild the library as well. CI bypasses the local library cache automatically. |
 | `--goals` | Print the goal at each hole; see [goals of an unfinished proof](#goals-of-an-unfinished-proof). |
@@ -754,14 +861,20 @@ certifies every proof and proof dependency for one framework version, and buildi
 several minutes. It is cached in the directory `LEANCIL_CACHE_DIR` names, by default
 `<local application data>/LeanCIL/libraries`, under a key of the framework sources, toolchain
 and platform. A cache miss first prints one line saying what is being built and kernel-replayed
-and where later runs reuse it from.
+and where later runs reuse it from. A run that uses a library it did not build, whether supplied,
+cached, or downloaded and kernel-replayed into the cache, checks the library's files against its
+manifest and traces the stage `Opening certified Lean verification library`; a run under
+`--force-full-verify` opens a cached entry the same way.
 
 An entry of a whole library holds about 1.2 GB; a closure entry holds only its modules. Every
 `verify`, `workspace` and `watch` process that reads an entry in place records its use in the
 entry directory's write time and holds a lock on a file beside the entry (`<key>.use`) until it
 ends; the lock files are never deleted. A process that cannot create the lock file for want of
 permission runs without it. `LEANCIL_CACHE_DIR` should name an absolute directory that only
-LeanCIL uses.
+LeanCIL uses. On Windows Lake cannot read a file whose full path is longer than 259 characters,
+so a run refuses a library, cached or supplied, that holds a compiled module file beyond that
+length and names the file; for a whole library this limits the cache directory's path to about
+120 characters.
 
 A run that publishes an entry removes cache directories that it judges unused, once, before it
 continues; there is no setting that turns this off. When the pass chooses any directory, fails or
@@ -891,8 +1004,9 @@ Every invocation validates the request's identity and required proof evidence. A
 caches can reuse unchanged certified builds and an unchanged proof's result (see
 [local support cache](CONSUMERS.md#local-support-cache)); source and hash checks, audits and
 required kernel replay apply regardless. `--fresh`, `--rebuild-library`, `--force-full-verify` and
-`LEANCIL_DISABLE_SUCCESS_CACHE=true` each bypass the reuse. A failed proof removes
-the previous `verified.json`.
+`LEANCIL_DISABLE_SUCCESS_CACHE=true` each bypass the reuse of support builds and proof results;
+only `--rebuild-library` and CI also bypass the certified [library cache](#library-cache). A failed
+proof removes the previous `verified.json`.
 
 When the assembly or the extractor changed since extraction, `verify` first extracts again from
 the settings `identity.json` records (assembly path, method, profile, assumptions, references and
@@ -937,6 +1051,17 @@ Verified: ExampleProof.addTwo_holds
   its arguments or recurses is printed as Lean elaborates it, in terms of the auxiliary
   definitions it compiles to, and the field accessors of a structure the proof declares are not
   listed. Definitions of modules the proof imports are named in the statement and not printed.
+- `verified.json` is the certificate, schema 7. Its `binding` section has the run's `mode`, the
+  `digests` file, statement `sources` and `images` the run read, and, as `facts`, every fact about
+  the assembly image that verification trusts, each with its `id`, `status`, `theorem` and
+  `reason`, in this order: `body-bytes`, `metadata-rows`, `platform-type-kinds`,
+  `enum-underlying-types`, `value-tuple-field-order`, `object-fields`, `layout-content`,
+  `dispatch-catalogs`, `static-data`, `generic-constraints`, `public-key-tokens` and
+  `import-identities`. `verify` writes `mode` `default`, reads no digest file, sources or image,
+  and lists every fact as `trusted`, with no theorem or reason.
+  `verify` accepts no certificate of another schema, mode or fact list, nor one with a missing,
+  repeated or reordered fact or an unknown status: a cached result whose certificate it refuses
+  is verified again.
 - `Lean messages` lists the informational and warning messages of the proof file, such as
   `#check`, `#eval` and `#print axioms` output, at `file:line:column` in the proof. The first 60
   lines are shown; `proof-messages.txt` in the artifact directory holds the full text, and the
@@ -994,7 +1119,7 @@ its result is cached apart from one without it. With `--format json` the goals a
 
 Method and call validation failures name the rejected item and the method containing it. A
 rejected call reports its callee, caller, IL offset and declaring assembly scope. For example, a
-reachable `Environment.ProcessorCount` call is outside the admitted runtime models. Exact closed
+reachable `System.Environment.ProcessorCount` call is outside the admitted runtime models. Exact closed
 `typeof` comparisons are supported; a `GetTypeFromHandle` call outside those patterns is
 unsupported. The diagnostic identifies metadata/CIL validation as the failing stage and links to
 the supported subset.
@@ -1105,7 +1230,7 @@ output (for the last request of an output, as with `verified.json`) and as the
 | `unsolved-goal` | A Lean `unsolved goals` error, or a `verify --goals` run that stopped at the goals it found open |
 | `resource-limit` | Heartbeats (`(deterministic) timeout`, `(kernel) deterministic timeout`) or recursion depth; `resource` names which |
 | `replay-or-audit-rejected` | Kernel replay or the theorem and axiom audit rejected the proof |
-| `refutation` | The theorem verified and states `Not (contract.Holds ...)` for a `MethodContract` or `OutcomeContract` |
+| `refutation` | The theorem verified and states a contract's counterexample, `MethodContract.Refuted`, `OutcomeContract.Refuted` or `OutcomeContract.RefutedCLR` |
 | `invalid-request` | The proof or theorem selection is invalid |
 | `unclassified` | Anything else, such as a missing tool; read `message` |
 
@@ -1115,19 +1240,29 @@ message block, so an internal error gives the request its kind. Lines are 1-base
 columns 0-based, as Lean prints them. Locations in the session's copies cite their originals, as
 in the text report. `message` is the original output, unmodified; `rerun` reruns just that
 request. Classification uses only the stage, LeanCIL's own messages and Lean's error prefixes
-above. Only a verified theorem whose elaborated statement is `Not` applied to a contract's `Holds`
-is a refutation, as reported by the theorem audit; an unsolved goal is never a refutation. A
-verified refutation keeps its `verified.json`, the certificate of the refutation, and also
-writes `failed.json` with kind `refutation`, located at the theorem's name.
+above. Only a verified theorem whose elaborated statement is a contract's `Refuted` is a
+refutation, as reported by the theorem audit; an unsolved goal is never a refutation. The audit
+rejects a requested theorem that states `Not` applied to a contract's `Holds`, as kind
+`replay-or-audit-rejected`: a run the model does not cover, such as an `unsupported` fault, proves
+such a negation without any fault of the method. A lemma the requested theorem uses may state it. A
+refutation names `Extracted.program`, directly or through definitions whose value is that constant,
+and one of the extraction's methods, callees included; `verify` refuses any other subject at stage
+`theorem audit`. A verified refutation keeps its `verified.json`, the certificate of the
+refutation, whose `refutation` records the contract, the refuted method's signature with the
+identity and SHA-256 of the assembly defining it, and the theorem's position. It also writes
+`failed.json` with kind `refutation`, located at the theorem's name, whose `method` is that
+method and assembly.
 
 ### Machine-readable verify output
 
 `leancil verify ... --format json` prints one JSON report on stdout instead of the text report,
 and nothing on stderr except [stage progress](#stage-progress); the exit code is the same as
-without it. `--format text` is the default. The report has `schema` 1, `result` (`verified` or
+without it. `--format text` is the default. The report has `schema` 2, `result` (`verified` or
 `failed`), the `stage` that failed, the `theorem`, `method`, `proof` and `output`, and on success
 the `axioms`, the `statement` and its `specification`, the definitions
-[`Specification:`](#reading-the-report) prints, each with its `name` and `text`. The proof's own
+[`Specification:`](#reading-the-report) prints, each with its `name` and `text`, and the
+certificate's [`binding`](#reading-the-report) section; a run that issued no certificate has
+`binding` `null` and says so in `unknown.binding`. The proof's own
 Lean messages are in `messages`, and `rerun` repeats the run. With `--goals`, `goals` lists each
 open goal with its `file`, `line`, `column`, `kind` (`sorry`, `failing tactic` or `unsolved`) and
 `goal`; without it `goals` is `null` and `unknown.goals` says why, as it does when the run stopped
@@ -1182,7 +1317,9 @@ the pc, read from the extraction's `Symbols.lean` whether or not the proof
 imports `ExtractedSymbols`; an extraction without a matching PDB has no
 `Symbols.lean`, and `unknown` says so. `missing.shape` names the kind of fact the step
 lacks, such as `unsafeAdd`, `spanValidity` or `targetState`, `calleeContract` at a
-`call` or `callvirt`, or on a class instance `objectForm`, `objectSlot` or
+`call` or `callvirt` that enters a callee, the shape of its runtime model's step at a `call`
+or `newobj` without a link, `linkOrModel` at a `call` or `newobj` with neither a link nor a
+runtime model, or on a class instance `objectForm`, `objectSlot` or
 `objectAllocation`, and `residual` the terms it must prove: the step rewritten by
 the proof's step equations and the `_ = .ok _` and `_ = .error _` facts in scope.
 A side condition, such as an unfolded step a tactic could not close, has a shape when it names one
@@ -1239,7 +1376,7 @@ library implementation proof source, artifact or full bundle is required.
 [Contract interfaces](CONTRACT-INTERFACES.md) gives the `extract` options and required pins, the
 sidecar schema and its checks, and the form the caller theorem must have.
 
-A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
+A `verified.json` contains `imports[]` with `acceptedVia` set to
 `published-certification`, the implementation SHA-256, interface digest,
 certification theorem/statement/digest, `sidecarSha256`, `certificationAuthenticated`
 (always `false`: no pinned digest covers the certification text) and deployment
@@ -1268,8 +1405,9 @@ Malformed documentation or stale extraction fails and removes an old lint report
 The report keeps potential modeled sites and XML declarations separate. It
 compares the selected entry's declarations with its profile-reachable method
 closure. It includes folded throws, integer divide/overflow, signed Abs, X86
-DivRem and span indexing faults. Clamp invalid bounds remain a model fault;
-this experiment does not map them to a CLR exception. Memory faults, invalid
+DivRem and span indexing faults. For an arithmetic or span fault, the site's origin includes the IL
+offset, opcode and operand. A call operand names the overload. Clamp invalid bounds remain a model
+fault without a CLR exception mapping. Memory faults, invalid
 states, unsupported operations and fuel exhaustion have no CLR name here.
 The lint is a conservative site analysis. It does not prove feasibility under a
 contract, exception conditions, or complete runtime behavior.

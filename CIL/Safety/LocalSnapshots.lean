@@ -134,7 +134,7 @@ theorem LocalSnapshots.load {body : CIL.Method} {pc index : Nat} {args stack : L
     {frame : Frame} {memory : Memory} {known : Nat → Option CIL.Value}
     (snapshots : LocalSnapshots memory frame.locals known) (value : CIL.Value)
     (specified : known index = some value) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar value :: stack) frame memory) := by
   obtain ⟨kind, home, stored, number, slot, fits, result, loaded⟩ :=
     snapshots index value specified
@@ -155,6 +155,16 @@ theorem LocalSnapshots.read_at {memory : Memory} {slots : List LocalSlot}
   rw [slot] at located
   cases located
   exact ⟨stored, number, fits, result, loaded⟩
+
+/-- A remembered 64-bit word reads back as its eight bytes. -/
+theorem LocalSnapshots.read_word64 {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    {index : Nat} {home : Reference} {word : CIL.W64}
+    (specified : known index = some (.i64 word))
+    (slot : slots[index]? = some (.bytes .word64 home)) :
+    read memory home 8 1 = .ok (numberBytes word.toNat 8) := by
+  obtain ⟨stored, number, fits, result, loaded⟩ := snapshots.read_at specified slot
+  cases stored <;> simp_all [localResult, localNumber, CIL.Value.hasUnspecified, localWidth]
 
 /-- A remembered 128-bit vector reads back as its sixteen bytes. -/
 theorem LocalSnapshots.read_vector128 {memory : Memory} {slots : List LocalSlot}
@@ -199,7 +209,7 @@ theorem LocalSnapshots.store {body : CIL.Method} {pc index : Nat} {args stack : 
     (slot : frame.locals[index]? = some (.bytes kind home))
     (ready : access memory home (localWidth kind) 1 true = .ok ()) :
     ∃ after,
-      step body (.setLocal index) pc args frame (.scalar value :: stack) memory =
+      step body (.stloc index) pc args frame (.scalar value :: stack) memory =
         .ok (.next (pc + 1) stack frame after) ∧
       LocalSnapshots after frame.locals (rememberLocal known index (localResult kind value)) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
@@ -328,6 +338,7 @@ theorem NumericHomes.snapshots {memory : Memory} {lower : Nat} {specs slots}
 #print axioms LocalSnapshots.after_write
 #print axioms LocalSnapshots.load
 #print axioms LocalSnapshots.read_at
+#print axioms LocalSnapshots.read_word64
 #print axioms LocalSnapshots.read_vector128
 #print axioms LocalSnapshots.read_vector256
 #print axioms LocalSnapshots.read_vector512

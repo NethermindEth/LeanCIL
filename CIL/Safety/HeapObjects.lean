@@ -7,7 +7,7 @@ Class instances on the checked heap. An object reference is null or offset 0 of 
 allocation whose kind records the object's runtime type (`formObject`). It carries no byte
 position, so code can neither observe nor forge one, and since allocation identities are never
 reused, reference equality compares identities alone. `CIL/Safety/Execution.lean` uses these
-observations for `ceq`, `beq`, `bne`, `brtrue`, `brfalse` and `cgt.un` against null, and
+observations for `ceq`, `beq`, `bne.un`, `brtrue`, `brfalse` and `cgt.un` against null, and
 `allocateObject` for `newobj`, which charges each instance to `Memory.heapBudget`.
 -/
 
@@ -90,7 +90,7 @@ def objectTest (memory : Memory) (type : CIL.Extraction.TypeExpr) (throwing : Bo
   | .address object =>
     let runtime ← runtimeTypeOf memory object
     if type ∈ runtime.lineage then pure reference
-    else if throwing then .error (.thrown "System.InvalidCastException")
+    else if throwing then .error (.thrown .invalidCast)
     else pure .null
 
 /-- Object storage is aligned to the 8-byte field slots of the admitted 64-bit targets. -/
@@ -137,7 +137,7 @@ def newReferenceArray (memory : Memory) (element : CIL.Extraction.TypeExpr)
     | .i32 bits => pure bits.toInt
     | .i64 bits => pure bits.toInt
     | _ => .error .invalidState
-  if length < 0 then .error (.thrown "System.OverflowException") else
+  if length < 0 then .error (.thrown .overflow) else
   if length.toNat > maxArrayLength then
     .error (.unsupported "Array length outside supported extent") else
   allocateObject memory (referenceArrayType element) (objectFieldSlot * length.toNat)

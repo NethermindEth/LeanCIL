@@ -3,8 +3,14 @@
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
 #:include Verification.cs
+#:include DeepChecks.cs
+#:include FailureReports.cs
+#:include LeanDiagnostics.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include BatchVerification.cs
 #:include CoreExamples.cs
+#:include CertificateCases.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 
@@ -12,9 +18,7 @@ using System.Text.Json;
 
 // A relocated shared runner must not execute an older suite plan after its source changes.
 var fixtureManifest = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
-if (!string.IsNullOrEmpty(fixtureManifest) &&
-    typeof(Program).Assembly.Location.StartsWith(Path.GetDirectoryName(Path.GetFullPath(fixtureManifest))! +
-        Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+if (!string.IsNullOrEmpty(fixtureManifest) && RunsFromFixtures(fixtureManifest) &&
     PreparedFixtureCommand("scripts/Test.cs", []) is null)
 {
     Run(["dotnet", "run", "--file", At("scripts/Test.cs"), "--", .. args], streamOutput: true,
@@ -99,13 +103,14 @@ else if (Environment.GetEnvironmentVariable(PrebuiltToolsEnvironment) == "true")
 if (suite is "all" or "core")
     projects.AddRange(["Examples/Hardware/Hardware.cs", "Examples/Verify.cs", "Tests/MetadataMutator.cs",
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
-        "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
+        "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
-        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs"]);
+        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/DecodedOpcodes.cs",
+        "Tests/SupportExtractionCache.cs", "Tests/SummaryCalls.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
-        "Tests/Objects.cs", "Tests/Strings.cs", "Tests/Guards.cs"]);
+        "Tests/Objects.cs", "Tests/Guards.cs", "Tests/SpanHomeReads.cs"]);
 if (suite is "all" or "dispatch")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
         "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",
@@ -115,8 +120,10 @@ if (suite is "all" or "evidence")
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs"]);
-if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
+        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs", "Tests/CallSiteAgreement.cs"]);
+if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
+if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
+if (suite is "all" or "blockers") projects.AddRange(["Tests/SelfAdmission.cs", "Tests/CanonicalMethods.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")
@@ -129,7 +136,8 @@ foreach (var (name, entry) in independentSuites)
         projects.Add(entry.Script);
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
     if (suite == "all" || suite == entry.Name)
-        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal)));
+        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal) &&
+            File.ReadLines(At(path)).FirstOrDefault() == "#!/usr/bin/env dotnet"));
 
 foreach (string project in projects.Distinct(StringComparer.Ordinal))
 {
@@ -176,11 +184,15 @@ Passed("prepared extractor source and output identity");
 RunFixture("Tests/VerificationCache.cs", [], streamOutput: true, progress: "Certified verification cache checks");
 Passed("certified artifact receipts and cache tampering rejection");
 
+RunFixture("Tests/SupportExtractionCache.cs", [], streamOutput: true, progress: "Support extraction cache checks");
+Passed("support audit reuse bound to extraction identity");
+
 RunFixture("Tests/VerificationReuse.cs", [], streamOutput: true, progress: "Certified verification reuse checks");
 Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");
 
 RunFixture("Tests/InstructionIndexes.cs", [], streamOutput: true, progress: "Instruction index checks");
 RunFixture("Tests/TemplateIndexes.cs", [], streamOutput: true, progress: "Template index checks");
+RunFixture("Tests/OutlineStops.cs", [], streamOutput: true, progress: "Outline stop checks");
 RunFixture("Tests/ImportIndexes.cs", [], streamOutput: true, progress: "Import index checks");
 RunFixture("Tests/StaticValueIndexes.cs", [], streamOutput: true, progress: "Static value index checks");
 Passed("instruction indexes and prefix target rejection");
@@ -227,15 +239,33 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
-    "Tests.LiteralDisplay", "Tests.PublicProofSurface"],
+    "Tests.SegmentContract",
+    "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
+    "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
+    "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
+    "Tests.BodyLiteral", "Tests.DecodedSummary", "Tests.SpanHomes",
+    "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
+    "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
+    "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
+    "Tests.RuntimeModels", "Tests.PlatformDefinitions", "Tests.BitModels", "Tests.UnsafeModels", "Tests.UnsafeOffsets",
+    "Tests.UnsafeTransferModels", "Tests.UnsafeBlocks", "Tests.UnsafeReinterpretations", "Tests.SpanModels",
+    "Tests.MarshalModels", "Tests.ImportedFieldIndex", "Tests.OpaqueClassFields", "Tests.StaticFieldSites"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
     + "local snapshot, struct field view, loop frame, contract consequence, invocation certificate, call transport, "
     + "buffer contents, linking, "
-    + "store fact, profile contract, instruction equation, code placement and SIMD lane tests");
+    + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
+    + "decoding, declared narrowing, value opcode decoding, decoded method, decoded summary, span home, "
+    + "replay diagnostic, literal body evidence, return metadata, object array, embedding retention and profile, "
+    + "full transfer, SHA-1, assembly index, pin index scaling, field reference, runtime model and bit helper model "
+    + "tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
+RunFixture("Tests/SummaryCalls.cs", [], streamOutput: true, progress: "Byref calls through a decoded summary");
+Passed("1, 4 and 16 byref calls by stepping and through a decoded summary");
+RunFixture("Tests/DecodedOpcodes.cs", [], streamOutput: true, progress: "Decoded opcode table");
+Passed("the extractor's decoded opcode table against Instruction.valueOpcode");
 
 // Both selectors bind the same full identity; explicit mismatches must still fail.
 const string fullIdentity = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";
@@ -265,22 +295,13 @@ verification.Verify(At("Examples/Hardware/bin/Examples.Hardware.dll"),
     At("Examples/Proofs/Hardware.lean"), At("artifacts/Hardware"));
 Passed("independent hardware assembly");
 
-// The unchanged addition contract must reject the subtraction implementation.
-var failed = false;
+// The addition contract is refuted for the subtraction implementation by a kernel-checked counterexample.
+var wrongAdd = verification.Verify(assembly, identity, signatures["WrongAdd"], At("Examples/Proofs/WrongAdd.lean"),
+    At("artifacts/WrongAdd"), theorem: CoreExampleTheorems["WrongAdd"], check: true);
+if (wrongAdd.refutation?.method.signature != signatures["WrongAdd"])
+    throw new InvalidOperationException("Subtraction has no verified refutation of the addition contract");
 
-try
-{
-    verification.Verify(assembly, identity, signatures["WrongAdd"], At("Examples/Proofs/Add.lean"), At("artifacts/WrongContract"));
-}
-catch (InvalidOperationException error) when (error.Message.Contains("Tactic `rfl` failed"))
-{
-    failed = true;
-}
-
-if (!failed || File.Exists(At("artifacts/WrongContract/verified.json")))
-    throw new InvalidOperationException("Incorrect arithmetic accepted or failed proof left a certificate");
-
-Passed("incorrect addition rejected against unchanged universal contract");
+Passed("incorrect addition refuted against the addition contract");
 
 // Unsupported instructions and malformed metadata must fail during extraction.
 Rejected(Extract("extract", assembly, identity, "System.Int32 Examples.Arithmetic::Unsupported(System.Int32)", At("artifacts/Unsupported")), "Unsupported instruction");
@@ -342,7 +363,7 @@ Passed("tampered generated CIL rejected");
 Rejected(Extract("check", staticDll, identity, signatures["Add"], addOutput), "Stale or mismatched");
 Passed("different compiled assembly rejected");
 
-failed = false;
+var failed = false;
 
 try
 {
@@ -362,25 +383,38 @@ var reportPath = Path.Combine(addOutput, "verified.json");
 var savedReport = File.ReadAllText(reportPath);
 try
 {
-    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 2 };
-    File.WriteAllText(reportPath, JsonSerializer.Serialize(legacy, Json));
-    failed = false;
-    try
+    foreach (var (name, text) in CertificateCases.Refused(savedReport))
     {
-        verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+        File.WriteAllText(reportPath, text);
+        failed = false;
+        try
+        {
+            verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput,
+                check: true);
+        }
+        // Only the certificate rule words its refusal this way; a later input check would not.
+        catch (InvalidOperationException error) when (error.Message.StartsWith("Stale verification report: ",
+            StringComparison.Ordinal))
+        {
+            failed = true;
+        }
+        if (!failed)
+            throw new InvalidOperationException("Certificate with " + name + " accepted");
     }
-    catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
-    {
-        failed = true;
-    }
-    if (!failed)
-        throw new InvalidOperationException("Legacy report without extraction certificate audit accepted");
 }
 finally
 {
     File.WriteAllText(reportPath, savedReport);
 }
-Passed("legacy report without extraction certificate audit rejected");
+verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+// A default certificate serves only a default run, and a well-formed deep one only a deep run.
+if (CertificateProblem(savedReport, BindingMode.Default) is { } defaultProblem)
+    throw new InvalidOperationException("Default certificate refused: " + defaultProblem);
+if (CertificateProblem(savedReport, BindingMode.Deep) is null)
+    throw new InvalidOperationException("Default certificate accepted where a deep one is required");
+if (CertificateProblem(CertificateCases.Deep(savedReport), BindingMode.Deep) is { } deepProblem)
+    throw new InvalidOperationException("Deep certificate refused where a deep one is required: " + deepProblem);
+Passed("certificates of another schema, mode or binding fact list rejected");
 
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-v3"), "Stale or mismatched");
 Passed("different feature profile rejected");

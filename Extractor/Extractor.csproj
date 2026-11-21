@@ -9,14 +9,17 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>leancil</ToolCommandName>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DefineConstants>$(DefineConstants);LEANCIL_TOOL</DefineConstants>
+    <!-- Verification.cs also declares its source dependency for file-based callers. -->
+    <Features>$(Features);FileBasedProgram</Features>
     <StartupObject>Nethermind.LeanCIL.Program</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="LeanCIL.IdentityTests" />
     <PackageReference Include="Mono.Cecil" />
     <None Include="../README.md" Pack="true" PackagePath="/" />
     <None Include="../LICENSE" Pack="true" PackagePath="/" />
@@ -33,7 +36,10 @@
     <Compile Include="../scripts/FailureReports.cs" Link="FailureReports.cs" />
     <Compile Include="../scripts/VerifyReports.cs" Link="VerifyReports.cs" />
     <Compile Include="../scripts/LibraryAudit.cs" Link="LibraryAudit.cs" />
-    <Content Include="../CIL/**/*.lean;../CIL.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
+    <Compile Include="../scripts/DeepChecks.cs" Link="DeepChecks.cs" />
+    <Compile Include="../scripts/DeepCheckInputs.cs" Link="DeepCheckInputs.cs" />
+    <Compile Include="../scripts/BindingImage.cs" Link="BindingImage.cs" />
+    <Content Include="../CIL/**/*.lean;../CIL.lean;../StrictBinding/**/*.lean;../StrictBinding.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

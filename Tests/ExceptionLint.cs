@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.Json;
 using System.Xml.Linq;
@@ -72,6 +77,13 @@ foreach ((string Selector, string[] Expected) item in new (string, string[])[]
     JsonElement report = Lint();
     if (!Potential(report).SequenceEqual(item.Expected))
         throw new InvalidOperationException("Wrong modeled exception set: " + item.Selector);
+    if (item.Selector == "Examples.ExceptionDocumentation::Absolute(int)")
+    {
+        var site = report.GetProperty("sites").EnumerateArray().Single();
+        const string origin = "interpreter operation: IL_0001: call System.Int32 System.Math::Abs(System.Int32)";
+        if (site.GetProperty("origin").GetString() != origin)
+            throw new InvalidOperationException("The overflow site must name the call to the selected overload.");
+    }
     bool expectedDrift = item.Selector.Contains("Clamp", StringComparison.Ordinal) || item.Selector.Contains("Profile", StringComparison.Ordinal);
     if (report.GetProperty("findings").GetArrayLength() != (expectedDrift ? 1 : 0))
         throw new InvalidOperationException("Compiler XML matching or separate invalid-bounds/profile exclusion failed: " + item.Selector);

@@ -3,6 +3,11 @@
 #:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -144,37 +149,50 @@ foreach (var (suffix, width, shape, alignment) in new[]
 }
 queue.Flush();
 var rejectedIndex = 0;
-foreach (var (name, theorem, before, after) in new[]
+foreach (var (name, lowered) in new[]
 {
-    ("ReadHalf", "method0_unsafe_validated", ".loadScalar 2 true", ".loadScalar 2 false"),
-    ("ReadWord", "method0_unsafe_validated", ".loadScalar 8 false", ".loadScalar 4 false"),
-    ("Read128", "method0_unsafe_validated", ".memory .load128", ".memory .load256"),
-    ("Write512", "method0_unsafe_validated", ".memory .store512", ".memory .store256"),
-    ("ReadAggregate", "method0_layouts_validated", ".loadAggregate 32", ".loadAggregate 16"),
-    ("WriteAggregate", "method0_coverage_validated", ".size 2 0 .store", ".size 2 0 .load"),
-    ("ReadWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\""),
-    ("ReadPointerWord", "method0_unsafe_validated", "target := .external externalIdentity0", "target := .external \"forged\""),
-    ("ReadPointerAggregate", "method0_layouts_validated", ".loadAggregate 32", ".loadAggregate 16"),
-    ("ReadAlignedWord", "method0_unsafe_validated", ".pointerTransfer (.scalar 8 false) 8 false",
-        ".pointerTransfer (.scalar 8 false) 1 false"),
-    ("ReadAlignedWord", "method0_unsafe_validated", ".pointerTransfer (.scalar 8 false) 8 false",
-        ".pointerTransfer (.scalar 8 false) 8 true"),
-    ("ReadAlignedAggregate", "method0_layouts_validated", ".pointerTransfer (.snapshot (.aggregate 32)) 8 false",
-        ".pointerTransfer (.snapshot (.aggregate 32)) 4 false"),
-    ("ReadAligned128", "method0_unsafe_validated", ".pointerTransfer (.snapshot .vector128) 16 false",
-        ".pointerTransfer (.snapshot .vector128) 8 false")
+    ("ReadHalf", ".ldind .i2"), ("ReadWord", ".ldind .i8"),
+    ("Read128", ".memory .load128"), ("Write512", ".memory .store512"),
+    ("ReadAggregate", ".ldobj method0.declared.returnType"), ("WriteAggregate", ".stobj (method0.declared.parameters[1]?.getD .void)"),
+    ("ReadPointerWord", ".ldind .i8"), ("ReadPointerAggregate", ".ldobj method0.declared.returnType"),
+    ("ReadAlignedWord", ".memory (.pointerTransfer (.scalar 8 false) 8 false)"),
+    ("WriteAlignedWord", ".memory (.pointerTransfer (.scalar 8 false) 8 true)"),
+    ("ReadAlignedAggregate", ".memory (.pointerTransfer (.snapshot (.aggregate 32)) 8 false)"),
+    ("ReadAligned128", ".memory (.pointerTransfer (.snapshot .vector128) 16 false)")
 }.Where(item => !alignedOnly || item.Item1.Contains("Aligned", StringComparison.Ordinal)))
 {
+    const string theorem = "method0_models_validated";
+    const string statement = "Extraction.RuntimeModelsAgree method0Closed method0Reachable method0";
     var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal))
-        throw new InvalidOperationException("Missing unaligned mutation target: " + name + "/" + before);
-    var path = Path.Combine(root, name, "Rejected-" + theorem + "-" + rejectedIndex++ + ".lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS unaligned evidence rejection: " + name + "/" + theorem,
-        theorem == "method0_unsafe_validated" ? "UnsafeCallsValid" :
-        theorem == "method0_layouts_validated" ? "MethodLayoutsValid" : "LayoutUsesComplete");
+    var pc = name.StartsWith("Read", StringComparison.Ordinal) ? 1 : 2;
+    var mutated = $$"""{ method0 with code := method0.code.set {{pc}} ({{lowered}}) }""";
+    var replacement = $"Extraction.RuntimeModelsAgree method0Closed method0Reachable {mutated}";
+    Reject(name, source, "theorem method0_models_validated", statement, replacement, "RuntimeModelsAgree");
+    Reject(name, source, "def method0Closed", "declared := { convention := 16",
+        "declared := { convention := 17", "RuntimeModelsAgree");
+}
+foreach (var name in new[] { "ReadWord", "ReadPointerWord", "ReadAlignedWord" }
+    .Where(name => !alignedOnly || name.Contains("Aligned", StringComparison.Ordinal)))
+{
+    var generated = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
+    var source = NarrowEvidence(generated, "method0_body_validated");
+    Reject(name, source, "def method0Original", "target := .external externalIdentity0",
+        "target := .external \"forged\"", "the decoded method does not match its body bytes or metadata");
 }
 rejected.Check();
+
+void Reject(string name, string source, string declaration, string before, string after, string marker)
+{
+    var start = source.IndexOf($"\n{declaration} ", StringComparison.Ordinal);
+    var end = start < 0 ? -1 : source.IndexOf('\n', start + 1);
+    var target = end < 0 ? -1 : source.IndexOf(before, start, end - start, StringComparison.Ordinal);
+    if (target < 0)
+        throw new InvalidOperationException($"Missing transfer mutation target in {name}: {before}");
+    var path = Path.Combine(root, name, $"Rejected-{rejectedIndex++}.lean");
+    var changed = string.Concat(source.AsSpan(0, target), after, source.AsSpan(target + before.Length));
+    File.WriteAllText(path, changed);
+    rejected.Add(path, $"PASS transfer evidence rejection: {name}/{marker}", marker);
+}
 
 partial class Program
 {

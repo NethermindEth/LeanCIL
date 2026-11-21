@@ -31,6 +31,13 @@ theorem enum_storage_checked :
           some (.enumeration "Fixture::Choice" storage)) = true := by decide +kernel
 #print axioms enum_storage_checked
 
+/-- An Int32 enum widens to a word, while an enum over an Int32 byref has no scalar kind. -/
+theorem enumScalarNeedsInteger :
+    let int32 := TypeExpr.atom runtimeScope "System.Int32"
+    (scalarType (.enum "E" (.byref int32)), scalarType (.enum "E" int32)) =
+      (.other, .word32) := by decide +kernel
+#print axioms enumScalarNeedsInteger
+
 /-- Exact enum identity survives local stores and returns instead of becoming only a width. -/
 theorem span_identity_checked :
     scalarTransfer method ⟨0, 10, .none⟩ [scalarType (span "First")] = some [] ∧
@@ -43,9 +50,12 @@ theorem span_identity_checked :
 /-- A method call cannot silently reinterpret one enum span as another. -/
 theorem span_call_identity_checked :
     let call : RawInstruction := ⟨0, 40, .call {
-      declaringType := .atom "Fixture" "Helpers", name := "Use", target := .managed 2,
-      typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := false,
-      returnType := .void, parameterTypes := [span "First"] }⟩
+      declared := { convention := 0, parameters := [span "First"] },
+      method := {
+        owner := .atom "Fixture" "Helpers", name := name!"Use", hasThis := false,
+        genericArity := 0, returnType := .void, parameters := [span "First"] },
+      name := "Use", target := .managed 2, typeArguments := [], parameterCount := 1,
+      returnsValue := false }⟩
     scalarTransfer method call [scalarType (span "First")] = some [] ∧
     scalarTransfer method call [scalarType (span "Second")] = none := by decide +kernel
 #print axioms span_call_identity_checked
@@ -61,13 +71,16 @@ theorem array_identity_checked :
 /-- Pointer-based in-place construction keeps the enum receiver's exact metadata identity. -/
 theorem enum_local_constructor :
     let constructor : CallSite := {
-      declaringType := span "First", name := ".ctor"
+      declared := {
+        convention := 0x20, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },
+      method := {
+        owner := span "First", name := name!".ctor", hasThis := true, genericArity := 0,
+        returnType := .void, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },
+      name := ".ctor",
       target := .external (runtimeScope ++
-        "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)")
-      typeArguments := [], parameterCount := 2, hasThis := true, returnsValue := false
-      returnType := .void
-      parameterTypes := [.pointer .void, .atom runtimeScope "System.Int32"] }
-    spanLocalConstructor constructor = some (.reference 1 true) ∧
+        "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)"),
+      typeArguments := [], parameterCount := 2, returnsValue := false }
+    runtimeModel {} .call constructor.method = some (.spanInPlace (.reference 1 true)) ∧
     scalarTransfer method ⟨0, 40, .call constructor⟩
       [.word32, .reference, scalarType (.byref (span "First"))] = some [] ∧
     scalarTransfer method ⟨0, 40, .call constructor⟩

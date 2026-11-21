@@ -1,4 +1,5 @@
 import CIL.Embedding.Tactic
+import Tests.Support
 
 /-!
 # Profile-parametric method embeddings
@@ -28,29 +29,29 @@ theorem profiles_valid : portable.Valid ∧ narrow.Valid ∧ wide.Valid := by de
 #print axioms profiles_valid
 
 /-- Code removed by profile extraction has no live instruction to match. -/
-abbrev unreachable : Op := .unsupported "Unreachable under selected profile"
+abbrev unreachable : Instruction := .unadmitted 0
 
 /-- One body over two feature flags and a callee, shared by all extraction profiles. -/
 def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Method := {
-  profile, returnsValue := true, locals := [], code := [
-    .feature .avx2, .brzero 6,
-    if avx2 then .arg 0 else unreachable,
-    if avx2 then .arg 1 else unreachable,
-    if avx2 then .call callee 2 else unreachable,
+  profile, returnsValue := true, locals := [], links := [(4, .direct callee)], code := [
+    .call (Tests.supportedGetter "X86.Avx2"), .brfalse 6,
+    if avx2 then .ldarg 0 else unreachable,
+    if avx2 then .ldarg 1 else unreachable,
+    if avx2 then .call (Tests.callee 2) else unreachable,
     if avx2 then .ret else unreachable,
-    if avx2 then unreachable else if sse42 then .arg 1 else .arg 0,
+    if avx2 then unreachable else if sse42 then .ldarg 1 else .ldarg 0,
     if avx2 then unreachable else .ret] }
 
 /-- An extracted layout has two extra dead instructions before the scalar branch target. -/
 def extracted (profile : FeatureProfile) (callee : Nat) : Method := {
-  profile, returnsValue := true, locals := [], code := [
-    .feature .avx2, .brzero 8,
-    if profile.avx2 then .arg 0 else unreachable,
-    if profile.avx2 then .arg 1 else unreachable,
-    if profile.avx2 then .call callee 2 else unreachable,
+  profile, returnsValue := true, locals := [], links := [(4, .direct callee)], code := [
+    .call (Tests.supportedGetter "X86.Avx2"), .brfalse 8,
+    if profile.avx2 then .ldarg 0 else unreachable,
+    if profile.avx2 then .ldarg 1 else unreachable,
+    if profile.avx2 then .call (Tests.callee 2) else unreachable,
     if profile.avx2 then .ret else unreachable,
     unreachable, unreachable,
-    if profile.avx2 then unreachable else if profile.sse42 then .arg 1 else .arg 0,
+    if profile.avx2 then unreachable else if profile.sse42 then .ldarg 1 else .ldarg 0,
     if profile.avx2 then unreachable else .ret] }
 
 /-- Local equalities bind an open template to each of three profile extractions. -/
@@ -120,7 +121,7 @@ example (callee : Nat) (called : callee = 4) :
 /-- error: cil_embed: the expected body does not embed -/
 #guard_msgs (substring := true) in
 example : MethodEmbeds
-    [{ extracted portable 3 with code := (extracted portable 3).code.set 1 (.brzero 9) }] 0
+    [{ extracted portable 3 with code := (extracted portable 3).code.set 1 (.brfalse 9) }] 0
     (template portable false false 3) := by
   cil_embed
 

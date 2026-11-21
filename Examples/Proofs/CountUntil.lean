@@ -7,7 +7,7 @@ import CIL.Safety.LoopOutcome
 import CIL.Safety.LoopScaffold
 
 open CIL.Safety
-open CIL (W32)
+open CIL (W32 ExceptionType)
 namespace ExampleProof
 
 bind_method countUntil untilBody :=
@@ -22,7 +22,7 @@ def bumpContract : OutcomeContract (W32 × W32) W32 where
   pre _ _ := True
   footprint _ := []
   post input _ _ v := v = input.1 + 1
-  raises input _ := if input.1 = input.2 then some "System.InvalidOperationException" else none
+  raises input _ := if input.1 = input.2 then some .invalidOperation else none
 
 theorem bump_holds : bumpContract.Holds Extracted.program bump := by
   rintro ⟨count, limit⟩ m -
@@ -35,14 +35,14 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
     exact ⟨Confined.refl _ m, _, rfl, rfl⟩
 
 /-- `CountUntil` raises exactly when the input exceeds the limit, after `limit` successful calls. -/
-def untilRaises (value limit : W32) : Option String :=
-  if limit.toNat < value.toNat then some "System.InvalidOperationException" else none
+def untilRaises (value limit : W32) : Option ExceptionType :=
+  if limit.toNat < value.toNat then some .invalidOperation else none
 
 bind_entry entry (value limit : W32) := untilBody
   with [.scalar (.i32 value), .scalar (.i32 limit)] from Memory.empty
   allocating Memory.empty_wellFormed
 private def guard : Nat := instructionLocation untilBody fun op =>
-  match op with | .brnonzero _ => true | _ => false
+  match op with | .brtrue _ => true | _ => false
 /-- The remaining count and the successful calls so far, held by the frame's two locals. -/
 private abbrev State (remaining counted : Reference) :=
   FrameState [] Memory.empty [.word32, .word32] (W32 × W32)
@@ -125,7 +125,7 @@ theorem outcome (holds : bumpContract.Holds Extracted.program bump) (value limit
 
 /-- The outcome `CountUntil` reaches from its arguments: `untilRaises` of them, or a normal
 return. -/
-def untilOutcome : List Value → Memory → Option String
+def untilOutcome : List Value → Memory → Option ExceptionType
   | [.scalar (.i32 value), .scalar (.i32 limit)], _ => untilRaises value limit
   | _, _ => none
 

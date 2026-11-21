@@ -25,7 +25,7 @@ theorem correctness (memory : CIL.Safety.Memory) (account : CIL.Safety.ManagedRe
     runtime does. -/
 theorem null_throws (memory : CIL.Safety.Memory) :
     ∃ fuel, CIL.Safety.invoke Extracted.program fuel 0 [.object .null] memory =
-      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨0, 1, .thrown .nullReference⟩ := by
   cil_checked_steps [CIL.Safety.objectFieldAddress]
 
 #print axioms null_throws

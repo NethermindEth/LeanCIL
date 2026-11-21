@@ -57,7 +57,8 @@ structure FailureRecord where
 
 /-- `record` as one line of JSON, with its expressions printed in the current context. -/
 def FailureRecord.render (record : FailureRecord) : MetaM String := do
-  let text (data : MessageData) : MetaM Json :=
+  -- An unassigned part prints as `?_`, so a record does not depend on metavariable numbering.
+  let text (data : MessageData) : MetaM Json := withOptions (pp.mvars.set · false) do
     return Json.str (← (← addMessageContext data).toString)
   let parts (entries : Array (String × Expr)) : MetaM Json := do
     return Json.mkObj (← entries.toList.mapM fun (name, value) => do

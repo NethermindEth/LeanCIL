@@ -1,3 +1,4 @@
+import Tests.Support.IntrinsicMethods
 import CIL.Safety.SymbolicExecution
 import CIL.SIMD.PackedLanes
 
@@ -338,13 +339,6 @@ example (x y : V256) {i : Nat} (lane : i < 4) (value : V256)
   cases evaluated
   exact lane64_signedgt256 x y lane
 
-/-- The portable lane multiply evaluates to the wrapping lanewise products. -/
-example (a0 a1 a2 a3 b0 b1 b2 b3 : W64) :
-    evalIntrinsic (.vector (.mul64 256))
-        [.v256 (pack256 a0 a1 a2 a3), .v256 (pack256 b0 b1 b2 b3)] =
-      some (.v256 (pack256 (a0 * b0) (a1 * b1) (a2 * b2) (a3 * b3))) := by
-  rw [intrinsic_mul256, zip256_pack256]
-
 /-- AVX-512DQ `MoveMask` of a packed mask vector gathers the four conditions as bits. -/
 example (lane0 lane1 lane2 lane3 : Bool) :
     evalIntrinsic (.avx512DQ .moveMask64)
@@ -359,7 +353,7 @@ example (lane0 lane1 lane2 lane3 : Bool) :
     another: one partial-product row of a multi-limb multiply. -/
 @[cil_code] def partialProductMethod : CIL.Method := {
   profile := { architecture := .x64, avx2 := true }
-  code := [.intrinsic (.avx2 .shr64) 2, .intrinsic (.avx2 .multiplyEven32) 2, .ret]
+  code := [.call Tests.IntrinsicMethods.shiftRight, .call Tests.IntrinsicMethods.multiplyEven32, .ret]
   locals := [], returnsValue := true }
 
 /-- The program holding `partialProductMethod`. -/

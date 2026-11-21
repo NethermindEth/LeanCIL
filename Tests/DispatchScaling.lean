@@ -30,9 +30,12 @@ def types (count : Nat) : List DispatchType :=
     interfaces := [], methods := [slot], assembly := pin}]
 /-- Call site selecting the shared interface slot. -/
 def site : CallSite := {
-  declaringType := iface, name := "Read", target := .managed 5,
-  typeArguments := [], parameterCount := 0, hasThis := true, returnsValue := false,
-  returnType := .void, parameterTypes := [] }
+  declared := { convention := 0x20 },
+  method := {
+    owner := iface, name := name!"Read", hasThis := true, genericArity := 0, returnType := .void,
+    parameters := [] },
+  name := "Read", target := .managed 5, typeArguments := [], parameterCount := 0,
+  returnsValue := false }
 /-- Resolve one call per concrete type using the list specification. -/
 def baseline (count : Nat) : Bool :=
   let catalog := types count

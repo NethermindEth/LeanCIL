@@ -3,6 +3,11 @@
 #:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -10,6 +15,9 @@
 using System.Reflection;
 using Mono.Cecil;
 
+var returnOnly = args is ["--return-only"];
+if (args.Length != 0 && !returnOnly)
+    throw new ArgumentException("Usage: PointerOperations.cs [--return-only]");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PointerOperations");
 Directory.CreateDirectory(root);
@@ -21,6 +29,7 @@ var storageBytes = new byte[16];
 foreach (var name in new[]
     { "Subtract", "SubtractNative", "Difference", "Less", "Greater", "LessEqual", "GreaterEqual" })
 {
+    if (returnOnly) break;
     var subtraction = name.StartsWith("Subtract", StringComparison.Ordinal);
     var native = name == "SubtractNative";
     var signature = subtraction ? "System.Byte*," + (native ? "System.IntPtr" : "System.Int32") :
@@ -63,9 +72,9 @@ foreach (var name in new[]
         """ + "\n" + control);
     evidence.Add(proof, "PASS runtime, certificate and checked pointer execution: " + name);
     if (name != "Difference") continue;
-    if (!source.Contains(".sub", StringComparison.Ordinal)) throw new Exception("Missing difference mutation target");
+    // The method is defined from its decoder, so the forgery changes the sub (89) the decoder reads to add (88).
     var forged = Path.Combine(root, "ForgedDifference.lean");
-    File.WriteAllText(forged, differenceEvidence!.Replace(".sub", ".add", StringComparison.Ordinal));
+    File.WriteAllText(forged, ForgeDecodedOriginal(differenceEvidence!, 0, "opcode := 89,", "opcode := 88,"));
     rejected.Add(forged, "PASS independent forged pointer difference rejection", "ScalarFlowValid");
 }
 
@@ -75,6 +84,7 @@ foreach (var (name, parameters) in new[]
     ("WriteEnum", "Examples.Unsigned64*,System.UInt64")
 })
 {
+    if (returnOnly && name != "ReadEnum") continue;
     var output = Path.Combine(root, name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"PointerOperations::{name}({parameters})", output]);
     var write = name == "WriteEnum";
@@ -137,18 +147,23 @@ foreach (var (name, parameters) in new[]
     }
     if (name == "ReadEnum")
     {
-        var returnEvidence = NarrowEvidence(source, "method0_shape_validated");
+        var returnEvidence = NarrowEvidence(source, "method0_declared_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, returnEvidence,
-            ["method0_shape_validated"], 1));
-        foreach (var replacement in new[] { ".ret (some .signed8)", ".ret (some .unsigned16)" })
+            ["method0_declared_validated"], 1));
+        foreach (var replacement in new[] { "System.Int32", "System.UInt16" })
         {
-            const string target = ".ret (some .signed16)";
-            if (!returnEvidence.Contains(target, StringComparison.Ordinal))
-                throw new InvalidOperationException("Missing enum return narrowing");
-            var widthChanged = replacement.Contains("signed8", StringComparison.Ordinal);
+            // The method is defined from its decoder, so the forged declared return is a forged decoder's value.
+            var forgedSource = ForgeDecodedReturnType(returnEvidence, 0, "\"System.Int16\"", $"\"{replacement}\"");
+            var widthChanged = replacement == "System.Int32";
             var forged = Path.Combine(output, "ForgedReturn" + widthChanged + ".lean");
-            File.WriteAllText(forged, returnEvidence.Replace(target, replacement, StringComparison.Ordinal));
-            rejected.Add(forged, "PASS independent enum return width/signedness rejection", "MethodShapeValid");
+            File.WriteAllText(forged, forgedSource);
+            rejected.Add(forged, "PASS independent enum return width/signedness rejection", "DeclaredValid");
+            // The `rfl` rejection is a failed elaboration; the kernel must also prove the obligation false.
+            var refuted = Path.Combine(output, "RefutedReturn" + widthChanged + ".lean");
+            File.WriteAllText(refuted, KernelRefutation(forgedSource, "method0_declared_validated",
+                "method0_declared_refuted"));
+            evidence.Add(refuted, "PASS the kernel proves the forged enum return declaration false",
+                "method0_declared_refuted");
         }
     }
     evidence.Add(proof, "PASS runtime, certificate and checked pointee storage: " + name);
@@ -156,6 +171,7 @@ foreach (var (name, parameters) in new[]
 
 foreach (var mutation in new[] { "float", "nested", "reference-field", "enum-storage", "enum-identity", "enum-scope" })
 {
+    if (returnOnly) break;
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -43,7 +44,8 @@ partial class Program
         requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof),
             Output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(r.Output)),
             Assembly = Path.GetFullPath(r.Assembly ?? assembly) }).ToArray();
-        if (requests.Select(r => Path.GetFullPath(r.Output)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != requests.Count)
+        // Outputs in another case are distinct only where the volume is known to tell case apart; a link never is.
+        if (requests.Select(r => ResolvedPath(r.Output)).Distinct(CollidingLocationComparer).Count() != requests.Count)
             throw new ArgumentException("Batch outputs must be distinct");
         foreach (var request in requests)
         {
@@ -172,20 +174,24 @@ partial class Program
                 var theorem = $"BatchCase{i}.{request.Theorem}";
                 var axioms = AuditedAxioms(audited.theorems[2 * i]);
                 AuditedAxioms(audited.theorems[2 * i + 1]);
+                // The manifest a refutation is bound to is the bytes whose digest matched, read once.
+                var manifest = File.ReadAllBytes(Path.Combine(request.Output, "identity.json"));
                 if (!Same(before[i], Inputs(commonAfter, request.Proof)) ||
-                    hashes[i] != Sha(Path.Combine(request.Output, "identity.json")))
+                    hashes[i] != Convert.ToHexStringLower(SHA256.HashData(manifest)))
                     throw new InvalidOperationException("Batch inputs changed during verification");
-                var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
+                var extraction = JsonSerializer.Deserialize<JsonElement>(manifest);
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
-                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes,
-                    Sha(sources[shardOf[i]]), theorem,
+                reports[i] = new Report(CertificateSchema, Sha(request.Assembly!), hashes[i], request.Theorem, axioms,
+                    AuditText(audited.theorems[2 * i]), before[i], BindingSection.Default, libraryKey, libraryBuild,
+                    AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(sources[shardOf[i]]), theorem,
                     staticValues: StaticValueAssumptions(extraction),
                     opaqueStaticValues: OpaqueStaticValues(extraction),
                     imports: PublishedImports(extraction),
                     contractDependencies: DeploymentDependencies(extraction),
-                    initializationAssumptions: InitializationAssumptions(extraction));
+                    initializationAssumptions: InitializationAssumptions(extraction),
+                    refutation: ExtractedRefutation(audited.theorems[2 * i], extraction,
+                        $"BatchCase{i}.{ExtractedProgram}"));
             }
             // A package may require the same library by path and have built into it since the last snapshot.
             RequireUnchangedLibrary();

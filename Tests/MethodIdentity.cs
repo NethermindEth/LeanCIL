@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.RegularExpressions;
 
@@ -18,7 +23,8 @@ string Build(string name, string body)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Identity.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Identity.cs"), "namespace Identity; public static class Calls { " + body + " }");
     Run(["dotnet", "build", Path.Combine(source, "Identity.csproj"), "-c", "Release"]);
@@ -130,3 +136,4 @@ catch (InvalidOperationException error) when (error.Message.Contains("rfl"))
 }
 if (!failed) throw new InvalidOperationException("A positional proof survived renumbering; the reordered build does not exercise identity.");
 Console.WriteLine("PASS positional indices break on renumbering; signatures do not");
+Run(["dotnet", "run", "--file", At("Tests/Identities.cs")], streamOutput: true, progress: "Typed identity display");

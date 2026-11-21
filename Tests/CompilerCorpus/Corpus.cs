@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: AssemblyConfiguration("Release")]
-[assembly: TargetFramework(".NETCoreApp,Version=v10.0")]
+[assembly: TargetFramework(".NETCoreApp,Version=v11.0")]
 
 public static class Corpus
 {

@@ -1,10 +1,10 @@
-import CIL.Safety.InstructionMemory
+import CIL.Safety.StepComposition
 import CIL.Safety.AccessRequirements
 
 /-!
 # Typed copies
 
-What a successful `cpobj` (`copyObject`) leaves in memory: each destination byte holds the
+What a successful `cpobj` leaves in memory: each destination byte holds the
 matching source byte, now marked initialized. Consumers use this to read copied structs
 back without unfolding the instruction.
 -/
@@ -13,13 +13,28 @@ namespace CIL.Safety
 
 /-- Every successful typed copy initializes each destination byte to the
     corresponding byte in the source snapshot, for arbitrary memories and sizes. -/
-theorem copyObject_writes_snapshot (m result : Memory) (source destination : Reference)
+theorem cpobj_writes_snapshot (m result : Memory) (source destination : Reference)
     (size index : Nat) (rest : List Value) (within : index < size)
-    (copied : instruction (.copyObject size)
+    {body : Method} {type : Extraction.TypeExpr} {pc : Nat} {args : List Value} {frame : Frame}
+    (width : (body.valueShape type).size? = some size)
+    (stepped : step body (.cpobj type) pc args frame
       (.reference (.address source) :: .reference (.address destination) :: rest) m =
-        .ok (result, rest)) :
+        .ok (.next (pc + 1) rest frame result)) :
     result.cells destination.allocation (destination.offset + index) =
       ⟨(m.cells source.allocation (source.offset + index)).bits, true⟩ := by
+  rw [step_cpobj_eq body pc args frame m width] at stepped
+  let operands := .reference (.address source) :: .reference (.address destination) :: rest
+  have copied : copyInitializedBytes size operands m = .ok (result, rest) := by
+    change (do
+      let (updated, values) ← copyInitializedBytes size operands m
+      pure (FrameAction.next (pc + 1) values frame updated)) = .ok _ at stepped
+    cases executed : copyInitializedBytes size operands m with
+    | error _ => rw [executed] at stepped; cases stepped
+    | ok pair =>
+      cases pair
+      rw [executed] at stepped
+      cases stepped
+      rfl
   change (if source.allocation = destination.allocation && source.offset != destination.offset &&
       source.offset < destination.offset + size && destination.offset < source.offset + size then
     .error (.unsupported "Partially overlapping typed copy") else do
@@ -44,5 +59,5 @@ theorem copyObject_writes_snapshot (m result : Memory) (source destination : Ref
         have initialized := write_initializes _ _ _ _ _ index hw (by simpa using within)
         simpa using initialized
 
-#print axioms copyObject_writes_snapshot
+#print axioms cpobj_writes_snapshot
 end CIL.Safety

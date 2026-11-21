@@ -70,7 +70,7 @@ leancil resolve-imports bin/App.dll --library Lib \
 | `--profile name` or `@profile.json` | The execution profile; see the architecture rule below. |
 | `--output file` | Write the result as JSON there. The default is standard output. |
 
-Only `net10.0` targets are accepted. The command does not restore, use the network, or infer a
+Only `net11.0` targets are accepted. The command does not restore, use the network, or infer a
 RID from the host.
 
 Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's breadth-first
@@ -106,7 +106,7 @@ Required fields of a sidecar:
 - `frameworkKey`: SHA-256 of the sorted framework source manifest described below.
 - `assemblyIdentity`, `mvid`, `targetFramework`, `implementationSha256`, and
   `isReferenceAssembly`: exact implementation metadata and bytes. Target framework
-  is `.NETCoreApp,Version=v10.0`. Reference assemblies are authoring-only; caller proofs can be
+  is `.NETCoreApp,Version=v11.0`. Reference assemblies are authoring-only; caller proofs can be
   checked, but no successful verification report is published.
 - `interfaceModules`: module names and full Lean source strings. Names are plain
   dotted identifiers. Framework, toolchain, generated, example and test module
@@ -236,7 +236,7 @@ an interface macro or elaborator cannot forge a closure. The compiled interface
 artifacts are hashed before replay and must keep those hashes after the audit
 and before each later step. Consumer workspaces also
 reject source-name collisions and include their hashes in snapshot checks.
-Schema-4 reports list `imports` accepted via `published-certification`, as well
+A `verified.json` certificate lists `imports` accepted via `published-certification`, as well
 as `contractImports`; CLI output states the conditional assumptions and deployment
 obligations.
 Hashes and certification records never discharge those assumptions.

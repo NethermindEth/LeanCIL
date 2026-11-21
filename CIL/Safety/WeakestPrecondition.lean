@@ -105,7 +105,7 @@ theorem of_prefix {before after : Nat → Except LocatedFault (Memory × List Va
 
 /-- One fetched instruction continues with the checked state it actually produces. -/
 theorem step {program : CIL.Program} {method pc target : Nat}
-    {body : CIL.Method} {operation : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {operation : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {post : (Memory × List Value) → Prop}
     (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)
     (stepped : Safety.step body operation pc args frame stack memory =
@@ -121,7 +121,7 @@ theorem step {program : CIL.Program} {method pc target : Nat}
 
 /-- A checked return expires the frame and validates every value before establishing `post`. -/
 theorem returned {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {operation : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {operation : CIL.Instruction} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory} {post : (Memory × List Value) → Prop}
     (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)
     (stepped : Safety.step body operation pc args frame stack memory =
@@ -150,7 +150,7 @@ theorem enter {program : CIL.Program} {method : Nat} {body : CIL.Method}
 
 /-- Compose a checked call with its suffix, retaining the helper's complete postcondition. -/
 theorem call {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method}
-    {operation : CIL.Op} {args stack arguments rest : List Value}
+    {operation : CIL.Instruction} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory}
     {helperPost post : (Memory × List Value) → Prop}
     (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)

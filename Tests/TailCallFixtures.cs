@@ -8,6 +8,7 @@ partial class Program
     {
         var names = new[] { "Forward", "ForwardReference", "ForwardVoid", "ForwardThrow", "LocalReference" };
         var dll = Path.Combine(root, "TailCalls.dll");
+        var callPcs = new Dictionary<string, int>(StringComparer.Ordinal);
         using (var module = ModuleDefinition.ReadModule(assembly))
         {
             foreach (var method in module.GetType("Examples.TailCalls").Methods.Where(method => names.Contains(method.Name)))
@@ -15,6 +16,7 @@ partial class Program
                 var call = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Call);
                 if (call.Next?.OpCode.Code != Code.Ret) throw new InvalidOperationException("Missing tail-call fixture return");
                 method.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
+                callPcs.Add(method.Name, method.Body.Instructions.IndexOf(call));
             }
             module.Write(dll);
         }
@@ -25,8 +27,9 @@ partial class Program
             var output = Path.Combine(root, "Tail-" + name);
             Run(["dotnet", ExtractorPath, "extract", dll, $"TailCalls::{name}({signature})", output]);
             var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-            const string tail = ".tailCall 1 1";
-            if (!source.Contains(tail, StringComparison.Ordinal))
+            var pc = callPcs[name];
+            var tailLinks = DirectLinks(source, 1).Where(call => call.Method == 0).ToArray();
+            if (tailLinks.Length != 1 || tailLinks[0].Pc != pc || !IsDecodedMethod(source, 0))
                 throw new InvalidOperationException("Missing emitted tail transfer: " + name);
             var argument = byref ? ".reference (.address ⟨0, 0⟩)" : ".scalar (.i32 42)";
             var result = name switch
@@ -37,7 +40,19 @@ partial class Program
                 _ => null
             };
             var proof = Path.Combine(root, "Tail-" + name + ".lean");
-            File.WriteAllText(proof, source + $$"""
+            File.WriteAllText(proof, $$"""
+                {{source}}
+
+                example : Extracted.method0.code[{{pc - 1}}]? = some .nop :=
+                  Extracted.method0_instruction{{pc - 1}}
+                example : Extracted.method0.code[{{pc}}]? =
+                    ((Extracted.method0Closed.code[{{pc}}]?).bind fun raw =>
+                      match raw.operand with
+                      | .call site => some (.call site.method { tail := true })
+                      | _ => none) := by
+                  rw [Extracted.method0_instruction{{pc}}] <;> rfl
+                example : Extracted.method0.code[{{pc + 1}}]? = some .ret :=
+                  Extracted.method0_instruction{{pc + 1}}
 
                 private def tailMemory : CIL.Safety.Memory := {
                   allocations := fun identity => if identity == 0 then
@@ -56,7 +71,7 @@ partial class Program
                     """);
             else
             {
-                var fault = name == "ForwardThrow" ? ".thrown \"System.InvalidOperationException\"" :
+                var fault = name == "ForwardThrow" ? ".thrown .invalidOperation" :
                     ".memory .expiredLifetime (.address ⟨1, 0⟩) 0";
                 File.AppendAllText(proof, $$"""
 
@@ -77,22 +92,25 @@ partial class Program
                     """);
             evidence.Add(proof, "PASS compiled tail transfer and lifetime: " + name);
             if (name != "Forward") continue;
-            foreach (var (mutation, before, after, marker) in new[]
+            const string feature = "method0_features_validated";
+            var featureSource = NarrowEvidence(source, feature);
+            var control = Path.Combine(root, "Tail-prefix-control.lean");
+            File.WriteAllText(control, featureSource);
+            evidence.Add(control, "PASS the raw tail prefix agrees with the decoded call", feature);
+            const string withoutTail = "fun op => match op with | .call target _ => .call target {} | _ => op";
+            foreach (var (mutation, changed, markers) in new[]
             {
-                ("dropped", tail, ".call 1 1",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                        "method0Closed"),
-                ("prefix", "opcode := 65044", "opcode := 0",
-                    "Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-                        "method0Closed"),
-                ("target", tail, ".tailCall 0 1", "Extraction.ManagedCallsValid")
+                ("dropped", ForgeDecodedInstruction(source, 0, pc, withoutTail),
+                    new[] { "Extraction.FeatureFlowValid", FeatureObligation(0) }),
+                ("prefix", ForgeClosedCode(featureSource, 0,
+                    $$"""modify {{pc - 1}} (fun raw => { raw with opcode := 0 })"""),
+                    ["Extraction.FeatureFlowValid", FeatureObligation(0), "is false"]),
+                ("target", ForgeLink(source, 0, pc, ".direct 0"), ["Extraction.ManagedCallsValid"])
             })
             {
-                if (!source.Contains(before, StringComparison.Ordinal))
-                    throw new InvalidOperationException("Missing tail mutation target: " + mutation);
                 var forged = Path.Combine(root, "Forged-tail-" + mutation + ".lean");
-                File.WriteAllText(forged, source.Replace(before, after, StringComparison.Ordinal));
-                rejected.Add(forged, "PASS tail certificate rejection: " + mutation, marker);
+                File.WriteAllText(forged, changed);
+                rejected.Add(forged, "PASS tail certificate rejection: " + mutation, markers);
             }
         }
         var excludedDll = Path.Combine(root, "TailExcluded.dll");
@@ -117,11 +135,11 @@ partial class Program
                 (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 42)]
                   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
                     views := [], nextIdentity := 0 }).map Prod.snd =
-                  .ok [.scalar (.i32 42)] := rfl
+                  .ok [.scalar (.i32 42)] := by cil_kernel_rfl
             #print axioms excluded_indirect_tail
             """);
         evidence.Add(excludedProof, "PASS profile-excluded indirect tail");
-        foreach (var mutation in new[] { "branch", "return", "missing-pointer", "stack", "type" })
+        foreach (var mutation in new[] { "branch", "dead-branch", "return", "missing-pointer", "stack", "type" })
         {
             var changed = Path.Combine(root, "Tail-Rejected-" + mutation + ".dll");
             using (var module = ModuleDefinition.ReadModule(dll))
@@ -131,6 +149,8 @@ partial class Program
                 var call = prefix.Next;
                 var processor = method.Body.GetILProcessor();
                 if (mutation == "branch") processor.InsertBefore(prefix, Instruction.Create(OpCodes.Br, call));
+                // An unreachable branch after the final return still may not enter the tail call.
+                else if (mutation == "dead-branch") processor.Append(Instruction.Create(OpCodes.Br, call));
                 else if (mutation == "return") processor.InsertAfter(call, Instruction.Create(OpCodes.Nop));
                 else if (mutation == "stack")
                     processor.InsertBefore(method.Body.Instructions[0], Instruction.Create(OpCodes.Ldc_I4_0));
@@ -148,7 +168,7 @@ partial class Program
                 "TailCalls::Forward(System.Int32)", Path.Combine(root, "Tail-Rejected-" + mutation)]);
             var marker = mutation switch
             {
-                "branch" => "middle of a tail transfer",
+                "branch" or "dead-branch" => "Branch enters the instruction after a prefix",
                 "missing-pointer" => "Invalid evaluation stack during reachability",
                 "stack" => "Tail call requires exactly its arguments",
                 _ => "Unsupported tail prefix"

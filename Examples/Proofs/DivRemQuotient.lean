@@ -16,6 +16,8 @@ open CIL CIL.Safety
 def inputs (lower upper divisor : W64) : List CIL.Safety.Value :=
   [.scalar (.i64 lower), .scalar (.i64 upper), .scalar (.i64 divisor)]
 
+-- Comparing the two fully assembly-qualified tuple arguments needs additional reduction depth.
+set_option maxRecDepth 2048 in
 /-- `DivRem(lower, upper, divisor).Quotient` is the natural quotient when it fits, and faults
     otherwise. -/
 theorem correctness (lower upper divisor : W64) :

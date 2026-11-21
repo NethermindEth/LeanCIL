@@ -25,6 +25,10 @@ namespace CIL.Safety
 
 @[cil_guard] theorem guard_span (reference : ManagedReference) (length : Nat) :
     Value.hasUnspecified (.span reference length) = false := rfl
+/-- A span local's home carries no unspecified vector bits. -/
+@[cil_guard] theorem guard_spanHome (slot : Nat) :
+    Value.hasUnspecified (.spanHome slot) = false := rfl
+#print axioms guard_spanHome
 
 @[cil_guard] theorem guard_snapshot (shape : CIL.SnapshotShape) (bytes : List (BitVec 8 × Bool)) :
     CIL.Value.hasUnspecified (.snapshot shape bytes) = false := rfl
@@ -53,6 +57,13 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_nullRef : CIL.Value.hasUnspecified .nullRef = false := rfl
 @[cil_guard] theorem guard_unmodeled : CIL.Value.hasUnspecified .unmodeled = false := rfl
 
+-- A memory operation that reads no span view takes its operands from the stack unchanged.
+attribute [cil_guard] viewOperandCount
+/-- With no view operands to read, the stack is the operation's operand list. -/
+@[cil_guard] theorem viewOperands_zero (frame : Frame) (memory : Memory) (stack : List Value) :
+    viewOperands frame memory 0 stack = .ok stack := rfl
+#print axioms viewOperands_zero
+
 -- The guard inspects only the top `count` stack operands.
 @[cil_guard] theorem guard_operands_zero (stack : List Value) :
     unspecifiedOperands 0 stack = false := rfl
@@ -63,57 +74,124 @@ namespace CIL.Safety
       (value.hasUnspecified || unspecifiedOperands count rest) := rfl
 
 -- How many stack operands each instruction observes.
-@[cil_guard] theorem guard_nativeBinary (op : CIL.Op) : observerCount (.nativeBinary op) = 2 := rfl
-@[cil_guard] theorem guard_checkedConvert (width : Nat) (signed unsigned : Bool) :
-    observerCount (.checkedConvert width signed unsigned) = 1 := rfl
-@[cil_guard] theorem guard_checkedArithmetic (kind : CIL.CheckedBinaryKind) (signed : Bool) :
-    observerCount (.checkedArithmetic kind signed) = 2 := rfl
-@[cil_guard] theorem guard_divide (signed remainder : Bool) :
-    observerCount (.divide signed remainder) = 2 := rfl
-@[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
-    observerCount (.arg index narrow) = 0 := rfl
-@[cil_guard] theorem guard_call (callee argc : Nat) :
-    observerCount (.call callee argc) = argc := rfl
-@[cil_guard] theorem guard_newVector256 (callee argc : Nat) :
-    observerCount (.newVector256 callee argc) = argc := rfl
-@[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
-    observerCount (.newAggregate callee argc size) = argc := rfl
+/-- A signed division observes both of its operands. -/
+@[cil_guard] theorem guard_div : observerCount .div = 2 := rfl
+#print axioms guard_div
+/-- An unsigned division observes both of its operands. -/
+@[cil_guard] theorem guard_div_un : observerCount .div_un = 2 := rfl
+#print axioms guard_div_un
+/-- A signed remainder observes both of its operands. -/
+@[cil_guard] theorem guard_rem : observerCount .rem = 2 := rfl
+#print axioms guard_rem
+/-- An unsigned remainder observes both of its operands. -/
+@[cil_guard] theorem guard_rem_un : observerCount .rem_un = 2 := rfl
+#print axioms guard_rem_un
+/-- A signed checked addition observes both of its operands. -/
+@[cil_guard] theorem guard_add_ovf : observerCount .add_ovf = 2 := rfl
+#print axioms guard_add_ovf
+/-- An unsigned checked addition observes both of its operands. -/
+@[cil_guard] theorem guard_add_ovf_un : observerCount .add_ovf_un = 2 := rfl
+#print axioms guard_add_ovf_un
+/-- A signed checked subtraction observes both of its operands. -/
+@[cil_guard] theorem guard_sub_ovf : observerCount .sub_ovf = 2 := rfl
+#print axioms guard_sub_ovf
+/-- An unsigned checked subtraction observes both of its operands. -/
+@[cil_guard] theorem guard_sub_ovf_un : observerCount .sub_ovf_un = 2 := rfl
+#print axioms guard_sub_ovf_un
+/-- A signed checked multiplication observes both of its operands. -/
+@[cil_guard] theorem guard_mul_ovf : observerCount .mul_ovf = 2 := rfl
+#print axioms guard_mul_ovf
+/-- An unsigned checked multiplication observes both of its operands. -/
+@[cil_guard] theorem guard_mul_ovf_un : observerCount .mul_ovf_un = 2 := rfl
+#print axioms guard_mul_ovf_un
+/-- A checked conversion of a signed operand observes its one operand. -/
+@[cil_guard] theorem guard_conv_ovf (target : CIL.ConvTarget) :
+    observerCount (.conv_ovf target) = 1 := rfl
+#print axioms guard_conv_ovf
+/-- A checked conversion of an unsigned operand observes its one operand. -/
+@[cil_guard] theorem guard_conv_ovf_un (target : CIL.ConvTarget) :
+    observerCount (.conv_ovf_un target) = 1 := rfl
+#print axioms guard_conv_ovf_un
+@[cil_guard] theorem guard_ldarg (index : Nat) : observerCount (.ldarg index) = 0 := rfl
+#print axioms guard_ldarg
+@[cil_guard] theorem guard_starg (index : Nat) : observerCount (.starg index) = 0 := rfl
+#print axioms guard_starg
+@[cil_guard] theorem guard_ldarga (index : Nat) : observerCount (.ldarga index) = 0 := rfl
+#print axioms guard_ldarga
+/-- A call observes no operand before dispatch; the arm of its link checks them. -/
+@[cil_guard] theorem guard_call (method : Extraction.MethodRef) (prefixes : CallPrefixes) :
+    observerCount (.call method prefixes) = 0 := rfl
+#print axioms guard_call
+/-- A linked call checks its method's arguments. -/
+@[cil_guard] theorem guard_call_linked (link : CIL.Link) (observed : Bool) :
+    ((some link).isSome && observed) = observed := rfl
+#print axioms guard_call_linked
+/-- A call without a link leaves its operands to the model it runs. -/
+@[cil_guard] theorem guard_call_unlinked (observed : Bool) :
+    ((none : Option CIL.Link).isSome && observed) = false := rfl
+#print axioms guard_call_unlinked
+@[cil_guard] theorem guard_newobj (constructor : CIL.Extraction.MethodRef) :
+    observerCount (.newobj constructor) = constructor.parameters.length := rfl
+#print axioms guard_newobj
+
+open Lean Meta in
+/-- The argument count of a call's method as a numeral, when a closed term fixes its parameter
+    list and receiver flag; a method a variable decides is left as it is. -/
+dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.argumentCount _) :=
+  fun expression => do
+    let_expr CIL.Extraction.MethodRef.argumentCount _ := expression | return .continue
+    let count ← withDefault <| whnf expression
+    match count.rawNatLit? <|> count.nat? with
+    | some value => return .done (mkNatLit value)
+    | none => return .continue
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
     observerCount (.memory op) = op.argumentCount := rfl
-@[cil_guard] theorem guard_throw (exception : String) : observerCount (.throw exception) = 0 := rfl
-@[cil_guard] theorem guard_unsupported (description : String) :
-    observerCount (.unsupported description) = 0 := rfl
-@[cil_guard] theorem guard_ret : observerCount (.ret none) = 1 := rfl
-@[cil_guard] theorem guard_ret_narrow (kind : CIL.NarrowKind) :
-    observerCount (.ret (some kind)) = 1 := rfl
-@[cil_guard] theorem guard_loadAggregate (size : Nat) :
-    observerCount (.loadAggregate size) = 1 := rfl
-@[cil_guard] theorem guard_storeAggregate (size : Nat) :
-    observerCount (.storeAggregate size) = 2 := rfl
-@[cil_guard] theorem guard_copyObject (size : Nat) : observerCount (.copyObject size) = 2 := rfl
-@[cil_guard] theorem guard_initAggregate (size : Nat) :
-    observerCount (.initAggregate size) = 1 := rfl
-@[cil_guard] theorem guard_loadScalar (width : Nat) (signed : Bool) :
-    observerCount (.loadScalar width signed) = 1 := rfl
-@[cil_guard] theorem guard_storeScalar (width : Nat) : observerCount (.storeScalar width) = 2 := rfl
-@[cil_guard] theorem guard_fieldAt (offset width : Nat) (signed : Bool) :
-    observerCount (.fieldAt offset width signed) = 1 := rfl
-@[cil_guard] theorem guard_fieldAddress (offset : Nat) :
-    observerCount (.fieldAddress offset) = 1 := rfl
-@[cil_guard] theorem guard_setFieldAt (offset width : Nat) :
-    observerCount (.setFieldAt offset width) = 2 := rfl
-@[cil_guard] theorem guard_aggregateFieldAt (offset size : Nat) :
-    observerCount (.aggregateFieldAt offset size) = 1 := rfl
-@[cil_guard] theorem guard_setAggregateFieldAt (offset size : Nat) :
-    observerCount (.setAggregateFieldAt offset size) = 2 := rfl
-@[cil_guard] theorem guard_lane (index : Fin 4) : observerCount (.lane index) = 1 := rfl
-@[cil_guard] theorem guard_laneAddress (index : Fin 4) :
-    observerCount (.laneAddress index) = 1 := rfl
-@[cil_guard] theorem guard_setLane (index : Fin 4) : observerCount (.setLane index) = 2 := rfl
-@[cil_guard] theorem guard_load64 : observerCount .load64 = 1 := rfl
-@[cil_guard] theorem guard_store64 : observerCount .store64 = 2 := rfl
-@[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
-@[cil_guard] theorem guard_asRef : observerCount .asRef = 1 := rfl
+@[cil_guard] theorem guard_throw (exception : ExceptionType) :
+    observerCount (.throw exception) = 0 := rfl
+@[cil_guard] theorem guard_unadmitted (opcode : Nat) :
+    observerCount (.unadmitted opcode) = 0 := rfl
+/-- Return observes at most the first stack value, regardless of narrowing. -/
+@[cil_guard] theorem guard_ret :
+    observerCount .ret = 1 := rfl
+
+#print axioms guard_ret
+/-- The cpobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_cpobj (type : Extraction.TypeExpr) :
+    observerCount (.cpobj type) = 2 := rfl
+#print axioms guard_cpobj
+/-- The initobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_initobj (type : Extraction.TypeExpr) :
+    observerCount (.initobj type) = 1 := rfl
+#print axioms guard_initobj
+/-- The ldobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_ldobj (type : Extraction.TypeExpr) :
+    observerCount (.ldobj type) = (if Extraction.spanLocal type then 0 else 1) := rfl
+#print axioms guard_ldobj
+/-- The stobj guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_stobj (type : Extraction.TypeExpr) :
+    observerCount (.stobj type) = 2 := rfl
+#print axioms guard_stobj
+/-- The sizeof guard checks the operands observed by the storage operation. -/
+@[cil_guard] theorem guard_sizeof (type : Extraction.TypeExpr) :
+    observerCount (.sizeof type) = 0 := rfl
+#print axioms guard_sizeof
+@[cil_guard] theorem guard_ldind (kind : CIL.NumericKind) : observerCount (.ldind kind) = 1 := rfl
+@[cil_guard] theorem guard_stind (kind : CIL.NumericKind) : observerCount (.stind kind) = 2 := rfl
+@[cil_guard] theorem guard_ldlen : observerCount .ldlen = 1 := rfl
+@[cil_guard] theorem guard_ldelem (kind : CIL.NumericKind) : observerCount (.ldelem kind) = 2 :=
+  rfl
+@[cil_guard] theorem guard_ldelem_ref : observerCount .ldelem_ref = 2 := rfl
+@[cil_guard] theorem guard_stelem (kind : CIL.NumericKind) : observerCount (.stelem kind) = 3 :=
+  rfl
+@[cil_guard] theorem guard_stelem_ref : observerCount .stelem_ref = 3 := rfl
+@[cil_guard] theorem guard_ldsfld (field : CIL.Extraction.FieldRef) :
+    observerCount (.ldsfld field) = 0 := rfl
+@[cil_guard] theorem guard_ldsflda (field : CIL.Extraction.FieldRef) :
+    observerCount (.ldsflda field) = 0 := rfl
+@[cil_guard] theorem guard_ldtoken (operand : CIL.TokenOperand) :
+    observerCount (.ldtoken operand) = 0 := rfl
+@[cil_guard] theorem guard_stsfld (field : CIL.Extraction.FieldRef) :
+    observerCount (.stsfld field) = 1 := rfl
 
 -- Operand counts of memory instructions, which `observerCount` defers to.
 @[cil_guard] theorem guard_count_bigMul64 (signed : Bool) :
@@ -130,7 +208,6 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_store128 : CIL.MemoryOp.store128.argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_store256 : CIL.MemoryOp.store256.argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_store512 : CIL.MemoryOp.store512.argumentCount = 2 := rfl
-@[cil_guard] theorem guard_count_init256 : CIL.MemoryOp.init256.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_vector128Load :
     (CIL.MemoryOp.vector128Unsafe false false).argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_vector128LoadAt :
@@ -142,16 +219,10 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_asRef : CIL.MemoryOp.asRef.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_add (size : Nat) (signed : Bool) :
     (CIL.MemoryOp.add size signed).argumentCount = 2 := rfl
-@[cil_guard] theorem guard_count_bitcast256 : CIL.MemoryOp.bitcast256.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_bitcastByteBool :
     CIL.MemoryOp.bitcastByteBool.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_bitcastValue (source target : CIL.SnapshotShape) :
     (CIL.MemoryOp.bitcastValue source target).argumentCount = 1 := rfl
-@[cil_guard] theorem guard_count_skipInit : CIL.MemoryOp.skipInit.argumentCount = 1 := rfl
-@[cil_guard] theorem guard_count_staticAddress (bytes : List (BitVec 8)) :
-    (CIL.MemoryOp.staticAddress bytes).argumentCount = 0 := rfl
-@[cil_guard] theorem guard_count_staticValue (bytes : List (BitVec 8)) :
-    (CIL.MemoryOp.staticValue bytes).argumentCount = 0 := rfl
 @[cil_guard] theorem guard_count_createSpan (width : Nat) :
     (CIL.MemoryOp.createSpan width).argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_spanCreate : CIL.MemoryOp.spanCreate.argumentCount = 2 := rfl
@@ -159,6 +230,39 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_spanItem (width : Nat) :
     (CIL.MemoryOp.spanItem width).argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_spanLength : CIL.MemoryOp.spanLength.argumentCount = 1 := rfl
+-- The remaining span and view operations, whose counts `viewOperandCount` also reads.
+@[cil_guard] theorem guard_count_observeView (observation : CIL.ViewObservation) :
+    (CIL.MemoryOp.observeView observation).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanReinterpret (source target : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanReinterpret source target writable).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanCopy (width : Nat) (tryCopy : Bool) :
+    (CIL.MemoryOp.spanCopy width tryCopy).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_spanClear (width : Nat) :
+    (CIL.MemoryOp.spanFill width true).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanFill (width : Nat) :
+    (CIL.MemoryOp.spanFill width false).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_arrayFill (element : CIL.ArrayElement) :
+    (CIL.MemoryOp.arrayFill element false).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_arrayFillCounted (element : CIL.ArrayElement) :
+    (CIL.MemoryOp.arrayFill element true).argumentCount = 4 := rfl
+@[cil_guard] theorem guard_count_spanEmpty (width : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanEmpty width writable).argumentCount = 0 := rfl
+@[cil_guard] theorem guard_count_spanFromReference (width : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanFromReference width writable).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_spanSingleReference (width : Nat) (writable : Bool) :
+    (CIL.MemoryOp.spanSingleReference width writable).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_spanSlice : (CIL.MemoryOp.spanSlice false).argumentCount = 2 :=
+  rfl
+@[cil_guard] theorem guard_count_spanSliceCount :
+    (CIL.MemoryOp.spanSlice true).argumentCount = 3 := rfl
+@[cil_guard] theorem guard_count_spanReadOnly : CIL.MemoryOp.spanReadOnly.argumentCount = 1 :=
+  rfl
+@[cil_guard] theorem guard_count_arraySpan (element : CIL.ArrayElement) (writable : Bool) :
+    (CIL.MemoryOp.arraySpan element writable .whole).argumentCount = 1 := rfl
+@[cil_guard] theorem guard_count_arraySpanFrom (element : CIL.ArrayElement) (writable : Bool) :
+    (CIL.MemoryOp.arraySpan element writable .fromStart).argumentCount = 2 := rfl
+@[cil_guard] theorem guard_count_arraySpanCounted (element : CIL.ArrayElement) (writable : Bool) :
+    (CIL.MemoryOp.arraySpan element writable .counted).argumentCount = 3 := rfl
 @[cil_guard] theorem guard_count_nullRef : CIL.MemoryOp.nullRef.argumentCount = 0 := rfl
 @[cil_guard] theorem guard_count_isNullRef : CIL.MemoryOp.isNullRef.argumentCount = 1 := rfl
 

@@ -73,17 +73,15 @@ internal static class VirtualDispatch
     internal static IEnumerable<TypeDefinition> Hierarchy(MethodReference reference)
     {
         var declaring = reference.DeclaringType.Resolve();
-        return declaring is null ? [] : Classes(declaring.Module).Where(candidate => Derives(candidate, declaring));
+        if (declaring is null) return [];
+        return PinnedAssemblies.Active is { } pins
+            ? pins.DispatchHierarchy(declaring) : DerivedClasses([declaring.Module], declaring);
     }
 
-    // Every class of the pinned assemblies, nested ones included; without pins, the declaring module alone.
-    static IEnumerable<TypeDefinition> Classes(ModuleDefinition module)
-    {
-        IEnumerable<ModuleDefinition> modules = PinnedAssemblies.Active is { } pins
-            ? [pins.Selected, .. pins.References.Select(reference => reference.Module)] : [module];
-        return modules.SelectMany(each => each.GetTypes())
-            .Where(type => type is { IsValueType: false, IsInterface: false });
-    }
+    /// <summary>Every class in the modules, including nested classes, that derives from the slot's class.</summary>
+    internal static IEnumerable<TypeDefinition> DerivedClasses(IEnumerable<ModuleDefinition> modules,
+        TypeDefinition declaring) => modules.SelectMany(module => module.GetTypes())
+        .Where(type => type is { IsValueType: false, IsInterface: false } && Derives(type, declaring));
 
     static bool Derives(TypeDefinition candidate, TypeDefinition declaring)
     {

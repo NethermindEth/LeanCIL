@@ -25,11 +25,11 @@ theorem MethodRenaming.step_success (transport : StepTransport)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {arguments stack : List Value}
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack)
-    {operation : CIL.Op} {pc : Nat} {action : FrameAction}
+    {operation : CIL.Instruction} {pc : Nat} {action : FrameAction}
     (stepped : step sourceBody operation pc arguments sourceFrame stack source = .ok action) :
     ∃ later targetAction, mapping.Extends later ∧
       step targetBody (methods.indices.operation operation) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target = .ok targetAction ∧
+        targetFrame (stack.map (methods.indices.value mapping)) target = .ok targetAction ∧
       FrameAction.Renamed methods.indices later scopes action targetAction := by
   obtain ⟨later, extension, actions⟩ := transport methods.indices mapping scopes
     sourceBody targetBody operation pc arguments stack sourceFrame targetFrame source target
@@ -83,7 +83,7 @@ theorem RunTrace.rename (transport : StepTransport)
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack) :
     SuccessfulRenaming mapping scopes final values
       (run targetProgram fuel method pc (arguments.map mapping.value) targetFrame
-        (stack.map mapping.value) target) := by
+        (stack.map (methods.indices.value mapping)) target) := by
   induction trace generalizing sourceBody targetBody mapping scopes target targetFrame with
   | @next fuel method pc arguments sourceFrame stack source nextPc nextStack nextFrame
       updated final values actual following induction =>
@@ -104,7 +104,7 @@ theorem RunTrace.rename (transport : StepTransport)
       have argumentBounds : ∀ value ∈ arguments, value.Below mapping.sourceLimit := by
         rw [memory.sourceLimit]
         exact argumentValues.below sourceFormed
-      simp only [run, targetFound, methods.instruction fetched, targetStepped,
+      simp only [run_succ, targetFound, methods.instruction fetched, targetStepped,
         Except.mapError, Bind.bind, Except.bind]
       rw [← extension.values arguments argumentBounds]
       exact continued.prepend extension (fun _ _ scope => scope)
@@ -128,7 +128,7 @@ theorem RunTrace.rename (transport : StepTransport)
       obtain ⟨result, targetChecked, equal⟩ := checks.success
       subst result
       refine ⟨middle, scopes, _, extension, fun _ _ scope => scope, departed, ?_⟩
-      simp only [run, targetFound, methods.instruction fetched, targetStepped, targetChecked,
+      simp only [run_succ, targetFound, methods.instruction fetched, targetStepped, targetChecked,
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   | @call fuel method pc arguments sourceFrame stack source callee childArguments rest updated
       child childFrame childMemory returned result final values actual childFound entered
@@ -196,10 +196,12 @@ theorem RunTrace.rename (transport : StepTransport)
       have restBounds : ∀ value ∈ rest, value.Below middle.sourceLimit := by
         rw [renamed.sourceLimit]
         exact live.2.below sourceReady
-      simp only [run, targetFound, methods.instruction fetched, targetStepped,
+      simp only [run_succ, targetFound, methods.instruction fetched, targetStepped,
         targetChildFound, targetEntry, targetFinished, Except.mapError, Bind.bind, Except.bind]
+      have resultFree := run_result_not_spanHome _ _ _ _ _ _ _ _ _ _ childFinished
       rw [← fullExtension.values arguments argumentBounds,
-        ← middleExtension.values rest restBounds, ← List.map_append]
+        ← methods.indices.values_extends middleExtension rest restBounds,
+        ← methods.indices.values_of_not_home later resultFree, ← List.map_append]
       exact continued.prepend fullExtension scopeExtension
   | @tailCall fuel method pc arguments sourceFrame stack source callee childArguments updated
       body child checked childFrame childMemory final values actual bodyLookup childFound
@@ -250,9 +252,9 @@ theorem RunTrace.rename (transport : StepTransport)
         (by intro value member; cases member)
       simp only [List.map_nil] at continued
       rw [entryExtension.values checked checkedBounds] at continued
-      simp only [run, targetFound, methods.instruction fetched, targetStepped, targetChildFound,
-        childMethods.metadata.returnsValue, methods.metadata.returnsValue, returns,
-        Bool.false_eq_true, ite_false, targetCheck, targetEntry, Except.mapError,
+      simp only [run_succ, targetFound, methods.instruction fetched, targetStepped,
+        targetChildFound, childMethods.metadata.returnsValue, methods.metadata.returnsValue,
+        returns, Bool.false_eq_true, ite_false, targetCheck, targetEntry, Except.mapError,
         Bind.bind, Except.bind]
       exact continued.prepend (extension.trans entryExtension) (fun _ _ scope => Or.inl scope)
   | @construct fuel method pc arguments sourceFrame stack source callee childArguments rest
@@ -331,12 +333,13 @@ theorem RunTrace.rename (transport : StepTransport)
       have restBounds : ∀ value ∈ rest, value.Below middle.sourceLimit := by
         rw [renamed.sourceLimit]
         exact live.2.below sourceReady
-      simp only [run, targetFound, methods.instruction fetched, targetStepped,
+      simp only [run_succ, targetFound, methods.instruction fetched, targetStepped,
         targetChildFound, targetEntry, targetFinished, List.isEmpty_nil,
         Bool.not_true, Bool.false_eq_true, ite_false, targetLoaded, Except.mapError,
         Bind.bind, Except.bind]
       rw [← fullExtension.values arguments argumentBounds,
-        ← middleExtension.values rest restBounds, ← List.map_cons]
+        ← methods.indices.values_extends middleExtension rest restBounds,
+        ← methods.indices.value_of_not_home later (loadLocal_not_spanHome loaded), ← List.map_cons]
       exact continued.prepend fullExtension scopeExtension
 
 #print axioms RunTrace.rename
@@ -380,7 +383,7 @@ theorem invoke_rename (transport : StepTransport)
     (by intro value member; cases member)
   simp only [List.map_nil] at renamed
   rw [extension.values arguments bounds] at renamed
-  simp only [invoke, targetFound, targetChecked, targetEntry,
+  simp only [invoke_eq, targetFound, targetChecked, targetEntry,
     Except.mapError, Bind.bind, Except.bind]
   exact renamed.prepend extension (fun _ _ scope => Or.inl scope)
 #print axioms invoke_rename
@@ -431,11 +434,12 @@ theorem MethodRenaming.step_throw (transport : StepTransport)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {arguments stack : List Value}
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack)
-    {operation : CIL.Op} {pc : Nat} {exception : String}
+    {operation : CIL.Instruction} {pc : Nat} {exception : ExceptionType}
     (stepped : step sourceBody operation pc arguments sourceFrame stack source =
       .error (.thrown exception)) :
     step targetBody (methods.indices.operation operation) pc (arguments.map mapping.value)
-      targetFrame (stack.map mapping.value) target = .error (.thrown exception) := by
+      targetFrame (stack.map (methods.indices.value mapping)) target =
+        .error (.thrown exception) := by
   obtain ⟨later, _, actions⟩ := transport methods.indices mapping scopes
     sourceBody targetBody operation pc arguments stack sourceFrame targetFrame source target
     methods.metadata memory frames sourceFormed targetFormed
@@ -451,7 +455,7 @@ theorem MethodRenaming.step_throw (transport : StepTransport)
 theorem ResultRenamed.located_throw {mapping : AllocationRenaming} {relation : α → β → Prop}
     {source : ExecutionResult α} {target : ExecutionResult β}
     (related : ResultRenamed mapping relation source target) {method pc : Nat}
-    {fault : LocatedFault} {exception : String}
+    {fault : LocatedFault} {exception : ExceptionType}
     (failed : source.mapError (fun fault => ⟨method, pc, fault⟩) = .error fault)
     (thrown : fault.fault = .thrown exception) :
     target.mapError (fun fault => ⟨method, pc, fault⟩) = .error fault := by
@@ -469,7 +473,7 @@ theorem run_throw_rename (transport : StepTransport)
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {fuel method pc : Nat} {arguments stack : List Value} {sourceFrame : Frame}
-    {source : Memory} {fault : LocatedFault} {exception : String}
+    {source : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (failed : run sourceProgram fuel method pc arguments sourceFrame stack source = .error fault)
     (thrown : fault.fault = .thrown exception)
     {sourceBody targetBody : CIL.Method}
@@ -483,27 +487,27 @@ theorem run_throw_rename (transport : StepTransport)
     (statics : source.StaticBindingsBounded)
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack) :
     run targetProgram fuel method pc (arguments.map mapping.value) targetFrame
-      (stack.map mapping.value) target = .error fault := by
+      (stack.map (methods.indices.value mapping)) target = .error fault := by
   induction fuel generalizing method pc arguments stack sourceFrame source sourceBody targetBody
       mapping scopes target targetFrame with
   | zero => cases failed; cases thrown
   | succ fuel induction =>
     cases fetched : sourceBody.code[pc]? with
     | none =>
-      simp only [run, sourceFound, fetched] at failed
+      simp only [run_succ, sourceFound, fetched] at failed
       cases failed
       cases thrown
     | some operation =>
       cases stepped : step sourceBody operation pc arguments sourceFrame stack source with
       | error reason =>
-        simp only [run, sourceFound, fetched, stepped, Except.mapError, Bind.bind,
+        simp only [run_succ, sourceFound, fetched, stepped, Except.mapError, Bind.bind,
           Except.bind] at failed
         cases failed
         dsimp only at thrown
         subst reason
         have targetStepped := methods.step_throw transport memory frames sourceFormed
           targetFormed statics argumentValues stackValues stepped
-        simp only [run, targetFound, methods.instruction fetched, targetStepped,
+        simp only [run_succ, targetFound, methods.instruction fetched, targetStepped,
           Except.mapError, Bind.bind, Except.bind]
       | ok action =>
         obtain ⟨middle, targetAction, extension, targetStepped, actions⟩ :=
@@ -516,9 +520,9 @@ theorem run_throw_rename (transport : StepTransport)
         have argumentBounds : ∀ value ∈ arguments, value.Below mapping.sourceLimit := by
           rw [memory.sourceLimit]
           exact argumentValues.below sourceFormed
-        simp only [run, sourceFound, fetched, stepped, Except.mapError, Bind.bind,
+        simp only [run_succ, sourceFound, fetched, stepped, Except.mapError, Bind.bind,
           Except.bind] at failed
-        simp only [run, targetFound, methods.instruction fetched, targetStepped,
+        simp only [run_succ, targetFound, methods.instruction fetched, targetStepped,
           Except.mapError, Bind.bind, Except.bind]
         cases actions with
         | next renamed nextFrames =>
@@ -625,10 +629,12 @@ theorem run_throw_rename (transport : StepTransport)
               have restBounds : ∀ value ∈ rest, value.Below middle.sourceLimit := by
                 rw [renamed.sourceLimit]
                 exact live.2.below sourceReady
+              have resultFree := run_result_not_spanHome _ _ _ _ _ _ _ _ _ _ childFinished
               rw [targetFinished]
               simp only []
               rw [← fullExtension.values arguments argumentBounds,
-                ← middleExtension.values rest restBounds, ← List.map_append]
+                ← methods.indices.values_extends middleExtension rest restBounds,
+                ← methods.indices.values_of_not_home later resultFree, ← List.map_append]
               exact continued
         | @tailCall updated targetUpdated callee childArguments renamed =>
           have live : ValuesValid updated childArguments := contract.values sourceFormed stackValues
@@ -822,7 +828,9 @@ theorem run_throw_rename (transport : StepTransport)
                   rw [targetLoaded]
                   simp only []
                   rw [← fullExtension.values arguments argumentBounds,
-                    ← middleExtension.values rest restBounds, ← List.map_cons]
+                    ← methods.indices.values_extends middleExtension rest restBounds,
+                    ← methods.indices.value_of_not_home later (loadLocal_not_spanHome loaded),
+                    ← List.map_cons]
                   exact continued
 #print axioms run_throw_rename
 
@@ -835,17 +843,22 @@ theorem invoke_throw_rename (transport : StepTransport)
     (memory : Memory.Renamed mapping scopes source target)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {fuel method : Nat} {arguments : List Value}
-    (argumentValues : ValuesValid source arguments) {fault : LocatedFault} {exception : String}
+    (argumentValues : ValuesValid source arguments) {fault : LocatedFault}
+    {exception : ExceptionType}
     (failed : invoke sourceProgram fuel method arguments source = .error fault)
     (thrown : fault.fault = .thrown exception) :
     invoke targetProgram fuel method (arguments.map mapping.value) target = .error fault := by
   cases found : sourceProgram[method]? with
   | none =>
-    simp only [invoke, found] at failed
+    simp only [invoke_eq, found] at failed
     cases failed
     cases thrown
   | some body =>
-    have checked := checkedValues_of_valid argumentValues
+    rcases checkedValues_of_valid_or_home argumentValues with checked | refused
+    case inr =>
+      simp only [invoke_eq, found, refused, Except.mapError, Bind.bind, Except.bind] at failed
+      cases failed
+      cases thrown
     have bounds : ∀ value ∈ arguments, value.Below mapping.sourceLimit := by
       rw [memory.sourceLimit]
       exact argumentValues.below sourceFormed
@@ -859,7 +872,8 @@ theorem invoke_throw_rename (transport : StepTransport)
       cases entry : enterFrame body arguments source with
       | ok result => exact ⟨result.1, result.2, rfl⟩
       | error reason =>
-        simp only [invoke, found, checked, entry, Except.mapError, Bind.bind, Except.bind] at failed
+        simp only [invoke_eq, found, checked, entry, Except.mapError, Bind.bind,
+          Except.bind] at failed
         cases failed
         exact False.elim (enterFrame_not_thrown body methods.sourceReady arguments source exception
           (by simpa only [show reason = .thrown exception from thrown] using entry))
@@ -868,7 +882,7 @@ theorem invoke_throw_rename (transport : StepTransport)
       memory.enterFrameInitialized sourceFormed targetFormed
         (by rw [memory.sourceLimit]; exact statics) methods.sourceReady methods.targetReady
         methods.indices methods.declarations arguments (arguments.map mapping.value) entry
-    simp only [invoke, found, checked, sourceEntry, Except.mapError, Bind.bind,
+    simp only [invoke_eq, found, checked, sourceEntry, Except.mapError, Bind.bind,
       Except.bind] at failed
     have renamed := run_throw_rename transport programs failed thrown found targetFound methods
       enteredMemory enteredFrames
@@ -879,7 +893,7 @@ theorem invoke_throw_rename (transport : StepTransport)
       (by intro value member; cases member)
     simp only [List.map_nil] at renamed
     rw [extension.values arguments bounds] at renamed
-    simpa only [invoke, targetFound, targetChecked, targetEntry,
+    simpa only [invoke_eq, targetFound, targetChecked, targetEntry,
       Except.mapError, Bind.bind, Except.bind] using renamed
 #print axioms invoke_throw_rename
 
@@ -930,7 +944,8 @@ theorem Raises.rename (transport : StepTransport)
     {initial : Memory} (formed : initial.WellFormed) (statics : initial.StaticBindingsBounded)
     (literals : initial.LiteralsBounded) {method : Nat} {arguments : List Value}
     (argumentValues : ValuesValid initial arguments)
-    {exception : String} (raised : Raises sourceProgram method arguments initial exception) :
+    {exception : ExceptionType}
+    (raised : Raises sourceProgram method arguments initial exception) :
     Raises targetProgram method arguments initial exception := by
   obtain ⟨fuel, fault, failed, thrown⟩ := raised
   have targetFailed := invoke_throw_rename transport programs

@@ -26,7 +26,7 @@ theorem program_static_sites_valid (program : CIL.Program) (method : Nat) (body 
   exact List.mem_map.mpr ⟨site, member, rfl⟩
 
 theorem step_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (body : CIL.Method) (operation : CIL.Op) (pc : Nat) (args : List Value)
+    (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) (action : FrameAction)
     (hm : m.WellFormed) (sites : StaticSitesValid descriptors body)
     (world : StaticWorldValid descriptors m)

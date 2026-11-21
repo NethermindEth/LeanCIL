@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -9,7 +14,6 @@
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.Intrinsics;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -18,7 +22,8 @@ var root = At("artifacts/VectorStorage");
 var source = Path.Combine(root, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Storage.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Optimize>true</Optimize></PropertyGroup></Project>
 """);
 var elements = new[] { ("byte", typeof(byte)), ("int", typeof(int)), ("uint", typeof(uint)),
     ("long", typeof(long)), ("ulong", typeof(ulong)) };
@@ -248,7 +253,7 @@ foreach (var item in portableCases)
         // The helper's isolated declarations must match its certificate in the complete caller.
         var callEvidence = File.ReadAllText(Path.Combine(callOutput, "Extracted.lean"))
             .Replace("method0", "method1", StringComparison.Ordinal);
-        const string portableObligation = "method1_intrinsics_validated";
+        const string portableObligation = "method1_models_validated";
         File.AppendAllText(proof, CheckedEvidenceControl(evidence,
             NarrowEvidence(callEvidence, portableObligation), [portableObligation], 1));
     }
@@ -257,64 +262,110 @@ foreach (var item in portableCases)
 pending.Flush();
 
 var baseline = File.ReadAllText(Path.Combine(root, "Roundtrip128uint/Extracted.lean"));
-const string obligation = "method0_vector_initializations_validated";
+const string shapes = "method0_object_operands_validated";
+const string scalars = "method0_scalars_validated";
 var controlPath = Path.Combine(root, "Roundtrip128uint/Control.lean");
-File.WriteAllText(controlPath, baseline +
-    CheckedEvidenceControl(baseline, NarrowEvidence(baseline, obligation), [obligation], 0));
+File.WriteAllText(controlPath, $"""
+    {baseline}
+    {CheckedEvidenceControl(baseline, NarrowEvidence(baseline, shapes), [shapes], 0)}
+    """);
 Run(["lake", "env", "lean", controlPath], cwd: verification.CheckoutPackage());
+// At these ordinary value sites the scalar check leaves the emitted operand to the code equation.
+const string codeEquation = "method0.code = Extraction.methodCode";
+var scalarControl = Path.Combine(root, "Roundtrip128uint/ScalarControl.lean");
+File.WriteAllText(scalarControl, DecodedScalars(baseline));
+Run(["lake", "env", "lean", scalarControl], cwd: verification.CheckoutPackage());
 var rejected = new RejectedEvidence(root);
-foreach (var (name, changed) in new[]
+const string widerFamily = ".constructor Extraction.intrinsicsScope \"System.Runtime.Intrinsics.Vector256`1\"";
+const string wordElement = ".atom Extraction.runtimeScope \"System.UInt32\"";
+foreach (var (name, changed, obligation, marker) in new[]
 {
-    ("store-width", baseline.Replace(".memory .store128", ".memory .store256")),
-    ("load-width", baseline.Replace(".memory .load128", ".memory .load256")),
-    ("init-width", baseline.Replace(".initAggregate 16", ".initAggregate 32")),
-    ("init-missing", baseline.Replace(".initAggregate 16", ".nop")),
-    ("element-token", baseline.Replace("\"System.UInt32\"", "\"System.Int16\"")),
-    ("vector-token", baseline.Replace("Vector128\\u00601", "Vector256\\u00601"))
+    ("float-element", baseline.Replace("\"System.UInt32\"", "\"System.Double\""), shapes, "ObjectOperandsValid"),
+    ("element-token", baseline.Replace("\"System.UInt32\"", "\"System.Int16\""), shapes, "ObjectOperandsValid"),
+    ("vector-token", ForgeTransfer("ldobj", $""".ldobj (.apply ({widerFamily}) ({wordElement}))"""),
+        scalars, codeEquation),
+    ("store-width", ForgeTransfer("stobj", ".stobj (.atom Extraction.runtimeScope \"System.UInt64\")"),
+        scalars, codeEquation),
+    ("load-width", ForgeTransfer("ldobj", ".ldobj (.atom Extraction.runtimeScope \"System.Int32\")"),
+        scalars, codeEquation),
+    ("init-width", ForgeTransfer("initobj", ".initobj (.atom Extraction.runtimeScope \"System.Byte\")"),
+        scalars, codeEquation),
+    ("init-missing", ForgeTransfer("initobj", ".nop"), scalars, codeEquation)
 })
 {
-    if (changed == baseline) throw new InvalidOperationException("Ineffective vector mutation: " + name);
-    var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(changed, obligation));
-    rejected.Add(path, "PASS independently rejected vector evidence: " + name,
-        "Extraction.VectorInitializationsValid method0Closed", "is false");
+    if (changed == baseline) throw new InvalidOperationException($"Ineffective vector mutation: {name}");
+    if (obligation == shapes)
+    {
+        var live = Path.Combine(root, $"{name}-decoder.lean");
+        File.WriteAllText(live, NarrowEvidence(changed, shapes));
+        rejected.Add(live, $"PASS live vector element refused: {name}", "MethodDecodeError.liveHole 1 65045");
+        var element = name == "float-element" ? "System.Double" : "System.Int16";
+        var token = $$"""
+            map (fun raw => match raw.operand with
+              | .type (.apply head _) =>
+                { raw with operand := .type (.apply head (.atom Extraction.runtimeScope "{{element}}")) }
+              | _ => raw)
+            """;
+        var literal = Path.Combine(root, $"{name}-operand.lean");
+        File.WriteAllText(literal, NarrowEvidence(ForgeClosedCode(baseline, 0, token), shapes));
+        rejected.Add(literal, $"PASS independently rejected vector evidence: {name}", marker, "is false");
+        continue;
+    }
+    var path = Path.Combine(root, $"{name}.lean");
+    File.WriteAllText(path, DecodedScalars(changed));
+    rejected.Add(path, $"PASS independently rejected vector evidence: {name}", marker, "is false");
 }
+
+// The scalar obligation with the scalar check and the code equation decided apart, so a rejection names the
+// conjunct that refuses it.
+string DecodedScalars(string source)
+{
+    var narrowed = NarrowEvidence(source, scalars);
+    var statement = $"{scalars} : And (Extraction.ScalarFlowValid method0Closed method0FeatureStates " +
+        $"method0ScalarStates method0.code) ({codeEquation} ";
+    const string decided = ") := by decide +kernel";
+    var start = narrowed.IndexOf(statement, StringComparison.Ordinal);
+    var end = start < 0 ? -1 : narrowed.IndexOf(decided, start, StringComparison.Ordinal);
+    if (end < 0 || narrowed.IndexOf('\n', start, end - start) >= 0)
+        throw new InvalidOperationException("Missing decoded scalar obligation");
+    return narrowed[..end] + ") := ⟨by decide +kernel, by decide +kernel⟩" + narrowed[(end + decided.Length)..];
+}
+
+string ForgeTransfer(string opcode, string replacement) => ForgeDecodedMethod(baseline, 0,
+    $"""code := method.code.map fun op => match op with | .{opcode} _ => {replacement} | _ => op""");
 var portableBaseline = File.ReadAllText(Path.Combine(root, "PortableCall128/Extracted.lean"))
     .Replace("method0", "method1", StringComparison.Ordinal);
-string RawOnly(string text, Func<string, string> change) => Regex.Replace(text,
-    @"(?m)^def method1(?:Original|Closed) :[^\r\n]*", match => change(match.Value));
-string UnrelatedPortable(string source, int bits)
+// The byte helper consists of two argument loads followed by the bitwise call.
+void RejectPortable(string original, string name, string change)
 {
-    var unrelated = RawOnly(source, text => Regex.Replace(
-        text.Replace($"System.Runtime.Intrinsics.Vector{bits}", $"Unrelated.Vector{bits}"),
-        @"name := ""[^""]*""", "name := \"Unrelated\""));
-    return Regex.Replace(unrelated,
-        $@"\.intrinsic \(\.vector \(\.(?:band|bor|bxor|bnot|equalsAll|zero|ones) {bits}\)\) \d+", ".nop");
-}
-void RejectPortable(string original, string name, string changed)
-{
-    if (changed == original) throw new InvalidOperationException("Ineffective portable mutation: " + name);
+    var changed = ForgeClosedCode(original, 1, $$"""
+        modify 2 (fun raw => match raw.operand with
+          | .call site => { raw with operand := .call { site with {{change}} } }
+          | _ => raw)
+        """);
     var path = Path.Combine(root, name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(changed, "method1_intrinsics_validated"));
-    rejected.Add(path, "PASS independently rejected portable vector evidence: " + name,
-        "Extraction.ExactIntrinsicsValid method1Closed", "is false");
+    File.WriteAllText(path, NarrowEvidence(changed, "method1_models_validated"));
+    rejected.Add(path, $"PASS portable model rejects {name}", "Extraction.RuntimeModelsAgree", "is false");
 }
-foreach (var (name, changed) in new[]
+foreach (var (name, field) in new[]
 {
-    ("portable-operation", portableBaseline.Replace(".vector (.band 128)", ".vector (.bor 128)")),
-    ("portable-element", RawOnly(portableBaseline, text => text.Replace("System.Byte", "System.Int64"))),
-    ("portable-scope", RawOnly(portableBaseline, text => text.Replace("Version=10.0.0.0", "Version=9.0.0.0"))),
-    ("portable-width", portableBaseline.Replace(".vector (.band 128)", ".vector (.band 256)")),
-    ("portable-arity", portableBaseline.Replace(".intrinsic (.vector (.band 128)) 2",
-        ".intrinsic (.vector (.band 128)) 1")),
-    ("portable-target-family", UnrelatedPortable(portableBaseline, 128))
+    ("portable-operation", """method.name := name!"op_BitwiseOr" """),
+    ("portable-element", """method.parameters := [.atom CIL.Extraction.runtimeScope "System.Int64"]"""),
+    ("portable-scope", """method.owner := .atom "Foreign" "System.Runtime.Intrinsics.Vector128`1" """),
+    ("portable-arity", "parameterCount := 1"),
+    ("portable-target", """target := .external "Other member" """)
 })
-    RejectPortable(portableBaseline, name, changed);
+    RejectPortable(portableBaseline, name, field);
 var wideBaseline = File.ReadAllText(Path.Combine(root, "PortableCall512/Extracted.lean"))
     .Replace("method0", "method1", StringComparison.Ordinal);
-RejectPortable(wideBaseline, "portable512-width",
-    wideBaseline.Replace(".vector (.band 512)", ".vector (.band 256)"));
-RejectPortable(wideBaseline, "portable512-target-family", UnrelatedPortable(wideBaseline, 512));
+const string narrowHead = """
+    (.constructor CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.Vector256`1")
+    """;
+const string byteElement = """(.atom CIL.Extraction.runtimeScope "System.Byte")""";
+const string narrowOwner = $"""method.owner := .apply {narrowHead} {byteElement}""";
+RejectPortable(portableBaseline, "portable-width", narrowOwner);
+RejectPortable(wideBaseline, "portable512-width", narrowOwner);
+RejectPortable(wideBaseline, "portable512-target", """target := .external "Other member" """);
 rejected.Check();
 
 foreach (var mutation in new[] { "element", "scope", "encoding", "field512" })

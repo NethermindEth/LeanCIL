@@ -2,6 +2,10 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/ExportVerificationSuites.cs
@@ -35,10 +39,13 @@ Directory.CreateDirectory(appRoot);
 Directory.CreateDirectory(package);
 Directory.CreateDirectory(callerPackage);
 File.WriteAllText(Path.Combine(libraryRoot, "Lib.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>ImportFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+<ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
 """);
 string librarySource = Path.Combine(libraryRoot, "Library.cs");
 File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; " +
@@ -189,11 +196,16 @@ if (inventory["frameworkKey"]?.GetValue<string>() != first["frameworkKey"]!.GetV
     inventory["leanCilRevision"]?.GetValue<string>() != revision)
     throw new InvalidOperationException("Source bundle did not record its framework key and LeanCIL revision: " + inventory.ToJsonString());
 
-string CallerVerify()
+void ExtractCaller()
 {
     Run([.. cli, "extract", app, "ImportFixture.Application::Entry(ulong)", callerArtifact, "--import", sidecar,
         "--import-implementation", "ImportFixture.Lib=" + library, "--import-sha256", "ImportFixture.Lib=" + Sha(library),
         "--import-interface-sha256", "ImportFixture.Lib=" + interfaceDigest]);
+}
+
+string CallerVerify()
+{
+    ExtractCaller();
     return Run([.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage]);
 }
 
@@ -230,7 +242,8 @@ if (cohort != "core")
 
         CallerVerify();
         var report = JsonNode.Parse(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")))!;
-        if (report["schema"]!.GetValue<int>() != 4 || report["contractImports"]!.AsArray().Count != 1 ||
+        if (report["schema"]!.GetValue<int>() != CertificateSchema ||
+            report["contractImports"]!.AsArray().Count != 1 ||
             report["imports"]![0]!["acceptedVia"]!.GetValue<string>() != "published-certification" ||
             !report["imports"]![0]!["deploymentObligation"]!.GetValue<string>()
                 .Contains("exact implementation bytes", StringComparison.Ordinal))
@@ -284,8 +297,8 @@ if (cohort != "core")
 completed.CompleteCase("core.publication");
 CallerVerify();
 JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
-if (initialCaller.GetProperty("schema").GetInt32() != 4)
-    throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
+if (initialCaller.GetProperty("schema").GetInt32() != CertificateSchema)
+    throw new InvalidOperationException("Imported contract verification did not produce the current trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 
@@ -376,10 +389,10 @@ string customProfile = Path.Combine(root, "custom-profile.json");
 // A realizable x64 group still cannot masquerade as the built-in scalar profile.
 JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new
 {
-    name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true, ssse3 = false,
-    sse42 = false, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = false, avx512DQ = false,
-    avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = true,
-    vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
+    name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true,
+    ssse3 = true, sse42 = true, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false,
+    sse41 = true, avx512DQ = false, avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false,
+    x86Base64 = true, vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
 }))!.AsObject();
 File.WriteAllText(customProfile, profile.ToJsonString());
 RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
@@ -489,6 +502,59 @@ File.WriteAllText(contractSource, File.ReadAllText(contractSource).Replace("outp
 RejectExport(ProducerManifest(), "unsolved goals", prior);
 Console.WriteLine("PASS a failing library contract cannot replace a published sidecar");
 completed.CompleteCase("core.incorrect-post");
+
+// Verify the caller's fixed postcondition under the original interface and warm its proof cache.
+File.WriteAllText(contractSource, originalContractSource);
+string callerSource = File.ReadAllText(callerProof);
+File.AppendAllText(callerProof, """
+
+    namespace IncrementClient
+    open CIL.Safety
+    def exactIncrement : MethodContract CIL.W64 CIL.W64 :=
+      { ImportFixture.addOne with post := fun input _ _ output => output = input + 1 }
+    theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
+        (fun linked => exactIncrement.Holds linked 0) := ExampleProof.correctness
+    end IncrementClient
+    """);
+string[] fixedCaller = [.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage,
+    "--theorem", "IncrementClient.correctness"];
+ExtractCaller();
+Run(fixedCaller);
+Run(fixedCaller);
+string callerReport = Path.Combine(callerArtifact, "verified.json");
+if (JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(callerReport))
+        .GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
+    throw new InvalidOperationException("The fixed-postcondition caller did not warm its proof cache.");
+
+string unchangedImplementation = Sha(library);
+File.WriteAllText(contractSource, originalContractSource.Replace("output = input + 1",
+    "output = input + 1 ∨ output = input + 2", StringComparison.Ordinal));
+File.WriteAllText(proof, File.ReadAllText(proof).Replace("case post => simp only [ImportFixture.addOne, CIL.importedPost]",
+    "case post => exact Or.inl rfl", StringComparison.Ordinal));
+Export(ProducerManifest());
+JsonObject revised = JsonNode.Parse(File.ReadAllText(sidecar))!.AsObject();
+var revisedInterface = revised["interfaceDigest"]!.GetValue<string>();
+if (revisedInterface == interfaceDigest || revised["exports"]![0]!["closureDigest"]!.GetValue<string>() == closureDigest ||
+    revised["implementationSha256"]!.GetValue<string>() != unchangedImplementation)
+    throw new InvalidOperationException("The revised postcondition must change both contract digests for the same DLL.");
+interfaceDigest = revisedInterface;
+ExtractCaller();
+var incompatible = Execute(fixedCaller);
+if (incompatible.Code != 1 || !incompatible.Output.Contains("ExampleProof.correctness", StringComparison.Ordinal) ||
+    !incompatible.Output.Contains("exactIncrement", StringComparison.Ordinal) || File.Exists(callerReport))
+    throw new InvalidOperationException("Unexpected fixed caller result under the revised postcondition: " +
+        incompatible.Output);
+File.WriteAllText(callerProof, callerSource);
+Run([.. cli, "verify", callerArtifact, "--proof", callerProof, "--proof-root", callerPackage,
+    "--theorem", "ExampleProof.correctness"]);
+var revisedReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(callerReport));
+var import = revisedReport.GetProperty("imports").EnumerateArray().Single();
+if (revisedReport.GetProperty("theorem").GetString() != "ExampleProof.correctness" ||
+    import.GetProperty("interfaceDigest").GetString() != revisedInterface ||
+    import.GetProperty("implementationSha256").GetString() != unchangedImplementation)
+    throw new InvalidOperationException("The weaker caller receipt did not bind the revised contract and unchanged DLL.");
+Console.WriteLine("PASS a revised imported contract invalidates the cached exact increment and admits the weaker caller");
+completed.CompleteCase("core.revised-contract");
 
 completed.Finish();
 

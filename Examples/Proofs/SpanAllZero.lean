@@ -20,7 +20,7 @@ bind_loop loop := Extracted.method0
 
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (state : SpanSuffix memory 4 false) :=
-  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  Extracted.method0 at loop.latch matching (· matches .brtrue _)
   with entry.frame memory state.view, [.scalar (.i32 (BitVec.ofNat 32 state.view.length))], memory
 
 /-- The compiled loop decides whether every mathematical element is zero, for any valid length. -/
@@ -29,7 +29,7 @@ theorem correctness (memory : Memory) (view : SpanView) (values : List CIL.W32)
     (contents : SpanContents memory view 4 values) :
     ∃ fuel, invoke Extracted.program fuel 0 [.bufferSpan view] memory =
       .ok (memory, [.scalar (.i32 (if values.all (· == 0) then 1 else 0))]) := by
-  refine invoke_loop_returns Extracted.lookup0 (by simp [cil_checked, valid])
+  refine invoke_loop_returns Extracted.program_method0 (by simp [cil_checked, valid])
     (entry.checked memory view valid contents.elementWidth readOnly) (header memory)
     (fun state => state.values.all (· == 0) = values.all (· == 0)) (·.values.length)
     ⟨view, values, valid, readOnly, contents⟩ (by cil_loop_steps) rfl ?_

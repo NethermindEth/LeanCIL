@@ -24,12 +24,6 @@ theorem makeLocals_owned (m result : Memory) (activation : Nat) (kinds : List CI
 
 #print axioms makeLocals_owned
 
-theorem makeArgumentHomes_owned (m result : Memory) (activation : Nat) (indices : List Nat)
-    (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    FrameAllocations result activation owned := by
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).allocations
-
 theorem makeParameterHomes_owned (m result : Memory) (activation : Nat)
     (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
     (homes : List (Nat × LocalSlot)) (owned : List AllocationId)

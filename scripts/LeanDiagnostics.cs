@@ -12,22 +12,22 @@ internal static partial class LeanDiagnostics
     internal const string HiddenModulesKey = "LeanCIL.HiddenModules";
 
     [GeneratedRegex(@"^(?<level>error|warning|info|trace): (?<message>.*)$")]
-    private static partial Regex Entry();
+    private static partial Regex Entry { get; }
 
     [GeneratedRegex(@"^error: (?:(?<location>.+?\.lean:\d+:\d+): )?(?<message>.*)$")]
-    private static partial Regex LakeError();
+    private static partial Regex LakeError { get; }
 
     [GeneratedRegex(@"^(?<location>.+?\.lean:\d+:\d+): error: (?<message>.*)$")]
-    private static partial Regex LeanError();
+    private static partial Regex LeanError { get; }
 
     [GeneratedRegex(@"^.+?\.lean:\d+:\d+: (?:error|warning|info): ")]
-    private static partial Regex LeanEntry();
+    private static partial Regex LeanEntry { get; }
 
     [GeneratedRegex(@"^Some required (?:targets|builds) logged failures:")]
-    private static partial Regex FailureList();
+    private static partial Regex FailureList { get; }
 
     [GeneratedRegex(@"^(?:build failed|Lean exited with code \d+)$")]
-    private static partial Regex Boilerplate();
+    private static partial Regex Boilerplate { get; }
 
     internal sealed record Diagnostic(string? Module, string? Location, IReadOnlyList<string> Lines);
 
@@ -40,18 +40,18 @@ internal static partial class LeanDiagnostics
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i];
-            var job = LeanOutput.Job().Match(line);
+            var job = LeanOutput.Job.Match(line);
             if (job.Success) { module = job.Groups["module"].Value; continue; }
-            if (FailureList().IsMatch(line)) { module = null; continue; }
-            var match = LakeError().Match(line);
-            if (!match.Success) match = LeanError().Match(line);
+            if (FailureList.IsMatch(line)) { module = null; continue; }
+            var match = LakeError.Match(line);
+            if (!match.Success) match = LeanError.Match(line);
             if (!match.Success) continue;
             var location = match.Groups["location"].Success ? match.Groups["location"].Value : null;
             var message = match.Groups["message"].Value;
             var block = new List<string> { message };
             while (i + 1 < lines.Length && !IsBoundary(lines[i + 1])) block.Add(lines[++i]);
             while (block.Count > 1 && block[^1].Trim().Length == 0) block.RemoveAt(block.Count - 1);
-            if (location is null && block.Count == 1 && Boilerplate().IsMatch(message)) continue;
+            if (location is null && block.Count == 1 && Boilerplate.IsMatch(message)) continue;
             if (module is not null && hidden?.Contains(module) == true) continue;
             result.Add(new(module, location, block));
         }
@@ -64,7 +64,7 @@ internal static partial class LeanDiagnostics
         var lines = output.Replace("\r\n", "\n").Split('\n');
         for (var i = 0; i < lines.Length; i++)
         {
-            var entry = Entry().Match(lines[i]);
+            var entry = Entry.Match(lines[i]);
             if (!entry.Success) continue;
             var block = new List<string> { entry.Groups["message"].Value };
             while (i + 1 < lines.Length && !IsBoundary(lines[i + 1])) block.Add(lines[++i]);
@@ -73,8 +73,8 @@ internal static partial class LeanDiagnostics
         }
     }
 
-    static bool IsBoundary(string line) => LeanOutput.Job().IsMatch(line) || Entry().IsMatch(line) ||
-        LeanEntry().IsMatch(line) || FailureList().IsMatch(line) ||
+    static bool IsBoundary(string line) => LeanOutput.Job.IsMatch(line) || Entry.IsMatch(line) ||
+        LeanEntry.IsMatch(line) || FailureList.IsMatch(line) ||
         line.StartsWith("Build completed", StringComparison.Ordinal);
 
     /// <summary>

@@ -1,7 +1,7 @@
 import Extracted
 import CIL.MethodIdentity
+import CIL.Safety.DecodedSummary
 import CIL.Safety.ObjectFields
-import CIL.Safety.OutcomeContract
 
 /-!
 # Two calls on class instances
@@ -95,7 +95,7 @@ theorem correctness : bumpBothContract.Holds Extracted.program bumpBoth :=
 /-- `Bump` on a null account throws `NullReferenceException` at its field load. -/
 theorem bump_null_throws (memory : Memory) (amount : W64) :
     ∃ fuel, invoke Extracted.program fuel bump [.object .null, .scalar (.i64 amount)] memory =
-      .error ⟨bump, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨bump, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms bump_null_throws
@@ -115,7 +115,7 @@ def bumpOutcome : OutcomeContract (ManagedReference × W64) where
     | .address account =>
       Account.Balance.Holds final account (Account.Balance.of initial account + amount)
   raises := fun (account, _) _ => match account with
-    | .null => some "System.NullReferenceException"
+    | .null => some .nullReference
     | .address _ => none
 
 /-- `Bump` meets its outcome contract: the runtime exception for null, the update otherwise. -/
@@ -128,4 +128,14 @@ theorem bump_outcome : bumpOutcome.Holds Extracted.program bump := by
   | address account => exact WP.adequate.mp (bump_holds (account, amount) memory permitted)
 
 #print axioms bump_outcome
+
+/-- The balance update and null exception belong to the same pinned `Bump` body. -/
+theorem bump_summary : ∃ record, Extracted.methodEvidence[bump]? = some record ∧
+    DecodedOutcomeSummary Extracted.program Extracted.methodEvidence Extracted.profile
+      Extracted.environment bump record.assembly record.original.token record.arguments
+      bumpOutcome :=
+  ⟨_, rfl, .of_translation Extracted.translation_valid ⟨bump, by decide⟩
+    (method := Extracted.method1) rfl bump_outcome⟩
+
+#print axioms bump_summary
 end ExampleProof

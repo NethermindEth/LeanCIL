@@ -1,5 +1,6 @@
 import CIL.Safety.CertifiedContract
 import CIL.Safety.ReturnMemory
+import Tests.Support
 
 /-!
 Consumer uses of invocation certificates on `Echo(v) => v` and its caller
@@ -20,11 +21,13 @@ abbrev echoMethod : Nat := 0
 abbrev relayMethod : Nat := 1
 
 /-- `Echo(v) => v` on one scalar argument. -/
-@[cil_code] def echo : CIL.Method := { returnsValue := true, locals := [], code := [.arg 0, .ret] }
+@[cil_code] def echo : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ret] }
 
 /-- `Relay(v) => Echo(v)`: one call whose result it returns. -/
 @[cil_code] def relay : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, .call echoMethod 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {}, .ret],
+    links := [(1, .direct echoMethod)] }
 
 /-- `Echo` then `Relay`; the program declares no statics. -/
 @[cil_code] def program : CIL.Program := [echo, relay]
@@ -178,7 +181,7 @@ macro "relay_finish" : tactic => `(tactic| (
   ))
 
 /-- The call `Relay` makes at pc 1, standing in for a `bind_call` site. -/
-theorem relaySite.call : relay.code[1]? = some (.call echoMethod 1) := rfl
+theorem relaySite.call : relay.code[1]? = some (.call (Tests.callee 1)) := rfl
 
 /-- The caller supplies the entry premises, so a callee without a precondition still hands
     over its certificate, whose visited-state clause is the postcondition. -/
@@ -236,15 +239,18 @@ def echoOff : MethodContract CIL.W64 CIL.W64 :=
   { echoContract with post := fun v _ _ out => out = v + 1 }
 
 /-- Only the returned values of a computed run are compared; memories never are. -/
-theorem echo_off_rejected : ¬ echoOff.Holds program echoMethod := fun holds => by
-  obtain ⟨_, ⟨_, values⟩, invoked, -, out, encoded, wrong⟩ :=
-    holds sample empty ⟨empty_formed, empty_world⟩
-  have observed := invoke_ok_observation_unique Prod.snd
-    (rfl : (invoke program echoFuel echoMethod (echoOff.args sample) empty).map Prod.snd =
-      .ok sampleArgs)
-    invoked
-  dsimp only [echoOff, echoContract] at observed encoded wrong
-  subst observed wrong
+theorem echo_off_rejected : echoOff.Refuted program echoMethod := by
+  have mapped : (invoke program echoFuel echoMethod (echoOff.args sample) empty).map Prod.snd =
+      .ok sampleArgs := rfl
+  obtain ⟨⟨final, values⟩, invoked, rfl⟩ : ∃ result,
+      invoke program echoFuel echoMethod (echoOff.args sample) empty = .ok result ∧
+        result.2 = sampleArgs := by
+    revert mapped
+    cases invoke program echoFuel echoMethod (echoOff.args sample) empty <;> simp [Except.map]
+  refine .of_return (input := sample) (initial := empty) ⟨empty_formed, empty_world⟩ invoked ?_
+  rintro ⟨-, out, encoded, wrong⟩
+  dsimp only [echoOff, echoContract] at encoded wrong
+  subst wrong
   simp at encoded
 
 #print axioms echo_off_rejected

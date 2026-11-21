@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -26,12 +31,12 @@ static string Narrowed(string source, out string control)
 {
     var obligations = Regex.Matches(source,
         @"(?m)^theorem method\d+_constrained_validated : [^\r\n]+\r?$");
-    var methodCount = Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count;
+    var methodCount = DefinedMethods(source).Length;
     if (methodCount == 0 || obligations.Count != methodCount)
         throw new Exception("Unexpected constrained obligation count");
-    var declarations = Regex.Replace(source,
-        @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
-    declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    var declarations = GeneratedTheorem.Replace(source, "");
+    declarations = AxiomsCommand.Replace(declarations, "");
+    declarations = ResolutionFactsCommand.Replace(declarations, "");
     var names = obligations.Select(match => Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value).ToArray();
     var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Zip(names).Select(pair =>
         pair.First.Value + "\n#print axioms " + pair.Second)) + "\nend Extracted", StringComparison.Ordinal);
@@ -67,6 +72,12 @@ foreach (var (name, type, expected) in new[]
     Run(["dotnet", ExtractorPath, "extract", name == "DirectGeneric" ? directAssembly : assembly,
         $"ConstrainedCalls::{name}(Examples.{type}&)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    // A specialized body's field operands carry no token, so its closed raw method names the field by the row the
+    // definition's token names.
+    if (name == "Generic" && !source.Split('\n').Any(line =>
+            line.Contains("Closed : Extraction.RawMethod", StringComparison.Ordinal) &&
+            line.Contains("name!\"Value\"", StringComparison.Ordinal)))
+        throw new InvalidOperationException($"The closed body of {name} does not name its field operand Value");
     var proof = Path.Combine(root, name + ".lean");
     var extent = type.Contains('`') ? 8 : 4;
     File.WriteAllText(proof, source + $$"""
@@ -79,19 +90,20 @@ foreach (var (name, type, expected) in new[]
           nextIdentity := 1 }
         theorem constrained_result :
             (CIL.Safety.invoke Extracted.program 32 0 [.reference (.address ⟨0, 0⟩)]
-              inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
+              inputMemory).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := by rfl
         #print axioms constrained_result
         """);
 
-    var call = name == "DirectGeneric" ? ".call 1 2" : ".call 2 1";
-    if (!source.Contains(call, StringComparison.Ordinal)) throw new Exception("Missing constrained call mutation target");
+    var calls = DirectLinks(source, name == "DirectGeneric" ? 1 : 2);
+    if (calls.Length != 1) throw new Exception("Missing constrained call mutation target");
     var forged = Path.Combine(root, name + "-wrong-target.lean");
     var narrowed = Narrowed(source, out var control);
     File.AppendAllText(proof, "\n" + control);
     evidence.Add(proof, "PASS compiled constrained call, certificate and obligation eligibility: " + name);
     if (!type.Contains('`') && !name.StartsWith("Closed", StringComparison.Ordinal))
     {
-        File.WriteAllText(forged, narrowed.Replace(call, ".call 0 1", StringComparison.Ordinal));
+        // The link names another method than the one the constraint resolves.
+        File.WriteAllText(forged, ForgeLink(narrowed, calls[0].Method, calls[0].Pc, ".direct 0"));
         rejected.Add(forged, "PASS forged constrained target: " + name, "ConstrainedCallsValid");
     }
     if (type.Contains('`'))
@@ -133,7 +145,7 @@ File.WriteAllText(twoOwnerProof, File.ReadAllText(Path.Combine(twoOwners, "Extra
     theorem distinct_owner_results :
         (CIL.Safety.invoke Extracted.program 64 0
           [.reference (.address ⟨0, 0⟩), .reference (.address ⟨0, 8⟩)]
-          twoOwnerMemory).map Prod.snd = .ok [.scalar (.i32 84)] := rfl
+          twoOwnerMemory).map Prod.snd = .ok [.scalar (.i32 84)] := by rfl
     #print axioms distinct_owner_results
     """);
 evidence.Add(twoOwnerProof, "PASS distinct constrained owner specializations");
@@ -205,6 +217,20 @@ foreach (var name in new[] { "AddCounted", "XorPlain" })
     evidence.Add(proof, "PASS static interface dispatch: " + name);
 }
 
+static void CheckPruning(string proof, bool expected)
+{
+    var pruned = expected ? "true" : "false";
+    File.AppendAllText(proof, $$"""
+
+        /-- Whether the extracted program contains a hole under this profile. -/
+        theorem flag_pruning :
+            (Extracted.program.any fun method =>
+              method.code.any fun op => op matches .unadmitted _) = {{pruned}} := by decide +kernel
+        #print axioms flag_pruning
+
+        """);
+}
+
 // A flag getter whose body is a constant return prunes the block it guards, so the process clock read
 // there is never extracted; results match the runtime, which runs neither read for these flags.
 var constantFlags = staticInterfaces.Assembly.GetType("Examples.ConstantFlags")!;
@@ -213,8 +239,6 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     var output = Path.Combine(root, "Flags-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstantFlags::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (!source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
-        throw new Exception("Constant flag block was not pruned: " + name);
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
         .Select(input => (input, result: (ulong)constantFlags.GetMethod(name)!.Invoke(null, [input])!))
         .Select(pair => $"(CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i64 {pair.input})] " +
@@ -222,6 +246,7 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     var proof = Path.Combine(root, "Flags-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    CheckPruning(proof, true);
     evidence.Add(proof, "PASS constant flag pruning: " + name);
 }
 
@@ -246,9 +271,6 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{type}::{name}(ulong)", output,
         .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (pruned is bool expected && expected !=
-        source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
-        throw new Exception("Unexpected flag pruning: " + name);
     if (name == "WidthNarrow") widthNarrow = source;
     var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
@@ -258,12 +280,13 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
     var proof = Path.Combine(root, type + "-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem flag_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms flag_result\n");
+    if (pruned is bool expected) CheckPruning(proof, expected);
     evidence.Add(proof, $"PASS {type}: {name}");
 }
 
 // The receiver's catalog lists the interface instantiated at its own type argument; listing another
 // instantiation leaves the slot unimplemented.
-const string narrowWidth = "interfaces := [.apply (.constructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
+const string narrowWidth = "interfaces := [.apply (.objectConstructor \"Examples, Version=1.0.0.0, Culture=neutral, " +
     "PublicKeyToken=null\" \"Examples.IWidth\\u00601\") (.atom Extraction.runtimeScope \"System.UInt32\")";
 if (widthNarrow?.Contains(narrowWidth, StringComparison.Ordinal) != true)
     throw new Exception("Missing generic receiver interface mutation target");
@@ -292,20 +315,21 @@ if (!offCaller.Success || !offGetter.Success || !onGetter.Success)
     throw new Exception("Missing constant flag mutation targets");
 var (callerIndex, offIndex, onIndex) =
     (offCaller.Groups[1].Value, offGetter.Groups[1].Value, onGetter.Groups[1].Value);
-var offCall = $".call {offIndex} 0";
+var offCalls = DirectLinks(flags, int.Parse(offIndex, System.Globalization.CultureInfo.InvariantCulture))
+    .Where(call => call.Method.ToString(System.Globalization.CultureInfo.InvariantCulture) == callerIndex).ToArray();
 var callerStates = Regex.Match(flags, $@"(?m)^def method{callerIndex}FeatureStates : [^\r\n]+");
 var offBody = Regex.Match(flags, $@"(?m)^def method{offIndex}Closed : [^\r\n]+");
 var offStates = Regex.Match(flags, $@"(?m)^def method{offIndex}FeatureStates : [^\r\n]+");
 const string offWord = "stack := [some (BitVec.ofInt 32 (0))]";
 const string offLoad = "{ offset := 0, opcode := 22, operand := .none }";
-if (!flags.Contains(offCall, StringComparison.Ordinal) ||
+if (offCalls.Length != 1 ||
     !callerStates.Value.Contains(offWord, StringComparison.Ordinal) ||
     !offBody.Value.Contains(offLoad, StringComparison.Ordinal) ||
     !offStates.Value.Contains(offWord, StringComparison.Ordinal))
     throw new Exception("Missing constant flag mutation sites");
 foreach (var (mutation, forgedSource, obligation) in new[]
 {
-    ("swapped-callee", flags.Replace(offCall, $".call {onIndex} 0", StringComparison.Ordinal), callerIndex),
+    ("swapped-callee", ForgeLink(flags, offCalls[0].Method, offCalls[0].Pc, $".direct {onIndex}"), callerIndex),
     ("forged-word", flags.Replace(callerStates.Value, new Regex(Regex.Escape(offWord)).Replace(
         callerStates.Value, "stack := [some (BitVec.ofInt 32 (1))]", 1), StringComparison.Ordinal), callerIndex),
     ("callee-word", flags.Replace(offBody.Value, offBody.Value.Replace(offLoad,
@@ -318,8 +342,7 @@ foreach (var (mutation, forgedSource, obligation) in new[]
     var forged = Path.Combine(root, "Flags-" + mutation + ".lean");
     File.WriteAllText(forged, forgedSource);
     rejected.Add(forged, "PASS forged constant flag: " + mutation,
-        $"Extraction.FeatureFlowValid rawLayouts.toArray (Extraction.evidenceConstants methodEvidence) " +
-            $"method{obligation}Closed");
+        "Extraction.FeatureFlowValid", FeatureObligation(obligation));
 }
 
 // Extraction keeps the guarded block, and so rejects its clock read, whenever the flag is live or the
@@ -413,23 +436,27 @@ foreach (var (name, type) in new[]
 // The emitted call must name the resolved instance: another method, a hidden override or a changed
 // method type argument each leave the caller's constrained obligation unprovable.
 var (spendDefault, spendOverride) = (defaultNarrowed["SpendDefault"], defaultNarrowed["SpendOverride"]);
-var defaultSite = Regex.Match(spendDefault, @"target := \.managed (\d+), typeArguments := \[(\.aggregate ""[^""]+" +
-    @"TriplePrice"" \d+), (\.aggregate ""[^""]+Allowance"" \d+)\], ownerArgumentCount := 1");
-var overrideSite = Regex.Match(spendOverride, @"target := \.managed (\d+), typeArguments := \[\.aggregate ""[^""]+" +
-    @"TriplePrice"" \d+, \.aggregate ""[^""]+DoublingAllowance"" \d+\], ownerArgumentCount := 1");
-var hiddenOverride = overrideSite.Success ? Regex.Match(spendOverride,
-    @"overrides := \[\(" + overrideSite.Groups[1].Value + @", [^\r\n]+?DoublingAllowance"" \d+\)\)\]") : Match.Empty;
-var defaultBody = Regex.Match(spendDefault, @"def method(\d+)Original : Extraction.RawMethod := " +
-    @"\{ token := \d+, owner := ""[^""]+::Examples.IAllowance\\u00601""");
-var defaultCalls = Regex.Matches(spendDefault, @"(?m)^  \.call " + defaultBody.Groups[1].Value + @" 1,\r?$");
-if (!defaultSite.Success || !hiddenOverride.Success || !defaultBody.Success || defaultCalls.Count != 1)
+Match SpendSite(string source, string allowance) => ConstrainedLayoutPattern.SpendSite().Matches(source)
+    .FirstOrDefault(match => match.Groups["owner"].Value == allowance) ?? Match.Empty;
+var defaultSite = SpendSite(spendDefault, "Examples.Allowance");
+var overrideSite = SpendSite(spendOverride, "Examples.DoublingAllowance");
+var hiddenOverride = ConstrainedLayoutPattern.Override().Matches(spendOverride)
+    .FirstOrDefault(match => overrideSite.Success && match.Groups["token"].Value == overrideSite.Groups["token"].Value)
+    ?? Match.Empty;
+var defaultBody = ConstrainedLayoutPattern.DefaultBody().Match(spendDefault);
+var defaultCalls = defaultBody.Success
+    ? DirectLinks(spendDefault,
+        int.Parse(defaultBody.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture))
+    : [];
+if (!defaultSite.Success || !hiddenOverride.Success || !defaultBody.Success || defaultCalls.Length != 1)
     throw new Exception("Missing static virtual default mutation target");
 foreach (var (mutation, forgedSource) in new[]
 {
-    ("wrong-target", spendDefault.Replace(defaultCalls[0].Value, "  .call 0 1,", StringComparison.Ordinal)),
+    ("wrong-target", ForgeLink(spendDefault, defaultCalls[0].Method, defaultCalls[0].Pc, ".direct 0")),
     ("hidden-override", spendOverride.Replace(hiddenOverride.Value, "overrides := []", StringComparison.Ordinal)),
     ("method-argument", spendDefault.Replace(defaultSite.Value, defaultSite.Value.Replace(
-        defaultSite.Groups[2].Value + ", ", defaultSite.Groups[3].Value + ", ", StringComparison.Ordinal),
+        $"{defaultSite.Groups["price"].Value}, ", $"{defaultSite.Groups["argument"].Value}, ",
+        StringComparison.Ordinal),
         StringComparison.Ordinal))
 })
 {
@@ -451,9 +478,6 @@ foreach (var (owner, name) in new[]
     var output = Path.Combine(root, "MostSpecific-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{owner}::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (name == "TraceQuiet" &&
-        !source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
-        throw new Exception("Derived constant flag block was not pruned: " + name);
     mostSpecificSources[name] = source;
     var method = examples.GetType("Examples." + owner)!.GetMethod(name)!;
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
@@ -463,6 +487,7 @@ foreach (var (owner, name) in new[]
     var proof = Path.Combine(root, "MostSpecific-" + name + ".lean");
     File.WriteAllText(proof, source + "\ntheorem most_specific_result :\n    " + string.Join(" ∧\n    ", claims) +
         " :=\n  ⟨" + string.Join(", ", claims.Select(_ => "rfl")) + "⟩\n#print axioms most_specific_result\n");
+    if (name == "TraceQuiet") CheckPruning(proof, true);
     evidence.Add(proof, "PASS most specific interface body: " + name);
 }
 
@@ -622,7 +647,7 @@ foreach (var (mutation, selector, marker) in new[]
 foreach (var (mutation, marker) in new[]
 {
     ("prefix", "adjacent concrete constrained receiver"),
-    ("branch", "Branch bypasses constrained receiver prefix"),
+    ("branch", "Branch enters the instruction after a prefix"),
     ("constraint", "Unsupported generic method constraints")
 })
 {
@@ -666,7 +691,8 @@ Console.WriteLine("PASS constrained extraction rejection: open-generic-receiver"
 const string modifierRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";
 MethodDefinition InAdd(ModuleDefinition module) => module.GetType("Examples.InWord").Methods
     .Single(method => method.Name.EndsWith(".Add", StringComparison.Ordinal));
-foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope" })
+foreach (var mutation in new[]
+    { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope", "flattened-name" })
 {
     var dll = Path.Combine(root, "in-" + mutation + ".dll");
     string selector;
@@ -676,10 +702,15 @@ foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested",
         var modified = (RequiredModifierType)method.Parameters[0].ParameterType;
         var reference = (ByReferenceType)modified.ElementType;
         var runtime = (AssemblyNameReference)modified.ModifierType.Scope;
-        TypeReference Forged(AssemblyNameReference scope) =>
-            new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        TypeReference Forged(AssemblyNameReference scope)
+        {
+            module.AssemblyReferences.Add(scope);
+            return new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        }
         method.Parameters[0].ParameterType = mutation switch
         {
+            "flattened-name" => new RequiredModifierType(new TypeReference("",
+                "System.Runtime.InteropServices.InAttribute", module, runtime), reference),
             "modopt" => new OptionalModifierType(modified.ModifierType, reference),
             "other-modreq" => new RequiredModifierType(
                 new TypeReference("System.Runtime.CompilerServices", "IsVolatile", module, runtime), reference),
@@ -769,3 +800,22 @@ const string returnRejection = "Custom modifiers are unsupported in method retur
 if (returnResult.Code == 0 || !returnResult.Output.Contains(returnRejection, StringComparison.Ordinal))
     throw new Exception("Incorrect in-modifier return rejection\n" + returnResult.Output);
 Console.WriteLine("PASS in-modifier rejection: ref readonly return");
+
+static partial class ConstrainedLayoutPattern
+{
+    const string Price = """(?<price>\.aggregate \("[^"]+" \+\+ "Examples\.TriplePrice"\) \d+)""";
+    const string Argument = """(?<argument>\.aggregate \("[^"]+" \+\+ "(?<owner>[^"]+)"\) \d+)""";
+
+    const string Target = """target := \.managed (?<token>\d+), typeArguments := """;
+
+    [GeneratedRegex($"""{Target}\[{Price}, {Argument}\], ownerArgumentCount := 1""")]
+    internal static partial Regex SpendSite();
+
+    [GeneratedRegex("""overrides := \[\((?<token>\d+), [^\]\r\n]+?DoublingAllowance"\) \d+\)\)\]""")]
+    internal static partial Regex Override();
+
+    const string Definition = """def method(\d+)Original : Extraction\.RawMethod := """;
+
+    [GeneratedRegex($$"""{{Definition}}\{ token := \d+, owner := "[^"]+::Examples\.IAllowance\\u00601["]""")]
+    internal static partial Regex DefaultBody();
+}

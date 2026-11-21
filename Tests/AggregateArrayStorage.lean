@@ -19,7 +19,7 @@ private def memory : Memory := {
 
 /-- Aggregate stores preserve an uninitialized suffix and both neighbouring regions. -/
 theorem masked_store :
-    (memoryInstruction (.arrayTransfer element true)
+    (typedElementInstruction (.value element) true
       [.scalar (.snapshot (.aggregate 16) mask), .scalar (.i32 1), .array view] memory).map
       (fun result => ((result.1.cells 0 0).bits, (result.1.cells 0 16).bits,
         (result.1.cells 0 24).initialized, (result.1.cells 0 32).bits)) =
@@ -28,40 +28,41 @@ theorem masked_store :
 
 /-- Aggregate loads retain initialization masks instead of inventing readable bytes. -/
 theorem masked_load :
-    (memoryInstruction (.arrayTransfer element false) [.scalar (.i32 0), .array view]
+    (typedElementInstruction (.value element) false [.scalar (.i32 0), .array view]
       { memory with cells := fun _ offset => if offset < 8 then ⟨7, true⟩ else ⟨0, false⟩ }).map
       Prod.snd = .ok [.scalar (.snapshot (.aggregate 16) mask)] := rfl
 #print axioms masked_load
 
 /-- A typed write still requires authority over the destination bytes. -/
 theorem missing_authority :
-    (memoryInstruction (.arrayTransfer element true)
+    (typedElementInstruction (.value element) true
       [.scalar (.aggregate (List.replicate 16 0)), .scalar (.i32 0), .array view]
       { memory with views := [] }).isOk = false := rfl
 #print axioms missing_authority
 
 /-- Equal-sized vector and struct storage cannot be interchanged by an array instruction. -/
 theorem wrong_identity :
-    memoryInstruction (.arrayTransfer (.vector "Vector128<UInt64>" 16) false)
+    typedElementInstruction (.value (.vector "Vector128<UInt64>" 16)) false
       [.scalar (.i32 0), .array view] memory = .error .invalidState := rfl
 #print axioms wrong_identity
 
 /-- Array indexing preserves named bounds exceptions. -/
 theorem past_end :
-    memoryInstruction (.arrayTransfer element false) [.scalar (.i32 2), .array view] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+    typedElementInstruction (.value element) false [.scalar (.i32 2), .array view] memory =
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms past_end
 
 /-- Expired storage cannot yield a typed element, even when its bytes remain present. -/
 theorem expired :
-    (memoryInstruction (.arrayTransfer element false) [.scalar (.i32 0), .array view]
-      { memory with allocations := fun _ => some ⟨.callerStack, ⟨48, 16, []⟩, false, [48]⟩ }).isOk =
-      false := rfl
+    (typedElementInstruction (.value element) false [.scalar (.i32 0), .array view]
+      { memory with
+        allocations := fun _ => some ⟨.callerStack, ⟨48, 16, []⟩, false, [48]⟩ }).isOk = false :=
+    rfl
 #print axioms expired
 
 /-- A readonly element address retains its restriction on subsequent writes. -/
 theorem readonly_address :
-    memoryInstruction (.arrayAddress element false) [.scalar (.i32 1), .array view] memory =
+    elementAddressInstruction (.value element) true [.scalar (.i32 1), .array view] memory =
       .ok (memory, [.readOnlyReference (.address ⟨0, 16⟩)]) := rfl
 #print axioms readonly_address
 
@@ -74,7 +75,7 @@ theorem empty_slice :
 
 /-- Array metadata with a forged extent is rejected before dereferencing any element. -/
 theorem invalid_extent :
-    (memoryInstruction (.arrayTransfer element false)
+    (typedElementInstruction (.value element) false
       [.scalar (.i32 0), .array { view with length := 4 }] memory).isOk = false := rfl
 #print axioms invalid_extent
 

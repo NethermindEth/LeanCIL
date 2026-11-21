@@ -265,53 +265,57 @@ theorem writeSnapshot_initialized (memory : Memory) (reference : Reference)
   cases access memory reference bytes.length alignment true with
   | error => rfl
   | ok =>
-    simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, List.getElem?_map]
+    simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
+      snapshotCellAt_eq, List.getElem?_map]
     congr 2
     funext allocation position
     split <;> try rfl
     cases bytes[position - reference.offset]? <;> rfl
 
-/-- Closes a step equation through its generic `instructionStep` equation, as the stepping
-    equations in `InstructionSteps` are closed. -/
-local macro "field_step_proof " generic:ident : tactic => `(tactic| (
-  rw [$generic:ident]
-  simp only [instructionStep, instruction, cil_guard, unspecifiedOperands, List.take, List.any,
+/-- Reduce a vector store at the offset and width of its checked field. -/
+local macro "field_step_proof " shape:ident : tactic => `(tactic| (
+  rw [step_stfld_value_eq _ _ _ _ _ _ _ _ _ $shape:ident]
+  simp only [storeValueField, cil_guard, unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_assoc, pure_bind,
     referenceAt, valueSnapshot, ite_true, writeSnapshot_initialized]
   all_goals first | rfl | (split <;> (try simp only [bind_assoc, pure_bind]) <;> rfl)))
 
 /-- A 16-byte vector field store writes the vector's bytes at the field address. -/
-theorem step_setFieldAt_v128_eq (body : CIL.Method) (pc : Nat) (args : List Value)
-    (frame : Frame) (memory : Memory) (offset : Nat) (bits : BitVec 128) (reference : Reference)
-    (rest : List Value) :
-    step body (.setFieldAt offset 16) pc args frame
+theorem step_stfld_value_v128_eq (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (operand : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape operand = .value offset 16 signed) (bits : BitVec 128)
+    (reference : Reference) (rest : List Value) :
+    step body (.stfld operand) pc args frame
       (.scalar (.v128 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) 16
         (write memory address (numberBytes bits.toNat 16) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored := by
-  field_step_proof step_setFieldAt_eq
+  field_step_proof shape
 
 /-- A 32-byte vector field store writes the vector's bytes at the field address. -/
-theorem step_setFieldAt_v256_eq (body : CIL.Method) (pc : Nat) (args : List Value)
-    (frame : Frame) (memory : Memory) (offset : Nat) (bits : BitVec 256) (reference : Reference)
-    (rest : List Value) :
-    step body (.setFieldAt offset 32) pc args frame
+theorem step_stfld_value_v256_eq (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (operand : Extraction.FieldRef) (offset : Nat) (signed : Bool)
+    (shape : body.fieldShape operand = .value offset 32 signed) (bits : BitVec 256)
+    (reference : Reference) (rest : List Value) :
+    step body (.stfld operand) pc args frame
       (.scalar (.v256 bits) :: .reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
       let stored ← checkedAt (.address address) 32
         (write memory address (numberBytes bits.toNat 32) ordinaryAccessAlignment)
       return .next (pc + 1) rest frame stored := by
-  field_step_proof step_setFieldAt_eq
+  field_step_proof shape
 
 /-- A nested struct field store writes the struct's bytes at the field address once their
     count matches the field's. -/
-theorem step_setAggregateFieldAt_reference_eq (body : CIL.Method) (pc : Nat)
-    (args : List Value) (frame : Frame) (memory : Memory) (offset size : Nat)
+theorem step_stfld_aggregate_reference_eq (body : CIL.Method) (pc : Nat)
+    (args : List Value) (frame : Frame) (memory : Memory) (operand : Extraction.FieldRef)
+    (offset size : Nat)
+    (shape : body.fieldShape operand = .aggregate offset size)
     (bytes : List (BitVec 8)) (reference : Reference) (rest : List Value) :
-    step body (.setAggregateFieldAt offset size) pc args frame
+    step body (.stfld operand) pc args frame
       (.scalar (.aggregate bytes) :: .reference (.address reference) :: rest) memory =
       if bytes.length != size then .error .invalidState else do
         let address ← checkedAt (.address reference) 0
@@ -319,20 +323,61 @@ theorem step_setAggregateFieldAt_reference_eq (body : CIL.Method) (pc : Nat)
         let stored ← checkedAt (.address address) size
           (write memory address bytes ordinaryAccessAlignment)
         return .next (pc + 1) rest frame stored := by
-  field_step_proof step_setAggregateFieldAt_eq
+  rw [step_stfld_aggregate_eq body pc args frame memory operand offset size shape]
+  simp only [storeAggregateField, cil_guard, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, referenceAt]
+  all_goals first | rfl | (split <;> (try simp only [bind_assoc, pure_bind]) <;> rfl)
 
-/-- A nested struct field load reads the field's bytes at the field address. -/
-theorem step_aggregateFieldAt_reference_eq (body : CIL.Method) (pc : Nat) (args : List Value)
-    (frame : Frame) (memory : Memory) (offset size : Nat) (reference : Reference)
+/-- A nested struct field store of a snapshot writes its bytes and initialization flags at the
+    field address once its width and byte count match the field's. -/
+theorem step_stfld_aggregate_snapshot_eq (body : CIL.Method) (pc : Nat)
+    (args : List Value) (frame : Frame) (memory : Memory) (operand : Extraction.FieldRef)
+    (offset size width : Nat)
+    (shape : body.fieldShape operand = .aggregate offset size)
+    (bytes : List (BitVec 8 × Bool)) (reference : Reference) (rest : List Value) :
+    step body (.stfld operand) pc args frame
+      (.scalar (.snapshot (.aggregate width) bytes) :: .reference (.address reference) :: rest)
+        memory =
+      if bytes.length != size || width != size then .error .invalidState else do
+        let address ← checkedAt (.address reference) 0
+          (add memory reference 1 (BitVec.ofNat 64 offset))
+        let stored ← checkedAt (.address address) size
+          (writeSnapshot memory address bytes ordinaryAccessAlignment)
+        return .next (pc + 1) rest frame stored := by
+  rw [step_stfld_aggregate_eq body pc args frame memory operand offset size shape]
+  simp only [storeAggregateField, cil_guard, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, referenceAt]
+  all_goals first | rfl | (split <;> (try simp only [bind_assoc, pure_bind]) <;> rfl)
+
+/-- A nested struct field load copies the field's bytes at the field address, as a snapshot
+    keeping their initialization flags when some of them are uninitialized. -/
+theorem step_ldfld_aggregate_reference_eq (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (field : Extraction.FieldRef) (offset size : Nat)
+    (shape : body.fieldShape field = .aggregate offset size) (reference : Reference)
     (rest : List Value) :
-    step body (.aggregateFieldAt offset size) pc args frame
+    step body (.ldfld field) pc args frame
       (.reference (.address reference) :: rest) memory = do
       let address ← checkedAt (.address reference) 0
         (add memory reference 1 (BitVec.ofNat 64 offset))
+      if let .error .uninitialized := read memory address size ordinaryAccessAlignment then
+        let copied ← loadSnapshot memory (.address address) (.aggregate size)
+        return .next (pc + 1) (.scalar copied :: rest) frame memory
       let bytes ← checkedAt (.address address) size
         (read memory address size ordinaryAccessAlignment)
       return .next (pc + 1) (.scalar (.aggregate bytes) :: rest) frame memory := by
-  field_step_proof step_aggregateFieldAt_eq
+  rw [step_ldfld_aggregate_eq body pc args frame memory field offset size shape]
+  simp only [loadAggregateField, cil_guard, unspecifiedOperands, List.take, List.any,
+    Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, referenceAt, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
+  cases checkedAt (.address reference) 0 (add memory reference 1 (BitVec.ofNat 64 offset)) with
+  | error => rfl
+  | ok address =>
+    dsimp only
+    cases read memory address size ordinaryAccessAlignment with
+    | ok => rfl
+    | error fault =>
+      cases fault <;> try rfl
+      cases loadSnapshot memory (.address address) (.aggregate size) <;> rfl
 
 /-- A field store into readable struct bytes leaves them reading as the stored field bytes. -/
 theorem read_after_field_write {memory after : Memory} {home : Reference}
@@ -379,15 +424,16 @@ theorem field_address {memory : Memory} {home : Reference} {length offset width 
 
 /-- `stfld` into a struct home readable as `bytes` writes only the field's bytes, after which the
     home reads as `bytes` with that field stored. The step holds in any method and frame. -/
-theorem step_setFieldAt_home {memory : Memory} {home : Reference} {bytes : List (BitVec 8)}
+theorem step_stfld_value_home {memory : Memory} {home : Reference} {bytes : List (BitVec 8)}
     {field : FieldLayout} (formed : memory.WellFormed)
     (loaded : read memory home bytes.length 1 = .ok bytes)
     (writable : access memory home bytes.length 1 true = .ok ())
     (within : field.offset + field.width ≤ bytes.length) {value : CIL.Value} {number : Nat}
     (encoded : fieldStoreNumber field.width value = some number) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.setFieldAt field.offset field.width) pc args frame
+      (∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+        body.fieldShape operand = .value field.offset field.width signed → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar value :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
       write memory { home with offset := home.offset + field.offset }
@@ -402,32 +448,33 @@ theorem step_setFieldAt_home {memory : Memory} {home : Reference} {bytes : List 
     (alignment := 1) (by simpa only [numberBytes_length] using slice.access)
   have address := field_address formed writable positive within
   refine ⟨after, ?_, written, read_after_field_write loaded within written⟩
-  intro body pc args frame rest
+  intro body operand signed shape pc args frame rest
   unfold fieldStoreNumber at encoded
   split at encoded <;> cases encoded <;> rename_i sized <;>
-    simp only [sized] at written address ⊢
+    simp only [sized] at written address shape ⊢
   all_goals first
-    | rw [step_setFieldAt_i32_1_eq, ← numberBytes_mod _ 1]
-    | rw [step_setFieldAt_i32_2_eq, ← numberBytes_mod _ 2]
-    | rw [step_setFieldAt_i32_4_eq]
-    | rw [step_setFieldAt_i64_eq]
-    | rw [step_setFieldAt_v128_eq]
-    | rw [step_setFieldAt_v256_eq]
+    | rw [step_stfld_value_i32_1_eq _ _ _ _ _ _ _ _ shape, ← numberBytes_mod _ 1]
+    | rw [step_stfld_value_i32_2_eq _ _ _ _ _ _ _ _ shape, ← numberBytes_mod _ 2]
+    | rw [step_stfld_value_i32_4_eq _ _ _ _ _ _ _ _ shape]
+    | rw [step_stfld_value_i64_eq _ _ _ _ _ _ _ _ shape]
+    | rw [step_stfld_value_v128_eq _ _ _ _ _ _ _ _ shape]
+    | rw [step_stfld_value_v256_eq _ _ _ _ _ _ _ _ shape]
   all_goals simp [address, written, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
 /-- A nested struct store of `fieldBytes` into a struct home readable as `bytes` writes only
     the field's bytes, after which the home reads as `bytes` with that field stored. The step
     holds in any method and frame. -/
-theorem step_setAggregateFieldAt_home {memory : Memory} {home : Reference}
+theorem step_stfld_aggregate_home {memory : Memory} {home : Reference}
     {bytes : List (BitVec 8)} {field : FieldLayout} (formed : memory.WellFormed)
     (loaded : read memory home bytes.length 1 = .ok bytes)
     (writable : access memory home bytes.length 1 true = .ok ())
     (within : field.offset + field.width ≤ bytes.length) (positive : 0 < field.width)
     {fieldBytes : List (BitVec 8)} (fieldSized : fieldBytes.length = field.width) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.setAggregateFieldAt field.offset field.width) pc args frame
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .aggregate field.offset field.width → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar (.aggregate fieldBytes) :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
       write memory { home with offset := home.offset + field.offset } fieldBytes 1 =
@@ -442,100 +489,105 @@ theorem step_setAggregateFieldAt_home {memory : Memory} {home : Reference}
   have address := field_address formed writable positive within
   refine ⟨after, ?_, written,
     read_after_field_write loaded within (by rw [encoding]; exact written)⟩
-  intro body pc args frame rest
-  rw [step_setAggregateFieldAt_reference_eq]
+  intro body operand shape pc args frame rest
+  rw [step_stfld_aggregate_reference_eq _ _ _ _ _ _ _ _ shape]
   simp [fieldSized, address, written, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
 
 #print axioms writeSnapshot_initialized
 #print axioms loadValue_signed_of_read
-#print axioms step_setFieldAt_v128_eq
-#print axioms step_setFieldAt_v256_eq
-#print axioms step_setAggregateFieldAt_reference_eq
-#print axioms step_aggregateFieldAt_reference_eq
+#print axioms step_stfld_value_v128_eq
+#print axioms step_stfld_value_v256_eq
+#print axioms step_stfld_aggregate_reference_eq
+#print axioms step_ldfld_aggregate_reference_eq
+#print axioms step_stfld_aggregate_snapshot_eq
 #print axioms field_address
-#print axioms step_setFieldAt_home
-#print axioms step_setAggregateFieldAt_home
+#print axioms step_stfld_value_home
+#print axioms step_stfld_aggregate_home
 /-- `ldfld` through the address of a struct home readable as `bytes` pushes the field's number
     at the field's width and changes nothing. The step holds in any method and frame. -/
-theorem step_fieldAt_home {memory : Memory} {home : Reference} {bytes : List (BitVec 8)}
+theorem step_ldfld_unsigned_home {memory : Memory} {home : Reference} {bytes : List (BitVec 8)}
     {field : FieldLayout} (formed : memory.WellFormed)
     (loaded : read memory home bytes.length 1 = .ok bytes)
     (within : field.offset + field.width ≤ bytes.length) (scalar : ScalarWidth field.width) :
-    ∀ body pc args frame rest,
-      step body (.fieldAt field.offset field.width false) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef),
+      body.fieldShape operand = .value field.offset field.width false → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame
         (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (numericOfWidth field.width (field.numberIn bytes)) :: rest)
           frame memory) := by
-  intro body pc args frame rest
+  intro body operand shape pc args frame rest
   have positive : 0 < field.width := by rcases scalar with h | h | h | h | h | h | h <;> omega
   have address := field_address formed (read_access loaded) positive within
   have slice := read_slice_bytes formed loaded field.offset field.width positive within
-  rw [step_fieldAt_reference_eq]
+  rw [step_ldfld_value_reference_eq _ _ _ _ _ _ _ _ _ shape]
   simp [address, loadValue_of_read scalar slice, FieldLayout.numberIn, FieldLayout.bytesIn,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- A signed `ldfld` through the address of a struct home readable as `bytes` pushes the
     field's number sign extended from a 1- or 2-byte field, and changes nothing. The step holds
     in any method and frame. -/
-theorem step_fieldAt_signed_home {memory : Memory} {home : Reference}
+theorem step_ldfld_signed_home {memory : Memory} {home : Reference}
     {bytes : List (BitVec 8)} {field : FieldLayout} (formed : memory.WellFormed)
     (loaded : read memory home bytes.length 1 = .ok bytes)
     (within : field.offset + field.width ≤ bytes.length) (scalar : ScalarWidth field.width) :
-    ∀ body pc args frame rest,
-      step body (.fieldAt field.offset field.width true) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef),
+      body.fieldShape operand = .value field.offset field.width true → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame
         (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (signedOfWidth field.width (field.numberIn bytes)) :: rest)
           frame memory) := by
-  intro body pc args frame rest
+  intro body operand shape pc args frame rest
   have positive : 0 < field.width := by rcases scalar with h | h | h | h | h | h | h <;> omega
   have address := field_address formed (read_access loaded) positive within
   have slice := read_slice_bytes formed loaded field.offset field.width positive within
-  rw [step_fieldAt_reference_eq]
+  rw [step_ldfld_value_reference_eq _ _ _ _ _ _ _ _ _ shape]
   simp [address, loadValue_signed_of_read scalar slice, FieldLayout.numberIn,
     FieldLayout.bytesIn, checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure,
     Except.pure]
 
 /-- A nested struct load through the address of a struct home readable as `bytes` pushes the
     field's bytes and changes nothing. The step holds in any method and frame. -/
-theorem step_aggregateFieldAt_home {memory : Memory} {home : Reference}
+theorem step_ldfld_aggregate_home {memory : Memory} {home : Reference}
     {bytes : List (BitVec 8)} {field : FieldLayout} (formed : memory.WellFormed)
     (loaded : read memory home bytes.length 1 = .ok bytes)
     (within : field.offset + field.width ≤ bytes.length) (positive : 0 < field.width) :
-    ∀ body pc args frame rest,
-      step body (.aggregateFieldAt field.offset field.width) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef),
+      body.fieldShape operand = .aggregate field.offset field.width → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame
         (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (.aggregate (field.bytesIn bytes)) :: rest) frame
           memory) := by
-  intro body pc args frame rest
+  intro body operand shape pc args frame rest
   have address := field_address formed (read_access loaded) positive within
   have slice := read_slice_bytes formed loaded field.offset field.width positive within
-  rw [step_aggregateFieldAt_reference_eq]
+  rw [step_ldfld_aggregate_reference_eq _ _ _ _ _ _ _ _ shape]
   simp [address, slice, FieldLayout.bytesIn, checkedAt, Except.mapError, Bind.bind,
     Except.bind, Pure.pure, Except.pure]
 
 /-- `initobj` on a writable home zeroes its `size` bytes, which then read back. The step holds
     in any method and frame. -/
-theorem step_initAggregate_home {memory : Memory} {home : Reference} {size : Nat}
+theorem step_initobj_home {memory : Memory} {home : Reference} {size : Nat}
     (writable : access memory home size 1 true = .ok ()) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.initAggregate size) pc args frame (.reference (.address home) :: rest)
-          memory = .ok (.next (pc + 1) rest frame after)) ∧
+      (∀ (body : Method) (type : Extraction.TypeExpr), (body.valueShape type).size? = some size →
+        ∀ pc args frame rest,
+          step body (.initobj type) pc args frame (.reference (.address home) :: rest) memory =
+            .ok (.next (pc + 1) rest frame after)) ∧
       write memory home (List.replicate size 0) 1 = .ok after ∧
       read after home size 1 = .ok (List.replicate size 0) := by
   obtain ⟨after, written⟩ := write_succeeds (bytes := List.replicate size 0) (alignment := 1)
     (by simpa using writable)
   refine ⟨after, ?_, written, by simpa using write_readback _ _ _ _ _ written⟩
-  intro body pc args frame rest
-  rw [step_initAggregate_reference_eq]
+  intro body type shape pc args frame rest
+  rw [step_initobj_reference_eq _ _ _ _ _ shape]
   simp only [referenceAt, ordinaryAccessAlignment, written, checkedAt, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_fieldAt_home
-#print axioms step_fieldAt_signed_home
-#print axioms step_aggregateFieldAt_home
-#print axioms step_initAggregate_home
+#print axioms step_ldfld_unsigned_home
+#print axioms step_ldfld_signed_home
+#print axioms step_ldfld_aggregate_home
+#print axioms step_initobj_home
 
 /-- A remembered aggregate local reads as exactly its remembered bytes, which fill its home. -/
 theorem LocalSnapshots.aggregate {memory : Memory} {slots : List LocalSlot}
@@ -572,16 +624,17 @@ theorem LocalSnapshots.zero_aggregate {entered memory : Memory} {boundary : Nat}
     (slot : slots[index]? = some (.bytes (.aggregate ⟨width, bounded⟩) home))
     (writable : access memory home width 1 true = .ok ()) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.initAggregate width) pc args frame (.reference (.address home) :: rest)
-          memory = .ok (.next (pc + 1) rest frame after)) ∧
+      (∀ (body : Method) (type : Extraction.TypeExpr), (body.valueShape type).size? = some width →
+        ∀ pc args frame rest,
+          step body (.initobj type) pc args frame (.reference (.address home) :: rest) memory =
+            .ok (.next (pc + 1) rest frame after)) ∧
       LocalSnapshots after slots
         (rememberLocal known index (.aggregate (List.replicate width 0))) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
       access after home width 1 true = .ok () ∧ form after home = .ok home ∧
       write memory home (List.replicate width 0) 1 = .ok after := by
   let size : Fin (2^64) := ⟨width, bounded⟩
-  obtain ⟨after, stepped, written, _⟩ := step_initAggregate_home writable
+  obtain ⟨after, stepped, written, _⟩ := step_initobj_home writable
   obtain ⟨_, ready⟩ := access_requirements writable
   have encoded : localNumber (.aggregate size) (.aggregate (List.replicate size 0)) =
       .ok (byteNumber (List.replicate size 0)) := by
@@ -678,8 +731,9 @@ theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {k
     (found : layout.fields[fieldIndex]? = some ⟨offset, width, aggregate⟩)
     (value : CIL.Value) {number : Nat} (encoded : fieldStoreNumber width value = some number) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.setFieldAt offset width) pc args frame
+      (∀ (body : Method) (operand : Extraction.FieldRef) (signed : Bool),
+        body.fieldShape operand = .value offset width signed → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar value :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
       LocalSnapshots after slots (rememberLocal known index
@@ -694,7 +748,7 @@ theorem LocalSnapshots.store_field {entered memory : Memory} {boundary : Nat} {k
   obtain ⟨length, loaded⟩ := snapshots.aggregate slot specified
   have within : offset + width ≤ bytes.length :=
     (length.trans sized.symm) ▸ field_within_layout layout valid _ (List.mem_of_getElem? found)
-  obtain ⟨after, stepped, written, -⟩ := step_setFieldAt_home
+  obtain ⟨after, stepped, written, -⟩ := step_stfld_value_home
     (field := ⟨offset, width, aggregate⟩) formed loaded (length ▸ writable) within encoded
   obtain ⟨remembered, formedAfter, below, kept, formsAfter, changed⟩ :=
     snapshots.write_field homes formed slot specified writable valid disjoint sized decoded found
@@ -719,8 +773,9 @@ theorem LocalSnapshots.store_aggregate_field {entered memory : Memory} {boundary
     (found : layout.fields[fieldIndex]? = some ⟨offset, width, aggregate⟩)
     (fieldBytes : List (BitVec 8)) (fieldSized : fieldBytes.length = width) :
     ∃ after,
-      (∀ body pc args frame rest,
-        step body (.setAggregateFieldAt offset width) pc args frame
+      (∀ (body : CIL.Method) (operand : CIL.Extraction.FieldRef),
+        body.fieldShape operand = .aggregate offset width → ∀ pc args frame rest,
+        step body (.stfld operand) pc args frame
           (.scalar (.aggregate fieldBytes) :: .reference (.address home) :: rest) memory =
           .ok (.next (pc + 1) rest frame after)) ∧
       LocalSnapshots after slots (rememberLocal known index (.aggregate
@@ -736,7 +791,7 @@ theorem LocalSnapshots.store_aggregate_field {entered memory : Memory} {boundary
   have within : offset + width ≤ bytes.length :=
     (length.trans sized.symm) ▸ field_within_layout layout valid _ member
   have positive := valid.positive member
-  obtain ⟨after, stepped, written, -⟩ := step_setAggregateFieldAt_home
+  obtain ⟨after, stepped, written, -⟩ := step_stfld_aggregate_home
     (field := ⟨offset, width, aggregate⟩) formed loaded (length ▸ writable) within positive
     fieldSized
   have fits : byteNumber fieldBytes < 256 ^ width := fieldSized ▸ byteNumber_lt fieldBytes
@@ -778,14 +833,15 @@ theorem LocalSnapshots.load_field {memory : Memory} {slots : List LocalSlot}
     (decoded : layout.values bytes = values) {fieldIndex offset width : Nat}
     (found : layout.fields[fieldIndex]? = some ⟨offset, width, false⟩) {value : Nat}
     (present : values[fieldIndex]? = some value) :
-    ∀ body pc args frame rest,
-      step body (.fieldAt offset width false) pc args frame (.reference (.address home) :: rest)
+    ∀ (body : Method) (operand : Extraction.FieldRef),
+      body.fieldShape operand = .value offset width false → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame (.reference (.address home) :: rest)
         memory = .ok (.next (pc + 1) (.scalar (numericOfWidth width value) :: rest) frame
           memory) := by
   obtain ⟨loaded, within, number⟩ :=
     snapshots.field_value slot specified valid sized decoded found present
   rw [← number]
-  exact step_fieldAt_home (field := ⟨offset, width, false⟩) formed loaded within
+  exact step_ldfld_unsigned_home (field := ⟨offset, width, false⟩) formed loaded within
     (valid.scalar (List.mem_of_getElem? found))
 
 /-- A signed `ldfld` of field `fieldIndex` through the address of a remembered aggregate local
@@ -800,14 +856,15 @@ theorem LocalSnapshots.load_signed_field {memory : Memory} {slots : List LocalSl
     (decoded : layout.values bytes = values) {fieldIndex offset width : Nat}
     (found : layout.fields[fieldIndex]? = some ⟨offset, width, false⟩) {value : Nat}
     (present : values[fieldIndex]? = some value) :
-    ∀ body pc args frame rest,
-      step body (.fieldAt offset width true) pc args frame (.reference (.address home) :: rest)
+    ∀ (body : Method) (operand : Extraction.FieldRef),
+      body.fieldShape operand = .value offset width true → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame (.reference (.address home) :: rest)
         memory = .ok (.next (pc + 1) (.scalar (signedOfWidth width value) :: rest) frame
           memory) := by
   obtain ⟨loaded, within, number⟩ :=
     snapshots.field_value slot specified valid sized decoded found present
   rw [← number]
-  exact step_fieldAt_signed_home (field := ⟨offset, width, false⟩) formed loaded within
+  exact step_ldfld_signed_home (field := ⟨offset, width, false⟩) formed loaded within
     (valid.scalar (List.mem_of_getElem? found))
 
 /-- A nested struct load of field `fieldIndex` through the address of a remembered aggregate
@@ -822,8 +879,9 @@ theorem LocalSnapshots.load_aggregate_field {memory : Memory} {slots : List Loca
     (decoded : layout.values bytes = values) {fieldIndex offset width : Nat} {aggregate : Bool}
     (found : layout.fields[fieldIndex]? = some ⟨offset, width, aggregate⟩) {value : Nat}
     (present : values[fieldIndex]? = some value) :
-    ∀ body pc args frame rest,
-      step body (.aggregateFieldAt offset width) pc args frame
+    ∀ (body : Method) (operand : Extraction.FieldRef),
+      body.fieldShape operand = .aggregate offset width → ∀ pc args frame rest,
+      step body (.ldfld operand) pc args frame
         (.reference (.address home) :: rest) memory =
         .ok (.next (pc + 1) (.scalar (.aggregate (numberBytes value width)) :: rest) frame
           memory) := by
@@ -842,7 +900,7 @@ theorem LocalSnapshots.load_aggregate_field {memory : Memory} {slots : List Loca
     rw [← number]
     exact roundTrip
   rw [encoding]
-  exact step_aggregateFieldAt_home (field := ⟨offset, width, aggregate⟩) formed loaded within
+  exact step_ldfld_aggregate_home (field := ⟨offset, width, aggregate⟩) formed loaded within
     positive
 
 #print axioms LocalSnapshots.aggregate

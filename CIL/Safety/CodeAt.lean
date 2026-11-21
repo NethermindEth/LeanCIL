@@ -15,12 +15,12 @@ namespace CIL.Safety
 
 /-- `segment` occupies `body.code` from position `start`: the instructions at `start`,
     `start + 1`, ... are exactly those of `segment`, in order. -/
-def CodeAt (body : CIL.Method) (start : Nat) (segment : List CIL.Op) : Prop :=
+def CodeAt (body : CIL.Method) (start : Nat) (segment : List CIL.Instruction) : Prop :=
   (body.code.drop start).take segment.length = segment
 
 namespace CodeAt
 
-variable {body : CIL.Method} {start : Nat} {segment : List CIL.Op}
+variable {body : CIL.Method} {start : Nat} {segment : List CIL.Instruction}
 
 /-- A placement is exactly agreement of `body.code` with `segment` at each position of the
     segment, shifted by `start`. -/
@@ -42,14 +42,14 @@ theorem iff_lookup : CodeAt body start segment ↔
 #print axioms iff_lookup
 
 /-- The instruction at each position of a placed segment is the segment's instruction there. -/
-theorem lookup {op : CIL.Op} (placed : CodeAt body start segment) (index : Nat)
+theorem lookup {op : CIL.Instruction} (placed : CodeAt body start segment) (index : Nat)
     (found : segment[index]? = some op) : body.code[start + index]? = some op := by
   rw [iff_lookup.mp placed index (List.getElem?_eq_some_iff.mp found).1, found]
 
 #print axioms lookup
 
 /-- The positional form a placement replaces: `segment` follows `start` instructions. -/
-theorem of_eq_append {leading tail : List CIL.Op}
+theorem of_eq_append {leading tail : List CIL.Instruction}
     (placed : body.code = leading ++ segment ++ tail) (offset : leading.length = start) :
     CodeAt body start segment := by
   unfold CodeAt
@@ -89,7 +89,7 @@ theorem nil : CodeAt body start [] := by
 #print axioms nil
 
 /-- A segment is placed at `start` exactly when its two parts are placed one after the other. -/
-theorem append_iff {left right : List CIL.Op} :
+theorem append_iff {left right : List CIL.Instruction} :
     CodeAt body start (left ++ right) ↔
       CodeAt body start left ∧ CodeAt body (start + left.length) right := by
   simp only [iff_lookup, List.length_append]
@@ -109,28 +109,30 @@ theorem append_iff {left right : List CIL.Op} :
 #print axioms append_iff
 
 /-- The first part of a placed segment is placed at the same start. -/
-theorem append_left {left right : List CIL.Op} (placed : CodeAt body start (left ++ right)) :
+theorem append_left {left right : List CIL.Instruction}
+    (placed : CodeAt body start (left ++ right)) :
     CodeAt body start left :=
   (append_iff.mp placed).1
 
 #print axioms append_left
 
 /-- The second part of a placed segment is placed after the first part. -/
-theorem append_right {left right : List CIL.Op} (placed : CodeAt body start (left ++ right)) :
+theorem append_right {left right : List CIL.Instruction}
+    (placed : CodeAt body start (left ++ right)) :
     CodeAt body (start + left.length) right :=
   (append_iff.mp placed).2
 
 #print axioms append_right
 
 /-- Adjacent placed segments compose into one placed segment. -/
-theorem append {left right : List CIL.Op} (first : CodeAt body start left)
+theorem append {left right : List CIL.Instruction} (first : CodeAt body start left)
     (second : CodeAt body (start + left.length) right) : CodeAt body start (left ++ right) :=
   append_iff.mpr ⟨first, second⟩
 
 #print axioms append
 
 /-- A placed segment's first instruction is at `start` and the rest follows it. -/
-theorem cons_iff {op : CIL.Op} {rest : List CIL.Op} :
+theorem cons_iff {op : CIL.Instruction} {rest : List CIL.Instruction} :
     CodeAt body start (op :: rest) ↔
       body.code[start]? = some op ∧ CodeAt body (start + 1) rest := by
   rw [← List.singleton_append, append_iff, iff_lookup (segment := [op])]
@@ -159,7 +161,7 @@ theorem take (placed : CodeAt body start segment) (count : Nat) :
 #print axioms take
 
 /-- A segment inside a placed segment is placed after the instructions that precede it. -/
-theorem middle {before inner after : List CIL.Op}
+theorem middle {before inner after : List CIL.Instruction}
     (placed : CodeAt body start (before ++ inner ++ after)) :
     CodeAt body (start + before.length) inner :=
   append_left (append_right (List.append_assoc _ _ _ ▸ placed))

@@ -2,9 +2,16 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
+#:include BulkCallEvidence.cs
 #:include RejectedEvidence.cs
+#:include MarshalModelEvidence.cs
 
 using Mono.Cecil;
 
@@ -18,10 +25,10 @@ string Span(int width, bool writable = true, int offset = 0, int length = 2) =>
     $".bufferSpan ⟨.address ⟨0, {offset}⟩, {length}, {width}, {writable.ToString().ToLowerInvariant()}⟩";
 foreach (var method in metadata.GetType("Examples.AggregateSpans").Methods.Where(method => method.IsPublic))
 foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordinal)
-    ? new[] { "x64-sse2", "arm64-advsimd" } : ["scalar"])
+    ? new[] { "x64-sse42", "arm64-advsimd" } : ["scalar"])
 {
     var name = method.Name;
-    var layoutWidth = profile == "x64-sse2" ? 64 : 48;
+    var layoutWidth = profile == "x64-sse42" ? 64 : 48;
     var output = Path.Combine(root, profile == "scalar" ? name : name + "-" + profile);
     Directory.CreateDirectory(output);
     var arguments = name switch
@@ -64,7 +71,15 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
             "(result.1.cells 0 96).bits]) = .ok [0, 63, 96]",
         _ => null
     };
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
+    var contents = extra is null ? "" : $$"""
+        /-- Stores and overlapping copies preserve neighbouring bytes. -/
+        theorem contents : {{extra}} := by rfl
+        #print axioms contents
+        """;
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.StepComposition
+        namespace ExampleProof
         /-- Existing initialized caller storage shared by overlapping aggregate views. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
@@ -73,31 +88,25 @@ foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordina
           views := [⟨0, 0, 128, true, true⟩]
           nextIdentity := 1 }
         /-- Compiled span operations retain aggregate and vector storage identities. -/
-        """ + $"\ntheorem correctness : (CIL.Safety.invoke Extracted.program 64 0 [{arguments}] memory).map " +
-        $"Prod.snd = .ok [{expected}] := by rfl\n#print axioms correctness\n" +
-        (extra is null ? "" : "/-- Stores and overlapping copies preserve neighbouring bytes. -/\n" +
-            "theorem contents : " + extra + " := by rfl\n#print axioms contents\n") +
-        "end ExampleProof\n");
+        theorem correctness :
+            (CIL.Safety.invoke Extracted.program 64 0 [{{arguments}}] memory).map Prod.snd =
+              .ok [{{expected}}] := by rfl
+        #print axioms correctness
+        {{contents}}
+        end ExampleProof
+
+        """);
+    if (name == "Copy") File.AppendAllText(proof, BulkCallEvidence(0, 2, ".spanCopy 32 true"));
+    if (name == "Clear") File.AppendAllText(proof, BulkCallEvidence(0, 1, ".spanFill 32 true"));
     queue.Add(new(method.FullName, proof, output, Profile: profile),
         () => Console.WriteLine("PASS aggregate span: " + name + " (" + profile + ")"));
 }
 queue.Flush();
-var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
-foreach (var (name, before, after, theorem) in new[]
-{
-    ("ReadOnlyFactory", ".spanFromReference 32 false", ".spanFromReference 32 true", "method0_scalars_validated"),
-    ("Factory", ".spanFromReference 32 true", ".spanFromReference 16 true", "method0_layouts_validated"),
-    ("Bytes", ".spanReinterpret 32 1 true", ".spanReinterpret 16 1 true", "method0_layouts_validated"),
-    ("WordsView", ".spanReinterpret 1 32 false", ".spanReinterpret 1 16 false", "method0_layouts_validated"),
-    ("Copy", ".spanCopy 32 true", ".spanCopy 16 true", "method0_layouts_validated"),
-    ("VectorBytes", ".spanReinterpret 16 1 true", ".spanReinterpret 32 1 true", "method0_scalars_validated")
-})
-{
-    var source = NarrowEvidence(File.ReadAllText(Path.Combine(root, name, "Extracted.lean")), theorem);
-    if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing span mutation");
-    var path = Path.Combine(root, "Rejected" + name + ".lean");
-    File.WriteAllText(path, source.Replace(before, after, StringComparison.Ordinal));
-    rejected.Add(path, "PASS aggregate span evidence rejection: " + name,
-        theorem.EndsWith("layouts_validated", StringComparison.Ordinal) ? "MethodLayoutsValid" : "ScalarFlowValid");
-}
-rejected.Check();
+CheckMarshalModels(root,
+[
+    ("ReadOnlyFactory", 2, ".spanFromReference 32 false", ".spanFromReference 2 false"),
+    ("Factory", 2, ".spanFromReference 32 true", ".spanFromReference 2 true"),
+    ("Bytes", 1, ".spanReinterpret 32 1 true", ".spanReinterpret 2 1 true"),
+    ("WordsView", 1, ".spanReinterpret 1 32 false", ".spanReinterpret 2 32 false"),
+    ("VectorBytes", 1, ".spanReinterpret 16 1 true", ".spanReinterpret 2 1 true")
+]);

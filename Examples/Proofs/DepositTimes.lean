@@ -59,7 +59,7 @@ private abbrev State (memory : Memory) (account home : Reference) :=
 /-- The loop test, with the count made and `times` on the stack. -/
 bind_cutpoint header (memory : Memory) (account : Reference) (times : W32) (home : Reference)
     (state : State memory account home) :=
-  depositTimesBody at loop.latch matching (fun op => op matches .bltu _) with
+  depositTimesBody at loop.latch matching (fun op => op matches .blt_un _) with
     entry.frame memory home, [.scalar (.i32 times), .scalar (.i32 state.values)], state.memory
 
 /-- The balance after `count` deposits of `amount` onto `balance`. -/

@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
@@ -104,9 +109,9 @@ foreach (var name in new[] { "mutable", "twice", "branch", "address" })
 var original = File.ReadAllText(Path.Combine(root, "ReadSignedByte", "Extracted.lean"));
 foreach (var (name, before, after, marker) in new[]
 {
-    ("signedness", "scalar := some true", "scalar := some false", "MethodShapeValid"),
-    ("width", "[(BitVec.ofNat 8 128)]", "[(BitVec.ofNat 8 128), (BitVec.ofNat 8 255)]", "MethodShapeValid"),
-    ("literal", "literal := some (.i32 4294967168)", "literal := some (.i32 127)", "StaticValuesValid")
+    ("signedness", "scalar := some true", "scalar := some false", "MethodDecodeError.liveHole"),
+    ("width", "[(BitVec.ofNat 8 128)]", "[(BitVec.ofNat 8 128), (BitVec.ofNat 8 255)]", "MethodDecodeError.liveHole"),
+    ("literal", "literal := some (.i32 4294967168)", "literal := some (.i32 127)", "MethodDecodeError.liveHole")
 })
 {
     if (!original.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing tamper target: " + name);
@@ -135,7 +140,7 @@ if (!seededReport.SequenceEqual(seedFields))
 Console.WriteLine("PASS hash proved for every seed; a fixed seed is refuted and unbound seeds fault");
 
 var mixSource = File.ReadAllText(Path.Combine(mix, "Extracted.lean"));
-const string seedBytes = "SeededHash::Seed0\", bytes := [(BitVec.ofNat 8 0)";
+const string seedBytes = "name := name!\"Seed0\" }, bytes := [(BitVec.ofNat 8 0)";
 if (!mixSource.Contains(seedBytes, StringComparison.Ordinal)) throw new Exception("Missing unknown seed descriptor");
 var guessedProof = Path.Combine(root, "Opaque-guessed.lean");
 // A load from the zero placeholder faults unless the caller supplies a binding.
@@ -149,7 +154,7 @@ rejected.Add(guessedProof, "PASS unknown seed is never read as its zero placehol
 var forgedSeed = Path.Combine(root, "Opaque-forged.lean");
 File.WriteAllText(forgedSeed, mixSource.Replace(seedBytes, seedBytes[..^2] + "5)", StringComparison.Ordinal));
 rejected.Add(forgedSeed, "PASS Lean evidence rejects a value written into an unknown seed",
-    "StaticValuesValid");
+    "MethodDecodeError.liveHole");
 
 void RejectSeeded(string name, string dll, string method, string marker, bool assume = true)
 {

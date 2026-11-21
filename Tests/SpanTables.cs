@@ -2,10 +2,16 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
+#:include ExceptionMembers.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -19,6 +25,7 @@ Directory.CreateDirectory(root);
 var rejected = new RejectedEvidence(root);
 var queue = new GeneratedQueue(verification, assembly);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.SpanTables")!;
+using var metadata = ModuleDefinition.ReadModule(assembly);
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.Safety.Execution");
 
 string Scalar(object value) => value switch
@@ -32,8 +39,18 @@ void Prove(string dll, string selector, string folder, IReadOnlyList<string> cla
     string control = "")
 {
     var proof = Path.Combine(root, folder + ".lean");
-    File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\ntheorem correctness :\n" +
-        string.Join(" ∧\n", claims) + " := by\n  and_intros <;> rfl\nend ExampleProof\n" + control);
+    var claimsText = string.Join(" \u2227\n", claims);
+    File.WriteAllText(proof, $$"""
+        import Extracted
+        import CIL.Safety.Execution
+        namespace ExampleProof
+        theorem correctness :
+        {{claimsText}} := by
+          and_intros <;> rfl
+        #print axioms correctness
+        end ExampleProof
+        {{control}}
+        """);
     queue.Add(new(selector, proof, Path.Combine(root, folder), Assembly: dll), passed);
 }
 
@@ -49,36 +66,47 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     var folder = Path.Combine(root, name);
     Run(Extract("extract", assembly, "Examples", selector, folder));
     var source = File.ReadAllText(Path.Combine(folder, "Extracted.lean"));
-    var instructions = ExtractedInstructions(source);
-    var site = instructions.FirstOrDefault(instruction =>
-        Regex.IsMatch(instruction.Op, @"\A\.memory \(\.spanItem \d\)\z"));
+    var code = metadata.GetType("Examples.SpanTables").Methods.Single(method => method.Name == name).Body.Instructions;
+    var indexer = code.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Call &&
+        instruction.Operand is MethodReference { Name: "get_Item" });
     var claims = inputs.Select(input =>
     {
         try { return Claim(assembly, name, input, $".ok [{Scalar(runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!)}]"); }
-        catch (TargetInvocationException error) when (site is not null)
+        catch (TargetInvocationException error) when (indexer is not null)
         {
-            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
+            string member = ExceptionMember(error.InnerException!);
+            return Claim(assembly, name, input, $".error ⟨0, {code.IndexOf(indexer)}, .thrown .{member}⟩");
         }
     }).ToList();
     // The RVA descriptor carries the declared packing Roslyn aligned the table to.
     var packing = name is "Word" or "Count" ? 4 : 8;
-    if (!source.Contains($"alignment := {packing} }})", StringComparison.Ordinal))
+    if (!source.Contains($"alignment := {packing} }}", StringComparison.Ordinal))
         throw new InvalidOperationException($"{name}: missing static data alignment {packing}");
-    var folded = instructions.FirstOrDefault(instruction => instruction.Op == ".nop");
-    var obligation = $"method{folded?.Method}_features_validated";
-    var control = folded is not null
-        ? CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0) : "";
+    var store = code.SingleOrDefault(instruction => instruction.OpCode.Code == Code.Stloc_0);
+    if (name != "First" && store?.Next.OpCode.Code != Code.Ldloca_S)
+        throw new InvalidOperationException($"{name}: missing span receiver store and address");
+    const string obligation = "method0_features_validated";
+    var control = store is null ? "" :
+        CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0);
+    if (store is not null)
+    {
+        var pc = code.IndexOf(store);
+        claims.Add($"Extracted.method0.code[{pc}]? = some (.stloc 0)");
+        claims.Add($"Extracted.method0.code[{pc + 1}]? = some (.ldloca 0)");
+    }
     Prove(assembly, selector, name + "-Verified", claims,
         () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"), control);
 
-    // The receiver fold is bound by the feature certificate, independently of the instruction lemmas.
-    if (folded is null) continue;
+    // The feature certificate binds each receiver instruction to its raw opcode.
+    if (store is null) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".localAddr 0"), obligation));
+    var narrowed = NarrowEvidence(source, obligation);
+    File.WriteAllText(forged, narrowed.Replace("method0Reachable method0.code",
+        $"method0Reachable (method0.code.set {code.IndexOf(store)} .nop)", StringComparison.Ordinal));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
         diagnostic => Regex.IsMatch(diagnostic,
-            @"Extraction\.FeatureFlowValid rawLayouts\.toArray \(Extraction\.evidenceConstants methodEvidence\) " +
-                @"method\d+Closed"), "is false");
+            @"Extraction\.FeatureFlowValid rawLayouts\.toArray \(Extraction\.evidenceConstants methodEvidence\)\s+" +
+                @"\(Extraction\.linkIndex method\d+\)\s+method\d+Closed"), "is false");
 }
 
 // The proved value comes from the assembly's RVA blob through ldtoken.
@@ -96,13 +124,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 Prove(tampered, "SpanTables::Word(int)", "Tampered",
     [Claim(tampered, "Word", [0], ".ok [.scalar (.i32 1891)]")],
     () => Console.WriteLine("PASS tampered RVA blob changes the proved word"));
-// Reused locals and computed indexes retain storage; entering an erased receiver is invalid.
-foreach (var (mutation, marker) in new[]
-{
-    ("second-read", ""),
-    ("computed-index", ""),
-    ("interior-branch", "Branch into a folded span receiver")
-})
+// Reused locals and computed indexes retain typed span storage.
+foreach (var mutation in new[] { "second-read", "computed-index" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -125,24 +148,13 @@ foreach (var (mutation, marker) in new[]
                 il.InsertAfter(code[3], il.Create(OpCodes.Ldc_I4_0));
                 il.InsertAfter(code[4], il.Create(OpCodes.Add));
                 break;
-            case "interior-branch":
-                il.InsertBefore(code[1], il.Create(OpCodes.Br, code[2]));
-                break;
         }
         module.Write(dll);
     }
-    if (marker.Length == 0)
-    {
-        var expected = Scalar(runtime.GetMethod("Word")!.Invoke(null, [0])!);
-        Prove(dll, "SpanTables::Word(int)", "Supported-" + mutation,
-            [Claim(dll, "Word", [0], $".ok [{expected}]")],
-            () => Console.WriteLine("PASS stored static span: " + mutation));
-        continue;
-    }
-    var result = Execute(Extract("extract", dll, "Examples", "SpanTables::Word(int)", output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
-        throw new InvalidOperationException("Incorrect span rejection: " + mutation + "\n" + result.Output);
-    Console.WriteLine("PASS rejection: " + mutation);
+    var expected = Scalar(runtime.GetMethod("Word")!.Invoke(null, [0])!);
+    Prove(dll, "SpanTables::Word(int)", "Supported-" + mutation,
+        [Claim(dll, "Word", [0], $".ok [{expected}]")],
+        () => Console.WriteLine("PASS stored static span: " + mutation));
 }
 // CoreCLR's CreateSpan<uint> throws on data not 4-byte aligned; packing 2 promises only 2 bytes.
 const string misalignedSpan = "Typed span element width does not divide the field alignment";
@@ -164,13 +176,16 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 Run(Extract("extract", narrowDll, "Examples", "SpanTables::Word(int)", narrowFolder));
 var narrowSource = File.ReadAllText(Path.Combine(narrowFolder, "Extracted.lean"));
-var createSite = ExtractedInstructions(narrowSource)
-    .FirstOrDefault(instruction => instruction.Op == ".memory (.createSpan 4)");
-if (createSite is null || !narrowSource.Contains("alignment := 2 })", StringComparison.Ordinal))
-    throw new InvalidOperationException("Narrow packing did not reach the extracted CreateSpan site");
+var getterIndex = DirectLinks(narrowSource, 1).Single();
+var getterCode = metadata.GetType("Examples.SpanTables").Methods.Single(method => method.Name == "get_Words")
+    .Body.Instructions;
+var createPc = getterCode.IndexOf(getterCode.Single(instruction =>
+    instruction.Operand is GenericInstanceMethod { Name: "CreateSpan" }));
+if (getterIndex.Method != 0 || !IsDecodedMethod(narrowSource, 1) ||
+    !narrowSource.Contains("alignment := 2 }", StringComparison.Ordinal))
+    throw new InvalidOperationException("Narrow packing did not reach the decoded span getter");
 Prove(narrowDll, "SpanTables::Word(int)", "Narrow-packing-Verified",
-    [Claim(narrowDll, "Word", [0], $".error ⟨{createSite.Method}, {createSite.Pc}, " +
-        $".unsupported \"{misalignedSpan}\"⟩")],
+    [Claim(narrowDll, "Word", [0], $".error \u27e81, {createPc}, .unsupported \"{misalignedSpan}\"\u27e9")],
     () => Console.WriteLine("PASS CreateSpan over a narrower packing is unsupported, never a success"));
 
 // An RVA off its declared packing is rejected before extraction; Cecil re-aligns, so patch the table.

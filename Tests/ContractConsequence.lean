@@ -5,6 +5,7 @@ import CIL.Safety.WordMemory
 import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
 import CIL.Safety.Forwarders
+import Tests.Support
 
 /-! Synthetic extraction: `Root(v) => Percent(v) + 1`, a throwing `Percent`,
     `AddTo(in a, in b, out res)`, `Sum` and `SumSwapped(in b, in a, out res)` forwarding to it,
@@ -37,35 +38,46 @@ def method8Signature : String :=
 /-- `IsZeroIgnoring(v, unused) => IsZero(v)`. -/
 def method9Signature : String :=
   "System.Boolean Consequence.Calls::IsZeroIgnoring(System.UInt64,System.UInt64)"
-@[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
+@[cil_code] def method0 : Method := {
+  returnsValue := true, locals := [], links := [(1, .direct 1)], code :=
+    [.ldarg 0, .call (Tests.callee 1) {}, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,
-    .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
+  [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
+    .throw .argumentOutOfRange, .ldarg 0, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ret] }
 @[cil_code] def method3 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 0, .arg 1, .arg 2, .call 2 3, .ret] }
+  [.ldarg 0, .ldarg 1, .ldarg 2, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 2)] }
 /-- `SumSwapped`: loads its arguments in the order `AddTo` takes them. -/
 @[cil_code] def method4 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 1, .arg 0, .arg 2, .call 2 3, .ret] }
+  [.ldarg 1, .ldarg 0, .ldarg 2, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 2)] }
 /-- `SumDiscard`: passes its local's address as `AddFlag`'s `res` and returns the flag. -/
 @[cil_code] def method5 : Method :=
-  { returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
-    [.arg 0, .arg 1, .localAddr 0, .call 8 3, .ret (some .unsigned8)] }
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
+    [.ldarg 0, .ldarg 1, .ldloca 0, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 8)] }
 /-- `IsZero`: a comparison returned as a narrowed boolean. -/
-@[cil_code] def method6 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+@[cil_code] def method6 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 0, .ldc_i4 0, .conv_i8, .ceq, .ret] }
 /-- `IsZeroForward`: re-narrows `IsZero`'s boolean through its own `ret`. -/
-@[cil_code] def method7 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def method7 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 6)] }
 /-- `AddFlag`: `AddTo`'s store followed by a constant `true`. -/
-@[cil_code] def method8 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .const32 1,
-    .ret (some .unsigned8)] }
+@[cil_code] def method8 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ldc_i4 1,
+    .ret] }
 /-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
-@[cil_code] def method9 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def method9 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 6)] }
 /-- `AddFrom(out res, in b, in a) => AddTo(in a, in b, out res)`. -/
 def method10Signature : String :=
   "System.Void Consequence.Calls::AddFrom(System.UInt64&,System.UInt64&,System.UInt64&)"
@@ -82,20 +94,30 @@ def method14Signature : String :=
   "System.Boolean Consequence.Calls::IsSetForward(System.Boolean)"
 /-- `AddFrom`: loads its arguments in reverse, the order `AddTo` takes them. -/
 @[cil_code] def method10 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 1, .arg 0, .call 2 3, .ret] }
+  [.ldarg 2, .ldarg 1, .ldarg 0, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 2)] }
 /-- `CopyTo`: passes its zero-initialized local's address as `AddFrom`'s `a`. -/
 @[cil_code] def method11 : Method :=
   { returnsValue := false, locals := [.i64 0], localKinds := [.word64], code :=
-    [.arg 0, .arg 1, .localAddr 0, .call 10 3, .ret] }
+    [.ldarg 0, .ldarg 1, .ldloca 0, .call (Tests.callee 3) {}, .ret], links := [(3, .direct 10)] }
 /-- `IsZeroSecond`: forwards its second argument and never loads its first. -/
-@[cil_code] def method12 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 1, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def method12 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 1, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 6)] }
 /-- `IsSet`: a boolean parameter, loaded narrowed, returned narrowed. -/
-@[cil_code] def method13 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0 (some .unsigned8), .ret (some .unsigned8)] }
+@[cil_code] def method13 : Method := {
+  declared := {
+    parameters := [.atom CIL.Extraction.runtimeScope "System.Boolean"]
+    returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 0, .ret] }
 /-- `IsSetForward`: passes its boolean parameter through a narrowed load. -/
-@[cil_code] def method14 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0 (some .unsigned8), .call 13 1, .ret (some .unsigned8)] }
+@[cil_code] def method14 : Method := {
+  declared := {
+    parameters := [.atom CIL.Extraction.runtimeScope "System.Boolean"]
+    returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.ldarg 0, .call (Tests.callee 1) {}, .ret], links := [(1, .direct 13)] }
 @[cil_code] def program : Program :=
   [method0, method1, method2, method3, method4, method5, method6, method7, method8, method9,
     method10, method11, method12, method13, method14]
@@ -146,7 +168,7 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 
 def percentBounded : OutcomeContract CIL.W64 CIL.W64 :=
   { percentExact with post := fun _ _ _ out => out ≤ 100 }
@@ -320,8 +342,9 @@ theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_p
 
 /-- `Sum` passes its arguments through in order, so it meets `addPublic` itself. -/
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
-  add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+  add_public.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 
@@ -335,9 +358,9 @@ def swappedArgs (input : AddInput) : List Value :=
 /-- The swapped forwarder meets `addPublic` over its own argument order: the frame fact
     about `a` follows from `AddTo`'s footprint although `a` is now the second argument. -/
 theorem swapped_forwards : (addPublic.withArgs swappedArgs).Holds Extracted.program swapped :=
-  add_public.forward (loads := plainLoads [1, 0, 2]) (narrow := none) (forwarded := swappedArgs)
-    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  add_public.forward (loads := [1, 0, 2]) (narrow := none) (forwarded := swappedArgs)
+    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl (by
       simp only [swappedArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
         at member ⊢
@@ -347,10 +370,10 @@ theorem swapped_forwards : (addPublic.withArgs swappedArgs).Holds Extracted.prog
 #print axioms swapped_forwards
 
 /-- The indices are checked against the body: `SumSwapped` is not an in-order forwarder. -/
-theorem swapped_not_in_order :
-    ¬ Forwards swappedBody addBody (plainLoads [0, 1, 2]) addTo none := fun forwards => by
+theorem swapped_not_in_order (method : CIL.Extraction.MethodRef) :
+    ¬ Forwards swappedBody addBody [0, 1, 2] method addTo none := fun forwards => by
   have code := forwards.code
-  simp [swappedBody, Extracted.method4, forwarderCode, plainLoads] at code
+  simp [swappedBody, Extracted.method4, forwarderCode] at code
 
 #print axioms swapped_not_in_order
 
@@ -410,19 +433,21 @@ def discardContract : MethodContract DiscardInput Bool where
 /-- The out local is fresh, so `AddFlag`'s footprint drops out, `a` keeps its bytes and the
     returned flag outlives the local; the forwarder's frame is never stepped by hand. -/
 theorem discard_forwards : discardContract.Holds Extracted.program discard :=
-  add_flag_holds.forward_out (loads := plainLoads [0, 1]) (narrow := some .unsigned8)
+  add_flag_holds.forward_out (loads := [0, 1]) (narrow := some .unsigned8)
     (kind := .word64) (initial := .unmodeled)
     (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
     discard.found addFlag.found
-    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
+    ⟨rfl, rfl, rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
       fun _ => nofun, nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
       simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact access_reference_valid _ _ _ _ _ (read_access readA)
-      · exact access_reference_valid _ _ _ _ _ (read_access readB)⟩)
-    (fun _ _ _ _ => plainLoads_unchanged _ _) (fun _ _ _ _ => rfl)
+      · exact access_reference_valid _ _ _ _ _ (read_access readB), fun value member => by
+      simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with same | same <;> subst same <;> rfl⟩)
+    (fun _ _ _ _ => plainLoads_unchanged (by decide) _) (fun _ _ _ _ => rfl)
     (fun _ _ _ _ _ flag _ _ => ⟨_, rfl, by cases flag <;> decide⟩)
     (fun _ => rfl) (fun _ _ _ _ _ _ _ _ _ member => ⟨_, List.mem_singleton.mp member⟩)
     (fun _ _ _ _ ⟨formed, readA, readB⟩ below _ _ writable _ => ⟨
@@ -443,9 +468,9 @@ theorem array_local_has_no_home (activation : Nat) (element : CIL.ArrayElement) 
 
 /-- An array local cannot satisfy the fresh-byte-home shape required by out forwarding. -/
 theorem array_out_forwarder_rejected (body calleeBody : CIL.Method)
-    (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
+    (loads : List Nat) (method : CIL.Extraction.MethodRef) (callee : Nat)
     (narrow : Option CIL.NarrowKind) (element : CIL.ArrayElement) (initial : CIL.Value) :
-    ¬ ForwardsOut body calleeBody loads callee narrow (.array element) initial :=
+    ¬ ForwardsOut body calleeBody loads method callee narrow (.array element) initial :=
   fun forwards => forwards.notArray element rfl
 
 #print axioms array_out_forwarder_rejected
@@ -457,9 +482,9 @@ def fromArgs (input : AddInput) : List Value :=
 
 /-- `AddFrom` meets `addPublic` over its own argument order. -/
 theorem add_from_forwards : (addPublic.withArgs fromArgs).Holds Extracted.program addFrom :=
-  add_public.forward (loads := plainLoads [2, 1, 0]) (narrow := none) (forwarded := fromArgs)
-    addFrom.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  add_public.forward (loads := [2, 1, 0]) (narrow := none) (forwarded := fromArgs)
+    addFrom.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl (by
       simp only [fromArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
         at member ⊢
@@ -488,19 +513,21 @@ def copyContract : MethodContract CopyInput where
 /-- The zeroed local is `AddTo`'s `a`: its initializer supplies `a`'s word, its freshness the
     `Apart` fact between `a` and `res`, and `AddTo`'s region footprint is the caller's own. -/
 theorem copy_forwards : copyContract.Holds Extracted.program copyTo :=
-  add_from_forwards.forward_out (loads := plainLoads [0, 1]) (narrow := none)
+  add_from_forwards.forward_out (loads := [0, 1]) (narrow := none)
     (kind := .word64) (initial := .i64 0)
     (fun input home => ⟨home, input.b, input.res, input.region, 0, input.y⟩)
     copyTo.found addFrom.found
-    ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
+    ⟨rfl, rfl, rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
       fun _ => nofun, nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readB, writable, _⟩ => ⟨formed, fun value member => by
       simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact access_reference_valid _ _ _ _ _ writable
-      · exact access_reference_valid _ _ _ _ _ (read_access readB)⟩)
-    (fun _ _ _ _ => plainLoads_unchanged _ _) (fun _ _ _ _ => rfl)
+      · exact access_reference_valid _ _ _ _ _ (read_access readB), fun value member => by
+      simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
+      rcases member with same | same <;> subst same <;> rfl⟩)
+    (fun _ _ _ _ => plainLoads_unchanged (by decide) _) (fun _ _ _ _ => rfl)
     (fun _ _ _ _ _ _ _ _ => trivial) (fun _ => rfl)
     (fun _ _ _ _ _ _ _ ⟨empty, _⟩ _ member => by subst empty; cases member)
     (fun input memory entered home ⟨formed, readB, writable, within⟩ below enteredFormed fresh
@@ -533,7 +560,7 @@ def isZeroContract : MethodContract CIL.W64 Bool where
 /-- `IsZero` meets its contract by stepping its body. -/
 theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
   intro v memory _
-  cil_contract_steps [isZeroContract, NarrowKind.extend_ite_ofNat_one_zero]
+  cil_contract_steps [isZeroContract, CIL.NarrowKind.extend_ite_ofNat_one_zero]
   refine ⟨Confined.refl _ memory, decide (v = 0), ?_, rfl⟩
   simp [isZeroContract, CIL.NarrowKind.extend_ite_ofNat_one_zero]
 
@@ -543,9 +570,9 @@ theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
     identity on 0 and 1, so it inherits the contract. -/
 theorem is_zero_forwards :
     (isZeroContract.withArgs isZeroContract.args).Holds Extracted.program isZeroForward :=
-  is_zero_holds.forward (loads := plainLoads [0]) (narrow := some .unsigned8)
-    isZeroForward.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  is_zero_holds.forward (loads := [0]) (narrow := some .unsigned8)
+    isZeroForward.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 
@@ -558,14 +585,14 @@ def ignoringArgs (v : CIL.W64) : List Value := [.scalar (.i64 v), .scalar (.i64 
     forwarder's own argument check needs. -/
 theorem is_zero_ignoring_forwards :
     (isZeroContract.withArgs ignoringArgs).Holds Extracted.program isZeroIgnoring :=
-  is_zero_holds.forward (loads := plainLoads [0]) (narrow := some .unsigned8)
-    isZeroIgnoring.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  is_zero_holds.forward (loads := [0]) (narrow := some .unsigned8)
+    isZeroIgnoring.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ value member => by
       simp only [ignoringArgs, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
       · exact .inl (List.mem_singleton_self _)
-      · exact .inr rfl)
+      · exact .inr ⟨rfl, rfl⟩)
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 
 #print axioms is_zero_ignoring_forwards
@@ -591,13 +618,13 @@ def pairArgs (pair : CIL.W64 × CIL.W64) : List Value :=
 /-- `IsZeroSecond(v, w)` returns `w == 0`: the load of argument 1 picks `w`. -/
 theorem is_zero_second_forwards :
     (secondZero.withArgs pairArgs).Holds Extracted.program isZeroSecond :=
-  second_zero_holds.forward (loads := plainLoads [1]) (narrow := some .unsigned8)
-    isZeroSecond.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  second_zero_holds.forward (loads := [1]) (narrow := some .unsigned8)
+    isZeroSecond.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ value member => by
       simp only [pairArgs, List.mem_cons, List.not_mem_nil, or_false] at member
       rcases member with same | same <;> subst same
-      · exact .inr rfl
+      · exact .inr ⟨rfl, rfl⟩
       · exact .inl (List.mem_singleton_self _))
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
 
@@ -623,20 +650,22 @@ theorem is_set_holds : isSetContract.Holds Extracted.program isSet := by
 /-- `IsSetForward`'s narrowed load keeps a boolean, so it inherits `IsSet`'s contract. -/
 theorem is_set_forwards :
     (isSetContract.withArgs isSetContract.args).Holds Extracted.program isSetForward :=
-  is_set_holds.forward (loads := [(0, some .unsigned8)]) (narrow := some .unsigned8)
-    isSetForward.found isSet.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+  is_set_holds.forward (loads := [0]) (narrow := some .unsigned8)
+    isSetForward.found isSet.found ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun flag _ _ pair member => by
       simp only [isSetContract, List.zip_cons_cons, List.zip_nil_left,
         List.mem_singleton] at member
       subst member
-      exact ⟨_, rfl, by cases flag <;> decide⟩)
+      exact .narrow rfl (by cases flag <;> decide))
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ out _ => ⟨_, rfl, by cases out <;> decide⟩)
 
 #print axioms is_set_forwards
 
-/-- A narrowed load of a value outside the narrow range would change it. -/
-theorem wide_load_changes : ¬ LoadsUnchanged (some .unsigned8) (.scalar (.i32 256)) := by
+/-- `IsSetForward`'s narrowed load of a value outside the Boolean range would change it. -/
+theorem wide_load_changes : ¬ LoadsUnchanged Extracted.method14 0 (.scalar (.i32 256)) := by
+  unfold LoadsUnchanged
+  rw [show Extracted.method14.argumentAccess 0 = .value (some .unsigned8) from rfl]
   rintro ⟨bits, same, extended⟩
   simp only [Value.scalar.injEq, CIL.Value.i32.injEq] at same
   subst same
@@ -668,22 +697,6 @@ def sampleInput : AddInput := ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 16⟩, ⟨0, 0⟩
 
 theorem sample_pre : addPre sampleInput sample := ⟨rfl, rfl, rfl⟩
 
-theorem raises_unique {program : CIL.Program} {method : Nat} {args : List Value} {memory : Memory}
-    {one other : String} (first : Raises program method args memory one)
-    (second : Raises program method args memory other) : one = other := by
-  obtain ⟨_, fault, ran, thrown⟩ := first
-  obtain ⟨_, fault', ran', thrown'⟩ := second
-  cases invoke_unique (by simp [Settled, thrown]) (by simp [Settled, thrown']) ran ran'
-  rw [thrown] at thrown'
-  cases thrown'
-  rfl
-
-theorem raises_not_returns {program : CIL.Program} {method fuel : Nat} {args : List Value} {memory : Memory}
-    {exception : String} {result : Memory × List Value} (raised : Raises program method args memory exception)
-    (returned : invoke program fuel method args memory = .ok result) : False := by
-  obtain ⟨_, fault, ran, thrown⟩ := raised
-  cases invoke_unique (second := .ok result) (by simp [Settled, thrown]) trivial ran returned
-
 theorem percent_returns {v : CIL.W64} (within : v ≤ 100) (m : Memory) :
     ∃ fuel final, invoke Extracted.program fuel percent [.scalar (.i64 v)] m = .ok (final, [.scalar (.i64 v)]) := by
   obtain ⟨fuel, final, values, invoked, -, out, encoded, same⟩ :=
@@ -702,14 +715,14 @@ theorem stronger_post_not_refines : ¬ percentExact.Refines percentTooStrong := 
   have bound : (100 : CIL.W64) < 100 := refines.post 100 sample sample 100 trivial (by decide) (Confined.refl _ _) rfl
   exact absurd bound (by decide)
 
-theorem stronger_post_rejected : ¬ percentTooStrong.Holds Extracted.program percent := fun holds => by
-  have outcome := holds 100 sample trivial
-  simp only [percentTooStrong, percentExact, show (100 : CIL.W64) ≤ 100 by decide, ite_true] at outcome
-  obtain ⟨fuel, final, values, invoked, -, out, rfl, bound⟩ := outcome
-  obtain ⟨fuel', final', invoked'⟩ := percent_returns (v := 100) (by decide) sample
-  have same := invoke_ok_unique invoked invoked'
-  simp only [Prod.mk.injEq, List.cons.injEq, Value.scalar.injEq, CIL.Value.i64.injEq, and_true] at same
-  rw [same.2] at bound
+theorem stronger_post_rejected : percentTooStrong.Refuted Extracted.program percent := by
+  obtain ⟨_, _, invoked⟩ := percent_returns (v := 100) (by decide) sample
+  refine .of_return (input := 100) (initial := sample) trivial invoked ?_
+  simp only [OutcomeContract.Violates, MethodContract.Violates, percentTooStrong, percentExact,
+    show (100 : CIL.W64) ≤ 100 by decide, ite_true]
+  rintro ⟨-, out, encoded, bound⟩
+  simp only [List.cons.injEq, Value.scalar.injEq, CIL.Value.i64.injEq, and_true] at encoded
+  rw [← encoded] at bound
   exact absurd (show (100 : CIL.W64) < 100 from bound) (by decide)
 
 /-- A weaker pre: `Percent(101)` raises, so it cannot be promised to return. -/
@@ -719,9 +732,11 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
   have bound : (101 : CIL.W64) ≤ 100 := refines.pre 101 sample trivial
   exact absurd bound (by decide)
 
-theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program percent := fun holds => by
-  obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 sample trivial
-  exact raises_not_returns (percent_exact.raising (input := 101) (exception := "System.ArgumentOutOfRangeException") trivial (by decide)) invoked
+theorem weaker_pre_rejected : percentUnguarded.Refuted Extracted.program percent := by
+  obtain ⟨_, _, failed, thrown⟩ := percent_exact.raising (input := 101) (initial := sample)
+    (exception := .argumentOutOfRange) trivial (by decide)
+  exact .of_fault (input := 101) (initial := sample) trivial
+    (by simp [thrown, ExecutionFault.definite]) failed
 
 /-- A smaller footprint: `AddTo` changes `res`, which an empty footprint keeps. -/
 def addUnframed : MethodContract AddInput := { addInternal with footprint := fun _ => [] }
@@ -730,13 +745,11 @@ theorem smaller_footprint_not_refines : ¬ addInternal.Refines addUnframed := fu
   obtain ⟨_, member, _⟩ := refines.footprint sampleInput sample sample_pre _ (List.mem_singleton_self _)
   exact nomatch member
 
-theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program addTo := fun holds => by
-  obtain ⟨_, ⟨final, values⟩, invoked, framed, -⟩ := holds sampleInput sample sample_pre
-  obtain ⟨_, ⟨final', values'⟩, invoked', -, _, rfl, -, readback⟩ :=
+theorem smaller_footprint_rejected : addUnframed.Refuted Extracted.program addTo := by
+  obtain ⟨_, ⟨final, values⟩, invoked, -, _, rfl, -, readback⟩ :=
     add_internal sampleInput sample sample_pre
-  have same := congrArg Prod.fst (invoke_ok_unique invoked invoked')
-  dsimp only at same
-  subst same
+  refine .of_return (input := sampleInput) (initial := sample) sample_pre invoked ?_
+  rintro ⟨framed, -⟩
   have kept := framed.read_eq sampleInput.res (by decide) 8 1 fun _ _ => Outside.nil _ _
   have zero : read sample sampleInput.res 8 1 = .ok (numberBytes 0 8) := rfl
   rw [readback, zero] at kept
@@ -744,15 +757,17 @@ theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program addT
 
 /-- A changed exception type: `Percent(101)` throws `ArgumentOutOfRangeException`. -/
 def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
-  { percentBounded with raises := fun v _ => if v ≤ 100 then none else some "System.ArgumentException" }
+  { percentBounded with raises := fun v _ => if v ≤ 100 then none else some .argument }
 
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed := fun refines =>
   absurd (refines.raises 101 sample trivial) (by decide)
 
-theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program percent := fun holds => by
-  have renamed : Raises Extracted.program percent [.scalar (.i64 101)] sample "System.ArgumentException" :=
-    holds.raising (input := 101) trivial (by decide)
-  exact absurd (raises_unique renamed (percent_exact.raising (input := 101) (exception := "System.ArgumentOutOfRangeException") trivial (by decide))) (by decide)
+theorem changed_exception_rejected : percentRenamed.Refuted Extracted.program percent := by
+  obtain ⟨_, _, failed, thrown⟩ := percent_exact.raising (input := 101) (initial := sample)
+    (exception := .argumentOutOfRange) trivial (by decide)
+  refine .of_fault (input := 101) (initial := sample) trivial
+    (by simp [thrown, ExecutionFault.definite]) failed ?_
+  simp [OutcomeContract.Violates, percentRenamed, thrown]
 
 /-- The callee contract over the first word of the pair. -/
 def firstZero : MethodContract (CIL.W64 × CIL.W64) Bool :=
@@ -761,19 +776,19 @@ def firstZero : MethodContract (CIL.W64 × CIL.W64) Bool :=
     post := fun pair _ _ zero => zero = decide (pair.1 = 0) }
 
 /-- Loading argument 0 instead of 1 does not match `IsZeroSecond`'s body. -/
-theorem first_not_forwarded :
-    ¬ Forwards isZeroSecondBody isZeroBody (plainLoads [0]) isZero (some .unsigned8) :=
+theorem first_not_forwarded (method : CIL.Extraction.MethodRef) :
+    ¬ Forwards isZeroSecondBody isZeroBody [0] method isZero (some .unsigned8) :=
   fun forwards => by
     have code := forwards.code
-    simp [isZeroSecondBody, Extracted.method12, forwarderCode, plainLoads] at code
+    simp [isZeroSecondBody, Extracted.method12, forwarderCode] at code
 
 /-- What loading argument 0 would derive is false: `IsZeroSecond(0, 7)` returns `false`. -/
 theorem first_selection_rejected :
-    ¬ (firstZero.withArgs pairArgs).Holds Extracted.program isZeroSecond := fun holds => by
-  obtain ⟨_, ⟨_, _⟩, invoked, -, zero, rfl, decided⟩ := holds (0, 7) sample trivial
-  obtain ⟨_, ⟨_, _⟩, invoked', -, zero', rfl, decided'⟩ :=
+    (firstZero.withArgs pairArgs).Refuted Extracted.program isZeroSecond := by
+  obtain ⟨_, ⟨_, _⟩, invoked, -, zero', rfl, decided'⟩ :=
     is_zero_second_forwards (0, 7) sample trivial
-  have same := congrArg Prod.snd (invoke_ok_unique invoked invoked')
+  refine .of_return (input := (0, 7)) (initial := sample) trivial invoked ?_
+  rintro ⟨-, zero, same, decided⟩
   simp only [firstZero, secondZero, MethodContract.withArgs] at decided decided' same
   subst decided decided'
   exact absurd same (by decide)
@@ -785,16 +800,10 @@ def danglingArgs (v : CIL.W64) : List Value :=
 /-- Every premise but `covered` holds for `danglingArgs`, and the contract is false: the
     forwarder rejects the dangling argument the callee never sees. -/
 theorem dangling_rejected :
-    ¬ (isZeroContract.withArgs danglingArgs).Holds Extracted.program isZeroIgnoring :=
-  fun holds => by
-    obtain ⟨_, _, invoked, -⟩ := holds 0 sample trivial
-    obtain ⟨_, _, _, _, -, checked, -, -⟩ := invoke_success_setup invoked
-    obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ checked
-    subst same
-    have dangling := valid (.reference (.address ⟨1, 0⟩))
-      (by simp [MethodContract.withArgs, danglingArgs])
-    have missing : form sample ⟨1, 0⟩ = .error .missingAllocation := rfl
-    exact absurd (missing.symm.trans dangling) nofun
+    (isZeroContract.withArgs danglingArgs).Refuted Extracted.program isZeroIgnoring :=
+  .of_fault (input := 0) (initial := sample) trivial (by decide)
+    (rfl : invoke Extracted.program 64 isZeroIgnoring
+      ((isZeroContract.withArgs danglingArgs).args 0) sample = .error _)
 
 #print axioms first_not_forwarded
 #print axioms first_selection_rejected

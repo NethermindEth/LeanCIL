@@ -1,6 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include DirectoryLinks.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // Child mode: an independent process holding the use lock of one entry until told to stop.
 if (args is ["hold-entry", var heldByChild, var childSignal, var childStop])
@@ -336,7 +342,7 @@ try
             GC.Collect();
             using (var editorProbe = HoldEntryExclusively(wholeEntry))
                 if (editorProbe is not null) throw new Exception("An editor process did not hold its entry's lock");
-            if (EvictUnused(builtCache, KeyName(), LibraryStaging(), Days(7), 1, null, library: true)
+            if (EvictUnused(builtCache, KeyName, LibraryStaging, Days(7), 1, null, library: true)
                     .Contains(wholeLibraryKey) || !Directory.Exists(wholeEntry))
                 throw new Exception("A pass removed the entry an editor process was using");
         }
@@ -348,6 +354,81 @@ try
         }
         Console.WriteLine("PASS the whole library replaces the closure entry and is preferred; an import outside " +
             "a closure is refused from the compiled header in every spelling");
+        // Consumer cache keys bind the library directory, so the run that builds and publishes the library must
+        // read the entry later runs open, or no later run can restore the support it publishes.
+        var buildingCache = Path.Combine(Path.GetTempPath(), "lp-" + Guid.NewGuid().ToString("N")[..8]);
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", buildingCache);
+        try
+        {
+            using var built = Open(null);
+            using var reopened = Open(null);
+            if (built.libraryBuild != "fresh" || built.library != Path.Combine(buildingCache, wholeLibraryKey) ||
+                reopened.libraryBuild != "cache" || reopened.library != built.library)
+                throw new Exception("The run that built the library read another directory than later runs: " +
+                    built.library + " and " + reopened.library);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", builtCache);
+            if (Directory.Exists(buildingCache)) Directory.Delete(buildingCache, true);
+        }
+        Console.WriteLine("PASS the run that builds and publishes the library reads the entry later runs open");
+
+        // Lake on Windows reports a file whose full path exceeds its limit as missing, so an entry it cannot read
+        // is refused when opened instead of failing the first build that requires it; the limit itself is checked.
+        var longest = ReadManifest(wholeEntry)!.Keys
+            .Where(name => name.StartsWith(CompiledLibraryPrefix, StringComparison.Ordinal))
+            .MaxBy(name => name.Length)!;
+        var compiledModule = longest[CompiledLibraryPrefix.Length..longest.IndexOf('.', CompiledLibraryPrefix.Length)]
+            .Replace('/', '.');
+        // A module importing the one that owns the longest file makes Lake read that file's hash; the package
+        // requires the entry by its absolute path, as consumer verification does.
+        void BuildImporter(string entry)
+        {
+            var package = Path.Combine(Path.GetTempPath(), "lq-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(package);
+            try
+            {
+                File.Copy(Path.Combine(entry, "lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+                var location = System.Text.Json.JsonSerializer.Serialize(entry.Replace('\\', '/'));
+                File.WriteAllText(Path.Combine(package, "lakefile.toml"), "name = \"probe\"\n\n[[require]]\n" +
+                    "name = \"leancil\"\npath = " + location + "\n\n[[lean_lib]]\nname = \"PathProbe\"\n");
+                File.WriteAllText(Path.Combine(package, "PathProbe.lean"), "import " + compiledModule + "\n");
+                Run(["lake", "build", "PathProbe"], package);
+            }
+            finally { Directory.Delete(package, true); }
+        }
+        foreach (var beyondLimit in new[] { false, true })
+        {
+            var padded = Path.Combine(Path.GetTempPath(), "ll-");
+            var rootLength = LakePathLimit + (beyondLimit ? 1 : 0) - longest.Length - wholeLibraryKey.Length - 2;
+            var longRoot = padded + new string('r', rootLength - padded.Length);
+            var longEntry = Path.Combine(longRoot, wholeLibraryKey);
+            CopyTree(wholeEntry, longEntry);
+            Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", longRoot);
+            var reader = new Program();
+            try
+            {
+                if (!beyondLimit || !OperatingSystem.IsWindows())
+                {
+                    reader.Library(Inputs(At("CIL.lean")));
+                    BuildImporter(longEntry);
+                    if (reader.libraryBuild != "cache" || reader.library != longEntry)
+                        throw new Exception("A library entry within the path limit was not opened in place");
+                    continue;
+                }
+                ExpectRejection(() => reader.Library(Inputs(At("CIL.lean"))), "cannot be read by Lake");
+                ExpectRejection(() => BuildImporter(longEntry), "no such file");
+            }
+            finally
+            {
+                ((IDisposable)reader).Dispose();
+                Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", builtCache);
+                Directory.Delete(longRoot, true);
+            }
+        }
+        Console.WriteLine($"PASS a library entry whose files Lake reads at {LakePathLimit} characters is opened; " +
+            "one character more is refused on Windows, where Lake fails to read it");
     }
     finally
     {
@@ -396,21 +477,8 @@ try
         return path;
     }
     List<string> EvictLibraries(string root, int? limit = null, string? current = null, double retentionDays = 7) =>
-        EvictUnused(root, KeyName(), LibraryStaging(), TimeSpan.FromDays(retentionDays), limit, current, library: true);
+        EvictUnused(root, KeyName, LibraryStaging, TimeSpan.FromDays(retentionDays), limit, current, library: true);
     TimeSpan Days(double days) => TimeSpan.FromDays(days);
-    bool TryLink(string link, string target)
-    {
-        try { Directory.CreateSymbolicLink(link, target); return true; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-        if (!OperatingSystem.IsWindows()) return false;
-        // A junction needs no privilege.
-        using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
-            $"/c mklink /J \"{link}\" \"{target}\"")
-        { CreateNoWindow = true, RedirectStandardOutput = true, UseShellExecute = false })!;
-        mklink.StandardOutput.ReadToEnd();
-        mklink.WaitForExit();
-        return mklink.ExitCode == 0 && Directory.Exists(link);
-    }
 
     var retained = NewEvictionRoot();
     var stale = PlantEntry(retained, LibraryKeyOf('1'), Days(8));
@@ -438,7 +506,7 @@ try
     foreach (var file in new[] { "cache-manifest.json", "cache-receipt.hmac" })
         File.WriteAllText(Path.Combine(elsewhere, file), "published");
     var linkedEntry = Path.Combine(retained, LibraryKeyOf('c'));
-    var linked = TryLink(linkedEntry, elsewhere);
+    var linked = TryLinkDirectory(linkedEntry, elsewhere);
     if (linked) Directory.SetLastWriteTimeUtc(linkedEntry, DateTime.UtcNow - Days(30));
     var removed = EvictLibraries(retained, current: Path.GetFileName(inUse));
     if (removed.Count != 4 || Directory.Exists(stale) || Directory.Exists(killedPublisher) ||
@@ -463,7 +531,7 @@ try
     File.WriteAllText(Path.Combine(linkTarget, "keep.txt"), "outside the entry");
     var holdsLink = NewEvictionRoot();
     var withLink = PlantEntry(holdsLink, LibraryKeyOf('a'), Days(30));
-    if (TryLink(Path.Combine(withLink, ".lake", "link"), linkTarget))
+    if (TryLinkDirectory(Path.Combine(withLink, ".lake", "link"), linkTarget))
     {
         if (EvictLibraries(holdsLink).Count != 1 || Directory.Exists(withLink) ||
             !File.Exists(Path.Combine(linkTarget, "keep.txt")))
@@ -473,9 +541,9 @@ try
     else Console.WriteLine("SKIP link inside an entry: no link could be made");
 
     // The names are anchored, so a name that only ends in a newline is no key.
-    if (KeyName().IsMatch(LibraryKeyOf('a') + "\n") || LibraryStaging().IsMatch(Staging('a') + "\n") ||
-        SupportGeneration().IsMatch(LibraryKeyOf('a') + "-" + LibraryKeyOf('b') + "\n") ||
-        AbandonedStaging().IsMatch(Staging('a') + "\n") || !KeyName().IsMatch(LibraryKeyOf('a')))
+    if (KeyName.IsMatch(LibraryKeyOf('a') + "\n") || LibraryStaging.IsMatch(Staging('a') + "\n") ||
+        SupportGeneration.IsMatch(LibraryKeyOf('a') + "-" + LibraryKeyOf('b') + "\n") ||
+        AbandonedStaging.IsMatch(Staging('a') + "\n") || !KeyName.IsMatch(LibraryKeyOf('a')))
         throw new Exception("A cache name pattern matched a name with a trailing newline");
     Console.WriteLine("PASS cache names match exactly");
 
@@ -743,14 +811,14 @@ try
     var vanishing = NewEvictionRoot();
     PlantEntry(vanishing, LibraryKeyOf('a'), Days(30));
     PlantEntry(vanishing, LibraryKeyOf('b'), Days(30));
-    if (EvictUnused(vanishing, KeyName(), LibraryStaging(), Days(7), 8, null, _ => Directory.Delete(vanishing, true),
+    if (EvictUnused(vanishing, KeyName, LibraryStaging, Days(7), 8, null, _ => Directory.Delete(vanishing, true),
             library: true).Count != 0)
         throw new Exception("A pass counted entries it could not remove from a root that vanished");
     var counted = NewEvictionRoot();
     PlantEntry(counted, LibraryKeyOf('a'), Days(30));
     PlantEntry(counted, LibraryKeyOf('b'), Days(30));
     var countReport = new PassReport();
-    if (EvictUnused(counted, KeyName(), LibraryStaging(), Days(7), null, null, null, true, countReport).Count != 2 ||
+    if (EvictUnused(counted, KeyName, LibraryStaging, Days(7), null, null, null, true, countReport).Count != 2 ||
         countReport.Removed != 2)
         throw new Exception("The report did not count the directories removed");
     Console.WriteLine("PASS a pin that cannot be read keeps its entry for the retention period, and no pass raises");
@@ -769,7 +837,7 @@ try
     var spelledEntry = PlantEntry(spelledRoot, LibraryKeyOf('a'), Days(30));
     var spelledLink = Path.Combine(evictionRoots, "link-to-" + Path.GetFileName(spelledRoot));
     var spelledOwner = Path.Combine(packageOwner, "spelled");
-    var reachedByLink = TryLink(spelledLink, spelledRoot);
+    var reachedByLink = TryLinkDirectory(spelledLink, spelledRoot);
     var entryThroughLink = Path.Combine(reachedByLink ? spelledLink : spelledRoot, LibraryKeyOf('a'));
     Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", reachedByLink ? spelledLink : spelledRoot);
     try { FrameworkPackage(spelledOwner, entryThroughLink, pin: true); }
@@ -839,9 +907,10 @@ try
     File.WriteAllText(Path.Combine(racePackage, "lakefile.toml"),
         "name = \"leancil\"\nsrcDir = \"" + Path.Combine(racing, LibraryKeyOf('b')).Replace('\\', '/') + "\"\n");
     var racedPin = PlantPin(racing, racedEntry, racePackage, 2);
+    var pinHook = beforePinRetired;
     beforePinRetired = pin => File.SetLastWriteTimeUtc(pin, DateTime.UtcNow);
     try { EvictLibraries(racing); }
-    finally { beforePinRetired = null; }
+    finally { beforePinRetired = pinHook; }
     if (!File.Exists(racedPin) || !Directory.Exists(racedEntry) ||
         Directory.EnumerateFiles(racing, "*.dead-*").Any())
         throw new Exception("A pin renewed while a pass retired it was deleted, or left under another name");
@@ -873,18 +942,41 @@ try
         if (singleRead.Elapsed > TimeSpan.FromSeconds(30) || slowEntries.Any(path => !Directory.Exists(path)) ||
             !single.SequenceEqual(new[] { Path.GetFileName(unpinnedStale) }))
             throw new Exception("A lakefile that never answers delayed the pass, or its entries were removed");
-        // The whole pass is bounded too: it stops reading, stops removing, and says so.
+        // The whole pass is bounded too: a read under way when the limit comes is cut off there rather than at
+        // the read limit, and the pass then stops reading and removing, and says so. The pass sees only its own
+        // clock: the first reading fixes the limit, the second, taken by the first read, leaves it a moment,
+        // and every later one lies past it, so machine load cannot change what the pass does.
         PlantEntry(slowRoot, LibraryKeyOf('f'), Days(30));
-        packageReadLimit = TimeSpan.FromSeconds(30);
-        passLimit = TimeSpan.FromMilliseconds(500);
-        var wholePass = System.Diagnostics.Stopwatch.StartNew();
+        var passStart = DateTime.UtcNow;
+        var passReadings = 0;
+        var clockBefore = passClock;
+        packageReader = _ => { neverAnswers.Wait(TimeSpan.FromSeconds(10)); return ""; };
+        packageReadLimit = TimeSpan.FromHours(1);
+        passLimit = TimeSpan.FromHours(1);
+        passClock = () => Interlocked.Increment(ref passReadings) switch
+        {
+            1 => passStart,
+            2 => passStart + passLimit - TimeSpan.FromMilliseconds(200),
+            _ => passStart + passLimit + passLimit
+        };
         var gaveUp = new PassReport();
-        var stopped = EvictUnused(slowRoot, KeyName(), LibraryStaging(), Days(7), null, null, null, true, gaveUp);
-        if (wholePass.Elapsed > TimeSpan.FromSeconds(20) || !gaveUp.GaveUp || stopped.Count != 0 ||
-            !Directory.Exists(Path.Combine(slowRoot, LibraryKeyOf('f'))))
-            throw new Exception("The pass was not bounded, or did not say that it gave up");
+        List<string> stopped;
+        try { stopped = EvictUnused(slowRoot, KeyName, LibraryStaging, Days(7), null, null, null, true, gaveUp); }
+        finally { passClock = clockBefore; }
+        // A read waited for until the read limit would have answered after ten seconds and been judged.
+        if (!gaveUp.GaveUp || gaveUp.Unjudged != 1 || stopped.Count != 0 ||
+            !Directory.Exists(Path.Combine(slowRoot, LibraryKeyOf('f'))) ||
+            slowEntries.Any(path => !Directory.Exists(path)))
+            throw new Exception("The pass was not bounded, or did not say that it gave up: " +
+                $"gave up {gaveUp.GaveUp}, unjudged {gaveUp.Unjudged}, removed [{string.Join(", ", stopped)}]");
+        // A clock that lies past the limit after its first reading makes the pass give up whatever the load.
+        var stageReadings = 0;
+        passClock = () =>
+            Interlocked.Increment(ref stageReadings) == 1 ? passStart : passStart + passLimit + passLimit;
         libraryEvicted = 0;
-        var gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9')));
+        string gaveUpStage;
+        try { gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9'))); }
+        finally { passClock = clockBefore; }
         if (!gaveUpStage.Contains("END ") || !gaveUpStage.Contains("s limit") || !gaveUpStage.Contains("(exit 0, ") ||
             WithoutStageProgress(gaveUpStage).Length != 0)
             throw new Exception("A pass that gave up did not report it: " + gaveUpStage);
@@ -952,11 +1044,53 @@ try
     {
         passClock = () => clockCalls++ == 0 ? jumpStart : jumpStart.AddHours(2);
         var jumped = new PassReport();
-        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, jumped);
+        EvictUnused(unread, KeyName, LibraryStaging, Days(7), null, null, null, true, jumped);
         RequireUnreadKept("a clock that jumped");
         if (!jumped.GaveUp) throw new Exception("A pass whose clock jumped past its limit did not say so");
     }
     finally { passClock = realClock; }
+    // Past its limit a pass retires no pin, even one judged by its age without reading a lakefile, and a pass
+    // that reaches its limit while removing closure records stops there.
+    var agedPinRoot = NewEvictionRoot();
+    var agedPin = PlantPin(agedPinRoot, PlantEntry(agedPinRoot, LibraryKeyOf('a'), Days(30)), "", 8);
+    var lateRoot = NewEvictionRoot();
+    var lateRecord = Path.Combine(lateRoot, LibraryKeyOf('d') + ".closure");
+    File.WriteAllText(lateRecord, LibraryKeyOf('7'));
+    var lateCalls = 0;
+    try
+    {
+        passLimit = TimeSpan.Zero;
+        EvictLibraries(agedPinRoot);
+        if (!File.Exists(agedPin)) throw new Exception("A pass past its limit deleted a pin");
+        passLimit = zeroLimit;
+        // The first two readings are the deadline and the check before closure records are removed.
+        passClock = () => lateCalls++ < 2 ? jumpStart : jumpStart.AddHours(2);
+        EvictLibraries(lateRoot);
+        if (!File.Exists(lateRecord)) throw new Exception("A pass past its limit deleted a closure record");
+    }
+    finally { (passLimit, passClock) = (zeroLimit, realClock); }
+    // A read that waited out the rest of the pass stops it even when the clock has not yet passed the
+    // deadline, as when a wait rounded down to whole milliseconds returns just before it.
+    var stalledRead = new ManualResetEventSlim(false);
+    var limitsBefore = (packageReader, packageReadLimit, passLimit);
+    try
+    {
+        var frozenAt = DateTime.UtcNow;
+        passClock = () => frozenAt;
+        packageReader = _ => { stalledRead.Wait(); return ""; };
+        packageReadLimit = TimeSpan.FromSeconds(30);
+        passLimit = TimeSpan.FromMilliseconds(200);
+        var cutShort = new PassReport();
+        EvictUnused(unread, KeyName, LibraryStaging, Days(7), null, null, null, true, cutShort);
+        RequireUnreadKept("a read that waited out the pass");
+        if (!cutShort.GaveUp) throw new Exception("A pass whose read waited out its limit did not say so");
+    }
+    finally
+    {
+        stalledRead.Set();
+        passClock = realClock;
+        (packageReader, packageReadLimit, passLimit) = limitsBefore;
+    }
     var holdsRead = new ManualResetEventSlim(false);
     var readerBefore = (packageReader, packageReadLimit);
     try
@@ -964,7 +1098,7 @@ try
         packageReader = _ => { holdsRead.Wait(); return ""; };
         packageReadLimit = TimeSpan.FromMilliseconds(300);
         var timedOut = new PassReport();
-        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, timedOut);
+        EvictUnused(unread, KeyName, LibraryStaging, Days(7), null, null, null, true, timedOut);
         RequireUnreadKept("a read that did not finish", staleToo: false);
         if (timedOut.Unjudged != 1) throw new Exception("A read that did not finish was not counted");
     }

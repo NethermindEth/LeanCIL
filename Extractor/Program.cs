@@ -29,6 +29,7 @@ internal static partial class Program
         "       leancil new-proof extraction-directory proof.lean\n" +
         "       leancil verify output-directory [--proof proof.lean] [--theorem name] [--fresh] [--rebuild-library] " +
         "[--proof-root package-directory] [--force-full-verify] [--full-artifact Lib=directory]... " +
+        "[--deep-checks digests.sha256] " +
         "[--format text|json] [--trace] [--goals]\n" +
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
         "[--results results.json] [--format text|json] [--trace] [--check]\n" +
@@ -46,12 +47,18 @@ internal static partial class Program
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
+    /// <summary>The extracted methods, each defined from its decoder.</summary>
+    internal sealed record MethodDefinitions(MethodDefinition[] Methods);
+
     /// <summary>Runs <c>extract</c> or <c>check</c> in this process without printing its report;
-    /// a rejection throws instead of returning an exit code.</summary>
-    internal static void RunQuietly(string[] args)
+    /// a rejection throws instead of returning an exit code. A batch shares the files read by earlier runs, and
+    /// `definitions` receives the extracted methods.
+    /// </summary>
+    internal static void RunQuietly(string[] args, ExtractionBatch? batch = null,
+        Action<MethodDefinitions>? definitions = null)
     {
         if (args is not ["extract" or "check", ..]) throw new ArgumentException(Usage);
-        Run(args, report: TextWriter.Null, rethrow: true);
+        Run(args, batch, report: TextWriter.Null, rethrow: true, definitions: definitions);
     }
 
     /// <summary>
@@ -70,7 +77,8 @@ internal static partial class Program
 
     static int Run(string[] args, ExtractionBatch? batch = null,
         Action<TemplateEmitter.Variant>? checkedTemplate = null, TextWriter? report = null, bool rethrow = false,
-        Action<ProofOutline.Extraction>? inspect = null, bool refresh = false)
+        Action<ProofOutline.Extraction>? inspect = null, bool refresh = false,
+        Action<MethodDefinitions>? definitions = null)
     {
         report ??= Console.Out;
         if (args.Length == 0 || args is ["--help"] or ["-h"])
@@ -270,10 +278,10 @@ internal static partial class Program
             var assemblySnapshot = batch?.ReadAssembly(assemblyPath);
             byte[] assembly = assemblySnapshot?.Bytes ?? File.ReadAllBytes(assemblyPath);
             stage = "metadata and CIL validation";
-            if (assemblySnapshot is null) VectorSignatures.Validate(assembly);
-            else assemblySnapshot.ValidateSignatures();
             string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             var assemblyHash = assemblySnapshot?.Hash ?? Hash(assembly);
+            assemblySnapshot ??= new(assembly, assemblyHash);
+            assemblySnapshot.ValidateSignatures();
             List<PinnedAssemblies.Source> referenceSources = [];
             JsonElement[] recordedReferences = recorded is { } pinnedGraph &&
                 pinnedGraph.TryGetProperty("references", out JsonElement pinnedRecords)
@@ -286,7 +294,8 @@ internal static partial class Program
                     global::Program.ExtractionIdentity.Resolve(output, pin.GetProperty("path").GetString()!),
                     pin.GetProperty("sha256").GetString()!));
             referenceSources.AddRange(referencePaths.Select(path => new PinnedAssemblies.Source(path)));
-            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources);
+            using PinnedAssemblies pinned = new(assemblySnapshot, referenceSources,
+                batch is null ? null : batch.ReadAssembly);
             ModuleDefinition module = pinned.Selected;
             foreach ((JsonElement record, var reference) in recordedReferences.Zip(pinned.References))
                 if (record.GetProperty("assemblyIdentity").GetString() != reference.Pin.Identity ||
@@ -294,7 +303,8 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: referenced assembly " +
                         $"{CliPaths.Display(reference.Path)} is not the recorded " +
                         $"{record.GetProperty("assemblyIdentity").GetString()}.");
-            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
+            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice,
+                batch is null ? null : batch.ReadPdb);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
             List<ImportResolution.Source> importSources = [];
@@ -332,8 +342,10 @@ internal static partial class Program
             using ImportResolution imports = new(importSources);
             using var enumMetadata = EnumTypes.BeginScope();
             stage = "metadata and CIL validation";
-            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity, entry, profile, initializedTypes, imports: imports,
-                typeArguments: entryTypeArguments.ToArray(), importedByref: type => imports.ValidateByref(type, profile));
+            var callSites = new ResolvedCallSites();
+            MethodDefinition[] methods = MetadataValidation.Validate(module, expectedAssembly ?? assemblyIdentity,
+                entry, profile, initializedTypes, imports: imports, typeArguments: entryTypeArguments.ToArray(),
+                importedByref: type => imports.ValidateByref(type, profile), callSites: callSites);
             foreach (var node in imports.Nodes)
                 if (pinned.References.Any(reference => reference.Pin.Identity == node.AssemblyIdentity))
                     throw new InvalidDataException(
@@ -351,8 +363,9 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: extractor has changed since extraction.");
             }
             stage = "metadata and CIL validation";
-            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, imports,
-                staticIdentities, collectTemplates: checkedTemplate is not null || inspect is not null);
+            LeanEmitter.Emission emitted = LeanEmitter.Emit(methods, profile, pinned, callSites, imports,
+                staticIdentities, collectOutlines: inspect is not null,
+                templateInputs: checkedTemplate is not null);
             string source = emitted.Source;
             var loadedValues = methods.SelectMany(m => Reachability.Analyze(m, profile)).Where(StaticValues.IsLoad)
                 .Select(i => StaticValues.Resolve((FieldReference)i.Operand, module, profile.Architecture)).ToArray();
@@ -361,8 +374,12 @@ internal static partial class Program
             var opaqueStaticValues = new SortedSet<string>(loadedValues.Where(value => value.Opaque)
                 .Select(value => value.Field.FullName), StringComparer.Ordinal);
             if (initializedTypes.Count > 0)
-                source += "\n-- Caller assumption: these types completed initialization successfully before invocation.\n" +
-                    "def Extracted.initializedTypes : List String := " + JsonSerializer.Serialize(initializedTypes) + "\n";
+                source += $"""
+
+                    -- Caller assumption: these types completed initialization successfully before invocation.
+                    def Extracted.initializedTypes : List String := {IdentityText.QuoteList(initializedTypes)}
+
+                    """;
             var initializationAssumptions = InitializationAssumption.Normalize(initializedTypes.Select(type =>
                 new InitializationAssumption(assemblyIdentity, type)).Concat(imports.InitializationAssumptions()));
             if (initializationAssumptions.Length > 0)
@@ -370,12 +387,17 @@ internal static partial class Program
                     "def Extracted.initializationAssumptions : List (String × String) := " +
                     InitializationAssumption.Lean(initializationAssumptions) + "\n";
             if (staticValues.Count > 0)
-                source += "-- Caller assumption: these fields keep the values their static constructors stored.\n" +
-                    "def Extracted.staticValues : List String := " + JsonSerializer.Serialize(staticValues) + "\n";
+                source += $"""
+                    -- Caller assumption: these fields keep the values their static constructors stored.
+                    def Extracted.staticValues : List String := {IdentityText.QuoteList(staticValues)}
+
+                    """;
             if (opaqueStaticValues.Count > 0)
-                source += "-- Not computed by extraction: loads read the caller's static binding.\n" +
-                    "def Extracted.opaqueStaticValues : List String := " +
-                    JsonSerializer.Serialize(opaqueStaticValues) + "\n";
+                source += $"""
+                    -- Not computed by extraction: loads read the caller's static binding.
+                    def Extracted.opaqueStaticValues : List String := {IdentityText.QuoteList(opaqueStaticValues)}
+
+                    """;
             SortedDictionary<string, string> importModules = imports.InterfaceModules();
             if (imports.Bindings.Count > 0) importModules.Add("ExtractedImports", imports.EmitImports(methods.Length));
             SortedDictionary<string, string> importModuleHashes = new(importModules.ToDictionary(pair => pair.Key,
@@ -412,7 +434,11 @@ internal static partial class Program
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
-                methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
+                // Where each body sits in the image is recorded here, outside the Lean evidence, for the strict audit.
+                // A method's assembly is its pin index: 0 the selected assembly, k its k-th reference.
+                methods = methods.Select(m => new { signature = m.FullName, assembly = pinned.Index(m.Module),
+                    token = m.MetadataToken.ToInt32(),
+                    bodyAddress = ((MethodDefinition)pinned.Original(m.Module).LookupToken(m.MetadataToken)).RVA,
                     specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),
                     instructions = m.Body.Instructions.Select(i => i.ToString()) }),
@@ -474,16 +500,22 @@ internal static partial class Program
             foreach (var name in opaqueStaticValues)
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
-            checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
+            if (checkedTemplate is not null)
+            {
+                var frames = global::Program.TemplateVectorFrames(source, emitted.Templates);
+                checkedTemplate(new(output, assemblyHash, profile, frames) { DecoderInputs = emitted.TemplateInputs });
+            }
+            definitions?.Invoke(new(methods));
             if (args[0] == "check" && !refresh)
-                inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source, emitted.Views,
-                    profile.Architecture));
+                inspect?.Invoke(new(methods, emitted.Outlines, emitted.Views,
+                    profile.Architecture, emitted.Layouts));
         }
         catch (Exception exception)
         {
             if (rethrow) throw;
             if (exception is CliFailure { Reported: true }) return 1;
-            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify" or "audit-library");
+            CliDiagnostics.Write(exception, stage,
+                args[0] is "check" or "verify" or "audit-library");
             return 1;
         }
         return 0;

@@ -13,7 +13,7 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
     (fun linked => DerivedInterface.addPublic.Holds linked 0) := by
   rintro linked links imported ⟨left, right, sum, region, leftValue, rightValue⟩ memory
     ⟨formed, readLeft, readRight, writable, apart, within⟩
-  have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
+  have found : linked[0]? = some Extracted.method0 := links.found Extracted.program_method0
   have holds : DerivedInterface.addPublic.Holds linked 1 := imported
   have leftForm := access_reference_valid _ _ _ _ _ (read_access readLeft)
   have rightForm := access_reference_valid _ _ _ _ _ (read_access readRight)

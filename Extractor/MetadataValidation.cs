@@ -18,7 +18,7 @@ internal static class MetadataValidation
         var marker = markers[0];
         var constructor = marker.Constructor;
         if (markers.Length != 1 || marker.AttributeType is TypeSpecification ||
-            !RuntimeModels.ExactScope(marker.AttributeType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(marker.AttributeType, PlatformAssemblies.SystemRuntime) ||
             constructor.Name != ".ctor" || !constructor.HasThis || constructor.ExplicitThis ||
             constructor.CallingConvention != MethodCallingConvention.Default ||
             constructor.HasGenericParameters || constructor.Parameters.Count != 0 ||
@@ -69,8 +69,8 @@ internal static class MetadataValidation
     internal static int? IntegerVectorWidth(TypeReference type)
     {
         if (type is not GenericInstanceType { GenericArguments.Count: 1 } vector ||
-            !RuntimeModels.ExactScope(vector.ElementType.Scope, "System.Runtime.Intrinsics") ||
-            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(vector.ElementType, PlatformAssemblies.SystemRuntimeIntrinsics) ||
+            !RuntimeModels.ExactScope(vector.GenericArguments[0], PlatformAssemblies.SystemRuntime) ||
             vector.GenericArguments[0].FullName is not ("System.Byte" or "System.Int32" or "System.UInt32" or
                 "System.Int64" or "System.UInt64")) return null;
         return vector.ElementType.FullName switch
@@ -102,10 +102,13 @@ internal static class MetadataValidation
     {
         var definition = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate field");
         if (definition.IsStatic || reference.Name != definition.Name ||
-            MethodSpecialization.SignatureType(reference.FieldType) !=
-                MethodSpecialization.SignatureType(definition.FieldType))
+            StructuralSignatures.Current.Type(reference.FieldType) !=
+                StructuralSignatures.Current.Type(definition.FieldType))
             throw new InvalidDataException("Mismatched aggregate field signature: " + reference.FullName);
-        return Fields(reference.DeclaringType).Single(field => field.Definition == definition);
+        // The owner and the field resolve separately and must reach one definition, or the field is not the owner's.
+        return Array.Find(Fields(reference.DeclaringType), field => field.Definition == definition) ??
+            throw new InvalidDataException("Unresolved aggregate field: " + reference.FullName +
+                " is not an instance field of its declaring type as resolved");
     }
 
     // A read-only validation/emission phase owns its context; metadata rewrites require a new one.
@@ -177,7 +180,11 @@ internal static class MetadataValidation
 
         internal AggregateInfo AggregateLayout(TypeReference reference)
         {
-            if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached)) return cached;
+            if (validated.TryGetValue(LayoutEvidence.Identity(reference), out var cached))
+            {
+                if (ValueTuples.Is(reference)) ValueTuples.RequirePrimitiveArguments((GenericInstanceType)reference);
+                return cached;
+            }
             if (imported.TryGetValue(LayoutEvidence.Identity(reference), out TypeDefinition? definition))
             {
                 // The selected module's own metadata computes an imported layout, as admission did.
@@ -338,9 +345,6 @@ internal static class MetadataValidation
     {
         RuntimeModels.ValidateTypeIdentity(reference, module, architecture);
         var fields = ValueTuples.Fields(reference);
-        foreach (var field in fields)
-            if (field.Type is TypeSpecification || EnumTypes.IsEnum(field.Type) || IsAggregate(field.Type, module))
-                throw new InvalidDataException($"Unsupported field type: {field.Type.FullName}");
         var width = PrimitiveWidth(fields[0].Type);
         if (fields.Any(field => PrimitiveWidth(field.Type) != width))
             throw new InvalidDataException($"Unsupported aggregate layout: {reference.FullName} (auto layout reorders fields of different widths)");
@@ -433,6 +437,11 @@ internal static class MetadataValidation
 
     const string OpenGenericMethod = "Unsupported method metadata: open generic method";
     const string OpenGenericMember = "Unsupported method metadata: member of an open generic type";
+    // The runtime-async implementation flag, absent from Cecil 0.11.6: such a body returns the awaited result and
+    // the runtime builds the declared task, so the translated body would not compute the method's return value.
+    const MethodImplAttributes RuntimeAsync = (MethodImplAttributes)0x2000;
+    const string RuntimeAsyncMethod = "Unsupported method metadata: runtime-async method\n" +
+        "  Its body returns the awaited result, not the declared task.";
 
     // With `blocked`, failures after the selector resolves, the entry's shape included, are recorded
     // and the walk continues past them; without it, the first failure throws. Only profile-reachable
@@ -440,7 +449,7 @@ internal static class MetadataValidation
     internal static MethodDefinition[] Validate(ModuleDefinition module, string assemblyIdentity, string entrySignature, FeatureProfile profile,
         IReadOnlyCollection<string>? initializedTypes = null, List<Blocked>? blocked = null, ImportResolution? imports = null,
         string[]? typeArguments = null, Func<TypeReference, bool>? importedByref = null,
-        List<(Instruction Instruction, object Operand)>? rewrites = null)
+        List<(Instruction Instruction, object Operand)>? rewrites = null, ResolvedCallSites? callSites = null)
     {
         profile.Validate();
         initializedTypes ??= [];
@@ -450,7 +459,7 @@ internal static class MetadataValidation
         string? Attribute(string name) => module.Assembly.CustomAttributes
             .SingleOrDefault(a => a.AttributeType.FullName == name)?.ConstructorArguments.Single().Value as string;
         if ((module.Assembly.Name.FullName != assemblyIdentity && module.Assembly.Name.Name != assemblyIdentity) ||
-            Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v10.0" ||
+            Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v11.0" ||
             // MSBuild configuration names are case-insensitive: `-c release` stamps "release".
             !string.Equals(Attribute("System.Reflection.AssemblyConfigurationAttribute"), "Release",
                 StringComparison.OrdinalIgnoreCase) ||
@@ -549,6 +558,8 @@ internal static class MetadataValidation
                     (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
                         MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0)
                     throw new InvalidDataException("Unsupported method metadata: no managed IL body");
+                if ((method.ImplAttributes & RuntimeAsync) != 0)
+                    throw new InvalidDataException(RuntimeAsyncMethod);
             }, named: true)) return;
             // Every other rejection is its own blocker; the body and callees are still analysed.
             void Reject(Func<bool> rejected, string reason) => Check(method, null, () =>
@@ -613,13 +624,12 @@ internal static class MetadataValidation
                     else if (type is not ByReferenceType || importedByref?.Invoke(type) != true)
                         Type(type, module, architecture: profile.Architecture, strings: true);
                 }, named: true);
-            if (Check(method, null, () => Spans.Analyze(method, profile), named: true))
-                foreach (VariableDefinition local in method.Body.Variables)
-                    Check(method, null, () =>
-                    {
-                        if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
-                        else Type(local.VariableType, module, architecture: profile.Architecture, strings: true);
-                    }, named: true);
+            foreach (VariableDefinition local in method.Body.Variables)
+                Check(method, null, () =>
+                {
+                    if (imports?.ValidateLocal(local.VariableType, profile) == true) ImportedLocal(method, local);
+                    else Type(local.VariableType, module, architecture: profile.Architecture, strings: true);
+                }, named: true);
             HashSet<Instruction> reachable = [];
             TypeTests.Analysis? typeTests = null;
             Throws.Analysis? throws = null;
@@ -652,6 +662,7 @@ internal static class MetadataValidation
                             throw Call("Unsupported virtual call", reference, method, instruction, error.Message,
                                 error);
                         }
+                        callSites?.AddVirtual(instruction, table);
                         foreach (var body in table.Select(entry => entry.Body).Distinct())
                             Enter(body, reference, instruction);
                         return;
@@ -663,7 +674,9 @@ internal static class MetadataValidation
                     if (VirtualDispatch.Unresolvable(instruction) is { } reason)
                         throw Call("Unsupported virtual call", reference, method, instruction, reason);
                     var resolved = ConstrainedCalls.Resolve(method, instruction, instructions, profile.Architecture);
-                    Enter(ConstrainedCalls.Specialize(resolved, specializations), reference, instruction);
+                    var implementation = ConstrainedCalls.Specialize(resolved, specializations);
+                    callSites?.Add(instruction, implementation);
+                    Enter(implementation, reference, instruction);
                     return;
                 }
                 var pinnedCallee = reference.DeclaringType.Scope is AssemblyNameReference &&
@@ -699,6 +712,7 @@ internal static class MetadataValidation
                         throw Call("Unsupported generic newobj constructor", reference, method, instruction);
                     rewrites?.Add((instruction, instruction.Operand));
                     instruction.Operand = specialized;
+                    callSites?.Add(instruction, specialized);
                     Enter(specialized, reference, instruction);
                     return;
                 }
@@ -724,6 +738,7 @@ internal static class MetadataValidation
                         !IsAggregate(callee.DeclaringType, module) && !ObjectTypes.Candidate(callee.DeclaringType)))
                     throw Call("Unsupported newobj constructor", reference, method, instruction,
                         "newobj must construct a reference-free struct or a class of a pinned assembly");
+                callSites?.Add(instruction, callee);
                 Enter(callee, reference, instruction);
             }
             void StaticLoad(Instruction instruction, FieldReference loaded)
@@ -806,11 +821,21 @@ internal static class MetadataValidation
                                 "Folded throws require an allowlisted System.Runtime constructor with literal strings or null arguments.");
                         if (instruction.OpCode.Code != Code.Newobj && reference.Name == ".ctor" &&
                             Spans.Is(reference.DeclaringType) &&
-                            !Spans.Analyze(method, profile).Constructors.ContainsKey(instruction))
-                            throw Call("Unsupported in-place span constructor", reference, method, instruction,
-                                "The receiver must be a local address followed by at most three simple argument pushes.");
-                        if (instruction.OpCode.Code == Code.Call && RuntimeModels.ObjectConstructor(reference)) return;
-                        if (InstructionTranslation.RuntimeModel(reference, profile) is null) CallSite(instruction, reference);
+                            !Spans.ConstructorCalls(method).Contains(instruction))
+                            throw Call("Unsupported in-place span constructor", reference, method, instruction, """
+                                The receiver must be the address of a local or parameter of the constructed type,
+                                  followed by at most three simple argument pushes and no branch target.
+                                """);
+                        if (instruction.OpCode.Code == Code.Call &&
+                            RuntimeModels.CallModel(reference, profile) is not null ||
+                            instruction.OpCode.Code == Code.Newobj &&
+                            Spans.ConstructorOperation(reference, profile.Architecture) is not null)
+                        {
+                            callSites?.AddModel(instruction);
+                            return;
+                        }
+                        RuntimeModels.ValidateCallScope(reference);
+                        CallSite(instruction, reference);
                     }))
                     skipped.Add(instruction);
             }
@@ -827,7 +852,7 @@ internal static class MetadataValidation
                     failure.Error.Message == "Unsupported type: " + modified);
         }
         ordered.Reverse();
-        // Validate translation before producing any artifact.
+        // Validate the reachable operands and targets before emitting the method evidence.
         var methods = ordered.ToArray();
         // Proofs bind methods by unscoped signature, so one signature must name one assembly's body.
         foreach (var group in methods.GroupBy(method => method.FullName, StringComparer.Ordinal))
@@ -839,11 +864,8 @@ internal static class MetadataValidation
             .ToDictionary(pair => pair.method, pair => pair.index);
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var layoutContext = new LayoutContext(module, profile.Architecture);
-        for (int i = 0; i < methods.Length; i++)
+        foreach (var method in methods)
         {
-            var index = i;
-            var method = methods[index];
-            var instructions = new InstructionIndex(method);
             NativeOperands.Certificate? nativeOperands = null;
             Dictionary<int, int>? parameterHomes = null;
             HashSet<Instruction>? reachable = null;
@@ -854,11 +876,11 @@ internal static class MetadataValidation
                     parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
                 }), named: true))
                 continue;
-            foreach (Instruction instruction in reachable!)
+            var admission = new InstructionAdmission(method, profile, methodIndices, constrainedTargets,
+                layoutContext, imports, nativeOperands!, parameterHomes!);
+            foreach (var instruction in reachable!)
                 if (!skipped.Contains(instruction))
-                    Check(method, instruction, () =>
-                        InstructionTranslation.Translate(instruction, method, methodIndices, index, instructions,
-                            profile, nativeOperands, parameterHomes, imports, layoutContext, constrainedTargets), named: true);
+                    Check(method, instruction, () => admission.Check(instruction), named: true);
         }
         return methods;
     }

@@ -33,9 +33,6 @@ partial class Program
         "DLL decoding and runtime/model correspondence remain trusted, " +
         "and an untrusted source bundle must be checked in an isolated environment.";
 
-    static StringComparer PathComparer =>
-        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-
     static int BindingSlot(JsonElement binding) => binding.GetProperty("slot").GetInt32();
 
     static string BundleName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
@@ -169,27 +166,18 @@ partial class Program
             .Where(root => !Inside(toolchain, Path.GetFullPath(root))));
     }
 
-    static bool Inside(string root, string path)
-    {
-        string relative = Path.GetRelativePath(root, path);
-        bool escapes = relative == ".." ||
-            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
-            Path.IsPathRooted(relative);
-        return relative == "." || !escapes;
-    }
-
     // The caller's roots resolved against its session, then the toolchain library, each root once.
     string CallerLeanPath(string leanPath, string session) => string.Join(Path.PathSeparator,
         leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.GetFullPath(path, session)).Append(Path.Combine(Toolchain, "lib/lean"))
-            .Distinct(PathComparer));
+            .Distinct(LocationComparer));
 
     FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
         string callerLeanPath, IReadOnlyDictionary<string, string> overrides)
     {
         string originalLeanPath = CallerLeanPath(callerLeanPath, callerSession);
         string callerRoots = WithoutToolchain(originalLeanPath);
-        SortedDictionary<string, string> acceptedCaller = FullModuleStamps(callerRoots);
+        SortedDictionary<string, string> acceptedCaller = FullArtifactHashes(FullModuleArtifactPaths(callerRoots));
         SortedDictionary<string, string> originalModules = FullModulePaths(originalLeanPath);
         CheckFullResolution(callerSession, originalLeanPath, originalModules);
         JsonElement[] bindings = ExtractionIdentity.Read(output).Imports.OrderBy(BindingSlot).ToArray();
@@ -234,11 +222,11 @@ partial class Program
             foreach ((string directory, string digest) in bundles) ContractSourceBundle.Validate(directory, digest);
         }
         // One snapshot after each run that elaborates producer-derived code.
-        // It detects accidental, not hostile, mutation, so caller artifacts are stamped, not hashed.
+        // Caller artifacts are compared by content, so a same-length rewrite with its write time restored fails.
         void RequireCallerUnchanged()
         {
             RecheckOriginal();
-            RequireFullStamps(acceptedCaller);
+            RequireFullArtifactHashes(acceptedCaller);
             RequireFullModuleArtifactSet(callerRoots, acceptedCaller);
             RequireFullModulePaths(originalLeanPath, originalModules);
         }
@@ -249,7 +237,7 @@ partial class Program
         List<FullBundle> regenerated =
             RegenerateFullClosure(output, bindings, overrides, usedOverrides, original, bundles, graph, staging);
         var stagedInputs = regenerated.ToDictionary(bundle => bundle.Staging,
-            bundle => FullStagingFiles(bundle.Staging), PathComparer);
+            bundle => FullStagingFiles(bundle.Staging), LocationComparer);
         // Preflight already required a bundle for every reachable node, so an override naming one is used.
         usedOverrides.UnionWith(ReachableGraph(ExtractionIdentity.Read(output)).Select(node =>
             AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name));
@@ -411,8 +399,8 @@ partial class Program
             Path.GetFullPath(ExtractionIdentity.Resolve(callerOutput, node.GetProperty(field).GetString()!));
         bool selectedNode = node.GetProperty("implementationSha256").GetString() == selection.ImplementationSha256 &&
             node.GetProperty("interfaceDigest").GetString() == contract.InterfaceDigest &&
-            PathComparer.Equals(NodePath("implementationPath"), Path.GetFullPath(selection.Implementation)) &&
-            PathComparer.Equals(NodePath("sidecarPath"), Path.GetFullPath(selection.Sidecar));
+            LocationComparer.Equals(NodePath("implementationPath"), Path.GetFullPath(selection.Implementation)) &&
+            LocationComparer.Equals(NodePath("sidecarPath"), Path.GetFullPath(selection.Sidecar));
         if (!selectedNode)
             throw new InvalidDataException(
                 "Full-verification dependency differs from the caller's selected graph node: " +
@@ -442,7 +430,7 @@ partial class Program
         string staging)
     {
         Dictionary<string, int> exportIds = new(StringComparer.Ordinal);
-        Dictionary<string, FullBundle> staged = new(PathComparer);
+        Dictionary<string, FullBundle> staged = new(LocationComparer);
         List<FullBundle> ordered = [];
         Queue<FullImport> pending = new();
         foreach (JsonElement binding in bindings)
@@ -550,8 +538,9 @@ partial class Program
         string implementation = selection.Implementation;
         ContractExportManifest manifest =
             new(1, implementation, consumer, interfaces, slots.Select(slot => slot.Request).ToArray());
-        using ModuleDefinition module =
-            ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));
+        byte[] implementationBytes = File.ReadAllBytes(implementation);
+        using PinnedAssemblies pinned = new(implementationBytes, ContractInterface.Hash(implementationBytes), []);
+        ModuleDefinition module = pinned.Selected;
         PreparedContractExport[] prepared =
             slots.Select(slot => PrepareContractExport(manifest, module, slot.Request)).ToArray();
         using Program independent = new()
@@ -842,8 +831,8 @@ partial class Program
         !(package.TryGetProperty("subDir", out JsonElement subdirectory) &&
             subdirectory.ValueKind == JsonValueKind.String && subdirectory.GetString() is not ("" or "."));
 
-    string CaptureFullTerms(string session, string proofModule, string destination, InterfaceModule[] interfaces,
-        string leanPath)
+    internal string CaptureFullTerms(string session, string proofModule, string destination,
+        InterfaceModule[] interfaces, string leanPath)
     {
         string toolchainLibrary = Path.Combine(Toolchain, "lib/lean");
         string[] shared = Directory.EnumerateFiles(toolchainLibrary, "*.olean", SearchOption.AllDirectories)
@@ -854,10 +843,10 @@ partial class Program
             .Distinct(StringComparer.Ordinal).ToArray();
         string captured = Path.Combine(session, destination + ".transfer");
         string probe = Path.Combine(session, "LeanCILCapture" + destination + ".lean");
-        string sharedNames = JsonSerializer.Serialize(shared);
+        string sharedNames = Nethermind.LeanCIL.IdentityText.QuoteList(shared);
         string capture =
             $"CIL.Interface.FullTransfer.capture (<- Lean.getEnv) shared `{destination} #[`{ExportTheorem}]";
-        string capturedPath = JsonSerializer.Serialize(captured);
+        string capturedPath = LeanString(captured);
         // Composition uses only the certified theorem; its closure carries the producer program.
         File.WriteAllText(probe, $$"""
 import {{proofModule}}
@@ -913,7 +902,7 @@ run_cmd do
     {
         SortedDictionary<string, string> modules = new(StringComparer.Ordinal);
         foreach (string root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(Path.GetFullPath).Distinct(PathComparer))
+            .Select(Path.GetFullPath).Distinct(LocationComparer))
         {
             if (!Directory.Exists(root)) continue;
             foreach (string path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
@@ -921,7 +910,7 @@ run_cmd do
                 string name = RelativeModuleName(root, path);
                 if (!ContractInterface.Constant(name)) continue;
                 string absolute = Path.GetFullPath(path);
-                if (modules.TryGetValue(name, out string? previous) && !PathComparer.Equals(previous, absolute))
+                if (modules.TryGetValue(name, out string? previous) && !LocationComparer.Equals(previous, absolute))
                     throw new InvalidDataException("Ambiguous full-verification module: " + name);
                 modules[name] = absolute;
             }
@@ -939,26 +928,6 @@ run_cmd do
                         yield return Path.GetFullPath(path);
     }
 
-    // Length and last-write time of each caller artifact; hashing would reread the whole library each run.
-    static SortedDictionary<string, string> FullModuleStamps(string leanPath)
-    {
-        SortedDictionary<string, string> stamps = new(StringComparer.Ordinal);
-        foreach (string path in FullModuleArtifactPaths(leanPath)) stamps[path] = Stamp(path);
-        return stamps;
-    }
-
-    static string Stamp(string path)
-    {
-        FileInfo file = new(path);
-        return file.Exists ? file.Length + ":" + file.LastWriteTimeUtc.Ticks : "";
-    }
-
-    static void RequireFullStamps(SortedDictionary<string, string> accepted)
-    {
-        foreach ((string path, string stamp) in accepted)
-            if (stamp.Length == 0 || Stamp(path) != stamp)
-                throw new InvalidDataException("Full-verification source or compiled artifact changed: " + path);
-    }
 
     static void RequireFullModuleArtifactSet(string leanPath, SortedDictionary<string, string> expected)
     {
@@ -984,9 +953,9 @@ run_cmd do
         object app = AuditConstant("Extracted.program");
         object libraries = AuditConstant("LeanCILFullComposition.libraries");
         object linked = App(AuditConstant("CIL.Safety.link"), app, libraries);
-        object except = App(new { @const = "Except", levels = new[] { 0, 0 } }, AuditConstant("String"), program);
-        object success = App(new { @const = "Except.ok", levels = new[] { 0, 0 } }, AuditConstant("String"), program,
-            linked);
+        object collision = AuditConstant("CIL.Safety.StaticCollision");
+        object except = App(new { @const = "Except", levels = new[] { 0, 0 } }, collision, program);
+        object success = App(new { @const = "Except.ok", levels = new[] { 0, 0 } }, collision, program, linked);
         object checkedLink = App(new { @const = "Eq", levels = new[] { 1 } }, except,
             App(AuditConstant("CIL.Safety.linkChecked"), app, libraries), success);
         object callerClaim = App(AuditConstant("LeanCILFullComposition.fullCallerClaim"), linked);
@@ -1111,6 +1080,8 @@ run_cmd do
         source.AppendLine("theorem extraction" + index + " : CIL.Extraction.TranslationValid " +
             library.ExpectedModule + ".Extracted.rawLayouts " +
             library.ExpectedModule + ".Extracted.computedLayouts " +
+            library.ExpectedModule + ".Extracted.assemblies " +
+            library.ExpectedModule + ".Extracted.platformDefinitions " +
             library.ExpectedModule + ".Extracted.methodEvidence " +
             library.ExpectedModule + ".Extracted.imports " + program + " := " +
             library.ExpectedModule + ".Extracted.translation_valid");

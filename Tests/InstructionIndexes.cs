@@ -2,8 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -11,11 +18,12 @@ var extractor = Assembly.LoadFrom(ExtractorPath);
 var indexType = extractor.GetType("Nethermind.LeanCIL.InstructionIndex", true)!;
 var position = indexType.GetMethod("Position", BindingFlags.Instance | BindingFlags.NonPublic)!;
 var isTarget = indexType.GetMethod("IsTarget", BindingFlags.Instance | BindingFlags.NonPublic)!;
-var validate = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!
-    .GetMethod("ValidateReadOnly", BindingFlags.Static | BindingFlags.NonPublic)!;
+var validateEntry = extractor.GetType("Nethermind.LeanCIL.InstructionPrefixes", true)!
+    .GetMethod("Validate", BindingFlags.Static | BindingFlags.NonPublic)!;
 object Index(MethodDefinition method) => Activator.CreateInstance(indexType,
     BindingFlags.Instance | BindingFlags.NonPublic, null, [method], null)!;
-using var module = ModuleDefinition.CreateModule("Indexes", ModuleKind.Dll);
+using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
+var module = pinned.Module;
 var method = new MethodDefinition("Body", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
 var first = Instruction.Create(OpCodes.Nop);
 var prefix = Instruction.Create(OpCodes.Readonly);
@@ -29,7 +37,7 @@ for (var offset = 0; offset < method.Body.Instructions.Count; offset++)
         throw new Exception("Instruction position used byte offsets instead of identity");
 if ((int)position.Invoke(index, [Instruction.Create(OpCodes.Nop)])! != -1)
     throw new Exception("Foreign instruction was admitted");
-validate.Invoke(null, [index, prefix]);
+validateEntry.Invoke(null, [method]);
 foreach (var switched in new[] { false, true })
 {
     branch.OpCode = switched ? OpCodes.Switch : OpCodes.Br;
@@ -38,11 +46,11 @@ foreach (var switched in new[] { false, true })
     if (!(bool)isTarget.Invoke(index, [address])!) throw new Exception("Missing prefix-bypass target");
     try
     {
-        validate.Invoke(null, [index, prefix]);
+        validateEntry.Invoke(null, [method]);
         throw new Exception("Accepted a branch bypassing readonly");
     }
     catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
-        rejected.Message.Contains("Branch enters an array address", StringComparison.Ordinal)) { }
+        rejected.Message.Contains("Branch enters the instruction after a prefix", StringComparison.Ordinal)) { }
 }
 method.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Nop));
 if ((int)position.Invoke(Index(method), [first])! != 1)
@@ -62,13 +70,30 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", true)!
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
-string Translate(Instruction instruction) => (string)translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
-if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
+var sitesType = extractor.GetType("Nethermind.LeanCIL.ResolvedCallSites", true)!;
+var sites = Activator.CreateInstance(sitesType)!;
+sitesType.GetMethod("Add", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(sites, [call, callee]);
+object Operation(Instruction instruction) => translate.Invoke(null,
+    [instruction, caller, methods, Index(caller), sites, null, null, null, null, null])!;
+List<(int Pc, string Link)> Links(SortedSet<int> targets) =>
+    (List<(int, string)>)sitesType.GetMethod("Links", BindingFlags.Instance | BindingFlags.NonPublic)!
+        .Invoke(sites, [caller, caller.Body.Instructions.ToHashSet(), methods, null, null, targets])!;
+
+// Proof outlines keep the callee index; templates take the link at its pc and its target from the admitted graph.
+if (!Equals(Property(Operation(call), "Method"), 1)) throw new Exception("Incorrect call index");
+var linked = new SortedSet<int>();
+if (!Links(linked).SequenceEqual([(0, ".direct 1")]) || !linked.SetEquals([1]))
+    throw new Exception("Incorrect call link or target");
+caller.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Tail));
+var tail = Operation(call);
+linked.Clear();
+if (!Equals(Property(tail, "Method"), 1) || !Equals(Property(tail, "Kind"), Named("CallKind", "Tail")) ||
+    !Links(linked).SequenceEqual([(1, ".direct 1")]) || !linked.SetEquals([1]))
+    throw new Exception("The prefixed call lost its target or its link at the call instruction");
 methods.Remove(callee);
 try
 {
-    Translate(call);
+    Operation(call);
     throw new Exception("Unresolved method was assigned a call index");
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
@@ -80,10 +105,12 @@ var choose = Instruction.Create(OpCodes.Switch, [destination, destination]);
 caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_0));
 caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
-if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target order or duplicates changed");
+if (!((IEnumerable<int>)Property(Operation(choose), "Targets")).SequenceEqual([2, 2]))
+    throw new Exception("Switch target order or duplicates changed");
+linked.Clear();
+if (Links(linked).Count != 0 || linked.Count != 0) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
-var runtimeScope = AssemblyNameReference.Parse(
-    "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+var runtimeScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
 module.TypeSystem.UInt64.Scope = runtimeScope;
 var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
 var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
@@ -108,7 +135,7 @@ if ((int)layoutIndex.Invoke(layouts, [inner])! != 0 || (int)layoutIndex.Invoke(l
     (int)layoutIndex.Invoke(layouts, [module.TypeSystem.String])! != -1)
     throw new Exception("Layout index lost topological order or admitted an absent type");
 var emitted = new System.Text.StringBuilder();
-layoutType.GetMethod("EmitLayouts", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(layouts, [emitted]);
+layoutType.GetMethod("EmitLayouts", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(layouts, [emitted, null]);
 if (!emitted.ToString().Contains("computedLayouts : Array Extraction.ComputedLayout := #[⟨layout1, 8⟩, ⟨layout0, 8⟩]",
     StringComparison.Ordinal))
     throw new Exception("Raw layout order was confused with emitted layout order");
@@ -153,8 +180,7 @@ if (!ReferenceEquals(contextFields.Invoke(freshContext, [inner]), contextFields.
     (int)contextFieldIndex.Invoke(freshContext, [inner, inner.Fields[1], false])! != 1 ||
     (int)contextFieldIndex.Invoke(freshContext, [inner, duplicateField, false])! != -1)
     throw new Exception("Field snapshots lost field identity or instance order");
-var intrinsicsScope = AssemblyNameReference.Parse(
-    "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
+var intrinsicsScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime.Intrinsics");
 var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
     module, intrinsicsScope, true));
 vector.GenericArguments.Add(module.TypeSystem.UInt64);
@@ -221,14 +247,14 @@ var addressArgument = Instruction.Create(OpCodes.Ldarga, argumentMethod.Paramete
 foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeArgument, loadArgument,
     Instruction.Create(OpCodes.Pop), addressArgument, Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ret) })
     argumentMethod.Body.Instructions.Add(instruction);
-string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => (string)translate.Invoke(null,
+object TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), null, null, positions, null, null, null])!;
-if (TranslateArgument(storeArgument, homePositions) != ".setLocal 3" ||
-    TranslateArgument(loadArgument, homePositions) != ".local 3" ||
-    TranslateArgument(addressArgument, homePositions) != ".localAddr 3")
-    throw new Exception("Home translation lost the raw-local offset or slot index");
-if (TranslateArgument(loadArgument, []) != ".arg 1")
+        Index(argumentMethod), sites, null, null, positions, null, null])!;
+if (!Equals(TranslateArgument(storeArgument, homePositions), Make("Starg", 1)) ||
+    !Equals(TranslateArgument(loadArgument, homePositions), Make("Arg", 1)) ||
+    !Equals(TranslateArgument(addressArgument, homePositions), Make("Ldarga", 1)))
+    throw new Exception("A homed argument's store, load or address no longer names the argument");
+if (!Equals(TranslateArgument(loadArgument, []), Make("Arg", 1)))
     throw new Exception("Unhomed loads no longer use the original argument");
 try
 {
@@ -237,4 +263,252 @@ try
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
     rejected.Message == "Missing parameter storage") { }
-Console.WriteLine("PASS home lookup preserves first positions, local offsets and missing-store rejection");
+try
+{
+    TranslateArgument(addressArgument, []);
+    throw new Exception("An address without a home was admitted");
+}
+catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
+    rejected.Message == "Missing parameter storage") { }
+Console.WriteLine("PASS home lookup preserves first positions, argument indexes and missing-home rejection");
+
+// Outline generation reads the typed operation and its operands.
+const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
+    BindingFlags.NonPublic;
+Type Model(string name) => extractor.GetType("Nethermind.LeanCIL." + name, true)!;
+object Make(string name, params object?[] arguments) => Activator.CreateInstance(Model(name), arguments)!;
+object Named(string type, string value) => Enum.Parse(Model(type), value);
+object Property(object value, string name) => value.GetType().GetProperty(name, Declared)!.GetValue(value)!;
+var bodyType = extractor.GetType("Nethermind.LeanCIL.ProofOutline", true)!.GetNestedType("Body",
+    BindingFlags.NonPublic)!;
+Array Operations(params object[] operations)
+{
+    var array = Array.CreateInstance(Model("Operation"), operations.Length);
+    for (var at = 0; at < operations.Length; at++) array.SetValue(operations[at], at);
+    return array;
+}
+object Body(params object[] operations) => Activator.CreateInstance(bodyType, Declared, null,
+    [Operations(operations)], null)!;
+int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
+// An argument read is pure only when its declared type is no narrow integer: (int, byte) below.
+var mixedArguments = new MethodDefinition("Mixed", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+mixedArguments.Parameters.Add(new ParameterDefinition("word", Mono.Cecil.ParameterAttributes.None,
+    module.TypeSystem.Int32));
+mixedArguments.Parameters.Add(new ParameterDefinition("small", Mono.Cecil.ParameterAttributes.None,
+    module.TypeSystem.Byte));
+owner.Methods.Add(mixedArguments);
+bool Pure(object operation, bool plainReturn = true) =>
+    (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(MethodDefinition), typeof(bool)])!
+        .Invoke(null, [operation, mixedArguments, plainReturn])!;
+var nop = Make("StackOperation", Code.Nop);
+foreach (var encoding in new[] { OpCodes.Blt_S, OpCodes.Blt })
+{
+    var backEdge = Make("Jump", (int)encoding.Value, 0);
+    if (Loops(Body(nop, nop, backEdge)) != 1)
+        throw new Exception("A conditional back edge is not found as a loop: " + encoding.Name);
+}
+if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
+    !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
+    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
+    throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
+var unaligned = Model("UnsafeModels").GetMethod("UnalignedStorage", Declared)!;
+Instruction TransferSite(string name) => module.GetType("Examples.UnalignedMemory").Methods
+    .Single(method => method.Name == name).Body.Instructions.Single(site => site.OpCode.Code == Code.Call);
+TypeReference? Storage(Instruction site, string name) =>
+    (TypeReference?)unaligned.Invoke(null, [site, name, "x64"]);
+foreach (var (name, expected) in new[] { ("ReadSigned", MetadataType.SByte), ("ReadHalf", MetadataType.Int16),
+    ("ReadWord", MetadataType.UInt64), ("ReadPointerWord", MetadataType.UInt64) })
+    if (Storage(TransferSite(name), "ReadUnaligned")?.MetadataType != expected)
+        throw new Exception("Incorrect closed Unsafe.ReadUnaligned storage type for " + name);
+var writeSite = TransferSite("WritePointerWord");
+if (Storage(writeSite, "WriteUnaligned")?.MetadataType != MetadataType.UInt64 ||
+    Storage(writeSite, "ReadUnaligned") is not null ||
+    Storage(Instruction.Create(OpCodes.Callvirt, (MethodReference)writeSite.Operand), "WriteUnaligned") is not null ||
+    Storage(TransferSite("ReadAlignedWord"), "Read") is not null ||
+    Storage(TransferSite("ReadPointerAggregate"), "ReadUnaligned") is not null)
+    throw new Exception("A transfer outline lost its opcode, direction, alignment or scalar type");
+var outlineType = Model("ProofOutline");
+var unoutlined = Model("Unoutlined").GetField("Site", Declared)!.GetValue(null)!;
+var readsWidth = outlineType.GetNestedType("LoopOutline", BindingFlags.NonPublic)!.GetMethod("ReadsWidth", Declared)!;
+bool Reads(string name, int width) => (bool)readsWidth.Invoke(null, [unoutlined, TransferSite(name), "x64", width])!;
+var scalarStore = outlineType.GetMethod("ScalarStore", Declared)!;
+(int Width, string Lemma)? Store(string name) =>
+    ((int, string)?)scalarStore.Invoke(null, [unoutlined, TransferSite(name), "x64"]);
+if (!Reads("ReadWord", 8) || Reads("ReadWord", 4) || Reads("ReadSigned", 1) || Reads("ReadHalf", 2) ||
+    Store("WritePointerWord") != (8, "transfer_i64_of_write") || Store("WriteHalf") != (2, "transfer_i32_of_write") ||
+    Store("ReadWord") is not null || Store("WritePointerAggregate") is not null)
+    throw new Exception("The loop outline selected an incorrect scalar read width or store theorem");
+var negativeOffset = Make("AddOffset", ulong.MaxValue - 7, true);
+if (!Equals(Property(negativeOffset, "Stride"), ulong.MaxValue - 7) ||
+    !Equals(Property(negativeOffset, "Signed"), true))
+    throw new Exception("A negative stride lost its signed two's complement value");
+try
+{
+    Make("Constant", 32, -1L, true);
+    throw new Exception("A negative numeral constant was admitted");
+}
+catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+// A `with` copy sets one member of an existing constant, so each member checks the other as well.
+void Assign(object value, string property, object newValue) =>
+    value.GetType().GetProperty(property, Declared)!.SetValue(value, newValue);
+foreach (var (constant, property, newValue) in new (object, string, object)[]
+{
+    (Make("Constant", 32, 5L, true), "Value", -1L), (Make("Constant", 32, -1L, false), "Numeral", true)
+})
+    try
+    {
+        Assign(constant, property, newValue);
+        throw new Exception("Changing " + property + " made a negative numeral constant");
+    }
+    catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+Console.WriteLine("PASS typed operations preserve outline operands, argument kinds and tail-call targets");
+
+// The extractor's narrowing table, which the outline readers refuse arguments by, states for every primitive
+// head the narrowing Lean's declaredNarrow gives it (pinned in Tests/ResolutionFacts.lean); an admitted enum
+// narrows as its underlying type on both sides.
+var narrowOf = extractor.GetType("Nethermind.LeanCIL.LeanEmitter", true)!
+    .GetMethod("Narrow", BindingFlags.Static | BindingFlags.NonPublic)!;
+string? NarrowName(TypeReference type) => narrowOf.Invoke(null, [type])?.ToString();
+var system = module.TypeSystem;
+foreach (var (head, narrowing) in new (TypeReference, string?)[]
+{
+    (system.Boolean, "Unsigned8"), (system.Char, "Unsigned16"), (system.SByte, "Signed8"), (system.Byte, "Unsigned8"),
+    (system.Int16, "Signed16"), (system.UInt16, "Unsigned16"), (system.Int32, null), (system.UInt32, null),
+    (system.Int64, null), (system.UInt64, null), (system.IntPtr, null), (system.UIntPtr, null),
+    (system.Single, null), (system.Double, null)
+})
+    if (NarrowName(head) != narrowing)
+        throw new Exception(
+            $"{head.FullName} narrows as {NarrowName(head) ?? "nothing"}, not {narrowing ?? "nothing"}");
+var enums = module.Types.Where(type => type.IsEnum).ToArray();
+if (enums.Length == 0) throw new Exception("The examples declare no enum to compare narrowing on");
+foreach (var enumeration in enums)
+{
+    var storage = enumeration.Fields.Single(field => !field.IsStatic).FieldType;
+    if (NarrowName(enumeration) != NarrowName(storage))
+        throw new Exception($"{enumeration.FullName} does not narrow as its underlying {storage.FullName}");
+}
+Console.WriteLine(
+    $"PASS argument narrowing agrees with declaredNarrow on 14 primitive heads and {enums.Length} enums");
+
+// A stage learns an instruction's category, callee and target from the typed Operation, never from the Lean text
+// that renders it. Each place that reads generated Lean text is listed here with what it reads.
+var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
+    .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
+    .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
+foreach (var type in extractor.GetTypes().Where(Model("Operation").IsAssignableFrom))
+    if (type.GetMethods(Declared | BindingFlags.DeclaredOnly).Any(method => method.Name is "Render" or "ToLean"))
+        throw new Exception("Extractor operation defines an instruction renderer: " + type);
+var constructors = RenderedLeanReaders.Constructors(File.ReadLines(At("CIL/Instructions.lean")));
+foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callvirt" })
+    if (!constructors.Contains(rendered)) throw new Exception("Missing CIL instruction ." + rendered);
+var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
+(string File, int Reads, string Reason)[] allowedReaders =
+[
+    ("Extractor/ProofGates.cs", 3,
+        "compares whole method definitions, the raw definitions decoded methods come from, and signatures"),
+    ("scripts/ConsumerVerification.cs", 3, "the component splitter cuts module text at declaration boundaries"),
+    ("scripts/VerifyReports.cs", 1, "reads the source location table of Symbols.lean, not an instruction"),
+    ("scripts/BenchmarkExternalIdentities.cs", 1, "reads identity byte arrays from baseline extractions"),
+];
+var actualReaders = readers.Where(finding => finding.Kind == "reads generated Lean")
+    .GroupBy(finding => finding.File).Select(group => (group.Key, group.Count())).Order().ToArray();
+var expectedReaders = allowedReaders.Select(entry => (entry.File, entry.Reads)).Order().ToArray();
+if (!actualReaders.SequenceEqual(expectedReaders) || readers.Any(finding => finding.Kind != "reads generated Lean"))
+    throw new Exception("Stages read generated Lean text outside the allowed list:\n" +
+        string.Join("\n", readers.Select(finding => $"{finding.File}:{finding.Line}: {finding.Kind}")));
+// Each rule must fail on a scratch source, so that a weakened pattern cannot pass unnoticed.
+foreach (var (scratchFile, scratchText, rule) in new (string, string, string)[]
+{
+    ("Extractor/Scratch.cs", "var calls = Regex.Matches(emitted, @\"^\\s*\\.call \\d+\");",
+        "reads generated Lean"),
+    ("Extractor/Scratch.cs", "if (line.StartsWith(\".ret\", StringComparison.Ordinal)) returns++;",
+        "reads generated Lean"),
+    ("Extractor/Scratch.cs", "var bodies = Regex.Matches(module, @\"^def method\\d+ : Method := \");",
+        "reads generated Lean"),
+    ("Extractor/Scratch.cs", "var text = op.ToLean(); // parsed below",
+        "renders an instruction"),
+    ("Extractor/ProofOutlineLoops.cs", "if (op.ToLean().StartsWith(\".br\")) return Stop(\"x\");",
+        "renders an instruction"),
+    ("Extractor/LeanEmitter.cs", "var first = ops.Select(op => op.ToLean()).First(text => text.Contains(\"x\"));",
+        "renders an instruction"),
+    ("Extractor/LeanEmitter.cs", "if (op.Link(callee).Contains(target)) return true;",
+        "searches a rendered link"),
+})
+    if (!RenderedLeanReaders.Scan(new Dictionary<string, string> { [scratchFile] = scratchText }, constructors)
+            .Any(finding => finding.Kind == rule))
+        throw new Exception("Not found as " + rule + ": " + scratchText);
+if (RenderedLeanReaders.Scan(new Dictionary<string, string> { ["Extractor/Scratch.cs"] =
+        "var calls = operations.Count(operation => operation is Call);" }, constructors).Count != 0)
+    throw new Exception("A typed read of calls was reported");
+Console.WriteLine("PASS no stage reads opcode, call or target information back from generated Lean text");
+
+/// <summary>Finds code that reads generated Lean text or reads back what an Operation renders.</summary>
+static partial class RenderedLeanReaders
+{
+    internal sealed record Finding(string File, int Line, string Kind);
+
+    /// <summary>Files that serialize method links.</summary>
+    static readonly string[] Emitters = ["Extractor/LeanEmitter.cs", "Extractor/TemplateEmitter.cs"];
+
+    [GeneratedRegex(@"\| ([a-z][A-Za-z0-9_]*)")]
+    private static partial Regex RenderedConstructor { get; }
+
+    const string SearchMethods =
+        "Contains|StartsWith|EndsWith|IndexOf|Split|Matches|Replace|IsMatch|Match|GeneratedRegex|new Regex";
+
+    [GeneratedRegex($"""(?:{SearchMethods})\((?<rest>.*)$""")]
+    private static partial Regex SearchCall { get; }
+
+    const string DeclarationKeywords = "def|theorem|lemma|namespace|structure|instance";
+
+    [GeneratedRegex($"""
+        "[^"]*(?:\b(?:{DeclarationKeywords})\s*\(?[A-Za-z.]|method\\?d|method\[0-9\])[^"]*"
+        """)]
+    private static partial Regex GeneratedDeclaration { get; }
+
+    const string RenderedReceivers = """op|operation|ops\[\w+\]|values\[\w+\]""";
+
+    [GeneratedRegex($"""\b(?:{RenderedReceivers})\.ToLean\(|new Unadmitted\(.*\)\.ToLean\(""")]
+    private static partial Regex RenderedOperation { get; }
+
+    /// <summary>A dotted name, with its dot escaped or not, that no word or dot precedes.</summary>
+    [GeneratedRegex(@"(?<![\w.])\\?\.(?<name>\w+)\b")]
+    private static partial Regex DottedName { get; }
+
+    /// <summary>Whether text holds a string literal that names one of the constructors after a dot.</summary>
+    static bool NamesConstructor(string text, HashSet<string> constructors) =>
+        DottedName.Matches(text).Any(match => constructors.Contains(match.Groups["name"].Value) &&
+            text.LastIndexOf('"', match.Index) >= 0 && text.IndexOf('"', match.Index + match.Length) >= 0);
+
+    /// <summary>The constructors of the executable instruction type in Lean.</summary>
+    internal static string[] Constructors(IEnumerable<string> lines) =>
+        [.. lines.SkipWhile(line => line != "inductive Instruction where")
+            .TakeWhile(line => !line.StartsWith("  deriving ", StringComparison.Ordinal))
+            .Where(line => line.StartsWith("  | ", StringComparison.Ordinal))
+            .SelectMany(line => RenderedConstructor.Matches(line).Select(match => match.Groups[1].Value)).Distinct()];
+
+    /// <summary>One finding per line that reads generated Lean or misuses a rendered operation.</summary>
+    internal static List<Finding> Scan(IReadOnlyDictionary<string, string> files, string[] constructors)
+    {
+        var rendered = constructors.ToHashSet(StringComparer.Ordinal);
+        var found = new List<Finding>();
+        foreach (var (file, text) in files)
+        {
+            var lines = text.Split('\n');
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var line = lines[index];
+                var search = SearchCall.Match(line);
+                var searched = search.Success && (GeneratedDeclaration.IsMatch(search.Groups["rest"].Value) ||
+                    NamesConstructor(search.Groups["rest"].Value, rendered));
+                if (searched) found.Add(new(file, index + 1, "reads generated Lean"));
+                if (RenderedOperation.IsMatch(line)) found.Add(new(file, index + 1, "renders an instruction"));
+                if (!line.Contains("op.Link(", StringComparison.Ordinal)) continue;
+                if (!Emitters.Contains(file)) found.Add(new(file, index + 1, "renders a link outside emission"));
+                else if (search.Success) found.Add(new(file, index + 1, "searches a rendered link"));
+            }
+        }
+        return found;
+    }
+}
