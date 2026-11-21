@@ -16,6 +16,11 @@ open Tests.MetadataBuilder (objectPlatform)
 
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
+example : scalarType (.atom coreLibraryScope "System.Int32") = .word32 ∧
+    scalarType (.atom coreLibraryScope "System.Int64") = .word64 ∧
+    scalarType (.atom coreLibraryScope "System.IntPtr") = .native ∧
+    scalarType (.atom "System.Private.CoreLib" "System.Int32") = .other := by decide +kernel
+
 private def word : TypeExpr := .atom runtime "System.UInt64"
 private def intType : TypeExpr := .atom runtime "System.Int32"
 private def nativeType : TypeExpr := .atom runtime "System.IntPtr"

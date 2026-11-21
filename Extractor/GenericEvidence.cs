@@ -790,7 +790,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             // string the block states: one proof for every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
                 $"assembly{index}Metadata assembly{index}Identity := " +
-                "⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩");
+                "⟨by cil_kernel_rfl, by first | cil_kernel_rfl | decide +kernel, by cil_kernel_rfl⟩");
         }
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         var pins = Pinned.Pins.ToArray();

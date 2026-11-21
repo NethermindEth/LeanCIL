@@ -64,7 +64,7 @@ def scalarType : TypeExpr → ScalarKind
     | some (.span _ writable), some identity => .enumSpan identity writable false
     | _, _ => .other
   | .atom scope name =>
-    if scope != runtimeScope then .other
+    if scope != runtimeScope && scope != coreLibraryScope then .other
     else if name ∈ ["System.IntPtr", "System.UIntPtr"] then .native
     else if name ∈ ["System.Int64", "System.UInt64"] then .word64
     else if name ∈ ["System.Boolean", "System.Char", "System.SByte", "System.Byte", "System.Int16",
