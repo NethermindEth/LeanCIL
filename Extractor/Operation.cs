@@ -275,9 +275,6 @@ internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, str
 /// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
 internal sealed record ReferenceElementAccess(bool Store) : Operation;
 
-/// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
-internal sealed record Localloc : Operation;
-
 /// <summary>
 /// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,
 /// which the extraction check compares with the token. <paramref name="Class"/> names a class element.
@@ -287,15 +284,6 @@ internal sealed record NewArray(NewArray.ClassElement? Class, string? Element = 
     /// <summary>The class <paramref name="Name"/> (a full name) of the assembly <paramref name="Scope"/>.</summary>
     internal sealed record ClassElement(string Scope, string Name);
 }
-
-/// <summary>An <c>ldnull</c>: the null object reference.</summary>
-internal sealed record LoadNull : Operation;
-
-/// <summary>A <c>castclass</c> of the top reference to the class <paramref name="Type"/>.</summary>
-internal sealed record CastClass(string Type) : Operation;
-
-/// <summary>An <c>isinst</c> test of the top reference against the class <paramref name="Type"/>.</summary>
-internal sealed record IsInstance(string Type) : Operation;
 
 /// <summary>
 /// The model of a span constructor that a call runs on the span home beneath its arguments: the slot the home

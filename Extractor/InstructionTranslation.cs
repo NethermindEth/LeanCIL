@@ -103,6 +103,11 @@ internal static class InstructionTranslation
             var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
             return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
+        if (i.OpCode.Code is Code.Castclass or Code.Isinst)
+        {
+            ObjectTypes.ValidateTestOperand(i);
+            return Unoutlined.Site;
+        }
         if (InstructionOperands.IsCheckedConversion(i.OpCode.Code)) return new StackOperation(i.OpCode.Code);
         return i.OpCode.Code switch
         {
@@ -111,13 +116,13 @@ internal static class InstructionTranslation
             Code.Conv_I1 or Code.Conv_I2 or Code.Conv_I4 or Code.Conv_I8 or Code.Conv_I or
             Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4 or Code.Conv_U8 or Code.Conv_U or
             Code.Add_Ovf or Code.Add_Ovf_Un or Code.Sub_Ovf or Code.Sub_Ovf_Un or Code.Mul_Ovf or Code.Mul_Ovf_Un or
-            Code.Div or Code.Div_Un or Code.Rem or Code.Rem_Un or Code.Dup or Code.Pop =>
+            Code.Div or Code.Div_Un or Code.Rem or Code.Rem_Un or Code.Dup or Code.Pop or Code.Ldnull =>
                 new StackOperation(i.OpCode.Code),
             Code.Nop or Code.Readonly => StackOperation.Nop,
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
-            Code.Localloc => new Localloc(),
+            Code.Localloc => Unoutlined.Site,
             Code.Starg or Code.Starg_S => new Starg(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
@@ -132,9 +137,6 @@ internal static class InstructionTranslation
             Code.Stind_I1 => new IndirectAccess(NumericKind.I1, true),
             Code.Stind_I2 => new IndirectAccess(NumericKind.I2, true),
             Code.Stind_I4 => new IndirectAccess(NumericKind.I4, true),
-            Code.Ldnull => new LoadNull(),
-            Code.Castclass => new CastClass(ObjectTypes.TestOperand(i)),
-            Code.Isinst => new IsInstance(ObjectTypes.TestOperand(i)),
             Code.Ldstr => StringOperation((string)i.Operand),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),

@@ -64,7 +64,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
                 InstructionOperands.ObjectStorage(method, site, operand, instructions, layouts, profile);
                 return;
             case Code.Castclass or Code.Isinst:
-                ObjectTypes.TestOperand(site);
+                ObjectTypes.ValidateTestOperand(site);
                 return;
             case Code.Ldfld or Code.Stfld or Code.Ldflda:
                 CheckField(site);

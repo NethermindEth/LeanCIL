@@ -199,7 +199,7 @@ internal static class ObjectTypes
     /// class. An instance records only its own and its admitted base classes, so a test against an interface or
     /// System.Object is rejected, naming why.
     /// </summary>
-    internal static string TestOperand(Instruction instruction)
+    internal static void ValidateTestOperand(Instruction instruction)
     {
         var target = (TypeReference)instruction.Operand;
         var site = $"Unsupported type test: {instruction.OpCode.Name} {target.FullName}\n  ";
@@ -218,7 +218,6 @@ internal static class ObjectTypes
             throw new InvalidDataException(
                 site + error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
         }
-        return GenericEvidence.ObjectType(target);
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.
