@@ -82,9 +82,8 @@ theorem quantified_vector_write {memory : Memory} (after : Nat → Memory)
     (target : Nat → Reference) (bits : Nat → BitVec 256)
     (facts : ∀ index, write memory (target index) (numberBytes (bits index).toNat 32) 1 =
       .ok (after index) ∧ True)
-    (index : Nat) (body : CIL.Method) (pc : Nat) (args : List Value)
-    (frame : Frame) (rest : List Value) :
-    step body (.memory .store256) pc args frame
+    (index : Nat) (body : CIL.Method) (pc : Nat) (frame : Frame) (rest : List Value) :
+    modelStep (some (.memory .store256)) body pc frame
         (.scalar (.v256 (bits index)) :: .reference (.address (target index)) :: rest) memory =
       .ok (.next (pc + 1) rest frame (after index)) := by
   cil_checked_step [facts]

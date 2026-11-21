@@ -669,8 +669,8 @@ private def byteSpanCode : List Instruction :=
 /-- Span construction checks its exact signature and managed backing reference. -/
 private theorem span_constructor_cases :
     (ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates byteSpanCode) ∧
-    (¬ ScalarFlowValid byteSpanRaw byteSpanFeatures byteSpanStates (byteSpanCode.set 2 (.memory
-      (.spanItem 1)))) ∧
+    (¬ ScalarFlowValid byteSpanRaw byteSpanFeatures (byteSpanStates.set 2 (some [.word32, .other]))
+      byteSpanCode) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .reference] = some
       [.other]) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call byteSpanSite)) [.word32, .other] = none) ∧
@@ -832,7 +832,7 @@ example : ScalarFlowValid (holeRaw 88) holeFeatures (holeStates.set 3 (some [.wo
     (holeCode .add) := by decide
 -- Array loads now require exact array evidence rather than accepting an equal stack effect.
 example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates
-    (holeCode (.memory (.spanItem 4))) := by decide
+    (holeCode (.ldelema intType false)) := by decide
 example : ¬ ScalarFlowValid (holeRaw 149) holeFeatures holeStates (holeCode .add) := by decide
 example : ¬ ScalarFlowValid (holeRaw 143 (.type intType)) holeFeatures holeStates
     (holeCode .div) := by decide
@@ -1018,7 +1018,7 @@ private def indirectForged : List IndirectCase := [
   -- Width.
   load 70 (.ldind .i4), load 73 (.ldind .u1), load 74 (.ldind .i8),
   load 76 (.ldind .i4) .word64, load 77 (.ldind .i8) .native,
-  load 70 (.memory .load128), store 82 (.stind .i4), store 84 (.stind .i8),
+  load 70 (.ldobj vectorType), store 82 (.stind .i4), store 84 (.stind .i8),
   store 85 (.stind .i4), store 223 (.stind .i2),
   -- Sign.
   load 70 (.ldind .u1), load 71 (.ldind .i1), load 72 (.ldind .u2), load 73 (.ldind .i2),
@@ -1052,7 +1052,8 @@ private def objectForged : List IndirectCase := [
   store 129 (.stind .i1) (operand := .type intType),
   store 129 (.stind .i8) (operand := .type sbyteType),
   typed 113 aggregateType (.ldind .u4), typed 129 aggregateType (.ldobj aggregateType),
-  typed 113 enumType (.ldind .u2), typed 113 vectorType (.memory .load256),
+  typed 113 enumType (.ldind .u2), typed 113 vectorType (.ldobj (.apply
+    (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector256`1") intType)),
   -- Floating-point and pointer operands, which extraction refuses.
   typed 113 (.atom runtime "System.Double") (.ldfld tupleItem1),
   typed 129 (.atom runtime "System.Single") (.stfld tupleItem1),
@@ -1092,9 +1093,14 @@ private def pushHoleCode (emitted : Instruction) : List Instruction :=
   [emitted, .pop, .ldarg 0, .ret]
 example : ScalarFlowValid (pushHoleRaw 20) pushHoleFeatures
     (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode .ldnull) := by decide
--- `ldnull` has one canonical null; the byref null of `Unsafe.NullRef` is a different value.
+/-- The closed Unsafe.NullRef<Int32> returns a managed reference. -/
+private def nullReference : MethodRef :=
+  { owner := unsafeOwner, name := name!"NullRef", hasThis := false, genericArity := 1,
+    methodArguments := [intType], parameters := [], returnType := .byref intType }
+
+-- The byref returned by Unsafe.NullRef has a different stack kind from the object null.
 example : ¬ ScalarFlowValid (pushHoleRaw 20) pushHoleFeatures
-    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullRef)) := by decide
+    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.call nullReference)) := by decide
 example : ¬ ScalarFlowValid (pushHoleRaw 20) pushHoleFeatures
     (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.ldc_i8 0)) := by decide
 example : ¬ ScalarFlowValid (pushHoleRaw 35) pushHoleFeatures pushHoleStates

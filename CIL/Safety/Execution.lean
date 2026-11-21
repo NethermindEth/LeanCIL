@@ -937,10 +937,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .ldstr text, _ => do
     let (memory, values) ← stringLiteralInstruction text stack m
     return .next (pc + 1) values frame memory
-  | .memory operation, _ =>
-    let operands ← viewOperands frame m (viewOperandCount operation) stack
-    let (memory, values) ← staticInstruction body pc operation operands m
-    return .next (pc + 1) values frame memory
   | .throw exception, _ => .error (.thrown exception)
   | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m
   | _, _ =>

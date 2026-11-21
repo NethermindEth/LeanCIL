@@ -166,12 +166,13 @@ def modelledStepOf (step : MVarId) : MetaM (Option MVarId) := step.withContext d
     `step` itself when no operand is such a home. -/
 def viewedStepGoal (step : MVarId) : MetaM MVarId := step.withContext do
   let some (_, action, _) := (← instantiateMVars (← step.getType)).eq? | return step
-  let some #[body, op, pc, args, frame, stack, memory] :=
-      argumentsOf? action `CIL.Safety.step 7 | return step
-  let some #[operation] := argumentsOf? (← whnfR op) `CIL.Instruction.memory 1 | return step
+  let some #[model, body, pc, frame, stack, memory] :=
+      argumentsOf? action `CIL.Safety.modelStep 6 | return step
+  let some #[_, value] := argumentsOf? model `Option.some 2 | return step
+  let some #[operation] := argumentsOf? value `CIL.RuntimeModel.memory 1 | return step
   let viewed ← viewedStack frame operation stack
   if viewed == stack then return step
-  let stepTerm ← mkAppM `CIL.Safety.step #[body, op, pc, args, frame, viewed, memory]
+  let stepTerm ← mkAppM `CIL.Safety.modelStep #[model, body, pc, frame, viewed, memory]
   let goal ← mkFreshExprMVar (← mkEq stepTerm (← mkFreshExprMVar (← inferType stepTerm)))
   return goal.mvarId!
 

@@ -35,8 +35,7 @@ def indirectOpcode (opcode : Nat) : Bool :=
     raw opcode emits none of these four instructions. Modelled calls retain their method reference. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (emitted : Instruction) (skipEncoding := false) : Bool :=
-  if emitted matches .memory _ then false
-  else if instruction.opcode == 0x71 || instruction.opcode == 0x81 ||
+  if instruction.opcode == 0x71 || instruction.opcode == 0x81 ||
       (emitted matches .ldobj _ | .stobj _) then
     skipEncoding || valueEncodingMatches previous instruction emitted
   else if !indirectOpcode instruction.opcode then
@@ -57,16 +56,5 @@ def indirectSiteWindow (rawAt : Nat → Option RawInstruction) (pc : Nat)
     (rawAt (pc + 1)).any (prefixTakes instruction) && (emitted matches .nop)
   | 65043 => false
   | _ => indirectAccessMatches previous instruction emitted skipEncoding
-
-/-- A runtime-model operation cannot occupy an instruction site, including when a caller has
-    already checked its encoding. -/
-theorem indirectSiteWindow_memory (rawAt : Nat → Option RawInstruction) (pc : Nat)
-    (instruction : RawInstruction) (operation : MemoryOp) (skipEncoding : Bool)
-    (previous : Option RawInstruction) :
-    indirectSiteWindow rawAt pc instruction (.memory operation) skipEncoding previous = false := by
-  unfold indirectSiteWindow
-  split <;> simp [indirectAccessMatches]
-
-#print axioms indirectSiteWindow_memory
 
 end CIL.Extraction

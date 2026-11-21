@@ -46,11 +46,11 @@ attribute [cil_checked] load_word64_of_read load_vector128_of_read load_vector25
     contents. -/
 theorem step_store128_of_write {memory after : Memory} {target : Reference} {bits : BitVec 128}
     (written : write memory target (numberBytes bits.toNat 16) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body (.memory .store128) pc args frame
+    ∀ body pc frame rest,
+      modelStep (some (.memory .store128)) body pc frame
         (.scalar (.v128 bits) :: .reference (.address target) :: rest) memory =
         .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
+  intro body pc frame rest
   rw [step_memory_store128_eq, storeValue_vector128_of_write written]
   rfl
 #print axioms step_store128_of_write
@@ -59,11 +59,11 @@ theorem step_store128_of_write {memory after : Memory} {target : Reference} {bit
     contents. -/
 theorem step_store256_of_write {memory after : Memory} {target : Reference} {bits : BitVec 256}
     (written : write memory target (numberBytes bits.toNat 32) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body (.memory .store256) pc args frame
+    ∀ body pc frame rest,
+      modelStep (some (.memory .store256)) body pc frame
         (.scalar (.v256 bits) :: .reference (.address target) :: rest) memory =
         .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
+  intro body pc frame rest
   rw [step_memory_store256_eq, storeValue_vector256_of_write written]
   rfl
 #print axioms step_store256_of_write
@@ -72,11 +72,11 @@ theorem step_store256_of_write {memory after : Memory} {target : Reference} {bit
     contents. -/
 theorem step_store512_of_write {memory after : Memory} {target : Reference} {bits : BitVec 512}
     (written : write memory target (numberBytes bits.toNat 64) 1 = .ok after) :
-    ∀ body pc args frame rest,
-      step body (.memory .store512) pc args frame
+    ∀ body pc frame rest,
+      modelStep (some (.memory .store512)) body pc frame
         (.scalar (.v512 bits) :: .reference (.address target) :: rest) memory =
         .ok (.next (pc + 1) rest frame after) := by
-  intro body pc args frame rest
+  intro body pc frame rest
   rw [step_memory_store512_eq, storeValue_vector512_of_write written]
   rfl
 #print axioms step_store512_of_write

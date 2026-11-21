@@ -295,11 +295,11 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   (if profile.avx512DQVL then .ldarg 0 else .unadmitted 0),
   (if profile.avx512DQVL then limbsCall false else .unadmitted 0),
   (if profile.avx512DQVL then limbsCall true else .unadmitted 0),
-  (if profile.avx512DQVL then .memory .load256 else .unadmitted 0),
+  (if profile.avx512DQVL then .ldobj Tests.IntrinsicMethods.vector256UInt64 else .unadmitted 0),
   (if profile.avx512DQVL then .ldarg 1 else .unadmitted 0),
   (if profile.avx512DQVL then limbsCall false else .unadmitted 0),
   (if profile.avx512DQVL then limbsCall true else .unadmitted 0),
-  (if profile.avx512DQVL then .memory .load256 else .unadmitted 0),
+  (if profile.avx512DQVL then .ldobj Tests.IntrinsicMethods.vector256UInt64 else .unadmitted 0),
   (if profile.avx512DQVL then .stloc 22 else .unadmitted 0),
   (if profile.avx512DQVL then .ldloc 22 else .unadmitted 0),
   (if profile.avx512DQVL then .ldc_i4 (BitVec.ofInt 32 (27)) else .unadmitted 0),
@@ -318,7 +318,7 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then limbsCall true else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .memory .load256 else .unadmitted 0),
+    else if profile.avx2 then .ldobj Tests.IntrinsicMethods.vector256UInt64 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .stloc 23
     else .unadmitted 0),
@@ -330,7 +330,7 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then limbsCall true else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .memory .load256 else .unadmitted 0),
+    else if profile.avx2 then .ldobj Tests.IntrinsicMethods.vector256UInt64 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldc_i4 (BitVec.ofInt 32 (27)) else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0

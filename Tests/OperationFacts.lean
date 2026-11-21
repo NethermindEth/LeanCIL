@@ -13,8 +13,8 @@ open CIL.Safety
 /-- A vector load consumes the read fact for the same memory, reference and width. -/
 theorem vector_load {memory : Memory} {source : Reference} {bits : BitVec 256}
     (loaded : read memory source 32 1 = .ok (numberBytes bits.toNat 32))
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.memory .load256) pc args frame (.reference (.address source) :: rest) memory =
+    (body : CIL.Method) (pc : Nat) (frame : Frame) (rest : List Value) :
+    modelStep (some (.memory .load256)) body pc frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.v256 bits) :: rest) frame memory) := by
   cil_checked_step [loaded]
 #print axioms vector_load
@@ -22,8 +22,8 @@ theorem vector_load {memory : Memory} {source : Reference} {bits : BitVec 256}
 /-- A vector store consumes its successful write, without asking for any previous snapshot. -/
 theorem vector_store {memory after : Memory} {destination : Reference} {bits : BitVec 256}
     (written : write memory destination (numberBytes bits.toNat 32) 1 = .ok after)
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.memory .store256) pc args frame
+    (body : CIL.Method) (pc : Nat) (frame : Frame) (rest : List Value) :
+    modelStep (some (.memory .store256)) body pc frame
         (.scalar (.v256 bits) :: .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
   cil_checked_step [written]

@@ -234,29 +234,29 @@ theorem reference_add_byte_offsets (body : CIL.Method) (pc : Nat) (args : List V
     (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.Value)
     (rest : List Value) :
     step body .add pc args frame (.scalar offset :: .reference reference :: rest) memory =
-      step body (.memory (.add 1 true)) pc args frame
+      modelStep (some (.memory (.add 1 true))) body pc frame
         (.scalar offset :: .reference reference :: rest) memory ∧
     step body .add pc args frame (.reference reference :: .scalar offset :: rest) memory =
-      step body (.memory (.add 1 true)) pc args frame
+      modelStep (some (.memory (.add 1 true))) body pc frame
         (.reference reference :: .scalar offset :: rest) memory ∧
     step body .add pc args frame (.scalar offset :: .readOnlyReference reference :: rest) memory =
-      step body (.memory (.add 1 true)) pc args frame
+      modelStep (some (.memory (.add 1 true))) body pc frame
         (.scalar offset :: .readOnlyReference reference :: rest) memory ∧
     step body .add pc args frame (.readOnlyReference reference :: .scalar offset :: rest) memory =
-      step body (.memory (.add 1 true)) pc args frame
+      modelStep (some (.memory (.add 1 true))) body pc frame
         (.readOnlyReference reference :: .scalar offset :: rest) memory := by
   cases unspecified : offset.hasUnspecified <;>
-    simp [step, staticInstruction, memoryInstruction, observerCount,
+    simp [modelStep_memory, step, staticInstruction, memoryInstruction, observerCount,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, Value.hasUnspecified, unspecified,
       viewOperandCount, viewOperands]
 #print axioms reference_add_byte_offsets
 
-/-- Reference addition rejects memory-model substitution and a spurious encoded operand. -/
+/-- Reference addition rejects a substituted subtraction and a spurious encoded operand. -/
 theorem reference_add_encoding :
     CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.word32, .reference] .add = true ∧
     CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.native, .reference] .add = true ∧
     CIL.Extraction.scalarOpMatches none ⟨0, 88, .none⟩ [.word32, .reference]
-      (.memory (.add 1 true)) = false ∧
+      (.sub) = false ∧
     CIL.Extraction.scalarOpMatches none ⟨0, 88, .target 1⟩ [.word32, .reference] .add = false :=
   by decide +kernel
 #print axioms reference_add_encoding
@@ -290,10 +290,10 @@ theorem commuted_native_step (body : CIL.Method) (pc : Nat) (args : List Value)
 #print axioms commuted_native_step
 
 /-- Registered equations step a commuted readonly offset to a readonly result symbolically. -/
-theorem commuted_readonly_step (body : CIL.Method) (pc : Nat) (args : List Value)
+theorem commuted_readonly_step (body : CIL.Method) (pc : Nat)
     (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W32)
     (rest : List Value) :
-    step body (.memory (.add 8 true)) pc args frame
+    modelStep (some (.memory (.add 8 true))) body pc frame
       (.readOnlyReference reference :: .scalar (.i32 offset) :: rest) memory = do
       let address ← referenceAt reference
       let result ← checkedAt reference 0 (add memory address 8 (BitVec.ofInt 64 offset.toInt))

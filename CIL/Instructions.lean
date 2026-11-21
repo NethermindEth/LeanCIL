@@ -279,7 +279,6 @@ inductive Instruction where
   | ldflda (field : Extraction.FieldRef)
   /-- `stfld`: pops a value and a receiver below it and stores the value into the field. -/
   | stfld (field : Extraction.FieldRef)
-  | memory (operation : MemoryOp)
   -- Static fields; the descriptor extraction bound to the instruction's pc holds the storage.
   /-- `ldsfld`: the value of the static field `field`. -/
   | ldsfld (field : Extraction.FieldRef)

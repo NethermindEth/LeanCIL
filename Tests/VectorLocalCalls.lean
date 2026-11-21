@@ -19,7 +19,7 @@ open CIL.Safety
 @[cil_code] def helper : CIL.Method :=
   { locals := [], returnsValue := false,
     code := [.ldarg 2, .ldarg 0, .ldarg 1, .call Tests.IntrinsicMethods.portableAdd,
-      .memory .store256, .ret] }
+      .stobj Tests.IntrinsicMethods.vector256UInt64, .ret] }
 
 /-- The helper receives two saved vector values and one writable output reference. -/
 structure Inputs where

@@ -11,12 +11,12 @@ partial class Program
             match method{{method}}.code[{{pc}}]? with
             | some (Instruction.call target prefixes) =>
               Safety.step method{{method}} (.call target prefixes) {{pc}} args frame stack memory =
-                Safety.step method{{method}} (.memory ({{operation}})) {{pc}} args frame stack memory
+                Safety.modelStep (some (.memory ({{operation}}))) method{{method}} {{pc}} frame stack memory
             | _ => False := by
-          exact Safety.step_call_memory method{{method}} {{pc}} args frame memory
+          exact Safety.step_call_model method{{method}} {{pc}} args frame memory
             (prefixes := {}) rfl method{{method}}_model{{pc}} rfl stack
         #print axioms call_step
-        /-- A live call binds the raw declaration and rejects a substituted memory instruction. -/
+        /-- A live call binds the raw declaration and the exact prefix of the emitted instruction. -/
         theorem call_operand :
             (match method{{method}}Closed.code[{{pc}}]? with
             | some raw => match raw.operand with
@@ -25,7 +25,7 @@ partial class Program
                   runtimeCatalog.siteAgrees environment profile operand emitted none true
                 let forged := { raw with operand := .call { site with declared.convention := 0 } }
                 let call := Instruction.call site.method {}
-                agrees raw call && !agrees forged call && !agrees raw (.memory ({{operation}}))
+                agrees raw call && !agrees forged call && !agrees raw (.call site.method { tail := true })
               | _ => false
             | none => false) = true := by decide +kernel
         #print axioms call_operand

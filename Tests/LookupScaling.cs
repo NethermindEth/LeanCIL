@@ -2255,7 +2255,6 @@ void ModelTableCosts()
             #kernel_cost "model lookup {{position}} {{size}}" ({{claim}})
             """;
     }
-    string Emitted(int index) => $".memory (.divRemOut {index})";
     string Call(int index) => $$""".call (method name!"Model{{index:D4}}") {}""";
     string Site(int index) => $$"""
         ⟨{{index}}, 40, .call { method := method name!"Model{{index:D4}}", declared := { convention := 0 },
@@ -2265,9 +2264,9 @@ void ModelTableCosts()
         /-- {{count}} live calls of distinct modelled methods, the call at index i to method i. -/
         def raw{{count}} : RawMethod := { shell with code := [
           {{string.Join(",\n  ", Enumerable.Range(0, count).Select(Site))}}] }
-        /-- An unrelated emission at each modelled call. -/
+        /-- Each site names the next method in the list, wrapping at its end. -/
         def code{{count}} : List Instruction :=
-          [{{string.Join(", ", Enumerable.Range(0, count).Select(Emitted))}}]
+          [{{string.Join(", ", Enumerable.Range(0, count).Select(index => Call((index + 1) % count)))}}]
         /-- The same sites keeping the calls to their own methods. -/
         def calls{{count}} : List Instruction :=
           [{{string.Join(", ", Enumerable.Range(0, count).Select(Call))}}]

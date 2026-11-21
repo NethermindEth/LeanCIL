@@ -3,8 +3,7 @@ import CIL.Extraction.Generics
 /-!
 # Span call names
 
-Span element names as runtime signatures spell them, the scope of the array extension methods,
-and the span operations only a checked model binding may emit.
+Span element names as runtime signatures spell them and the assembly defining array extensions.
 -/
 
 namespace CIL.Extraction
@@ -22,13 +21,5 @@ def spanElementName (type : TypeExpr) : Option String := do
     return String.ofList name
   let .apply (.constructor _ name) (.atom _ element) := type | none
   if (integerVectorWidth type).isSome then some (name ++ "<" ++ element ++ ">") else none
-
-/-- Modelled span operations require a checked model binding at their call site. -/
-def spanEmissionAllowed : Instruction → Bool
-  | .memory .spanCreate | .memory (.spanFromReference ..) | .memory (.spanSingleReference ..)
-  | .memory (.arraySpan ..) | .memory (.spanCopy ..) | .memory (.spanFill ..)
-  | .memory (.arrayFill ..) | .memory (.spanEmpty ..) | .memory (.spanItem _) | .memory .spanLength
-  | .memory (.spanSlice _) | .memory .spanReadOnly => false
-  | _ => true
 
 end CIL.Extraction

@@ -4,9 +4,9 @@ import CIL.Safety.GuardNormalization
 /-!
 # Memory step equations
 
-One `@[cil_step]` equation per `memoryInstruction` arm and operand shape, so a `.memory` step
+One `@[cil_step]` equation per memory model and operand shape, so a bound call
 rewrites to that arm's body and never unfolds `staticInstruction` or `memoryInstruction`.
-The span constructors over static storage keep `step_memory_eq`, which these outrank. `ldlen` of a
+The span constructors over static storage keep `modelStep_memory`, which these outrank. `ldlen` of a
 value array has its equations here beside the view checks it shares with them.
 -/
 
@@ -19,7 +19,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
 /-- Closes one memory step equation through `step` and both memory dispatchers. Both
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
-  simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
+  simp only [modelStep_memory, step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     copyBlockBytes, initBlockBytes, otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
     vector128UnsafeInstruction, displaceReference, observerCount, viewOperandCount, viewOperands,
     spanView, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any,
@@ -66,7 +66,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- `bigMul64` stores the low 64 bits of the product through `low` and pushes the high 64. -/
 @[cil_step high] theorem step_memory_bigMul64_eq (low : ManagedReference) (right left : CIL.W64)
     (rest : List Value) :
-    step body (.memory (.bigMul64 false)) pc args frame
+    modelStep (some (.memory (.bigMul64 false))) body pc frame
       (.reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory = do
       let stored ← storeValue memory low (.i64 (left * right))
       return .next (pc + 1)
@@ -76,7 +76,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- Signed `bigMul64` stores the same low word and pushes the signed high 64 bits. -/
 @[cil_step high] theorem step_memory_bigMul64_signed_eq (low : ManagedReference)
     (right left : CIL.W64) (rest : List Value) :
-    step body (.memory (.bigMul64 true)) pc args frame
+    modelStep (some (.memory (.bigMul64 true))) body pc frame
       (.reference low :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory = do
       let stored ← storeValue memory low (.i64 (left * right))
       return .next (pc + 1)
@@ -86,7 +86,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- `Math.DivRem(int, int, out int)` divides first, then stores the remainder's four bytes. -/
 @[cil_step high] theorem step_memory_divRemOut32_eq (destination : ManagedReference)
     (right left : CIL.W32) (rest : List Value) :
-    step body (.memory (.divRemOut 32)) pc args frame
+    modelStep (some (.memory (.divRemOut 32))) body pc frame
       (.reference destination :: .scalar (.i32 right) :: .scalar (.i32 left) :: rest) memory = do
       match CIL.divRemBits true left right with
       | .error fault => .error (.arithmetic fault)
@@ -96,7 +96,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
           (write memory address (numberBytes remainder.toNat 4) ordinaryAccessAlignment)
         return .next (pc + 1) (.scalar (.i32 quotient) :: rest) frame stored := by
   cases outcome : CIL.divRemBits true left right <;>
-    simp only [step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
+    simp only [modelStep_memory, step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
       viewOperandCount, viewOperands, Bool.or_false, Bool.false_eq_true, ite_false, cil_guard,
       outcome, bind_assoc, pure_bind] <;>
@@ -105,7 +105,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- `Math.DivRem(long, long, out long)` divides first, then stores the remainder's eight bytes. -/
 @[cil_step high] theorem step_memory_divRemOut64_eq (destination : ManagedReference)
     (right left : CIL.W64) (rest : List Value) :
-    step body (.memory (.divRemOut 64)) pc args frame
+    modelStep (some (.memory (.divRemOut 64))) body pc frame
       (.reference destination :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest) memory = do
       match CIL.divRemBits true left right with
       | .error fault => .error (.arithmetic fault)
@@ -115,7 +115,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
           (write memory address (numberBytes remainder.toNat 8) ordinaryAccessAlignment)
         return .next (pc + 1) (.scalar (.i64 quotient) :: rest) frame stored := by
   cases outcome : CIL.divRemBits true left right <;>
-    simp only [step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
+    simp only [modelStep_memory, step, staticInstruction, memoryInstruction, wideArithmeticInstruction, observerCount,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
       viewOperandCount, viewOperands, Bool.or_false, Bool.false_eq_true, ite_false, cil_guard,
       outcome, bind_assoc, pure_bind] <;>
@@ -155,26 +155,26 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 -- Vector loads and stores, one equation per stored value shape.
 @[cil_step high] theorem step_memory_load128_eq (r : ManagedReference) (rest : List Value) :
-    step body (.memory .load128) pc args frame (.reference r :: rest) memory = do
+    modelStep (some (.memory .load128)) body pc frame (.reference r :: rest) memory = do
       let value ← loadValue memory r 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_load256_eq (r : ManagedReference) (rest : List Value) :
-    step body (.memory .load256) pc args frame (.reference r :: rest) memory = do
+    modelStep (some (.memory .load256)) body pc frame (.reference r :: rest) memory = do
       let value ← loadValue memory r 32
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_load512_eq (r : ManagedReference) (rest : List Value) :
-    step body (.memory .load512) pc args frame (.reference r :: rest) memory = do
+    modelStep (some (.memory .load512)) body pc frame (.reference r :: rest) memory = do
       let value ← loadValue memory r 64
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_store128_eq (bits : BitVec 128) (r : ManagedReference)
     (rest : List Value) :
-    step body (.memory .store128) pc args frame
+    modelStep (some (.memory .store128)) body pc frame
       (.scalar (.v128 bits) :: .reference r :: rest) memory = do
       let stored ← storeValue memory r (.v128 bits)
       return .next (pc + 1) rest frame stored := by
@@ -182,7 +182,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 @[cil_step high] theorem step_memory_store128_snapshot_eq (bytes : List (BitVec 8 × Bool))
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory .store128) pc args frame
+    modelStep (some (.memory .store128)) body pc frame
       (.scalar (.snapshot .vector128 bytes) :: .reference r :: rest) memory = do
       let stored ← storeValue memory r (.snapshot .vector128 bytes)
       return .next (pc + 1) rest frame stored := by
@@ -190,7 +190,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 @[cil_step high] theorem step_memory_store256_eq (bits : BitVec 256) (r : ManagedReference)
     (rest : List Value) :
-    step body (.memory .store256) pc args frame
+    modelStep (some (.memory .store256)) body pc frame
       (.scalar (.v256 bits) :: .reference r :: rest) memory = do
       let stored ← storeValue memory r (.v256 bits)
       return .next (pc + 1) rest frame stored := by
@@ -198,7 +198,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 @[cil_step high] theorem step_memory_store256_snapshot_eq (bytes : List (BitVec 8 × Bool))
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory .store256) pc args frame
+    modelStep (some (.memory .store256)) body pc frame
       (.scalar (.snapshot .vector256 bytes) :: .reference r :: rest) memory = do
       let stored ← storeValue memory r (.snapshot .vector256 bytes)
       return .next (pc + 1) rest frame stored := by
@@ -206,7 +206,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 @[cil_step high] theorem step_memory_store512_eq (bits : BitVec 512) (r : ManagedReference)
     (rest : List Value) :
-    step body (.memory .store512) pc args frame
+    modelStep (some (.memory .store512)) body pc frame
       (.scalar (.v512 bits) :: .reference r :: rest) memory = do
       let stored ← storeValue memory r (.v512 bits)
       return .next (pc + 1) rest frame stored := by
@@ -214,7 +214,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 
 @[cil_step high] theorem step_memory_store512_snapshot_eq (bytes : List (BitVec 8 × Bool))
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory .store512) pc args frame
+    modelStep (some (.memory .store512)) body pc frame
       (.scalar (.snapshot .vector512 bytes) :: .reference r :: rest) memory = do
       let stored ← storeValue memory r (.snapshot .vector512 bytes)
       return .next (pc + 1) rest frame stored := by
@@ -223,7 +223,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 -- Vector transfer equations normalize the memory operation after unlinked call resolution.
 @[cil_step high] private theorem step_memory_vector128Load_eq
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.vector128Unsafe false false)) pc args frame (.reference r :: rest)
+    modelStep (some (.memory (.vector128Unsafe false false))) body pc frame (.reference r :: rest)
       memory = do
       let value ← loadValue memory r 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
@@ -241,7 +241,7 @@ theorem step_call_vector128Load_eq {method : Extraction.MethodRef}
       memory = do
       let value ← loadValue memory r 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128Load_eq
 
 #print axioms step_call_vector128Load_eq
@@ -249,7 +249,7 @@ theorem step_call_vector128Load_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128Load_readOnly_eq
     (r : ManagedReference)
     (rest : List Value) :
-    step body (.memory (.vector128Unsafe false false)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe false false))) body pc frame
       (.readOnlyReference r :: rest) memory = do
       let value ← loadValue memory r 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
@@ -268,7 +268,7 @@ theorem step_call_vector128Load_readOnly_eq {method : Extraction.MethodRef}
       (.readOnlyReference r :: rest) memory = do
       let value ← loadValue memory r 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128Load_readOnly_eq
 
 #print axioms step_call_vector128Load_readOnly_eq
@@ -276,7 +276,7 @@ theorem step_call_vector128Load_readOnly_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128LoadAt_eq
     (offset : CIL.W64) (r : ManagedReference)
     (rest : List Value) :
-    step body (.memory (.vector128Unsafe false true)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe false true))) body pc frame
       (.scalar (.i64 offset) :: .reference r :: rest) memory = do
       let address ← referenceAt r
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
@@ -299,7 +299,7 @@ theorem step_call_vector128LoadAt_eq {method : Extraction.MethodRef}
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
       let value ← loadValue memory (.address moved) 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128LoadAt_eq
 
 #print axioms step_call_vector128LoadAt_eq
@@ -307,7 +307,7 @@ theorem step_call_vector128LoadAt_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128LoadAt_readOnly_eq
     (offset : CIL.W64)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.vector128Unsafe false true)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe false true))) body pc frame
       (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
       let address ← referenceAt r
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
@@ -330,7 +330,7 @@ theorem step_call_vector128LoadAt_readOnly_eq {method : Extraction.MethodRef}
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
       let value ← loadValue memory (.address moved) 16
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128LoadAt_readOnly_eq
 
 #print axioms step_call_vector128LoadAt_readOnly_eq
@@ -338,7 +338,7 @@ theorem step_call_vector128LoadAt_readOnly_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128Store_eq
     (bits : BitVec 128) (r : ManagedReference)
     (rest : List Value) :
-    step body (.memory (.vector128Unsafe true false)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe true false))) body pc frame
       (.reference r :: .scalar (.v128 bits) :: rest) memory = do
       let stored ← storeValue memory r (.v128 bits)
       return .next (pc + 1) rest frame stored := by
@@ -357,7 +357,7 @@ theorem step_call_vector128Store_eq {method : Extraction.MethodRef}
       (.reference r :: .scalar (.v128 bits) :: rest) memory = do
       let stored ← storeValue memory r (.v128 bits)
       return .next (pc + 1) rest frame stored := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128Store_eq
 
 #print axioms step_call_vector128Store_eq
@@ -365,7 +365,7 @@ theorem step_call_vector128Store_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128Store_snapshot_eq
     (bytes : List (BitVec 8 × Bool))
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.vector128Unsafe true false)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe true false))) body pc frame
       (.reference r :: .scalar (.snapshot .vector128 bytes) :: rest) memory = do
       let stored ← storeValue memory r (.snapshot .vector128 bytes)
       return .next (pc + 1) rest frame stored := by
@@ -384,7 +384,7 @@ theorem step_call_vector128Store_snapshot_eq {method : Extraction.MethodRef}
       (.reference r :: .scalar (.snapshot .vector128 bytes) :: rest) memory = do
       let stored ← storeValue memory r (.snapshot .vector128 bytes)
       return .next (pc + 1) rest frame stored := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128Store_snapshot_eq
 
 #print axioms step_call_vector128Store_snapshot_eq
@@ -392,7 +392,7 @@ theorem step_call_vector128Store_snapshot_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128StoreAt_eq
     (offset : CIL.W64) (bits : BitVec 128)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.vector128Unsafe true true)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe true true))) body pc frame
       (.scalar (.i64 offset) :: .reference r :: .scalar (.v128 bits) :: rest) memory = do
       let address ← referenceAt r
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
@@ -415,7 +415,7 @@ theorem step_call_vector128StoreAt_eq {method : Extraction.MethodRef}
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
       let stored ← storeValue memory (.address moved) (.v128 bits)
       return .next (pc + 1) rest frame stored := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128StoreAt_eq
 
 #print axioms step_call_vector128StoreAt_eq
@@ -423,7 +423,7 @@ theorem step_call_vector128StoreAt_eq {method : Extraction.MethodRef}
 @[cil_step high] private theorem step_memory_vector128StoreAt_snapshot_eq
     (offset : CIL.W64)
     (bytes : List (BitVec 8 × Bool)) (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.vector128Unsafe true true)) pc args frame
+    modelStep (some (.memory (.vector128Unsafe true true))) body pc frame
       (.scalar (.i64 offset) :: .reference r :: .scalar (.snapshot .vector128 bytes) :: rest)
       memory = do
       let address ← referenceAt r
@@ -448,14 +448,14 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
       let moved ← checkedAt r 0 (add memory address 1 (BitVec.ofInt 64 (offset.toNat : Int)))
       let stored ← storeValue memory (.address moved) (.snapshot .vector128 bytes)
       return .next (pc + 1) rest frame stored := by
-  rw [step_call_memory body pc args frame memory link found rfl]
+  rw [step_call_model body pc args frame memory link found rfl]
   apply step_memory_vector128StoreAt_snapshot_eq
 
 #print axioms step_call_vector128StoreAt_snapshot_eq
 
 -- References, pointer arithmetic and bit casts.
 @[cil_step high] theorem step_memory_asRef_eq (r : ManagedReference) (rest : List Value) :
-    step body (.memory .asRef) pc args frame (.reference r :: rest) memory = do
+    modelStep (some (.memory .asRef)) body pc frame (.reference r :: rest) memory = do
       let value ← formValue memory r
       return .next (pc + 1) (value :: rest) frame memory := by
   memory_step_proof
@@ -558,9 +558,9 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 /-- Commuted reference offsets reuse the scalar-first memory step equations. -/
 @[cil_step high] theorem step_memory_add_commuted_eq (size : Nat) (signed : Bool)
     (reference : ManagedReference) (offset : CIL.Value) (rest : List Value) :
-    step body (.memory (.add size signed)) pc args frame
+    modelStep (some (.memory (.add size signed))) body pc frame
       (.reference reference :: .scalar offset :: rest) memory =
-    step body (.memory (.add size signed)) pc args frame
+    modelStep (some (.memory (.add size signed))) body pc frame
       (.scalar offset :: .reference reference :: rest) memory :=
   id rfl
 #print axioms step_memory_add_commuted_eq
@@ -568,7 +568,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 -- One equation per `offsetValue` shape, so the offset is a term and needs no side condition.
 @[cil_step high] theorem step_memory_add_signed_i32_eq (size : Nat) (offset : CIL.W32)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.add size true)) pc args frame
+    modelStep (some (.memory (.add size true))) body pc frame
       (.scalar (.i32 offset) :: .reference r :: rest) memory = do
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset.toInt))
@@ -577,7 +577,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 
 @[cil_step high] theorem step_memory_add_signed_i64_eq (size : Nat) (offset : CIL.W64)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.add size true)) pc args frame
+    modelStep (some (.memory (.add size true))) body pc frame
       (.scalar (.i64 offset) :: .reference r :: rest) memory = do
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset.toInt))
@@ -586,7 +586,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 
 @[cil_step high] theorem step_memory_add_unsigned_i64_eq (size : Nat) (offset : CIL.W64)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.add size false)) pc args frame
+    modelStep (some (.memory (.add size false))) body pc frame
       (.scalar (.i64 offset) :: .reference r :: rest) memory = do
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 (offset.toNat : Int)))
@@ -596,16 +596,16 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 /-- Offsetting a readonly reference keeps the restriction and the writable form's checks. -/
 @[cil_step high] theorem step_memory_add_readOnly_commuted_eq (size : Nat) (signed : Bool)
     (reference : ManagedReference) (offset : CIL.Value) (rest : List Value) :
-    step body (.memory (.add size signed)) pc args frame
+    modelStep (some (.memory (.add size signed))) body pc frame
       (.readOnlyReference reference :: .scalar offset :: rest) memory =
-    step body (.memory (.add size signed)) pc args frame
+    modelStep (some (.memory (.add size signed))) body pc frame
       (.scalar offset :: .readOnlyReference reference :: rest) memory :=
   id rfl
 #print axioms step_memory_add_readOnly_commuted_eq
 
 @[cil_step high] theorem step_memory_add_readOnly_signed_i32_eq (size : Nat) (offset : CIL.W32)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.add size true)) pc args frame
+    modelStep (some (.memory (.add size true))) body pc frame
       (.scalar (.i32 offset) :: .readOnlyReference r :: rest) memory = do
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset.toInt))
@@ -614,7 +614,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 
 @[cil_step high] theorem step_memory_add_readOnly_signed_i64_eq (size : Nat) (offset : CIL.W64)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.add size true)) pc args frame
+    modelStep (some (.memory (.add size true))) body pc frame
       (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 offset.toInt))
@@ -623,7 +623,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 
 @[cil_step high] theorem step_memory_add_readOnly_unsigned_i64_eq (size : Nat) (offset : CIL.W64)
     (r : ManagedReference) (rest : List Value) :
-    step body (.memory (.add size false)) pc args frame
+    modelStep (some (.memory (.add size false))) body pc frame
       (.scalar (.i64 offset) :: .readOnlyReference r :: rest) memory = do
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address size (BitVec.ofInt 64 (offset.toNat : Int)))
@@ -633,7 +633,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 -- The operand is any scalar, so the guard stays until the caller's value decides it.
 @[cil_step high] theorem step_memory_bitcastValue_eq (source target : CIL.SnapshotShape)
     (value : CIL.Value) (rest : List Value) :
-    step body (.memory (.bitcastValue source target)) pc args frame (.scalar value :: rest) memory =
+    modelStep (some (.memory (.bitcastValue source target))) body pc frame (.scalar value :: rest) memory =
       if value.hasUnspecified then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else do
@@ -643,13 +643,13 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 
 -- A byte reinterpreted as a Boolean must be 0 or 1.
 @[cil_step high] theorem step_memory_bitcastByteBool_i32_eq (bits : CIL.W32) (rest : List Value) :
-    step body (.memory .bitcastByteBool) pc args frame (.scalar (.i32 bits) :: rest) memory =
+    modelStep (some (.memory .bitcastByteBool)) body pc frame (.scalar (.i32 bits) :: rest) memory =
       if bits.toNat ≤ 1 then .ok (.next (pc + 1) (.scalar (.i32 bits) :: rest) frame memory)
       else .error (.unsupported "Noncanonical Boolean representation") := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_bitcastByteBool_i8_eq (bits : BitVec 8) (rest : List Value) :
-    step body (.memory .bitcastByteBool) pc args frame (.scalar (.i8 bits) :: rest) memory =
+    modelStep (some (.memory .bitcastByteBool)) body pc frame (.scalar (.i8 bits) :: rest) memory =
       if bits.toNat ≤ 1 then
         .ok (.next (pc + 1) (.scalar (.i32 (bits.zeroExtend 32)) :: rest) frame memory)
       else .error (.unsupported "Noncanonical Boolean representation") := by
@@ -658,7 +658,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 -- Spans.
 @[cil_step high] theorem step_memory_spanReference_eq (r : ManagedReference) (length : Nat)
     (rest : List Value) :
-    step body (.memory .spanReference) pc args frame (.span r length :: rest) memory = do
+    modelStep (some (.memory .spanReference)) body pc frame (.span r length :: rest) memory = do
       let value ← formValue memory r
       return .next (pc + 1) (value :: rest) frame memory := by
   memory_step_proof
@@ -667,12 +667,12 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
     the view is empty; it validates the view's extent but makes no access. -/
 @[cil_step high] theorem step_memory_spanReference_view_eq (reference : ManagedReference)
     (length width : Nat) (rest : List Value) :
-    step body (.memory .spanReference) pc args frame
+    modelStep (some (.memory .spanReference)) body pc frame
       (.bufferSpan ⟨reference, length, width, true⟩ :: rest) memory = do
       let _ ← checkedAt reference 0 (SpanView.validate ⟨reference, length, width, true⟩ memory)
       let value ← formValue memory reference
       return .next (pc + 1) (value :: rest) frame memory := by
-  simp only [step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
+  simp only [modelStep_memory, step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     viewOperandCount, viewOperands, spanView,
     Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, bind_ite, bind_assoc, pure_bind]
@@ -684,12 +684,12 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
     to reads, even when the view is empty; it validates the view's extent but makes no access. -/
 @[cil_step high] theorem step_memory_spanReference_readOnlyView_eq (reference : ManagedReference)
     (length width : Nat) (rest : List Value) :
-    step body (.memory .spanReference) pc args frame
+    modelStep (some (.memory .spanReference)) body pc frame
       (.bufferSpan ⟨reference, length, width, false⟩ :: rest) memory = do
       let _ ← checkedAt reference 0 (SpanView.validate ⟨reference, length, width, false⟩ memory)
       let _ ← formValue memory reference
       return .next (pc + 1) (.readOnlyReference reference :: rest) frame memory := by
-  simp only [step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
+  simp only [modelStep_memory, step, staticInstruction, memoryInstruction, otherMemoryInstruction, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     viewOperandCount, viewOperands, spanView,
     Bool.or_false, Bool.false_eq_true, ite_false, cil_guard, bind_ite, bind_assoc, pure_bind]
@@ -701,7 +701,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
     `IndexOutOfRangeException`. -/
 @[cil_step high] theorem step_memory_spanItem_eq (width : Nat) (index : CIL.W32)
     (r : ManagedReference) (length : Nat) (rest : List Value) :
-    step body (.memory (.spanItem width)) pc args frame
+    modelStep (some (.memory (.spanItem width))) body pc frame
       (.scalar (.i32 index) :: .span r length :: rest) memory =
       if index.toNat < length then do
         let address ← referenceAt r
@@ -712,13 +712,13 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 
 @[cil_step high] theorem step_memory_spanLength_eq (r : ManagedReference) (length : Nat)
     (rest : List Value) :
-    step body (.memory .spanLength) pc args frame (.span r length :: rest) memory =
+    modelStep (some (.memory .spanLength)) body pc frame (.span r length :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (BitVec.ofNat 32 length)) :: rest) frame memory) := by
   memory_step_proof
 
 /-- A buffer span's length retains its validation obligation and does not read its bytes. -/
 @[cil_step high] theorem step_memory_bufferSpanLength_eq (view : SpanView) (rest : List Value) :
-    step body (.memory .spanLength) pc args frame (.bufferSpan view :: rest) memory = do
+    modelStep (some (.memory .spanLength)) body pc frame (.bufferSpan view :: rest) memory = do
       let _ ← checkedAt view.reference 0 (view.validate memory)
       return .next (pc + 1)
         (.scalar (.i32 (BitVec.ofNat 32 view.length)) :: rest) frame memory := by
@@ -728,7 +728,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 /-- A suffix slice checks the starting index and preserves the span's storage and capability. -/
 @[cil_step high] theorem step_memory_bufferSpanSlice_eq (view : SpanView)
     (start : CIL.W32) (rest : List Value) :
-    step body (.memory (.spanSlice false)) pc args frame
+    modelStep (some (.memory (.spanSlice false))) body pc frame
       (.scalar (.i32 start) :: .bufferSpan view :: rest) memory = do
       if start.toNat ≤ view.length then pure ()
         else .error (.thrown .argumentOutOfRange)
@@ -741,7 +741,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 /-- A counted slice retains both range checks and the checked view-construction result. -/
 @[cil_step high] theorem step_memory_bufferSpanSliceCount_eq (view : SpanView)
     (start length : CIL.W32) (rest : List Value) :
-    step body (.memory (.spanSlice true)) pc args frame
+    modelStep (some (.memory (.spanSlice true))) body pc frame
       (.scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest) memory = do
       if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
         else .error (.thrown .argumentOutOfRange)
@@ -753,7 +753,7 @@ theorem step_call_vector128StoreAt_snapshot_eq {method : Extraction.MethodRef}
 /-- Buffer indexing keeps width, bounds and memory checks before returning a restricted address. -/
 @[cil_step high] theorem step_memory_bufferSpanItem_eq (view : SpanView)
     (width : Nat) (index : CIL.W32) (rest : List Value) :
-    step body (.memory (.spanItem width)) pc args frame
+    modelStep (some (.memory (.spanItem width))) body pc frame
       (.scalar (.i32 index) :: .bufferSpan view :: rest) memory = do
       if width == view.width then pure () else .error .invalidState
       if index.toNat < view.length then pure ()
@@ -771,14 +771,14 @@ set_option hygiene false in
 local macro "home_step_proof" : tactic => `(tactic| (
   cases viewed : spanView frame memory (.spanHome slot) with
   | error fault =>
-    simp only [step_memory_eq, viewOperandCount, viewOperands, cil_guard, viewed,
+    simp only [modelStep_memory, viewOperandCount, viewOperands, cil_guard, viewed,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
       CIL.Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, ite_true,
       Bind.bind, Except.bind]
     try simp only [spanView, Pure.pure, Except.pure]
   | ok result =>
     obtain ⟨view, rfl⟩ := spanView_home_view viewed
-    simp only [step_memory_eq, viewOperandCount, viewOperands, cil_guard, viewed,
+    simp only [modelStep_memory, viewOperandCount, viewOperands, cil_guard, viewed,
       CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
       CIL.Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, ite_true,
       Bind.bind, Except.bind]
@@ -786,10 +786,10 @@ local macro "home_step_proof" : tactic => `(tactic| (
 
 /-- `get_Length` through a home steps on the view its slot holds; any other slot faults. -/
 @[cil_step high] theorem step_memory_spanLength_home_eq (slot : Nat) (rest : List Value) :
-    step body (.memory .spanLength) pc args frame (.spanHome slot :: rest) memory =
+    modelStep (some (.memory .spanLength)) body pc frame (.spanHome slot :: rest) memory =
       match spanView frame memory (.spanHome slot) with
       | .ok (.bufferSpan view) =>
-        step body (.memory .spanLength) pc args frame (.bufferSpan view :: rest) memory
+        modelStep (some (.memory .spanLength)) body pc frame (.bufferSpan view :: rest) memory
       | .ok _ => .error .invalidState
       | .error fault => .error fault := by
   home_step_proof
@@ -797,10 +797,10 @@ local macro "home_step_proof" : tactic => `(tactic| (
 
 /-- `GetReference` through a home steps on the view its slot holds; any other slot faults. -/
 @[cil_step high] theorem step_memory_spanReference_home_eq (slot : Nat) (rest : List Value) :
-    step body (.memory .spanReference) pc args frame (.spanHome slot :: rest) memory =
+    modelStep (some (.memory .spanReference)) body pc frame (.spanHome slot :: rest) memory =
       match spanView frame memory (.spanHome slot) with
       | .ok (.bufferSpan view) =>
-        step body (.memory .spanReference) pc args frame (.bufferSpan view :: rest) memory
+        modelStep (some (.memory .spanReference)) body pc frame (.bufferSpan view :: rest) memory
       | .ok _ => .error .invalidState
       | .error fault => .error fault := by
   home_step_proof
@@ -810,10 +810,10 @@ local macro "home_step_proof" : tactic => `(tactic| (
     faults. -/
 @[cil_step high] theorem step_memory_spanItem_home_eq (width : Nat) (index : CIL.W32)
     (slot : Nat) (rest : List Value) :
-    step body (.memory (.spanItem width)) pc args frame
+    modelStep (some (.memory (.spanItem width))) body pc frame
       (.scalar (.i32 index) :: .spanHome slot :: rest) memory =
       match spanView frame memory (.spanHome slot) with
-      | .ok (.bufferSpan view) => step body (.memory (.spanItem width)) pc args frame
+      | .ok (.bufferSpan view) => modelStep (some (.memory (.spanItem width))) body pc frame
         (.scalar (.i32 index) :: .bufferSpan view :: rest) memory
       | .ok _ => .error .invalidState
       | .error fault => .error fault := by
@@ -824,10 +824,10 @@ local macro "home_step_proof" : tactic => `(tactic| (
     faults. -/
 @[cil_step high] theorem step_memory_spanSlice_home_eq (start : CIL.W32) (slot : Nat)
     (rest : List Value) :
-    step body (.memory (.spanSlice false)) pc args frame
+    modelStep (some (.memory (.spanSlice false))) body pc frame
       (.scalar (.i32 start) :: .spanHome slot :: rest) memory =
       match spanView frame memory (.spanHome slot) with
-      | .ok (.bufferSpan view) => step body (.memory (.spanSlice false)) pc args frame
+      | .ok (.bufferSpan view) => modelStep (some (.memory (.spanSlice false))) body pc frame
         (.scalar (.i32 start) :: .bufferSpan view :: rest) memory
       | .ok _ => .error .invalidState
       | .error fault => .error fault := by
@@ -837,10 +837,10 @@ local macro "home_step_proof" : tactic => `(tactic| (
 /-- A counted slice through a home steps on the view its slot holds; any other slot faults. -/
 @[cil_step high] theorem step_memory_spanSliceCount_home_eq (start length : CIL.W32)
     (slot : Nat) (rest : List Value) :
-    step body (.memory (.spanSlice true)) pc args frame
+    modelStep (some (.memory (.spanSlice true))) body pc frame
       (.scalar (.i32 length) :: .scalar (.i32 start) :: .spanHome slot :: rest) memory =
       match spanView frame memory (.spanHome slot) with
-      | .ok (.bufferSpan view) => step body (.memory (.spanSlice true)) pc args frame
+      | .ok (.bufferSpan view) => modelStep (some (.memory (.spanSlice true))) body pc frame
         (.scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest) memory
       | .ok _ => .error .invalidState
       | .error fault => .error fault := by
@@ -886,17 +886,17 @@ theorem step_ldlen_array_eq (view : ArrayView) (rest : List Value) :
 
 -- Null references; `isNullRef` makes no access, so it answers for expired references too.
 @[cil_step high] theorem step_memory_nullRef_eq (stack : List Value) :
-    step body (.memory .nullRef) pc args frame stack memory =
+    modelStep (some (.memory .nullRef)) body pc frame stack memory =
       .ok (.next (pc + 1) (.reference .null :: stack) frame memory) := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_isNullRef_null_eq (rest : List Value) :
-    step body (.memory .isNullRef) pc args frame (.reference .null :: rest) memory =
+    modelStep (some (.memory .isNullRef)) body pc frame (.reference .null :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 1) :: rest) frame memory) := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_isNullRef_address_eq (r : Reference) (rest : List Value) :
-    step body (.memory .isNullRef) pc args frame (.reference (.address r) :: rest) memory =
+    modelStep (some (.memory .isNullRef)) body pc frame (.reference (.address r) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 0) :: rest) frame memory) := by
   memory_step_proof
 

@@ -222,8 +222,8 @@ structure StoredInput where
 /-- Both reads precede the helper call and the only store, so any input/output overlap is valid. -/
 @[cil_code] def storedBody : Method :=
   { profile, locals := [], returnsValue := false,
-    code := [.ldarg 0, .ldarg 1, .memory .load256, .ldarg 2, .memory .load256,
-      .call (Tests.callee 2) {}, .memory .store256, .ret], links := [(5, .direct 0)] }
+    code := [.ldarg 0, .ldarg 1, .ldobj Tests.IntrinsicMethods.vector256UInt64, .ldarg 2, .ldobj Tests.IntrinsicMethods.vector256UInt64,
+      .call (Tests.callee 2) {}, .stobj Tests.IntrinsicMethods.vector256UInt64, .ret], links := [(5, .direct 0)] }
 
 /-- The output becomes the exact arithmetic result, with no separation or initial-output premise. -/
 def storedContract (subtract : Bool) : MethodContract StoredInput Unit where
@@ -357,8 +357,8 @@ private def overlapArguments : List CIL.Safety.Value :=
 
 /-- This incorrect caller overwrites the first input before taking its snapshot. -/
 @[cil_code] private def earlyStoreBody : Method :=
-  { storedBody.withCode ([.ldarg 0, .ldc_i8 0, .call CIL.Extraction.broadcast256Method, .memory
-      .store256] ++ storedBody.code) with
+  { storedBody.withCode ([.ldarg 0, .ldc_i8 0, .call CIL.Extraction.broadcast256Method,
+      .stobj Tests.IntrinsicMethods.vector256UInt64] ++ storedBody.code) with
     links := storedBody.links.map fun entry => (entry.1 + 4, entry.2) }
 
 /-- Observe the output bytes only after the real checked invocation returns. -/

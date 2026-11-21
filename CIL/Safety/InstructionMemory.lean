@@ -122,7 +122,6 @@ def observerCount : CIL.Instruction → Nat
   | .newobj constructor => constructor.parameters.length
   | .calli signature _ => signature.parameters.length + 1
   | .ldftn .. => 0
-  | .memory operation => operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
   | .ldc_i8 _ | .ldnull | .ldstr _ | .dup | .pop | .br _
@@ -1514,7 +1513,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
   -- Memory operations and constants
-  | .memory operation, _ => memoryInstruction operation stack m
   | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)
   | .ldc_i8 bits, _ => return (m, .scalar (.i64 bits) :: stack)
   | .ldnull, _ => return (m, .object .null :: stack)

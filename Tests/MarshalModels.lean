@@ -233,19 +233,19 @@ theorem floating_vectors_refused :
         if bits == 256 then .vector256 else .vector512
       let cases := fixtures element int32Type (bits / 8) 4 (.snapshot shape)
       (cases.zip declarations).all (fun (fixture, sig) =>
-        refused (fixture.raw sig) (.memory fixture.operation)) &&
+        refused (fixture.raw sig) (.call fixture.method {})) &&
       ((fixtures int32Type element 4 (bits / 8) (.scalar 4 false)).zip declarations).all
         (fun (fixture, sig) => fixture.name != "Cast" ||
-          refused (fixture.raw sig) (.memory fixture.operation))) = true := by decide +kernel
+          refused (fixture.raw sig) (.call fixture.method {}))) = true := by decide +kernel
 
 #print axioms floating_vectors_refused
 
 /-- Missing layouts and unknown names both require the call's hole. -/
 theorem unresolved_marshal_sites :
     ((fixtures packet packet 8 8 (.snapshot (.aggregate 8))).zip declarations).all
-      (fun (fixture, sig) => refused (fixture.raw sig) (.memory fixture.operation)) = true ∧
+      (fun (fixture, sig) => refused (fixture.raw sig) (.call fixture.method {})) = true ∧
     scalarSites.all (fun (fixture, sig) =>
-      refused ({ fixture with name := "Unknown" }.raw sig) (.memory fixture.operation)) =
+      refused ({ fixture with name := "Unknown" }.raw sig) (.call fixture.method {})) =
         true := by decide +kernel
 
 #print axioms unresolved_marshal_sites
@@ -284,10 +284,10 @@ theorem marshal_site_emissions :
       let agrees := fun raw emitted =>
         runtimeCatalog.siteAgrees {} .scalar raw emitted none true
       let call := Instruction.call fixture.method {}
-      let operation := Instruction.memory fixture.operation
-      agrees site call && !agrees site operation && !agrees site (.memory .spanReadOnly) &&
+      let wrongPrefix := Instruction.call fixture.method { tail := true }
+      agrees site call && !agrees site wrongPrefix && !agrees site .nop &&
         !agrees (fixture.raw (changed declaration)) call &&
-        !agrees (fixture.raw (changed declaration)) operation &&
+        !agrees (fixture.raw (changed declaration)) wrongPrefix &&
         [0x00, 0x11, 0x30, 0x50, 0x70].all (fun convention =>
           !agrees (fixture.raw { declaration with convention }) call)) = true := by decide +kernel
 
@@ -308,20 +308,20 @@ private def unrelated : RawInstruction :=
 /-- An unrelated call cannot observe array data, construct these spans or transfer their bytes. -/
 theorem unrelated_marshal_emissions :
     scalarSites.all (fun (fixture, _) =>
-      !runtimeCatalog.siteAgrees {} .scalar unrelated (.memory fixture.operation) none true) =
+      !runtimeCatalog.siteAgrees {} .scalar unrelated (.call fixture.method {}) none true) =
       true := by decide +kernel
 
 #print axioms unrelated_marshal_emissions
 
-/-- Each resolved overload runs its lowered memory instruction on every execution state. -/
+/-- Each resolved overload executes its bound memory model on every execution state. -/
 private theorem marshal_model_steps (fixture : Fixture)
     (member : fixture ∈ scalarSites.map Prod.fst) (body : Method) (pc : Nat)
     (environment : body.environment = {}) (link : body.linkAt pc = none)
     (args stack : List Safety.Value) (frame : Safety.Frame) (memory : Safety.Memory) :
     Safety.step body (.call fixture.method {}) pc args frame stack memory =
-      Safety.step body (.memory fixture.operation) pc args frame stack memory := by
+      Safety.modelStep (some (.memory fixture.operation)) body pc frame stack memory := by
   have found := List.all_eq_true.mp marshal_resolutions.1 fixture member
-  apply Safety.step_call_memory body pc args frame memory link _ rfl stack
+  apply Safety.step_call_model body pc args frame memory link _ rfl stack
   rw [environment]
   exact beq_iff_eq.mp found
 

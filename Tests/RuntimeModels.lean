@@ -58,7 +58,7 @@ example : runModel body (.intrinsic (.scalar (.rotateLeft 32)) 2) 3 frame
     intrinsicCall body.profile (.scalar (.rotateLeft 32)) 2 3 frame
       [.scalar (.i32 1), .scalar (.i32 0x80000000)] staticMemory := rfl
 example : runModel body (.memory (.createSpan 4)) 3 frame [start] staticMemory =
-    step body (.memory (.createSpan 4)) 3 [] frame [start] staticMemory := rfl
+    modelStep (some (.memory (.createSpan 4))) body 3 frame [start] staticMemory := rfl
 example : runModel body (.feature .avx2) 3 frame [start] staticMemory =
     featureCall body.profile .avx2 3 frame [start] staticMemory := rfl
 example : runModel body (.constant 8) 3 frame [start] staticMemory =
@@ -91,10 +91,10 @@ example : runModel body (.typedTransfer (.snapshot (.aggregate 16)) true) 3 fram
       Memory.empty)) := rfl
 example : runModel body (.typedTransfer (.snapshot .vector128) false) 3 frame [start]
       heapMemory =
-    step body (.memory .load128) 3 [] frame [start] heapMemory := rfl
+    modelStep (some (.memory .load128)) body 3 frame [start] heapMemory := rfl
 example : runModel body (.typedTransfer (.snapshot .vector128) true) 3 frame
       [.scalar (.v128 5), start] heapMemory =
-    step body (.memory .store128) 3 [] frame [.scalar (.v128 5), start] heapMemory := rfl
+    modelStep (some (.memory .store128)) body 3 frame [.scalar (.v128 5), start] heapMemory := rfl
 
 -- The equalities above compare successes, not two copies of one fault.
 example : (runModel body (.intrinsic (.scalar (.rotateLeft 32)) 2) 3 frame
@@ -135,7 +135,7 @@ example : memoryInstruction (.createSpan 4) [start] heapMemory =
     .error (.unsupported "Typed span outside a whole extracted static field") := rfl
 example : memoryInstruction .spanCreate [.scalar (.i32 4), start] heapMemory =
     .error (.unsupported "Span pointer constructor outside extracted static data") := rfl
-example : step body (.memory .spanCreate) 3 [] frame [.scalar (.i64 4), start] staticMemory =
+example : modelStep (some (.memory .spanCreate)) body 3 frame [.scalar (.i64 4), start] staticMemory =
     .error .invalidState := rfl
 
 -- Guarded by its observer count, a model rejects unspecified bits as its instruction does.
@@ -145,22 +145,21 @@ example : observedCall (CIL.RuntimeModel.referenceCompare .same).observerCount
         [.scalar (.v128Low64 0), start] staticMemory) =
     step body .ceq 3 [] frame [.scalar (.v128Low64 0), start] staticMemory := rfl
 
--- A memory model is its memory instruction, so a memory step equation steps a modelled call:
--- one success and the unspecified-bits fault, each reached through `modelStep_memory`.
+-- The same checked memory model accepts a specified null and rejects unspecified vector bits.
 example : modelStep (some (.memory .isNullRef)) body 3 frame [.reference .null] staticMemory =
     .ok (.next 4 [.scalar (.i32 1)] frame staticMemory) := by
-  rw [modelStep_memory (args := [])]
+  rw [modelStep_memory]
   rfl
 example : modelStep (some (.memory .isNullRef)) body 3 frame [.scalar (.v128Low64 0)]
       staticMemory =
     .error (.unsupported "Instruction observes unspecified vector bits") := by
-  rw [modelStep_memory (args := [])]
-  exact step_unspecified rfl
+  rw [modelStep_memory]
+  rfl
 
 -- Each model observes the operands its emitted instruction observes.
 example : (CIL.RuntimeModel.intrinsic (.scalar (.rotateLeft 32)) 2).observerCount = 0 := rfl
 example : (CIL.RuntimeModel.memory (.createSpan 4)).observerCount =
-    observerCount (.memory (.createSpan 4)) := rfl
+    CIL.MemoryOp.argumentCount (.createSpan 4) := rfl
 example : (CIL.RuntimeModel.feature .avx2).observerCount = 0 := rfl
 example : (CIL.RuntimeModel.constant 8).observerCount = observerCount (.ldc_i4 8) := rfl
 example : (CIL.RuntimeModel.referenceCompare .less).observerCount = observerCount .clt_un := rfl
@@ -244,18 +243,18 @@ private def site (method : MethodRef) (opcode : Nat := 40)
 example : catalog.table = ModelTable.ofEntries entries := rfl
 
 -- A modelled call keeps its method, including when a memory operation implements its semantics.
-example : catalog.siteAgrees {} {} (site bigMul) (.memory (.bigMul64 false)) = false := by
+example : catalog.siteAgrees {} {} (site bigMul) (.newobj bigMul) = false := by
   decide +kernel
-example : catalog.siteAgrees {} {} (site bigMul) (.memory (.divRemOut 64)) = false := by
+example : catalog.siteAgrees {} {} (site bigMul) (.call divRem) = false := by
   decide +kernel
 -- A call keeps its operand; `ManagedCallsValid` decides whether a model or a link enters it.
 example : catalog.siteAgrees {} {} (site bigMul) (.call bigMul) = true := by decide +kernel
-example : catalog.siteAgrees {} {} (site bigMul) (.memory (.bigMul64 true)) = false := by
+example : catalog.siteAgrees {} {} (site bigMul) (.call signedBigMul) = false := by
   decide +kernel
 
 -- An entry reached by name, opcode and owner still refuses a reference its resolve rejects.
 example : catalog.table.find {} .call signedBigMul = none := by decide +kernel
-example : catalog.siteAgrees {} {} (site signedBigMul) (.memory (.bigMul64 false)) = false := by
+example : catalog.siteAgrees {} {} (site signedBigMul) (.call signedBigMul) = false := by
   decide +kernel
 example : catalog.table.find {} .call { spanLength word with hasThis := false } = none := by
   decide +kernel
@@ -296,20 +295,20 @@ example : misfiled.find {} .call spanIsEmpty = none := by decide +kernel
 
 -- An unlinked call without a named family has no resolved instruction.
 example : catalog.siteAgrees {} {} (site divRem) (.call divRem) = false := by decide +kernel
-example : catalog.siteAgrees {} {} (site divRem) (.memory (.divRemOut 64)) = false := by
+example : catalog.siteAgrees {} {} (site divRem) (.call bigMul) = false := by
   decide +kernel
 
 -- The opcode and the owner are part of the key; a generic owner matches by its head.
 example : catalog.table.find {} .newobj bigMul = none := by decide +kernel
 example : catalog.table.find {} .call { bigMul with owner := runtimeType "System.Maths" } =
     none := by decide +kernel
-example : catalog.siteAgrees {} {} (site (spanLength word)) (.memory .spanLength) = false := by
+example : catalog.siteAgrees {} {} (site (spanLength word)) (.call (spanLength (runtimeType "System.Byte"))) = false := by
   decide +kernel
 example : catalog.table.find {} .call
     { spanLength word with owner := runtimeType "System.String" } = none := by decide +kernel
 example : catalog.siteAgrees {} {} (site (spanLength (runtimeType "System.Byte")))
-    (.memory .spanLength) = false := by decide +kernel
-example : catalog.siteAgrees {} {} (site bigMul 115) (.memory (.bigMul64 false)) = false := by
+    (.call (spanLength word)) = false := by decide +kernel
+example : catalog.siteAgrees {} {} (site bigMul 115) (.call bigMul) = false := by
   decide +kernel
 
 /-- A method whose only instruction is `instruction`. -/
@@ -323,7 +322,7 @@ example : ModelsAgree catalog {} {} (method (site bigMul)) [false] [.unadmitted 
   decide +kernel
 example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [false] [.unadmitted 115] := by
   decide +kernel
-example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [true] [.memory (.divRemOut 64)] := by
+example : ¬ ModelsAgree catalog {} {} (method (site bigMul)) [true] [.call divRem] := by
   decide +kernel
 
 -- Two entries for one slot are refused when the table is built.
@@ -631,7 +630,7 @@ example : specializedCall catalog bigMul = some false := by decide +kernel
 example : accepts getElement128Method { getElementSignature "System.Runtime.Intrinsics.Vector128`1"
     with returnType := word } = false := by decide +kernel
 example : catalog.siteAgrees {} {} (site bigMul 40
-    { bigMul.signature 0 with returnType := .parameter 0 }) (.memory (.bigMul64 false)) = false :=
+    { bigMul.signature 0 with returnType := .parameter 0 }) (.call bigMul) = false :=
   by decide +kernel
 
 -- A vector helper site refuses a call with another member or vector width.

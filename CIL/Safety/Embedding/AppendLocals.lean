@@ -1343,17 +1343,6 @@ theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
 
 #print axioms step_appendLocals_newobj
 
-/-- `memory` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_memory (operation : MemoryOp) :
-    StepAppendLocals (.memory operation) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  refine PaddedAgrees.kept ?_ kept
-  unfold step
-  padded_natural
-
-#print axioms step_appendLocals_memory
-
 /-- `ldsfld` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldsfld (field : CIL.Extraction.FieldRef) :
     StepAppendLocals (.ldsfld field) := by
@@ -1693,8 +1682,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       refine PaddedAgrees.kept ?_ kept
       unfold step
       padded_natural
-    case memory operation =>
-      exact step_appendLocals_memory operation
     case ldsfld field => exact step_appendLocals_ldsfld field
     case ldsflda field => exact step_appendLocals_ldsflda field
     case ldtoken operand => exact step_appendLocals_ldtoken operand

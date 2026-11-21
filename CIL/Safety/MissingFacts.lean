@@ -183,9 +183,7 @@ def modelledCallStep? (step : MVarId) : TacticM (Option MVarId) := do
       let link ← Term.exprToSyntax link
       let model ← Term.exprToSyntax model
       let rewrite ← if opcode == ``CIL.CallOpcode.call then
-          `(tactic| first
-            | rewrite [CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl]
-            | rewrite [CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl])
+          `(tactic| rewrite [CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl])
         else
           `(tactic| first
             | rewrite [CIL.Safety.step_newobj_memory _ _ _ _ _ $link $model rfl]

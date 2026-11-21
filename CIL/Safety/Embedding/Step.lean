@@ -479,11 +479,6 @@ theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
 
 #print axioms step_relabel_newobj
 
-theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operation) := by
-  plain_cases
-  simp only [staticInstruction_congr context.statics]
-  lockstep
-
 theorem step_relabel_ldsfld (field : Extraction.FieldRef) : StepRelabel (.ldsfld field) := by
   plain_cases
   rw [staticLoad_congr context.statics]
@@ -859,7 +854,6 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case callvirt method => exact step_relabel_callvirt method
   case newobj constructor => exact step_relabel_newobj constructor
   case cpblk | initblk | ldftn | ldstr => plain_cases; lockstep
-  case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
   case ldobj | stobj | cpobj | sizeof =>
@@ -1469,10 +1463,6 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case callvirt method => exact step_raise_callvirt method
   case newobj constructor => exact step_raise_newobj constructor
   case cpblk | initblk | ldftn | ldstr => plain_cases; raise_lockstep
-  case memory operation =>
-    plain_cases
-    simp only [staticInstruction_congr context.statics]
-    raise_lockstep
   case ldsfld =>
     plain_cases
     rw [staticLoad_congr context.statics]

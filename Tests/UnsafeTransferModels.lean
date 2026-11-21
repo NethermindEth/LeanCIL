@@ -44,28 +44,25 @@ private def decoded (environment : LayoutEnvironment) (profile : FeatureProfile)
       initLocals := true, maxStack := 2, genericParameters := [], code := [raw] }
   (decodeRaw profile environment [] [true] method []).map Method.code
 
-/-- Floating vectors fail resolution and cannot emit their width's transfer at any Unsafe site. -/
+/-- Floating vector transfers reject both the original call and the integer overload of the same width. -/
 theorem rejectedFloatingSites :
-    [("128", TransferKind.snapshot .vector128, Instruction.memory .load128,
-       Instruction.memory .store128, 16),
-     ("256", .snapshot .vector256, .memory .load256, .memory .store256, 32),
-     ("512", .snapshot .vector512, .memory .load512, .memory .store512, 64)].all
-      (fun (width, kind, loadOp, storeOp, alignment) =>
-        ["System.Single", "System.Double"].all fun lane =>
-          let element := TypeExpr.apply
-            (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
-            (.atom runtimeScope lane)
-          [false, true].all fun byref =>
-            [(name!"Read", false, Instruction.memory (.pointerTransfer kind alignment false)),
-             (name!"Write", true, .memory (.pointerTransfer kind alignment true)),
-             (name!"ReadUnaligned", false, loadOp), (name!"WriteUnaligned", true, storeOp)].all
-              fun (name, store, op) =>
-                let raw := site name store element byref 0x10
-                match raw.operand with
-                | .call call => (runtimeModel {} .call call.method).isNone &&
-                  decide (decoded {} .scalar raw = liveHoleAt 0 40) &&
-                  !runtimeCatalog.siteAgrees {} .scalar raw op none true
-                | _ => false) = true := by decide +kernel
+    ["128", "256", "512"].all (fun width =>
+      let vector := fun lane => TypeExpr.apply
+        (.constructor intrinsicsScope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
+        (.atom runtimeScope lane)
+      ["System.Single", "System.Double"].all fun lane =>
+        [false, true].all fun byref =>
+          [(name!"Read", false), (name!"Write", true),
+           (name!"ReadUnaligned", false), (name!"WriteUnaligned", true)].all fun (name, store) =>
+            let raw := site name store (vector lane) byref 0x10
+            let integer := site name store (vector "System.UInt64") byref 0x10
+            match raw.operand, integer.operand with
+            | .call call, .call substitute =>
+              (runtimeModel {} .call call.method).isNone &&
+              decide (decoded {} .scalar raw = liveHoleAt 0 40) &&
+              !runtimeCatalog.siteAgrees {} .scalar raw (.call call.method {}) none true &&
+              !runtimeCatalog.siteAgrees {} .scalar raw (.call substitute.method {}) none true
+            | _, _ => false) = true := by decide +kernel
 
 #print axioms rejectedFloatingSites
 
@@ -229,10 +226,8 @@ theorem reservedEmissions :
     let control := site name!"Read" false (.atom runtimeScope "System.UInt64") false 0x10
     let other := site name!"Unknown" false (.atom runtimeScope "System.UInt64") false 0x10
     let operations := [Instruction.ldind .i8, .stind .i8,
-       .ldobj (.aggregate "Fixture::Packet" 0),
-       .stobj (.aggregate "Fixture::Packet" 0), .memory .load128, .memory .load256, .memory .load512,
-      .memory .store128, .memory .store256, .memory .store512,
-      .memory (.pointerTransfer (.scalar 8 false) 8 false)]
+      .ldobj (.aggregate "Fixture::Packet" 0), .stobj (.aggregate "Fixture::Packet" 0)] ++
+      ["128", "256", "512"].flatMap (fun width => [.ldobj (vector width), .stobj (vector width)])
     (match control.operand with
      | .call call => decide (decoded {} .scalar control = .ok [.call call.method {}])
      | _ => false) = true ∧ decoded {} .scalar other = liveHoleAt 0 40 ∧
@@ -246,13 +241,13 @@ theorem reservedEmissions :
 
 /-- A non-call instruction cannot claim the checked pointer transfer of a runtime model. -/
 theorem nonCallTransferRefused :
-    let raw : RawMethod := {
-      token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
-      attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
-      initLocals := true, maxStack := 1, genericParameters := [], code := [⟨0, 0, .none⟩] }
-    UnsafeCallsValid raw [true] [.nop] ∧
-      ¬ UnsafeCallsValid raw [true] [.memory (.pointerTransfer (.scalar 8 false) 8 false)] := by
-  decide +kernel
+    let read := site name!"Read" false (.atom runtimeScope "System.UInt64") false 0x10
+    let nop : RawInstruction := ⟨0, 0, .none⟩
+    (match read.operand with
+    | .call call => decide (decoded {} .scalar read = .ok [.call call.method {}]) &&
+      decide (decoded {} .scalar nop = .ok [.nop]) &&
+      !(valueEncodingMatches none nop (.call call.method {}))
+    | _ => false) = true := by decide +kernel
 
 #print axioms nonCallTransferRefused
 
@@ -262,13 +257,13 @@ theorem unresolvedTransfers :
     let control := site name!"ReadUnaligned" false byte false 0x10
     (match control.operand with
      | .call call => decide (decoded {} .scalar control = .ok [.call call.method {}]) &&
-         !runtimeCatalog.siteAgrees {} .scalar control (.memory .bitcastByteBool) none true
+         !runtimeCatalog.siteAgrees {} .scalar control (.conv_u1) none true
      | _ => false) = true ∧
       [TypeExpr.pointer .void, .apply (.constructor runtimeScope "System.Span`1") byte].all
         (fun element =>
           let raw := site name!"ReadUnaligned" false element false 0x10
           decide (decoded {} .scalar raw = liveHoleAt 0 40) &&
-            !runtimeCatalog.siteAgrees {} .scalar raw (.memory .bitcastByteBool) none true &&
+            !runtimeCatalog.siteAgrees {} .scalar raw (.conv_u1) none true &&
             runtimeCatalog.siteAgrees {} .scalar raw (.unadmitted 40) none false) = true := by
   decide +kernel
 

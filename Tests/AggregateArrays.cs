@@ -120,18 +120,24 @@ foreach (var (name, before, after, theorem) in new[]
     if (!source.Contains(before, StringComparison.Ordinal)) throw new Exception("Missing array mutation: " + name);
     Reject(name, theorem, source.Replace(before, after, StringComparison.Ordinal));
 }
-// A span over an array is a kept call whose runtime model forms the view from the checked layout. A view forged at
-// the decoded call, pc 1, is refused by the scalar flow when it is writable and by the model agreement when narrower.
-var pairElement = ".aggregate " + JsonSerializer.Serialize(pairIdentity);
-foreach (var (name, view, theorem) in new[]
+// The retained conversion must preserve both the writability and the width of the array element.
+foreach (var name in new[] { "ReadOnlyView", "View" })
 {
-    ("ReadOnlyView", $".arraySpan ({pairElement} 16) true .whole", "method0_scalars_validated"),
-    ("View", $".arraySpan ({pairElement} 8) true .whole", "method0_models_validated")
-})
-{
+    var element = name == "ReadOnlyView"
+        ? $".aggregate {JsonSerializer.Serialize(pairIdentity)} 0"
+        : ".atom Extraction.runtimeScope \"System.UInt64\"";
+    var change = $$"""
+        fun instruction => match instruction with
+        | .call target prefixes =>
+          let element : Extraction.TypeExpr := {{element}}
+          let owner := Extraction.TypeExpr.apply (.constructor Extraction.runtimeScope "System.Span\u00601") element
+          .call { target with owner, returnType := owner, parameters := [.array element] } prefixes
+        | other => other
+        """;
     var original = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
-    var forged = ForgeDecodedInstruction(original, 0, 1, $"fun _ => .memory ({view})");
-    Reject(name, theorem, NarrowEvidence(forged, theorem));
+    var forged = ForgeDecodedInstruction(original, 0, 1, change);
+    const string agreement = "method0_models_validated";
+    Reject(name, agreement, NarrowEvidence(forged, agreement));
 }
 evidence.Check();
 rejected.Check();

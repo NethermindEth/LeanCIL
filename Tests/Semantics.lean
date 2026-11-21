@@ -448,53 +448,64 @@ theorem nested_null :
       .error (.memory .nullDereference .null 0) := rfl
 
 theorem null_reference_pushed :
-    instruction (.memory .nullRef) [.scalar (.i32 7)] Memory.empty =
+    memoryInstruction .nullRef [.scalar (.i32 7)] Memory.empty =
       .ok (Memory.empty, [.reference .null, .scalar (.i32 7)]) := rfl
 
 theorem null_reference_detected :
-    instruction (.memory .isNullRef) [.reference .null] Memory.empty =
+    memoryInstruction .isNullRef [.reference .null] Memory.empty =
       .ok (Memory.empty, [.scalar (.i32 1)]) := rfl
 
 theorem live_reference_not_null :
-    instruction (.memory .isNullRef) [Tests.reference] Tests.caller =
+    memoryInstruction .isNullRef [Tests.reference] Tests.caller =
       .ok (Tests.caller, [.scalar (.i32 0)]) := rfl
 
 -- Testing performs no access, so an expired reference is still not null.
 theorem expired_reference_not_null :
-    instruction (.memory .isNullRef) [Tests.reference] (expire Tests.caller 0) =
+    memoryInstruction .isNullRef [Tests.reference] (expire Tests.caller 0) =
       .ok (expire Tests.caller 0, [.scalar (.i32 0)]) := rfl
 
 theorem null_test_requires_reference :
-    instruction (.memory .isNullRef) [.scalar (.i64 0)] Memory.empty = .error .invalidState := rfl
+    memoryInstruction .isNullRef [.scalar (.i64 0)] Memory.empty = .error .invalidState := rfl
 
 -- Every load and store through `NullRef` faults as a null dereference.
 theorem null_reference_accesses_fault :
-    instructions [.memory .nullRef, .ldind .i8] [] Memory.empty =
+    (do
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
+      instructions [.ldind .i8] stack memory) =
       .error (.memory .nullDereference .null 8) ∧
-    instructions [.memory .nullRef, .ldind .i4] [] Memory.empty =
+    (do
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
+      instructions [.ldind .i4] stack memory) =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .ldc_i8 7, .stind .i8] [] Memory.empty =
-      .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .ldc_i4 7, .stind .i4] [] Memory.empty =
+    (do
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
+      instructions [.ldc_i8 7, .stind .i8] stack memory) =
       .error (.memory .nullDereference .null 0) ∧
     (do
-      let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
+      instructions [.ldc_i4 7, .stind .i4] stack memory) =
+      .error (.memory .nullDereference .null 0) ∧
+    (do
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
       transferObject (.aggregate 32) false stack memory) =
       .error (.memory .nullDereference .null 32) ∧
     (do
-      let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
       initializeBytes 32 stack memory) =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .memory .load256] [] Memory.empty =
+    (do
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
+      memoryInstruction .load256 stack memory) =
       .error (.memory .nullDereference .null 32) ∧
     (do
-      let (memory, stack) ← instruction (.memory .nullRef) [] Memory.empty
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
       loadValueField 8 8 false stack memory) =
       .error (.memory .nullDereference .null 0) ∧
     structFieldAddress 8 [.reference .null] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     (do
-      let (memory, stack) ← instructions [.memory .nullRef, .ldc_i8 7] [] Memory.empty
+      let (memory, stack) ← memoryInstruction .nullRef [] Memory.empty
+      let (memory, stack) ← instruction (.ldc_i8 7) stack memory
       storeValueField 8 8 stack memory) =
       .error (.memory .nullDereference .null 0) :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩

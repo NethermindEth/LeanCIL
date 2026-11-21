@@ -63,5 +63,5 @@ same module.
 | Extract the successful result of a bind | Expanding the bind's impossible error branch | included above |
 | `dsimp` to unfold `observerCount` in `step_observers`, where definitional equality suffices | `simp`, which builds congruence proofs over the dispatcher | `Step.lean` 26% to 29% slower |
 | Simplify the observer guard in the goal only; the hypothesis from `observer_ok` or `observer_thrown` does not contain it | Simplifying the normalized hypothesis as well | `Step.lean` 6% to 10% slower |
-| Rewrite with `step_memory_eq` in `stepMemory` | Unfolding the instruction dispatcher | 5,451 heartbeats against 602 |
+| Rewrite a memory step with its dispatch equation | Unfolding the instruction dispatcher | 5,451 heartbeats against 602 |
 | Rewrite the outer guard directly and try the write correspondence before the read correspondence in `instructionResult` | The reverse order, which reduces a write while matching a read lemma that cannot apply | 264,632 heartbeats against 227,277 |

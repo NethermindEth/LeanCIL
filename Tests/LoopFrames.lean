@@ -1,4 +1,5 @@
 import CIL.MethodIdentity
+import Tests.Support.SpanMethods
 import CIL.Safety.LoopScaffold
 import CIL.Safety.LoopVC
 import CIL.Verification
@@ -398,9 +399,11 @@ open CIL (W64)
   returnsValue := true, locals := [.i64 0], localKinds := [.word64],
   parameterHomes := [(0, .span 8 false)]
   code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarg 0, .ldc_i4 0,
-    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
-    .memory (.spanSlice false), .starg 0, .ldarg 0, .memory .spanLength, .brtrue 4,
+    .call (SpanMethods.item SpanMethods.uint64), .ldind .i8, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
+    .call (SpanMethods.slice SpanMethods.uint64 false), .starg 0, .ldarg 0, .call (SpanMethods.length SpanMethods.uint64), .brtrue 4,
     .ldloc 0, .ret] }
+
+cil_runtime_models spanSum
 
 /-- The program of `spanSum` alone. -/
 @[cil_code] def spanSumProgram : CIL.Program := [spanSum]

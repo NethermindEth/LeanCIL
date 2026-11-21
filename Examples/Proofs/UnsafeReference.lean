@@ -16,7 +16,7 @@ theorem reinterpret_preserves (body : CIL.Method) (method : CIL.Extraction.Metho
     (formed : form memory reference = .ok reference) :
     step body (.call method {}) pc args frame (.reference (.address reference) :: rest) memory =
       .ok (.next (pc + 1) (.reference (.address reference) :: rest) frame memory) := by
-  rw [step_call_memory (link := unlinked) (found := model) (direct := rfl)]
+  rw [step_call_model (link := unlinked) (found := model) (direct := rfl)]
   cil_checked_step [formed]
 
 /-- The compiled cast preserves arbitrary caller memory and the precise reference. -/

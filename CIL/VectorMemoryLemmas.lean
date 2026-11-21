@@ -23,15 +23,6 @@ namespace CIL
       some (.static bytes (size * offset)) := by
   simp [CIL.unsafeAdd, ← Int.natCast_mul]
 
-@[simp ↓] theorem eval_add_static_vector (m : CIL.Memory) (bytes : List (BitVec 8))
-    (index : CIL.W32) (rest : List CIL.Value) :
-    CIL.evalMemory (.add 32 false)
-      (.i64 (index.zeroExtend 64) :: .ref (.static bytes 0) :: rest) m =
-      some (m, .ref (.static bytes (32 * index.toNat)) :: rest) := by
-  have bound : index.toNat < 2^64 := by have hi := index.isLt; omega
-  simp [CIL.evalMemory, CIL.offsetValue, BitVec.zeroExtend, BitVec.toNat_setWidth,
-    Nat.mod_eq_of_lt bound]
-
 /-- Each byte inside a written range holds the matching little-endian byte of the value. -/
 theorem writeBytes_inside (m : Memory) (base word count address : Nat)
     (h : base ≤ address ∧ address < base + count) :

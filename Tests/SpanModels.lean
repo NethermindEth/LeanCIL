@@ -171,14 +171,14 @@ theorem closedRefusals :
 #print axioms closedRefusals
 
 /-- A live site requires the kept call and the open declaration. Wrong conventions and a
-    forged declaration cannot retain the call or substitute its lowered memory operation. -/
+    forged declaration reject both the original call and one with an added tail prefix. -/
 theorem liveAgreement :
     ((rows int32 4).all fun row =>
       let accepts := fun sig op =>
         runtimeCatalog.siteAgrees {} .scalar (row.raw sig) op none true
       let call := Instruction.call row.method {}
-      accepts row.declared call && !accepts row.declared (.memory row.operation) &&
-        !accepts row.forged call && !accepts row.forged (.memory row.operation) &&
+      accepts row.declared call && !accepts row.declared (.call row.method { tail := true }) &&
+        !accepts row.forged call && !accepts row.forged (.call row.method { tail := true }) &&
         ([0, 0x20, 1, 0x10, 0x11, 0x30, 0x40, 0x50, 0x60, 0x70].all fun header =>
           header == row.declared.convention ||
             !accepts { row.declared with convention := header } call)) := by
@@ -210,15 +210,15 @@ theorem operandRefusals :
 
 #print axioms operandRefusals
 
-/-- Every resolved span call has its memory instruction's exact frame, stack, memory and fault
+/-- Every resolved span call has its runtime model's exact frame, stack, memory and fault
     for all receiver values, including those from argument homes, local addresses and byrefs. -/
 theorem stepOfSpanCall (body : Method) (pc : Nat) (args : List Safety.Value) (frame : Safety.Frame)
     (memory : Safety.Memory) (stack : List Safety.Value) (row : Overload)
     (link : body.linkAt pc = none)
     (found : runtimeModel body.environment .call row.method = some (.memory row.operation)) :
     Safety.step body (.call row.method {}) pc args frame stack memory =
-      Safety.step body (.memory row.operation) pc args frame stack memory :=
-  Safety.step_call_memory body pc args frame memory link found rfl stack
+      Safety.modelStep (some (.memory row.operation)) body pc frame stack memory :=
+  Safety.step_call_model body pc args frame memory link found rfl stack
 
 #print axioms stepOfSpanCall
 

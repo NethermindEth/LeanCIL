@@ -144,8 +144,6 @@ dsimproc [cil_step, cil_guard] reduceArgumentCount (CIL.Extraction.MethodRef.arg
     match count.rawNatLit? <|> count.nat? with
     | some value => return .done (mkNatLit value)
     | none => return .continue
-@[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
-    observerCount (.memory op) = op.argumentCount := rfl
 @[cil_guard] theorem guard_throw (exception : ExceptionType) :
     observerCount (.throw exception) = 0 := rfl
 @[cil_guard] theorem guard_unadmitted (opcode : Nat) :

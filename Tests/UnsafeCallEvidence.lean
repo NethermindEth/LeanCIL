@@ -48,20 +48,12 @@ example : ¬ UnsafeCallsValid (raw call) [true] [.pop] := by decide +kernel
 example : ¬ UnsafeCallsValid (raw call) [] [.call call.method {}] := by decide +kernel
 example : ¬ UnsafeCallsValid (raw call) [true] [] := by decide +kernel
 
--- Only the selected model may perform raw byte displacement.
-example : ¬ UnsafeCallsValid (raw call) [true] [.memory .byteOffset] := by decide +kernel
-example : ¬ UnsafeCallsValid nonCall [true] [.memory .byteOffset] := by decide +kernel
-
--- A helper operation cannot replace an unrelated instruction.
-example : ¬ UnsafeCallsValid nonCall [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid nonCall [true] [.memory .isNullRef] := by decide +kernel
-example : UnsafeCallsValid nonCall [true] [.pop] := by decide +kernel
--- A decoded null object cannot be replaced by an Unsafe managed null reference.
-example : UnsafeCallsValid { nonCall with code := [⟨0, 20, .none⟩] } [true] [.ldnull] := by decide
-example : ¬ UnsafeCallsValid { nonCall with code := [⟨0, 20, .none⟩] } [true]
-    [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid { nonCall with code := [⟨0, 20, .call call⟩] } [true]
-    [.memory .nullRef] := by decide +kernel
+-- A real SkipInit call and ordinary stack operations retain distinct opcode and metadata evidence.
+example : Instruction.ofRaw? none ⟨0, 38, .none⟩ = some .pop ∧
+    valueEncodingMatches none ⟨0, 38, .none⟩ (.call call.method {}) = false ∧
+    Instruction.ofRaw? none ⟨0, 20, .none⟩ = some .ldnull ∧
+    valueEncodingMatches none ⟨0, 20, .none⟩ (.call call.method {}) = false ∧
+    Instruction.ofRaw? none ⟨0, 20, .call call⟩ = none := by decide +kernel
 -- Unreachable sites are emitted as holes and are not bound.
 example : UnsafeCallsValid (raw call) [false] [.unadmitted 0x28] := by decide +kernel
 

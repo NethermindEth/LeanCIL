@@ -43,7 +43,7 @@ theorem byteOffset_emission :
     let method := byteOffset native
     let site := byteSite method
     decoded site = .ok [.call method {}] ∧
-      runtimeCatalog.siteAgrees {} .scalar (operand site) (.memory .byteOffset) none true =
+      runtimeCatalog.siteAgrees {} .scalar (operand site) (.call method { tail := true }) none true =
         false ∧
       runtimeCatalog.siteAgrees {} .scalar (operand site) .sub none true = false := by
   decide +kernel
@@ -100,12 +100,12 @@ theorem byteOffset_sized :
 
 #print axioms byteOffset_sized
 
-/-- A retained ByteOffset computes the same checked displacement as the memory instruction. -/
+/-- A retained ByteOffset runs the checked displacement model. -/
 theorem byteOffset_step (body : Method) (pc : Nat) (args stack : List Safety.Value)
     (frame : Safety.Frame) (memory : Safety.Memory) (link : body.linkAt pc = none) :
     step body (.call (byteOffset native) {}) pc args frame stack memory =
-      step body (.memory .byteOffset) pc args frame stack memory := by
-  exact step_call_memory body pc args frame memory link (by rfl) rfl stack
+      modelStep (some (.memory .byteOffset)) body pc frame stack memory := by
+  exact step_call_model body pc args frame memory link (by rfl) rfl stack
 
 #print axioms byteOffset_step
 
@@ -191,35 +191,29 @@ private def memberSite (method declared : MethodRef) : CallSite :=
     typeArguments := method.methodArguments, parameterCount := 2, returnsValue := true }
 
 /-- Each closed overload and its generic declaration occupy the same position in the fixture. -/
-private def offsetSites (element : TypeExpr) (width : Nat) : List (CallSite × RuntimeModel) :=
+private def offsetSites (element : TypeExpr) (width : Nat) : List CallSite :=
   ((overloads element width).zip (overloads (.parameter 0) width)).filterMap
-    fun ((method, model), (declared, _)) =>
-      if method.name == name!"ByteOffset" then none else some (memberSite method declared, model)
-
-/-- The stack operation executed by a retained displacement call. -/
-private def loweredOffset : RuntimeModel → Instruction
-  | .memory operation => .memory operation
-  | .referenceSubtract => .sub
-  | _ => .nop
+    fun ((method, _), (declared, _)) =>
+      if method.name == name!"ByteOffset" then none else some (memberSite method declared)
 
 /-- All twelve declarations retain their exact closed call and reject competing emissions. -/
 theorem displacement_emissions :
-    (offsetSites int 4).all (fun (site, model) =>
+    (offsetSites int 4).all (fun site =>
       decide (decoded site = .ok [.call site.method {}]) &&
-      !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none true &&
+      !runtimeCatalog.siteAgrees {} .scalar (operand site) .sub none true &&
       !runtimeCatalog.siteAgrees {} .scalar (operand site) .add none true) = true := by
   decide +kernel
 
 #print axioms displacement_emissions
 
-/-- An altered operand produces the call opcode's hole and refuses the former live lowering. -/
-private def refusesOffset (site : CallSite) (model : RuntimeModel) : Bool :=
+/-- An altered operand produces the call opcode’s hole and refuses its live call. -/
+private def refusesOffset (site : CallSite) : Bool :=
   decide (decoded site = liveHoleAt 0 40) &&
-    !runtimeCatalog.siteAgrees {} .scalar (operand site) (loweredOffset model) none true
+    !runtimeCatalog.siteAgrees {} .scalar (operand site) (.call site.method {}) none true
 
 /-- Forging the open signature, convention, identity or receiver invalidates a resolving site. -/
 theorem displacement_binding :
-    (offsetSites int 4).all (fun (site, model) =>
+    (offsetSites int 4).all (fun site =>
       let method := site.method
       let closedAddress := method.returnType
       let forged := if closedAddress == .pointer .void then
@@ -231,18 +225,18 @@ theorem displacement_binding :
         { site with target := .external "Fixture" }]
       let conventions := [0x00, 0x11, 0x30, 0x50, 0x70].map fun convention =>
         { site with declared.convention := convention }
-      (changed ++ conventions).all (refusesOffset · model)) = true := by decide +kernel
+      (changed ++ conventions).all refusesOffset) = true := by decide +kernel
 
 #print axioms displacement_binding
 
 /-- Substituting another genuine overload's operand for the selected overload produces a hole. -/
 theorem displacement_crossed_overloads :
     [name!"Add", name!"Subtract", name!"AddByteOffset", name!"SubtractByteOffset"].all (fun name =>
-      let family := (offsetSites int 4).filter fun (site, _) => site.method.name == name
+      let family := (offsetSites int 4).filter fun site => site.method.name == name
       match family with
-      | (one, model) :: (other, _) :: _ =>
-        refusesOffset { one with target := other.target } model &&
-          refusesOffset { one with declared := other.declared } model
+      | one :: other :: _ =>
+        refusesOffset { one with target := other.target } &&
+          refusesOffset { one with declared := other.declared }
       | _ => false) = true := by decide +kernel
 
 #print axioms displacement_crossed_overloads
@@ -250,7 +244,7 @@ theorem displacement_crossed_overloads :
 /-- Replacing the element by a span leaves only the hole, including at an owned, linked call. -/
 theorem span_displacements_refused :
     let span := TypeExpr.apply (.constructor runtimeScope "System.Span`1") int
-    (offsetSites span 0).all (fun (site, model) => refusesOffset site model &&
+    (offsetSites span 0).all (fun site => refusesOffset site &&
       !runtimeCatalog.siteAgrees {} .scalar (operand site) (.call site.method {})
         (some (.direct 0)) true) = true := by decide +kernel
 
@@ -261,9 +255,9 @@ theorem unsized_displacement_code :
     let excluded : List TypeExpr := [.pointer int, .byref int, .array int, .void,
       .atom runtimeScope "System.Single", .object runtimeScope "System.String",
       .aggregate "Fixture::Absent" 0]
-    excluded.all (fun element => (offsetSites element 0).all fun (site, model) =>
-      refusesOffset site model) = true ∧
-      (offsetSites (.parameter 0) 0).all (fun (site, _) =>
+    excluded.all (fun element => (offsetSites element 0).all fun site =>
+      refusesOffset site) = true ∧
+      (offsetSites (.parameter 0) 0).all (fun site =>
         decide (decoded site = .error .instantiation)) = true := by
   decide +kernel
 
@@ -290,8 +284,8 @@ theorem memoryOverloadStep (method : MethodRef) (op : MemoryOp)
     (member : (method, RuntimeModel.memory op) ∈ overloads int 4) (frame : Safety.Frame)
     (stack : List CIL.Safety.Value) (memory : Safety.Memory) :
     step body (.call method {}) 0 [] frame stack memory =
-      step body (.memory op) 0 [] frame stack memory := by
-  apply step_call_memory (link := rfl) (direct := rfl)
+      modelStep (some (.memory op)) body 0 frame stack memory := by
+  apply step_call_model (link := rfl) (direct := rfl)
   exact beq_iff_eq.mp (List.all_eq_true.mp (show resolves {} int 4 from by decide +kernel)
     (method, RuntimeModel.memory op) member)
 

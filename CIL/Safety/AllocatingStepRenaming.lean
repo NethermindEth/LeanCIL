@@ -28,21 +28,20 @@ theorem staticInstruction_body (sourceBody targetBody : CIL.Method) (pc : Nat)
 
 /-- Checked memory steps, span constructors over static storage included, extend the map only
     when their actual operation allocates. -/
-theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : AllocationRenaming}
+theorem Memory.Renamed.memoryModelStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceFormed : source.WellFormed) (sourceBody targetBody : CIL.Method)
-    (operation : CIL.MemoryOp) (pc : Nat) (arguments stack : List Value)
+    (operation : CIL.MemoryOp) (pc : Nat) (stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
-      (step sourceBody (.memory operation) pc arguments sourceFrame stack source)) :
+      (modelStep (some (.memory operation)) sourceBody pc sourceFrame stack source)) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
-        (step sourceBody (.memory operation) pc arguments sourceFrame stack source)
-        (step targetBody (.memory operation) pc (arguments.map mapping.value)
-          targetFrame (stack.map (indices.value mapping)) target) := by
-  simp only [step_memory_eq, indices.unspecifiedOperands mapping] at observable ⊢
+        (modelStep (some (.memory operation)) sourceBody pc sourceFrame stack source)
+        (modelStep (some (.memory operation)) targetBody pc targetFrame (stack.map (indices.value mapping)) target) := by
+  simp only [modelStep_memory, indices.unspecifiedOperands mapping] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -60,7 +59,7 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
     rcases second with ⟨targetAfter, targetValues⟩
     rcases result with ⟨memories, rfl⟩
     exact .ok (.next memories (frames.extend extension (fun _ _ scope => scope)))
-#print axioms Memory.Renamed.stepMemory
+#print axioms Memory.Renamed.memoryModelStep
 
 /-- A typed element access after its operand check touches the mapped element and keeps the
     allocation map: both bodies give the element the same shape. -/

@@ -1,4 +1,5 @@
 import CIL.Safety.LoopScaffold
+import Tests.Support.SpanMethods
 import CIL.Safety.LoopVC
 import CIL.Safety.Execution
 import CIL.StructuralLabels
@@ -381,9 +382,11 @@ open CIL.Safety
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
   code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarg 0, .ldc_i4 0,
-    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
-    .memory (.spanSlice false), .starg 0, .ldarg 0, .memory .spanLength, .brtrue 4,
+    .call (SpanMethods.item SpanMethods.uint64), .ldind .i8, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
+    .call (SpanMethods.slice SpanMethods.uint64 false), .starg 0, .ldarg 0, .call (SpanMethods.length SpanMethods.uint64), .brtrue 4,
     .ldloc 0, .ret] }
+
+cil_runtime_models sum
 
 /-- The program holding only `sum`. -/
 @[cil_code] def program : CIL.Program := [sum]
@@ -505,9 +508,11 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
   code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarga 0, .ldc_i4 0,
-    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarga 0, .ldc_i4 1,
-    .memory (.spanSlice false), .starg 0, .ldarga 0, .memory .spanLength, .brtrue 4,
+    .call (SpanMethods.item SpanMethods.uint64), .ldind .i8, .add, .stloc 0, .ldarga 0, .ldc_i4 1,
+    .call (SpanMethods.slice SpanMethods.uint64 false), .starg 0, .ldarga 0, .call (SpanMethods.length SpanMethods.uint64), .brtrue 4,
     .ldloc 0, .ret] }
+
+cil_runtime_models sumByAddress
 
 /-- The program holding only `sumByAddress`. -/
 @[cil_code] def addressProgram : CIL.Program := [sumByAddress]
@@ -553,7 +558,9 @@ theorem sum_by_address_returns (memory : Memory) (view : SpanView) (values : Lis
 
 /-- `return span.Length;` read straight from the argument, with no parameter home. -/
 @[cil_code] def length : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.ldarg 0, .memory .spanLength, .ret] }
+  { locals := [], returnsValue := true, code := [.ldarg 0, .call (SpanMethods.length SpanMethods.uint64), .ret] }
+
+cil_runtime_models length
 
 /-- The program holding only `length`. -/
 @[cil_code] def lengthProgram : CIL.Program := [length]

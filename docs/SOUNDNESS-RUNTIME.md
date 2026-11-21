@@ -143,7 +143,7 @@ The runtime table binds ten static `System.Runtime.InteropServices.MemoryMarshal
 The open declaration distinguishes writable and readonly spans and fixes the positions of
 the method parameters. The closed reference fixes their types. `transferKind?` reads the
 scalar width and signedness, integer-vector width or aggregate size from the layout environment.
-A resolved call runs the corresponding memory instruction via `step_call_memory`.
+`step_call_model` executes the memory operation bound to the resolved method.
 
 The decoder reads the checked fold role before resolving a call. An exact runtime
 `System.Type` comparison supplies its Boolean result. The constructor of an allowlisted

@@ -82,7 +82,7 @@ var requests = cases.Select(item =>
     {
         var (pc, operation, forgery) = item.Name == "IsNull"
             ? (0, ".nullRef", ".ldc_i8 0")
-            : (1, ".isNullRef", ".memory .asRef");
+            : (1, ".isNullRef", ".ldnull");
         File.AppendAllText(proof, $$"""
 
             namespace ExampleProof
@@ -96,7 +96,9 @@ var requests = cases.Select(item =>
                 And ((match kept with
                  | .call method _ => runtimeModel Extracted.environment .call method
                  | _ => none) = some (.memory {{operation}}))
-                  (check kept && !check (.memory {{operation}}) && !check ({{forgery}})) := by
+                  (check kept && !check ({{forgery}}) && (match kept with
+                   | .call method _ => !check (.call method { tail := true })
+                   | _ => false)) := by
               decide +kernel
             #print axioms nullHelperCall
             end ExampleProof

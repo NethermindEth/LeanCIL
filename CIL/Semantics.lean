@@ -227,9 +227,6 @@ def step (op : Instruction) (returns : Bool)
     return .next (if b ≤ a then target else pc + 1) rest memory
   | .bge_un target, .i64 b :: .i64 a :: rest =>
     return .next (if b ≤ a then target else pc + 1) rest memory
-  | .memory operation, _ =>
-    let (updated, values) ← evalMemory operation stack memory
-    return .next (pc + 1) values updated
   -- Return.
   | .ret, _ => returnFromStack narrow returns stack memory
   | _, _ => none

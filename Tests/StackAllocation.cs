@@ -93,10 +93,10 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
             if (!passed) throw new Exception($"Stack span model fact {operation}: {checkedFact.Output}");
             Console.WriteLine($"PASS stack span model fact {(accepted ? "accepted" : "refused")}: {operation}");
         }
-        // A modelled construction keeps its call, so its own operation in the call's place is refused.
+        // The stack span constructor must retain its original opcode.
         var forgedSpan = Path.Combine(root, "forged-span.lean");
         File.WriteAllText(forgedSpan,
-            ForgeModelEmission(source, constructorPc, ".memory (.spanFromReference 4 true)"));
+            ForgeConstructorOpcode(source, constructorPc));
         var rejectedSpan = Execute(["lake", "env", "lean", forgedSpan], cwd: FixturePackage());
         if (rejectedSpan.Code == 0 || !rejectedSpan.Output.Contains("RuntimeModelsAgree", StringComparison.Ordinal))
             throw new Exception($"Substituted stack span instruction was not refused: {rejectedSpan.Output}");

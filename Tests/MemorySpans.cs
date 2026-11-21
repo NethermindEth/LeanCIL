@@ -367,10 +367,10 @@ foreach (var (name, signature, element, width, writable, range) in new[]
         }
         if (name == "ArrayConstructor")
         {
-            // A modelled construction keeps its call, so its own operation in the call's place is refused.
+            // The constructor operand must retain its original opcode.
             var substituted = Path.Combine(root, $"Forged-{name}-substituted.lean");
-            File.WriteAllText(substituted, ForgeModelEmission(source, site, model));
-            rejected.Add(substituted, $"PASS substituted memory instruction refused: {name}", "RuntimeModelsAgree",
+            File.WriteAllText(substituted, ForgeConstructorOpcode(source, site));
+            rejected.Add(substituted, $"PASS substituted constructor opcode refused: {name}", "RuntimeModelsAgree",
                 "is false");
         }
     }

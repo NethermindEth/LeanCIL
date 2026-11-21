@@ -412,10 +412,10 @@ theorem scalar_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame
   · rfl
 
 open CIL.Safety in
-theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
+theorem bitcast_fact_stack (body : CIL.Method) (frame : Frame)
     (memory : Memory) (bytes : List (BitVec 8)) (value : BitVec 256)
     (casted : bitcastValue (.aggregate 32) .vector256 (.aggregate bytes) = .ok (.v256 value)) :
-    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+    ∃ stack, modelStep (some (.memory (.bitcastValue (.aggregate 32) .vector256))) body 0 frame
       [.scalar (.aggregate bytes)] memory = .ok (.next 1 stack frame memory) ∧
       stack = [.scalar (.v256 value)] := by
   refine ⟨?_, ?_, ?_⟩
@@ -433,7 +433,7 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
 
 @[cil_code] def permuteStoreMethod : CIL.Method := {
   profile := { architecture := .x64, avx2 := true }
-  code := [.call Tests.IntrinsicMethods.permute, .memory .store256, .ret]
+  code := [.call Tests.IntrinsicMethods.permute, .stobj Tests.IntrinsicMethods.vector256UInt64, .ret]
   locals := [], returnsValue := false }
 
 @[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]
@@ -452,11 +452,11 @@ theorem permute_then_store (a b c d : CIL.W64) (destination : Reference) (memory
 
 open CIL.Safety in
 /-- A `memoryInstruction` fact closes a single store step without `staticInstruction` passed. -/
-theorem store_from_instruction_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+theorem store_from_instruction_fact (body : CIL.Method) (frame : Frame)
     (bits : BitVec 256) (destination : Reference) (memory final : Memory)
     (stored : memoryInstruction .store256
       [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
-    step body (.memory .store256) 2 args frame
+    modelStep (some (.memory .store256)) body 2 frame
       [.scalar (.v256 bits), .reference (.address destination)] memory =
       .ok (.next 3 [] frame final) := by
   cil_checked_step [stored]
@@ -486,11 +486,11 @@ info: 'Tests.Automation.duplicate_from_instruction_fact' depends on axioms: [pro
 open CIL.Safety in
 /-- A fact one level up, on `staticInstruction`, still closes the store: the retry tries it
     before unfolding `staticInstruction`, which would rewrite past it. -/
-theorem store_from_static_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+theorem store_from_static_fact (body : CIL.Method) (frame : Frame)
     (bits : BitVec 256) (destination : Reference) (memory final : Memory)
     (stored : staticInstruction body 2 .store256
       [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
-    step body (.memory .store256) 2 args frame
+    modelStep (some (.memory .store256)) body 2 frame
       [.scalar (.v256 bits), .reference (.address destination)] memory =
       .ok (.next 3 [] frame final) := by
   cil_checked_step [stored]
@@ -517,7 +517,7 @@ info: 'Tests.Automation.static_load_from_fact' depends on axioms: [propext, Quot
 
 /-- Two vector stores; reached through a lookup hypothesis, so facts can name the body. -/
 def twoStoresMethod : CIL.Method := {
-  code := [.memory .store256, .memory .store256, .ret], locals := [], returnsValue := false }
+  code := [.stobj Tests.IntrinsicMethods.vector256UInt64, .stobj Tests.IntrinsicMethods.vector256UInt64, .ret], locals := [], returnsValue := false }
 
 open CIL.Safety in
 /-- Facts at both levels in one run: each store takes the retry for its own fact's level, so
@@ -539,31 +539,31 @@ theorem stores_from_mixed_facts (program : CIL.Program) (index : Nat)
 
 -- Naming `staticInstruction` explicitly, and stating either fact as a proof term, still applies.
 open CIL.Safety in
-example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+example (body : CIL.Method) (frame : Frame) (bits : BitVec 256)
     (destination : Reference) (memory final : Memory)
     (stored : memoryInstruction .store256
       [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
-    step body (.memory .store256) 2 args frame
+    modelStep (some (.memory .store256)) body 2 frame
       [.scalar (.v256 bits), .reference (.address destination)] memory =
       .ok (.next 3 [] frame final) := by
   cil_checked_step [staticInstruction, stored]
 
 open CIL.Safety in
-example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+example (body : CIL.Method) (frame : Frame) (bits : BitVec 256)
     (destination : Reference) (memory final : Memory)
     (stored : memoryInstruction .store256
       [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
-    step body (.memory .store256) 2 args frame
+    modelStep (some (.memory .store256)) body 2 frame
       [.scalar (.v256 bits), .reference (.address destination)] memory =
       .ok (.next 3 [] frame final) := by
   cil_checked_step [(stored)]
 
 open CIL.Safety in
-example (body : CIL.Method) (args : List Value) (frame : Frame) (bits : BitVec 256)
+example (body : CIL.Method) (frame : Frame) (bits : BitVec 256)
     (destination : Reference) (memory final : Memory)
     (stored : staticInstruction body 2 .store256
       [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
-    step body (.memory .store256) 2 args frame
+    modelStep (some (.memory .store256)) body 2 frame
       [.scalar (.v256 bits), .reference (.address destination)] memory =
       .ok (.next 3 [] frame final) := by
   cil_checked_step [(stored)]
@@ -604,9 +604,9 @@ theorem feature_step_literal_profile (memory : CIL.Safety.Memory) :
 
 -- Each memory step rewrites by its own equation; no fact names `staticInstruction` or `memoryInstruction`.
 open CIL.Safety in
-theorem asRef_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+theorem asRef_fact_stack (body : CIL.Method) (frame : Frame) (memory : Memory)
     (reference : Reference) (formed : form memory reference = .ok reference) :
-    ∃ stack, step body (.memory .asRef) 0 args frame [.reference (.address reference)] memory =
+    ∃ stack, modelStep (some (.memory .asRef)) body 0 frame [.reference (.address reference)] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address reference)] := by
   refine ⟨?_, ?_, ?_⟩
   rotate_left
@@ -614,10 +614,10 @@ theorem asRef_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
   · rfl
 
 open CIL.Safety in
-theorem load128_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+theorem load128_fact_stack (body : CIL.Method) (frame : Frame) (memory : Memory)
     (source : ManagedReference) (value : BitVec 128)
     (loaded : loadValue memory source 16 = .ok (.v128 value)) :
-    ∃ stack, step body (.memory .load128) 0 args frame [.reference source] memory =
+    ∃ stack, modelStep (some (.memory .load128)) body 0 frame [.reference source] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.v128 value)] := by
   refine ⟨?_, ?_, ?_⟩
   rotate_left
@@ -625,10 +625,10 @@ theorem load128_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
   · rfl
 
 open CIL.Safety in
-theorem add_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+theorem add_fact_stack (body : CIL.Method) (frame : Frame) (memory : Memory)
     (base result : Reference) (offset : CIL.W32)
     (moved : add memory base 8 (BitVec.ofInt 64 offset.toInt) = .ok result) :
-    ∃ stack, step body (.memory (.add 8 true)) 0 args frame
+    ∃ stack, modelStep (some (.memory (.add 8 true))) body 0 frame
       [.scalar (.i32 offset), .reference (.address base)] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address result)] := by
   refine ⟨?_, ?_, ?_⟩
@@ -638,11 +638,11 @@ theorem add_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame) (
 
 -- A symbolic managed reference stays `referenceAt reference`, so the caller's fact about it applies.
 open CIL.Safety in
-theorem add_symbolic_reference (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory)
+theorem add_symbolic_reference (body : CIL.Method) (frame : Frame) (memory : Memory)
     (reference : ManagedReference) (base result : Reference) (offset : CIL.W32)
     (addressed : referenceAt reference = .ok base)
     (moved : add memory base 8 (BitVec.ofInt 64 offset.toInt) = .ok result) :
-    ∃ stack, step body (.memory (.add 8 true)) 0 args frame
+    ∃ stack, modelStep (some (.memory (.add 8 true))) body 0 frame
       [.scalar (.i32 offset), .reference reference] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.reference (.address result)] := by
   refine ⟨?_, ?_, ?_⟩
@@ -652,8 +652,8 @@ theorem add_symbolic_reference (body : CIL.Method) (args : List Value) (frame : 
 
 -- An unknown scalar keeps its guard: the equation exposes it rather than assuming it away.
 open CIL.Safety in
-example (body : CIL.Method) (args : List Value) (frame : Frame) (memory : Memory) (value : CIL.Value) :
-    step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame [.scalar value] memory =
+example (body : CIL.Method) (frame : Frame) (memory : Memory) (value : CIL.Value) :
+    modelStep (some (.memory (.bitcastValue (.aggregate 32) .vector256))) body 0 frame [.scalar value] memory =
       if value.hasUnspecified then .error (.unsupported "Instruction observes unspecified vector bits") else do
         let cast ← bitcastValue (.aggregate 32) .vector256 value
         return .next 1 [.scalar cast] frame memory := by
@@ -795,9 +795,18 @@ theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame
   cil_checked_step [unlinked, profile, bareProfile_none]
 
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
+private def addUInt64 : CIL.Extraction.MethodRef :=
+  let element := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  let offset := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Int32"
+  { owner := CIL.Extraction.unsafeOwner, name := name!"Add", hasThis := false,
+    genericArity := 1, methodArguments := [element], parameters := [.byref element, offset],
+    returnType := .byref element }
+
 @[cil_code] def addBody : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.ldarg 0, .ldc_i4 8, .memory (.add 8 true), .pop,
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ldc_i4 8, .call addUInt64, .pop,
       .ldc_i4 1, .ret] }
+
+cil_runtime_models addBody
 
 open CIL.Safety in
 theorem add_run (memory : Memory) (source moved : Reference)
@@ -839,7 +848,7 @@ reference : Reference
 -/
 #guard_msgs in
 example (body : CIL.Method) (frame : Frame) (memory : Memory) (reference : Reference) :
-    step body (.memory .asRef) 0 [] frame [.reference (.address reference)] memory =
+    modelStep (some (.memory .asRef)) body 0 frame [.reference (.address reference)] memory =
       .ok (.next 1 [.reference (.address reference)] frame memory) := by
   cil_checked_step []
 
@@ -1128,12 +1137,12 @@ theorem checked_add64_return (memory : CIL.Safety.Memory) (x y : W64) (fits : x.
 
 open CIL.Safety in
 /-- A dispatch fact preserves its abstract value when the step infers the next stack. -/
-theorem bitcast_dispatch_keeps_value (body : CIL.Method) (args : List Value) (frame : Frame)
+theorem bitcast_dispatch_keeps_value (body : CIL.Method) (frame : Frame)
     (memory : Memory) (byte : BitVec 8) (value : BitVec 256)
     (casted : memoryInstruction (.bitcastValue (.aggregate 32) .vector256)
       [.scalar (.aggregate (List.replicate 32 byte))] memory =
         .ok (memory, [.scalar (.v256 value)])) :
-    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+    ∃ stack, modelStep (some (.memory (.bitcastValue (.aggregate 32) .vector256))) body 0 frame
       [.scalar (.aggregate (List.replicate 32 byte))] memory =
         .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.v256 value)] := by
   refine ⟨?_, ?_, ?_⟩
@@ -1145,12 +1154,12 @@ theorem bitcast_dispatch_keeps_value (body : CIL.Method) (args : List Value) (fr
 
 open CIL.Safety in
 /-- The same abstract result is retained for a fact at the static dispatch boundary. -/
-theorem bitcast_static_keeps_value (body : CIL.Method) (args : List Value) (frame : Frame)
+theorem bitcast_static_keeps_value (body : CIL.Method) (frame : Frame)
     (memory : Memory) (byte : BitVec 8) (value : BitVec 256)
     (casted : staticInstruction body 0 (.bitcastValue (.aggregate 32) .vector256)
       [.scalar (.aggregate (List.replicate 32 byte))] memory =
         .ok (memory, [.scalar (.v256 value)])) :
-    ∃ stack, step body (.memory (.bitcastValue (.aggregate 32) .vector256)) 0 args frame
+    ∃ stack, modelStep (some (.memory (.bitcastValue (.aggregate 32) .vector256))) body 0 frame
       [.scalar (.aggregate (List.replicate 32 byte))] memory =
         .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.v256 value)] := by
   refine ⟨?_, ?_, ?_⟩
@@ -1162,21 +1171,30 @@ theorem bitcast_static_keeps_value (body : CIL.Method) (args : List Value) (fram
 
 open CIL.Safety in
 /-- A conjunction-wrapped dispatch fact remains usable through the generic fallback. -/
-theorem store_from_wrapped_fact (body : CIL.Method) (args : List Value) (frame : Frame)
+theorem store_from_wrapped_fact (body : CIL.Method) (frame : Frame)
     (bits : BitVec 256) (destination : Reference) (memory final : Memory)
     (stored : True ∧ memoryInstruction .store256
       [.scalar (.v256 bits), .reference (.address destination)] memory = .ok (final, [])) :
-    step body (.memory .store256) 2 args frame
+    modelStep (some (.memory .store256)) body 2 frame
       [.scalar (.v256 bits), .reference (.address destination)] memory =
       .ok (.next 3 [] frame final) := by
   cil_checked_step_normalized [stored]
 
 #print axioms store_from_wrapped_fact
 
+private def byteToBoolean : CIL.Extraction.MethodRef :=
+  let source := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Byte"
+  let target := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.Boolean"
+  { owner := CIL.Extraction.unsafeOwner, name := name!"BitCast", hasThis := false,
+    genericArity := 2, methodArguments := [source, target], parameters := [source],
+    returnType := target }
+
 /-- Compare two words and reinterpret the result as a Boolean. -/
 @[cil_code] def comparedBoolean : CIL.Method := {
-  code := [.ldarg 0, .ldarg 1, .ceq, .memory .bitcastByteBool, .ret]
+  code := [.ldarg 0, .ldarg 1, .ceq, .call byteToBoolean, .ret]
   locals := [], returnsValue := true }
+
+cil_runtime_models comparedBoolean
 
 open CIL.Safety in
 /-- A comparison result is a canonical Boolean whatever its condition, so the reinterpretation
@@ -1192,7 +1210,7 @@ open CIL.Safety in
 /-- A Boolean cast of an unconstrained int32 keeps its canonical-range obligation. -/
 theorem unconstrained_boolean_cast (body : CIL.Method) (frame : Frame) (bits : CIL.W32)
     (memory : Memory) (canonical : bits.toNat ≤ 1) :
-    step body (.memory .bitcastByteBool) 0 [] frame [.scalar (.i32 bits)] memory =
+    modelStep (some (.memory .bitcastByteBool)) body 0 frame [.scalar (.i32 bits)] memory =
       .ok (.next 1 [.scalar (.i32 bits)] frame memory) := by
   fail_if_success cil_checked_step []
   cil_checked_step [canonical]
@@ -1204,7 +1222,7 @@ open CIL.Safety in
     so its bound steps the Boolean cast of the widened value. -/
 theorem widened_boolean_cast (body : CIL.Method) (frame : Frame) (field : CIL.W64)
     (memory : Memory) (canonical : field.toNat ≤ 1) :
-    step body (.memory .bitcastByteBool) 0 [] frame
+    modelStep (some (.memory .bitcastByteBool)) body 0 frame
         [.scalar (.i32 ((field.setWidth 8).setWidth 32))] memory =
       .ok (.next 1 [.scalar (.i32 ((field.setWidth 8).setWidth 32))] frame memory) := by
   fail_if_success cil_checked_step []

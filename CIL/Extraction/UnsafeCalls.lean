@@ -4,28 +4,16 @@ import CIL.Extraction.ObjectConstruction
 /-!
 # Unsafe helper calls
 
-Live lowered calls bind their memory operations. Modelled Unsafe calls retain their operands.
+Live calls retain their operands, including calls whose checked model consumes one value.
 -/
 
 namespace CIL.Extraction
 
-/-- Standalone reference and memory operations accept only raw opcodes that produce them.
-    A call is the only possible origin of a pointer transfer, span transfer or view observation. -/
-private def memoryCallOrigin (raw : RawInstruction) : Instruction → Bool
-  | .memory (.binaryRead ..) | .memory (.binaryWrite ..) | .memory (.vector128Unsafe ..) => false
-  | .memory (.zeroGuard ..) | .memory (.comparisonGuard ..) | .memory .throwIfNull => false
-  | .memory .nullRef | .memory .isNullRef | .memory .byteOffset => false
-  | .memory (.pointerTransfer ..) | .memory (.marshalRead ..) | .memory (.marshalWrite ..)
-  | .memory (.spanReinterpret ..) | .memory (.observeView _) => raw.opcode == 40
-  | _ => true
-
-/-- A recognized call emits exactly its helper operation, which no other instruction may emit. -/
+/-- The reachability and code lists cover each site, and no live call is replaced by a pop. -/
 def UnsafeCallsValid (closed : RawMethod)
     (reachable : List Bool) (code : List Instruction) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
-  all3 (fun instruction live emitted => !live ||
-      memoryCallOrigin instruction emitted &&
-      callEmitsNoPop instruction emitted)
+  all3 (fun instruction live emitted => !live || callEmitsNoPop instruction emitted)
     closed.code reachable code = true
 
 instance (closed : RawMethod)

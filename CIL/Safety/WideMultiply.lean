@@ -24,7 +24,7 @@ theorem step_bigMul64_of_write {body : CIL.Method} {pc : Nat} {args rest : List 
       (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
       memory = .ok (.next (pc + 1)
         (.scalar (.i64 (CIL.WideMultiply.high64 left right)) :: rest) frame result) := by
-  rw [step_call_memory (link := unlinked) (found := model) (direct := rfl),
+  rw [step_call_model (link := unlinked) (found := model) (direct := rfl),
     step_memory_bigMul64_eq]
   simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
     checkedAt, stored, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
@@ -42,7 +42,7 @@ theorem step_bigMul64_signed_of_write {body : CIL.Method} {pc : Nat} {args rest 
       (.reference (.address reference) :: .scalar (.i64 right) :: .scalar (.i64 left) :: rest)
       memory = .ok (.next (pc + 1)
         (.scalar (.i64 (CIL.WideMultiply.signedHigh64 left right)) :: rest) frame result) := by
-  rw [step_call_memory (link := unlinked) (found := model) (direct := rfl),
+  rw [step_call_model (link := unlinked) (found := model) (direct := rfl),
     step_memory_bigMul64_signed_eq]
   simp only [storeValue, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false, referenceAt,
     checkedAt, stored, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]

@@ -1164,9 +1164,15 @@ static void CheckShuffleReadWidth(string proof, MethodDefinition method)
         theorem shuffle_rejects_narrow_read :
             [{{string.Join(", ", reads)}}].all (fun pc => (fixtureOperandCode[pc]?).any fun raw =>
               let closed := { method0Closed with code := [raw] }
-              let narrow := Instruction.memory (.marshalRead (.snapshot .vector128) false)
-              let emitted := { method0 with code := [narrow], links := [] }
-              !(decide (RuntimeModelsAgree closed [true] emitted))) = true := by cil_kernel_rfl
+              match raw.operand with
+              | .call site =>
+                let vector := TypeExpr.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
+                  (.atom runtimeScope "System.Byte")
+                let narrow := { site.method with returnType := vector, methodArguments := [vector] }
+                let emitted := { method0 with code := [.call narrow {}], links := [] }
+                runtimeModel environment .call narrow == some (.memory (.marshalRead (.snapshot .vector128) false)) &&
+                  !(decide (RuntimeModelsAgree closed [true] emitted))
+              | _ => false) = true := by cil_kernel_rfl
         #print axioms shuffle_rejects_narrow_read
         end Extracted
 

@@ -326,7 +326,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     argument and the parameter name and leaves memory unchanged. -/
 @[cil_step high] theorem step_throwIfNull_eq (name argument : ManagedReference)
     (rest : List Value) :
-    step body (.memory .throwIfNull) pc args frame (.object name :: .object argument :: rest)
+    modelStep (some (.memory .throwIfNull)) body pc frame (.object name :: .object argument :: rest)
         memory =
       match argument with
       | .null => .error (.thrown .argumentNull)
@@ -356,11 +356,11 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 /-- A zero guard on a 32-bit stack value throws, or pops it with the parameter name. -/
 @[cil_step high] theorem step_zeroGuard_i32_eq (guard : ZeroGuard) (width : Nat) (signed : Bool)
     (name : ManagedReference) (bits : CIL.W32) (rest : List Value) :
-    step body (.memory (.zeroGuard guard width signed)) pc args frame
+    modelStep (some (.memory (.zeroGuard guard width signed))) body pc frame
         (.object name :: .scalar (.i32 bits) :: rest) memory = do
       zeroGuardOutcome guard width signed (.i32 bits)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+  simp only [modelStep_memory, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
     staticInstruction, memoryInstruction,
     zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
     List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
@@ -372,11 +372,11 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 /-- A zero guard on a 64-bit stack value throws, or pops it with the parameter name. -/
 @[cil_step high] theorem step_zeroGuard_i64_eq (guard : ZeroGuard) (width : Nat) (signed : Bool)
     (name : ManagedReference) (bits : CIL.W64) (rest : List Value) :
-    step body (.memory (.zeroGuard guard width signed)) pc args frame
+    modelStep (some (.memory (.zeroGuard guard width signed))) body pc frame
         (.object name :: .scalar (.i64 bits) :: rest) memory = do
       zeroGuardOutcome guard width signed (.i64 bits)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+  simp only [modelStep_memory, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
     staticInstruction, memoryInstruction,
     zeroGuardInstruction, zeroGuardOutcome, CIL.MemoryOp.argumentCount, unspecifiedOperands,
     List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil, Value.hasUnspecified,
@@ -388,11 +388,11 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 /-- A comparison guard on 32-bit stack values throws, or pops both with the parameter name. -/
 @[cil_step high] theorem step_comparisonGuard_i32_eq (guard : ComparisonGuard) (width : Nat)
     (signed : Bool) (name : ManagedReference) (other value : CIL.W32) (rest : List Value) :
-    step body (.memory (.comparisonGuard guard width signed)) pc args frame
+    modelStep (some (.memory (.comparisonGuard guard width signed))) body pc frame
         (.object name :: .scalar (.i32 other) :: .scalar (.i32 value) :: rest) memory = do
       comparisonGuardOutcome guard width signed (.i32 value) (.i32 other)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+  simp only [modelStep_memory, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
     staticInstruction, memoryInstruction,
     comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
     unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
@@ -405,11 +405,11 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
 /-- A comparison guard on 64-bit stack values throws, or pops both with the parameter name. -/
 @[cil_step high] theorem step_comparisonGuard_i64_eq (guard : ComparisonGuard) (width : Nat)
     (signed : Bool) (name : ManagedReference) (other value : CIL.W64) (rest : List Value) :
-    step body (.memory (.comparisonGuard guard width signed)) pc args frame
+    modelStep (some (.memory (.comparisonGuard guard width signed))) body pc frame
         (.object name :: .scalar (.i64 other) :: .scalar (.i64 value) :: rest) memory = do
       comparisonGuardOutcome guard width signed (.i64 value) (.i64 other)
       return .next (pc + 1) rest frame memory := by
-  simp only [step, observerCount, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
+  simp only [modelStep_memory, viewOperandCount, viewOperands, pure_bind, Bool.or_false,
     staticInstruction, memoryInstruction,
     comparisonGuardInstruction, comparisonGuardOutcome, CIL.MemoryOp.argumentCount,
     unspecifiedOperands, List.take_succ_cons, List.take_zero, List.any_cons, List.any_nil,
@@ -796,50 +796,35 @@ def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
 open Lean Meta in
 /-- A vector object access steps as its checked vector operation. A span load steps as a no-op
     on a known span value. Each result supplies a proof at the requested stack. -/
-def typedObjectLowering? (body op : Expr) (stack : Option Expr := none) :
-    MetaM (Option (Expr × Expr)) := do
-  let (name, #[field]) := (← whnfR op).getAppFnArgs | return none
-  unless name == ``CIL.Instruction.ldobj || name == ``CIL.Instruction.stobj do return none
-  let lowering (equation : Name) (lowered : Expr) (premises : Array Expr) := do
-    let type ← inferType (mkApp (mkConst equation) body)
-    forallBoundedTelescope type (some 4) fun variables _ => do
-      let proof := mkAppN (mkConst equation) (#[body] ++ variables ++ #[field] ++ premises)
-      return some (lowered, ← mkLambdaFVars variables proof)
-  let resolver := mkApp2 (mkConst ``CIL.Method.valueShape) body field
+def typedObjectStep? (body op pc args frame stack memory : Expr) : MetaM (Option Expr) := do
+  let (name, #[type]) := (← whnfR op).getAppFnArgs | return none
+  let load := name == ``CIL.Instruction.ldobj
+  unless load || name == ``CIL.Instruction.stobj do return none
+  let resolver := mkApp2 (mkConst ``CIL.Method.valueShape) body type
   let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.valueShape resolver
     | return none
   let some proof := shared.proof? | return none
-  let load := name == ``CIL.Instruction.ldobj
+  let premises := #[body, pc, args, frame, memory, type, proof]
   match shared.expr.getAppFnArgs with
   | (``CIL.ValueShape.vector, #[width]) =>
-    let some (equation, operation) := (match ← getNatValue? width, load with
-      | some 16, true => some (``step_ldobj_vector16, ``CIL.MemoryOp.load128)
-      | some 32, true => some (``step_ldobj_vector32, ``CIL.MemoryOp.load256)
-      | some 64, true => some (``step_ldobj_vector64, ``CIL.MemoryOp.load512)
-      | some 16, false => some (``step_stobj_vector16, ``CIL.MemoryOp.store128)
-      | some 32, false => some (``step_stobj_vector32, ``CIL.MemoryOp.store256)
-      | some 64, false => some (``step_stobj_vector64, ``CIL.MemoryOp.store512)
+    let some equation := (match ← getNatValue? width, load with
+      | some 16, true => some ``step_ldobj_vector16
+      | some 32, true => some ``step_ldobj_vector32
+      | some 64, true => some ``step_ldobj_vector64
+      | some 16, false => some ``step_stobj_vector16
+      | some 32, false => some ``step_stobj_vector32
+      | some 64, false => some ``step_stobj_vector64
       | _, _ => none) | return none
-    return ← lowering equation (mkApp (mkConst ``CIL.Instruction.memory) (mkConst operation))
-      #[proof]
+    return some (mkAppN (mkConst equation) (premises.push stack))
   | (``CIL.ValueShape.span, #[]) =>
-    let some stack := stack | return none
     unless load do return none
     let (``List.cons, #[_, head, rest]) := (← whnfR stack).getAppFnArgs | return none
-    let (equation, operands) := match (← whnfR head).getAppFnArgs with
-      | (``CIL.Safety.Value.bufferSpan, #[view]) => (``step_ldobj_span, #[view])
-      | (``CIL.Safety.Value.span, #[reference, length]) =>
-        (``step_ldobj_span_value, #[reference, length])
-      | _ => (Name.anonymous, #[])
-    if operands.isEmpty then return none
-    let some (lowered, proof) ← lowering equation (mkConst ``CIL.Instruction.nop)
-        (#[proof] ++ operands ++ #[rest]) | return none
-    -- The equation is stated at this stack; the caller still supplies one for every lowering.
-    let ignored ← forallBoundedTelescope (← inferType proof) (some 4) fun variables _ => do
-      withLocalDeclD `stack (mkApp (mkConst ``List [levelZero]) (mkConst ``CIL.Safety.Value))
-        fun unused => do
-          mkLambdaFVars (variables.push unused) (mkAppN proof variables).headBeta
-    return some (lowered, ignored)
+    match (← whnfR head).getAppFnArgs with
+    | (``CIL.Safety.Value.bufferSpan, #[view]) =>
+      return some (mkAppN (mkConst ``step_ldobj_span) (premises ++ #[view, rest]))
+    | (``CIL.Safety.Value.span, #[reference, length]) =>
+      return some (mkAppN (mkConst ``step_ldobj_span_value) (premises ++ #[reference, length, rest]))
+    | _ => return none
   | _ => return none
 
 open Lean Meta in

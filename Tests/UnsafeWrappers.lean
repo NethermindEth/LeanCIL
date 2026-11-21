@@ -53,8 +53,8 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
       addMethod, offsetStorage, numeric] <;> rfl)]
   rw [run_next (body := addMethod method profile declared environment) rfl rfl
     (by
-      rw [step_call_memory (link := rfl) (found := found) (direct := rfl)]
-      simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+      rw [step_call_model (link := rfl) (found := found) (direct := rfl)]
+      simp [modelStep_memory, CIL.MemoryOp.argumentCount, unspecifiedOperands,
         Value.hasUnspecified, specified, staticInstruction, operation, viewOperandCount,
         viewOperands] <;> rfl)]
   rw [run_return (body := addMethod method profile declared environment) rfl rfl
@@ -96,18 +96,18 @@ theorem add_error {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEn
   rw [Tests.WrapperProofs.run_fault
     (body := addMethod method profile declared environment) rfl rfl
     (by
-      rw [step_call_memory (link := rfl) (found := found) (direct := rfl)]
-      simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+      rw [step_call_model (link := rfl) (found := found) (direct := rfl)]
+      simp [modelStep_memory, CIL.MemoryOp.argumentCount, unspecifiedOperands,
         Value.hasUnspecified, specified, staticInstruction, operation, viewOperandCount,
         viewOperands] <;> rfl)]
   rfl
 
 /-- A partial vector is rejected before the integer-offset adapter runs. -/
-example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
+example (body : CIL.Method) (pc : Nat) (frame : Frame)
     (memory : Memory) (reference : ManagedReference) (low : CIL.W64) :
     memoryInstruction (.add 1 false) [.scalar (.v128Low64 low), .reference reference] memory =
       .error (.unsupported "Memory operation observes unspecified vector bits") ∧
-    step body (.memory (.add 1 false)) pc args frame
+    modelStep (some (.memory (.add 1 false))) body pc frame
       [.scalar (.v128Low64 low), .reference reference] memory =
       .error (.unsupported "Instruction observes unspecified vector bits") := by
   constructor <;> rfl

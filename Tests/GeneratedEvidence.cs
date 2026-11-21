@@ -269,6 +269,14 @@ partial class Program
         return AxiomsCommand.Replace(result, "");
     }
 
+    /// <summary>Exchange call and newobj at a constructor site, preserving its exact member.</summary>
+    static string ForgeConstructorOpcode(string source, int pc) => ForgeModelEmission(source, pc, $$"""
+        match method0.code[{{pc}}]'(by decide +kernel) with
+        | .newobj ctor => .call ctor
+        | .call ctor _ => .newobj ctor
+        | original => original
+        """.ReplaceLineEndings(" "));
+
     /// <summary>Check a replacement instruction at a live pc against the original call operand.</summary>
     static string ForgeModelEmission(string source, int pc, string instruction)
     {

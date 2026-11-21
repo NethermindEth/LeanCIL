@@ -219,8 +219,8 @@ foreach (var (name, native, pointer) in additions)
             """);
         foreach (var (mutation, replacement) in new[]
         {
-            ("lowered", ".memory (.add 1 true)"), ("subtract", ".sub"),
-            ("stride", ".memory (.add 2 true)"), ("unsigned", ".memory (.add 1 false)")
+            ("signedOverflow", ".add_ovf"), ("subtract", ".sub"),
+            ("shift", ".shl"), ("unsignedOverflow", ".add_ovf_un")
         })
         {
             File.AppendAllText(proof, $$"""

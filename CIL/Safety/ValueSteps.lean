@@ -233,12 +233,15 @@ dsimproc [cil_step] reduceMethodProfile (CIL.Method.profile _) := fun e => do
 
 open Lean Meta in
 /-- The link `m.linkAt pc` reads, as `none` or `some` of a link constructor, for a method literal
-    `m` and a literal pc, by evaluating its table; a named, opaque or case-split body, or a table a
+    `m` and a pc that reduces to a numeral, by evaluating its table. A named or opaque body, or a table a
     parameter decides, gives nothing. -/
 def literalLink? (read : Expr) : MetaM (Option Expr) := do
   let_expr CIL.Method.linkAt body pc := read | return none
   unless (← instantiateMVars body).isAppOf ``CIL.Method.mk do return none
-  unless (← instantiateMVars pc).nat?.isSome do return none
+  let pc ← instantiateMVars pc
+  unless pc.nat?.isSome do
+    if pc.hasFVar || pc.hasMVar then return none
+    unless (← (evalNat pc).run).isSome do return none
   let link ← withDefault <| whnf read
   match_expr link with
   | Option.none _ => return some link

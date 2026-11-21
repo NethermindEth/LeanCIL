@@ -944,7 +944,7 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
     operands is read from its frame slot first, so the fact meets the view it stands for. -/
 macro "cil_checked_memory_from_fact " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       rw [CIL.Safety.step_memory_eq]
+       rw [CIL.Safety.modelStep_memory]
        cil_try_simp_only [cil_guard, CIL.Safety.viewOperands, CIL.Safety.spanView,
          List.getElem?_cons_zero, List.getElem?_cons_succ, pure_bind]
        cil_try_simp_only [cil_guard, cil_checked, cil_side, pure_bind, $[$facts:term],*]
@@ -1058,20 +1058,23 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
   let target := (← instantiateMVars target).consumeMData
   let some (_, lhs, _) := target.eq? | return #[]
-  let some #[body, opcode, _, _, _, _, _] := argumentsOf? lhs ``CIL.Safety.step 7 | return #[]
-  let head := (← whnfR opcode).getAppFn.constName?
+  let (action, arity, bodyIndex, opcodeIndex) :=
+    if lhs.isAppOfArity ``CIL.Safety.modelStep 6 then (``CIL.Safety.modelStep, 6, 1, 0)
+    else (``CIL.Safety.step, 7, 0, 1)
+  let some arguments := argumentsOf? lhs action arity | return #[]
+  let body := arguments[bodyIndex]!
+  let head := (← whnfR arguments[opcodeIndex]!).getAppFn.constName?
   let states (type : Expr) : MetaM Bool := withNewMCtxDepth do
     let openParameters := type.hasMVar
     let (_, _, conclusion) ← forallMetaTelescopeReducing type
     let some (_, factLhs, _) := conclusion.eq? | return false
-    let some #[_, factOpcode, _, _, _, _, _] := argumentsOf? factLhs ``CIL.Safety.step 7
-      | return false
-    match (← whnfR factOpcode).getAppFn.constName?, head with
+    let some factArguments := argumentsOf? factLhs action arity | return false
+    match (← whnfR factArguments[opcodeIndex]!).getAppFn.constName?, head with
     | some factHead, some goalHead => unless factHead == goalHead do return false
     | _, _ => pure ()
     if openParameters then return true
     -- A named body may need its generated equation unfolded before application.
-    let arguments := factLhs.getAppArgs |>.set! 0 body
+    let arguments := factArguments.set! bodyIndex body
     withTransparency .instances <| isDefEq (mkAppN factLhs.getAppFn arguments) lhs
   let mut matching := #[]
   for fact in facts do
@@ -1080,7 +1083,7 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
     else if ← suppliedFactSatisfies fact (fun type => forallTelescope type fun _ conclusion =>
         pure (conclusion.isAppOfArity ``And 2)) then
       let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
-      for part in ← equationConjuncts (·.isAppOfArity ``CIL.Safety.step 7) proof do
+      for part in ← equationConjuncts (·.isAppOfArity action arity) proof do
         if ← states (← inferType part) then
           matching := matching.push (← Term.exprToSyntax part)
   return matching
@@ -1180,20 +1183,20 @@ open Lean Elab Tactic Meta in
     conjunction. Matching fresh quantified variables never instantiates the caller's goal. -/
 def dispatchFacts (step : Expr) (function : Name) (facts : Array Term) :
     TacticM (Array Term) := do
-  let arguments := step.getAppArgs
-  let (some body, some opcode, some pc, some frame, some stack, some memory) :=
-      (arguments[0]?, arguments[1]?, arguments[2]?, arguments[4]?, arguments[5]?, arguments[6]?)
-    | return #[]
-  let operation ← whnfR opcode
-  let wanted ← if function == ``CIL.Safety.instruction then
-      mkAppM function #[operation, stack, memory]
-    else if let some operand := lastArgument? operation then
-      -- An operation fact states the operands the step hands over, with each home read.
+  if facts.isEmpty then return #[]
+  let wanted ← if function == ``CIL.Safety.instruction then do
+      let some #[_, opcode, _, _, _, stack, memory] := argumentsOf? step ``CIL.Safety.step 7
+        | return #[]
+      mkAppM function #[← whnfR opcode, stack, memory]
+    else do
+      let some #[model, body, pc, frame, stack, memory] :=
+        argumentsOf? step ``CIL.Safety.modelStep 6 | return #[]
+      let some #[_, value] := argumentsOf? model ``Option.some 2 | return #[]
+      let some #[operand] := argumentsOf? value ``CIL.RuntimeModel.memory 1 | return #[]
       let operands ← viewedStack frame operand stack
       if function == ``CIL.Safety.staticInstruction then
         mkAppM function #[body, pc, operand, operands, memory]
       else mkAppM function #[operand, operands, memory]
-    else return #[]
   facts.filterM (suppliedFactSatisfies · (dispatchFactMatches wanted function))
 
 open Lean Elab Tactic Meta in
@@ -1334,6 +1337,17 @@ elab_rules : tactic
           evalTactic (← `(tactic| exact step_nop_eq ..))
           return
     if !facts.getElems.isEmpty && (← applyCheckedStepFact facts.getElems) then return
+    if let some (_, action, _) := initial.eq? then
+      if let some #[model, _, _, _, _, _] := argumentsOf? action ``CIL.Safety.modelStep 6 then
+        if let some #[_, value] := argumentsOf? model ``Option.some 2 then
+          if value.isAppOf ``CIL.RuntimeModel.memory then
+            let tactic ← if !(← dispatchFacts action ``staticInstruction facts.getElems).isEmpty then
+                `(tactic| cil_checked_memory_from_fact [$facts:term,*])
+              else if !(← dispatchFacts action ``memoryInstruction facts.getElems).isEmpty then
+                `(tactic| cil_checked_memory_from_fact [CIL.Safety.staticInstruction, $facts:term,*])
+              else `(tactic| cil_checked_memory_by_equations [$facts:term,*])
+            evalTactic tactic
+            return
     if let some (_, step, result) := initial.eq? then
       if let some #[body, op, pc, args, frame, stack, memory] :=
           argumentsOf? step ``CIL.Safety.step 7 then
@@ -1383,16 +1397,15 @@ elab_rules : tactic
               all_goals simp [cil_guard, cil_checked, referenceAt, checkedAt, $[$facts:term],*] <;> rfl)))
             return
           catch _ => saved.restore
-        if let some (lowered, lowering) ← typedObjectLowering? body op stack then
-          let equation := (mkAppN lowering #[pc, args, frame, memory, stack]).headBeta
-          let steppedLowered :=
-            mkAppN step.getAppFn #[body, lowered, pc, args, frame, stack, memory]
+        if let some equation ← typedObjectStep? body op pc args frame stack memory then
+          let some (_, _, resolved) := (← inferType equation).eq? | throwError "expected a step equation"
           let stated ← withLocalDeclD `stepped (← inferType step) fun stepped => do
             mkLambdaFVars #[stepped] (← mkEq stepped result)
           let rewritten ← mkCongrArg stated equation
-          let target ← mkEq steppedLowered result
+          let target ← mkEq resolved result
           replaceMainGoal [← (← getMainGoal).replaceTargetEq target rewritten]
-          if ← applyCheckedStepFact facts.getElems then return
+          evalTactic (← `(tactic| cil_checked_step_normalized [$facts:term,*]))
+          return
     if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
       let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
@@ -1572,22 +1585,8 @@ elab_rules : tactic
         | none => pure #[]
       else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
-    let strategy ← if operation == ``CIL.Instruction.memory then
-        let matchingStatic :=
-          !(← dispatchFacts lhs ``CIL.Safety.staticInstruction facts.getElems).isEmpty
-        let matchingMemory :=
-          !(← dispatchFacts lhs ``CIL.Safety.memoryInstruction facts.getElems).isEmpty
-        -- A supplied operation fact retains its abstraction; otherwise select its equation.
-        if matchingStatic then
-          `(tactic| cil_strict (cil_checked_memory_from_fact [$facts:term,*]))
-        else if matchingMemory then
-          `(tactic| cil_strict (
-            cil_checked_memory_from_fact [CIL.Safety.staticInstruction, $facts:term,*]))
-        else
-          `(tactic| cil_strict (cil_checked_memory_by_equations [$facts:term,*]))
-      -- A checked field normally steps from its shape and address facts. A caller can also
-      -- supply the byte-level operation that the shape selects.
-      else if operation == ``CIL.Instruction.ldfld then
+    -- A checked field can also step from the byte-level read selected by its shape.
+    let strategy ← if operation == ``CIL.Instruction.ldfld then
         let hasRead ← facts.getElems.anyM fun fact => suppliedFactSatisfies fact fun type => do
           let some (_, lhs, _) := type.getForallBody.consumeMData.eq? | return false
           return lhs.isAppOf ``CIL.Safety.loadValueField
@@ -1643,7 +1642,7 @@ elab_rules : tactic
              | cil_checked_memory_from_fact [$facts:term,*]
              | cil_checked_step_normalized [$facts:term,*]
              | cil_checked_memory_by_equations [$facts:term,*])
-          | (refine Eq.trans (CIL.Safety.step_call_memory _ _ _ _ _ $link $model rfl _) ?_
+          | (refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
              first
              | cil_checked_memory_from_fact [$facts:term,*]
              | cil_checked_step_normalized [$facts:term,*]
@@ -1985,15 +1984,6 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     try (conv => lhs; arg 4; cil_literal_nat)
     cil_stack_cleanup))
 
-open Lean Meta in
-/-- Resolve typed object accesses using the value shape in the fetched method. -/
-def cilSteppedOp (lookup op : Expr) : MetaM Expr := do
-  let head := (← whnfR op).getAppFn
-  unless head.isConstOf ``CIL.Instruction.ldobj || head.isConstOf ``CIL.Instruction.stobj do return op
-  let some code := lookup.find? (·.isAppOfArity ``CIL.Method.code 1) | return op
-  let some (lowered, _) ← typedObjectLowering? code.appArg! op | return op
-  return lowered
-
 open Lean Elab Tactic Meta in
 /-- Instantiate `lemma` against the goal through `select`, close its method and instruction
     lookups (the premises `lookups` places from the end) with `cil_lookup`, and return both
@@ -2017,7 +2007,7 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
     unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
   let fetched ← instantiateMVars (← inferType instructionFound)
   let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
-  let fetchedOp ← cilSteppedOp fetched (← lastArgument "cilFetchedOp" found)
+  let fetchedOp ← lastArgument "cilFetchedOp" found
   let operation :=
     ((← cilReducedOp? fetchedOp).bind (·.getAppFn.constName?)).getD Name.anonymous
   let lookupSyntax (proof : Expr) : TacticM Term := do
@@ -2116,7 +2106,7 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   let instruction ← inferType (← Term.elabTerm instructionFound none)
   let some (_, _, found) := instruction.eq? | return facts
   let some fetchedOp := lastArgument? found | return facts
-  let opcode ← whnf (← cilSteppedOp instruction fetchedOp)
+  let opcode ← whnf fetchedOp
   let mut offset := mkNatLit 0
   if operation == ``CIL.Instruction.stobj then
     let some code := instruction.find? (·.isAppOfArity ``CIL.Method.code 1) | return facts

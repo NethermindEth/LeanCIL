@@ -93,7 +93,7 @@ theorem exact_array_span_call :
       decide (decodeArrayCall site = .ok [.call method {}]) &&
         (runtimeModel {} .call method == some (.memory (.arraySpan .signed32 true range))) &&
         !runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
-          (.memory (.arraySpan .signed32 true range)) none true &&
+          (.call method { tail := true }) none true &&
         refused.all (fun other => decide (decodeArrayCall other = liveHoleAt 0 40))) := by
   decide +kernel
 #print axioms exact_array_span_call
@@ -124,8 +124,8 @@ theorem arraySpanStep (body : Method) (pc : Nat) (method : MethodRef) (range : A
     (found : runtimeModel body.environment .call method = some (.memory (.arraySpan element true
       range))) :
     Safety.step body (.call method {}) pc args frame stack memory =
-      Safety.step body (.memory (.arraySpan element true range)) pc args frame stack memory :=
-  Safety.step_call_memory body pc args frame memory link found rfl stack
+      Safety.modelStep (some (.memory (.arraySpan element true range))) body pc frame stack memory :=
+  Safety.step_call_model body pc args frame memory link found rfl stack
 #print axioms arraySpanStep
 
 /-- Each fixture pairs a constructor declaration with the operation it must execute. -/
@@ -178,7 +178,7 @@ theorem constructor_models :
         decide (decodeConstructor site = .ok [.newobj method]) &&
           (runtimeModel {} .newobj method == some (.memory op)) &&
           (method.parameters.length == op.argumentCount) &&
-          !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.memory op) none true &&
+          !runtimeCatalog.siteAgrees {} .scalar (i 115 (.call site)) (.call method) none true &&
           refused.all (fun other => refusesConstructor other)) &&
       [(TypeExpr.atom runtime "System.Double", "System.Double"),
        (.aggregate "Missing::Layout" 0, "Layout")].all (fun (element, name) =>
@@ -345,7 +345,7 @@ theorem bulk_enum_models :
     ((bulkSites element "Tag").zip operations).all fun (site, operation) =>
       runtimeModel {} .call site.method == some (.memory operation) &&
         !(runtimeCatalog.siteAgrees {} .scalar (i 40 (.call site))
-          (.memory operation) none true)
+          (.call site.method { tail := true }) none true)
     := by decide +kernel
 
 #print axioms bulk_enum_models

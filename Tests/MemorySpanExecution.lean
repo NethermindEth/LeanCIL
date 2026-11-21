@@ -1,5 +1,6 @@
 import CIL.Safety.Execution
 import Tests.Support
+import Tests.Support.SpanMethods
 
 /-! # Span values across interpreter calls, locals and frame lifetimes
 
@@ -20,11 +21,11 @@ private def memory : Safety.Memory := {
 private def view : SpanView := ⟨.address ⟨0, 0⟩, 3, 4, false⟩
 
 private def reader : Method := {
-  code := [.ldarg 0, .ldarg 1, .memory (.spanItem 4), .ldind .u4, .ret]
+  code := [.ldarg 0, .ldarg 1, .call (SpanMethods.item SpanMethods.int32), .ldind .u4, .ret]
   locals := [], returnsValue := true }
 
 private def caller : Method := {
-  code := [.ldarg 0, .stloc 0, .ldloc 0, .ldarg 1, .ldarg 2, .memory (.spanSlice true),
+  code := [.ldarg 0, .stloc 0, .ldloc 0, .ldarg 1, .ldarg 2, .call (SpanMethods.slice SpanMethods.int32 true),
     .ldarg 3, .call (Tests.callee 2) {}, .ret], links := [(7, .direct 1)]
   locals := [.nullRef], localKinds := [.span 4 false], returnsValue := true }
 
@@ -35,7 +36,7 @@ theorem local_slice_and_call :
 #print axioms local_slice_and_call
 
 private def emptyLength : Method := {
-  code := [.ldarg 0, .ldc_i4 3, .ldc_i4 0, .memory (.spanSlice true), .memory .spanLength, .ret]
+  code := [.ldarg 0, .ldc_i4 3, .ldc_i4 0, .call (SpanMethods.slice SpanMethods.int32 true), .call (SpanMethods.length SpanMethods.int32), .ret]
   locals := [], returnsValue := true }
 
 theorem end_empty_slice :
@@ -70,7 +71,7 @@ theorem invalid_index :
 #print axioms invalid_index
 
 private def illegalWriter : Method := {
-  code := [.ldarg 0, .ldc_i4 0, .memory (.spanItem 4), .ldc_i4 1, .stind .i4, .ret]
+  code := [.ldarg 0, .ldc_i4 0, .call (SpanMethods.item SpanMethods.int32), .ldc_i4 1, .stind .i4, .ret]
   locals := [], returnsValue := false }
 
 theorem readonly_reference_rejects_store :
@@ -79,7 +80,7 @@ theorem readonly_reference_rejects_store :
 #print axioms readonly_reference_rejects_store
 
 private def escaping : Method := {
-  code := [.ldloca 0, .ldc_i4 1, .memory (.spanFromReference 4 true), .ret]
+  code := [.ldloca 0, .ldc_i4 1, .call SpanMethods.createInt32, .ret]
   locals := [.i32 7], localKinds := [.word32], returnsValue := true }
 
 theorem expired_local_cannot_escape :

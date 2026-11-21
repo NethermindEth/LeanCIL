@@ -798,14 +798,6 @@ theorem Instruction.sameValue_self_of_ofRaw? {previous : Option RawInstruction}
 
 #print axioms Instruction.sameValue_self_of_ofRaw?
 
-/-- A decoded value instruction never contains a runtime-model memory operation. -/
-theorem Instruction.ofRaw?_ne_memory (previous : Option RawInstruction) (raw : RawInstruction)
-    (operation : MemoryOp) : Instruction.ofRaw? previous raw ≠ some (.memory operation) := by
-  intro decoded
-  exact Bool.false_ne_true (Instruction.sameValue_self_of_ofRaw? decoded)
-
-#print axioms Instruction.ofRaw?_ne_memory
-
 /-- Instantiation preserves the operand information that a preceding modifier checks. -/
 private theorem invalidPredecessor_substitute {previous : Option RawInstruction}
     {raw : RawInstruction} {operand : RawOperand} {arguments : List TypeExpr}

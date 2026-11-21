@@ -12,35 +12,6 @@ be matched exactly. Indirect loads, stores and block operations also meet the ex
 
 namespace CIL.Extraction
 
-/-- `(pops, pushes)` of each memory operation. -/
-private def memoryFeatureEffect : MemoryOp → Nat × Nat
-  | .spanCopy _ tryCopy => (2, if tryCopy then 1 else 0)
-  | .spanFill _ clear => (if clear then 1 else 2, 0)
-  | .arrayFill _ counted => (if counted then 4 else 2, 0)
-  | .marshalRead _ trying => (if trying then 2 else 1, 1)
-  | .binaryRead _ _ _ trying => (if trying then 2 else 1, 1)
-  | .binaryWrite _ _ trying => (2, if trying then 1 else 0)
-  | .marshalWrite _ trying => (2, if trying then 1 else 0)
-  | .pointerTransfer _ _ store => if store then (2, 0) else (1, 1)
-  | .vector128Unsafe store offset =>
-    let pops := (if store then 2 else 1) + (if offset then 1 else 0)
-    (pops, if store then 0 else 1)
-  | .bigMul64 _ | .divRemOut _ => (3, 1)
-  | .spanSlice explicitLength => (if explicitLength then 3 else 2, 1)
-  | .spanFromReference .. | .byteOffset => (2, 1)
-  | .spanSingleReference .. => (1, 1)
-  | .spanEmpty .. => (0, 1)
-  | .arraySpan _ _ range => (range.argumentCount, 1)
-  | .observeView _ | .spanReinterpret .. | .spanReadOnly => (1, 1)
-  | .copyBlock _ | .initBlock _ => (3, 0)
-  | .store128 | .store256 | .store512 => (2, 0)
-  | .nullRef => (0, 1)
-  | .throwIfNull | .zeroGuard .. => (2, 0)
-  | .comparisonGuard .. => (3, 0)
-  | .add .. | .spanCreate | .spanItem _ => (2, 1)
-  | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue ..
-  | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)
-
 /-- The raw opcode a class type test lowers from, `castclass` (116) or `isinst` (117), and the
     class it tests; `none` for any other instruction. -/
 def typeTestSource : Instruction → Option (Nat × TypeExpr)
@@ -81,7 +52,6 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .callvirt method => some (method.argumentCount, if returnsValue then 1 else 0)
   | .newobj constructor => some (constructor.parameters.length, 1)
   | .cpblk _ | .initblk _ => some (3, 0)
-  | .memory operation => some (memoryFeatureEffect operation)
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => some (0, 1)
   | .stsfld _ => some (1, 0)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.

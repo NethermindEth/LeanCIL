@@ -950,7 +950,6 @@ private def checkScalarSite (raw : RawMethod)
   | ((instruction, role), pc), some feature, some stack, emitted =>
     let skipEncoding := decodedValueSite instruction role emitted
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
-      spanEmissionAllowed emitted &&
       indirectSiteWindow rawAt pc instruction emitted skipEncoding &&
       readOnlyPrefixMatches (rawAt (pc + 1)) instruction &&
       scalarEmissionMatches role (rawBefore rawAt pc) instruction stack emitted

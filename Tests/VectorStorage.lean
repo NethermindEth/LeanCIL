@@ -50,7 +50,7 @@ theorem altered_storage_rejected :
 /-- A different transfer with the same stack depth fails the literal site's encoding check. -/
 theorem changed_object_meaning_rejected :
     let type := vectorType 128 "System.UInt32"
-    !valueEncodingMatches none ⟨0, 0x71, .type type⟩ (.memory .load128) &&
+    !valueEncodingMatches none ⟨0, 0x71, .type type⟩ (.ldobj (vectorType 256 "System.UInt32")) &&
       !valueEncodingMatches none ⟨0, 0xfe15, .type type⟩ .nop &&
       !valueEncodingMatches none ⟨0, 0x71, .type type⟩ (.initobj type) := by decide +kernel
 #print axioms changed_object_meaning_rejected

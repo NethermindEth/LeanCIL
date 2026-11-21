@@ -131,7 +131,7 @@ var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
         instruction.OpCode.Code == Code.Call && instruction.Operand is MethodReference { Name: ".ctor" }));
     var source = File.ReadAllText(Path.Combine(root, name, "Extracted.lean"));
     var path = Path.Combine(root, "LayoutLocalRejected.lean");
-    File.WriteAllText(path, ForgeModelEmission(source, pc, ".memory (.spanFromReference 48 true)"));
+    File.WriteAllText(path, ForgeConstructorOpcode(source, pc));
     rejected.Add(path, "PASS forged in-place constructor refused", "RuntimeModelsAgree", "is false");
 }
 // Each forgery changes the width or capability of a generated model fact, so it elaborates exactly when the
@@ -152,11 +152,11 @@ foreach (var (name, model) in new[]
     rejected.Add(path, $"PASS forged span model fact refused: {name} {model}", ModelFactMismatch(modelSites[name]));
 }
 {
-    // A modelled construction keeps its call, so a memory instruction in its place is refused whatever its operands.
+    // The constructor operand must retain its original opcode.
     var source = File.ReadAllText(Path.Combine(root, "Single", "Extracted.lean"));
     var path = Path.Combine(root, "Single-substituted-rejected.lean");
-    File.WriteAllText(path, ForgeModelEmission(source, modelSites["Single"], ".memory (.spanSingleReference 4 true)"));
-    rejected.Add(path, "PASS substituted memory instruction refused: Single", "RuntimeModelsAgree", "is false");
+    File.WriteAllText(path, ForgeConstructorOpcode(source, modelSites["Single"]));
+    rejected.Add(path, "PASS substituted constructor opcode refused: Single", "RuntimeModelsAgree", "is false");
 }
 {
     // A reset takes its width from its home and its operand from the decoded body, so a forged element identity

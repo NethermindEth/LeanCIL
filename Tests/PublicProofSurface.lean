@@ -86,6 +86,14 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
   rw [reverse]
 #print axioms vector_literal_rewrite
 
+open CIL.Extraction in
+/-- The closed Unsafe.BitCast from the fixture's 32-byte aggregate to Vector256<UInt64>. -/
+private def bytesToVector : MethodRef :=
+  let source := TypeExpr.aggregate "Fixture::Bytes" 0
+  let target := wordVector 256
+  { owner := unsafeOwner, name := name!"BitCast", hasThis := false, genericArity := 2,
+    methodArguments := [source, target], parameters := [source], returnType := target }
+
 /-- An aggregate is reinterpreted as a vector and compared with zero before a narrow return. -/
 @[cil_code] def aggregateZero : CIL.Method :=
   {
@@ -95,7 +103,7 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
                      declaredSize := 32, fields := [] }]
     layouts := #[⟨{ size := 32, fields := [] }, 1⟩] },
   locals := [], returnsValue := true, code := [.ldobj (.aggregate "Fixture::Bytes" 0),
-    .memory (.bitcastValue (.aggregate 32) .vector256),
+    .call bytesToVector,
     .call zeroMethod, .call (equalityMethod 256), .ret] }
 cil_runtime_models aggregateZero
 

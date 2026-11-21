@@ -122,7 +122,7 @@ private def references : List (CallSite × MemoryOp) :=
 /-- Every admitted call runs its expected operation and keeps its operand at the live site. -/
 theorem resolved : (references ++ values).all (fun (call, operation) =>
     model call == some (.memory operation) && accepts call (.call call.method {}) &&
-      !accepts call (.memory operation) && !accepts call .nop) := by decide +kernel
+      !accepts call (.call call.method { tail := true }) && !accepts call .nop) := by decide +kernel
 #print axioms resolved
 
 /-- A span, array or class on either side of As has no field or vector storage, so the live site
@@ -145,8 +145,8 @@ theorem checkedSizes : LayoutsValid (environment 2).rawLayouts (environment 2).l
 theorem asExclusions : [TypeExpr.byref byteType, .pointer byteType, .parameter 0,
     .ownerParameter 0].all (fun arg => (model (asSite arg byteType)).isNone &&
       (model (asSite byteType arg)).isNone &&
-      !accepts (asSite arg byteType) (.memory .asRef) &&
-      !accepts (asSite byteType arg) (.memory .asRef)) := by decide +kernel
+      !accepts (asSite arg byteType) (.call (asSite arg byteType).method) &&
+      !accepts (asSite byteType arg) (.call (asSite byteType arg).method)) := by decide +kernel
 #print axioms asExclusions
 
 /-- BitCast requires checked equal-width snapshots in both directions, or Byte to Boolean. -/
@@ -231,8 +231,8 @@ theorem exactReference : controls.all (fun (call, _) =>
         "System.Object"], returnType := byteType }).isNone := by decide +kernel
 #print axioms exactReference
 
-/-- A forged open return type or convention invalidates both the kept and the lowered form. -/
-theorem exactDeclaration : controls.all (fun (call, operation) =>
+/-- A forged open return type or convention rejects both the original call and a tail-prefixed call. -/
+theorem exactDeclaration : controls.all (fun (call, _) =>
     let altered := { call with declared.returnType := .void }
     refuses call altered &&
       refuses call { call with target := .external "Other" } &&
@@ -242,7 +242,7 @@ theorem exactDeclaration : controls.all (fun (call, operation) =>
       refuses call { call with name := "Other" } &&
       refuses call { call with declared.parameters := [.ownerParameter 0] } &&
       !accepts altered (.call call.method {}) &&
-      !accepts altered (.memory operation) &&
+      !accepts altered (.call call.method { tail := true }) &&
       [0x00, 0x11, 0x30, 0x50, 0x70].all (fun convention =>
         refuses call { call with declared.convention := convention })) := by
   decide +kernel
@@ -259,7 +259,7 @@ theorem unadmitted :
         !accepts call (.unadmitted 40) && !accepts call .nop) := by decide +kernel
 #print axioms unadmitted
 
-/-- On every stack and memory these calls step as the memory instruction they implement. -/
+/-- On every stack and memory these calls step according to their bound runtime model. -/
 theorem callSteps (call : CallSite) (operation : MemoryOp)
     (listed : (call, operation) ∈ references ++ values) (pc : Nat)
     (args stack : List CIL.Safety.Value)
@@ -267,12 +267,12 @@ theorem callSteps (call : CallSite) (operation : MemoryOp)
     let body : Method :=
       { code := [], locals := [], returnsValue := true, environment := environment 2 }
     step body (.call call.method {}) pc args frame stack memory =
-      step body (.memory operation) pc args frame stack memory := by
+      modelStep (some (.memory operation)) body pc frame stack memory := by
   have found : (references ++ values).all
       (fun pair => model pair.1 == some (.memory pair.2)) := by decide +kernel
   have modelAt := List.all_eq_true.mp found _ listed
   dsimp only
-  apply step_call_memory <;> first | rfl | exact eq_of_beq modelAt
+  apply step_call_model <;> first | rfl | exact eq_of_beq modelAt
 
 #print axioms callSteps
 
@@ -320,7 +320,7 @@ theorem spanReceiversFault : [(MemoryOp.spanLength, ([] : List CIL.Safety.Value)
     (.spanCopy 1 true, [.bufferSpan ⟨.address ⟨0, 0⟩, 8, 1, true⟩]),
     (.spanFill 1 false, [.scalar (.i32 0)]), (.spanFill 1 true, [])].all (fun (operation, above) =>
       nullOrPlain.all fun receiver =>
-        faults (instruction (.memory operation) (above ++ [receiver]) callerMemory)) := by
+        faults (memoryInstruction operation (above ++ [receiver]) callerMemory)) := by
   decide +kernel
 #print axioms spanReceiversFault
 

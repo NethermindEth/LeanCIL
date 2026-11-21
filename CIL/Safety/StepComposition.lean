@@ -342,28 +342,17 @@ theorem step_call_feature {method : Extraction.MethodRef} {prefixes : CallPrefix
 
 #print axioms step_call_feature
 
-/-- A memory operation's model runs as the `.memory` instruction of that operation: both guard
-    its `argumentCount` operands and run `memoryInstruction`, so its step equations apply. -/
-theorem modelStep_memory (operation : CIL.MemoryOp) (stack : List Value) :
+/-- A memory model checks its operands, reads any span homes and performs the bound operation. -/
+@[cil_step low] theorem modelStep_memory (operation : CIL.MemoryOp) (stack : List Value) :
     modelStep (some (.memory operation)) body pc frame stack memory =
-      step body (.memory operation) pc args frame stack memory := by
-  simp only [modelStep, observedCall, runModel, CIL.RuntimeModel.observerCount, step,
-    observerCount, staticInstruction]
-  rfl
+      if unspecifiedOperands operation.argumentCount stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let operands ← viewOperands frame memory (viewOperandCount operation) stack
+        let (result, values) ← staticInstruction body pc operation operands memory
+        return FrameAction.next (pc + 1) values frame result := id rfl
 
 #print axioms modelStep_memory
-
-/-- A call without a link whose method's model is a memory operation steps as that operation. -/
-theorem step_call_memory {method : Extraction.MethodRef} {prefixes : CallPrefixes}
-    {operation : CIL.MemoryOp} (link : body.linkAt pc = none)
-    (found : Extraction.runtimeModel body.environment .call method = some (.memory operation))
-    (direct : prefixes.tail = false) (stack : List Value) :
-    step body (.call method prefixes) pc args frame stack memory =
-      step body (.memory operation) pc args frame stack memory := by
-  rw [step_call_model (link := link) (found := found) (direct := direct),
-    modelStep_memory (args := args)]
-
-#print axioms step_call_memory
 
 /-- An unlinked constructor dispatches its model after checking the explicit arguments. -/
 theorem step_newobj_model {method : Extraction.MethodRef} {model : CIL.RuntimeModel}
@@ -384,10 +373,10 @@ theorem step_newobj_memory {method : Extraction.MethodRef} {operation : CIL.Memo
     (found : Extraction.runtimeModel body.environment .newobj method = some (.memory operation))
     (count : method.parameters.length = operation.argumentCount) (stack : List Value) :
     step body (.newobj method) pc args frame stack memory =
-      step body (.memory operation) pc args frame stack memory := by
-  rw [step_newobj_model (link := link) (found := found), modelStep_memory (args := args), count]
+      modelStep (some (.memory operation)) body pc frame stack memory := by
+  rw [step_newobj_model (link := link) (found := found), count, modelStep_memory]
   by_cases observed : unspecifiedOperands operation.argumentCount stack = true <;>
-    simp only [step, observerCount, observed, Bool.false_eq_true, ite_true, ite_false]
+    simp only [observed, Bool.false_eq_true, ite_true, ite_false]
 
 #print axioms step_newobj_memory
 
@@ -686,7 +675,7 @@ private theorem valueShape_span_test (type : Extraction.TypeExpr) :
 @[cil_step] theorem step_ldobj_vector16 {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .vector 16) (stack : List Value) :
     step body (.ldobj type) pc args frame stack memory =
-      step body (.memory .load128) pc args frame stack memory := by
+      modelStep (some (.memory .load128)) body pc frame stack memory := by
   simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
     pureArity, staticInstruction]
   first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
@@ -696,7 +685,7 @@ private theorem valueShape_span_test (type : Extraction.TypeExpr) :
 @[cil_step] theorem step_ldobj_vector32 {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .vector 32) (stack : List Value) :
     step body (.ldobj type) pc args frame stack memory =
-      step body (.memory .load256) pc args frame stack memory := by
+      modelStep (some (.memory .load256)) body pc frame stack memory := by
   simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
     pureArity, staticInstruction]
   first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
@@ -706,7 +695,7 @@ private theorem valueShape_span_test (type : Extraction.TypeExpr) :
 @[cil_step] theorem step_ldobj_vector64 {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .vector 64) (stack : List Value) :
     step body (.ldobj type) pc args frame stack memory =
-      step body (.memory .load512) pc args frame stack memory := by
+      modelStep (some (.memory .load512)) body pc frame stack memory := by
   simp only [step, observerCount, valueShape_span_test body type, shape, transferObject,
     pureArity, staticInstruction]
   first | rfl | (cases unspecifiedOperands 1 stack <;> rfl)
@@ -841,7 +830,7 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
 @[cil_step] theorem step_stobj_vector16 {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .vector 16) (stack : List Value) :
     step body (.stobj type) pc args frame stack memory =
-      step body (.memory .store128) pc args frame stack memory := by
+      modelStep (some (.memory .store128)) body pc frame stack memory := by
   simp only [step, observerCount, shape, transferObject,
     pureArity, staticInstruction]
   first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
@@ -851,7 +840,7 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
 @[cil_step] theorem step_stobj_vector32 {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .vector 32) (stack : List Value) :
     step body (.stobj type) pc args frame stack memory =
-      step body (.memory .store256) pc args frame stack memory := by
+      modelStep (some (.memory .store256)) body pc frame stack memory := by
   simp only [step, observerCount, shape, transferObject,
     pureArity, staticInstruction]
   first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
@@ -861,7 +850,7 @@ theorem step_ldobj_span_result {type : Extraction.TypeExpr}
 @[cil_step] theorem step_stobj_vector64 {type : Extraction.TypeExpr}
     (shape : body.valueShape type = .vector 64) (stack : List Value) :
     step body (.stobj type) pc args frame stack memory =
-      step body (.memory .store512) pc args frame stack memory := by
+      modelStep (some (.memory .store512)) body pc frame stack memory := by
   simp only [step, observerCount, shape, transferObject,
     pureArity, staticInstruction]
   first | rfl | (cases unspecifiedOperands 2 stack <;> rfl)
@@ -1097,18 +1086,6 @@ theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
   rw [step_ldarga_home_eq body pc args frame memory index stack slot access, step_ldloca_eq]
 
 #print axioms step_ldarga_home_ldloca
-
-/-- Memory operations fault on unspecified operand bits, then run `staticInstruction`. -/
-@[cil_step] theorem step_memory_eq (operation : CIL.MemoryOp) (stack : List Value) :
-    step body (.memory operation) pc args frame stack memory =
-      if unspecifiedOperands operation.argumentCount stack then
-        .error (.unsupported "Instruction observes unspecified vector bits")
-      else do
-        let operands ← viewOperands frame memory (viewOperandCount operation) stack
-        let (memory, values) ← staticInstruction body pc operation operands memory
-        return FrameAction.next (pc + 1) values frame memory := by
-  simp only [step, observerCount]
-  rfl
 
 /-- `ldsfld` pushes the value `staticLoad` reads through the descriptor bound to its pc. Stated
     as the match a rewrite of the read leaves, so checking a stepped load never evaluates it. -/

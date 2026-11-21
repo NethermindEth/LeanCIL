@@ -622,8 +622,8 @@ example (frame : Frame) (memory : Memory)
 
 cil_runtime_models spanOfReference
 
--- A construction without a link stops at its model's step, not at the raw constructor's.
-/-- (CIL.Instruction.memory (CIL.MemoryOp.spanSingleReference 4 true)) 1 -/
+-- The stuck constructor reports its bound span model.
+/-- modelStep (some (CIL.RuntimeModel.memory (CIL.MemoryOp.spanSingleReference 4 true))) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (frame : Frame) (memory : Memory) (value : Value) (post : Memory → List Value → Prop) :
     LoopTerminates [spanOfReference] 0 [value] post ⟨1, frame, [value], memory⟩ := by
@@ -793,8 +793,8 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
       (fun _ _ => True) ⟨3, stampsEntry.frame memory home, [], current⟩ := by
   cil_loop_advance
 
--- The stuck step shows its pc as a literal, as the message's first line does.
-/-- (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) 5 -/
+-- The stuck offset call reports its bound element width and signedness.
+/-- modelStep (some (CIL.RuntimeModel.memory (CIL.MemoryOp.add 4 true))) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)

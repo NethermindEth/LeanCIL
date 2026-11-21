@@ -25,7 +25,7 @@ theorem witness : invoke Extracted.program 16 0 arguments callerMemory = .error 
   change run Extracted.program 13 0 3 arguments ⟨1, [], [], 0⟩
     [.scalar (.i32 9), .scalar (.i32 0), callerReference] callerMemory = .error fault
   apply run_fault Extracted.program_method0 Extracted.method0_instruction3
-  rw [step_call_memory (link := Extracted.method0_link3) (found := Extracted.method0_model3)
+  rw [step_call_model (link := Extracted.method0_link3) (found := Extracted.method0_model3)
     (direct := rfl)] <;> rfl
 
 /-- No fuel choice can make a nine-byte fill succeed in the eight-byte allocation. -/

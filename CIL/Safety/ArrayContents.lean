@@ -424,16 +424,16 @@ theorem CheckedSpan.of_array {memory : Memory} {view : ArrayView} {width : Nat}
 theorem step_arraySpan_whole {memory : Memory} {view : ArrayView} {element : CIL.ArrayElement}
     {writable : Bool} (typed : view.elementType = element)
     (valid : view.validate memory = .ok ()) :
-    ∀ body pc args frame rest,
-      step body (.memory (.arraySpan element writable .whole)) pc args frame
+    ∀ body pc frame rest,
+      modelStep (some (.memory (.arraySpan element writable .whole))) body pc frame
         (.array view :: rest) memory =
         .ok (.next (pc + 1) (.bufferSpan (view.span writable) :: rest) frame memory) := by
-  intro body pc args frame rest
+  intro body pc frame rest
   subst typed
   have checked : (view.span writable).validate memory = .ok () :=
     ArrayView.span_valid writable valid
   simp only [ArrayView.span] at checked
-  rw [step_memory_eq]
+  rw [modelStep_memory]
   simp [unspecifiedOperands, CIL.MemoryOp.argumentCount, CIL.ArraySpanRange.argumentCount,
     Value.hasUnspecified, staticInstruction, memoryInstruction, otherMemoryInstruction, checked,
     viewOperandCount, viewOperands, spanView,

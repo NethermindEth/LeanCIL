@@ -190,9 +190,6 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
   let instruction ← instantiateMVars instructionLookup
   let op ← lastArgument "loopFetch" op
   let code? := fetched.find? (·.isAppOfArity ``CIL.Method.code 1)
-  let lowered ← match code? with
-    | some code => typedObjectLowering? code.appArg! op
-    | none => pure none
   let resolvedField : MetaM (Option (Expr × Expr)) := do
     let some code := code? | return none
     let (name, #[field]) := (← whnfR op).getAppFnArgs | pure none
@@ -208,7 +205,7 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
       let some #[body, _, pc, _, _, _, _] := argumentsOf? action ``CIL.Safety.step 7 | pure false
       unlinkedPc body pc
     else pure false
-  return { op := lowered.map (·.1) |>.getD op, unlinkedCall, valueField, found, instruction, step }
+  return { op, unlinkedCall, valueField, found, instruction, step }
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=

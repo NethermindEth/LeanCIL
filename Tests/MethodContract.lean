@@ -6,6 +6,7 @@ import CIL.Safety.WordFootprint
 import CIL.Safety.ReturnMemory
 import CIL.Safety.Segment
 import Tests.Support
+import Tests.Support.IntrinsicMethods
 import Tests.WordFields
 
 /-! A synthetic extraction with the bodies the C# fixture compiles to:
@@ -323,7 +324,7 @@ theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
 /-- A feature test and a vector load step by their own equations inside a contract proof. -/
 def featureLoadBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [], code := [.call (Tests.supportedGetter "X86.Avx2"), .pop, .ldarg 0,
-      .memory .load128, .ret] }
+      .ldobj Tests.IntrinsicMethods.vector128Byte, .ret] }
 
 theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (wide : profile.avx2 = true) (found : program[index]? = some (featureLoadBody profile))

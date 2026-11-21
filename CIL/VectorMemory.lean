@@ -7,8 +7,8 @@ import CIL.WideMultiply
 /-!
 # Vector memory and unsafe references
 
-128-, 256- and 512-bit loads and stores, `Unsafe` reference arithmetic, and the memory
-instructions (`MemoryOp`) of the reference interpreter. In caller storage a vector is
+128-, 256- and 512-bit loads and stores, `Unsafe` reference arithmetic, and the operations
+bound to modeled memory calls. In caller storage a vector is
 stored little-endian, byte by byte, like scalars in `CIL.Memory`, so vector and scalar
 accesses to the same bytes agree. A scalar local holds a whole vector value instead.
 
@@ -18,8 +18,7 @@ Exact overload references (.NET 10):
    https://learn.microsoft.com/dotnet/api/system.runtime.interopservices.memorymarshal.getreference?view=net-10.0
    https://learn.microsoft.com/dotnet/api/system.readonlyspan-1.-ctor?view=net-10.0
    Unsafe.Add scales by element size. BitCast preserves storage bits.
-   The shared value evaluator models static byte spans. Checked array-backed and
-   reference-backed primitive spans use the memory rules in CIL.Safety.
+   Checked static, array-backed and reference-backed spans use the memory rules in CIL.Safety.
    Static bytes come from the extracted RVA field.
 -/
 
@@ -70,13 +69,6 @@ def write512 (memory : Memory) (address : Address) (bits : BitVec 512) : Option 
   | .byte base => some (writeBytes memory base bits.toNat 64)
   | .local frame index => some (write memory (.local frame index) (.v512 bits))
   | .static .. => none
-
-/-- Only actual pointer representations may be reinterpreted as managed refs.
-    In particular, a vector snapshot cannot become a pointer to caller storage. -/
-def unsafeAsRef : Value → Option Value
-  | .object base => some (.ref (.byte base))
-  | .ref address => some (.ref address)
-  | _ => none
 
 /-- Byte-address arithmetic is unbounded, as in the existing scalar memory
     model. Negative offsets must remain nonnegative. Local slots are typed
@@ -218,71 +210,6 @@ def offsetValue (signed : Bool) (value : Value) : Option Int :=
   | true, .i32 bits => some bits.toInt
   | true, .i64 bits => some bits.toInt
   | false, .i64 bits => some (bits.toNat : Int)
-  | _, _ => none
-
-/-- Runs a memory instruction on the evaluation stack (top first), giving the new memory and
-    stack. Ill-typed operands, out-of-range accesses and writes to read-only data are stuck. -/
-def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
-    Option (Memory × List Value) := do
-  match op, stack with
-  -- `Math.BigMul`: the low word is stored through the reference, the high word is pushed.
-  | .bigMul64 false, .ref low :: .i64 right :: .i64 left :: rest =>
-    return (← write64 memory low (left * right), .i64 (WideMultiply.high64 left right) :: rest)
-  | .bigMul64 true, .ref low :: .i64 right :: .i64 left :: rest =>
-    return (← write64 memory low (left * right),
-      .i64 (WideMultiply.signedHigh64 left right) :: rest)
-  -- Vector loads and stores, through a reference or an object.
-  | .load128, .ref address :: rest => return (memory, (← read128 memory address) :: rest)
-  | .load256, .ref address :: rest => return (memory, (← read256 memory address) :: rest)
-  | .load256, .object base :: rest => return (memory, (← read256 memory (.byte base)) :: rest)
-  | .load512, .ref address :: rest => do return (memory, (← read512 memory address) :: rest)
-  | .store512, .v512 bits :: .ref address :: rest =>
-    return (← write512 memory address bits, rest)
-  | .store128, .v128 bits :: .ref address :: rest =>
-    return (← write128 memory address bits, rest)
-  | .store256, .v256 bits :: .ref address :: rest =>
-    return (← write256 memory address bits, rest)
-  | .store256, .v256 bits :: .object base :: rest =>
-    return (← write256 memory (.byte base) bits, rest)
-  -- `Vector128.LoadUnsafe` and `StoreUnsafe`, the offset in bytes above the reference.
-  | .vector128Unsafe false false, .ref address :: rest =>
-    return (memory, (← read128 memory address) :: rest)
-  | .vector128Unsafe false true, offset :: .ref address :: rest =>
-    let moved ← unsafeAdd 1 (← offsetValue false offset) address
-    return (memory, (← read128 memory moved) :: rest)
-  | .vector128Unsafe true false, .ref address :: .v128 bits :: rest =>
-    return (← write128 memory address bits, rest)
-  | .vector128Unsafe true true, offset :: .ref address :: .v128 bits :: rest =>
-    let moved ← unsafeAdd 1 (← offsetValue false offset) address
-    return (← write128 memory moved bits, rest)
-  -- `Unsafe` reinterpretation and offsets.
-  | .asRef, v :: rest => return (memory, (← unsafeAsRef v) :: rest)
-  | .add size signed, offset :: .ref address :: rest =>
-    return (memory, .ref (← unsafeAdd size (← offsetValue signed offset) address) :: rest)
-  | .bitcastByteBool, .i32 bits :: rest =>
-    if bits.toNat < 256 then return (memory, .i32 bits :: rest) else none
-  | .bitcastByteBool, .i8 bits :: rest =>
-    return (memory, .i32 (bits.zeroExtend 32) :: rest)
-  -- Null references.
-  | .nullRef, _ => return (memory, .nullRef :: stack)
-  | .isNullRef, .nullRef :: rest => return (memory, .i32 1 :: rest)
-  | .isNullRef, .object _ :: rest | .isNullRef, .ref _ :: rest => return (memory, .i32 0 :: rest)
-  -- Read-only static data and spans over it; span indexing is bounds checked.
-  | .createSpan width, .ref (.static bytes 0) :: rest =>
-    if 0 < width ∧ bytes.length % width = 0 then
-      return (memory, .span (.static bytes 0) (bytes.length / width) :: rest)
-    else none
-  | .spanItem width, .i32 index :: .span (.static bytes offset) length :: rest =>
-    if index.toNat < length then
-      return (memory, .ref (.static bytes (offset + index.toNat * width)) :: rest)
-    else none
-  | .spanLength, .span _ length :: rest => return (memory, .i32 (BitVec.ofNat 32 length) :: rest)
-  | .spanCreate, .i32 length :: .ref (.static bytes offset) :: rest =>
-    if 0 ≤ length.toInt ∧ offset + length.toNat ≤ bytes.length then
-      return (memory, .span (.static bytes offset) length.toNat :: rest)
-    else none
-  | .spanReference, .span address length :: rest =>
-    if length = 0 then none else return (memory, .ref address :: rest)
   | _, _ => none
 
 end CIL
