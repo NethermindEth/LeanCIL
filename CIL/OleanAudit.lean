@@ -826,7 +826,9 @@ unsafe def main (args : List String) : IO UInt32 := do
         else none
       try
         writeAudit req output env [("replayed", toJson targets), ("fused", toJson fused)]
-          ownerOf closureOwnerOf replayedInterfaces
+          (if fused then ownerOf else fun name =>
+            (env.getModuleIdxFor? name).bind (env.allImportedModuleNames[·.toNat]?))
+          closureOwnerOf replayedInterfaces
       finally unless fused do env.freeRegions
     return 0
   let env ← importModules (modules.map ({ module := · })) {} (loadExts := false)

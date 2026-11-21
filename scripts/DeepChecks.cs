@@ -465,7 +465,8 @@ partial class Program
         // The structural audit binds the proposition and every extraction and image constant.
         // Read only its final argument from the replayed statement.
         if (theorem.term is not { } term || theorem.termError is not null)
-            throw new InvalidDataException("Missing audited coverage argument");
+            throw new InvalidDataException($"Cannot read the coverage argument of {theorem.name}: " +
+                (theorem.termError ?? "audit returned no statement term"));
         var nodes = term.GetProperty("nodes");
         var application = nodes[term.GetProperty("root").GetInt32()];
         if (application[0].GetString() == "app")

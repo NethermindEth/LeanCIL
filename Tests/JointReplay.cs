@@ -315,7 +315,7 @@ void CheckFusedReplay()
         refutationSource], root, root + Path.PathSeparator + library, environment: environment);
 
     System.Text.Json.JsonElement Audit(string[] targets, string module, string theorem, bool fused,
-        bool rejected = false, bool metadata = false, string[]? axioms = null)
+        bool rejected = false, bool metadata = false, string[]? axioms = null, bool term = false)
     {
         var request = Path.Combine(root, "fused-request.json");
         var result = Path.Combine(root, "fused-result.json");
@@ -324,7 +324,7 @@ void CheckFusedReplay()
             ["modules"] = new[] { module }, ["replayTargets"] = targets,
             ["theorems"] = new[]
             {
-                new { name = theorem, axioms = axioms ?? [], statement = true, refutation = true }
+                new { name = theorem, axioms = axioms ?? [], statement = true, refutation = true, term }
             }
         };
         if (metadata)
@@ -346,6 +346,12 @@ void CheckFusedReplay()
     Audit(["JointA"], "JointA", "JointA.base", fused: true);
     Audit(["JointA"], "JointA", "JointA.base", fused: false, metadata: true);
     Console.WriteLine("PASS fused and metadata fallback audit cannot shadow toolchain modules");
+    var imported = Audit(["JointClean"], "JointA", "JointA.base", fused: false, term: true);
+    var replayed = Audit(["JointA"], "JointA", "JointA.base", fused: true, term: true);
+    if (!JsonElement.DeepEquals(imported.GetProperty("theorems")[0].GetProperty("term"),
+        replayed.GetProperty("theorems")[0].GetProperty("term")))
+        throw new InvalidOperationException("Partial replay changed the statement of an independently imported theorem");
+    Console.WriteLine("PASS partially replayed audit preserves imported theorem statements");
     Audit(["JointClean", "JointUnapproved"], "JointUnapproved", "JointDuplicate.same",
         fused: false, rejected: true);
     Audit(["JointUnapproved", "JointClean"], "JointUnapproved", "JointDuplicate.same",

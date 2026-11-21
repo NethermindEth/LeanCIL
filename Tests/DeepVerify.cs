@@ -125,12 +125,14 @@ using (Program restoredSupport = new())
         stage: stage => audited |= stage == "theorem audit");
     var original = restoredSupport.bindingPreparation!;
     if (restoredSupport.supportCacheHits == 0 || !audited || restoredReport.binding.mode != BindingMode.Deep ||
+        !restoredReport.binding.facts.SequenceEqual(report.binding.facts) ||
+        !restoredReport.binding.images.SequenceEqual(report.binding.images) ||
         !Same(original.BaseArtifacts, ModuleArtifacts(restoredSupport.library!)) ||
         !ModuleArtifactsPreserved(original.SessionArtifacts, ModuleArtifacts(restoredSupport.session!)) ||
         !ModuleArtifactsPreserved(original.CertifiedArtifacts,
             restoredSupport.SessionModules(restoredSupport.session!)))
         throw new InvalidOperationException(
-            "Authenticated support reuse changed the prepared library or skipped audit");
+            "Authenticated support reuse changed the binding results or prepared library, or skipped audit");
 }
 Console.WriteLine("PASS authenticated support restoration preserves prepared families and runs a deep audit");
 if (args is ["--support-restore"]) return;
@@ -182,14 +184,19 @@ if (args is ["--prepared-inventory"]) return;
 
 var subjects = BindingRequests(new("", [new("Identity", inputs.Images[0].Digest, [])], 1));
 // Exercise report projection and scaling with the same literal term shape as the joint audit.
-AuditedOleans coverageAudit = new(new(), [new(EnumStorageTheorem, null, [], null, null,
+static AuditedTheorem IncompleteCoverage(string theorem, string predicate) => new(theorem, null, [], null, null,
     JsonSerializer.SerializeToElement(new { root = 2, nodes = new object[] {
-        new object[] { "const", 0, new[] { "StrictBinding", "EnumStorageChecked" }, Array.Empty<object>() },
+        new object[] { "const", 0, new[] { "StrictBinding", predicate }, Array.Empty<object>() },
         new object[] { "const", 0, new[] { "Bool", "false" }, Array.Empty<object>() },
-        new object[] { "app", 0, 1 } } }))], []);
+        new object[] { "app", 0, 1 } } }));
+AuditedOleans coverageAudit = new(new(), [
+    IncompleteCoverage(EnumStorageTheorem, "EnumStorageChecked"),
+    IncompleteCoverage(PlatformKindsTheorem, "PlatformKindsChecked")
+], []);
 var withoutRows = DeepBindingSection(inputs, [new("Identity", inputs.Images[0])],
     [.. subjects.Where(request => request.Module != MetadataRowsModule)], report.binding.sources!, coverageAudit);
 if (withoutRows.facts.Single(fact => fact.id == BindingFact.EnumUnderlyingTypes).status != BindingStatus.NotCovered ||
+    withoutRows.facts.Single(fact => fact.id == BindingFact.PlatformTypeKinds).status != BindingStatus.NotCovered ||
     withoutRows.facts.Single(fact => fact.id == BindingFact.MetadataRows).status != BindingStatus.NotCovered ||
     withoutRows.facts.Single(fact => fact.id == BindingFact.BodyBytes).theorem != "BindingAudit.bodies")
     throw new InvalidOperationException("A fact without an audited request was reported as reconfirmed");

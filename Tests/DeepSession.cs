@@ -183,8 +183,9 @@ var requests = contribution.Requests.Select(request => request.Audit).Append(Pro
 string[] jointModules = [.. contribution.Modules, "Proof"];
 var audited = verification.AuditOleans(search, jointModules, requests, replayTargets: jointModules);
 contribution.RequireAudited(audited);
-if (EnumStorageComplete(audited.theorems.Single(theorem => theorem.name == EnumStorageTheorem)))
-    throw new InvalidOperationException("The scalar-only fixture reported complete enum coverage");
+foreach (var name in new[] { EnumStorageTheorem, PlatformKindsTheorem })
+    if (CoverageComplete(audited.theorems.Single(theorem => theorem.name == name)))
+        throw new InvalidOperationException($"The scalar-only fixture reported complete coverage for {name}");
 RequireAuditedModule(audited, "Proof", Path.ChangeExtension(proofSource, ".olean"));
 foreach (var theorem in audited.theorems) AuditedAxioms(theorem);
 Console.WriteLine("PASS deep modules and proof share the existing extraction with retained image bytes");
