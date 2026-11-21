@@ -143,7 +143,7 @@ internal static class RuntimeModels
     internal static Operation? CallModel(MethodReference reference, FeatureProfile profile)
     {
         if (FeatureProfile.PlatformConstant(reference) is int constant) return new Constant(32, constant, true);
-        if (FeatureProfile.Getter(reference) is Feature feature) return new FeatureTest(feature);
+        if (FeatureProfile.Getter(reference) is not null) return Unoutlined.Site;
         if (ReferenceQueries.Constant(reference, profile.Architecture) is int referenceContent)
             return new Constant(32, referenceContent, true);
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
@@ -257,12 +257,12 @@ internal static class RuntimeModels
         string signature = reference.FullName;
         if (VectorHelperCalls.TryGetValue(signature, out var helper)) return helper;
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
-            return new VectorCreateScalarUnsafe64();
+            return Unoutlined.Site;
         foreach (int width in new[] { 128, 256 })
         {
             string element = $"!!0 {Intrinsics}.Vector{width}::GetElement<System.UInt64>";
             if (signature == $"{element}({Vector(width, "!!0")},System.Int32)")
-                return Hardware($".vector (.extract64 {width})", 2);
+                return Unoutlined.Site;
         }
         return HardwareModel(signature, profile);
     }
@@ -306,14 +306,12 @@ internal static class RuntimeModels
         return calls;
     }
 
-    private static readonly Dictionary<string, Operation> PortableVectorOperations = BuildPortableVectorOperations();
+    private static readonly HashSet<string> PortableVectorSignatures = BuildPortableVectorSignatures();
 
-    private static HardwareIntrinsic Hardware(string family, int arguments) => new(family, arguments);
-
-    // Lane-independent integer aliases bind exact signatures to the existing whole-vector operations.
-    private static Dictionary<string, Operation> BuildPortableVectorOperations()
+    // Exact signatures of the lane-independent integer vector members admitted on every profile.
+    private static HashSet<string> BuildPortableVectorSignatures()
     {
-        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal);
+        var signatures = new HashSet<string>(StringComparer.Ordinal);
         foreach (var width in new[] { 128, 256, 512 })
         {
             var genericVector = Vector(width, "!!0");
@@ -323,20 +321,15 @@ internal static class RuntimeModels
                 { "System.Byte", "System.Int64", "System.UInt64", "System.UInt32", "System.Int32" })
             {
                 var vectorOwner = Vector(width, element);
-                foreach (var (name, op) in new[]
-                    { ("op_BitwiseAnd", "band"), ("op_BitwiseOr", "bor"), ("op_ExclusiveOr", "bxor") })
-                    operations.Add($"{memberVector} {vectorOwner}::{name}({memberVector},{memberVector})",
-                        Hardware($".vector (.{op} {width})", 2));
-                operations.Add($"{memberVector} {vectorOwner}::op_OnesComplement({memberVector})",
-                    Hardware($".vector (.bnot {width})", 1));
-                operations.Add($"System.Boolean {owner}::EqualsAll<{element}>({genericVector},{genericVector})",
-                    Hardware($".vector (.equalsAll {width})", 2));
-                operations.Add($"{memberVector} {vectorOwner}::get_Zero()", Hardware($".vector (.zero {width})", 0));
-                operations.Add($"{memberVector} {vectorOwner}::get_AllBitsSet()",
-                    Hardware($".vector (.ones {width})", 0));
+                foreach (var name in new[] { "op_BitwiseAnd", "op_BitwiseOr", "op_ExclusiveOr" })
+                    signatures.Add($"{memberVector} {vectorOwner}::{name}({memberVector},{memberVector})");
+                signatures.Add($"{memberVector} {vectorOwner}::op_OnesComplement({memberVector})");
+                signatures.Add($"System.Boolean {owner}::EqualsAll<{element}>({genericVector},{genericVector})");
+                signatures.Add($"{memberVector} {vectorOwner}::get_Zero()");
+                signatures.Add($"{memberVector} {vectorOwner}::get_AllBitsSet()");
             }
         }
-        return operations;
+        return signatures;
     }
 
     private static readonly Dictionary<string, Operation> VectorHelperCalls = BuildVectorHelperCalls();
@@ -353,22 +346,22 @@ internal static class RuntimeModels
             {
                 var vector = Vector(width, $"System.{element}");
                 calls.Add($"System.Boolean {vector}::op_Equality({open},{open})",
-                    Hardware($".vector (.equalsAll {width})", 2));
+                    Unoutlined.Site);
             }
             if (width == 512)
             {
                 calls.Add($"{V512UInt64} {owner}::Create({V256UInt64},{V256UInt64})",
-                    Hardware(".vector .combine256", 2));
+                    Unoutlined.Site);
                 continue;
             }
-            foreach (var (element, bits, count) in new[]
+            foreach (var (element, count) in new[]
             {
-                ("System.UInt64", 64, 1), ("System.UInt64", 64, width / 64), ("System.UInt32", 32, width / 32)
+                ("System.UInt64", 1), ("System.UInt64", width / 64), ("System.UInt32", width / 32)
             })
             {
                 var parameters = string.Join(",", Enumerable.Repeat(element, count));
                 calls.Add($"{Vector(width, element)} {owner}::Create({parameters})",
-                    Hardware($".vector (.create{bits} {width})", count));
+                    Unoutlined.Site);
             }
             var result = Vector(width, "!!0");
             calls.Add($"{result} {owner}::Create<System.Byte>(System.ReadOnlySpan`1<!!0>)",
@@ -387,33 +380,31 @@ internal static class RuntimeModels
 
     private static Operation? HardwareModel(string signature, FeatureProfile profile)
     {
-        if (PortableVectorOperations.TryGetValue(signature, out var operation)) return operation;
-        Operation Finish(string family, int argc, Feature? required = null) =>
-            Require(Hardware(family, argc), required);
-        Operation Require(Operation intrinsic, Feature? required = null)
+        if (PortableVectorSignatures.Contains(signature)) return Unoutlined.Site;
+        Operation Require(Feature feature, Operation? operation = null)
         {
-            if (required is Feature feature && !profile.Get(feature))
+            if (!profile.Get(feature))
                 throw new InvalidDataException($"Reachable intrinsic lacks {feature}: {signature}");
-            return intrinsic;
+            return operation ?? Unoutlined.Site;
         }
         if (signature == $"{V256UInt64} {Avx2}::And({V256UInt64},{V256UInt64})")
-            return Finish(".avx2 .band", 2, Feature.Avx2);
+            return Require(Feature.Avx2);
         if (signature == $"{V256UInt64} {Avx2}::Or({V256UInt64},{V256UInt64})")
-            return Finish(".avx2 .bor", 2, Feature.Avx2);
+            return Require(Feature.Avx2);
         if (signature == $"{V256UInt64} {Avx2}::Xor({V256UInt64},{V256UInt64})")
-            return Finish(".avx2 .bxor", 2, Feature.Avx2);
+            return Require(Feature.Avx2);
         if (signature == $"{V256UInt64} {Avx2}::AndNot({V256UInt64},{V256UInt64})")
-            return Finish(".avx2 .andNot", 2, Feature.Avx2);
+            return Require(Feature.Avx2);
         if (signature == $"{V256UInt64} {Avx2}::ShiftLeftLogical({V256UInt64},{V128UInt64})")
-            return Finish(".avx2 .shl64Count", 2, Feature.Avx2);
+            return Require(Feature.Avx2);
         if (signature == $"{V256UInt64} {Avx2}::ShiftRightLogical({V256UInt64},{V128UInt64})")
-            return Finish(".avx2 .shr64Count", 2, Feature.Avx2);
+            return Require(Feature.Avx2);
         if (signature == $"{V512UInt64} {X86}.Avx512F::CompareLessThan({V512UInt64},{V512UInt64})")
-            return Finish(".avx512 .ltu512", 2, Feature.Avx512F);
+            return Require(Feature.Avx512F);
         if (signature == $"{V512UInt64} {X86}.Avx512F::CompareGreaterThan({V512UInt64},{V512UInt64})")
-            return Finish(".avx512 .gtu512", 2, Feature.Avx512F);
+            return Require(Feature.Avx512F);
         if (signature == $"System.Int32 {Avx512DQ}::MoveMask({V512UInt64})")
-            return Finish(".avx512DQ .moveMask512", 1, Feature.Avx512DQ);
+            return Require(Feature.Avx512DQ);
         foreach (int width in new[] { 128, 256 })
         {
             string ulongVector = Vector(width, "System.UInt64");
@@ -421,14 +412,14 @@ internal static class RuntimeModels
             string memberVector = Vector(width, "!0");
             string owner = $"System.Runtime.Intrinsics.Vector{width}";
             string genericOwner = Vector(width, "System.UInt64");
-            foreach ((string name, string op) in new[] { ("op_Addition", "add64"), ("op_Subtraction", "sub64") })
+            foreach (var name in new[] { "op_Addition", "op_Subtraction" })
                 if (signature == $"{memberVector} {genericOwner}::{name}({memberVector},{memberVector})")
-                    return Finish($".vector (.{op} {width})", 2);
-            foreach ((string name, string op) in new[] { ("LessThan", "ltu64"), ("Equals", "eq64") })
+                    return Unoutlined.Site;
+            foreach (var name in new[] { "LessThan", "Equals" })
                 if (signature == $"{genericVector} {owner}::{name}<System.UInt64>({genericVector},{genericVector})")
-                    return Finish($".vector (.{op} {width})", 2);
+                    return Unoutlined.Site;
             if (signature == $"{genericVector} {owner}::LessThan<System.Int64>({genericVector},{genericVector})")
-                return Finish($".vector (.lt64 {width})", 2);
+                return Unoutlined.Site;
             foreach ((string method, string target) in new[] { ("AsByte", "System.Byte"), ("AsUInt32", "System.UInt32"),
                 ("AsInt64", "System.Int64"), ("AsDouble", "System.Double"), ("AsUInt64", "System.UInt64"),
                 ("AsInt32", "System.Int32"), ("AsSingle", "System.Single") })
@@ -437,87 +428,87 @@ internal static class RuntimeModels
                     "System.UInt64", "System.Byte", "System.UInt32", "System.Int64", "System.Int32", "System.Single"
                 })
                     if (signature == $"{Vector(width, target)} {owner}::{method}<{source}>({genericVector})")
-                        return Finish($".vector (.reinterpret {width})", 1);
+                        return Unoutlined.Site;
             string longVector = Vector(width, "System.Int64");
             if (signature == $"{longVector} {owner}::ShiftRightArithmetic({longVector},System.Int32)")
-                return Finish($".vector (.ashr64 {width})", 2);
+                return Unoutlined.Site;
             if (signature == $"{ulongVector} {owner}::CreateScalar(System.UInt64)")
-                return Finish($".vector (.createScalar64 {width})", 1);
+                return Unoutlined.Site;
             if (signature == $"{Vector(width, "System.UInt32")} {owner}::CreateScalar(System.UInt32)")
-                return Finish($".vector (.createScalar32 {width})", 1);
+                return Unoutlined.Site;
             if (signature == $"System.UInt32 {owner}::ExtractMostSignificantBits<System.UInt64>({genericVector})")
-                return Finish($".vector (.extractMSB64 {width})", 1);
+                return Unoutlined.Site;
             if (signature == $"!!0 {owner}::Sum<System.UInt64>({genericVector})")
-                return Finish($".vector (.sum64 {width})", 1);
+                return Unoutlined.Site;
         }
         return signature switch
         {
             $"{V128UInt64} {Intrinsics}.Arm.AdvSimd::ExtractVector128({V128UInt64},{V128UInt64},System.Byte)" =>
-                Finish(".advSimd .extract64", 3, Feature.AdvSimd),
+                Require(Feature.AdvSimd),
             $"{V128UInt64} {Intrinsics}.Arm.AdvSimd::ReverseElement8({V128UInt64})" =>
-                Finish(".advSimd .reverseElement8", 1, Feature.AdvSimd),
+                Require(Feature.AdvSimd),
             $"{V128UInt64} {X86}.Sse2::ShiftLeftLogical128BitLane({V128UInt64},System.Byte)" =>
-                Finish(".sse .shiftLeftBytes", 2, Feature.Sse2),
+                Require(Feature.Sse2),
             $"{V128UInt64} {X86}.Sse2::Multiply({V128UInt32},{V128UInt32})" =>
-                Finish(".sse .multiplyEven32", 2, Feature.Sse2),
+                Require(Feature.Sse2),
             $"{V128Byte} {X86}.Ssse3::AlignRight({V128Byte},{V128Byte},System.Byte)" =>
-                Finish(".sse .alignBytes", 3, Feature.Ssse3),
+                Require(Feature.Ssse3),
             $"{V128Byte} {X86}.Ssse3::Shuffle({V128Byte},{V128Byte})" =>
-                Finish(".sse .shuffleBytes", 2, Feature.Ssse3),
+                Require(Feature.Ssse3),
             $"{V256Byte} {Avx2}::Shuffle({V256Byte},{V256Byte})" =>
-                Finish(".avx2 .shuffleBytes", 2, Feature.Avx2),
-            $"{V128Byte} {X86}.Aes::Encrypt({V128Byte},{V128Byte})" => Finish(".aes .encrypt", 2, Feature.Aes),
+                Require(Feature.Avx2),
+            $"{V128Byte} {X86}.Aes::Encrypt({V128Byte},{V128Byte})" => Require(Feature.Aes),
             $"{V128Byte} {Intrinsics}.Arm.Aes::Encrypt({V128Byte},{V128Byte})" =>
-                Finish(".armAes .encrypt", 2, Feature.ArmAes),
+                Require(Feature.ArmAes),
             $"{V128Byte} {Intrinsics}.Arm.Aes::MixColumns({V128Byte})" =>
-                Finish(".armAes .mixColumns", 1, Feature.ArmAes),
+                Require(Feature.ArmAes),
             $"{V256UInt64} {Avx2}::Permute4x64({V256UInt64},System.Byte)" =>
-                Finish(".avx2 .permute4x64", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt32} {Avx2}::Blend({V256UInt32},{V256UInt32},System.Byte)" =>
-                Finish(".avx2 .blend32", 3, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256Int32} {Avx2}::Blend({V256Int32},{V256Int32},System.Byte)" =>
-                Finish(".avx2 .blend32", 3, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt64} {Avx2}::Add({V256UInt64},{V256UInt64})" =>
-                Finish(".avx2 .add64", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt64} {Avx2}::CompareEqual({V256UInt64},{V256UInt64})" =>
-                Finish(".avx2 .eq64", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt64} {Avx2}::ShiftLeftLogical({V256UInt64},System.Byte)" =>
-                Finish(".avx2 .shl64", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256Int64} {Avx2}::CompareGreaterThan({V256Int64},{V256Int64})" =>
-                Finish(".avx2 .signedgt64", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt64} {Avx2}::Multiply({V256UInt32},{V256UInt32})" =>
-                Finish(".avx2 .multiplyEven32", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt64} {Avx2}::ShiftRightLogical({V256UInt64},System.Byte)" =>
-                Finish(".avx2 .shr64", 2, Feature.Avx2),
+                Require(Feature.Avx2),
             $"{V256UInt64} {Avx512FVL}::AlignRight64({V256UInt64},{V256UInt64},System.Byte)" =>
-                Finish(".avx512 .alignRight64", 3, Feature.Avx512FVL),
+                Require(Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::TernaryLogic({V256UInt64},{V256UInt64},{V256UInt64},System.Byte)" =>
-                Finish(".avx512 .ternaryLogic", 4, Feature.Avx512FVL),
+                Require(Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::PermuteVar4x64x2({V256UInt64},{V256UInt64},{V256UInt64})" =>
-                Finish(".avx512 .permuteVar4x64x2", 3, Feature.Avx512FVL),
+                Require(Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::CompareLessThan({V256UInt64},{V256UInt64})" =>
-                Finish(".avx512 .ltu64", 2, Feature.Avx512FVL),
+                Require(Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::CompareGreaterThan({V256UInt64},{V256UInt64})" =>
-                Finish(".avx512 .gtu64", 2, Feature.Avx512FVL),
+                Require(Feature.Avx512FVL),
             $"{V256UInt64} {Avx512FVL}::CompareGreaterThanOrEqual({V256UInt64},{V256UInt64})" =>
-                Finish(".avx512 .geu64", 2, Feature.Avx512FVL),
+                Require(Feature.Avx512FVL),
             $"System.Int32 {Avx512DQ}::MoveMask({V256UInt64})" =>
-                Finish(".avx512DQ .moveMask64", 1, Feature.Avx512DQ),
+                Require(Feature.Avx512DQ),
             $"{V256UInt64} {Avx512DQ}/VL::MultiplyLow({V256UInt64},{V256UInt64})" =>
-                Finish(".avx512DQ .mul64", 2, Feature.Avx512DQVL),
-            $"System.Int32 {Avx}::MoveMask({V256Double})" => Finish(".avx .moveMask64", 1, Feature.Avx),
-            $"System.Int32 {Avx}::MoveMask({V256Single})" => Finish(".avx .moveMask32", 1, Feature.Avx),
+                Require(Feature.Avx512DQVL),
+            $"System.Int32 {Avx}::MoveMask({V256Double})" => Require(Feature.Avx),
+            $"System.Int32 {Avx}::MoveMask({V256Single})" => Require(Feature.Avx),
             $"{V256Single} {Avx}::Blend({V256Single},{V256Single},System.Byte)" =>
-                Finish(".avx .blend32", 3, Feature.Avx),
-            $"System.Boolean {Avx}::TestZ({V256UInt64},{V256UInt64})" => Finish(".avx .testZ64", 2, Feature.Avx),
+                Require(Feature.Avx),
+            $"System.Boolean {Avx}::TestZ({V256UInt64},{V256UInt64})" => Require(Feature.Avx),
             $"System.UInt32 {X86}.Bmi1::BitFieldExtract(System.UInt32,System.Byte,System.Byte)" =>
-                Finish(".bmi1 .bextr32", 3, Feature.Bmi1),
+                Require(Feature.Bmi1),
             $"System.UInt64 {X86}.Bmi2/X64::MultiplyNoFlags(System.UInt64,System.UInt64)" =>
-                Finish(".bmi2 .multiplyHigh64", 2, Feature.Bmi2),
+                Require(Feature.Bmi2),
             $"System.UInt64 {Intrinsics}.Arm.ArmBase/Arm64::MultiplyHigh(System.UInt64,System.UInt64)" =>
-                Finish(".armBase64 .multiplyHigh64", 2, Feature.ArmBase64),
+                Require(Feature.ArmBase64),
             $"{UInt64Pair} {X86}.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)" =>
-                Require(new X86BaseDivRem64(), Feature.X86Base64),
+                Require(Feature.X86Base64, new X86BaseDivRem64()),
             _ => null
         };
     }

@@ -165,9 +165,6 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operatio
     internal bool ReturnsToCaller => Kind is CallKind.Static or CallKind.Instance;
 }
 
-/// <summary>A boolean read of a runtime feature of the selected profile.</summary>
-internal sealed record FeatureTest(Feature Feature) : Operation;
-
 internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address }
 
 /// <summary>
@@ -344,19 +341,8 @@ internal sealed record ScalarIntrinsic(ScalarFunction Function, int Width, bool 
     public override int GetHashCode() => HashCode.Combine(Function, Arguments, OperandTypes);
 }
 
-/// <summary>The vector constructor that sets the low 64-bit lane and leaves the rest unspecified.</summary>
-internal sealed record VectorCreateScalarUnsafe64() : Intrinsic(1);
-
 /// <summary>The x86 64-bit division with remainder.</summary>
 internal sealed record X86BaseDivRem64() : Intrinsic(3);
-
-/// <summary>A vector or hardware intrinsic no consumer inspects, held as its rendered Lean family term.</summary>
-internal sealed record HardwareIntrinsic : Intrinsic
-{
-    readonly string family;
-
-    internal HardwareIntrinsic(string family, int arguments) : base(arguments) => this.family = family;
-}
 
 /// <summary>Which elements of an array a span covers.</summary>
 internal enum ArrayRange { Whole, FromStart, Counted }
