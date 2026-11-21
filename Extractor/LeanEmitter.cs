@@ -344,17 +344,8 @@ internal static class LeanEmitter
                         outlineOperations.Add(Unoutlined.Site);
                         continue;
                     }
-                    var operation = InstructionTranslation.Translate(site, m, methodIndices, instructions, callSites,
-                        profile, scalarCertificate, parameterHomes, importResolution, layoutContext);
-                    // Each descriptor reads the operand of the closed instruction the decoder checks.
-                    outlineOperations.Add(operation switch
-                    {
-                        ObjectInstruction access => access with { Operand = genericEvidence.ClosedOperandOf(site) },
-                        NewArray allocation => allocation with { Element = genericEvidence.ClosedOperandOf(site) },
-                        TypedElementAccess access => access with { Element = genericEvidence.ClosedOperandOf(site) },
-                        ElementAddress address => address with { Element = genericEvidence.ClosedOperandOf(site) },
-                        _ => operation
-                    });
+                    outlineOperations.Add(InstructionTranslation.Translate(site, m, methodIndices, instructions,
+                        callSites, profile, scalarCertificate, parameterHomes, importResolution, layoutContext));
                 }
                 outlines.Add(new(frame, [.. outlineOperations]));
             }

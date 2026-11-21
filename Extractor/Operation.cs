@@ -154,8 +154,8 @@ internal sealed record StructField(FieldAccess Access, int Offset, int Width, bo
 /// <summary>The class layout entry used by a field load or store in a proof outline.</summary>
 internal sealed record ClassField(ClassViews.FieldOperation Field) : Operation;
 
-/// <summary>An object instruction names the closed type whose shape determines its memory access.</summary>
-internal sealed record ObjectInstruction(Code Opcode, string? Operand = null, int? ScalarWidth = null,
+/// <summary>The object opcode and storage shape used by a proof outline.</summary>
+internal sealed record ObjectInstruction(Code Opcode, int? ScalarWidth = null,
     bool Signed = false, int? ByteSize = null) : Operation;
 
 /// <summary>
@@ -184,23 +184,19 @@ internal static class NumericKinds
 }
 
 /// <summary>
-/// A typed <c>ldelem</c> or <c>stelem</c> of the element type <paramref name="Element"/>, the raw operand's type
-/// expression. <paramref name="Storage"/> is the element's inline storage, or null for a handler table's method
-/// pointer.
+/// A typed element load or store. A handler table holds method pointers and has no inline element storage.
 /// </summary>
-internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, string? Element = null) : Operation;
+internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage) : Operation;
 
 /// <summary>
-/// An <c>ldelema</c> of the element type <paramref name="Element"/>, the raw operand's type expression, whose inline
-/// storage is <paramref name="Storage"/>; <paramref name="ReadOnly"/> records a <c>readonly.</c> prefix.
+/// The inline element storage and <c>readonly.</c> prefix of an <c>ldelema</c> site.
 /// </summary>
-internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, string? Element = null) : Operation;
+internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly) : Operation;
 
 /// <summary>
-/// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,
-/// which the extraction check compares with the token. <paramref name="Class"/> names a class element.
+/// A <c>newarr</c> site. The object proof outline uses the scope and name of a class element.
 /// </summary>
-internal sealed record NewArray(NewArray.ClassElement? Class, string? Element = null) : Operation
+internal sealed record NewArray(NewArray.ClassElement? Class) : Operation
 {
     /// <summary>The class <paramref name="Name"/> (a full name) of the assembly <paramref name="Scope"/>.</summary>
     internal sealed record ClassElement(string Scope, string Name);
