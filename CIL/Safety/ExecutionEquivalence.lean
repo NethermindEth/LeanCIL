@@ -120,12 +120,12 @@ inductive FrameActionEquivalent : FrameAction → FrameAction → Prop where
       FrameActionEquivalent (.returned values m) (.returned values n)
 
 /-- Managed dispatch observes only stable identities and equivalent checked arguments. -/
-theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
-    (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
+theorem Memory.Equivalent.calliStep {m n : Memory} (same : m.Equivalent n)
+    (signature : CIL.ManagedSignature) (tail : Bool) (link : Option CIL.Link) (frame : Frame)
     (stack : List Value) :
-    ResultEquivalent FrameActionEquivalent (managedStep operation link pc frame stack m)
-      (managedStep operation link pc frame stack n) := by
-  unfold CIL.Safety.managedStep
+    ResultEquivalent FrameActionEquivalent (calliStep signature tail link frame stack m)
+      (calliStep signature tail link frame stack n) := by
+  unfold CIL.Safety.calliStep
   split <;> try simp only [same.callArguments]
   all_goals repeat' first
     | exact .error _
@@ -134,7 +134,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     | exact .ok (.tailCall same _ _)
     | (apply ResultEquivalent.bind_same; intro)
     | split
-#print axioms Memory.Equivalent.managedStep
+#print axioms Memory.Equivalent.calliStep
 
 /-- Fresh array bytes and authority do not depend on the old view-list representation. -/
 theorem Memory.Equivalent.allocateArray {m n : Memory} (same : m.Equivalent n)
@@ -430,7 +430,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
     same.objectAboveNull, same.virtualTarget, same.objectTest]
   all_goals repeat' first
-    | exact same.managedStep _ _ _ _ _
+    | exact same.calliStep _ _ _ _ _
     | unfold returnFrom
     | unfold localAllocation
     | unfold initializeSpanHome

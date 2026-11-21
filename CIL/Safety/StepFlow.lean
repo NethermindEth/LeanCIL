@@ -38,13 +38,13 @@ def FrameAction.callee : FrameAction → Option Nat
   | _ => none
 
 /-- An indirect call can enter only a body named in the authenticated catalog of its link. -/
-theorem managedStep_callee {operation : CIL.ManagedOp} {link : Option CIL.Link} {pc : Nat}
+theorem calliStep_callee {signature : CIL.ManagedSignature} {tail : Bool} {link : Option CIL.Link}
     {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
-    (executed : managedStep operation link pc frame stack memory = .ok action)
+    (executed : calliStep signature tail link frame stack memory = .ok action)
     (enters : action.callee = some callee) :
-      (CIL.Instruction.managed operation).readsLink = true ∧
+      (CIL.Instruction.calli signature tail).readsLink = true ∧
         callee ∈ (link.map CIL.Link.callees).getD [] := by
-  unfold managedStep at executed
+  unfold calliStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |
@@ -57,7 +57,7 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {link : Option CIL.Link} 
     | solve | cases executed; cases enters
     | cases executed
     | split at executed
-#print axioms managedStep_callee
+#print axioms calliStep_callee
 
 set_option maxHeartbeats 800000 in
 /-- A successful call or construction is a step of an instruction that reads its link, and enters
@@ -72,7 +72,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
   dsimp only at h
   split at h
   all_goals repeat' first
-    | exact managedStep_callee h enters
+    | exact calliStep_callee h enters
     | unfold returnFrom at h
     | unfold localAllocation at h
     | unfold initializeSpanHome at h
@@ -97,10 +97,10 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
 theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSignature}
     {pc : Nat} {args : List Value} {frame : Frame}
     {stack : List Value} {memory : Memory} {action : FrameAction}
-    (executed : step body (.managed (.call signature true)) pc args frame stack memory =
+    (executed : step body (.calli signature true) pc args frame stack memory =
       .ok action) :
     ∃ callee arguments result, action = .tailCall callee arguments result := by
-  simp only [step, managedStep, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  simp only [step, calliStep, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; exact ⟨_, _, _, rfl⟩
     | cases executed

@@ -212,9 +212,9 @@ var numbered = new (string Name, Func<int, object> Caller, string Expected)[]
     ("CallVirtual", target => Linked("Caller", target,
         new FixtureSite(".callvirt (.arity 0)", $".virtual [(.void, {target})]"), ".ret"), relocatedTarget),
     ("MethodAddress", target => Linked("Caller", target,
-        new FixtureSite($".managed (.address {managedId} {managedSignature})", $".address {target}"), ".ret"),
+        new FixtureSite($".ldftn {managedId} {managedSignature}", $".address {target}"), ".ret"),
         relocatedTarget),
-    ("IndirectCall", target => Linked("Caller", target, new FixtureSite($".managed (.call {managedSignature} false)",
+    ("IndirectCall", target => Linked("Caller", target, new FixtureSite($".calli {managedSignature} false",
         $".indirect [{{ identity := {managedId}, method := {target} }}]"), ".ret"), relocatedTarget),
     ("Initializer", target => MethodIn("Caller", FrameOf(false, InitializedSite(target)), [], ".ret"),
         "initializer := some { method := callee0, arguments := []")

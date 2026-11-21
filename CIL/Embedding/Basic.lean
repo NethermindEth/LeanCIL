@@ -54,7 +54,7 @@ theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
 
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Instruction.continues : Instruction → Bool
-  | .managed (.call _ true) => false
+  | .calli _ true => false
   | .call _ prefixes => !prefixes.tail
   | .br _ | .ret | .throw _ | .unadmitted _ => false
   | _ => true

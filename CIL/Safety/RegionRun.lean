@@ -32,7 +32,7 @@ def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Pro
 theorem Instruction.continues_of_linked {op : CIL.Instruction}
     (linked : op.readsLink = true)
     (notTail : ∀ method prefixes, op = .call method prefixes → prefixes.tail = false)
-    (notManagedTail : ∀ signature, op ≠ .managed (.call signature true)) :
+    (notManagedTail : ∀ signature, op ≠ .calli signature true) :
     op.continues = true := by
   cases op <;> simp_all [CIL.Instruction.readsLink, CIL.Instruction.continues]
 

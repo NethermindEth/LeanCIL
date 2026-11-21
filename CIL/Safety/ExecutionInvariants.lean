@@ -503,12 +503,12 @@ theorem StepContract.spanInPlace {body : CIL.Method} {site : Nat} {operation : C
 #print axioms StepContract.spanInPlace
 
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
-theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
-    (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat)
+theorem calliStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
+    (signature : CIL.ManagedSignature) (tail : Bool) (link : Option CIL.Link) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
-    (executed : managedStep operation link pc frame stack memory = .ok action) :
+    (executed : calliStep signature tail link frame stack memory = .ok action) :
     StepContract body pc dispatched frame stack memory action := by
-  unfold managedStep at executed
+  unfold calliStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |
@@ -525,7 +525,7 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
         | constructor
     | cases executed
     | split at executed
-#print axioms managedStep_contract
+#print axioms calliStep_contract
 
 /-- An instance field load that succeeds preserves checked effects and stack validity. -/
 theorem fieldLoad_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
@@ -610,7 +610,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | exact modelStep_contract (by assumption)
-    | solve | apply managedStep_contract; assumption
+    | solve | apply calliStep_contract; assumption
     | solve | exact StepContract.storeArgument (by assumption)
     | unfold returnFrom at h
     | unfold localAllocation at h
@@ -747,18 +747,18 @@ local macro "home_free_close" : tactic => `(tactic| (
 
 
 /-- A managed pointer call hands its callee checked arguments, none of them a home. -/
-theorem managedStep_homeFree {operation : CIL.ManagedOp} {link : Option CIL.Link} {pc : Nat}
+theorem calliStep_homeFree {signature : CIL.ManagedSignature} {tail : Bool} {link : Option CIL.Link}
     {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction}
-    (executed : managedStep operation link pc frame stack memory = .ok action) :
+    (executed : calliStep signature tail link frame stack memory = .ok action) :
     action.HomeFree := by
-  unfold managedStep at executed
+  unfold calliStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | (cases executed; home_free_close; done)
     | (cases executed; done)
     | split at executed
 
-#print axioms managedStep_homeFree
+#print axioms calliStep_homeFree
 
 /-- No successful step hands a home to another frame, so a home never leaves the frame whose
     slot it names. -/
@@ -772,7 +772,7 @@ theorem step_homeFree {body : CIL.Method} {operation : CIL.Instruction} {pc : Na
   all_goals repeat' first
     | (cases h; home_free_close; done)
     | (cases h; done)
-    | exact managedStep_homeFree h
+    | exact calliStep_homeFree h
     | unfold returnFrom at h
     | unfold localAllocation at h
     | unfold initializeSpanHome at h

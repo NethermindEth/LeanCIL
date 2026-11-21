@@ -193,8 +193,8 @@ def Instruction.ofCallSite? (previous : Option RawInstruction) (opcode : Nat)
     if site.hasThis then none else
     match site.target, managedOwner site.declaringType with
     | .managed token, some (owner, _) =>
-      some (.managed (.address ⟨owner, token, site.typeArguments.map callableType⟩
-        (ManagedSignature.ofTypes site.returnType site.parameterTypes)))
+      some (.ldftn ⟨owner, token, site.typeArguments.map callableType⟩
+        (ManagedSignature.ofTypes site.returnType site.parameterTypes))
     | _, _ => none
   else none
 
@@ -355,8 +355,11 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .callvirt expected => match emitted with
     | .callvirt actual => expected == actual
     | _ => false
-  | .managed expected => match emitted with
-    | .managed actual => decide (expected = actual)
+  | .ldftn identity signature => match emitted with
+    | .ldftn target sig => identity == target && signature == sig
+    | _ => false
+  | .calli signature tail => match emitted with
+    | .calli sig isTail => signature == sig && tail == isTail
     | _ => false
   | .call expected prefixes => match emitted with
     | .call actual actualPrefixes => expected == actual && prefixes == actualPrefixes
@@ -534,8 +537,8 @@ def Instruction.ofRaw? (previous : Option RawInstruction) (raw : RawInstruction)
   | .call site => Instruction.ofCallSite? previous raw.opcode site
   | .indirectCall result parameters hasThis explicitThis convention =>
     if raw.opcode == 41 && !hasThis && !explicitThis && convention == 0 then
-      some (.managed (.call (ManagedSignature.ofTypes result parameters)
-        (callPrefixes previous).tail))
+      some (.calli (ManagedSignature.ofTypes result parameters)
+        (callPrefixes previous).tail)
     else none
   | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
@@ -847,8 +850,8 @@ theorem Instruction.ofRaw?_substitute {previous : Option RawInstruction} {raw : 
       | .indirectCall .., .indirectCall result parameters hasThis explicitThis convention =>
         if !invalidPredecessor previous raw && raw.opcode == 41 && !hasThis &&
             !explicitThis && convention == 0 then
-          some (.managed (.call (ManagedSignature.ofTypes result parameters)
-            (callPrefixes previous).tail))
+          some (.calli (ManagedSignature.ofTypes result parameters)
+            (callPrefixes previous).tail)
         else none
       | _, _ => Instruction.ofRaw? previous raw := by
   have sameGuard := invalidPredecessor_substitute (previous := previous) (raw := raw) substituted

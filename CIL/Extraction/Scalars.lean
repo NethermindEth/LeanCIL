@@ -449,9 +449,8 @@ def scalarEmissionMatches (role : Option FoldRole)
     | offset :: .nativeMethodTable _ :: _, .add
     | .nativeMethodTable _ :: offset :: _, .add => offset ∈ [.word32, .native]
     | _, _ => false
-  else if let .managed operation := emitted then match operation with
-    | .address .. => instruction.opcode == 65030
-    | .call .. => instruction.opcode == 41
+  else if emitted matches .ldftn .. then instruction.opcode == 65030
+  else if emitted matches .calli .. then instruction.opcode == 41
   else if arrayEmission emitted then arrayMatches previous instruction stack emitted skipEncoding
   else if instruction.opcode == 114 ||
       (match emitted with | .ldstr _ => true | _ => false) then

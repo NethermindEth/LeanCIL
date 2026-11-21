@@ -64,7 +64,7 @@ var decode = $$"""
         let pc := {{indirect.Pc}}
         let before := rawBefore (fun index => code[index]?) pc
         ((code[pc]?).bind (Instruction.ofRaw? before) matches
-          some (.managed (.call _ true))) = true := by decide +kernel
+          some (.calli _ true)) = true := by decide +kernel
 
     """;
 var control = CheckedEvidenceControl(source, scalar, ["method0_scalars_validated"], 0);
@@ -167,7 +167,7 @@ foreach (var (name, mutated) in new[]
 var calls = NarrowEvidence(source, "method0_calls_validated");
 const string changeCall = """
     fun op => match op with
-      | .managed (.call signature tail) => .managed (.call { signature with result := .void } tail)
+      | .calli signature tail => .calli { signature with result := .void } tail
       | _ => op
     """;
 var changedCalls = ForgeDecodedInstruction(calls, 0, indirect.Pc, changeCall.ReplaceLineEndings(" "));

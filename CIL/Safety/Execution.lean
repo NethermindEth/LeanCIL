@@ -244,12 +244,10 @@ theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CI
 /-- Managed dispatch checks stable pointer identity and signature before selecting a body from
     the catalog `link`, the call site's entry in its method's link table. Tail calls use the same
     retirement action as direct tail calls. -/
-def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (frame : Frame)
+def calliStep (signature : CIL.ManagedSignature) (tail : Bool) (link : Option CIL.Link) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
-  match operation, stack with
-  | .address identity signature, _ =>
-    return .next (pc + 1) (.methodPointer ⟨signature, some identity⟩ :: stack) frame memory
-  | .call signature tail, .methodPointer pointer :: values =>
+  match stack with
+  | .methodPointer pointer :: values =>
     let some (.indirect catalog) := link | .error unlinkedCall
     let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
@@ -258,7 +256,7 @@ def managedStep (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) 
     let arguments ← (values.take count).reverse.mapM (callArgument frame memory)
     if tail then return .tailCall method arguments memory
     else return .call method arguments (values.drop count) memory
-  | _, _ => .error .invalidState
+  | _ => .error .invalidState
 
 /-- Evaluates an intrinsic. Operands with unspecified bits are allowed only where the
     result does not observe them; arithmetic faults are reported, not swallowed. -/
@@ -820,7 +818,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
   match op, stack with
-  | .managed operation, _ => managedStep operation (body.linkAt pc) pc frame stack m
+  | .ldftn identity signature, _ =>
+    return .next (pc + 1) (.methodPointer ⟨signature, some identity⟩ :: stack) frame m
+  | .calli signature tail, _ => calliStep signature tail (body.linkAt pc) frame stack m
   | .add, .scalar _ :: .reference _ :: _
   | .add, .reference _ :: .scalar _ :: _
   | .add, .scalar _ :: .readOnlyReference _ :: _

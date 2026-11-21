@@ -186,7 +186,7 @@ example : (body.relocate (· + 10)).code = body.code := rfl
 /-- An address that the root discards reaches no callee, even when the target has a body. -/
 theorem discarded_address_closure :
     let root : Method :=
-      { code := [.managed (.address ⟨"T", 1, []⟩ ⟨.void, []⟩), .pop, .ret],
+      { code := [.ldftn ⟨"T", 1, []⟩ ⟨.void, []⟩, .pop, .ret],
         links := [(0, .address 1)], locals := [], returnsValue := false }
     (Program.closure [root, body] 0).map Prod.snd = some [0] := rfl
 #print axioms discarded_address_closure

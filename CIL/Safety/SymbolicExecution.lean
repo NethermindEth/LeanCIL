@@ -1297,7 +1297,7 @@ def stepModelFact? (body method : Expr) (opcode := ``CIL.CallOpcode.call) (facts
 /-- Opcodes whose step reads the body's link at the step's pc. -/
 def linkedOpcodes : List Lean.Name :=
   [``CIL.Instruction.call, ``CIL.Instruction.callvirt,
-    ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
+    ``CIL.Instruction.newobj, ``CIL.Instruction.calli]
 
 open Lean Elab Tactic Meta in
 /-- Apply a supplied step fact at the current instruction, unfolding named bodies as needed. -/

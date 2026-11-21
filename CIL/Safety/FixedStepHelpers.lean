@@ -151,7 +151,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
   | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
-  | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callvirt ..
+  | .ldftn .. | .calli .. | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callvirt ..
   | .castclass _ | .isinst _ | .throw _ | .ret => .boundary
   | _ => .other
 
@@ -336,23 +336,25 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.profile, metadata.returnsValue, metadata.returnNarrow]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    -- Only the dispatcher's final arm excludes `.managed`, so the guard skips every other arm
+    -- Only the dispatcher's final arm excludes `calli`, so the guard skips every other arm
     -- and fails if no arm is left to select.
     any_goals
       first
-        | (have excludesManaged : ∀ native, operation = .managed native → False := by assumption
-           clear excludesManaged)
+        | (have excludesCalli : ∀ signature tail, operation = .calli signature tail → False := by assumption
+           clear excludesCalli)
         | fail "not the dispatcher's fallback arm"
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
-         have noManaged : ∀ op, operation = .managed op → False := by assumption
+         have noCalli : ∀ sig tail, operation = .calli sig tail → False := by assumption
+         have noLdftn : ∀ id sig, operation = .ldftn id sig → False := by assumption
          have noArgument : ∀ position, operation = .ldarg position → False := by assumption
          have noCall : ∀ method prefixes, operation = .call method prefixes → False := by
            assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
          have noReturn : operation = .ret → False := by assumption
          cases operation <;> try cases boundary
-         all_goals try exact False.elim (noManaged _ rfl)
+         all_goals try exact False.elim (noCalli _ _ rfl)
+         all_goals try exact False.elim (noLdftn _ _ rfl)
          all_goals try exact False.elim (noArgument _ rfl)
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)

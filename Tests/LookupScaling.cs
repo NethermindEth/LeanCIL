@@ -3538,9 +3538,9 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
     var consumeBytes = pointers ? 5 : 1;
     var loaded = addressed ? ".reference" : "kind";
     const string identity = """{ owner := "T::Scaling", token := 2, arguments := [] }""";
-    var pushed = pointers ? $".managed (.address {identity} signature)" : ".ldc_i4 0";
+    var pushed = pointers ? $".ldftn {identity} signature" : ".ldc_i4 0";
     var emittedLoad = addressed ? ".ldloca index" : ".ldloc index";
-    var consumed = pointers ? ".managed (.call signature false)" : ".pop";
+    var consumed = pointers ? ".calli signature false" : ".pop";
     var header = $$"""
         import CIL.Extraction.Scalars
         set_option maxRecDepth 100000

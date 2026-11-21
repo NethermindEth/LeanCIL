@@ -136,12 +136,12 @@ theorem indirectTarget_relocate (f : Nat → Nat) (signature : CIL.ManagedSignat
 
 /-- Relocating the catalog an indirect call reads from its link changes only the body index of
     its selected action. -/
-private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
-    (tail : Bool) (link : Option CIL.Link) (pc : Nat)
+private theorem calliStep_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
+    (tail : Bool) (link : Option CIL.Link)
     (frame : Frame) (stack : List Value) (memory : Memory) :
-    managedStep (.call signature tail) (link.map (CIL.Link.relocate f)) pc frame stack
+    calliStep signature tail (link.map (CIL.Link.relocate f)) frame stack
         memory =
-      (managedStep (.call signature tail) link pc frame stack memory).map
+      (calliStep signature tail link frame stack memory).map
         (FrameAction.relocate f) := by
   cases stack with
   | nil => rfl
@@ -154,11 +154,11 @@ private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedS
     rename_i catalog
     cases selected : indirectTarget signature catalog pointer with
     | none =>
-      simp only [managedStep, Option.map_some, CIL.Link.relocate, indirectTarget_relocate,
+      simp only [calliStep, Option.map_some, CIL.Link.relocate, indirectTarget_relocate,
         selected, Option.map_none]
       rfl
     | some method =>
-      simp only [managedStep, Option.map_some, CIL.Link.relocate, indirectTarget_relocate,
+      simp only [calliStep, Option.map_some, CIL.Link.relocate, indirectTarget_relocate,
         selected]
       repeat' first
         | rfl
@@ -166,7 +166,7 @@ private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedS
             FrameAction.relocate]
         | split
 
-#print axioms managedStep_relocate
+#print axioms calliStep_relocate
 
 /-- Relocating a dispatch table renames the selected body and keeps every fault. -/
 private theorem virtualTarget_relocate (f : Nat → Nat) (memory : Memory)
@@ -202,14 +202,6 @@ private theorem step_relinked {body : CIL.Method} (links : List (Nat × CIL.Link
   -- stack as deep as the patterns look so the matcher selects this instruction's arm.
   cases op <;> simp only [CIL.Instruction.readsLink, reduceCtorEq] at unlinked
   case ldtoken operand => cases operand <;> rfl
-  case managed operation =>
-    cases operation <;> simp only [Bool.true_eq_false] at unlinked
-    all_goals first
-      | rfl
-      | (rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩
-         all_goals (try (cases first <;> try cases ‹ManagedReference›))
-         all_goals (try (cases second <;> try cases ‹ManagedReference›))
-         all_goals rfl)
   all_goals first
     | rfl
     | (rcases stack with _ | ⟨first, _ | ⟨second, rest⟩⟩
@@ -236,12 +228,11 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
       simp only [Except.map, FrameAction.relocate_of_callee_none f action none]
   | true =>
     cases op <;> simp only [CIL.Instruction.readsLink, Bool.false_eq_true] at linked
-    case managed operation =>
-      cases operation <;> simp only [Bool.false_eq_true] at linked
+    case calli =>
       simp only [step, CIL.Method.linkAt_relocate]
       rw [apply_ite (Except.map (FrameAction.relocate f))]
       refine ite_congr rfl (fun _ => rfl) (fun _ => ?_)
-      exact managedStep_relocate f _ _ (body.linkAt pc) pc frame stack m
+      exact calliStep_relocate f _ _ (body.linkAt pc) frame stack m
     case callvirt method =>
       simp only [step, observerCount, CIL.Method.linkAt_relocate]
       by_cases unknown : unspecifiedOperands method.argumentCount stack = true

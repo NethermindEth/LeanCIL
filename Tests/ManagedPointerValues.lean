@@ -47,20 +47,20 @@ theorem typed_table_provenance :
 
 /-- A numerical value is never callable, even when it equals an admitted program index. -/
 theorem numeric_pointer_rejected :
-    managedStep (.call signature true) (some (.indirect [⟨identity, 1⟩])) 0 frame
+    calliStep signature true (some (.indirect [⟨identity, 1⟩])) frame
       [.scalar (.i64 1), .scalar (.i32 42)] memory = .error .invalidState := rfl
 #print axioms numeric_pointer_rejected
 
 /-- A well-typed pointer still needs its exact identity in the admitted target catalog. -/
 theorem foreign_target_rejected :
-    managedStep (.call signature true) (some (.indirect [⟨identity, 1⟩])) 0 frame
+    calliStep signature true (some (.indirect [⟨identity, 1⟩])) frame
       [.methodPointer ⟨signature, some other⟩, .scalar (.i32 42)] memory =
         .error .invalidState := rfl
 #print axioms foreign_target_rejected
 
 /-- A successful indirect tail call uses the existing frame-retiring driver action. -/
 theorem checked_tail_target :
-    managedStep (.call signature true) (some (.indirect [⟨identity, 1⟩])) 0 frame
+    calliStep signature true (some (.indirect [⟨identity, 1⟩])) frame
       [.methodPointer ⟨signature, some identity⟩, .scalar (.i32 42)] memory =
         .ok (.tailCall 1 [.scalar (.i32 42)] memory) := rfl
 #print axioms checked_tail_target
@@ -80,9 +80,9 @@ theorem literal_null_table_rejected :
     catalog of the site's link: a pointer of another signature, a null pointer and a target
     outside the catalog all fault alike. -/
 theorem call_selection_unchanged (signature : ManagedSignature)
-    (catalog : List ManagedTarget) (tail : Bool) (pc : Nat) (frame : Frame)
+    (catalog : List ManagedTarget) (tail : Bool) (frame : Frame)
     (pointer : MethodPointer) (values : List CIL.Safety.Value) (memory : CIL.Safety.Memory) :
-    managedStep (.call signature tail) (some (.indirect catalog)) pc frame
+    calliStep signature tail (some (.indirect catalog)) frame
         (.methodPointer pointer :: values) memory =
       (do
         if pointer.signature != signature then .error .invalidState else pure ()
@@ -94,7 +94,7 @@ theorem call_selection_unchanged (signature : ManagedSignature)
         let arguments ← (values.take count).reverse.mapM (callArgument frame memory)
         if tail then return FrameAction.tailCall target.method arguments memory
         else return .call target.method arguments (values.drop count) memory) := by
-  simp only [managedStep, indirectTarget]
+  simp only [calliStep, indirectTarget]
   cases pointer.signature != signature with
   | true => rfl
   | false =>
@@ -139,7 +139,7 @@ private theorem long_selected :
 /-- A call through a pointer to the long owner steps by `step_managed_call_eq` and the kernel's
     fact, whatever lies below its argument. -/
 theorem long_owner_call (rest : List CIL.Safety.Value) :
-    step caller (.managed (.call signature false)) 1 [] frame
+    step caller (.calli signature false) 1 [] frame
       (.methodPointer ⟨signature, some longIdentity⟩ :: .scalar (.i32 42) :: rest) memory =
       .ok (.call 1 [.scalar (.i32 42)] rest memory) := by
   simp only [cil_step, caller_link, long_selected, parameter_count]
@@ -151,8 +151,8 @@ theorem long_owner_call (rest : List CIL.Safety.Value) :
 private def longProgram : Program :=
   [{ returnsValue := true, locals := [],
       links := [(1, .address 1), (2, .indirect longCatalog)],
-      code := [.ldarg 0, .managed (.address longIdentity signature),
-        .managed (.call signature false), .ret] },
+      code := [.ldarg 0, .ldftn longIdentity signature,
+        .calli signature false, .ret] },
     { returnsValue := true, locals := [], code := [.ldarg 0, .ret] }]
 
 /-- A whole run through the long owner, closed as an extraction's proofs of indirect calls are:

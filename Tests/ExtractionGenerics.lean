@@ -237,10 +237,10 @@ theorem managed_pointer_bindings :
       method.parameters := [], method.returnType := .void,
       method.methodArguments := [], method.genericArity := 0, typeArguments := [],
       parameterCount := 0, returnsValue := false }
-    let address := Instruction.managed (.address identity signature)
+    let address := Instruction.ldftn identity signature
     let load := RawInstruction.mk 0 65030 (.call site)
     let indirect := RawInstruction.mk 0 41 (.indirectCall .void [] false false 0)
-    let transfer := Instruction.managed (.call signature false)
+    let transfer := Instruction.calli signature false
     let target : ManagedTarget := ⟨identity, 0⟩
     let forged : ManagedTarget := ⟨{ identity with token := second.token }, 0⟩
     validateManagedCall methods [] load true (some (.address 0)) address ∧

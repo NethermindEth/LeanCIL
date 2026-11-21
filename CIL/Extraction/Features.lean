@@ -386,7 +386,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
   if (match emitted with
-    | .call _ prefixes => prefixes.tail | .managed (.call _ true) => true | _ => false) then
+    | .call _ prefixes => prefixes.tail | .calli _ true => true | _ => false) then
     return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
@@ -474,10 +474,10 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     | .call site => prefixes.tail && site.returnType == raw.returnType &&
       featureOpMatches layouts raw instruction (.call method { prefixes with tail := false })
     | _ => false
-  | some .tailCall, .managed (.call signature true) =>
+  | some .tailCall, .calli signature true =>
     signature.result == callableType raw.returnType &&
       featureOpMatches layouts raw instruction
-        (.managed (.call signature false))
+        (.calli signature false)
   | some .argument, _ => valueEncodingMatches previous instruction emitted &&
       featureOpMatches layouts raw instruction emitted
   | some _, _ => false
@@ -545,10 +545,10 @@ theorem ManagedCallsValid.tailCall_target {types : List DispatchType}
     cases op <;> first | contradiction | skip
     case call method prefixes =>
       exact ⟨_, _, rfl, (Bool.and_eq_true_iff.mp (Bool.and_eq_true_iff.mp feature).1).1⟩
-    case managed operation =>
+    case calli =>
       have fits := calls.linkFits found rfl
       rw [linked] at fits
-      cases operation <;> contradiction
+      contradiction
   obtain ⟨method, prefixes, rfl, tail⟩ := shape
   have window := List.all_eq_true.mp
     ((ConstrainedCallsValid_iff_original _ _ _ _ _).mp constrained).2.2 pc

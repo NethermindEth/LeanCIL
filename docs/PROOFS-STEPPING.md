@@ -200,8 +200,8 @@ scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 A closed run through an indirect call through a method pointer, `calli`, is proved by
 `cil_kernel_rfl` on the equation `(CIL.Safety.invoke program fuel method args memory).map
 Prod.snd = .ok results`: the kernel evaluates the run, including the comparison of the pointer's
-owner string with each catalog entry's, and the elaborator evaluates none of it. A single step
-uses `CIL.Safety.step_managed_call_eq`, which states the step over `CIL.Safety.indirectTarget`:
+owner string with each catalog entry's, and the elaborator evaluates none of it. `CIL.Safety.step_ldftn_eq` pushes the pointer’s checked metadata identity and signature.
+An indirect call uses `CIL.Safety.step_managed_call_eq`, which states the step over `CIL.Safety.indirectTarget`:
 the catalog body selected for the pointer, or `none`, which faults with `invalidState`. Supply
 the selection as a fact `CIL.Safety.indirectTarget signature catalog pointer = some method`
 proved by `cil_kernel_rfl`. `simp only [cil_step, fact]` then leaves the operand guard, the
@@ -280,7 +280,7 @@ or readonly reference.
   which the stepper reads from the generated link fact of a named body or by evaluating the table
   of a literal body or of a named body that unfolds; only an opaque body needs the link as a
   supplied fact. Every call-family step (`.call`, `.callvirt`, `.newobj`
-  and `.managed`) rewrites with its link fact, the generated one or else a supplied
+  and `.calli`) rewrites with its link fact, the generated one or else a supplied
   `body.linkAt pc = link`, in the same pass as its equation, so only the arm of the link's kind is
   simplified. A `.call` with no link runs its method's runtime model; `cil_runtime_models body`
   states `body_model{pc} : runtimeModel body.environment .call method = some model` at each such

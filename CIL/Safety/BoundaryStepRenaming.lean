@@ -18,17 +18,17 @@ private theorem managedReference_null_iff (mapping : AllocationRenaming)
 #print axioms managedReference_null_iff
 
 /-- Managed metadata identities are stable while checked argument references are renamed. -/
-theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
+theorem Memory.Renamed.calliStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat) (stack : List Value)
+    (signature : CIL.ManagedSignature) (tail : Bool) (link : Option CIL.Link) (stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow (managedStep operation link pc sourceFrame stack source)) :
+    (observable : SuccessOrThrow (calliStep signature tail link sourceFrame stack source)) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (managedStep operation link pc sourceFrame stack source)
-      (managedStep operation link pc targetFrame (stack.map (indices.value mapping)) target) := by
-  unfold CIL.Safety.managedStep at observable ⊢
+      (calliStep signature tail link sourceFrame stack source)
+      (calliStep signature tail link targetFrame (stack.map (indices.value mapping)) target) := by
+  unfold CIL.Safety.calliStep at observable ⊢
   split
   all_goals try simp only [*, List.map_cons, LocalIndexMap.value]
     at observable ⊢
@@ -61,7 +61,7 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
       cases head <;>
         simp_all [AllocationRenaming.value, LocalIndexMap.value, managedReference_null_iff] <;>
         (exfalso; solve_by_elim)
-#print axioms Memory.Renamed.managedStep
+#print axioms Memory.Renamed.calliStep
 
 /-- Renaming keeps a live object's runtime type, and maps the fault of any other reference. -/
 private theorem Memory.Renamed.runtimeTypeOf {mapping : AllocationRenaming}
@@ -783,16 +783,19 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       (step sourceBody operation pc arguments sourceFrame stack source)
       (step targetBody operation pc (arguments.map mapping.value)
         targetFrame (stack.map (indices.value mapping)) target) := by
-  by_cases isManaged : ∃ native, operation = .managed native
-  · rcases isManaged with ⟨native, rfl⟩
+  by_cases isAddress : ∃ identity signature, operation = .ldftn identity signature
+  · rcases isAddress with ⟨identity, signature, rfl⟩
+    exact .ok (.next related frames)
+  by_cases indirect : ∃ signature tail, operation = .calli signature tail
+  · rcases indirect with ⟨signature, tail, rfl⟩
     unfold CIL.Safety.step at observable ⊢
     rw [indices.unspecifiedOperands mapping]
-    by_cases guarded : unspecifiedOperands (observerCount (.managed native)) stack = true
+    by_cases guarded : unspecifiedOperands (observerCount (.calli signature tail)) stack = true
     · simp only [guarded, ite_true]
       exact .error (.unsupported "Instruction observes unspecified vector bits")
     · simp only [guarded, Bool.false_eq_true, ite_false] at observable ⊢
       rw [metadata.linkAt pc]
-      exact related.managedStep frames native _ pc stack bounds observable
+      exact related.calliStep frames signature tail _ stack bounds observable
   by_cases direct : ∃ method prefixes, operation = .call method prefixes
   · rcases direct with ⟨method, prefixes, rfl⟩
     exact related.stepCall frames formed sourceBody targetBody method prefixes pc metadata
@@ -812,7 +815,8 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   ·
     allocation_fixed_step (
       first
-      | exact False.elim (isManaged ⟨_, rfl⟩)
+      | exact False.elim (isAddress ⟨_, _, rfl⟩)
+      | exact False.elim (indirect ⟨_, _, rfl⟩)
       | exact False.elim (direct ⟨_, _, rfl⟩)
       | exact False.elim (receiverChecked ⟨_, rfl⟩)
       | exact False.elim (casting ⟨_, rfl⟩)

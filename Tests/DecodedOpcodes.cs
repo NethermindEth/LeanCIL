@@ -64,7 +64,7 @@ File.WriteAllText(path, $$"""
         let code := [tailPrefix, indirect, RawInstruction.mk 7 {{OpCodes.Ret.Value}} .none]
         let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
         foldRoles code == [some .head, some .tailCall, some .argument] &&
-          (folded code 0 matches some .nop) && (folded code 1 matches some (.managed (.call _ true))) &&
+          (folded code 0 matches some .nop) && (folded code 1 matches some (.calli _ true)) &&
           ([0, 1, 2].all fun pc =>
             foldRoles (code.set pc nop) == List.replicate 3 none) := by
       decide +kernel
@@ -356,7 +356,7 @@ static void CheckClassAddress(string directory)
                 genericArity := 1, returnType := .void, parameters := [] } }
             let literal : ManagedIdentity := {{ManagedPointers.IdentityEvidence(target)}}
             Instruction.ofRaw? none ⟨0, 0xfe06, .call site⟩ =
-                some (.managed (.address literal ⟨.void, []⟩)) ∧
+                some (.ldftn literal ⟨.void, []⟩) ∧
               literal.arguments ≠ [.atom scope "Examples.Account"] := by
               constructor
               · rfl

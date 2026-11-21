@@ -210,10 +210,10 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 40, .call callSite⟩, .call callSite.method),
   (⟨0, 111, .call instanceSite⟩, .callvirt instanceSite.method),
   (⟨0, 65030, .call { callSite with typeArguments := [int32], method.genericArity := 1 }⟩,
-    .managed (.address ⟨"T::T.Account", 0x06000001, [callableType int32]⟩
-      ⟨.void, [callableType int32]⟩)),
+    .ldftn ⟨"T::T.Account", 0x06000001, [callableType int32]⟩
+      ⟨.void, [callableType int32]⟩),
   (⟨0, 41, .indirectCall .void [int32] false false 0⟩,
-    .managed (.call ⟨.void, [callableType int32]⟩ false)),
+    .calli ⟨.void, [callableType int32]⟩ false),
   (⟨6, 111, .call instanceSite⟩, .call instanceSite.method { constrained := some int32 }),
   (⟨0, 115, .call accountConstruction⟩, .newobj accountConstruction.method)]
 
@@ -273,9 +273,26 @@ theorem role_decodings :
       Instruction.ofRole? .tailCall (some tailPrefix) call =
         some (.call callSite.method { tail := true }) ∧
       Instruction.ofRole? .tailCall (some tailPrefix) indirect =
-        some (.managed (.call ⟨.void, []⟩ true)) := by
+        some (.calli ⟨.void, []⟩ true) := by
   repeat' first | apply And.intro | rfl | (intro impossible; cases impossible)
 #print axioms role_decodings
+
+/-- The two opcodes bind different operands. An altered token, signature or tail prefix fails. -/
+theorem pointer_encoding_checks :
+    let address : RawInstruction := ⟨0, 0xFE06, .call callSite⟩
+    let call : RawInstruction := ⟨5, 0x29, .indirectCall .void [int32] false false 0⟩
+    let identity : ManagedIdentity := ⟨"T::T.Account", 0x06000001, []⟩
+    let signature : ManagedSignature := ⟨.void, [callableType int32]⟩
+    valueEncodingMatches none address (.ldftn identity signature) = true ∧
+      valueEncodingMatches none address (.ldftn { identity with token := 0x06000002 } signature) =
+        false ∧
+      valueEncodingMatches none address (.ldftn identity ⟨.void, []⟩) = false ∧
+      valueEncodingMatches none address (.calli signature false) = false ∧
+      valueEncodingMatches none call (.ldftn identity signature) = false ∧
+      valueEncodingMatches none call (.calli signature true) = false ∧
+      valueEncodingMatches none call (.calli ⟨.void, []⟩ false) = false := by
+  decide +kernel
+#print axioms pointer_encoding_checks
 
 /-- Closing a generic owner supplies the identity at ldftn and the parameter type at calli. -/
 theorem callable_substitution :
@@ -285,10 +302,10 @@ theorem callable_substitution :
     Instruction.ofRaw? none ⟨0, 65030, .call site⟩ = none ∧
       ((substituteOperand [closed] [] 0 (.call site)).bind fun operand =>
         Instruction.ofRaw? none ⟨0, 65030, operand⟩) =
-          some (.managed (.address ⟨"T::C", 0x06000001, []⟩ ⟨.void, [callableType int32]⟩)) ∧
+          some (.ldftn ⟨"T::C", 0x06000001, []⟩ ⟨.void, [callableType int32]⟩) ∧
       ((substituteOperand [closed] [] 0 indirect).bind fun operand =>
         Instruction.ofRaw? none ⟨0, 41, operand⟩) =
-          some (.managed (.call ⟨.void, [callableType closed]⟩ false)) ∧
+          some (.calli ⟨.void, [callableType closed]⟩ false) ∧
       Instruction.ofRaw? none ⟨0, 41, .indirectCall .void [] false false 1⟩ = none := by
   decide +kernel
 #print axioms callable_substitution
@@ -740,7 +757,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 94, undecoded 5 of 99 constructors -/
+/-- info: decoded 95, undecoded 5 of 100 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

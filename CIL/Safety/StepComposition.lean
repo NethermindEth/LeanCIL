@@ -582,13 +582,21 @@ attribute [cil_step] fieldLoad fieldStore fieldReference
 
 attribute [cil_step] localAllocation
 
+/-- Loading a function pointer pushes the authenticated identity and signature on any stack. -/
+@[cil_step] theorem step_ldftn_eq (identity : CIL.ManagedIdentity) (signature : CIL.ManagedSignature)
+    (stack : List Value) :
+    step body (.ldftn identity signature) pc args frame stack memory =
+      .ok (.next (pc + 1) (.methodPointer ⟨signature, some identity⟩ :: stack) frame memory) := id rfl
+
+#print axioms step_ldftn_eq
+
 /-- An indirect call through a method pointer enters the body `indirectTarget` selects from the
     catalog its link gives; a fact for that selection, which the kernel checks, decides it without
     comparing identities here. -/
 @[cil_step] theorem step_managed_call_eq (signature : CIL.ManagedSignature)
     (tail : Bool) (pointer : CIL.MethodPointer)
     (values : List Value) :
-    step body (.managed (.call signature tail)) pc args frame
+    step body (.calli signature tail) pc args frame
         (.methodPointer pointer :: values) memory =
       if unspecifiedOperands (signature.parameters.length + 1) (.methodPointer pointer :: values)
       then .error (.unsupported "Instruction observes unspecified vector bits")
@@ -601,7 +609,7 @@ attribute [cil_step] localAllocation
         let arguments ← (values.take count).reverse.mapM (callArgument frame memory)
         if tail then return .tailCall method arguments memory
         else return .call method arguments (values.drop count) memory := by
-  simp only [step, observerCount, managedStep]
+  simp only [step, observerCount, calliStep]
   rfl
 
 #print axioms step_managed_call_eq

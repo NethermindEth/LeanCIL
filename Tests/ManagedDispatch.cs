@@ -123,10 +123,10 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     var address = SingleLink(source, 0, ".address ");
     const string changeSignature = """
         fun op => match op with
-          | .managed (.call signature tail) => .managed (.call { signature with result := .void } tail)
+          | .calli signature tail => .calli { signature with result := .void } tail
           | _ => op
         """;
-    const string dropTail = "fun op => match op with | .managed (.call s _) => .managed (.call s false) | _ => op";
+    const string dropTail = "fun op => match op with | .calli s _ => .calli s false | _ => op";
     const string callCheck = "method0_calls_validated";
     const string flowCheck = "method0_features_validated";
     var signatureChange = changeSignature.ReplaceLineEndings(" ");
@@ -242,8 +242,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
             $"{module.Assembly.Name.FullName}::Examples.IndirectValues/Pair");
         var forged = $$"""
             fun op => match op with
-              | .managed (.call signature tail) =>
-                .managed (.call { signature with result := .aggregate {{owner}} 0 } tail)
+              | .calli signature tail =>
+                .calli { signature with result := .aggregate {{owner}} 0 } tail
               | _ => op
             """;
         var narrowed = NarrowEvidence(source, "method0_calls_validated");

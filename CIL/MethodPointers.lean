@@ -58,10 +58,4 @@ structure MethodTable where
   counted : ∀ entries ∈ targets, entries.size = entryCount := by decide
   deriving DecidableEq, Repr
 
-/-- Managed pointer operations preserve metadata provenance instead of encoding addresses. -/
-inductive ManagedOp where
-  | address (identity : ManagedIdentity) (signature : ManagedSignature)
-  | call (signature : ManagedSignature) (tail : Bool)
-  deriving DecidableEq, Repr
-
 end CIL

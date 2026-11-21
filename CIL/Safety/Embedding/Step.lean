@@ -818,11 +818,10 @@ set_option maxHeartbeats 300000 in
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
 theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   cases op
-  case managed operation =>
-    cases operation
+  case calli =>
     all_goals plain_cases
     all_goals rw [context.link]
-    all_goals simp only [managedStep] at h ⊢
+    all_goals simp only [calliStep] at h ⊢
     all_goals repeat' first
       | contradiction
       | solve | simp only [FrameAction.relabel]
@@ -859,7 +858,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case call method prefixes => exact step_relabel_call method prefixes
   case callvirt method => exact step_relabel_callvirt method
   case newobj constructor => exact step_relabel_newobj constructor
-  case ldstr => plain_cases; lockstep
+  case ldftn | ldstr => plain_cases; lockstep
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
@@ -1414,10 +1413,10 @@ set_option maxHeartbeats 400000 in
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
 theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
-  case managed operation =>
+  case calli =>
     plain_cases
     rw [context.link]
-    simp only [managedStep] at h ⊢
+    simp only [calliStep] at h ⊢
     repeat' first
       | solve | raise_lockstep
       | solve | simp [unlinkedCall] at h
@@ -1469,7 +1468,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case call method prefixes => exact step_raise_call method prefixes
   case callvirt method => exact step_raise_callvirt method
   case newobj constructor => exact step_raise_newobj constructor
-  case ldstr => plain_cases; raise_lockstep
+  case ldftn | ldstr => plain_cases; raise_lockstep
   case memory operation =>
     plain_cases
     simp only [staticInstruction_congr context.statics]

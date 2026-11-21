@@ -185,12 +185,10 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
         | cases h
         | split at h
         | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  case managed operation =>
-    cases operation <;> try rfl
-    rename_i signature tail
+  case calli signature tail =>
     cases tail
     · rfl
-    · simp only [step, managedStep] at h
+    · simp only [step, calliStep] at h
       repeat' first
         | contradiction
         | exact resumes.elim

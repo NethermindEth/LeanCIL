@@ -1521,14 +1521,14 @@ theorem step_appendLocals_unadmitted (opcode : Nat) :
 #print axioms step_appendLocals_unadmitted
 
 /-- Managed pointers never inspect the unused trailing frame slots. -/
-theorem step_appendLocals_managed (operation : ManagedOp) :
-    StepAppendLocals (.managed operation) := by
+theorem step_appendLocals_calli (signature : ManagedSignature) (tail : Bool) :
+    StepAppendLocals (.calli signature tail) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   refine PaddedAgrees.kept ?_ kept
-  unfold step managedStep
+  unfold step calliStep
   padded_natural
-#print axioms step_appendLocals_managed
+#print axioms step_appendLocals_calli
 
 /-- Every instruction preserves successful and throwing steps under trailing local slots. -/
 theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : List Value)
@@ -1539,7 +1539,7 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       FrameAction.appendLocals extra <$> outcome := by
   have padded : StepAppendLocals op := by
     cases op
-    case managed operation => exact step_appendLocals_managed operation
+    case calli signature tail => exact step_appendLocals_calli signature tail
     case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
       | mul_ovf_un => exact step_appendLocals_faulting _ rfl
     case conv_ovf target =>
@@ -1687,7 +1687,7 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case callvirt method => exact step_appendLocals_callvirt method
     case newobj constructor =>
       exact step_appendLocals_newobj constructor
-    case ldstr =>
+    case ldftn | ldstr =>
       intro body pc args frame extra stack memory outcome stepped kept
       subst stepped
       refine PaddedAgrees.kept ?_ kept

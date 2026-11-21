@@ -53,8 +53,8 @@ change a local root. Control flow, returns, stores and addresses require exact
 raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
-  | .managed (.address ..) => some (0, 1)
-  | .managed (.call signature _) =>
+  | .ldftn .. => some (0, 1)
+  | .calli signature _ =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
   | .localloc | .newarr _ => some (1, 1)
   -- Pushes and one-operand operations.

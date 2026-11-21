@@ -18,14 +18,14 @@ private theorem bind_success {source : Except ε α} {continuation : α → Exce
   cases source <;> simp [Except.bind]
 
 /-- Managed dispatch produces a next step or child invocation, never a method return. -/
-private theorem managedStep_not_returned (operation : CIL.ManagedOp) (link : Option CIL.Link)
-    (pc : Nat) (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value) :
-    managedStep operation link pc frame stack memory ≠ .ok (.returned values final) := by
+private theorem calliStep_not_returned (signature : CIL.ManagedSignature) (tail : Bool) (link : Option CIL.Link)
+    (frame : Frame) (stack : List Value) (memory final : Memory) (values : List Value) :
+    calliStep signature tail link frame stack memory ≠ .ok (.returned values final) := by
   intro executed
-  unfold managedStep at executed
+  unfold calliStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first | cases executed | split at executed
-#print axioms managedStep_not_returned
+#print axioms calliStep_not_returned
 
 set_option maxHeartbeats 400000 in
 /-- A successful return has its declared arity and exposes no unspecified SIMD lanes. -/
@@ -42,7 +42,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
   repeat' first
     | unfold returnFrom at executed
     | unfold localAllocation at executed
-    | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ _ executed)
+    | solve | exact False.elim (calliStep_not_returned _ _ _ _ _ _ _ _ executed)
     | solve | (obtain ⟨_, _, _, returned, _⟩ := modelStep_frame executed; cases returned)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,

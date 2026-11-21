@@ -227,8 +227,10 @@ inductive Instruction where
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
-  /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
-  | managed (operation : ManagedOp)
+  /-- Push the managed method pointer authenticated by the method token and closed signature. -/
+  | ldftn (identity : ManagedIdentity) (signature : ManagedSignature)
+  /-- Call a managed function pointer with the standalone signature and optional tail prefix. -/
+  | calli (signature : ManagedSignature) (tail : Bool)
   -- Constants, conversions, arithmetic and stack shuffling.
   | ldc_i4 (value : W32)
   | ldc_i8 (value : W64)
@@ -428,17 +430,13 @@ theorem Instruction.eq_newobj_of_constructor? {op : Instruction}
 /-- Instructions whose metadata binding belongs to the method's link table. -/
 def Instruction.statesLink (op : Instruction) : Bool := by
   cases op
-  case call | callvirt | newobj | managed => exact true
+  case call | callvirt | newobj | ldftn | calli => exact true
   all_goals exact false
 
 /-- Instructions whose execution can consult the link at their pc. -/
 def Instruction.readsLink (op : Instruction) : Bool := by
   cases op
-  case call | callvirt | newobj => exact true
-  case managed operation =>
-    cases operation
-    case address => exact false
-    case call => exact true
+  case call | callvirt | newobj | calli => exact true
   all_goals exact false
 
 /-- An extracted method body with the frame layout the interpreter needs. -/

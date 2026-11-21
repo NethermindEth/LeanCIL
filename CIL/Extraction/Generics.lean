@@ -641,11 +641,11 @@ def validateManagedCallWith (methodCount : Nat)
     (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
   if !live then true else
   match emitted, link with
-  | .managed (.address identity signature), some (.address index) =>
+  | .ldftn identity signature, some (.address index) =>
     managedAddressMatches methods raw ⟨identity, index⟩ signature
-  | .managed (.call signature _), some (.indirect catalog) =>
+  | .calli signature _, some (.indirect catalog) =>
     managedIndirectMatches methods raw signature catalog
-  | .managed _, _ => false
+  | .ldftn .., _ | .calli .., _ => false
   -- Each listed body is a virtual instance method of a class with the slot's signature; which
   -- body each class selects is checked against the dispatch catalog.
   | .callvirt method, some (.virtual targets) => match raw.operand with
@@ -689,8 +689,8 @@ def validateManagedCallWith (methodCount : Nat)
 private def operandLinkFits (emitted : Instruction) (link : Option Link) : Bool :=
   match emitted, link with
   | .callvirt _, some (.direct _) | .callvirt _, some (.virtual _)
-  | .managed (.address ..), some (.address _) | .managed (.call ..), some (.indirect _) => true
-  | .callvirt _, _ | .managed _, _ => false
+  | .ldftn .., some (.address _) | .calli .., some (.indirect _) => true
+  | .callvirt _, _ | .ldftn .., _ | .calli .., _ => false
   | _, _ => link.isNone
 
 /-- The link kind permitted at an instruction other than a construction. -/
