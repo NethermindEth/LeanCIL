@@ -101,27 +101,12 @@ internal sealed record Starg(int Index) : Operation;
 internal sealed record Ldarga(int Index) : Operation;
 
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
-internal sealed record Local(int Index) : Operation
-{
-    /// <summary>The load of the argument homed in this slot when the body names the argument, as diagnostics show it.
-    /// </summary>
-    internal Arg? Argument { get; init; }
-}
+internal sealed record Local(int Index) : Operation;
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
-internal sealed record SetLocal(int Index) : Operation
-{
-    /// <summary>The store to the argument homed in this slot when the body names the argument, as diagnostics show it.
-    /// </summary>
-    internal Starg? Argument { get; init; }
-}
+internal sealed record SetLocal(int Index) : Operation;
 
-internal sealed record LocalAddress(int Index) : Operation
-{
-    /// <summary>The address of the argument homed in this slot when the body names the argument, as diagnostics show
-    /// it.</summary>
-    internal Ldarga? Argument { get; init; }
-}
+internal sealed record LocalAddress(int Index) : Operation;
 
 /// <summary>
 /// An integer constant of <see cref="Width"/> bits. <see cref="Numeral"/> says it was written as a bare numeral

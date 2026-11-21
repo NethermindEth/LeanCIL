@@ -31,9 +31,9 @@ internal static partial class ProofOutline
             : throw new InvalidDataException($"Argument {argument} is stored or addressed without a home");
         return [.. emitted.Operations.Select(operation => operation switch
         {
-            Arg load when slots.ContainsKey(load.Index) => new Local(Home(load.Index)) { Argument = load },
-            Starg store => new SetLocal(Home(store.Index)) { Argument = store },
-            Ldarga address => new LocalAddress(Home(address.Index)) { Argument = address },
+            Arg load when slots.ContainsKey(load.Index) => new Local(Home(load.Index)),
+            Starg store => new SetLocal(Home(store.Index)),
+            Ldarga address => new LocalAddress(Home(address.Index)),
             _ => operation
         })];
     }
