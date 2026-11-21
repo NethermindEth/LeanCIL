@@ -1,3 +1,4 @@
+import Tests.Support.IntrinsicMethods
 import CIL.Safety.SymbolicExecution
 import CIL.SIMD.PackedLanes
 
@@ -352,7 +353,7 @@ example (lane0 lane1 lane2 lane3 : Bool) :
     another: one partial-product row of a multi-limb multiply. -/
 @[cil_code] def partialProductMethod : CIL.Method := {
   profile := { architecture := .x64, avx2 := true }
-  code := [.intrinsic (.avx2 .shr64) 2, .intrinsic (.avx2 .multiplyEven32) 2, .ret]
+  code := [.call Tests.IntrinsicMethods.shiftRight, .call Tests.IntrinsicMethods.multiplyEven32, .ret]
   locals := [], returnsValue := true }
 
 /-- The program holding `partialProductMethod`. -/

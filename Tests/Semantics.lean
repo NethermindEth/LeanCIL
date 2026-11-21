@@ -2,7 +2,9 @@ import Tests.AggregateSetup
 import Tests.ValueBitCasts
 import Tests.ViewReuse
 import Tests.Support
+import Tests.Support.IntrinsicMethods
 import Tests.MixedNativeOpcodes
+import CIL.Safety.StepComposition
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.NumericLocalLoad
 
@@ -15,8 +17,7 @@ theorem vector_lane_add :
       some (.v128 (CIL.Vector.pack128 4 6)) := rfl
 
 theorem disabled_intrinsic :
-    (CIL.step (.intrinsic (.avx2 .add64) 2) false none 0
-      [.v256 1, .v256 2] (fun _ => none)).isSome = false := rfl
+    (CIL.Intrinsic.avx2 .add64).available CIL.FeatureProfile.scalar = false := rfl
 
 /-- A memory whose every address holds an initialized word, so only the instruction can fail. -/
 private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
@@ -114,23 +115,27 @@ theorem ldarga_without_home_unsupported :
 
 theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsic)
     (disabled : operation.available body.profile = false) (argc pc : Nat)
+    (method : CIL.Extraction.MethodRef) (link : body.linkAt pc = none)
+    (found : CIL.Extraction.runtimeModel body.environment .call method =
+      some (.intrinsic operation argc))
     (args stack : List Value) (frame : Frame) (memory : Memory) :
-    step body (.intrinsic operation argc) pc args frame stack memory =
+    step body (.call method) pc args frame stack memory =
       .error (.unsupported "Intrinsic unavailable in target profile") := by
-  simp [step, intrinsicCall, disabled, observerCount, unspecifiedOperands]
+  rw [step_call_intrinsic _ _ _ _ _ link found rfl]
+  simp [intrinsicCall, disabled]
 
 theorem checked_avx2_enabled :
-    step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
+    step { scalarBody with profile := { avx2 := true } } (.call Tests.IntrinsicMethods.add64)
       0 [] scalarFrame [.scalar (.v256 1), .scalar (.v256 2)] Memory.empty =
       .ok (.next 1 [.scalar (.v256 3)] scalarFrame Memory.empty) := rfl
 
 theorem checked_avx512_disabled :
-    step scalarBody (.intrinsic (.avx512 .ltu64) 2) 0 [] scalarFrame
+    step scalarBody (.call Tests.IntrinsicMethods.compareLessThan) 0 [] scalarFrame
       [.scalar (.v256 1), .scalar (.v256 2)] Memory.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem checked_avx512_invocation_disabled (memory : Memory) :
-    invoke [{ code := [.ldarg 0, .ldarg 1, .intrinsic (.avx512 .ltu64) 2, .ret], locals := [],
+    invoke [{ code := [.ldarg 0, .ldarg 1, .call Tests.IntrinsicMethods.compareLessThan, .ret], locals := [],
               returnsValue := true }] 4 0
       [.scalar (.v256 1), .scalar (.v256 2)] memory =
       .error ⟨0, 2, .unsupported "Intrinsic unavailable in target profile"⟩ := rfl
@@ -631,16 +636,31 @@ theorem divRem_overflow : CIL.X86.divRem64 0 3 3 = .error .overflow := rfl
 theorem divRem_zero : CIL.X86.divRem64 7 0 0 = .error .divideByZero := rfl
 theorem divRem_operands : CIL.X86.divRemValue [.i64 1, .i32 0, .i64 3] = .error .invalidOperands := rfl
 
-def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.intrinsic (.x86Base .divRem64) 3] }
+private def hardwareDivRem : CIL.Extraction.MethodRef :=
+  let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+  { owner := .atom CIL.Extraction.intrinsicsScope "System.Runtime.Intrinsics.X86.X86Base/X64",
+    name := name!"DivRem", genericArity := 0, hasThis := false,
+    returnType := .aggregate (CIL.Extraction.integerPairIdentity "System.UInt64") 0,
+    parameters := [word, word, word] }
 
+def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
+  { profile, returnsValue := true, locals := [], code := [.call hardwareDivRem],
+    environment := {
+      rawLayouts := [{
+        identity := CIL.Extraction.integerPairIdentity "System.UInt64"
+        explicit := false, auto := true, packing := 0, declaredSize := 0
+        fields := [⟨.unsigned64, none⟩, ⟨.unsigned64, none⟩] }]
+      layouts := #[⟨⟨16, [⟨0, 8, false⟩, ⟨8, 8, false⟩]⟩, 8⟩] } }
+
+set_option maxRecDepth 4096 in
 theorem divRem_checked_fault :
-    CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.intrinsic (.x86Base .divRem64) 3) 0 []
+    CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.call hardwareDivRem) 0 []
       ⟨0, [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Memory.empty =
       .error (.arithmetic .overflow) := rfl
 
+set_option maxRecDepth 4096 in
 theorem divRem_requires_x86Base :
-    CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.intrinsic (.x86Base .divRem64) 3) 0 []
+    CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.call hardwareDivRem) 0 []
       ⟨0, [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Memory.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 

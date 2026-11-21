@@ -186,7 +186,6 @@ def pureArity : CIL.Instruction → Option Nat
   | .brfalse _ | .brtrue _ | .switch _ => some 1
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => some 2
   | .br _ => some 0
-  | .intrinsic _ argc => some argc
   -- Faulting arithmetic has its own arms in `step`; `CIL.step` would drop the fault.
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
     | .mul_ovf | .mul_ovf_un | .conv_ovf _ | .conv_ovf_un _ => none
@@ -869,7 +868,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  | .intrinsic operation argc, _ => intrinsicCall body.profile operation argc pc frame stack m
   | .ldarg index, _ =>
     return .next (pc + 1) ((← loadArgument body index args frame m) :: stack) frame m
   | .ldloc i, _ =>

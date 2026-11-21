@@ -1,5 +1,6 @@
 import CIL.Safety.ProfileContract
 import Tests.Support
+import Tests.Support.IntrinsicMethods
 
 /-! A contract proved once under one feature profile and carried to other profiles by
     `MethodContract.Holds.reprofile` and its outcome forms, with the profile agreement decided
@@ -155,7 +156,7 @@ theorem baseline_rejected : avx2Contract.Refuted (reprofile program baselineProf
 /-- An AVX-512 DQ multiply needs four flags, all of which the agreement check reads. -/
 def intrinsicProgram : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.ldarg 0, .ldarg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
+     code := [.ldarg 0, .ldarg 1, .call Tests.IntrinsicMethods.multiplyLow, .ret] }]
 
 /-- Profiles that agree on the four flags agree on the multiply. -/
 theorem intrinsic_agrees : intrinsicProgram.ProfileAgreement avx512Profile
@@ -173,9 +174,11 @@ theorem intrinsic_check_rejects : ¬ ∀ featureId ∈ intrinsicProgram.profileR
 theorem intrinsic_disagrees : ¬ intrinsicProgram.ProfileAgreement avx512Profile
     { avx512Profile with avx512DQVL := false } := by
   intro agreement
-  have available := agreement _ (List.mem_singleton_self _) (.intrinsic (.avx512DQ .mul64) 2)
+  have available := agreement _ (List.mem_singleton_self _) (.call Tests.IntrinsicMethods.multiplyLow)
     (by simp)
-  simp [Instruction.ProfileAgreement, Intrinsic.available, avx512Profile, avx2Profile] at available
+  have enabled := available _ (Tests.IntrinsicMethods.multiplyLow_model _)
+  change true = false at enabled
+  contradiction
 
 /-- info: 'Tests.ProfileContract.uniform' depends on axioms: [propext] -/
 #guard_msgs in #print axioms uniform

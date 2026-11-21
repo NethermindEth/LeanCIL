@@ -188,20 +188,20 @@ theorem bitClaims :
 
 #print axioms bitClaims
 
-private def leadingLowered : CIL.Instruction :=
-  .intrinsic (.scalar (.leadingZeroCount 64 .word32)) 1
+private def leading64 : CIL.Instruction :=
+  .call (helper bitOperations name!"LeadingZeroCount" ulong int)
 example : RuntimeModelsAgree (method (site popCount)) [true] (emitting (.call popCount {})) := by
   decide +kernel
-example : ¬ RuntimeModelsAgree (method (site popCount)) [true] (emitting leadingLowered) := by
+example : ¬ RuntimeModelsAgree (method (site popCount)) [true] (emitting leading64) := by
   decide +kernel
 example : ManagedCallsValid [] [] (callModelled body) (method (site popCount)) [true]
     (emitting (.call popCount {})) := by decide +kernel
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site popCount)) [true]
     (emitting (.call log2 {})) := by decide +kernel
-private def narrowCount : CIL.Instruction := .intrinsic (.scalar (.popCount 64 .word32)) 1
+private def narrowCount : CIL.Instruction := .call popCount
 example : ¬ RuntimeModelsAgree (method (site ulongPopCount)) [true] (emitting narrowCount) := by
   decide +kernel
-private def reverse32 : CIL.Instruction := .intrinsic (.scalar (.reverseEndianness 32 false)) 1
+private def reverse32 : CIL.Instruction := .call (helper binaryPrimitives name!"ReverseEndianness" uint uint)
 example : ¬ RuntimeModelsAgree (method (site reverseUlong)) [true] (emitting reverse32) := by
   decide +kernel
 
@@ -227,10 +227,10 @@ private def calling (method : MethodRef) : CIL.Method := { body with code := [.c
 private def i32 (bits : Nat) : CIL.Safety.Value := .scalar (.i32 (BitVec.ofNat 32 bits))
 private def i64 (bits : Nat) : CIL.Safety.Value := .scalar (.i64 (BitVec.ofNat 64 bits))
 
--- Each helper call steps as the intrinsic it was lowered to, and the result word is the one the
+-- Each checked call runs its declared intrinsic, and the result word is the one the
 -- model states: an int from `BitOperations.PopCount`, a long from `UInt64.PopCount`.
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i64 7] Memory.empty =
-    step body (.intrinsic (.scalar (.popCount 64 .word32)) 1) 0 [] frame [i64 7]
+    intrinsicCall body.profile (.scalar (.popCount 64 .word32)) 1 0 frame [i64 7]
       Memory.empty := by rfl
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i64 7] Memory.empty =
     .ok (.next 1 [i32 3] frame Memory.empty) := by rfl
@@ -240,7 +240,7 @@ example : step (calling bytePopCount) (.call bytePopCount {}) 0 [] frame [i32 0x
     Memory.empty = .ok (.next 1 [i32 8] frame Memory.empty) := by rfl
 example : step (calling rotateLeft) (.call rotateLeft {}) 0 [] frame [i64 1, i32 65]
       Memory.empty =
-    step body (.intrinsic (.scalar (.rotateLeft 64)) 2) 0 [] frame [i64 1, i32 65]
+    intrinsicCall body.profile (.scalar (.rotateLeft 64)) 2 0 frame [i64 1, i32 65]
       Memory.empty := by rfl
 example : step (calling isPow2) (.call isPow2 {}) 0 [] frame [i64 (2 ^ 63)] Memory.empty =
     .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
@@ -248,13 +248,13 @@ example : step (calling isPow2) (.call isPow2 {}) 0 [] frame [i64 (2 ^ 63)] Memo
 -- The counts and `Log2` of zero, `RoundUpToPowerOf2` past the largest power, and the byte
 -- reversal of a sign-extended narrow value step as their intrinsics.
 example : step (calling log2) (.call log2 {}) 0 [] frame [i64 0] Memory.empty =
-    step body (.intrinsic (.scalar (.log2 64 .word32)) 1) 0 [] frame [i64 0] Memory.empty := by
+    intrinsicCall body.profile (.scalar (.log2 64 .word32)) 1 0 frame [i64 0] Memory.empty := by
   rfl
 example : step (calling log2) (.call log2 {}) 0 [] frame [i64 0] Memory.empty =
     .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 example : step (calling leadingZeroCount) (.call leadingZeroCount {}) 0 [] frame [i32 0]
       Memory.empty =
-    step body (.intrinsic (.scalar (.leadingZeroCount 32 .word32)) 1) 0 [] frame [i32 0]
+    intrinsicCall body.profile (.scalar (.leadingZeroCount 32 .word32)) 1 0 frame [i32 0]
       Memory.empty := by rfl
 example : step (calling leadingZeroCount) (.call leadingZeroCount {}) 0 [] frame [i32 0]
     Memory.empty = .ok (.next 1 [i32 32] frame Memory.empty) := by rfl
@@ -263,13 +263,13 @@ example : step (calling trailingZeroCount) (.call trailingZeroCount {}) 0 [] fra
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i64 0] Memory.empty =
     .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 example : step (calling roundUp) (.call roundUp {}) 0 [] frame [i32 0x80000001] Memory.empty =
-    step body (.intrinsic (.scalar (.roundUpToPowerOf2 32)) 1) 0 [] frame [i32 0x80000001]
+    intrinsicCall body.profile (.scalar (.roundUpToPowerOf2 32)) 1 0 frame [i32 0x80000001]
       Memory.empty := by rfl
 example : step (calling roundUp) (.call roundUp {}) 0 [] frame [i32 0x80000001] Memory.empty =
     .ok (.next 1 [i32 0] frame Memory.empty) := by rfl
 example : step (calling reverseShort) (.call reverseShort {}) 0 [] frame [i32 0xFFFFFF80]
       Memory.empty =
-    step body (.intrinsic (.scalar (.reverseEndianness 16 true)) 1) 0 [] frame [i32 0xFFFFFF80]
+    intrinsicCall body.profile (.scalar (.reverseEndianness 16 true)) 1 0 frame [i32 0xFFFFFF80]
       Memory.empty := by rfl
 example : step (calling reverseShort) (.call reverseShort {}) 0 [] frame [i32 0xFFFFFF80]
     Memory.empty = .ok (.next 1 [i32 0xFFFF80FF] frame Memory.empty) := by rfl
@@ -277,7 +277,7 @@ example : step (calling reverseSbyte) (.call reverseSbyte {}) 0 [] frame [i32 0x
     Memory.empty = .ok (.next 1 [i32 0xFFFFFF80] frame Memory.empty) := by rfl
 -- A call faults where its intrinsic does: a 64-bit helper given a 32-bit word.
 example : step (calling popCount) (.call popCount {}) 0 [] frame [i32 7] Memory.empty =
-    step body (.intrinsic (.scalar (.popCount 64 .word32)) 1) 0 [] frame [i32 7]
+    intrinsicCall body.profile (.scalar (.popCount 64 .word32)) 1 0 frame [i32 7]
       Memory.empty := by rfl
 example : (step (calling popCount) (.call popCount {}) 0 [] frame [i32 7] Memory.empty).toBool =
     false := by rfl

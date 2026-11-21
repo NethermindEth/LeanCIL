@@ -1,3 +1,4 @@
+import Tests.Support.IntrinsicMethods
 import CIL.Instructions
 import Tests.Support
 
@@ -302,9 +303,9 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   (if profile.avx512DQVL then .stloc 22 else .unadmitted 0),
   (if profile.avx512DQVL then .ldloc 22 else .unadmitted 0),
   (if profile.avx512DQVL then .ldc_i4 (BitVec.ofInt 32 (27)) else .unadmitted 0),
-  (if profile.avx512DQVL then .intrinsic (.avx2 .permute4x64) 2 else .unadmitted 0),
-  (if profile.avx512DQVL then .intrinsic (.avx512DQ .mul64) 2 else .unadmitted 0),
-  (if profile.avx512DQVL then .intrinsic (.vector (.sum64 256)) 1 else .unadmitted 0),
+  (if profile.avx512DQVL then .call Tests.IntrinsicMethods.permute else .unadmitted 0),
+  (if profile.avx512DQVL then .call Tests.IntrinsicMethods.multiplyLow else .unadmitted 0),
+  (if profile.avx512DQVL then .call Tests.IntrinsicMethods.sum else .unadmitted 0),
   (if profile.avx512DQVL then .stloc 6 else .unadmitted 0),
   (if profile.avx512DQVL then .br 96 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0 else .call (Tests.supportedGetter "X86.Avx2")),
@@ -333,63 +334,63 @@ def fullBody (profile : CIL.FeatureProfile) (wordIndex countIndex storageIndex :
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldc_i4 (BitVec.ofInt 32 (27)) else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .permute4x64) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.permute else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .stloc 24
     else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 23 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.reinterpret 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.asUInt32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 24 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldc_i4 (BitVec.ofInt 32 (32)) else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .shr64) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.shiftRight else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.reinterpret 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.asUInt32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .multiplyEven32) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.multiplyEven32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 23 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldc_i4 (BitVec.ofInt 32 (32)) else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .shr64) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.shiftRight else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.reinterpret 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.asUInt32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 24 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.reinterpret 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.asUInt32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .multiplyEven32) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.multiplyEven32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .add64) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.add64 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .stloc 25
     else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 23 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.reinterpret 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.asUInt32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 24 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.reinterpret 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.asUInt32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .multiplyEven32) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.multiplyEven32 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldloc 25 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .ldc_i4 (BitVec.ofInt 32 (32)) else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .shl64) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.shiftLeft else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.avx2 .add64) 2 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.add64 else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
-    else if profile.avx2 then .intrinsic (.vector (.sum64 256)) 1 else .unadmitted 0),
+    else if profile.avx2 then .call Tests.IntrinsicMethods.sum else .unadmitted 0),
   (if profile.avx512DQVL then .unadmitted 0
     else if profile.avx2 then .stloc 6
     else .unadmitted 0),

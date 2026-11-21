@@ -45,10 +45,33 @@ theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value
   exact ⟨final_formed, by rw [output_eq]⟩
 #print axioms named_call_continuation
 
+open CIL.Extraction in
+private def wordVector (width : Nat) : TypeExpr :=
+  .apply (.constructor intrinsicsScope s!"System.Runtime.Intrinsics.Vector{width}`1")
+    (.atom runtimeScope "System.UInt64")
+
+open CIL.Extraction in
+private def permuteMethod : MethodRef :=
+  { owner := .atom intrinsicsScope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Permute4x64",
+    hasThis := false, genericArity := 0, returnType := wordVector 256,
+    parameters := [wordVector 256, .atom runtimeScope "System.Byte"] }
+
+open CIL.Extraction in
+private def zeroMethod : MethodRef :=
+  { owner := wordVector 256, name := name!"get_Zero", hasThis := false,
+    genericArity := 0, returnType := wordVector 256, parameters := [] }
+
+open CIL.Extraction in
+private def equalityMethod (width : Nat) : MethodRef :=
+  { owner := wordVector width, name := name!"op_Equality", hasThis := false,
+    genericArity := 0, returnType := .atom runtimeScope "System.Boolean",
+    parameters := [wordVector width, wordVector width] }
+
 /-- The vector control is an ordinary literal in the emitted instructions. -/
 @[cil_code] def reverseVector : CIL.Method :=
   { profile := { architecture := .x64, avx2 := true }, locals := [], returnsValue := true,
-    code := [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2, .ret] }
+    code := [.ldc_i4 27, .call permuteMethod, .ret] }
+cil_runtime_models reverseVector
 
 /-- A rewrite stated with a literal still matches the vector value left by stepping. -/
 theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reversed : BitVec 256)
@@ -73,8 +96,8 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
     layouts := #[⟨{ size := 32, fields := [] }, 1⟩] },
   locals := [], returnsValue := true, code := [.ldobj (.aggregate "Fixture::Bytes" 0),
     .memory (.bitcastValue (.aggregate 32) .vector256),
-    .intrinsic (.vector (.zero 256)) 0, .intrinsic (.vector (.equalsAll 256)) 2,
-    .ret] }
+    .call zeroMethod, .call (equalityMethod 256), .ret] }
+cil_runtime_models aggregateZero
 
 /-- Snapshot map rewrites and symbolic intrinsic results remain usable after checked stepping. -/
 theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Reference)
@@ -93,7 +116,8 @@ theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Refe
   {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   locals := [], returnsValue := true,
-    code := [.intrinsic (.vector (.equalsAll 128)) 2, .ret] }
+    code := [.call (equalityMethod 128), .ret] }
+cil_runtime_models equalVector
 
 /-- An intrinsic's private result helper does not obstruct a symbolic scalar return. -/
 theorem vector_boolean_return (memory : Memory) (frame : Frame) (left right : BitVec 128) :

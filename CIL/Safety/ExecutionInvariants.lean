@@ -605,7 +605,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     StepContract body pc operation frame stack m action := by
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+  unfold step referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject observedCall initializeSpanHome at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
@@ -764,7 +764,7 @@ theorem managedStep_homeFree {operation : CIL.ManagedOp} {link : Option CIL.Link
 theorem step_homeFree {body : CIL.Method} {operation : CIL.Instruction} {pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body operation pc args frame stack m = .ok action) : action.HomeFree := by
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+  unfold step referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject modelStep observedCall runModel featureCall
     typedTransferCall skipInitCall initializeSpanHome spanInPlaceCall at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h

@@ -323,7 +323,7 @@ theorem step_call_intrinsic {method : Extraction.MethodRef} {prefixes : CallPref
       some (.intrinsic operation argc))
     (direct : prefixes.tail = false) :
     step body (.call method prefixes) pc args frame stack memory =
-      step body (.intrinsic operation argc) pc args frame stack memory := by
+      intrinsicCall body.profile operation argc pc frame stack memory := by
   rw [step_call_model (link := link) (found := found) (direct := direct)]
   rfl
 
@@ -1157,20 +1157,6 @@ theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
   rfl
 
 #print axioms step_stsfld_eq
-
-/-- An intrinsic must be available in the method's profile; its `argc` operands are taken
-    deepest first. -/
-@[cil_step] theorem step_intrinsic_eq (operation : CIL.Intrinsic) (argc : Nat)
-    (stack : List Value) :
-    step body (.intrinsic operation argc) pc args frame stack memory =
-      if !operation.available body.profile then
-        .error (.unsupported "Intrinsic unavailable in target profile")
-      else if stack.length < argc then .error .invalidState else do
-        let operands ← scalars (stack.take argc).reverse
-        let value ← checkedIntrinsic operation operands
-        return FrameAction.next (pc + 1)
-          ((← checkedValue memory (.scalar value)) :: stack.drop argc) frame memory :=
-  id rfl
 
 end InstructionEquations
 

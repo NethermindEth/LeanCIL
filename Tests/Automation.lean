@@ -1,3 +1,4 @@
+import Tests.Support.IntrinsicMethods
 import Tests.FeatureExecution
 import CIL.Safety.SymbolicExecution
 import CIL.Safety.MethodContract
@@ -432,7 +433,7 @@ theorem bitcast_fact_stack (body : CIL.Method) (args : List Value) (frame : Fram
 
 @[cil_code] def permuteStoreMethod : CIL.Method := {
   profile := { architecture := .x64, avx2 := true }
-  code := [.intrinsic (.avx2 .permute4x64) 2, .memory .store256, .ret]
+  code := [.call Tests.IntrinsicMethods.permute, .memory .store256, .ret]
   locals := [], returnsValue := false }
 
 @[cil_code] def permuteStoreProgram : CIL.Program := [permuteStoreMethod]

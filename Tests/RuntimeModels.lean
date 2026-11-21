@@ -55,7 +55,7 @@ private def fourth : Value := .reference (.address ⟨0, 4⟩)
 -- Each model against the instruction emitted for its call today, on a stack it accepts.
 example : runModel body (.intrinsic (.scalar (.rotateLeft 32)) 2) 3 frame
       [.scalar (.i32 1), .scalar (.i32 0x80000000)] staticMemory =
-    step body (.intrinsic (.scalar (.rotateLeft 32)) 2) 3 [] frame
+    intrinsicCall body.profile (.scalar (.rotateLeft 32)) 2 3 frame
       [.scalar (.i32 1), .scalar (.i32 0x80000000)] staticMemory := rfl
 example : runModel body (.memory (.createSpan 4)) 3 frame [start] staticMemory =
     step body (.memory (.createSpan 4)) 3 [] frame [start] staticMemory := rfl
@@ -158,8 +158,7 @@ example : modelStep (some (.memory .isNullRef)) body 3 frame [.scalar (.v128Low6
   exact step_unspecified rfl
 
 -- Each model observes the operands its emitted instruction observes.
-example : (CIL.RuntimeModel.intrinsic (.scalar (.rotateLeft 32)) 2).observerCount =
-    observerCount (.intrinsic (.scalar (.rotateLeft 32)) 2) := rfl
+example : (CIL.RuntimeModel.intrinsic (.scalar (.rotateLeft 32)) 2).observerCount = 0 := rfl
 example : (CIL.RuntimeModel.memory (.createSpan 4)).observerCount =
     observerCount (.memory (.createSpan 4)) := rfl
 example : (CIL.RuntimeModel.feature .avx2).observerCount = 0 := rfl
@@ -509,18 +508,15 @@ example : runtimeModel {} .call (helper name!"Max" int 2 (owner := runtimeType "
     none := by decide +kernel
 example : runtimeModel {} .newobj mathMax = none := by decide +kernel
 
--- A helper site keeps its call; the lowered intrinsic is refused there, and a call or intrinsic
--- of another helper is refused where the site calls `Min`, which a table without the helpers
--- accepted.
-private def maxLowered : CIL.Instruction := .intrinsic (.scalar (.math .max 32 true)) 2
+-- Each helper site requires the closed method reference of its own declaration.
 example : RuntimeModelsAgree (method (site mathMax)) [true] (emitting (.call mathMax {}) []) := by
   decide +kernel
-example : ¬ RuntimeModelsAgree (method (site mathMax)) [true] (emitting maxLowered []) := by
+example : ¬ RuntimeModelsAgree (method (site mathMax)) [true] (emitting (.call mathMin) []) := by
   decide +kernel
-example : ¬ RuntimeModelsAgree (method (site mathMin)) [true] (emitting maxLowered []) := by
+example : ¬ RuntimeModelsAgree (method (site mathMin)) [true] (emitting (.call mathMax) []) := by
   decide +kernel
 example : ¬ ModelsAgree { table := model_table% [objectConstructorEntry] }
-    {} {} (method (site mathMin)) [true] [maxLowered] := by decide +kernel
+    {} {} (method (site mathMin)) [true] [.call mathMax] := by decide +kernel
 example : ManagedCallsValid [] [] (callModelled body) (method (site mathMin)) [true]
     (emitting (.call mathMin {}) []) := by decide +kernel
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site mathMin)) [true]
@@ -638,20 +634,17 @@ example : catalog.siteAgrees {} {} (site bigMul 40
     { bigMul.signature 0 with returnType := .parameter 0 }) (.memory (.bigMul64 false)) = false :=
   by decide +kernel
 
--- A vector helper site keeps its call; the intrinsic it was lowered to is refused there, which a
--- table without the helpers accepted.
-private def extractLowered : CIL.Instruction := .intrinsic (.vector (.extract64 128)) 2
-private def createLowered : CIL.Instruction := .intrinsic (.vector .createScalarUnsafe64) 1
+-- A vector helper site refuses a call with another member or vector width.
 example : RuntimeModelsAgree (method laneSite) [true]
     (emitting (.call getElement128Method {}) []) := by decide +kernel
 example : ¬ RuntimeModelsAgree (method laneSite) [true]
-    (emitting extractLowered []) := by decide +kernel
+    (emitting (.call getElement256Method) []) := by decide +kernel
 example : ¬ ModelsAgree { table := model_table% [objectConstructorEntry] }
-    {} {} (method laneSite) [true] [extractLowered] := by decide +kernel
+    {} {} (method laneSite) [true] [.call getElement256Method] := by decide +kernel
 example : ¬ RuntimeModelsAgree (method (site createScalarUnsafeMethod)) [true]
-    (emitting createLowered []) := by decide +kernel
+    (emitting (.call getElement128Method) []) := by decide +kernel
 example : ¬ ModelsAgree { table := model_table% [objectConstructorEntry] }
-    {} {} (method (site createScalarUnsafeMethod)) [true] [createLowered] := by decide +kernel
+    {} {} (method (site createScalarUnsafeMethod)) [true] [.call getElement128Method] := by decide +kernel
 /-- Keeping a valid 256-bit call still requires its own generic member declaration. -/
 example : ¬ RuntimeModelsAgree (method (site getElement256Method 40
     { getElementSignature "System.Runtime.Intrinsics.Vector256`1" with returnType := word }))
@@ -919,41 +912,41 @@ private def calling (method : CIL.Extraction.MethodRef) : CIL.Method :=
 private def int32 (value : Int) : Value := .scalar (.i32 (BitVec.ofInt 32 value))
 example : step (calling Table.mathMin) (.call Table.mathMin {}) 0 [] frame [int32 3, int32 (-2)]
       heapMemory =
-    step body (.intrinsic (.scalar (.math .min 32 true)) 2) 0 [] frame [int32 3, int32 (-2)]
+    intrinsicCall body.profile (.scalar (.math .min 32 true)) 2 0 frame [int32 3, int32 (-2)]
       heapMemory := by rfl
 example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame [int32 3, int32 (-2)]
       heapMemory =
-    step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame [int32 3, int32 (-2)]
+    intrinsicCall body.profile (.scalar (.math .max 32 true)) 2 0 frame [int32 3, int32 (-2)]
       heapMemory := by rfl
 example : step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
       [int32 9, int32 1, int32 5] heapMemory =
-    step body (.intrinsic (.scalar (.math .clamp 32 true)) 3) 0 [] frame
+    intrinsicCall body.profile (.scalar (.math .clamp 32 true)) 3 0 frame
       [int32 9, int32 1, int32 5] heapMemory := by rfl
 example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame [int32 (-7)]
       heapMemory =
-    step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-7)]
+    intrinsicCall body.profile (.scalar (.math .abs 32 true)) 1 0 frame [int32 (-7)]
       heapMemory := by rfl
 example : step (calling Table.mathSign) (.call Table.mathSign {}) 0 [] frame
       [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory =
-    step body (.intrinsic (.scalar (.math .sign 64 true)) 1) 0 [] frame
+    intrinsicCall body.profile (.scalar (.math .sign 64 true)) 1 0 frame
       [.scalar (.i64 (BitVec.ofInt 64 (-7)))] heapMemory := by rfl
 example : (step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
     [int32 3, int32 (-2)] heapMemory).toBool := by rfl
 -- Bounds out of order and the most negative `Abs` fault as the intrinsic does.
 example : step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
       [int32 1, int32 5, int32 9] heapMemory =
-    step body (.intrinsic (.scalar (.math .clamp 32 true)) 3) 0 [] frame
+    intrinsicCall body.profile (.scalar (.math .clamp 32 true)) 3 0 frame
       [int32 1, int32 5, int32 9] heapMemory := by rfl
 example : (step (calling Table.mathClamp) (.call Table.mathClamp {}) 0 [] frame
     [int32 1, int32 5, int32 9] heapMemory).toBool = false := by rfl
 example : step (calling Table.mathAbs) (.call Table.mathAbs {}) 0 [] frame
       [int32 (-2147483648)] heapMemory =
-    step body (.intrinsic (.scalar (.math .abs 32 true)) 1) 0 [] frame [int32 (-2147483648)]
+    intrinsicCall body.profile (.scalar (.math .abs 32 true)) 1 0 frame [int32 (-2147483648)]
       heapMemory := by rfl
 -- A modelled call leaves unspecified operands to its model, so it faults as the intrinsic does.
 example : step (calling Table.mathMax) (.call Table.mathMax {}) 0 [] frame
       [.scalar (.v128Low64 7), int32 1] heapMemory =
-    step body (.intrinsic (.scalar (.math .max 32 true)) 2) 0 [] frame
+    intrinsicCall body.profile (.scalar (.math .max 32 true)) 2 0 frame
       [.scalar (.v128Low64 7), int32 1] heapMemory := by rfl
 
 section
@@ -963,31 +956,31 @@ open CIL.Extraction (createScalarUnsafeMethod getElement128Method getElement256M
 -- only in its low lane, where the call faulted before it left its operands to its model.
 example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
       [int32 0, .scalar (.v128Low64 7)] heapMemory =
-    step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
+    intrinsicCall body.profile (.vector (.extract64 128)) 2 0 frame
       [int32 0, .scalar (.v128Low64 7)] heapMemory := by rfl
 example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
       [int32 0, .scalar (.v128Low64 7)] heapMemory =
     .ok (.next 1 [.scalar (.i64 7)] frame heapMemory) := by rfl
 example : step (calling getElement128Method) (.call getElement128Method {}) 0 [] frame
       [int32 1, .scalar (.v128Low64 7)] heapMemory =
-    step body (.intrinsic (.vector (.extract64 128)) 2) 0 [] frame
+    intrinsicCall body.profile (.vector (.extract64 128)) 2 0 frame
       [int32 1, .scalar (.v128Low64 7)] heapMemory := by rfl
 /-- A 256-bit vector whose four 64-bit lanes hold 1, 2, 3 and 4, lowest first. -/
 private def lanes : BitVec 256 := CIL.Vector.pack256 1 2 3 4
 example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
       [int32 2, .scalar (.v256 lanes)] heapMemory =
-    step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
+    intrinsicCall body.profile (.vector (.extract64 256)) 2 0 frame
       [int32 2, .scalar (.v256 lanes)] heapMemory := by rfl
 example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
       [int32 2, .scalar (.v256 lanes)] heapMemory =
     .ok (.next 1 [.scalar (.i64 3)] frame heapMemory) := by rfl
 example : step (calling getElement256Method) (.call getElement256Method {}) 0 [] frame
       [int32 4, .scalar (.v256 lanes)] heapMemory =
-    step body (.intrinsic (.vector (.extract64 256)) 2) 0 [] frame
+    intrinsicCall body.profile (.vector (.extract64 256)) 2 0 frame
       [int32 4, .scalar (.v256 lanes)] heapMemory := by rfl
 example : step (calling createScalarUnsafeMethod) (.call createScalarUnsafeMethod {}) 0 [] frame
       [.scalar (.i64 7)] heapMemory =
-    step body (.intrinsic (.vector .createScalarUnsafe64) 1) 0 [] frame [.scalar (.i64 7)]
+    intrinsicCall body.profile (.vector .createScalarUnsafe64) 1 0 frame [.scalar (.i64 7)]
       heapMemory := by rfl
 
 /-- `GetElement(CreateScalarUnsafe(value), 0)` as two calls, as an extraction emits it. -/

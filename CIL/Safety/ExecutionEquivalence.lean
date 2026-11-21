@@ -421,7 +421,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (frame : Frame) (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by
-  unfold CIL.Safety.step observedCall intrinsicCall referenceCompareCall referenceSubtractCall
+  unfold CIL.Safety.step observedCall referenceCompareCall referenceSubtractCall
     newobjStep constructAggregate constructObject
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,

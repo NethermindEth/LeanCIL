@@ -1,3 +1,4 @@
+import Tests.Support.IntrinsicMethods
 import CIL.Safety.MethodContract
 import CIL.Safety.CheckedMemoryFacts
 import CIL.SIMD.PackedLanes
@@ -47,17 +48,17 @@ def cascade (subtract : Bool) (left right : V256) : W32 :=
 /-- CIL evaluates both by-value operands before applying their lane arithmetic. -/
 @[cil_code] def laneCode (subtract : Bool) : List Instruction :=
   [.ldarg 0, .ldarg 1,
-    .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2]
+    .call (if subtract then Tests.IntrinsicMethods.subtract else Tests.IntrinsicMethods.add64)]
 
 /-- A checked helper computes the packed flag cascade, retaining its outgoing flag bit. -/
 @[cil_code] def maskBody (subtract : Bool) : Method :=
   { profile, locals := [], returnsValue := true,
     code :=
       (if subtract then [.ldarg 0, .ldarg 1] else
-        laneCode false ++ [.ldc_i8 (~~~0), .intrinsic (.vector (.create64 256)) 1]) ++
-      [.intrinsic (.avx2 .eq64) 2, .intrinsic (.avx512DQ .moveMask64) 1, .dup] ++
+        laneCode false ++ [.ldc_i8 (~~~0), .call CIL.Extraction.broadcast256Method]) ++
+      [.call Tests.IntrinsicMethods.compareEqual, .call Tests.IntrinsicMethods.moveMask, .dup] ++
       (if subtract then [.ldarg 0, .ldarg 1] else laneCode false ++ [.ldarg 0]) ++
-      [.intrinsic (.avx512 .ltu64) 2, .intrinsic (.avx512DQ .moveMask64) 1,
+      [.call Tests.IntrinsicMethods.compareLessThan, .call Tests.IntrinsicMethods.moveMask,
         .ldc_i4 1, .shl, .add, .xor, .ret] }
 
 /-- The mask helper returns the exact cascade and leaves every caller byte unchanged. -/
@@ -114,10 +115,10 @@ theorem flag_lanes (flags : W32) :
 @[cil_code] def repairBody (subtract : Bool) : Method :=
   { profile, locals := [], returnsValue := true,
     code := [.ldarg 1, .ldarg 2,
-      .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2,
+      .call (if subtract then Tests.IntrinsicMethods.subtract else Tests.IntrinsicMethods.add64),
       .ldc_i8 0] ++ flagCode 1 ++ flagCode 2 ++ flagCode 3 ++
-      [.intrinsic (.vector (.create64 256)) 4,
-        .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2, .ret] }
+      [.call Tests.IntrinsicMethods.createFour,
+        .call (if subtract then Tests.IntrinsicMethods.subtract else Tests.IntrinsicMethods.add64), .ret] }
 
 /-- The corrected SIMD result before applying the shared whole-vector arithmetic theorem. -/
 def repaired (subtract : Bool) (flags : W32) (left right : V256) : V256 :=
@@ -272,15 +273,15 @@ private def carrying : V256 := pack256 (~~~0) (~~~0) 5 0
 @[cil_code] private def singleHopBody (subtract : Bool) : Method :=
   { maskBody subtract with
     code := (if subtract then [.ldarg 0, .ldarg 1] else laneCode false ++ [.ldarg 0]) ++ [
-      .intrinsic (.avx512 .ltu64) 2, .intrinsic (.avx512DQ .moveMask64) 1,
+      .call Tests.IntrinsicMethods.compareLessThan, .call Tests.IntrinsicMethods.moveMask,
       .ldc_i4 1, .shl, .ret] }
 
 /-- This incorrect helper repairs lane two from lane one's incoming flag. -/
 @[cil_code] private def wrongLaneBody : Method :=
   { repairBody false with
-    code := [.ldarg 1, .ldarg 2, .intrinsic (.avx2 .add64) 2, .ldc_i8 0] ++
+    code := [.ldarg 1, .ldarg 2, .call Tests.IntrinsicMethods.add64, .ldc_i8 0] ++
       flagCode 1 ++ flagCode 1 ++ flagCode 3 ++
-      [.intrinsic (.vector (.create64 256)) 4, .intrinsic (.avx2 .add64) 2, .ret] }
+      [.call Tests.IntrinsicMethods.createFour, .call Tests.IntrinsicMethods.add64, .ret] }
 
 /-- Checked invocation exposes the returned vector independently of the memory representation. -/
 private def observedVector (mask repair : Method) (left right : V256) : Option V256 :=
@@ -356,7 +357,7 @@ private def overlapArguments : List CIL.Safety.Value :=
 
 /-- This incorrect caller overwrites the first input before taking its snapshot. -/
 @[cil_code] private def earlyStoreBody : Method :=
-  { storedBody.withCode ([.ldarg 0, .ldc_i8 0, .intrinsic (.vector (.create64 256)) 1, .memory
+  { storedBody.withCode ([.ldarg 0, .ldc_i8 0, .call CIL.Extraction.broadcast256Method, .memory
       .store256] ++ storedBody.code) with
     links := storedBody.links.map fun entry => (entry.1 + 4, entry.2) }
 

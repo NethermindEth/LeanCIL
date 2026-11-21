@@ -1,3 +1,4 @@
+import Tests.Support.IntrinsicMethods
 import CIL.Safety.SegmentLocals
 
 /-!
@@ -133,7 +134,8 @@ theorem multiply_left_input {program : CIL.Program} {method : Nat} {body : CIL.M
 /-- The AVX2 permutation stage retains availability and exact intrinsic semantics. -/
 theorem reverse256 {program : CIL.Program} {method start : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
-    (placed : CodeAt body start [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2])
+    (placed : CodeAt body start [.ldc_i4 27, .call Tests.IntrinsicMethods.permute])
+    (unlinked : body.linkAt (start + 1) = none)
     (arguments : List Value) (frame : Frame) (memory : Memory) (vector reversed : BitVec 256)
     (available : (CIL.Intrinsic.avx2 .permute4x64).available body.profile = true)
     (permuted : checkedIntrinsic (.avx2 .permute4x64) [.v256 vector, .i32 27] =
@@ -142,27 +144,29 @@ theorem reverse256 {program : CIL.Program} {method start : Nat} {body : CIL.Meth
       (SegmentState.exact arguments ⟨frame, [.scalar (.v256 vector)], memory⟩)
       (SegmentState.exact arguments ⟨frame, [.scalar (.v256 reversed)], memory⟩) := by
   apply Segment.ofRun (cost := 2)
-  have reversedStep : step body (.intrinsic (.avx2 .permute4x64) 2) (start + 1)
+  have reversedStep : step body (.call Tests.IntrinsicMethods.permute) (start + 1)
       arguments frame [.scalar (.i32 27), .scalar (.v256 vector)] memory =
       .ok (.next (start + 2) [.scalar (.v256 reversed)] frame memory) := by
-    rw [step_intrinsic_eq]
-    simp only [available, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+    rw [step_call_intrinsic _ _ _ _ _ unlinked (Tests.IntrinsicMethods.permute_model _) rfl]
+    simp only [intrinsicCall, available, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
     change (do
       let value ← checkedIntrinsic (.avx2 .permute4x64) [.v256 vector, .i32 27]
       let checked ← checkedValue memory (.scalar value)
       pure (FrameAction.next (start + 2) [checked] frame memory)) = _
     rw [permuted]
     rfl
-  cil_segment_steps [found, placed, reversedStep]
+  cil_segment_steps [found, placed, reversedStep, unlinked]
+  all_goals exact run_next found (placed.lookup 1 rfl) reversedStep
 
 #print axioms reverse256
 
 /-- Multiply's two vector input stages compose through the checked intermediate memory. -/
 theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
+    (unlinked : body.linkAt 54 = none)
     (leftPlaced : CodeAt body 44 (referencePrefix 0 ++ [.memory .load256, .stloc 23]))
     (rightPlaced : CodeAt body 49 (referencePrefix 1 ++ [.memory .load256,
-      .ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2, .stloc 24]))
+      .ldc_i4 27, .call Tests.IntrinsicMethods.permute, .stloc 24]))
     (leftPlain : body.argumentAccess 0 = .value none)
     (rightPlain : body.argumentAccess 1 = .value none)
     (arguments : List Value) (frame : Frame) (before middle after : Memory)
@@ -184,10 +188,10 @@ theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Metho
   have first := multiply_left_input found leftPlaced leftPlain arguments frame before middle left
     leftVector leftArgument leftFormed leftLoaded leftStored
   have split : CodeAt body 49 (((referencePrefix 1 ++ [.memory .load256]) ++
-      [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2]) ++ [.stloc 24]) := rightPlaced
+      [.ldc_i4 27, .call Tests.IntrinsicMethods.permute]) ++ [.stloc 24]) := rightPlaced
   have loaded := load256_prefix found 1 split.append_left.append_left rightPlain arguments
     frame middle right rightVector rightArgument rightFormed rightLoaded
-  have reversed := reverse256 found split.append_left.append_right arguments frame middle
+  have reversed := reverse256 found split.append_left.append_right unlinked arguments frame middle
     rightVector reversed available permuted
   have stored := store256 found split.append_right arguments frame middle after _ rightStored
   exact ((first.trans loaded).trans reversed).trans stored

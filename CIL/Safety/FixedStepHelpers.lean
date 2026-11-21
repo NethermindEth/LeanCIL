@@ -149,7 +149,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
-  | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
+  | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callvirt ..
   | .castclass _ | .isinst _ | .throw _ | .ret => .boundary
@@ -268,7 +268,7 @@ macro "fixed_fallback" : tactic => `(tactic| (
 set_option hygiene false in
 /-- Compose fixed-map primitives after selecting one checked dispatcher family. -/
 macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
-  unfold CIL.Safety.step intrinsicCall referenceCompareCall referenceSubtractCall at observable ⊢
+  unfold CIL.Safety.step referenceCompareCall referenceSubtractCall at observable ⊢
   change SuccessOrThrow (if unspecifiedOperands (observerCount operation) stack then _ else _)
     at observable
   change ResultRenamed mapping _
@@ -360,10 +360,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          all_goals simp only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)
       | (have numeric : fixedStepFamily operation = .numeric := family
-         have noIntrinsic : ∀ intrinsic argc, operation = .intrinsic intrinsic argc → False :=
-           by assumption
          cases operation <;> try cases numeric
-         all_goals try exact False.elim (noIntrinsic _ _ rfl)
          all_goals simp only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)
       | fixed_fallback

@@ -53,7 +53,7 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
     | none => exact modelStep_profile_eq (opcode := .newobj) body constructor p q agrees ..
     | some link => cases link <;> rfl
   have baseStep := CIL.step_profile_eq body.environment op p q agreement
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
+  unfold step referenceCompareCall referenceSubtractCall
   simp only [reprofiled]
   split <;> try rfl
   all_goals split <;> try rfl

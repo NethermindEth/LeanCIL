@@ -67,7 +67,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     (h : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) :
     op.readsLink = true ∧ callee ∈ body.calleesAt pc := by
-  unfold step observedCall intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
+  unfold step observedCall referenceCompareCall referenceSubtractCall newobjStep
     constructAggregate constructObject at h
   dsimp only at h
   split at h

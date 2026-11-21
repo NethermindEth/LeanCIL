@@ -234,7 +234,9 @@ addresses, then store their `int64` argument there, per cycle; each `ldfld` and 
 field's `cil_field_shape` fact and supplied facts that locate the field and read or write it, and
 the struct fields contract bodies step the same bodies under contract stepping. At each size, both workloads compare the checked theorem's heartbeats with the recorded
 cost of the lowered body at `8cc33b38` on Lean 4.35.0. The instruction counts must match.
-The limits are 1.03 times the reference frontend heartbeats and 1.08 times the kernel heartbeats. The statics bodies have 16, 64 and 256
+The intrinsic call workload compares repeated typed `Math.Max(long, long)` calls against the
+same program at `9c53e7f5`. Both field and intrinsic call workloads allow 1.03 times the reference
+frontend heartbeats and 1.08 times the reference kernel heartbeats. The statics bodies have 16, 64 and 256
 instructions and load a static field and pop it per cycle, with one static site per load, so each
 step resolves its pc among all the body's sites. The constructions bodies have 16, 64 and 256
 instructions and construct and pop a class instance per cycle, each `newobj` reading its link and

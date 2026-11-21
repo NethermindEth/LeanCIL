@@ -248,12 +248,18 @@ object Scalar(string function, int width, bool signed, int result, int arguments
 object Named(Type type, string value) => Enum.Parse(type, value);
 object ValueName() => Model("MetadataName").GetMethod("OfText", BindingFlags.Static | BindingFlags.NonPublic)!
     .Invoke(null, ["value"])!;
+// Both template alternatives bind the closed runtime member that the compiled call names.
+string ScalarCall(string owner, string name, string result, params string[] parameters)
+{
+    static string Word(string type) => $".atom Extraction.runtimeScope \"System.{type}\"";
+    return $$""".call { owner := {{Word(owner)}}, name := name!"{{name}}", hasThis := false, genericArity := 0, returnType := {{Word(result)}}, parameters := [{{string.Join(", ", parameters.Select(Word))}}] }""";
+}
 var merged = new (string Identity, object Left, object Right, string Code)[]
 {
     ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
-        ".intrinsic (.scalar (.bigMul32 true)) 2"),
+        ScalarCall("Math", "BigMul", "Int64", "Int32", "Int32")),
     ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
-        ".intrinsic (.scalar (.popCount 32 .word32)) 1")
+        ScalarCall("Numerics.BitOperations", "PopCount", "Int32", "UInt32"))
 };
 foreach (var (identity, left, right, code) in merged)
 {
@@ -274,8 +280,8 @@ foreach (var (identity, different) in new[] { ("FieldIndex", Store(1, "word")), 
     if (!Rejected(() => Merge(identity, [".nop", store, ".ret"], [".nop", different, ".ret"]))
         .Contains($"Profiles with identical observed flags emit different instructions: {identity} at pc 1"))
         throw new Exception("A store to a different field shared the template body.");
-if (!Rejected(() => Merge("Rotate", [".intrinsic (.scalar (.rotateLeft 32)) 2", ".ret"],
-        [".intrinsic (.scalar (.rotateLeft 64)) 2", ".ret"]))
+if (!Rejected(() => Merge("Rotate", [ScalarCall("Numerics.BitOperations", "RotateLeft", "UInt32", "UInt32", "Int32"), ".ret"],
+        [ScalarCall("Numerics.BitOperations", "RotateLeft", "UInt64", "UInt64", "Int32"), ".ret"]))
     .Contains("Profiles with identical observed flags emit different instructions: Rotate at pc 0"))
     throw new Exception("Profiles that render a rotate differently merged");
 Console.WriteLine("PASS template merge accepts what the Lean text equates and names the instruction that differs");

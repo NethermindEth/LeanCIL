@@ -223,13 +223,13 @@ example : runtimeModel {} .call call9.method = some (.intrinsic (.vector .combin
 example : runtimeCatalog.siteAgrees {} profile ⟨0, 40, .call call9⟩ (.call call9.method {}) := by
   decide +kernel
 example : ¬ RuntimeModelsAgree (raw call9) [true]
-    (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
+    (body [.call call0.method]) := by decide +kernel
 example : ¬ RuntimeModelsAgree (raw call9) [true]
-    (body [.intrinsic (.vector .combine256) 3]) := by decide +kernel
+    (body [.call { call9.method with parameters := call9.method.parameters ++ [call9.method.returnType] }]) := by decide +kernel
 example : ¬ RuntimeModelsAgree (raw { call9 with method.hasThis := true }) [true]
-    (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
+    (body [.call call9.method]) := by decide +kernel
 example : ¬ RuntimeModelsAgree (raw { call9 with target := .external "forged" }) [true]
-    (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
+    (body [.call call9.method]) := by decide +kernel
 /-- The same vector equality declaration instantiated at the supplied owner element. -/
 private def equalitySite (width : Nat) (element : String) : CallSite :=
   let head := s!"System.Runtime.Intrinsics.Vector{width}`1"
@@ -272,22 +272,24 @@ private def call10 : CallSite := {
   target := .external (scope ++ "::System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
     System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)"),
   typeArguments := [], parameterCount := 1, returnsValue := true }
--- `CreateScalarUnsafe` keeps its call, so its intrinsic is refused at every site, its own too.
+-- The emitted call must name the member and instantiation of the original operand.
 example : RuntimeModelsAgree (raw call10) [true] (body [.call call10.method {}]) := by
   decide +kernel
 example : ¬ RuntimeModelsAgree (raw call10) [true]
-    (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
+    (body [.call call0.method]) := by decide +kernel
 example : ¬ RuntimeModelsAgree (raw call0) [true]
-    (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
+    (body [.call createScalarUnsafeMethod]) := by decide +kernel
 example : ¬ RuntimeModelsAgree (raw call10) [true]
-    (body [.intrinsic (.vector (.extract64 128)) 2]) := by decide +kernel
--- The table states what the site may emit instead.
+    (body [.call getElement128Method]) := by decide +kernel
+-- CreateScalar initializes the upper lane. Its checked call cannot replace CreateScalarUnsafe.
+private def createScalar : MethodRef := { createScalarUnsafeMethod with name := name!"CreateScalar" }
 example : call10.method = createScalarUnsafeMethod := by decide +kernel
+example : runtimeModel {} .call createScalar = some (.intrinsic (.vector (.createScalar64 128)) 1) := rfl
 example : ¬ ModelsAgree runtimeCatalog {} profile (raw call10) [true]
-    [.intrinsic (.vector (.createScalar64 128)) 1] := by decide +kernel
+    [.call createScalar] := by decide +kernel
 example : ¬ ModelsAgree runtimeCatalog {} profile
     (raw { call10 with target := .external "forged" }) [true]
-    [.intrinsic (.vector (.createScalar64 128)) 1] := by decide +kernel
+    [.call createScalar] := by decide +kernel
 example : refuses { call0 with parameterCount := 1 } := by decide +kernel
 example : runtimeModel {} .call call0.method ≠ some (.intrinsic (.avx2 .bor) 2) := by decide +kernel
 example : runtimeModel {} .call call4.method ≠ some (.intrinsic (.avx2 .shl64) 2) := by
@@ -347,9 +349,9 @@ example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 65037, .local 0�
 example : ¬ OpaqueLocalsValid withLocal
     { localBody with code := [.call createScalarUnsafeMethod {}, .ldloca 0] } := by
   decide +kernel
--- The intrinsic alone no longer stands for the call, so it claims no opaque local.
+-- A different closed member cannot claim the opaque local of CreateScalarUnsafe.
 example : ¬ OpaqueLocalsValid withLocal
-    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1] } := by decide +kernel
+    { localBody with code := [.call getElement128Method] } := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] }
     := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by
@@ -645,12 +647,12 @@ theorem unreachable_call :
 
 #print axioms unreachable_call
 
-/-- The shape check refuses a standalone intrinsic at an unrelated instruction. -/
-theorem standalone_intrinsic_refused :
+/-- Decoding a nop cannot introduce a call to an intrinsic. -/
+theorem nop_excludes_intrinsic_call :
     let source := { raw call0 with code := [⟨0, 0, .none⟩] }
-    methodShapeInstructions source (body [.intrinsic (.avx2 .band) 2]) = false := rfl
+    methodCode profile {} [] [true] source ≠ [.call call0.method] := by decide +kernel
 
-#print axioms standalone_intrinsic_refused
+#print axioms nop_excludes_intrinsic_call
 
 /-- Model agreement requires the same number of raw instructions, live flags and emissions. -/
 theorem exact_call_lengths :

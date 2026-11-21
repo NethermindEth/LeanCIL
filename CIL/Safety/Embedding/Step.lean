@@ -256,7 +256,7 @@ set_option hygiene false in
 /-- Introduces a `StepRelabel` or `StepRaise` goal, unfolds both steps and clears the guard. -/
 macro "explicit_intro" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h ⊢
+  unfold step referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers))
 
@@ -271,7 +271,7 @@ set_option hygiene false in
     before examining the second operand. -/
 local macro "stack_cases" " => " close:tacticSeq : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h ⊢
+  unfold step referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rcases stack with _ | ⟨v1, rest⟩ <;> (try cases v1)
@@ -478,18 +478,6 @@ theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
   all_goals first | cases h | (simp [unlinkedCall] at h)
 
 #print axioms step_relabel_newobj
-
-theorem step_relabel_intrinsic (operation : Intrinsic) (argc : Nat) :
-    StepRelabel (.intrinsic operation argc) := by
-  explicit_intro
-  rw [context.profile]
-  by_cases avail : (!operation.available expected.profile) = true
-  · simp [avail] at h
-  · simp only [avail, ↓reduceIte, Bool.false_eq_true] at h ⊢
-    by_cases short : stack.length < argc
-    · simp [short] at h
-    · simp only [short, ↓reduceIte] at h ⊢
-      lockstep
 
 theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operation) := by
   plain_cases
@@ -870,7 +858,6 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case call method prefixes => exact step_relabel_call method prefixes
   case callvirt method => exact step_relabel_callvirt method
   case newobj constructor => exact step_relabel_newobj constructor
-  case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
@@ -1202,18 +1189,6 @@ theorem step_raise_newobj (constructor : Extraction.MethodRef) :
 
 #print axioms step_raise_newobj
 
-theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) :
-    StepRaise (.intrinsic operation argc) := by
-  explicit_intro
-  rw [context.profile]
-  by_cases avail : (!operation.available expected.profile) = true
-  · simp [avail] at h
-  · simp only [avail, ↓reduceIte, Bool.false_eq_true] at h ⊢
-    by_cases short : stack.length < argc
-    · simp [short] at h
-    · simp only [short, ↓reduceIte] at h ⊢
-      raise_lockstep
-
 theorem step_raise_ret : StepRaise .ret := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
@@ -1492,7 +1467,6 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case call method prefixes => exact step_raise_call method prefixes
   case callvirt method => exact step_raise_callvirt method
   case newobj constructor => exact step_raise_newobj constructor
-  case intrinsic operation argc => exact step_raise_intrinsic operation argc
   case memory operation =>
     plain_cases
     simp only [staticInstruction_congr context.statics]

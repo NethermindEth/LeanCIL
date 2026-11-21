@@ -2,6 +2,7 @@ import CIL.Safety.LocalCalls
 import CIL.Safety.LoopScaffold
 import CIL.SIMD.Evaluation256Lemmas
 import Tests.Support
+import Tests.Support.IntrinsicMethods
 
 /-!
 # Vector helper output in mixed private storage
@@ -17,7 +18,7 @@ open CIL.Safety
 /-- The helper adds four pairs of lanes and writes the vector through its output argument. -/
 @[cil_code] def helper : CIL.Method :=
   { locals := [], returnsValue := false,
-    code := [.ldarg 2, .ldarg 0, .ldarg 1, .intrinsic (.vector (.add64 256)) 2,
+    code := [.ldarg 2, .ldarg 0, .ldarg 1, .call Tests.IntrinsicMethods.portableAdd,
       .memory .store256, .ret] }
 
 /-- The helper receives two saved vector values and one writable output reference. -/

@@ -997,7 +997,7 @@ elab_rules : tactic
     operands are respelled as numerals to match it. -/
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_simp_only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
+    cil_simp_only [CIL.Safety.intrinsicCall, cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
       Nat.reduceAdd, Nat.reduceLT, Bool.not_true, Bool.not_false, Bool.false_eq_true,
       ite_false, ite_true, List.take_succ_cons, List.take_zero, List.take_nil,
       List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append, List.append_nil,
@@ -1572,9 +1572,7 @@ elab_rules : tactic
         | none => pure #[]
       else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
-    let strategy ← if operation == ``CIL.Instruction.intrinsic then
-        `(tactic| cil_checked_intrinsic [$facts:term,*])
-      else if operation == ``CIL.Instruction.memory then
+    let strategy ← if operation == ``CIL.Instruction.memory then
         let matchingStatic :=
           !(← dispatchFacts lhs ``CIL.Safety.staticInstruction facts.getElems).isEmpty
         let matchingMemory :=
@@ -1612,19 +1610,30 @@ elab_rules : tactic
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
       else if let #[link, model] := linkFacts then
-        -- A modelled call rewrites by one equation and leaves a step the kernel evaluates; one
-        -- whose model is an intrinsic the kernel cannot evaluate steps as that intrinsic.
+        let evaluate ← `(tactic| (
+          refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
+          rfl))
+        let intrinsic ← `(tactic| (
+          refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
+          cil_checked_intrinsic [$facts:term,*]))
+        -- Scalar results can reduce directly. Vector steps normalize lanes, and supplied
+        -- evaluation facts must rewrite before reduction unfolds their symbolic operands.
+        let preferIntrinsic ← (← getMainGoal).withContext do
+          let type ← inferType (← Term.elabTerm model none)
+          let some (_, _, result) := type.consumeMData.eq? | return false
+          let some #[_, value] := argumentsOf? result ``Option.some 2 | return false
+          let some #[op, _] := argumentsOf? value ``CIL.RuntimeModel.intrinsic 2 | return false
+          return !op.isAppOf ``CIL.Intrinsic.scalar || !facts.getElems.isEmpty
+        let (firstStep, secondStep) := if preferIntrinsic then (intrinsic, evaluate) else (evaluate, intrinsic)
         `(tactic| cil_strict (first
-          | (refine Eq.trans (CIL.Safety.step_call_model _ _ _ _ _ $link $model rfl _) ?_
-             rfl)
+          | $firstStep:tactic
+          | $secondStep:tactic
           | (apply CIL.Safety.step_call_skipInit_address _ _ _ _ _ $link $model rfl
              assumption)
           | (refine Eq.trans (CIL.Safety.step_call_feature _ _ _ _ _ $link $model rfl) ?_
              cil_try_simp_only [cil_step, cil_guard, cil_checked, cil_side, $[$facts:term],*,
                ite_true, ite_false, Bool.true_eq_false, Bool.false_eq_true]
              all_goals rfl)
-          | (refine Eq.trans (CIL.Safety.step_call_intrinsic _ _ _ _ _ $link $model rfl) ?_
-             cil_checked_intrinsic [$facts:term,*])
           | (refine Eq.trans (CIL.Safety.step_call_typedTransfer _ _ _ _ _ $link $model rfl _) ?_
              cil_simp_only [CIL.Safety.typedTransferCall, CIL.Safety.observedTransfer,
                CIL.Safety.transferValues, cil_guard, cil_checked, $[$facts:term],*]

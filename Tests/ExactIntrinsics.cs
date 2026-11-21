@@ -607,23 +607,23 @@ Console.WriteLine("PASS SSSE3 byte shuffle contract and checked operand reversal
 
 // A forged operation at the hardware call must fail the model agreement of the complete method.
 var rejectedHardware = new RejectedEvidence(Path.Combine(root, "RejectedHardware"));
-void RejectHardware(string folder, string example, string member, string operation, string label)
+void RejectHardware(string folder, string example, string member, string replacement, string label)
 {
     var method = divisionMethods[example];
     var pc = method.Body.Instructions.Index().Single(item =>
         item.Item.Operand is MethodReference reference &&
         reference.FullName.Contains(member, StringComparison.Ordinal)).Index;
     var source = File.ReadAllText(Path.Combine(root, folder, "Extracted.lean"));
-    var arity = ((MethodReference)method.Body.Instructions[pc].Operand).Parameters.Count;
-    var changed = ForgeModelEmission(source, pc, $".intrinsic ({operation}) {arity}");
+    var changed = "import Tests.Support.IntrinsicMethods\n" +
+        ForgeModelEmission(source, pc, $".call Tests.IntrinsicMethods.{replacement}");
     var output = Path.Combine(root, "RejectedHardware");
     Directory.CreateDirectory(output);
     var path = Path.Combine(output, $"{folder}-{label}.lean");
     File.WriteAllText(path, changed);
-    rejectedHardware.Add(path, $"PASS {folder} rejects {operation}", "Extraction.RuntimeModelsAgree", "is false");
+    rejectedHardware.Add(path, $"PASS {folder} rejects {replacement}", "Extraction.RuntimeModelsAgree", "is false");
 }
-RejectHardware("Shuffle256", "Shuffle256", "Avx2::Shuffle(", ".avx2 .add64", "add");
-RejectHardware("Shuffle128", "Shuffle128", "Ssse3::Shuffle(", ".sse .shiftLeftBytes", "shift");
+RejectHardware("Shuffle256", "Shuffle256", "Avx2::Shuffle(", "add64", "add");
+RejectHardware("Shuffle128", "Shuffle128", "Ssse3::Shuffle(", "shiftLeftBytes", "shift");
 
 // The hash round is compared with the host CPU's AESENC under a custom x64 and a custom ARM64 AES
 // profile; the ARM64 extraction must agree, since AESE with a zero key, AESMC and the key are AESENC.
@@ -694,8 +694,8 @@ foreach (var profile in new[] { "x64-v4", "arm64-advsimd" })
     Console.WriteLine($"PASS AesRound rejected under {profile}");
 }
 // Forged evidence must not substitute another AES step for the one the raw call names.
-RejectHardware("AesRound-x64", "AesRound", "X86.Aes::Encrypt(", ".armAes .encrypt", "encrypt");
-RejectHardware("AesRound-arm64", "AesRound", "Arm.Aes::MixColumns(", ".armAes .encrypt", "mix");
+RejectHardware("AesRound-x64", "AesRound", "X86.Aes::Encrypt(", "armEncrypt", "encrypt");
+RejectHardware("AesRound-arm64", "AesRound", "Arm.Aes::MixColumns(", "armEncrypt", "mix");
 Run(["dotnet", "run", "--file", At("Tests/AesHardware.cs")], cwd: Root);
 Console.WriteLine("PASS host AES instructions match the Lean AES model");
 
@@ -1138,8 +1138,8 @@ static string? VectorModel(MethodReference call)
 }
 
 // Forged evidence cannot change the table select or the lane reversal.
-RejectHardware("SignWindow", "SignWindow", "::PermuteVar4x64x2(", ".avx512 .ternaryLogic", "permute");
-RejectHardware("ReverseLimbs", "ReverseLimbs", "::ReverseElement8(", ".avx2 .shuffleBytes", "reverse");
+RejectHardware("SignWindow", "SignWindow", "::PermuteVar4x64x2(", "ternaryLogic", "permute");
+RejectHardware("ReverseLimbs", "ReverseLimbs", "::ReverseElement8(", "shuffle256", "reverse");
 
 // PMULUDQ runs on the host CPU and its x64-sse42 extraction must return the same products.
 // Lanes with set high halves and both 32-bit extremes come first, then seeded random words.
@@ -1308,9 +1308,10 @@ if (rejectedMultiply.Code == 0 || File.Exists(Path.Combine(multiplyRejectedOutpu
 }
 Console.WriteLine("PASS MultiplyEven128 rejected under scalar");
 // Forged evidence must not substitute the 256-bit multiply or another exact SSE call for PMULUDQ.
-RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", ".avx2 .multiplyEven32", "wide");
-RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", ".sse .shuffleBytes", "shuffle");
-rejectedHardware.Check();
+RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", "multiplyEven32", "wide");
+RejectHardware("MultiplyEven128", "MultiplyEven128", "Sse2::Multiply(", "shuffle128", "shuffle");
+BuildLeanTestLibraries("Checking replacement hardware method signatures", "+Tests.Support.IntrinsicMethods");
+rejectedHardware.Check(FixtureLeanPath());
 
 // Runs the compiled example on the host CPU and returns the vector's bytes, lane zero first.
 static byte[] RuntimeShuffle(MethodInfo method, byte[] source, byte[] control)

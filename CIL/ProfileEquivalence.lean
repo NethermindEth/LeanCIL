@@ -25,13 +25,11 @@ def RuntimeModel.ProfileAgreement (model : RuntimeModel) (p q : FeatureProfile) 
   | .intrinsic operation _ => operation.available p = operation.available q
   | _ => True
 
-/-- `p` and `q` answer the profile query `op` makes, if any, the same way: a feature test, an
-    intrinsic's availability, or the query of the runtime model a call of a method with one runs,
-    resolved in `environment`. -/
+/-- Profiles agree on an instruction when the runtime model of its resolved call or constructor
+    has the same feature result or intrinsic availability in both profiles. -/
 def Instruction.ProfileAgreement (environment : LayoutEnvironment) (op : Instruction)
     (p q : FeatureProfile) : Prop :=
   match op with
-  | .intrinsic operation _ => operation.available p = operation.available q
   | .call method _ => ∀ model, Extraction.runtimeModel environment .call method = some model →
       model.ProfileAgreement p q
   | .newobj method => ∀ model, Extraction.runtimeModel environment .newobj method = some model →
@@ -42,18 +40,6 @@ def Instruction.ProfileAgreement (environment : LayoutEnvironment) (op : Instruc
 def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :=
   ∀ body ∈ program, ∀ op ∈ body.code, op.ProfileAgreement body.environment p q
 
-/-- An intrinsic step observes the profile only through the intrinsic's availability. -/
-theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool)
-    (narrow : Option NarrowKind) (pc : Nat) (stack : List Value) (memory : Memory)
-    (profile : FeatureProfile) :
-    step (.intrinsic operation argc) returns narrow pc stack memory profile =
-      if stack.length < argc || !operation.available profile then none else do
-        return .next (pc + 1)
-          ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory :=
-  rfl
-
-#print axioms step_intrinsic
-
 /-- A step under agreeing profiles has the same outcome. -/
 theorem step_profile_eq (environment : LayoutEnvironment) (op : Instruction)
     (p q : FeatureProfile) (h : op.ProfileAgreement environment p q) (returns : Bool)
@@ -61,21 +47,8 @@ theorem step_profile_eq (environment : LayoutEnvironment) (op : Instruction)
     (stack : List Value) (memory : Memory) :
     step op returns narrow pc stack memory p =
       step op returns narrow pc stack memory q := by
-  cases op <;> try rfl
-  case intrinsic operation argc =>
-    change operation.available p = operation.available q at h
-    rw [step_intrinsic, step_intrinsic, h]
-  case' ldind kind => cases kind
-  case' stind kind => cases kind
-  all_goals
-    cases stack with
-    | nil => rfl
-    | cons a rest =>
-      first
-      | rfl
-      | cases rest with
-        | nil => first | rfl | (cases a <;> rfl)
-        | cons b rest => first | rfl | (cases a <;> first | rfl | (cases b <;> rfl))
+  clear h
+  rfl
 
 @[simp] theorem reprofile_lookup (program : Program) (profile : FeatureProfile) (index : Nat) :
     (reprofile program profile)[index]? =
@@ -183,7 +156,6 @@ def RuntimeModel.profileReads : RuntimeModel → List Feature
 /-- The profile flags `op` reads: the feature it tests, every feature its intrinsic needs, or
     those of the runtime model a call runs, resolved in `environment`. -/
 def Instruction.profileReads (environment : LayoutEnvironment) : Instruction → List Feature
-  | .intrinsic operation _ => operation.requiredFeatures
   | .call method _ =>
     ((Extraction.runtimeModel environment .call method).map RuntimeModel.profileReads).getD []
   | .newobj method =>
@@ -217,7 +189,6 @@ theorem Program.ProfileAgreement.of_flags (program : Program) (p q : FeatureProf
     fun featureId read => agree featureId (List.mem_flatMap.mpr
       ⟨body, member, List.mem_flatMap.mpr ⟨op, instruction, read⟩⟩)
   cases op with
-  | intrinsic operation _ => exact Intrinsic.available_eq_of_required operation p q reads
   | call method _ | newobj method =>
     intro model found
     exact RuntimeModel.ProfileAgreement.of_flags model p q fun featureId read =>

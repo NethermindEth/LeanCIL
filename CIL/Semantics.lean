@@ -142,12 +142,12 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
 
 /-- Executes instruction `op` at `pc`. Binary operands are popped as `b :: a :: rest`, so
     `a` was pushed first; a mixed int32 and native pair is first widened by `widenMixed`
-    (ECMA-335 III.1.5). `returns` says whether the method returns a value; `profile` decides
-    feature tests and intrinsic availability. `narrow` is the method's return storage. -/
+    (ECMA-335 III.1.5). `returns` says whether the method returns a value; the checked call model decides feature tests and intrinsic availability. `narrow` is the method's return storage. -/
 def step (op : Instruction) (returns : Bool)
     (narrow : Option NarrowKind) (pc : Nat)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
+  let _ := profile
   match op, widenMixed op stack with
   -- Constants and stack shuffling.
   | .nop, _ => return .next (pc + 1) stack memory
@@ -227,11 +227,6 @@ def step (op : Instruction) (returns : Bool)
     return .next (if b ≤ a then target else pc + 1) rest memory
   | .bge_un target, .i64 b :: .i64 a :: rest =>
     return .next (if b ≤ a then target else pc + 1) rest memory
-  -- Intrinsics and memory operations.
-  | .intrinsic operation argc, _ =>
-    if stack.length < argc || !operation.available profile then none else
-      return .next (pc + 1)
-        ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory
   | .memory operation, _ =>
     let (updated, values) ← evalMemory operation stack memory
     return .next (pc + 1) values updated

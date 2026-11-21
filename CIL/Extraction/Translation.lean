@@ -110,14 +110,13 @@ private def staticFieldMatches (opcode : Nat) (field : FieldRef)
       descriptor.all (·.field == field)
   | none => false
 
-/-- Hardware operations require a kept call. Static field instructions agree with the raw field
+/-- Static field instructions agree with the raw field
     and its site descriptor, and each static load fits that descriptor. -/
 def methodShapeInstructions (closed : RawMethod)
     (method : Method) : Bool :=
   let raw := FlowIndex.ofList closed.code
   let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
-    | .intrinsic .. => false
     | .ldsfld field => staticFieldMatches ldsfldOpcode field (raw.get? pc) sites[pc]? &&
         staticLoadMatches ldsfldOpcode (raw.get? pc) sites[pc]?
     | .ldsflda field => staticFieldMatches ldsfldaOpcode field (raw.get? pc) sites[pc]? &&
@@ -132,7 +131,6 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
     (method : Method) :
     methodShapeInstructions closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
-      | .intrinsic .. => false
       | .ldsfld field =>
           staticFieldMatches ldsfldOpcode field closed.code[pc]? (method.staticAt pc) &&
           staticLoadMatches ldsfldOpcode closed.code[pc]? (method.staticAt pc)

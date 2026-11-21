@@ -16,8 +16,7 @@ const double WorkGrowthLimit = 1.35;
 // Unifying each lookup with every equation hypothesis added 600 to 1,950. A lookup outside a stepping
 // driver reads each hypothesis once, about 25 heartbeats; building an index for it took about 410.
 const double HypothesisCostLimit = 100.0;
-// A decoded field access shares the lowered body's memory facts. These limits bound the extra frontend and
-// kernel heartbeats per instruction for resolving the field operand.
+// Limit the frontend and kernel heartbeats for checked fields and intrinsic calls relative to their references.
 const double DecodedFrontendLimit = 1.03;
 const double DecodedKernelLimit = 1.08;
 const int Repetitions = 3;
@@ -123,8 +122,8 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
     if (workload.Key.StartsWith("hypotheses"))
         CheckHypothesisCost(measurements[0], measurements[^1]);
 }
-foreach (var decoded in rows.Where(row => row.Workload is "structfields" or "structfieldscontract"))
-    CheckFieldBudget(decoded);
+foreach (var decoded in rows.Where(row => row.Workload is "structfields" or "structfieldscontract" or "intrinsiccalls"))
+    CheckReferenceBudget(decoded);
 Console.WriteLine("PASS stepping growth budgets for " +
     string.Join(", ", rows.Select(row => row.Workload).Distinct()) + "; results: " + reportPath);
 
@@ -1010,9 +1009,9 @@ static void ScalingChecks()
         throw new InvalidOperationException("The argument budget accepted a per-instruction quadratic mutant.");
     var fieldBody = baseline with { Workload = "structfields", Size = 16, Instructions = 14,
         FrontendHeartbeats = 3_763_975, KernelHeartbeats = 86_336 };
-    CheckFieldBudget(fieldBody);
-    if (!Rejects(() => CheckFieldBudget(fieldBody with { KernelHeartbeats = 2 * fieldBody.KernelHeartbeats })) ||
-        !Rejects(() => CheckFieldBudget(fieldBody with { FrontendHeartbeats = 2 * fieldBody.FrontendHeartbeats })))
+    CheckReferenceBudget(fieldBody);
+    if (!Rejects(() => CheckReferenceBudget(fieldBody with { KernelHeartbeats = 2 * fieldBody.KernelHeartbeats })) ||
+        !Rejects(() => CheckReferenceBudget(fieldBody with { FrontendHeartbeats = 2 * fieldBody.FrontendHeartbeats })))
         throw new InvalidOperationException("The field budget accepted twice the reference cost.");
     // With the same instructions at every size, per-instruction cost must stay flat in the size: a
     // step that scans each hypothesis in scope grows with it.
@@ -1028,9 +1027,8 @@ static void ScalingChecks()
     throw new InvalidOperationException("The hypothesis budget accepted a cost that grows with the hypotheses.");
 }
 
-// Checked theorem heartbeats of the lowered fixtures at 8cc33b386637073a0594563d5a5ed1c291e9f313
-// on leanprover/lean4:v4.35.0. Both runners execute the same number of instructions at each size.
-static void CheckFieldBudget(SteppingMeasurement decoded)
+// Lean 4.35.0 checked-theorem heartbeats: field fixtures at 8cc33b38 and typed Math.Max calls at 9c53e7f5.
+static void CheckReferenceBudget(SteppingMeasurement decoded)
 {
     var (instructions, frontend, kernel) = (decoded.Workload, decoded.Size) switch
     {
@@ -1040,19 +1038,22 @@ static void CheckFieldBudget(SteppingMeasurement decoded)
         ("structfieldscontract", 16) => (14, 3_335_564, 86_060),
         ("structfieldscontract", 64) => (62, 9_598_624, 192_821),
         ("structfieldscontract", 256) => (254, 34_710_632, 619_863),
-        _ => throw new InvalidOperationException($"Missing field baseline for {decoded.Workload} {decoded.Size}.")
+        ("intrinsiccalls", 16) => (14, 3_434_418, 87_411),
+        ("intrinsiccalls", 64) => (62, 9_828_778, 200_230),
+        ("intrinsiccalls", 256) => (254, 35_106_686, 651_597),
+        _ => throw new InvalidOperationException($"Missing reference baseline for {decoded.Workload} {decoded.Size}.")
     };
     if (decoded.Instructions != instructions)
-        throw new InvalidOperationException($"Field baseline has {instructions} instructions, measured {decoded.Instructions}.");
+        throw new InvalidOperationException($"{decoded.Workload} baseline has {instructions} instructions, measured {decoded.Instructions}.");
     Check("frontend heartbeats", decoded.FrontendHeartbeats, frontend, DecodedFrontendLimit);
     Check("kernel heartbeats", decoded.KernelHeartbeats, kernel, DecodedKernelLimit);
 
-    void Check(string metric, double decodedCost, double loweredCost, double limit)
+    void Check(string metric, double decodedCost, double referenceCost, double limit)
     {
-        var ratio = decodedCost / loweredCost;
-        if (loweredCost <= 0 || ratio > limit)
+        var ratio = decodedCost / referenceCost;
+        if (referenceCost <= 0 || ratio > limit)
             throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                $"""{decoded.Workload} {metric}: {ratio:F4} of lowered at size {decoded.Size}; limit {limit:F4}"""));
+                $"""{decoded.Workload} {metric}: {ratio:F4} of reference at size {decoded.Size}; limit {limit:F4}"""));
     }
 }
 

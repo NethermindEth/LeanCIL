@@ -286,10 +286,9 @@ or readonly reference.
   `.call` by `step_call_direct`, so the kernel checks one equation whose right side no longer
   reads the link and a linked call never mentions the model; `step_call_eq` remains for a call
   whose link no fact decides. `cil_checked_steps` steps a call without a link on in the same
-  method, as any instruction that continues there. `step_call_intrinsic` rewrites such a call
-  whose model is an intrinsic to the step of that intrinsic, since a call without a link checks
-  only the operands its model observes; the stepper uses it, with the supplied intrinsic facts,
-  when the kernel cannot evaluate the model's step. For a checked call to `Unsafe.SkipInit<T>`, the
+  method. For a resolved intrinsic, `step_call_intrinsic` rewrites the decoded call to
+  `intrinsicCall`. It checks availability in the method's profile and the operands the
+  intrinsic observes. The stepper applies supplied evaluation facts to symbolic operands. For a checked call to `Unsafe.SkipInit<T>`, the
   stepper uses the caller's address-formation fact to pop the byref argument and preserve memory.
   For a symbolic managed reference, `step_call_skipInit_reference` exposes the formation check.
 

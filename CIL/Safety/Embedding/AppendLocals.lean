@@ -859,7 +859,7 @@ theorem step_appendLocals_sub :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
+  unfold step referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .sub pc _ frame extra memory
@@ -968,7 +968,7 @@ theorem step_appendLocals_clt_un :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
+  unfold step referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .clt_un pc _ frame extra memory
@@ -981,7 +981,7 @@ theorem step_appendLocals_cgt_un :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
+  unfold step referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .cgt_un pc _ frame extra memory
@@ -994,7 +994,7 @@ theorem step_appendLocals_ceq :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
+  unfold step referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .ceq pc _ frame extra memory
@@ -1342,17 +1342,6 @@ theorem step_appendLocals_newobj (constructor : Extraction.MethodRef) :
   padded_natural
 
 #print axioms step_appendLocals_newobj
-
-/-- `intrinsic` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_intrinsic (operation : Intrinsic) (argc : Nat) :
-    StepAppendLocals (.intrinsic operation argc) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step intrinsicCall
-  frame_natural
-
-#print axioms step_appendLocals_intrinsic
 
 /-- `memory` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_memory (operation : MemoryOp) :
@@ -1702,8 +1691,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case callvirt method => exact step_appendLocals_callvirt method
     case newobj constructor =>
       exact step_appendLocals_newobj constructor
-    case intrinsic operation argc =>
-      exact step_appendLocals_intrinsic operation argc
     case memory operation =>
       exact step_appendLocals_memory operation
     case ldsfld field => exact step_appendLocals_ldsfld field

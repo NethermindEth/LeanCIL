@@ -104,15 +104,19 @@ theorem byte_not_full_width :
     the identity is as long as a closed generic struct's, whose comparison once exhausted the
     elaborator's recursion limit. -/
 private def pairLayouts : List Extraction.RawLayout := [
-  { identity := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::\
-      Examples.StaticPair`1<System.Runtime, Version=11.0.0.0, Culture=neutral, \
-      PublicKeyToken=b03f5f7f11d50a3a::System.UInt32>",
+  { identity := Extraction.integerPairIdentity "System.Int32",
     explicit := false, auto := true, packing := -1, declaredSize := -1,
     fields := [{ type := .signed32, offset := none }, { type := .signed32, offset := none }] }]
 
 /-- The layout environment an extraction records for `pairLayouts`. -/
 private def pairEnvironment : LayoutEnvironment :=
   { rawLayouts := pairLayouts, layouts := #[⟨⟨8, [⟨0, 4, false⟩, ⟨4, 4, false⟩]⟩, 4⟩] }
+
+private def mathDivRem (element : String) : Extraction.MethodRef :=
+  let word := Extraction.TypeExpr.atom Extraction.runtimeScope element
+  { owner := .atom Extraction.runtimeScope "System.Math", name := name!"DivRem",
+    genericArity := 0, hasThis := false, parameters := [word, word],
+    returnType := .aggregate (Extraction.integerPairIdentity element) 0 }
 
 /-- `Math.DivRem(int, int)` in the emitted form: a declared struct return over a non-empty
     environment, with the identity written out as a literal as an extraction writes it. -/
@@ -121,19 +125,21 @@ private def pairDivRem : Method :=
     declared := {
       parameters := [.atom Extraction.runtimeScope "System.Int32",
         .atom Extraction.runtimeScope "System.Int32"],
-      returnType := .aggregate "Examples, Version=1.0.0.0, Culture=neutral, \
-        PublicKeyToken=null::Examples.StaticPair`1<System.Runtime, Version=11.0.0.0, \
-        Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.UInt32>" 0 }
-    code := [.ldarg 0, .ldarg 1, .intrinsic (.scalar (.divRem 32 true)) 2, .ret] }
+      returnType := .aggregate "System.Runtime, Version=11.0.0.0, Culture=neutral, \
+        PublicKeyToken=b03f5f7f11d50a3a::System.ValueTuple`2<System.Runtime, Version=11.0.0.0, \
+        Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.Int32,System.Runtime, \
+        Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.Int32>" 0 }
+    code := [.ldarg 0, .ldarg 1, .call (mathDivRem "System.Int32"), .ret] }
 
-/-- A generated boundary claim about a struct-returning body is proved by evaluation, with the
-    proof term a generated fixture uses and the default recursion limit. -/
+set_option maxRecDepth 4096 in
+/-- A closed tuple-returning method produces the expected bytes through its checked call. -/
 theorem pair_return_evaluates :
     (invoke [pairDivRem] 8 0 [.scalar (.i32 7), .scalar (.i32 2)] Memory.empty).map Prod.snd =
       .ok [.scalar (.aggregate [3, 0, 0, 0, 1, 0, 0, 0])] := by
   rfl
 #print axioms pair_return_evaluates
 
+set_option maxRecDepth 4096 in
 /-- The existential form of a generated struct claim elaborates by the same evaluation. -/
 theorem pair_return_exists :
     ∃ bytes, (invoke [pairDivRem] 8 0 [.scalar (.i32 7), .scalar (.i32 2)]
@@ -142,7 +148,7 @@ theorem pair_return_exists :
 #print axioms pair_return_exists
 
 private def remainderField : Extraction.FieldRef :=
-  { owner := .aggregate "SBytePair" 0, index := 1, name := name!"Item2",
+  { owner := .aggregate (Extraction.integerPairIdentity "System.SByte") 0, index := 1, name := name!"Item2",
     type := .atom Extraction.runtimeScope "System.SByte" }
 
 /-- `Math.DivRem(sbyte, sbyte).Remainder` over a two-byte struct layout, whose
@@ -151,7 +157,7 @@ private def sbyteRemainder : Method :=
   { pairDivRem with
     environment := {
       rawLayouts := [
-        { identity := "SBytePair", explicit := false, packing := 0, declaredSize := 0,
+        { identity := Extraction.integerPairIdentity "System.SByte", explicit := false, packing := 0, declaredSize := 0,
           fields := [{ type := .signed8 }, { type := .signed8 }] }]
       layouts := #[⟨⟨2, [⟨0, 1, false⟩, ⟨1, 1, false⟩]⟩, 1⟩] }
     declared := {
@@ -159,8 +165,9 @@ private def sbyteRemainder : Method :=
         .atom Extraction.runtimeScope "System.SByte"],
       returnType := .atom Extraction.runtimeScope "System.SByte" }
     code := [.ldarg 0, .ldarg 1,
-      .intrinsic (.scalar (.divRem 8 true)) 2, .ldfld remainderField, .ret] }
+      .call (mathDivRem "System.SByte"), .ldfld remainderField, .ret] }
 
+set_option maxRecDepth 4096 in
 /-- A narrowing return over a non-empty environment is proved by evaluation, and the remainder
     of -7 by 2 comes back sign-extended. -/
 theorem sbyte_return_evaluates :

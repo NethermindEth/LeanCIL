@@ -437,8 +437,8 @@ void CheckExternalCallTargets()
             """name := "CreateScalarUnsafe", target := .external externalIdentity0""",
             $"""name := "CreateScalarUnsafe", target := .external {AndTarget()}""",
             StringComparison.Ordinal), bodyTheorem, [bodyDecisionFailed]),
-        // The equality slot requires a kept call with its original closed reference.
-        ("wrong-emitted-intrinsic", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => .intrinsic (.avx2 .band) 2"),
+        // Substitute the decoded CreateScalarUnsafe call at pc 1 for op_Equality at pc 4.
+        ("wrong-emitted-intrinsic", ForgeDecodedInstruction(baseline, 0, 4, "fun _ => method.code[1]'(by decide)"),
             theorem, ["Extraction.RuntimeModelsAgree", "is false"])
     })
     {
