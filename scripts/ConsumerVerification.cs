@@ -1145,6 +1145,26 @@ partial class Program
         return imports.Keys.Where(module => !dependent.Contains(module)).Order(StringComparer.Ordinal).ToArray();
     }
 
+    // Git marks objects read-only on Windows. The session owns each copy and removes it after replay.
+    static void CloneConsumerDependency(string source, string destination)
+    {
+        try { Run(["git", "clone", "--no-hardlinks", "--no-checkout", source, destination]); }
+        finally
+        {
+            string objects = Path.Combine(destination, ".git", "objects");
+            if (OperatingSystem.IsWindows() && Directory.Exists(objects))
+            {
+                var options = new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint
+                };
+                foreach (FileInfo file in new DirectoryInfo(objects).EnumerateFiles("*", options))
+                    if (file.IsReadOnly) file.IsReadOnly = false;
+            }
+        }
+    }
+
     ConsumerSession PrepareConsumerSession(string session, string root, ConsumerDependency[] dependencies,
         SortedDictionary<string, string> snapshot, string certifiedLibrary, ExtractionIdentity extraction,
         IReadOnlyList<(string Module, string Proof, string Output)> proofs, string? symbols,
@@ -1158,7 +1178,7 @@ partial class Program
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             if (fullBundleDependencies is null)
             {
-                Run(["git", "clone", "--no-hardlinks", "--no-checkout", dependency.Directory, destination]);
+                CloneConsumerDependency(dependency.Directory, destination);
                 Run(["git", "remote", "set-url", "origin", dependency.Url], destination);
             }
             else Directory.CreateDirectory(destination);
