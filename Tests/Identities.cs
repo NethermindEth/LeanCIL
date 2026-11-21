@@ -325,7 +325,7 @@ static void CheckPairSignatures()
     {
         using var pins = new PinnedAssemblies(image, Convert.ToHexStringLower(SHA256.HashData(image)), []);
         var method = pins.Original(pins.Selected).Types[1].Methods.Single();
-        new MetadataSlices(pins).Method(method, [token], false);
+        new MetadataSlices(pins).Method(method, [token], classOwner: false, arguments: []);
     }
     var control = PairSignatureImage();
     if (Layout(control) != 8) throw new InvalidOperationException("Unexpected primitive pair size");
