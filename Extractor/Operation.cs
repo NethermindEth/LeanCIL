@@ -229,12 +229,6 @@ internal sealed record NewArray(NewArray.ClassElement? Class, string? Element = 
     internal sealed record ClassElement(string Scope, string Name);
 }
 
-/// <summary>
-/// The model of a span constructor that a call runs on the span home beneath its arguments: the slot the home
-/// names then holds the span <paramref name="Source"/> builds.
-/// </summary>
-internal sealed record SpanInPlace(SpanSource Source) : Operation;
-
 /// <summary>An intrinsic of the scalar, vector or hardware families over the given number of operands.</summary>
 internal abstract record Intrinsic(int Arguments) : Operation;
 

@@ -32,5 +32,3 @@ internal sealed record SpanEmpty(int Width, bool Writable) : Operation;
 internal enum ViewQuery { SpanEmpty, SpanPinnable, ArrayData }
 
 internal sealed record ObserveView(ViewQuery Query) : Operation;
-
-internal sealed record StringLiteral(string Text) : Operation;

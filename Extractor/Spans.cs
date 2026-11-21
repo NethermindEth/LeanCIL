@@ -172,11 +172,6 @@ internal static class Spans
         return operation ?? Unoutlined.Site;
     }
 
-    /// <summary>The model of a span constructor that a call runs on a span home; null for any other method.</summary>
-    internal static Operation? InPlaceConstructor(MethodReference reference, string architecture) =>
-        ConstructorOperation(reference, architecture, staticData: false) is SpanSource source
-            ? new SpanInPlace(source) : null;
-
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, HashSet<Instruction>>
         windows = new();
 

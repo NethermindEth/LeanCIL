@@ -109,6 +109,11 @@ internal static class InstructionTranslation
             return Unoutlined.Site;
         }
         if (InstructionOperands.IsCheckedConversion(i.OpCode.Code)) return new StackOperation(i.OpCode.Code);
+        if (i.OpCode.Code == Code.Ldstr)
+        {
+            InstructionOperands.ValidateLiteral((string)i.Operand);
+            return Unoutlined.Site;
+        }
         return i.OpCode.Code switch
         {
             Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Not or Code.Neg or
@@ -129,7 +134,6 @@ internal static class InstructionTranslation
             Code.Starg or Code.Starg_S => new Starg(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Switch => new Switch(((Instruction[])i.Operand).Select(instructions.Position).ToArray()),
-            Code.Ldstr => StringOperation((string)i.Operand),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
@@ -169,12 +173,5 @@ internal static class InstructionTranslation
             Code.Ret => new Return(),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
-    }
-
-    // Lean reads a surrogate escape as NUL, which would give distinct literals one key, and has no \b or \f.
-    static Operation StringOperation(string text)
-    {
-        InstructionOperands.ValidateLiteral(text);
-        return new StringLiteral(text);
     }
 }
