@@ -45,7 +45,7 @@ internal static class InstructionTranslation
         if (typeTests.Results.TryGetValue(i, out bool same))
         {
             if (i.Operand is Instruction target)
-                return same ? new Jump(JumpKind.Always, instructions.Position(target)) : StackOperation.Nop;
+                return same ? new Jump(OpCodes.Br.Value, instructions.Position(target)) : StackOperation.Nop;
             return same ? new Constant(32, 1, true) : new Constant(32, 0, true);
         }
         if (typeTests.Operands.Contains(i)) return StackOperation.Nop;
@@ -60,7 +60,10 @@ internal static class InstructionTranslation
         }
         if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         if (throws.Operands.Contains(i)) return StackOperation.Nop;
-        Operation JumpTo(JumpKind kind) => new Jump(kind, instructions.Position((Instruction)i.Operand));
+        if (i.Operand is Instruction destination &&
+            i.OpCode.OperandType is OperandType.InlineBrTarget or OperandType.ShortInlineBrTarget &&
+            i.OpCode.Code is not (Code.Leave or Code.Leave_S))
+            return new Jump(i.OpCode.Value, instructions.Position(destination));
         int LocalIndex() => ((VariableDefinition)i.Operand).Index;
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
@@ -130,9 +133,6 @@ internal static class InstructionTranslation
             Code.Castclass => new CastClass(ObjectTypes.TestOperand(i)),
             Code.Isinst => new IsInstance(ObjectTypes.TestOperand(i)),
             Code.Ldstr => StringOperation((string)i.Operand),
-            Code.Bgt or Code.Bgt_S => JumpTo(JumpKind.Greater),
-            Code.Ble or Code.Ble_S => JumpTo(JumpKind.LessOrEqual),
-            Code.Ble_Un or Code.Ble_Un_S => JumpTo(JumpKind.LessOrEqualUnsigned),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
@@ -171,16 +171,6 @@ internal static class InstructionTranslation
             Code.Ldc_I8 => new Constant(64, (long)i.Operand, false),
             Code.Ldind_I8 => new IndirectAccess(NumericKind.I8, false),
             Code.Stind_I8 => new IndirectAccess(NumericKind.I8, true),
-            Code.Br or Code.Br_S => JumpTo(JumpKind.Always),
-            Code.Brfalse or Code.Brfalse_S => JumpTo(JumpKind.IfZero),
-            Code.Brtrue or Code.Brtrue_S => JumpTo(JumpKind.IfNonzero),
-            Code.Blt_Un or Code.Blt_Un_S => JumpTo(JumpKind.LessUnsigned),
-            Code.Bge_Un or Code.Bge_Un_S => JumpTo(JumpKind.GreaterOrEqualUnsigned),
-            Code.Bgt_Un or Code.Bgt_Un_S => JumpTo(JumpKind.GreaterUnsigned),
-            Code.Bge or Code.Bge_S => JumpTo(JumpKind.GreaterOrEqual),
-            Code.Blt or Code.Blt_S => JumpTo(JumpKind.Less),
-            Code.Beq or Code.Beq_S => JumpTo(JumpKind.Equal),
-            Code.Bne_Un or Code.Bne_Un_S => JumpTo(JumpKind.NotEqual),
             Code.Ret => new Return(),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };

@@ -1,3 +1,4 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -388,21 +389,21 @@ internal static partial class ProofOutline
                     for (var operand = 0; operand < jump.Operands; operand++)
                         if (Pop() is null) return Stop(" on an empty stack", showInstruction: true);
                 }
-                else if (op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } nullTest &&
+                else if (op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } nullTest &&
                     stack.Count > 0 && stack[^1] is Opaque)
                 {
                     var tested = (Opaque)Pop()!;
                     if (stores > 0) return Stop(Unformed(tested));
                     // `brfalse` takes its target when the reference is null.
-                    return Branch($"{tested.Term[1..^1]} = .null", nullTest.Kind == JumpKind.IfZero, nullTest.Target);
+                    return Branch($"{tested.Term[1..^1]} = .null", nullTest.Kind == ILOpCode.Brfalse, nullTest.Target);
                 }
-                else if (op is Jump { Kind: JumpKind.Equal or JumpKind.NotEqual } equalityTest && stack.Count > 1 &&
+                else if (op is Jump { Kind: ILOpCode.Beq or ILOpCode.Bne_un } equalityTest && stack.Count > 1 &&
                     (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
                     var left = Pop();
                     if (Compared(left, right) is not { } condition) return Stop(Uncompared, showInstruction: true);
-                    return Branch(condition, equalityTest.Kind == JumpKind.Equal, equalityTest.Target);
+                    return Branch(condition, equalityTest.Kind == ILOpCode.Beq, equalityTest.Target);
                 }
                 else if (op is StackOperation { Kind: Code.Ceq or Code.Cgt_Un } comparison
                     && stack.Count > 1 &&
@@ -415,12 +416,12 @@ internal static partial class ProofOutline
                         return Stop(Uncompared, showInstruction: true);
                     stack.Add(new Word(null, 4));
                 }
-                else if (op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } objectTest &&
+                else if (op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } objectTest &&
                     stack.Count > 0 && stack[^1] is not Word)
                 {
                     // An argument object is never null, so its test always goes one way.
                     var zero = Pop() is Null;
-                    if (zero == (objectTest.Kind == JumpKind.IfZero)) pc = objectTest.Target - 1;
+                    if (zero == (objectTest.Kind == ILOpCode.Brfalse)) pc = objectTest.Target - 1;
                 }
                 else if (op is Jump { Conditional: true } test)
                 {
@@ -435,7 +436,7 @@ internal static partial class ProofOutline
                     var (condition, takenWhenTrue) = Body.Test(test, terms, 8 * operands[0]!.Width);
                     return Branch(condition, takenWhenTrue, test.Target);
                 }
-                else if (op is Jump { Kind: JumpKind.Always } branch) pc = branch.Target - 1;
+                else if (op is Jump { Kind: ILOpCode.Br } branch) pc = branch.Target - 1;
                 else if (Body.ConstantOf(op) is { Width: 32 or 64 } constant)
                     stack.Add(new Word(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
                         constant.Width == 64 ? 8 : 4, constant));

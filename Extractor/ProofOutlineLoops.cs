@@ -1,3 +1,4 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -80,18 +81,18 @@ internal static partial class ProofOutline
                 ? SignedValue(numeral, bits) : $"{terms[index].Term}.toInt";
             return jump.Kind switch
             {
-                JumpKind.IfZero => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", true),
-                JumpKind.IfNonzero => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", false),
-                JumpKind.Equal => ($"{Word(0)} = {Word(1)}", true),
-                JumpKind.NotEqual => ($"{Word(0)} = {Word(1)}", false),
-                JumpKind.Less => ($"{Signed(0)} < {Signed(1)}", true),
-                JumpKind.LessOrEqual => ($"{Signed(0)} ≤ {Signed(1)}", true),
-                JumpKind.Greater => ($"{Signed(1)} < {Signed(0)}", true),
-                JumpKind.GreaterOrEqual => ($"{Signed(1)} ≤ {Signed(0)}", true),
-                JumpKind.LessUnsigned => ($"{Word(0)} < {Word(1)}", true),
-                JumpKind.LessOrEqualUnsigned => ($"{Word(0)} ≤ {Word(1)}", true),
-                JumpKind.GreaterUnsigned => ($"{Word(1)} < {Word(0)}", true),
-                JumpKind.GreaterOrEqualUnsigned => ($"{Word(1)} ≤ {Word(0)}", true),
+                ILOpCode.Brfalse => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", true),
+                ILOpCode.Brtrue => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", false),
+                ILOpCode.Beq => ($"{Word(0)} = {Word(1)}", true),
+                ILOpCode.Bne_un => ($"{Word(0)} = {Word(1)}", false),
+                ILOpCode.Blt => ($"{Signed(0)} < {Signed(1)}", true),
+                ILOpCode.Ble => ($"{Signed(0)} ≤ {Signed(1)}", true),
+                ILOpCode.Bgt => ($"{Signed(1)} < {Signed(0)}", true),
+                ILOpCode.Bge => ($"{Signed(1)} ≤ {Signed(0)}", true),
+                ILOpCode.Blt_un => ($"{Word(0)} < {Word(1)}", true),
+                ILOpCode.Ble_un => ($"{Word(0)} ≤ {Word(1)}", true),
+                ILOpCode.Bgt_un => ($"{Word(1)} < {Word(0)}", true),
+                ILOpCode.Bge_un => ($"{Word(1)} ≤ {Word(0)}", true),
                 _ => throw new ArgumentException($"`{jump.Mnemonic}` is not a conditional branch", nameof(jump))
             };
         }
@@ -698,7 +699,7 @@ internal static partial class ProofOutline
                 else if (op is Jump test)
                 {
                     var taken = test.Target;
-                    var arity = test.Kind is JumpKind.IfZero or JumpKind.IfNonzero ? 1 : 2;
+                    var arity = test.Kind is ILOpCode.Brfalse or ILOpCode.Brtrue ? 1 : 2;
                     var operands = stack.TakeLast(arity).ToArray();
                     var rest = stack.Take(stack.Count - arity).ToList();
                     var terms = operands.Select(operand => new Body.Operand(operand.Term, operand.Numeral)).ToArray();
@@ -920,7 +921,7 @@ internal static partial class ProofOutline
                 if (Step(state) != Event.Continue)
                     throw Unsupported(
                         $"the loop test at {Location(loop.Latch)} is not a straight block ({stopReason})");
-            var arity = body.Operations[loop.Latch] is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } ? 1 : 2;
+            var arity = body.Operations[loop.Latch] is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } ? 1 : 2;
             if (state.Stack.Count != arity)
                 throw Unsupported($"the loop test at {Location(loop.Latch)} uses values from before its block");
             if (state.Stack is [Number left, Number right] && left.Width != right.Width)
@@ -1286,8 +1287,8 @@ internal static partial class ProofOutline
             var pc = state.Pc;
             var jump = (Jump)body.Operations[pc];
             var target = jump.Target;
-            var zero = jump.Kind == JumpKind.IfZero;
-            var nonzero = jump.Kind == JumpKind.IfNonzero;
+            var zero = jump.Kind == ILOpCode.Brfalse;
+            var nonzero = jump.Kind == ILOpCode.Brtrue;
             var unary = zero || nonzero;
             var operands = state.Stack.TakeLast(unary ? 1 : 2).ToArray();
             state.Stack.RemoveRange(state.Stack.Count - operands.Length, operands.Length);
@@ -1352,7 +1353,7 @@ internal static partial class ProofOutline
                     parameter.Shape == ParameterShape.Object) => $"(.address {argument.Name})",
                 _ => null
             }).ToArray();
-            if (jump.Kind is JumpKind.Equal or JumpKind.NotEqual && identities.All(term => term is not null))
+            if (jump.Kind is ILOpCode.Beq or ILOpCode.Bne_un && identities.All(term => term is not null))
             {
                 var (identity, equalTaken) =
                     Body.Test(jump, [new($"({identities[0]} : ManagedReference)"), new(identities[1]!)], 64);

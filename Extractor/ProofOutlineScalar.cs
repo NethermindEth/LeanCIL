@@ -1,3 +1,4 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Mono.Cecil.Cil;
@@ -133,24 +134,24 @@ internal static partial class ProofOutline
 
     /// <summary>Whether a conditional branch of `kind` on literal operands, read at `bits` bits, is taken.
     /// </summary>
-    static bool Taken(JumpKind kind, long[] values, int bits)
+    static bool Taken(ILOpCode kind, long[] values, int bits)
     {
         ulong Word(int index) => bits == 32 ? (uint)values[index] : (ulong)values[index];
         long Signed(int index) => bits == 32 ? (int)values[index] : values[index];
         return kind switch
         {
-            JumpKind.IfZero => Word(0) == 0,
-            JumpKind.IfNonzero => Word(0) != 0,
-            JumpKind.Equal => Word(0) == Word(1),
-            JumpKind.NotEqual => Word(0) != Word(1),
-            JumpKind.Less => Signed(0) < Signed(1),
-            JumpKind.LessOrEqual => Signed(0) <= Signed(1),
-            JumpKind.Greater => Signed(0) > Signed(1),
-            JumpKind.GreaterOrEqual => Signed(0) >= Signed(1),
-            JumpKind.LessUnsigned => Word(0) < Word(1),
-            JumpKind.LessOrEqualUnsigned => Word(0) <= Word(1),
-            JumpKind.GreaterUnsigned => Word(0) > Word(1),
-            JumpKind.GreaterOrEqualUnsigned => Word(0) >= Word(1),
+            ILOpCode.Brfalse => Word(0) == 0,
+            ILOpCode.Brtrue => Word(0) != 0,
+            ILOpCode.Beq => Word(0) == Word(1),
+            ILOpCode.Bne_un => Word(0) != Word(1),
+            ILOpCode.Blt => Signed(0) < Signed(1),
+            ILOpCode.Ble => Signed(0) <= Signed(1),
+            ILOpCode.Bgt => Signed(0) > Signed(1),
+            ILOpCode.Bge => Signed(0) >= Signed(1),
+            ILOpCode.Blt_un => Word(0) < Word(1),
+            ILOpCode.Ble_un => Word(0) <= Word(1),
+            ILOpCode.Bgt_un => Word(0) > Word(1),
+            ILOpCode.Bge_un => Word(0) >= Word(1),
             _ => throw new ArgumentException($"`{kind}` is not a conditional branch", nameof(kind))
         };
     }

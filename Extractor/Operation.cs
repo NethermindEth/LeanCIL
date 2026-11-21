@@ -1,3 +1,4 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
@@ -36,38 +37,35 @@ internal sealed record StackOperation(Code Kind) : Operation
     internal static readonly StackOperation Nop = new(Code.Nop);
 }
 
-/// <summary>The jump kinds; a conditional jump pops one (zero tests) or two operands.</summary>
-internal enum JumpKind
+/// <summary>The one-byte CIL branch encoding and the destination's instruction index.</summary>
+internal sealed record Jump(int Opcode, int Target) : Operation
 {
-    Always, IfZero, IfNonzero, Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual,
-    LessUnsigned, LessOrEqualUnsigned, GreaterUnsigned, GreaterOrEqualUnsigned
-}
+    // ECMA-335 places the short and long branch families in the same order in consecutive ranges.
+    private int LongOpcode => Opcode is >= (int)ILOpCode.Br_s and <= (int)ILOpCode.Blt_un_s
+        ? Opcode + ((int)ILOpCode.Br - (int)ILOpCode.Br_s) : Opcode;
 
-/// <summary>A jump to the instruction at index <paramref name="Target"/>.</summary>
-internal sealed record Jump(JumpKind Kind, int Target) : Operation
-{
-    /// <summary>The jump depends on the evaluation stack.</summary>
-    internal bool Conditional => Kind != JumpKind.Always;
+    internal ILOpCode Kind => (ILOpCode)LongOpcode;
+    internal bool Conditional => LongOpcode != (int)ILOpCode.Br;
 
-    /// <summary>The number of evaluation stack operands a conditional jump pops.</summary>
-    internal int Operands => Kind switch
+    /// <summary>The number of evaluation stack operands consumed by this branch.</summary>
+    internal int Operands => LongOpcode switch
     {
-        JumpKind.Always => 0,
-        JumpKind.IfZero or JumpKind.IfNonzero => 1,
+        (int)ILOpCode.Br => 0,
+        (int)ILOpCode.Brfalse or (int)ILOpCode.Brtrue => 1,
         _ => 2
     };
 
     /// <summary>The Lean constructor name, without its dot.</summary>
     internal string Mnemonic => Name[1..];
 
-    string Name => Kind switch
+    string Name => LongOpcode switch
     {
-        JumpKind.Always => ".br", JumpKind.IfZero => ".brfalse", JumpKind.IfNonzero => ".brtrue",
-        JumpKind.Equal => ".beq", JumpKind.NotEqual => ".bne_un", JumpKind.Less => ".blt",
-        JumpKind.LessOrEqual => ".ble", JumpKind.Greater => ".bgt", JumpKind.GreaterOrEqual => ".bge",
-        JumpKind.LessUnsigned => ".blt_un", JumpKind.LessOrEqualUnsigned => ".ble_un",
-        JumpKind.GreaterUnsigned => ".bgt_un", JumpKind.GreaterOrEqualUnsigned => ".bge_un",
-        _ => throw new ArgumentOutOfRangeException(nameof(Kind))
+        (int)ILOpCode.Br => ".br", (int)ILOpCode.Brfalse => ".brfalse", (int)ILOpCode.Brtrue => ".brtrue",
+        (int)ILOpCode.Beq => ".beq", (int)ILOpCode.Bne_un => ".bne_un", (int)ILOpCode.Blt => ".blt",
+        (int)ILOpCode.Ble => ".ble", (int)ILOpCode.Bgt => ".bgt", (int)ILOpCode.Bge => ".bge",
+        (int)ILOpCode.Blt_un => ".blt_un", (int)ILOpCode.Ble_un => ".ble_un",
+        (int)ILOpCode.Bgt_un => ".bgt_un", (int)ILOpCode.Bge_un => ".bge_un",
+        _ => throw new ArgumentOutOfRangeException(nameof(Opcode))
     };
 }
 

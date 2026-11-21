@@ -1,3 +1,4 @@
+using ILOpCode = System.Reflection.Metadata.ILOpCode;
 using System.Text;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
@@ -603,8 +604,8 @@ internal static partial class ProofOutline
             return false;
         bool LoadsBoolean(Operation op) => op is Arg load && parameters[load.Index].Shape == ParameterShape.Boolean;
         return ops.Select((op, pc) => Body.Pure(op, method, plainReturn) || LoadsBoolean(op) ||
-            op is Jump { Kind: JumpKind.Always } ||
-                op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } && pc > 0 && LoadsBoolean(ops[pc - 1]))
+            op is Jump { Kind: ILOpCode.Br } ||
+                op is Jump { Kind: ILOpCode.Brfalse or ILOpCode.Brtrue } && pc > 0 && LoadsBoolean(ops[pc - 1]))
             .All(stepped => stepped);
     }
 
