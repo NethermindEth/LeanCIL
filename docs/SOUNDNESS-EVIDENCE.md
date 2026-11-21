@@ -5,9 +5,9 @@
 ## Independently checked extraction evidence
 
 `TranslationValid rawLayouts computedLayouts assemblies platformDefinitions methodEvidence imports
-program` checks one record per emitted method in program order, each body against the one list of
-pinned assemblies and the one list of [platform definitions](#platform-definitions). The verifier kernel-replays and structurally audits
-`Extracted.translation_valid`; an unrelated theorem, non-theorem or different program/import table
+program` checks one record per emitted method in program order. It checks every body against the
+same pinned assemblies and platform definitions. The verifier kernel-replays and structurally
+audits `Extracted.translation_valid`; an unrelated theorem, non-theorem or different program/import table
 cannot substitute for it.
 
 | Evidence | Independently checked relation | Remaining assumption or limit |
