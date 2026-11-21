@@ -1113,12 +1113,12 @@ theorem comparisonGuardInstruction_contract (guard : ComparisonGuard) (width : N
 
 set_option maxHeartbeats 800000 in
 /-- The remaining memory operations preserve their checked effects and stack validity. -/
-private theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
+theorem otherMemoryInstruction_contract (operation : CIL.MemoryOp)
     (stack values : List Value) (memory result : Memory)
     (executed : otherMemoryInstruction operation stack memory = .ok (result, values)) :
     InstructionContract memory result stack values := by
   unfold otherMemoryInstruction at executed
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  simp only [copyBlockBytes, initBlockBytes, Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve | cases executed; instruction_contract_close
     | cases executed

@@ -112,7 +112,7 @@ def observerCount : CIL.Instruction → Nat
   | .stind _ | .cpobj _ | .stobj _ => 2
   | .ldlen => 1
   | .ldelem _ | .ldelem_ref | .ldelem_any _ | .ldelema .. => 2
-  | .stelem _ | .stelem_ref | .stelem_any _ => 3
+  | .stelem _ | .stelem_ref | .stelem_any _ | .cpblk _ | .initblk _ => 3
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => 0
   | .sizeof _ => 0
   | .stsfld _ => 1
@@ -698,6 +698,36 @@ def arrayAddress (element : CIL.ArrayElement) (writable : Bool) (stack : List Va
     .error (.thrown .nullReference)
   | _ => .error .invalidState
 
+/-- Copies non-overlapping bytes at the admitted alignment. A zero count touches no memory. -/
+def copyBlockBytes (alignment : Nat) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match stack with
+  | .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
+    let width := count.toNat
+    if width = 0 then return (memory, rest) else
+      let src ← referenceAt source
+      let dst ← referenceAt destination
+      if src.allocation = dst.allocation && src.offset < dst.offset + width &&
+          dst.offset < src.offset + width then
+        .error (.unsupported "Overlapping block copy")
+      else
+        let bytes ← checkedAt source width (read memory src width alignment)
+        return (← checkedAt destination width (write memory dst bytes alignment), rest)
+  | _ => .error .invalidState
+
+/-- Fills the destination with the low byte of the value. A zero count touches no memory. -/
+def initBlockBytes (alignment : Nat) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match stack with
+  | .scalar (.i32 count) :: .scalar (.i32 value) :: .reference destination :: rest =>
+    let width := count.toNat
+    if width = 0 then return (memory, rest) else
+      let dst ← referenceAt destination
+      let _ ← checkedAt destination width (access memory dst width alignment true)
+      return (← checkedAt destination width
+        (write memory dst (List.replicate width (value.setWidth 8)) alignment), rest)
+  | _ => .error .invalidState
+
 /-- Executes the remaining memory operations after the shared operand guard. -/
 def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -727,27 +757,8 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       let value ← loadTransfer memory source kind
       let result ← storeTransfer memory view.reference kind value
       if trying then return (result, .scalar (.i32 1) :: rest) else return (result, rest)
-  -- Block copy and block initialization
-  | .copyBlock alignment,
-      .scalar (.i32 count) :: .reference source :: .reference destination :: rest =>
-    let width := count.toNat
-    if width = 0 then return (memory, rest) else
-      let src ← referenceAt source
-      let dst ← referenceAt destination
-      if src.allocation = dst.allocation && src.offset < dst.offset + width &&
-          dst.offset < src.offset + width then
-        .error (.unsupported "Overlapping block copy")
-      else
-        let bytes ← checkedAt source width (read memory src width alignment)
-        return (← checkedAt destination width (write memory dst bytes alignment), rest)
-  | .initBlock alignment,
-      .scalar (.i32 count) :: .scalar (.i32 value) :: .reference destination :: rest =>
-    let width := count.toNat
-    if width = 0 then return (memory, rest) else
-      let dst ← referenceAt destination
-      let _ ← checkedAt destination width (access memory dst width alignment true)
-      return (← checkedAt destination width
-        (write memory dst (List.replicate width (value.setWidth 8)) alignment), rest)
+  | .copyBlock alignment, values => copyBlockBytes alignment values memory
+  | .initBlock alignment, values => initBlockBytes alignment values memory
   -- Vector loads and stores
   | .load128, .reference r :: rest | .load128, .readOnlyReference r :: rest =>
     return (memory, .scalar (← loadValue memory r 16) :: rest)
@@ -1264,6 +1275,20 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .comparisonGuard guard width signed =>
     comparisonGuardInstruction guard width signed stack memory
   | _ => otherMemoryInstruction operation stack memory
+
+/-- The external copy helper performs the same checked transfer as `cpblk`. -/
+theorem blockInstruction_copy (alignment : Nat) (stack : List Value) (memory : Memory) :
+    memoryInstruction (.copyBlock alignment) stack memory =
+      (if unspecifiedOperands 3 stack then .error (.unsupported "Memory operation observes unspecified vector bits")
+       else copyBlockBytes alignment stack memory) := by rfl
+#print axioms blockInstruction_copy
+
+/-- The external initialization helper performs the same checked transfer as `initblk`. -/
+theorem blockInstruction_init (alignment : Nat) (stack : List Value) (memory : Memory) :
+    memoryInstruction (.initBlock alignment) stack memory =
+      (if unspecifiedOperands 3 stack then .error (.unsupported "Memory operation observes unspecified vector bits")
+       else initBlockBytes alignment stack memory) := by rfl
+#print axioms blockInstruction_init
 
 /-- Copies initialized bytes between writable-reference stack operands without partial overlap. -/
 def copyInitializedBytes (size : Nat) (stack : List Value) (memory : Memory) :

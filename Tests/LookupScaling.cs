@@ -3445,7 +3445,7 @@ void IndirectAccessCosts()
               (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
             def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
               [.ldarg 0, .ldarg 0, .ldarg 0] ++ (if prefixed then [.nop] else []) ++
-                [.memory (.copyBlock (if prefixed then 1 else 8)), .br ((index + 1) * width prefixed)]
+                [.cpblk (if prefixed then 1 else 8), .br ((index + 1) * width prefixed)]
             def code (prefixed : Bool) (sites : Nat) : List Instruction :=
               (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
             """ + "\n";

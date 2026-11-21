@@ -943,6 +943,53 @@ private theorem Memory.Renamed.comparisonGuardInstructionResult {mapping : Alloc
     | cases observable
     | split
 #print axioms Memory.Renamed.comparisonGuardInstructionResult
+/-- Copying or initializing bytes commutes with allocation renaming, including the overlap
+    check on two bounded references. -/
+theorem Memory.Renamed.blockBytesResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (copy : Bool) (alignment : Nat)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      ((if copy then copyBlockBytes else initBlockBytes) alignment stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map (indices.value mapping))
+      ((if copy then copyBlockBytes else initBlockBytes) alignment stack source)
+      ((if copy then copyBlockBytes else initBlockBytes) alignment
+        (stack.map (indices.value mapping)) target) := by
+  cases copy <;> simp only [Bool.false_eq_true, ↓reduceIte, copyBlockBytes, initBlockBytes]
+    at observable ⊢
+  all_goals split at observable
+  all_goals try solve | cases observable
+  all_goals simp only [List.map_cons, LocalIndexMap.value]
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals have imageEquality : ∀ left right, left < mapping.sourceLimit →
+      right < mapping.sourceLimit → (mapping.image left = mapping.image right ↔ left = right) :=
+    fun left right leftBound rightBound =>
+      ⟨mapping.injective left right leftBound rightBound, congrArg mapping.image⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (mapping.referenceAt _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := referenceAt_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.checkedRead _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.checkedAccess _ (by assumption) _ _ _ _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | dsimp +instances only [AllocationRenaming.reference]
+    | simp only [mapping.isNull, imageEquality]
+    | (split <;> try simp only [*, mapping.isNull, AllocationRenaming.managedReference,
+        Bind.bind, Except.bind])
+#print axioms Memory.Renamed.blockBytesResult
+
 /-- Ordinary memory effects transport independently of the whole-span dispatch families. -/
 private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -957,6 +1004,10 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
       (otherMemoryInstruction operation (stack.map (indices.value mapping)) target) := by
   unfold otherMemoryInstruction at observable ⊢
   split at observable
+  all_goals first
+    | exact related.blockBytesResult true _ _ bounds observable
+    | exact related.blockBytesResult false _ _ bounds observable
+    | skip
   all_goals try simp only [List.map_cons, LocalIndexMap.value]
   all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable

@@ -138,6 +138,7 @@ foreach (var alignment in new[] { 0, 1, 2, 4, 8 })
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");
     string selector;
+    int? blockPc = null;
     var methodName = (copy ? "Copy" : "Fill") + (alignment == 8 ? "Aligned" : "");
     using (var module = ModuleDefinition.ReadModule(assembly))
     {
@@ -149,6 +150,7 @@ foreach (var alignment in new[] { 0, 1, 2, 4, 8 })
             call.Operand = null;
             if (alignment != 8)
                 method.Body.GetILProcessor().InsertBefore(call, Instruction.Create(OpCodes.Unaligned, (byte)alignment));
+            blockPc = method.Body.Instructions.IndexOf(call);
         }
         selector = method.FullName;
         module.Write(dll);
@@ -157,6 +159,11 @@ foreach (var alignment in new[] { 0, 1, 2, 4, 8 })
     var fill = copy ? null : runtime.CreateDelegate<FillBlock>();
     var move = copy ? runtime.CreateDelegate<CopyBlock>() : null;
     var claims = new List<string>();
+    if (blockPc is { } pc)
+    {
+        var opcode = copy ? "cpblk" : "initblk";
+        claims.Add($"Extracted.method0.code[{pc}]? = some (.{opcode} {alignment})");
+    }
     var offset = alignment is 0 or 1 ? 1 : alignment == 8 ? 0 : alignment;
     foreach (var count in new[] { 0, 1, 3, 8 })
     foreach (var value in new byte[] { 0, 127, 255 })

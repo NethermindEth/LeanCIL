@@ -106,6 +106,20 @@ theorem stepTransport : StepTransport := by
     case ldelema.refl element readOnly =>
       exact ⟨mapping, .refl mapping, memories.stepLdelema frames sourceFormed sourceBody
         targetBody metadata element readOnly pc arguments stack bounds observable⟩
+    case cpblk.refl alignment | initblk.refl alignment =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      simp only [LocalIndexMap.operation, step, observerCount, indices.unspecifiedOperands mapping]
+        at observable ⊢
+      by_cases observed : unspecifiedOperands 3 stack = true <;>
+        simp only [observed, Bool.false_eq_true, ite_true, ite_false] at observable ⊢
+      · exact .error _
+      first
+      | apply (memories.blockBytesResult true alignment stack bounds
+          observable.bind_left).bind
+      | apply (memories.blockBytesResult false alignment stack bounds
+          observable.bind_left).bind
+      rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
+      exact .ok (.next related frames)
     case ldstr.refl text =>
       refine ⟨mapping, .refl mapping, ?_⟩
       change SuccessOrThrow (do

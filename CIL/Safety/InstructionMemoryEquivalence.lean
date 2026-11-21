@@ -233,11 +233,12 @@ theorem Memory.Equivalent.storeArraySlot {m n : Memory} (same : m.Equivalent n)
 #print axioms Memory.Equivalent.storeArraySlot
 
 /-- Non-fill memory operations preserve equivalent memories and identical values. -/
-private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
+theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
       (otherMemoryInstruction operation stack n) := by
   unfold CIL.Safety.otherMemoryInstruction
+  simp only [copyBlockBytes, initBlockBytes]
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
     same.loadTransfer]

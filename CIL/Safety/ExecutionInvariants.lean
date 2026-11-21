@@ -636,6 +636,8 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | solve |
         apply StepContract.instruction
         first
+          | exact otherMemoryInstruction_contract (.copyBlock _) _ _ _ _ (by assumption)
+          | exact otherMemoryInstruction_contract (.initBlock _) _ _ _ _ (by assumption)
           | exact stringLiteralInstruction_contract _ _ _ _ _ (by assumption)
           | exact instruction_contract _ _ _ _ _ (by assumption)
     | solve |

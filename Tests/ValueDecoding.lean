@@ -195,8 +195,8 @@ def named : List (RawInstruction × Instruction) := [
   -- Dynamic frame storage.
   (⟨0, 65039, .none⟩, .localloc),
   -- Block copies and fills, at the default alignment and after `unaligned. 2`.
-  (⟨0, 65047, .none⟩, .memory (.copyBlock 8)), (⟨0, 65048, .none⟩, .memory (.initBlock 8)),
-  (⟨2, 65047, .none⟩, .memory (.copyBlock 2)), (⟨2, 65048, .none⟩, .memory (.initBlock 2)),
+  (⟨0, 65047, .none⟩, .cpblk 8), (⟨0, 65048, .none⟩, .initblk 8),
+  (⟨2, 65047, .none⟩, .cpblk 2), (⟨2, 65048, .none⟩, .initblk 2),
   -- Class type tests.
   (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog),
   -- Array allocations and element accesses that name their element type.
@@ -219,7 +219,7 @@ def named : List (RawInstruction × Instruction) := [
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
-  ``Instruction.throw,
+  ``Instruction.throw, ``Instruction.memory,
   ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld]
 
 /-- What each named opcode decodes to after its predecessor. -/
@@ -379,20 +379,20 @@ theorem block_alignments :
     let fill : RawInstruction := ⟨2, 65048, .none⟩
     let aligned (alignment : Int) : Option RawInstruction := some ⟨0, 0xfe12, .integer alignment⟩
     let constant (value : Int) : Option RawInstruction := some ⟨0, 0x1f, .integer value⟩
-    (Instruction.ofRaw? none copy == some (.memory (.copyBlock 8)) &&
-      Instruction.ofRaw? none fill == some (.memory (.initBlock 8)) &&
-      Instruction.ofRaw? (aligned 1) copy == some (.memory (.copyBlock 1)) &&
-      Instruction.ofRaw? (aligned 2) copy == some (.memory (.copyBlock 2)) &&
-      Instruction.ofRaw? (aligned 4) copy == some (.memory (.copyBlock 4)) &&
-      Instruction.ofRaw? (aligned 1) fill == some (.memory (.initBlock 1)) &&
-      Instruction.ofRaw? (aligned 2) fill == some (.memory (.initBlock 2)) &&
-      Instruction.ofRaw? (aligned 4) fill == some (.memory (.initBlock 4)) &&
-      Instruction.ofRaw? (constant 1) copy == some (.memory (.copyBlock 8)) &&
-      Instruction.ofRaw? (constant 2) copy == some (.memory (.copyBlock 8)) &&
-      Instruction.ofRaw? (constant 4) copy == some (.memory (.copyBlock 8)) &&
-      Instruction.ofRaw? (constant 1) fill == some (.memory (.initBlock 8)) &&
-      Instruction.ofRaw? (constant 2) fill == some (.memory (.initBlock 8)) &&
-      Instruction.ofRaw? (constant 4) fill == some (.memory (.initBlock 8))) = true := by
+    (Instruction.ofRaw? none copy == some (.cpblk 8) &&
+      Instruction.ofRaw? none fill == some (.initblk 8) &&
+      Instruction.ofRaw? (aligned 1) copy == some (.cpblk 1) &&
+      Instruction.ofRaw? (aligned 2) copy == some (.cpblk 2) &&
+      Instruction.ofRaw? (aligned 4) copy == some (.cpblk 4) &&
+      Instruction.ofRaw? (aligned 1) fill == some (.initblk 1) &&
+      Instruction.ofRaw? (aligned 2) fill == some (.initblk 2) &&
+      Instruction.ofRaw? (aligned 4) fill == some (.initblk 4) &&
+      Instruction.ofRaw? (constant 1) copy == some (.cpblk 8) &&
+      Instruction.ofRaw? (constant 2) copy == some (.cpblk 8) &&
+      Instruction.ofRaw? (constant 4) copy == some (.cpblk 8) &&
+      Instruction.ofRaw? (constant 1) fill == some (.initblk 8) &&
+      Instruction.ofRaw? (constant 2) fill == some (.initblk 8) &&
+      Instruction.ofRaw? (constant 4) fill == some (.initblk 8)) = true := by
   decide +kernel
 #print axioms block_alignments
 
@@ -491,7 +491,7 @@ theorem indirect_object_binding :
 /-- A forged operand on a block copy cannot emit the aligned copy at its taker. -/
 theorem malformed_block_operand_refused :
     !indirectAccessMatches (some ⟨0, 0xFE12, .integer 1⟩)
-      ⟨3, 0xFE17, .integer 1⟩ (.memory (.copyBlock 1)) := by
+      ⟨3, 0xFE17, .integer 1⟩ (.cpblk 1) := by
   decide +kernel
 #print axioms malformed_block_operand_refused
 
@@ -757,7 +757,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 95, undecoded 5 of 100 constructors -/
+/-- info: decoded 96, undecoded 6 of 102 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

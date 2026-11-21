@@ -144,7 +144,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldobj _ | .stobj _ | .cpobj _ | .initobj _ | .sizeof _
   | .ldelem_any _ | .stelem_any _ | .ldelema ..
   | .newobj _ | .memory _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded
-  | .ldstr _ | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
+  | .cpblk _ | .initblk _ | .ldstr _ | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference

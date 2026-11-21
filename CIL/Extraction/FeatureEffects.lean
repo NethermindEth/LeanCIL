@@ -80,6 +80,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .call method _ => some (method.argumentCount, if returnsValue then 1 else 0)
   | .callvirt method => some (method.argumentCount, if returnsValue then 1 else 0)
   | .newobj constructor => some (constructor.parameters.length, 1)
+  | .cpblk _ | .initblk _ => some (3, 0)
   | .memory operation => some (memoryFeatureEffect operation)
   | .ldsfld _ | .ldsflda _ | .ldtoken _ => some (0, 1)
   | .stsfld _ => some (1, 0)

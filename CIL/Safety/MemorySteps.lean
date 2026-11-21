@@ -20,7 +20,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
     dispatchers check the same operands, so a decided guard leaves one arm and no `if`. -/
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
-    otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
+    copyBlockBytes, initBlockBytes, otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
     vector128UnsafeInstruction, displaceReference, observerCount, viewOperandCount, viewOperands,
     spanView, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue,
@@ -125,7 +125,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     source and destination regions are rejected. -/
 @[cil_step high] theorem step_memory_copyBlock_eq (alignment : Nat) (count : CIL.W32)
     (source destination : ManagedReference) (rest : List Value) :
-    step body (.memory (.copyBlock alignment)) pc args frame
+    step body (.cpblk alignment) pc args frame
       (.scalar (.i32 count) :: .reference source :: .reference destination :: rest) memory =
       if count.toNat = 0 then .ok (.next (pc + 1) rest frame memory) else do
         let src ← referenceAt source
@@ -143,7 +143,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     byte becomes the low byte of `value`. -/
 @[cil_step high] theorem step_memory_initBlock_eq (alignment : Nat) (count value : CIL.W32)
     (destination : ManagedReference) (rest : List Value) :
-    step body (.memory (.initBlock alignment)) pc args frame
+    step body (.initblk alignment) pc args frame
       (.scalar (.i32 count) :: .scalar (.i32 value) :: .reference destination :: rest) memory =
       if count.toNat = 0 then .ok (.next (pc + 1) rest frame memory) else do
         let dst ← referenceAt destination

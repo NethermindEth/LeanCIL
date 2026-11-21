@@ -928,6 +928,12 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         | .object .null :: _ => .error (.thrown .nullReference)
         | _ => .error .invalidState
     | _ => .error unlinkedCall
+  | .cpblk alignment, _ => do
+    let (memory, values) ← copyBlockBytes alignment stack m
+    return .next (pc + 1) values frame memory
+  | .initblk alignment, _ => do
+    let (memory, values) ← initBlockBytes alignment stack m
+    return .next (pc + 1) values frame memory
   | .ldstr text, _ => do
     let (memory, values) ← stringLiteralInstruction text stack m
     return .next (pc + 1) values frame memory

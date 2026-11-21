@@ -916,8 +916,8 @@ theorem blockOperationsDecode :
     let load := [instr 0 0xfe12 (.integer 1), instr 2 0x4b, instr 3 0x2a]
     (match prefixedResult copy, prefixedResult fill, prefixedResult load with
      | .ok copied, .ok filled, .ok loaded =>
-       copied.code == [.nop, .memory (.copyBlock 2), .ret] &&
-         filled.code == [.memory (.initBlock defaultBlockAlignment), .ret] &&
+       copied.code == [.nop, .cpblk 2, .ret] &&
+         filled.code == [.initblk defaultBlockAlignment, .ret] &&
          loaded.code == [.nop, .ldind .u4, .ret]
      | _, _, _ => false) = true := by
   decide +kernel

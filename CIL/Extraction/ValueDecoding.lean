@@ -250,11 +250,11 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldstr text => match emitted with
     | .ldstr actual => decide (text = actual)
     | _ => false
-  | .memory (.copyBlock expected) => match emitted with
-    | .memory (.copyBlock actual) => expected == actual
+  | .cpblk expected => match emitted with
+    | .cpblk actual => expected == actual
     | _ => false
-  | .memory (.initBlock expected) => match emitted with
-    | .memory (.initBlock actual) => expected == actual
+  | .initblk expected => match emitted with
+    | .initblk actual => expected == actual
     | _ => false
   | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
   | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
@@ -496,9 +496,9 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   | 65039, .none => emit .localloc
   -- Block copies and fills, at the alignment an `unaligned.` before them gives.
   | 65047, .none => (blockAlignment previous).bind fun alignment =>
-    emit (.memory (.copyBlock alignment))
+    emit (.cpblk alignment)
   | 65048, .none => (blockAlignment previous).bind fun alignment =>
-    emit (.memory (.initBlock alignment))
+    emit (.initblk alignment)
   -- The prefixes their consumers record; `invalidPredecessor` refuses a consumer that takes
   -- neither, and `rawPrefixesValid` a prefix with no consumer.
   | 65054, .none => if previous.any fun before => isPrefixOpcode before.opcode then none
@@ -797,6 +797,14 @@ theorem Instruction.sameValue_self_of_ofRaw? {previous : Option RawInstruction}
         exact value.property
 
 #print axioms Instruction.sameValue_self_of_ofRaw?
+
+/-- A decoded value instruction never contains a runtime-model memory operation. -/
+theorem Instruction.ofRaw?_ne_memory (previous : Option RawInstruction) (raw : RawInstruction)
+    (operation : MemoryOp) : Instruction.ofRaw? previous raw ≠ some (.memory operation) := by
+  intro decoded
+  exact Bool.false_ne_true (Instruction.sameValue_self_of_ofRaw? decoded)
+
+#print axioms Instruction.ofRaw?_ne_memory
 
 /-- Instantiation preserves the operand information that a preceding modifier checks. -/
 private theorem invalidPredecessor_substitute {previous : Option RawInstruction}

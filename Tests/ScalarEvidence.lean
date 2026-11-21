@@ -995,10 +995,10 @@ private def indirectEmitted : List IndirectCase := [
   load 74 (.ldind .i4), load 75 (.ldind .u4), load 76 (.ldind .i8) .word64,
   load 77 (.ldind .i) .native, store 82 (.stind .i1), store 83 (.stind .i2),
   store 84 (.stind .i4), store 85 (.stind .i8), store 223 (.stind .i),
-  block 65047 (.memory (.copyBlock 8)), block 65048 (.memory (.initBlock 8)),
-  block 65047 (.memory (.copyBlock 1)) [unaligned 1],
-  block 65048 (.memory (.initBlock 2)) [unaligned 2],
-  block 65047 (.memory (.copyBlock 4)) [unaligned 4],
+  block 65047 (.cpblk 8), block 65048 (.initblk 8),
+  block 65047 (.cpblk 1) [unaligned 1],
+  block 65048 (.initblk 2) [unaligned 2],
+  block 65047 (.cpblk 4) [unaligned 4],
   load 74 (.ldind .i4) (prefixes := [unaligned 1]),
   store 85 (.stind .i8) [unaligned 2]]
 
@@ -1025,14 +1025,14 @@ private def indirectForged : List IndirectCase := [
   -- Typed object accesses of the right width, which no raw `ldind` or `stind` decodes to.
   load 74 (.ldobj intType), load 70 (.ldobj sbyteType), store 84 (.stobj intType),
   -- Alignment and operation.
-  block 65047 (.memory (.copyBlock 1)), block 65048 (.memory (.initBlock 4)),
-  block 65047 (.memory (.copyBlock 8)) [unaligned 1],
-  block 65048 (.memory (.initBlock 2)) [unaligned 4],
-  block 65047 (.memory (.initBlock 8)), block 65048 (.memory (.copyBlock 8)),
+  block 65047 (.cpblk 1), block 65048 (.initblk 4),
+  block 65047 (.cpblk 8) [unaligned 1],
+  block 65048 (.initblk 2) [unaligned 4],
+  block 65047 (.initblk 8), block 65048 (.cpblk 8),
   -- Kinds and prefixes extraction refuses.
-  block 65047 (.memory (.copyBlock 3)) [unaligned 3],
-  block 65047 (.memory (.copyBlock 8)) [i 0xFE1E],
-  block 65048 (.memory (.initBlock 8)) [i 0xFE14],
+  block 65047 (.cpblk 3) [unaligned 3],
+  block 65047 (.cpblk 8) [i 0xFE1E],
+  block 65048 (.initblk 8) [i 0xFE14],
   load 74 (.ldind .i4) (prefixes := [i 65043]),
   load 78 (.ldind .i4) .other, load 79 (.ldind .i8) .other,
   load 80 (.ldind .i) .other, store 81 (.stind .i8), store 86 (.stind .i4),
