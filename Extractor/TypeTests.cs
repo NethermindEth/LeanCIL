@@ -49,28 +49,37 @@ internal static class TypeTests
         return (Constructed(a) || Plain(a)) && (Constructed(b) || Plain(b)) ? false : null;
     }
 
-    static bool TypeMethod(Instruction instruction, string name, string signature) =>
-        instruction.OpCode.Code == Code.Call && instruction.Operand is MethodReference method &&
-        method is not GenericInstanceMethod && method.Name == name && method.DeclaringType is not TypeSpecification &&
-        method.DeclaringType.FullName == "System.Type" && LayoutEvidence.Scope(method.DeclaringType) == RuntimeScope &&
-        !method.HasThis && method.ReturnType.FullName != "System.Void" &&
-        LayoutEvidence.Scope(method.DeclaringType) + "::" + method.FullName == RuntimeScope + "::" + signature;
+    static bool RuntimeType(TypeReference type, string name, bool valueType = false) =>
+        type is not TypeSpecification && !type.IsNested && type.Namespace == "System" && type.Name == name &&
+        type.IsValueType == valueType && RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime);
 
-    static bool FromHandle(Instruction instruction) => TypeMethod(instruction, "GetTypeFromHandle",
-        "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)");
+    static bool TypeMethod(Instruction instruction, string name)
+    {
+        if (instruction.OpCode.Code != Code.Call || instruction.Operand is not MethodReference method ||
+            method is GenericInstanceMethod || method.HasGenericParameters || method.Name != name ||
+            method.HasThis || method.ExplicitThis || method.CallingConvention != MethodCallingConvention.Default ||
+            !RuntimeType(method.DeclaringType, "Type")) return false;
+
+        if (name == "GetTypeFromHandle")
+            return RuntimeType(method.ReturnType, "Type") && method.Parameters is [var handle] &&
+                RuntimeType(handle.ParameterType, "RuntimeTypeHandle", valueType: true);
+        return method.ReturnType.MetadataType == MetadataType.Boolean && method.Parameters is [var left, var right] &&
+            RuntimeType(left.ParameterType, "Type") && RuntimeType(right.ParameterType, "Type");
+    }
 
     static bool? Comparison(Instruction instruction) =>
         instruction.OpCode.Code == Code.Ceq && instruction.Operand is null ? true :
         instruction.Operand is Instruction && instruction.OpCode.Code is Code.Beq or Code.Beq_S ? true :
         instruction.Operand is Instruction && instruction.OpCode.Code is Code.Bne_Un or Code.Bne_Un_S ? false :
-        TypeMethod(instruction, "op_Equality", "System.Boolean System.Type::op_Equality(System.Type,System.Type)") ? true :
-        TypeMethod(instruction, "op_Inequality", "System.Boolean System.Type::op_Inequality(System.Type,System.Type)") ? false : null;
+        TypeMethod(instruction, "op_Equality") ? true :
+        TypeMethod(instruction, "op_Inequality") ? false : null;
 
     static bool? Test(IList<Instruction> code, int at)
     {
         if (at + 4 >= code.Count || code[at].OpCode.Code != Code.Ldtoken || code[at].Operand is not TypeReference left ||
             code[at + 2].OpCode.Code != Code.Ldtoken || code[at + 2].Operand is not TypeReference right ||
-            !FromHandle(code[at + 1]) || !FromHandle(code[at + 3]) || Comparison(code[at + 4]) is not bool equality)
+            !TypeMethod(code[at + 1], "GetTypeFromHandle") || !TypeMethod(code[at + 3], "GetTypeFromHandle") ||
+            Comparison(code[at + 4]) is not bool equality)
             return null;
         return Same(Expr(left), Expr(right)) is bool same ? same == equality : null;
     }

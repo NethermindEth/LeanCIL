@@ -167,14 +167,19 @@ if (live.Code == 0 || !live.Output.Contains("External managed dependency: System
 Console.WriteLine("PASS Word: the live non-matching branch is still validated");
 
 // Anything other than the exact closed encoding stays unsupported.
+const string externalTypeCall = "External managed dependency: System.Type System.Type::GetTypeFromHandle";
 foreach (var (mutation, marker) in new[]
 {
-    ("operand-gap", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("handle-return-scope", externalTypeCall),
+    ("handle-parameter-scope", externalTypeCall),
+    ("equality-parameter-scope", externalTypeCall),
+    ("vararg-handle", externalTypeCall),
+    ("operand-gap", externalTypeCall),
     ("type-local", "Unsupported type: System.Type"),
-    ("forwarded-scope", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
-    ("reference-equality", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("forwarded-scope", externalTypeCall),
+    ("reference-equality", externalTypeCall),
     ("interior-branch", "Branch into a folded type comparison"),
-    ("branch-forwarded-scope", "External managed dependency: System.Type System.Type::GetTypeFromHandle"),
+    ("branch-forwarded-scope", externalTypeCall),
     ("branch-interior-branch", "Branch into a folded type comparison")
 })
 {
@@ -197,6 +202,22 @@ foreach (var (mutation, marker) in new[]
         var fromHandle = (MethodReference)code[at + 1].Operand;
         switch (branchFold ? mutation["branch-".Length..] : mutation)
         {
+            case "handle-return-scope":
+            case "handle-parameter-scope":
+            case "equality-parameter-scope":
+                var wrongScope = new AssemblyNameReference("TypeSignatureFixture", new Version(1, 0, 0, 0));
+                module.AssemblyReferences.Add(wrongScope);
+                var equality = (MethodReference)code[at + 4].Operand;
+                if (mutation == "handle-parameter-scope")
+                    fromHandle.Parameters[0].ParameterType = new TypeReference("System", "RuntimeTypeHandle",
+                        module, wrongScope, valueType: true);
+                else if (mutation == "handle-return-scope")
+                    fromHandle.ReturnType = new TypeReference("System", "Type", module, wrongScope);
+                else equality.Parameters[1].ParameterType = new TypeReference("System", "Type", module, wrongScope);
+                break;
+            case "vararg-handle":
+                fromHandle.CallingConvention = MethodCallingConvention.VarArg;
+                break;
             case "operand-gap": il.InsertAfter(code[at + 1], il.Create(OpCodes.Nop)); break;
             case "type-local":
                 var local = new VariableDefinition(fromHandle.ReturnType);

@@ -274,7 +274,8 @@ examples of rejected opcodes and forms.
 
 Closed `typeof(A) == typeof(B)` and `!=` tests use two adjacent
 `ldtoken; call Type::GetTypeFromHandle` pairs followed by `Type::op_Equality` or
-`op_Inequality`, with exact `System.Runtime` signatures. The four operands emit `nop`
+`op_Inequality`. The extractor checks a static, nongeneric default calling convention and the
+`System.Runtime` identities of `Type` and `RuntimeTypeHandle` in the signatures. The four operands emit `nop`
 and the comparison emits its decided Boolean. `ReferenceEquals(typeof(A), typeof(B))`
 used as a Boolean value ends in operandless `ceq`, which emits the same decided Boolean.
 Its negation uses the ordinary integer comparison of that result with zero. Reference-equality
