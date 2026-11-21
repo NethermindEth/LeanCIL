@@ -530,6 +530,22 @@ foreach ((string name, int width, string profile, string unavailable, string fea
 
 Flush();
 
+static string ShuffleProof(int width, string contract) => $$"""
+        set_option maxRecDepth 8192 in
+        /-- The compiled shuffle reads each valid span once and leaves caller memory unchanged. -/
+        theorem correctness : {{contract}}.Holds Extracted.program 0 := by
+          rintro ⟨s, c⟩ memory ⟨⟨sv, ss, sr⟩, cv, cs, cr⟩
+          apply MethodContract.Holds.intro (c := {{contract}}) (input := (s, c)) memory
+            (CIL.Vector.shuffleBytes{{width}} s.bits c.bits) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+          refine ⟨32, ?_⟩
+          change invoke Extracted.program 32 0
+            [.bufferSpan (byteSpan s.address s.length), .bufferSpan (byteSpan c.address c.length)] memory =
+              .ok (memory, [.scalar (.v{{width}} (CIL.Vector.shuffleBytes{{width}} s.bits c.bits))])
+          have first := read_span memory s.address s.length (.v{{width}} s.bits) sv ss sr []
+          have second := read_span memory c.address c.length (.v{{width}} c.bits) cv cs cr [.scalar (.v{{width}} s.bits)]
+          cil_checked_steps [sv, cv, first, second]
+        """;
+
 // The AVX2 source halves contain ones and twos. Bit 7 masks every low byte.
 static byte[] Halves(byte low, byte high) =>
     Enumerable.Repeat(low, 16).Concat(Enumerable.Repeat(high, 16)).ToArray();
@@ -546,21 +562,7 @@ foreach ((string name, byte low, byte high) in new (string, byte, byte)[]
         throw new InvalidOperationException($"The compiled {name} differs from its counterexample.");
     verification.VerifyContractVariant(assembly, "Examples", selectors["Shuffle256"],
         Path.Combine(root, "ShuffleContract"), assembly, selectors[name], Path.Combine(root, name),
-        "open Tests.ShuffleContract", """
-        set_option maxRecDepth 8192 in
-        /-- The compiled shuffle reads each valid span once and leaves caller memory unchanged. -/
-        theorem correctness : shuffle.Holds Extracted.program 0 := by
-          rintro ⟨s, c⟩ memory ⟨⟨sv, ss, sr⟩, cv, cs, cr⟩
-          apply MethodContract.Holds.intro (c := shuffle) (input := (s, c)) memory
-            (CIL.Vector.shuffleBytes256 s.bits c.bits) ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
-          refine ⟨32, ?_⟩
-          change invoke Extracted.program 32 0
-            [.bufferSpan (byteSpan s.address s.length), .bufferSpan (byteSpan c.address c.length)] memory =
-              .ok (memory, [.scalar (.v256 (CIL.Vector.shuffleBytes256 s.bits c.bits))])
-          have first := read_span memory s.address s.length s.bits sv ss sr []
-          have second := read_span memory c.address c.length c.bits cv cs cr [.scalar (.v256 s.bits)]
-          cil_checked_steps [sv, cv, first, second]
-        """, $$"""
+        "open Tests.ShuffleContract", ShuffleProof(256, "shuffle"), $$"""
         set_option maxRecDepth 16384 in
         /-- The extracted mutant returns the wrong bytes for the two readable spans. -/
         theorem correctness : shuffle.Refuted Extracted.program 0 := by
@@ -570,6 +572,38 @@ foreach ((string name, byte low, byte high) in new (string, byte, byte)[]
     Console.WriteLine($"PASS AVX2 byte shuffle contract and checked {name} counterexample");
 }
 
+
+var reversed = Path.Combine(root, "Shuffle128Reversed");
+Directory.CreateDirectory(reversed);
+var reversedImage = Path.Combine(reversed, "Examples.dll");
+using (var variant = ModuleDefinition.ReadModule(assembly))
+{
+    var method = variant.GetType("Examples.DivisionIntrinsics").Methods.Single(m => m.Name == "Shuffle128");
+    var loads = method.Body.Instructions.Where(i => i.OpCode.Code is Code.Ldarg_0 or Code.Ldarg_1).ToArray();
+    if (loads.Length != 2 || loads[0].OpCode.Code != Code.Ldarg_0 || loads[1].OpCode.Code != Code.Ldarg_1)
+        throw new InvalidOperationException("Expected the shuffle to load source and then control.");
+    (loads[0].OpCode, loads[1].OpCode) = (loads[1].OpCode, loads[0].OpCode);
+    variant.Write(reversedImage);
+}
+if (Ssse3.IsSupported)
+{
+    var source = Enumerable.Repeat((byte)1, 16).ToArray();
+    var control = Enumerable.Repeat((byte)0x80, 16).ToArray();
+    var reversedMethod = Assembly.Load(File.ReadAllBytes(reversedImage))
+        .GetType("Examples.DivisionIntrinsics")!.GetMethod("Shuffle128")!;
+    if (!RuntimeShuffle(runtime.GetMethod("Shuffle128")!, source, control).SequenceEqual(new byte[16]) ||
+        !RuntimeShuffle(reversedMethod, source, control).SequenceEqual(control))
+        throw new InvalidOperationException("The SSSE3 shuffle or its reversed variant disagrees with the witness.");
+}
+verification.VerifyContractVariant(assembly, "Examples", selectors["Shuffle128"], Path.Combine(root, "Shuffle128Contract"),
+    reversedImage, selectors["Shuffle128"], reversed, "open Tests.ShuffleContract", ShuffleProof(128, "shuffle128"), """
+    set_option maxRecDepth 8192 in
+    /-- Reversing the two loads returns sixteen 0x80 bytes where the masked shuffle requires zeros. -/
+    theorem correctness : shuffle128.Refuted Extracted.program 0 := by
+      apply refuted_of_reversed128 (fuel := 32)
+      rfl
+    """, profile: "x64-sse42", imports: "import Tests.ShuffleContract");
+Console.WriteLine("PASS SSSE3 byte shuffle contract and checked operand reversal");
 
 // A forged operation at the hardware call must fail the model agreement of the complete method.
 var rejectedHardware = new RejectedEvidence(Path.Combine(root, "RejectedHardware"));
