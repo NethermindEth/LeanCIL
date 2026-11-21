@@ -338,10 +338,17 @@ if (!Reads("ReadWord", 8) || Reads("ReadWord", 4) || Reads("ReadSigned", 1) || R
     Store("WritePointerWord") != (8, "transfer_i64_of_write") || Store("WriteHalf") != (2, "transfer_i32_of_write") ||
     Store("ReadWord") is not null || Store("WritePointerAggregate") is not null)
     throw new Exception("The loop outline selected an incorrect scalar read width or store theorem");
-var negativeOffset = Make("AddOffset", ulong.MaxValue - 7, true);
-if (!Equals(Property(negativeOffset, "Stride"), ulong.MaxValue - 7) ||
-    !Equals(Property(negativeOffset, "Signed"), true))
-    throw new Exception("A negative stride lost its signed two's complement value");
+var offsetModel = Model("UnsafeModels").GetMethod("Offset", Declared)!;
+(ulong Stride, bool Signed)? Offset(Instruction site) =>
+    ((ulong, bool)?)offsetModel.Invoke(null, [site, "x64"]);
+var pointers = module.GetType("Examples.UnsafeReferences");
+Instruction PointerCall(string name) => pointers.Methods.Single(method => method.Name == name)
+    .Body.Instructions.Single(site => site.OpCode.Code == Code.Call);
+var subtract = PointerCall("SubtractPointer");
+if (Offset(subtract) != (ulong.MaxValue - 7, true) || Offset(PointerCall("AddPointer")) != (8UL, true) ||
+    Offset(Instruction.Create(OpCodes.Callvirt, (MethodReference)subtract.Operand)) is not null ||
+    Offset(TransferSite("ReadWord")) is not null)
+    throw new Exception("Incorrect displacement for a retained Unsafe call");
 try
 {
     Make("Constant", 32, -1L, true);

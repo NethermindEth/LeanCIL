@@ -11,20 +11,31 @@ internal static class UnsafeModels
 
     // A modelled helper keeps its call. Extractor analyses read the operation selected for that call.
     internal static Operation? CallModel(MethodReference reference, string architecture) =>
-        ClassifyCall(reference, architecture, out _);
+        ClassifyCall(reference, architecture, out _, out _);
 
     // Proof outlines read the closed storage type from the validated unaligned call at this site.
     internal static TypeReference? UnalignedStorage(Instruction site, string name, string architecture)
     {
         if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod call || call.Name != name)
             return null;
-        ClassifyCall(call, architecture, out var storage);
+        ClassifyCall(call, architecture, out var storage, out _);
         return storage;
     }
 
-    static Operation? ClassifyCall(MethodReference reference, string architecture, out TypeReference? storage)
+    /// <summary>The signedness and native-width stride of a retained Unsafe pointer addition.</summary>
+    internal static (ulong Stride, bool Signed)? Offset(Instruction site, string architecture)
+    {
+        if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod
+            { Name: "Add" or "Subtract" or "AddByteOffset" } call) return null;
+        ClassifyCall(call, architecture, out _, out var offset);
+        return offset;
+    }
+
+    static Operation? ClassifyCall(MethodReference reference, string architecture, out TypeReference? storage,
+        out (ulong Stride, bool Signed)? offset)
     {
         storage = null;
+        offset = null;
         if (reference.Name is "As" or "AsRef" or "BitCast")
         {
             if (reference.DeclaringType is TypeSpecification ||
@@ -102,7 +113,8 @@ internal static class UnsafeModels
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
         // Native-width negative strides reuse the checked wrapping offset operation.
         var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
-        return new AddOffset(stride, signed);
+        offset = (stride, signed);
+        return Unoutlined.Site;
     }
 
     // An element of field or vector storage has a width; any other element is unsupported.

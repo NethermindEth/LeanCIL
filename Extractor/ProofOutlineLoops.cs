@@ -49,10 +49,6 @@ internal static partial class ProofOutline
             _ => null
         };
 
-        /// <summary>The checked displacement applied by a retained Unsafe offset call.</summary>
-        internal static AddOffset? OffsetOf(Operation operation) =>
-            operation as AddOffset;
-
         /// <summary>An operation that steps without a branch, a fault or memory: arithmetic, conversions, constants
         /// and the calls modelled as one, and the bit-count calls, which step as their total intrinsic.</summary>
         internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
@@ -224,9 +220,10 @@ internal static partial class ProofOutline
             var imports = new List<string> { "CIL.Verification", "CIL.StructuralLabels" };
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
-            if (body.Operations.Any(op => Body.OffsetOf(op) is not null ||
-                    op is StackOperation { Kind: Code.Add }) &&
-                spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
+            if (spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) &&
+                Enumerable.Range(0, body.Operations.Length).Any(pc =>
+                    body.Operations[pc] is StackOperation { Kind: Code.Add } || body.Operations[pc] is Unoutlined &&
+                    UnsafeModels.Offset(method.Body.Instructions[pc], extraction.Architecture) is not null) ||
                 callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
             if (spec.Framed) imports.Add("CIL.Safety.ObjectFields");
@@ -633,8 +630,8 @@ internal static partial class ProofOutline
             operation is StackOperation { IsArithmetic: true } arithmetic ? arithmetic.Symbol : null;
 
         /// <summary>The byte stride of a signed reference addition.</summary>
-        static int? ReferenceStride(Operation operation) =>
-            Body.OffsetOf(operation) is { Signed: true, Stride: <= int.MaxValue } offset
+        static int? ReferenceStride(Operation operation, (ulong Stride, bool Signed)? displacement) =>
+            displacement is { Signed: true, Stride: <= int.MaxValue } offset
                 ? Convert.ToInt32(offset.Stride)
                 : operation is StackOperation { Kind: Code.Add } ? 1 : null;
 
@@ -1445,6 +1442,7 @@ internal static partial class ProofOutline
             var op = body.Operations[state.Pc];
             var site = method.Body.Instructions[state.Pc];
             var scalarStore = ScalarStore(op, site, extraction.Architecture);
+            var displacement = op is Unoutlined ? UnsafeModels.Offset(site, extraction.Architecture) : null;
             var stack = state.Stack;
             Value Pop()
             {
@@ -1515,7 +1513,7 @@ internal static partial class ProofOutline
                 var width = constant.Width == 64 ? 8 : 4;
                 stack.Add(new Number(ConstantTerm(constant), width, Value: constant.Numeral ? constant.Value : null));
             }
-            else if (ReferenceStride(op) is int stride && current is not null &&
+            else if (ReferenceStride(op, displacement) is int stride && current is not null &&
                 !state.Called && stack.Count >= 2 &&
                 stack[^1] is Number { Width: 4, Narrow: false } referenceIndex &&
                 stack[^2] is ReferenceArgument reference &&
@@ -1697,7 +1695,7 @@ internal static partial class ProofOutline
                 state.Facts.AddRange(ElementWrite(added, stored.Term, elementWrite.Lemma));
                 state.Moved = true;
             }
-            else if (Body.OffsetOf(op) is not null)
+            else if (displacement is not null)
                 return Stop("an `Unsafe.Add` other than one of a reference argument by a 32-bit index, written " +
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
