@@ -348,7 +348,7 @@ theorem Memory.Equivalent.classFieldStore {m n : Memory} (same : m.Equivalent n)
 #print axioms Memory.Equivalent.classFieldStore
 
 /-- A string literal loads the same bound object from equivalent memories. -/
-private theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same : m.Equivalent n)
+theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same : m.Equivalent n)
     (text : String) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (stringLiteralInstruction text stack m)
       (stringLiteralInstruction text stack n) := by
@@ -569,7 +569,6 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.wideArithmeticInstruction _ _
     · exact same.staticSpanInstruction _ _
     · exact same.staticSpanInstruction _ _
-    · exact same.stringLiteralInstruction _ _
     · exact same.throwIfNullInstruction _
     · exact same.zeroGuardInstruction _ _ _ _
     · exact same.comparisonGuardInstruction _ _ _ _

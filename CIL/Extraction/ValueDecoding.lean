@@ -247,8 +247,8 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldtoken (.type expected) => match emitted with
     | .ldtoken (.type actual) => expected == actual
     | _ => false
-  | .memory (.stringLiteral text) => match emitted with
-    | .memory (.stringLiteral actual) => decide (text = actual)
+  | .ldstr text => match emitted with
+    | .ldstr actual => decide (text = actual)
     | _ => false
   | .memory (.copyBlock expected) => match emitted with
     | .memory (.copyBlock actual) => expected == actual
@@ -398,7 +398,7 @@ private def plainValue? (previous : Option RawInstruction) (raw : RawInstruction
   -- Constants, with the operand ranges ECMA-335 gives each form.
   | 20, .none => emit .ldnull
   | 114, .text text =>
-    if literalTextSupported text then emit (.memory (.stringLiteral text)) else none
+    if literalTextSupported text then emit (.ldstr text) else none
   | 21, .none => emit (.ldc_i4 (BitVec.ofInt 32 (-1)))
   | 31, .integer value =>
     if -128 <= value && value < 128 then emit (.ldc_i4 (BitVec.ofInt 32 value)) else none

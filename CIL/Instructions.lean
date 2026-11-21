@@ -234,6 +234,8 @@ inductive Instruction where
   | ldc_i8 (value : W64)
   /-- `ldnull`: the null object reference. -/
   | ldnull
+  /-- `ldstr` pushes the interned object bound to the decoded user-string operand. -/
+  | ldstr (text : String)
   | conv_i1 | conv_i2 | conv_u2
   | conv_i8 | conv_i4 | conv_u1 | conv_u4 | conv_u8 | conv_u | conv_i | not | add | sub | mul
   | and | or

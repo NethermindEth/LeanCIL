@@ -125,7 +125,7 @@ def observerCount : CIL.Instruction → Nat
   | .memory operation => operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
-  | .ldc_i8 _ | .ldnull | .dup | .pop | .br _
+  | .ldc_i8 _ | .ldnull | .ldstr _ | .dup | .pop | .br _
   | .throw _ | .unadmitted _ => 0
   -- A linked call checks its method's arguments, and a call's model the operands it observes.
   | .call .. => 0
@@ -1259,7 +1259,6 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .spanCreate | .createSpan _ => staticSpanInstruction operation stack memory
-  | .stringLiteral text => stringLiteralInstruction text stack memory
   | .throwIfNull => throwIfNullInstruction stack memory
   | .zeroGuard guard width signed => zeroGuardInstruction guard width signed stack memory
   | .comparisonGuard guard width signed =>

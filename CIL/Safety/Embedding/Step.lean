@@ -859,6 +859,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case call method prefixes => exact step_relabel_call method prefixes
   case callvirt method => exact step_relabel_callvirt method
   case newobj constructor => exact step_relabel_newobj constructor
+  case ldstr => plain_cases; lockstep
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
   case ldsflda field => exact step_relabel_ldsflda field
@@ -1468,6 +1469,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case call method prefixes => exact step_raise_call method prefixes
   case callvirt method => exact step_raise_callvirt method
   case newobj constructor => exact step_raise_newobj constructor
+  case ldstr => plain_cases; raise_lockstep
   case memory operation =>
     plain_cases
     simp only [staticInstruction_congr context.statics]

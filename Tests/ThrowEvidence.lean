@@ -57,7 +57,7 @@ theorem message_operands :
 theorem string_and_throw :
     let closed := raw [i 114 (.text "keep"), i 38, i 114 (.text "message"), i 115 argument, i 122]
     methodCode .scalar {} [] (List.replicate 5 true) closed =
-      [.memory (.stringLiteral "keep"), .pop, .nop, .nop, .throw .argument] := rfl
+      [.ldstr "keep", .pop, .nop, .nop, .throw .argument] := rfl
 #print axioms string_and_throw
 
 /-- Rejecting an oversized message prefix still discovers an admitted fold in its suffix. -/

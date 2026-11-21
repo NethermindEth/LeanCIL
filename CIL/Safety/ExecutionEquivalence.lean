@@ -518,6 +518,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        obtain ⟨equivalent, rfl⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (first
+         | apply ResultEquivalent.bind (same.stringLiteralInstruction _ _)
          | apply ResultEquivalent.bind (same.copyInitializedBytes _ _)
          | apply ResultEquivalent.bind (same.initializeBytes _ _)
          | apply ResultEquivalent.bind (same.transferObject _ _ _)

@@ -169,9 +169,6 @@ inductive MemoryOp where
   | arraySpan (element : ArrayElement) (writable : Bool) (range : ArraySpanRange)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
-  /-- `ldstr`: the interned string object the caller bound to `text`. No operation reads its
-      characters. -/
-  | stringLiteral (text : String)
   /-- `ArgumentNullException.ThrowIfNull(argument, paramName)`: throws for a null argument. The
       parameter name is an opaque string nothing reads. -/
   | throwIfNull
@@ -211,7 +208,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .arraySpan _ _ range => range.argumentCount
   | .spanReinterpret .. | .spanReadOnly => 1
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _ => 2
-  | .nullRef | .stringLiteral _ | .spanEmpty .. => 0
+  | .nullRef | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue .. | .createSpan _
   | .spanReference | .spanLength | .isNullRef => 1
 

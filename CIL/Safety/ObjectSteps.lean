@@ -315,13 +315,11 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       .ok (.next (pc + 1) (.object .null :: stack) frame memory) := id rfl
 
 /-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
-@[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
-    step body (.memory (.stringLiteral text)) pc args frame stack memory = do
+@[cil_step high] theorem step_ldstr_eq (text : String) (stack : List Value) :
+    step body (.ldstr text) pc args frame stack memory = do
       let value ← literalObject memory text
       return .next (pc + 1) (value :: stack) frame memory := by
-  simp only [step, observerCount, staticInstruction, memoryInstruction,
-    stringLiteralInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
-    List.any, Bool.false_eq_true, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  simp only [step, stringLiteralInstruction, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases literalObject memory text <;> rfl
 
 /-- `ThrowIfNull` throws `ArgumentNullException` for a null argument; otherwise it pops the
@@ -1037,7 +1035,7 @@ simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expr
 #print axioms step_newarr_i64_eq
 #print axioms allocateElements_value
 #print axioms allocateElements_reference
-#print axioms step_stringLiteral_eq
+#print axioms step_ldstr_eq
 #print axioms step_ldlen_object_eq
 #print axioms step_ldlen_object_null_eq
 #print axioms step_ldelem_ref_i32_eq

@@ -1687,6 +1687,12 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case callvirt method => exact step_appendLocals_callvirt method
     case newobj constructor =>
       exact step_appendLocals_newobj constructor
+    case ldstr =>
+      intro body pc args frame extra stack memory outcome stepped kept
+      subst stepped
+      refine PaddedAgrees.kept ?_ kept
+      unfold step
+      padded_natural
     case memory operation =>
       exact step_appendLocals_memory operation
     case ldsfld field => exact step_appendLocals_ldsfld field

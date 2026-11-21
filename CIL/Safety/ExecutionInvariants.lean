@@ -635,8 +635,9 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
           | (apply staticAddress_contract; assumption)
     | solve |
         apply StepContract.instruction
-        apply instruction_contract
-        assumption
+        first
+          | exact stringLiteralInstruction_contract _ _ _ _ _ (by assumption)
+          | exact instruction_contract _ _ _ _ _ (by assumption)
     | solve |
         apply StepContract.viewed (by assumption)
         apply StepContract.instruction

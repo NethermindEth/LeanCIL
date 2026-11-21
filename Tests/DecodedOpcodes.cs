@@ -185,7 +185,7 @@ Console.WriteLine("PASS the decoded tail preserves its holes and the feature che
 foreach (var (name, selector, method, code) in new[]
 {
     ("SameText", "Strings::SameText()", 0,
-        """[.memory (.stringLiteral "x"), .memory (.stringLiteral "x"), .ceq, .ret]"""),
+        """[.ldstr "x", .ldstr "x", .ceq, .ret]"""),
     ("WordFlag", "GenericReceivers::CountWide(ulong)", 2, """
         (let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
          let getType := CIL.Extraction.getTypeFromHandle.method

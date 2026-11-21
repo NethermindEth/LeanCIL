@@ -106,6 +106,14 @@ theorem stepTransport : StepTransport := by
     case ldelema.refl element readOnly =>
       exact ⟨mapping, .refl mapping, memories.stepLdelema frames sourceFormed sourceBody
         targetBody metadata element readOnly pc arguments stack bounds observable⟩
+    case ldstr.refl text =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      change SuccessOrThrow (do
+        let (memory, values) ← stringLiteralInstruction text stack source
+        return FrameAction.next (pc + 1) values sourceFrame memory) at observable
+      apply (memories.stringLiteralInstructionResult sourceFormed text stack observable.bind_left).bind
+      rintro ⟨_, _⟩ ⟨_, _⟩ ⟨related, rfl⟩
+      exact .ok (.next related frames)
     case ldsfld.refl field =>
       exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
         targetBody metadata field pc arguments stack⟩

@@ -99,7 +99,7 @@ def named : List (RawInstruction × Instruction) := [
   -- Stack shuffling and return.
   (⟨0, 0, .none⟩, .nop), (⟨0, 37, .none⟩, .dup), (⟨0, 38, .none⟩, .pop), (⟨0, 42, .none⟩, .ret),
   -- Constants.
-  (⟨0, 114, .text "literal"⟩, .memory (.stringLiteral "literal")),
+  (⟨0, 114, .text "literal"⟩, .ldstr "literal"),
   (⟨0, 20, .none⟩, .ldnull), (⟨0, 21, .none⟩, .ldc_i4 (-1)), (⟨0, 22, .none⟩, .ldc_i4 0),
   (⟨0, 23, .none⟩, .ldc_i4 1),
   (⟨0, 24, .none⟩, .ldc_i4 2), (⟨0, 25, .none⟩, .ldc_i4 3), (⟨0, 26, .none⟩, .ldc_i4 4),
@@ -229,10 +229,10 @@ def decodedNamed : List (Option Instruction) :=
 /-- A string load binds its text and a type token binds the type it names. Field tokens require site binding. -/
 theorem literal_operands :
     let literal : RawInstruction := ⟨0, 114, .text "original"⟩
-    valueEncodingMatches none literal (.memory (.stringLiteral "original")) = true ∧
-    valueEncodingMatches none literal (.memory (.stringLiteral "changed")) = false ∧
+    valueEncodingMatches none literal (.ldstr "original") = true ∧
+    valueEncodingMatches none literal (.ldstr "changed") = false ∧
     valueEncodingMatches none literal .nop = false ∧
-    scalarEmissionMatches none none literal [] (.memory (.stringLiteral "changed")) = false ∧
+    scalarEmissionMatches none none literal [] (.ldstr "changed") = false ∧
     scalarEmissionMatches none none literal [] .nop = false ∧
     Instruction.ofRaw? none ⟨0, 114, .none⟩ = none ∧
     Instruction.ofRaw? none ⟨0, 208, .type dog⟩ = some (.ldtoken (.type dog)) ∧
@@ -245,7 +245,7 @@ theorem literal_operands :
 theorem literal_characters :
     let decode := fun text => Instruction.ofRaw? none ⟨0, 114, .text text⟩
     let supported := "a\t\n\r\uFFFF"
-    decode supported = some (.memory (.stringLiteral supported)) ∧
+    decode supported = some (.ldstr supported) ∧
       decode "a\x08b" = none ∧ decode "a\x0cb" = none ∧
       decode (String.singleton (Char.ofNat 0x10000)) = none := by decide +kernel
 #print axioms literal_characters
@@ -740,7 +740,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 93, undecoded 5 of 98 constructors -/
+/-- info: decoded 94, undecoded 5 of 99 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

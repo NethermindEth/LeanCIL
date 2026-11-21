@@ -1355,7 +1355,6 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact staticSpanInstruction_contract _ _ _ _ _ h
     · exact staticSpanInstruction_contract _ _ _ _ _ h
-    · exact stringLiteralInstruction_contract _ _ _ _ _ h
     · exact throwIfNullInstruction_contract _ _ _ _ h
     · exact zeroGuardInstruction_contract _ _ _ _ _ _ _ h
     · exact comparisonGuardInstruction_contract _ _ _ _ _ _ _ h

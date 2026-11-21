@@ -138,8 +138,7 @@ def viewOperandCount (operation : CIL.MemoryOp) : Nat :=
   | .asRef | .add .. | .byteOffset | .bitcastByteBool | .bitcastValue .. | .nullRef | .isNullRef
   | .throwIfNull | .zeroGuard .. | .comparisonGuard ..
   | .copyBlock _ | .initBlock _
-  | .load128 | .load256 | .load512 | .store128 | .store256 | .store512
-  | .stringLiteral _ => 0
+  | .load128 | .load256 | .load512 | .store128 | .store256 | .store512 => 0
 
 /-- A value `checkedValue` accepts is passed as that same checked value, since it is no home. -/
 theorem callArgument_of_checked {frame : Frame} {memory : Memory} {value result : Value}
@@ -929,6 +928,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         | .object .null :: _ => .error (.thrown .nullReference)
         | _ => .error .invalidState
     | _ => .error unlinkedCall
+  | .ldstr text, _ => do
+    let (memory, values) ← stringLiteralInstruction text stack m
+    return .next (pc + 1) values frame memory
   | .memory operation, _ =>
     let operands ← viewOperands frame m (viewOperandCount operation) stack
     let (memory, values) ← staticInstruction body pc operation operands m

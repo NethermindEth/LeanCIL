@@ -1326,13 +1326,13 @@ theorem struct_field_forgeries_refused :
 -- `ldstr` loads exactly its own text, nothing else loads a literal, and a folded throw's
 -- message emits nothing.
 example : scalarEmissionMatches none none (i 114 (.text "a")) []
-    (.memory (.stringLiteral "a")) = true := by decide
+    (.ldstr "a") = true := by decide
 example : scalarEmissionMatches none none (i 114 (.text "a")) []
-    (.memory (.stringLiteral "b")) = false := by decide
-example : scalarEmissionMatches none none (i 0) [] (.memory (.stringLiteral "a")) = false := by
+    (.ldstr "b") = false := by decide
+example : scalarEmissionMatches none none (i 0) [] (.ldstr "a") = false := by
   decide
 example : scalarEmissionMatches (some .interior) none (i 114 (.text "a")) []
-    (.memory (.stringLiteral "a")) = false := by decide
+    (.ldstr "a") = false := by decide
 example : scalarEmissionMatches none none (i 114 (.text "a")) [] .nop = false := by decide
 
 /-- A genuine open guard declaration with the element substituted in the closed reference. -/

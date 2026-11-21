@@ -856,7 +856,7 @@ private theorem formObject_observable {memory : Memory} {reference : Reference}
 #print axioms formObject_observable
 
 /-- A string literal loads the renamed binding of its text, formed alike. -/
-private theorem Memory.Renamed.stringLiteralInstructionResult {mapping : AllocationRenaming}
+theorem Memory.Renamed.stringLiteralInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
     (text : String) (stack : List Value)
@@ -1326,7 +1326,6 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
       | with_reducible exact related.arrayFillInstructionResult formed _ _ _ bounds observable
       | with_reducible exact related.wideArithmeticInstructionResult _ _ bounds observable
       | with_reducible exact related.staticSpanInstructionResult _ _ bounds observable
-      | with_reducible exact related.stringLiteralInstructionResult formed _ _ observable
       | with_reducible exact related.throwIfNullInstructionResult _ observable
       | with_reducible exact related.zeroGuardInstructionResult _ _ _ _ observable
       | with_reducible exact related.comparisonGuardInstructionResult _ _ _ _ observable

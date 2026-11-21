@@ -408,7 +408,7 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
     (emitted : Instruction) : Bool :=
   match instruction.opcode, instruction.operand, emitted with
   | 114, .text _, .nop => role ∈ [some .head, some .interior]
-  | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
+  | 114, .text text, .ldstr actual => role == none && text == actual
   | _, _, _ => false
 
 /-- The decoded `readonly.` rule at one site after `previous`: `readonly.` and `ldelema` emit
@@ -454,7 +454,7 @@ def scalarEmissionMatches (role : Option FoldRole)
     | .call .. => instruction.opcode == 41
   else if arrayEmission emitted then arrayMatches previous instruction stack emitted skipEncoding
   else if instruction.opcode == 114 ||
-      (match emitted with | .memory (.stringLiteral _) => true | _ => false) then
+      (match emitted with | .ldstr _ => true | _ => false) then
     stringLiteralMatches role instruction emitted
   else if instanceFieldSite instruction emitted then
     if classOwned instruction then
