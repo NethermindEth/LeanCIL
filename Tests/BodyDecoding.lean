@@ -96,6 +96,14 @@ theorem switch_decodes_to_instruction_indices :
     bodyMatches (evidence switchBytes) switchMethod [] = true := by decide +kernel
 #print axioms switch_decodes_to_instruction_indices
 
+/-- Repeated destinations retain their positions in the decoded switch table. -/
+theorem switch_preserves_repeated_targets :
+    bodyMatches (evidence [0x52, 0x02, 0x45, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
+        1, 0, 0, 0, 0x2A, 0x2A])
+      (method 8 false [] [instr 0 0x02, instr 1 0x45 (.targets [3, 2, 3]),
+        instr 18 0x2A, instr 19 0x2A]) [] = true := by decide +kernel
+#print axioms switch_preserves_repeated_targets
+
 /-- Two-byte opcodes `0xFE nn`: `ceq`, a long local and the unsigned `unaligned.` prefix. -/
 private def twoByteBytes : List Nat :=
   [0x36, 0x02, 0x03, 0xFE, 0x01, 0xFE, 0x0D, 0x05, 0x00, 0xFE, 0x12, 0xFF, 0x2A, 0x2A]

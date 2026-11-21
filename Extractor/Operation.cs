@@ -69,8 +69,6 @@ internal sealed record Jump(int Opcode, int Target) : Operation
     };
 }
 
-internal sealed record Switch(ValueList<int> Targets) : Operation;
-
 /// <summary>A return whose value and storage width are determined by the method declaration.</summary>
 internal sealed record Return : Operation;
 

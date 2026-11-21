@@ -105,11 +105,11 @@ var choose = Instruction.Create(OpCodes.Switch, [destination, destination]);
 caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_0));
 caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
-if (!((IEnumerable<int>)Property(Operation(choose), "Targets")).SequenceEqual([2, 2]))
-    throw new Exception("Switch target order or duplicates changed");
+if (Operation(choose).GetType() != Model("Unoutlined"))
+    throw new Exception("The switch has a redundant outline descriptor");
 linked.Clear();
 if (Links(linked).Count != 0 || linked.Count != 0) throw new Exception("A branch carries a call link");
-Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
+Console.WriteLine("PASS call indexes reject missing callees and a switch requires no outline descriptor or call link");
 var runtimeScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
 module.TypeSystem.UInt64.Scope = runtimeScope;
 var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
