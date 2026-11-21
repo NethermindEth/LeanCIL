@@ -1,6 +1,6 @@
 import CIL.Safety.StepComposition
 import CIL.Safety.ObjectAllocationLemmas
-import CIL.Safety.ValueSteps
+import CIL.Safety.InstructionSteps
 
 /-!
 # Object step equations
@@ -900,8 +900,19 @@ simproc [cil_step] reduceFieldLoad (step _ (.ldfld _) _ _ _ _ _) := fun expressi
     return ← equationStep (mkAppN (mkConst ``step_ldfld_value_eq)
       (leading ++ #[offset, width, signed, proof, stack]))
   | (``CIL.FieldShape.aggregate, #[offset, size]) =>
-    return ← equationStep (mkAppN (mkConst ``step_ldfld_aggregate_eq)
-      (leading ++ #[offset, size, proof, stack]))
+    let resolved := leading ++ #[offset, size, proof]
+    let fallback := mkAppN (mkConst ``step_ldfld_aggregate_eq) (resolved.push stack)
+    let_expr List.cons _ receiver rest := stack | return ← equationStep fallback
+    let_expr Value.scalar value := receiver | return ← equationStep fallback
+    match_expr value with
+    | CIL.Value.aggregate bytes =>
+      return ← equationStep (mkAppN (mkConst ``step_ldfld_aggregate_value_eq)
+        (resolved ++ #[bytes, rest]))
+    | CIL.Value.snapshot cell bytes =>
+      let_expr CIL.SnapshotShape.aggregate total := cell | return ← equationStep fallback
+      return ← equationStep (mkAppN (mkConst ``step_ldfld_aggregate_snapshot_eq)
+        (resolved ++ #[total, bytes, rest]))
+    | _ => return ← equationStep fallback
   | _ => pure ()
   let_expr CIL.FieldShape.classSlot offset slot := shape | equationStep generic
   let_expr List.cons _ receiver rest := stack | equationStep generic
