@@ -61,7 +61,7 @@ theorem successful_instruction_prefix (first second : List CIL.Instruction) (sta
 /-- Reference validity is independent of readable initialization and access
     width. A span's accessible bytes are checked by the memory operation. -/
 def Value.Valid (m : Memory) : Value → Prop
-  | .methodPointer _ | .methodTable _ | .object .null => True
+  | .typeHandle _ | .runtimeType _ | .methodPointer _ | .methodTable _ | .object .null => True
   | .object (.address r) => formObject m (.address r) = .ok (.object (.address r))
   | .scalar value => numericValue value = true
   | .bufferSpan view => view.validate m = .ok ()
@@ -354,7 +354,7 @@ theorem formValue_readOnly_valid (m : Memory) (reference : ManagedReference) (va
 theorem checkedValue_valid (m : Memory) (value result : Value)
     (h : checkedValue m value = .ok result) : result = value ∧ result.Valid m := by
   cases value with
-  | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
+  | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ => cases h; exact ⟨rfl, trivial⟩
   | spanHome _ => cases h
   | object r =>
     exact ⟨formObject_returns_input h, formObject_result_valid h⟩
@@ -398,7 +398,7 @@ theorem checkedValue_valid (m : Memory) (value result : Value)
 theorem checkedValue_of_valid (m : Memory) (value : Value) (valid : value.Valid m)
     (free : value.isHome = false) : checkedValue m value = .ok value := by
   cases value with
-  | methodPointer _ | methodTable _ => rfl
+  | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ => rfl
   | spanHome _ => cases free
   | object r =>
     cases r with
@@ -426,7 +426,7 @@ theorem ValuesValid.preserve {m result : Memory} {values : List Value}
   intro value member
   have hv := valid value member
   cases value with
-  | scalar value | methodPointer _ | methodTable _ | spanHome _ => exact hv
+  | typeHandle _ | runtimeType _ | scalar value | methodPointer _ | methodTable _ | spanHome _ => exact hv
   | object r =>
     cases r with
     | null => exact True.intro

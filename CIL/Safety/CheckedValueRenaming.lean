@@ -58,7 +58,7 @@ theorem Memory.Renamed.checkedValue {mapping : AllocationRenaming}
     ResultRenamed mapping (fun left right => right = mapping.value left)
       (checkedValue source value) (checkedValue target (mapping.value value)) := by
   cases value with
-  | methodPointer _ | methodTable _ => exact .ok rfl
+  | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ => exact .ok rfl
   | spanHome _ => exact .error .invalidState
   | scalar value =>
     dsimp only [AllocationRenaming.value, CIL.Safety.checkedValue]

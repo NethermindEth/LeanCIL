@@ -136,7 +136,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference _ => exact .error _
     | span _ _ => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | root root | readOnlyRoot root =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -147,7 +147,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
       exact .ok ⟨rfl, same⟩
     | scalar scalar => cases scalar <;> exact .error _
     | span reference length => exact .error _
-    | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ | spanHome _ =>
+    | typeHandle _ | runtimeType _ | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _ | spanHome _ =>
       exact .error _
   | bytes kind reference =>
     cases value with
@@ -171,7 +171,7 @@ theorem Memory.Equivalent.storeLocal {m n : Memory} (same : m.Equivalent n)
     | reference reference => exact .error _
     | span reference length => exact .error _
     | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | span width writable stored =>
     cases value
     case scalar scalar => cases scalar <;> exact .error _

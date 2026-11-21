@@ -41,6 +41,16 @@ theorem AllocationRenaming.checkedIntrinsic (mapping : AllocationRenaming)
     | split
 #print axioms AllocationRenaming.checkedIntrinsic
 
+/-- Scoped type identity has the same result or unsupported fault under every allocation map. -/
+theorem AllocationRenaming.runtimeTypeEqual (mapping : AllocationRenaming)
+    (left right : CIL.Extraction.TypeExpr) :
+    ResultRenamed mapping Eq (CIL.Safety.runtimeTypeEqual left right)
+      (CIL.Safety.runtimeTypeEqual left right) := by
+  unfold CIL.Safety.runtimeTypeEqual
+  split <;> first | exact .ok rfl | exact .error _
+
+#print axioms AllocationRenaming.runtimeTypeEqual
+
 /-- Scalar decoding has the same numeric checks and rejects the same reference shapes. -/
 theorem LocalIndexMap.scalarOperands (indices : LocalIndexMap) (mapping : AllocationRenaming)
     (values : List Value) :

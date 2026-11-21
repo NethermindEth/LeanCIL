@@ -438,6 +438,12 @@ numeric slot identities must remain fixed, and the frame-rule placement must bel
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
 absence of a direct `stloc` is not evidence that an aliased byte-backed local keeps its value.
 
+`SegmentRun.compareRuntimeTypes` composes two `ldtoken` and `GetTypeFromHandle` pairs with a
+checked type comparison call. Supply the five instruction lookups, the call links and runtime
+model equations, and the scoped comparison fact `methodN_typeIdentityP` for its final pc `P`.
+The result gives the comparison bit on the original stack and preserves the frame and memory
+for every continuation fuel.
+
 ### Contracts for segment exits
 
 `CIL.Safety.SegmentContract` describes an incoming boundary state, permitted memory writes and

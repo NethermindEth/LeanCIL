@@ -112,6 +112,7 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 33, .integer (-1)⟩, .ldc_i8 (-1)),
   (⟨0, 33, .integer (-9223372036854775808)⟩, .ldc_i8 (-9223372036854775808)),
   (⟨0, 33, .integer 9223372036854775807⟩, .ldc_i8 9223372036854775807),
+  (⟨0, 208, .type dog⟩, .ldtoken (.type dog)),
   -- Arguments.
   (⟨0, 2, .none⟩, .ldarg 0), (⟨0, 3, .none⟩, .ldarg 1), (⟨0, 4, .none⟩, .ldarg 2),
   (⟨0, 5, .none⟩, .ldarg 3), (⟨0, 14, .argument 5⟩, .ldarg 5),
@@ -219,14 +220,13 @@ def named : List (RawInstruction × Instruction) := [
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
   ``Instruction.throw,
-  ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld,
-  ``Instruction.ldtoken]
+  ``Instruction.unadmitted, ``Instruction.ldsfld, ``Instruction.ldsflda, ``Instruction.stsfld]
 
 /-- What each named opcode decodes to after its predecessor. -/
 def decodedNamed : List (Option Instruction) :=
   named.map fun (raw, _) => Instruction.ofRaw? (predecessor raw) raw
 
-/-- A string load binds its text and a metadata token needs a separate decoding rule. -/
+/-- A string load binds its text and a type token binds the type it names. Field tokens require site binding. -/
 theorem literal_operands :
     let literal : RawInstruction := ⟨0, 114, .text "original"⟩
     valueEncodingMatches none literal (.memory (.stringLiteral "original")) = true ∧
@@ -235,7 +235,8 @@ theorem literal_operands :
     scalarEmissionMatches none none literal [] (.memory (.stringLiteral "changed")) = false ∧
     scalarEmissionMatches none none literal [] .nop = false ∧
     Instruction.ofRaw? none ⟨0, 114, .none⟩ = none ∧
-    Instruction.ofRaw? none ⟨0, 208, .type dog⟩ = none ∧
+    Instruction.ofRaw? none ⟨0, 208, .type dog⟩ = some (.ldtoken (.type dog)) ∧
+    valueEncodingMatches none ⟨0, 208, .type dog⟩ (.ldtoken (.type int32)) = false ∧
     Instruction.ofRaw? none ⟨0, 208, classOperand⟩ = none := by decide +kernel
 #print axioms literal_operands
 
@@ -261,11 +262,11 @@ theorem role_decodings :
       decoded .head ⟨0, 20, .none⟩ = some .ldnull ∧
       decoded .interior ⟨0, 20, .none⟩ = some .ldnull ∧
       decoded .head ⟨0, 20, .integer 0⟩ = none ∧
-      decoded .blocked call = none ∧ decoded (.result true) call = some (.ldc_i4 1) ∧
-      decoded (.result false) call = some (.ldc_i4 0) ∧
-      decoded (.typeBranch true) branch = some (.br 9) ∧
-      decoded (.typeBranch true) branch ≠ some (.br 8) ∧
-      decoded (.typeBranch false) branch = some .nop ∧
+      decoded .blocked call = none ∧ decoded (.result true) call = some (.call callSite.method) ∧
+      decoded (.result false) call = some (.call callSite.method) ∧
+      decoded (.typeBranch true) branch = some (.beq 9) ∧
+      decoded (.typeBranch true) branch ≠ some (.beq 8) ∧
+      decoded (.typeBranch false) branch = some (.beq 9) ∧
       decoded (.raise .argument) ⟨0, 122, .none⟩ = some (.throw .argument) ∧
       decoded (.raise .argument) ⟨0, 122, .none⟩ ≠ some (.throw .overflow) ∧
       decoded .argument ⟨0, 2, .none⟩ = some (.ldarg 0) ∧
@@ -739,7 +740,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 92, undecoded 6 of 98 constructors -/
+/-- info: decoded 93, undecoded 5 of 98 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

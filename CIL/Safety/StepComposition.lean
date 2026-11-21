@@ -1132,6 +1132,13 @@ theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
 
 #print axioms step_ldsflda_eq
 
+/-- A type token pushes its scoped metadata handle without reading or allocating memory. -/
+@[cil_step] theorem step_ldtoken_type_eq (type : CIL.Extraction.TypeExpr) (stack : List Value) :
+    step body (.ldtoken (.type type)) pc args frame stack memory =
+      .ok (.next (pc + 1) (.typeHandle type :: stack) frame memory) := id rfl
+
+#print axioms step_ldtoken_type_eq
+
 /-- A field `ldtoken` pushes the same reference as `ldsflda` of that field. Stated as the match
     a rewrite of the read leaves, so checking a stepped load never evaluates it. -/
 @[cil_step] theorem step_ldtoken_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :

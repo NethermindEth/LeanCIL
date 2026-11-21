@@ -286,12 +286,12 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- call exclusion, and the others are cleared.
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
-      rename_i loadsField addressesField storesField addressHome localAllocation loadsStatic
+      rename_i typeToken loadsField addressesField storesField addressHome localAllocation loadsStatic
         addressesStatic tokensStatic storesStatic loadsObject storesObject copiesObject
         resetsObject objectSize loadsTyped storesTyped addressesTyped calls constructs
         unadmitted offsetBeforeTable
         tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
-        convOvf convOvfUn
+        convOvf convOvfUn typesEqual typesBranchEqual typesBranchUnequal
         objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse
         objectBranchTrue castClass isInst storeHome allocatedArray
       guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
@@ -325,7 +325,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       guard_hyp isInst : ∀ (type : CIL.Extraction.TypeExpr) (value : ManagedReference)
         (rest : List Value), operation = .isinst type → stack = Value.object value :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
-        convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
+        convOvfUn typeToken typesEqual typesBranchEqual typesBranchUnequal objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
         objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
         localAllocation loadsField addressesField storesField loadsStatic addressesStatic
         tokensStatic storesStatic loadsObject storesObject copiesObject resetsObject objectSize
@@ -380,6 +380,10 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     all_goals repeat first
       | exact .ok (.next related frames)
       | exact .error _
+      | (apply (mapping.runtimeTypeEqual _ _).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
       | (apply (related.referenceSubtract _ (by assumption) _).bind
          intro first second same
          subst second

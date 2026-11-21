@@ -565,7 +565,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Stelem_Any, Code.Ldelema, Code.Ldobj, Code.Stobj, Code.Initobj, Code.Cpobj, Code.Sizeof,
         Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Call, Code.Constrained,
         Code.Callvirt, Code.Newobj, Code.Ldftn, Code.Calli, Code.Switch,
-        Code.Cpblk, Code.Initblk, Code.Unaligned
+        Code.Cpblk, Code.Initblk, Code.Unaligned, Code.Ldtoken
     }).ToFrozenSet();
 
     /// <summary>The opcodes extraction takes the decoder to read: `DecodedOpcodes`, unless a test narrows the set in
@@ -605,13 +605,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var instructions = method.Body.Instructions;
         var throws = Throws.Analyze(method);
-        var typeTests = TypeTests.Analyze(method);
         for (var pc = 0; pc < instructions.Count; pc++)
         {
             var instruction = instructions[pc];
             if (!reachable.Contains(instruction)) continue;
-            if (throws.Operands.Contains(instruction) || throws.Raises.ContainsKey(instruction) ||
-                typeTests.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction))
+            if (throws.Operands.Contains(instruction) || throws.Raises.ContainsKey(instruction))
                 continue;
             if (instruction.OpCode.Code == Code.Tail && instruction.Next?.OpCode.Code is Code.Call or Code.Calli)
                 continue;

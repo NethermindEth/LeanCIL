@@ -655,6 +655,47 @@ elab_rules : command
 
 /-! ## Runtime models -/
 
+/-- The type operand loaded by the instruction at a comparison input. -/
+private def loadedType? (ops : Array Expr) (pc : Nat) : MetaM (Option Expr) := do
+  let some op := ops[pc]? | return none
+  let_expr CIL.Instruction.ldtoken operand := ← whnfR op | return none
+  let_expr CIL.TokenOperand.type type := ← whnfR operand | return none
+  return some type
+
+/-- The preceding model fact identifies a checked GetTypeFromHandle call. -/
+private def isTypeGetter (body : Body) (pc : Nat) : MetaM Bool := do
+  let some info := (← getEnv).find? (body.name.appendAfter s!"_model{pc}") | return false
+  forallTelescope info.type fun _ conclusion => do
+    let_expr Eq _ _ result := conclusion | return false
+    let_expr Option.some _ model := result | return false
+    return model.isConstOf ``CIL.RuntimeModel.typeFromHandle
+
+/-- A decided comparison of the two types at a pair of checked token/getter sites.
+    An unresolved comparison supplies no equality fact. -/
+private def declareTypeIdentity (body : Body) (ops : Array Expr) (pc : Nat)
+    (simpSet : SimpExtension) : TermElabM Unit := do
+  unless pc ≥ 4 && (← isTypeGetter body (pc - 3)) && (← isTypeGetter body (pc - 1)) do return
+  let some left ← loadedType? ops (pc - 4) | return
+  let some right ← loadedType? ops (pc - 2) | return
+  let read := mkApp2 (mkConst ``CIL.Extraction.sameRuntimeType) left right
+  let proof? ← match_expr (← whnfR left) with
+    | CIL.Extraction.TypeExpr.aggregate identity layout =>
+      if ← isDefEq left right then
+        pure (some (mkApp2 (mkConst ``CIL.Extraction.sameRuntimeType_aggregate_self) identity layout))
+      else pure none
+    | _ => pure none
+  let (value, proof) ← match proof? with
+    | some proof => pure (mkConst ``Bool.true, proof)
+    | none => do
+      let_expr Option.some _ value := ← withDefault <| whnf read | return
+      let value ← withDefault <| whnf value
+      unless value.isConstOf ``Bool.false || value.isConstOf ``Bool.true do return
+      pure (value, ← mkEqRefl read)
+  body.prove s!"_typeIdentity{pc}" s!"The scoped type comparison at pc {pc} of `{body.name}`."
+    (← mkEq read (← mkAppM ``Option.some #[value])) proof
+  addSimpTheorem simpSet (body.name.appendAfter s!"_typeIdentity{pc}") (post := false)
+    (inv := false) .global (eval_prio default)
+
 /-- Each modelled call or constructor has a lookup fact for its opcode, method and environment. -/
 syntax "cil_runtime_models " ident : command
 
@@ -698,6 +739,8 @@ elab_rules : command
             (← mkEq read (← mkAppM ``Option.some #[model])) (← mkEqRefl read)
           addSimpTheorem simpSet (name.appendAfter s!"_model{pc}") (post := false)
             (inv := false) .global (eval_prio default)
+          if model.isAppOf ``CIL.RuntimeModel.typeEquality then
+            declareTypeIdentity body ops pc simpSet
 
 /-! ## Field and value shapes -/
 

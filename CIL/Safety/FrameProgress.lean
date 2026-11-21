@@ -115,7 +115,7 @@ def ParameterFits (kind : CIL.LocalKind) : Value → Prop
   | .scalar value => kind ≠ .reference ∧ ∃ number, localNumber kind value = .ok number
   | .reference _ => kind = .reference
   | .object _ => kind = .object
-  | .span _ _ => False
+  | .typeHandle _ | .runtimeType _ | .span _ _ => False
   | .readOnlyReference _ => kind = .reference
   | .bufferSpan view => kind = .span view.width view.writable ∧ (0 < view.width ∧ view.width < 2^64)
   | .array view => kind = .array view.elementType
@@ -133,7 +133,7 @@ theorem initializeParameter_succeeds (m : Memory) (activation : Nat) (kind : CIL
       makeLocal activation kind .unmodeled m = .ok (slot, owned, home) ∧
       storeLocal home slot value = .ok (final, result) := by
   cases value with
-  | spanHome _ => exact fits.elim
+  | typeHandle _ | runtimeType _ | spanHome _ => exact fits.elim
   | methodPointer pointer =>
     change kind = .methodPointer pointer.signature at fits
     subst kind

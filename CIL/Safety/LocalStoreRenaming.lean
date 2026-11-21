@@ -57,7 +57,7 @@ theorem Memory.Renamed.storeLocal {indices : LocalIndexMap} {mapping : Allocatio
     | scalar scalar =>
       cases scalar <;> first | exact .error _ | exact .ok ⟨rfl, related⟩
     | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | root stored | readOnlyRoot stored =>
     cases value with
     | reference reference | readOnlyReference reference =>
@@ -67,7 +67,7 @@ theorem Memory.Renamed.storeLocal {indices : LocalIndexMap} {mapping : Allocatio
       intro left right values
       exact .ok ⟨rfl, related⟩
     | scalar scalar => cases scalar <;> exact .error _
-    | span _ _ | bufferSpan _ | array _ | methodPointer _ | methodTable _ | object _
+    | span _ _ | bufferSpan _ | array _ | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _
     | spanHome _ => exact .error _
   | object stored =>
     cases value with
@@ -79,7 +79,7 @@ theorem Memory.Renamed.storeLocal {indices : LocalIndexMap} {mapping : Allocatio
       exact .ok ⟨rfl, related⟩
     | scalar scalar => cases scalar <;> exact .error _
     | reference _ | readOnlyReference _ | span _ _ | bufferSpan _ | array _
-    | methodPointer _ | methodTable _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | spanHome _ => exact .error _
   | bytes kind reference =>
     cases value with
     | scalar scalar =>
@@ -102,12 +102,12 @@ theorem Memory.Renamed.storeLocal {indices : LocalIndexMap} {mapping : Allocatio
            intro left right stored
            exact .ok ⟨rfl, stored⟩)
     | reference _ | span _ _ | bufferSpan _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
   | span width writable stored =>
     cases value with
     | scalar scalar => cases scalar <;> exact .error _
     | reference _ | readOnlyReference _ | array _
-    | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | object _ | spanHome _ => exact .error _
     | span reference length =>
       cases writable with
       | true => exact .error .invalidState
@@ -149,7 +149,7 @@ theorem Memory.Renamed.storeLocal {indices : LocalIndexMap} {mapping : Allocatio
         · exact .ok ⟨rfl, related⟩
         · exact .error _
     | span _ _ | readOnlyReference _ | bufferSpan _
-    | methodPointer _ | methodTable _ | reference _ | spanHome _ => exact .error _
+    | typeHandle _ | runtimeType _ | methodPointer _ | methodTable _ | reference _ | spanHome _ => exact .error _
     | array view =>
       dsimp only [CIL.Safety.storeLocal, AllocationRenaming.localSlot,
         LocalIndexMap.value, AllocationRenaming.arrayView, Value.hasUnspecified, Bool.and]

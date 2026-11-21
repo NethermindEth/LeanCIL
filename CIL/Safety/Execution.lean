@@ -81,6 +81,8 @@ theorem bitcastValue_numeric {source target : CIL.SnapshotShape} {input value : 
 def checkedValue (m : Memory) : Value → ExecutionResult Value
   | .methodPointer pointer => .ok (.methodPointer pointer)
   | .methodTable table => .ok (.methodTable table)
+  | .typeHandle type => .ok (.typeHandle type)
+  | .runtimeType type => .ok (.runtimeType type)
   | .object r => formObject m r
   | .reference r => formValue m r
   | .readOnlyReference r => do
@@ -105,6 +107,8 @@ def spanView (frame : Frame) (memory : Memory) : Value → ExecutionResult Value
   | .spanHome index => match frame.locals[index]? with
     | some (.span width writable view) => loadLocal memory (.span width writable view)
     | _ => .error .invalidState
+  | .typeHandle type => pure (.typeHandle type)
+  | .runtimeType type => pure (.runtimeType type)
   | .scalar value => pure (.scalar value)
   | .reference reference => pure (.reference reference)
   | .span reference length => pure (.span reference length)
@@ -351,6 +355,12 @@ def featureCall (profile : CIL.FeatureProfile) (feature : CIL.Feature) (pc : Nat
   .ok (.next (pc + 1) (.scalar (.i32 (if profile.evaluate feature then 1 else 0)) :: stack) frame
     memory)
 
+/-- Two closed types compare when their scoped metadata establishes their runtime identity. -/
+def runtimeTypeEqual (left right : CIL.Extraction.TypeExpr) : ExecutionResult Bool :=
+  match CIL.Extraction.sameRuntimeType left right with
+  | some equal => .ok equal
+  | none => .error (.unsupported "Type comparison needs a resolved type identity")
+
 /-- A reference comparison pushes 1 when the two references, deepest first, stand in
     `relation`, and 0 otherwise; a readonly reference compares as its address. -/
 def referenceCompareCall (relation : CIL.ReferenceRelation) (pc : Nat) (frame : Frame)
@@ -428,6 +438,14 @@ def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : 
   | .referenceSubtract => referenceSubtractCall pc frame stack memory
   | .typedTransfer kind store => typedTransferCall kind store pc frame stack memory
   | .skipInit => skipInitCall pc frame stack memory
+  | .typeFromHandle => match stack with
+    | .typeHandle type :: rest => .ok (.next (pc + 1) (.runtimeType type :: rest) frame memory)
+    | _ => .error (.unsupported "GetTypeFromHandle requires a type handle")
+  | .typeEquality equal => match stack with
+    | .runtimeType right :: .runtimeType left :: rest => do
+      let same ← runtimeTypeEqual left right
+      return .next (pc + 1) (.scalar (.i32 (if same == equal then 1 else 0)) :: rest) frame memory
+    | _ => .error (.unsupported "Type comparison requires two runtime types")
   | .objectConstructor => match stack with
     | _ :: rest => .ok (.next (pc + 1) rest frame memory)
     | [] => .error (.unsupported "Not a memory instruction")
@@ -678,6 +696,16 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .ldtoken (.type type), _ => .ok (.next (pc + 1) (.typeHandle type :: stack) frame m)
+  | .ceq, .runtimeType right :: .runtimeType left :: rest => do
+    let same ← runtimeTypeEqual left right
+    return .next (pc + 1) (.scalar (.i32 (if same then 1 else 0)) :: rest) frame m
+  | .beq target, .runtimeType right :: .runtimeType left :: rest => do
+    let same ← runtimeTypeEqual left right
+    return .next (if same then target else pc + 1) rest frame m
+  | .bne_un target, .runtimeType right :: .runtimeType left :: rest => do
+    let same ← runtimeTypeEqual left right
+    return .next (if same then pc + 1 else target) rest frame m
   -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
   | .ceq, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right

@@ -146,6 +146,8 @@ def ConvTarget.signed : ConvTarget → Bool
 /-- The metadata item an `ldtoken` names. A field token's runtime handle is modelled by the
     reference to the field's read-only storage, which `createSpan` consumes. -/
 inductive TokenOperand where
+  /-- A metadata type whose runtime handle `ldtoken` loads. -/
+  | type (type : Extraction.TypeExpr)
   | field (field : Extraction.FieldRef)
   deriving DecidableEq, Repr
 

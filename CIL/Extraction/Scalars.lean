@@ -431,9 +431,8 @@ def scalarEmissionMatches (role : Option FoldRole)
       objectOpcode instruction.opcode then
     skipEncoding || valueEncodingMatches previous instruction emitted
   else if !readOnlyDecodedMatches previous instruction emitted skipEncoding then false
-  else if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
-  else if let some (.result value) := role then
-    match emitted with | .ldc_i4 bits => bits == if value then 1 else 0 | _ => false
+  else if role matches some .typeHead | some .typeOperand | some (.typeBranch _) | some (.result _) then
+    valueEncodingMatches previous instruction emitted
   else if let some (opcode, type) := typeTestSource emitted then
     match instruction.operand, stack with
     | .type target, value :: _ =>
@@ -1268,7 +1267,7 @@ theorem fold_decoding_agreement {layouts : Array RawLayout} {raw : RawMethod}
         simp [List.getElem?_map, featureAt]
       exact (calls.tailCall_target constrained rawAt tailAt codeAt live feature managed linked).1
     | blocked => exact supported.elim
-    | head | interior | result | raise | typeBranch =>
+    | head | interior | typeHead | typeOperand | result | raise | typeBranch =>
       exact (fixedRole_matches _ _ _ _ _ _ trivial).mp feature
   refine ⟨?_, bound, ?_⟩
   · cases pc with

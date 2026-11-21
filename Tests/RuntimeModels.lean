@@ -1043,21 +1043,23 @@ theorem unknownVirtualRefused (environment : LayoutEnvironment) (offset : Nat) (
 #print axioms unknownVirtualRefused
 
 /-- Whether a fold role fixes its entire instruction, stated per constructor: a role outside
-    head, interior and result must leave a live call to the claim check. -/
+    the head and interior of a throw sequence must leave a live call to the claim check. -/
 private def ownsWholeSite : Option FoldRole → Bool
   | none => false
   | some .head => true
   | some .interior => true
-  | some (.result _) => true
+  | some .typeHead | some .typeOperand | some (.result _) => false
   | some (.typeBranch _) => false
   | some (.raise _) => false
   | some .argument => false
   | some .tailCall => false
   | some .blocked => false
 
-/-- Only head, interior and result roles exempt a site from its decoder and claim check. -/
+/-- Only throw head and interior roles exempt a site from its decoder and claim check. -/
 theorem foldOwnsSite_roles (role : Option FoldRole) : foldOwnsSite role = ownsWholeSite role := by
-  rcases role with _ | (_ | _ | _ | _ | _ | _ | _ | _) <;> rfl
+  cases role with
+  | none => rfl
+  | some part => cases part <;> rfl
 
 #print axioms foldOwnsSite_roles
 

@@ -39,6 +39,10 @@ inductive Value where
   /-- A class instance reference: null or offset 0 of an object allocation. It has no byte
       position, so arithmetic, byte loads and byref operations never accept it. -/
   | object (reference : ManagedReference)
+  /-- The runtime handle loaded by `ldtoken` with a type operand. -/
+  | typeHandle (type : CIL.Extraction.TypeExpr)
+  /-- A `System.Type` obtained from a checked metadata type handle. -/
+  | runtimeType (type : CIL.Extraction.TypeExpr)
   /-- The address of span local `slot` of the running frame, as `ldloca` or `ldarga` takes it.
       Only a call reads the slot through it, when it passes the home; it never leaves the frame. -/
   | spanHome (slot : Nat)

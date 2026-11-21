@@ -18,6 +18,7 @@ import CIL.Extraction.AsSpanModels
 import CIL.Extraction.StaticSpanModel
 import CIL.Extraction.SpanBulkModels
 import CIL.Extraction.SpanConstructorModels
+import CIL.Extraction.RuntimeTypeModels
 
 /-!
 # Runtime model resolution
@@ -32,6 +33,7 @@ namespace CIL.Extraction
 /-- The families registered in the runtime model table. -/
 def modelFamilies : List (List ModelEntry) := [
   [objectConstructorEntry],
+  runtimeTypeEntries,
   vectorEntries,
   vectorHelperEntries,
   hardwareEntries,

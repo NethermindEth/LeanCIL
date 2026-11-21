@@ -47,13 +47,8 @@ internal static class InstructionTranslation
             TailCalls.ValidateReachable(m, i, profile.Architecture);
             return StackOperation.Nop;
         }
-        if (typeTests.Results.TryGetValue(i, out bool same))
-        {
-            if (i.Operand is Instruction target)
-                return same ? new Jump(OpCodes.Br.Value, instructions.Position(target)) : StackOperation.Nop;
-            return same ? new Constant(32, 1, true) : new Constant(32, 0, true);
-        }
-        if (typeTests.Operands.Contains(i)) return StackOperation.Nop;
+        if (typeTests.Operands.Contains(i) || i.OpCode.Code == Code.Call && typeTests.Results.ContainsKey(i))
+            return Unoutlined.Site;
         var throws = Throws.Analyze(m);
         if (i.OpCode.Code == Code.Constrained) return StackOperation.Nop;
         var receiverCall = ObjectTypes.ReceiverCall(i);

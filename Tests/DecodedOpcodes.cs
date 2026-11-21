@@ -186,7 +186,12 @@ foreach (var (name, selector, method, code) in new[]
 {
     ("SameText", "Strings::SameText()", 0,
         """[.memory (.stringLiteral "x"), .memory (.stringLiteral "x"), .ceq, .ret]"""),
-    ("WordFlag", "GenericReceivers::CountWide(ulong)", 2, "[.nop, .nop, .nop, .nop, .ldc_i4 1, .ret]")
+    ("WordFlag", "GenericReceivers::CountWide(ulong)", 2, """
+        (let word := CIL.Extraction.TypeExpr.atom CIL.Extraction.runtimeScope "System.UInt64"
+         let getType := CIL.Extraction.getTypeFromHandle.method
+         [.ldtoken (.type word), .call getType, .ldtoken (.type word), .call getType,
+          .call (CIL.Extraction.runtimeTypeComparison true).method, .ret])
+        """)
 })
 {
     var output = Path.Combine(directory, name);
@@ -212,7 +217,7 @@ foreach (var (name, selector, method, code) in new[]
                 let nop := RawInstruction.mk 0 {{OpCodes.Nop.Value}} .none
                 let opcode := fun (pc : Nat) => (code[pc]?).map RawInstruction.opcode
                 (opcode 0, opcode 2) == (some token, some token) &&
-                  foldRoles code == [some .head, some .interior, some .interior, some .interior,
+                  foldRoles code == [some .typeHead, some .typeOperand, some .typeOperand, some .typeOperand,
                     some (.result true), none] &&
                   ([0, 2].all fun pc => foldRoles (code.set pc nop) == List.replicate 6 none) := by
               decide +kernel

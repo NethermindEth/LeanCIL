@@ -124,7 +124,7 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     (123 <= opcode && opcode <= 125) || (129 <= opcode && opcode <= 139) ||
     opcode == 141 || (142 <= opcode && opcode <= 151) ||
     (154 <= opcode && opcode <= 159) || (162 <= opcode && opcode <= 164) ||
-    (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
+    (179 <= opcode && opcode <= 186) || (208 <= opcode && opcode <= 219) || opcode == 223 ||
     opcode == 224 || (65025 <= opcode && opcode <= 65030) ||
     (65033 <= opcode && opcode <= 65039) || opcode == 0xfe15 || opcode == 0xfe16 ||
     opcode == 0xfe1c || opcode == 0xfe1e || opcode == 0xfe12 || opcode == 0xfe17 ||
@@ -151,6 +151,7 @@ def Instruction.ofType? (previous : Option RawInstruction) (opcode : Nat) (type 
   | 0x8f => Instruction.ldelemaAfter? previous type
   | 0xa3 => some (.ldelem_any type)
   | 0xa4 => some (.stelem_any type)
+  | 0xd0 => some (.ldtoken (.type type))
   | 0xfe15 => some (.initobj type)
   | 0xfe16 => some .nop
   | 0xfe1c => some (.sizeof type)
@@ -162,7 +163,7 @@ theorem Instruction.ofType?_opcode {previous : Option RawInstruction} {opcode : 
     (named : Instruction.ofType? previous opcode type = some instruction) :
     opcode = 116 ∨ opcode = 117 ∨ opcode = 141 ∨ opcode = 163 ∨ opcode = 164 ∨
       opcode = 143 ∨ opcode = 0x70 ∨ opcode = 0x71 ∨ opcode = 0x81 ∨
-      opcode = 0xFE15 ∨ opcode = 0xFE1C ∨ opcode = 0xFE16 := by
+      opcode = 0xFE15 ∨ opcode = 0xFE1C ∨ opcode = 0xFE16 ∨ opcode = 0xD0 := by
   unfold Instruction.ofType? at named
   repeat' split at named
   all_goals first | contradiction | simp
@@ -243,6 +244,9 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
   | .ldnull => (emitted matches .ldnull)
+  | .ldtoken (.type expected) => match emitted with
+    | .ldtoken (.type actual) => expected == actual
+    | _ => false
   | .memory (.stringLiteral text) => match emitted with
     | .memory (.stringLiteral actual) => decide (text = actual)
     | _ => false
@@ -548,7 +552,7 @@ theorem Instruction.valueOpcode_of_ofRaw? {previous : Option RawInstruction} {ra
     · split at found
       · rcases Instruction.ofType?_opcode found
           with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs |
-          opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+          opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
           rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
       · split at found
         · cases found
@@ -590,7 +594,7 @@ theorem Instruction.ofRaw?_readOnly {previous : Option RawInstruction} {raw : Ra
   · split at found
     · rcases Instruction.ofType?_opcode found
         with opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs |
-          opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
+          opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs | opcodeIs <;>
         cases opcodeIs
     · split at found
       · cases found
@@ -657,11 +661,12 @@ theorem Instruction.ofRaw?_ldelema {previous : Option RawInstruction} {raw : Raw
 def Instruction.ofRaw (previous : Option RawInstruction) (raw : RawInstruction) : Instruction :=
   (Instruction.ofRaw? previous raw).getD (.unadmitted raw.opcode)
 
-/-- Decode an ordinary closed site, checking the element type of an object transfer or size. -/
+/-- Decode an ordinary closed site. Type handles require a recognized comparison, and object
+    transfers and sizes require an admitted closed operand. -/
 def Instruction.ofClosedValue (previous : Option RawInstruction) (raw : RawInstruction) :
     Instruction :=
   if (match raw.operand with
-    | .type type => objectOpcode raw.opcode && !objectApplicationAdmitted type
+    | .type type => raw.opcode == 208 || objectOpcode raw.opcode && !objectApplicationAdmitted type
     | _ => false) then .unadmitted raw.opcode
   else Instruction.ofRaw previous raw
 
@@ -977,5 +982,15 @@ theorem valueEncodingMatches_sound {previous : Option RawInstruction} {raw : Raw
   · exact absurd matched Bool.false_ne_true
 
 #print axioms valueEncodingMatches_sound
+
+/-- A value-encoding check accepts exactly the decoded instruction at this site. -/
+theorem valueEncodingMatches_iff {previous : Option RawInstruction} {raw : RawInstruction}
+    {emitted : Instruction} :
+    valueEncodingMatches previous raw emitted = true ↔
+      Instruction.ofRaw? previous raw = some emitted := by
+  refine ⟨valueEncodingMatches_sound, fun decoded => ?_⟩
+  simpa only [valueEncodingMatches, decoded] using Instruction.sameValue_self_of_ofRaw? decoded
+
+#print axioms valueEncodingMatches_iff
 
 end CIL.Extraction

@@ -1,3 +1,4 @@
+import CIL.Safety.Execution
 import CIL.Extraction.Scalars
 import CIL.Extraction.DecodedMethod
 import Tests.Support.RawDecoding
@@ -64,9 +65,9 @@ example : sameRuntimeType .void .void = none := by decide
 example : sameRuntimeType (.aggregate "Fixture::Bad::Name" 0) (.aggregate "Fixture::Bad::Other" 0) = none := by decide
 
 example : foldRoles (test marker marker) =
-    [some .head, some .interior, some .interior, some .interior, some (.result true)] := by decide
+    [some .typeHead, some .typeOperand, some .typeOperand, some .typeOperand, some (.result true)] := by decide
 example : foldRoles (test marker other inequality) =
-    [some .head, some .interior, some .interior, some .interior, some (.result true)] := by decide
+    [some .typeHead, some .typeOperand, some .typeOperand, some .typeOperand, some (.result true)] := by decide
 example : foldRoles (test (.atom "Forwarder" "System.UInt64") word) = List.replicate 5 none := by
   decide
 -- Any instruction between the operands breaks the exact encoding.
@@ -77,8 +78,14 @@ private def foldRaw := raw (test marker marker ++ [i 44 (.target 8), i 23, i 42,
 private def foldStates : FeatureCertificate := [state [], state [none], state [none],
   state [none, none], state [none, none], state [some 1], state [], state [some 1], none, none]
 private def foldMask := [true, true, true, true, true, true, true, true, false, false]
+private def typeOperands (left right : TypeExpr) : List Instruction :=
+  [.ldtoken (.type left), .call getTypeFromHandle.method, .ldtoken (.type right),
+   .call getTypeFromHandle.method]
+
+private def equalCall : Instruction := .call (runtimeTypeComparison true).method
+
 private def foldCode : List Instruction :=
-  [.nop, .nop, .nop, .nop, .ldc_i4 1, .brfalse 8, .ldc_i4 1, .ret, .unadmitted 22,
+  typeOperands marker marker ++ [equalCall, .brfalse 8, .ldc_i4 1, .ret, .unadmitted 22,
    .unadmitted 42]
 
 example : FeatureFlowValid #[] (fun _ => none) (fun _ => none)
@@ -99,23 +106,24 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none)
 example : FeatureFlowValid #[] (fun _ => none) (fun _ => none) distinctRaw .scalar
     ((foldStates.set 5 (state [some 0])).set 6 none |>.set 7 none |>.set 8 (state []) |>.set 9 (state [some 0]))
     [true, true, true, true, true, true, false, false, true, true]
-    [.nop, .nop, .nop, .nop, .ldc_i4 0, .brfalse 8, .unadmitted 23, .unadmitted 42,
-      .ldc_i4 0, .ret] := by decide
+    (typeOperands marker other ++ [equalCall, .brfalse 8, .unadmitted 23, .unadmitted 42,
+      .ldc_i4 0, .ret]) := by decide
 
 -- A branch into the operands would reach the comparison with a different emitted stack.
 private def enteredRaw := raw ([i 22, i 43 (.target 4)] ++ test marker marker ++ [i 42])
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) enteredRaw .scalar
     [state [], state [some 0], none, none, state [some 0], state [none, some 0], state [none, some 0], state [some 1]]
     [true, true, false, false, true, true, true, true]
-    [.ldc_i4 0, .br 4, .unadmitted 208, .unadmitted 40, .nop, .nop, .ldc_i4 1, .ret] := by decide
+    [.ldc_i4 0, .br 4, .unadmitted 208, .unadmitted 40, .ldtoken (.type marker),
+      .call getTypeFromHandle.method, equalCall, .ret] := by decide
 -- The same facts are accepted once the edge enters at the first operand.
 example : FeatureFlowValid #[] (fun _ => none) (fun _ => none)
     (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
     [state [], state [some 0], state [some 0], state [none, some 0], state [none, some 0], state [none, none, some 0], state [none, none, some 0], state [some 1, some 0]]
     [true, true, true, true, true, true, true, true]
-    [.ldc_i4 0, .br 2, .nop, .nop, .nop, .nop, .ldc_i4 1, .ret] := by decide
+    ([.ldc_i4 0, .br 2] ++ typeOperands marker marker ++ [equalCall, .ret]) := by decide
 
--- Undecided comparisons and stray type handles have no admitted translation.
+-- Undecided type comparisons cannot certify an emitted constant.
 private def undecidedRaw := raw (test (.atom "Forwarder" "System.UInt64") word ++ [i 42])
 example : ¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) undecidedRaw .scalar
     [state [], state [none], state [none], state [none, none], state [none, none], state [none]]
@@ -135,15 +143,17 @@ private def branchStates (taken : Bool) : FeatureCertificate :=
     if taken then none else state [], if taken then none else state [some 1],
     if taken then state [] else none, if taken then state [some 0] else none]
 
-/-- The raw scalar certificate tracks Type objects without exposing them to the interpreter. -/
+/-- The scalar certificate tracks the two type operands consumed by the branch. -/
 private def branchKinds (taken : Bool) : ScalarCertificate :=
   [some [], some [.other], some [.other], some [.other, .other], some [.other, .other],
     if taken then none else some [], if taken then none else some [.word32],
     if taken then some [] else none, if taken then some [.word32] else none]
 
-/-- Four erased operands and one exact transfer preserve instruction numbering. -/
-private def branchCode (taken : Bool) : List Instruction :=
-  [.nop, .nop, .nop, .nop, if taken then .br 7 else .nop,
+/-- The executed type branch retains both handle loads, both calls and its original target. -/
+private def branchCode (same : Bool) (opcode : Nat) : List Instruction :=
+  let equal := opcode == 46 || opcode == 59
+  let taken := same == equal
+  typeOperands word (if same then word else intType) ++ [if equal then .beq 7 else .bne_un 7,
     if taken then .unadmitted 23 else .ldc_i4 1,
     if taken then .unadmitted 42 else .ret,
     if taken then .ldc_i4 0 else .unadmitted 22,
@@ -157,8 +167,8 @@ theorem reference_type_branches :
       let states := branchStates taken
       decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) body .scalar states
         (states.map Option.isSome)
-        (branchCode taken)) &&
-      decide (ScalarFlowValid body states (branchKinds taken) (branchCode taken))) = true := by
+        (branchCode same opcode)) &&
+      decide (ScalarFlowValid body states (branchKinds taken) (branchCode same opcode))) = true := by
   decide +kernel
 #print axioms reference_type_branches
 
@@ -166,20 +176,20 @@ theorem reference_type_branches :
 theorem reference_type_branch_rejections :
     let states := branchStates true
     let mask := states.map Option.isSome
-    let code := branchCode true
+    let code := branchCode true 46
     let forwarded := raw ((branchRaw true 46).code.set 2
       (i 208 (.type (.atom "Forwarder" "System.UInt64"))))
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 46) .scalar states
-      mask (code.set 4 (.br 5))) ∧
+      mask (code.set 4 (.beq 5))) ∧
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 47) .scalar states
       mask code) ∧
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw true 46) .scalar
-      (branchStates false) ((branchStates false).map Option.isSome) (branchCode false)) ∧
+      (branchStates false) ((branchStates false).map Option.isSome) (branchCode false 46)) ∧
     ([1, 4, 9].all fun target =>
       let untouched := branchStates false
       !decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none) (branchRaw false 46 target)
         .scalar untouched
-        (untouched.map Option.isSome) (branchCode false))) = true ∧
+        (untouched.map Option.isSome) (branchCode false 46))) = true ∧
     (¬ FeatureFlowValid #[] (fun _ => none) (fun _ => none) forwarded .scalar states mask code) :=
       by
   decide +kernel
@@ -192,7 +202,7 @@ theorem reference_type_results :
       let result := if same then 1 else 0
       let states := (branchStates false).take 5 ++ [state [some result]]
       let kinds := (branchKinds false).take 5 ++ [some [.word32]]
-      let code := [.nop, .nop, .nop, .nop, .ldc_i4 result, .ret]
+      let code := typeOperands word (if same then word else intType) ++ [.ceq, .ret]
       decide (FeatureFlowValid #[] (fun _ => none) (fun _ => none)
           body .scalar states (List.replicate 6 true) code) &&
       decide (ScalarFlowValid body states kinds code) &&
@@ -248,14 +258,14 @@ theorem type_test_feature_opcodes :
   decide +kernel
 #print axioms type_test_feature_opcodes
 
-/-- Identical equality calls decode to the value of their two preceding type tokens. -/
+/-- Both equality calls retain their method operand and both closed type tokens. -/
 theorem decodedTypeEquality :
     ((Method.ofRaw? .scalar {} [] (List.replicate 5 true)
-        (raw (test word word)) []).bind (·.code[4]?)) =
-      some (.ldc_i4 1) ∧
+        (raw (test word word)) []).map Method.code) =
+      some (typeOperands word word ++ [equalCall]) ∧
     ((Method.ofRaw? .scalar {} [] (List.replicate 5 true)
-        (raw (test word intType)) []).bind (·.code[4]?)) =
-      some (.ldc_i4 0) := ⟨rfl, rfl⟩
+        (raw (test word intType)) []).map Method.code) =
+      some (typeOperands word intType ++ [equalCall]) := ⟨rfl, rfl⟩
 
 #print axioms decodedTypeEquality
 
@@ -284,5 +294,16 @@ theorem foreign_type_members :
   decide +kernel
 
 #print axioms foreign_type_members
+
+/-- Same-named types in different possible forwarding scopes leave both the operator and
+    the reference branch inconclusive. Neither operation reports an unequal result. -/
+theorem unresolved_runtime_identity (body : Method) (frame : Safety.Frame) (memory : Safety.Memory) :
+    let stack : List Safety.Value := [.runtimeType word, .runtimeType (.atom "Forwarder" "System.UInt64")]
+    let failure : Safety.ExecutionResult Safety.FrameAction :=
+      .error (.unsupported "Type comparison needs a resolved type identity")
+    Safety.runModel body (.typeEquality true) 0 frame stack memory = failure ∧
+    Safety.step body (.bne_un 7) 0 [] frame stack memory = failure := ⟨rfl, rfl⟩
+
+#print axioms unresolved_runtime_identity
 
 end Tests.TypeTestEvidence

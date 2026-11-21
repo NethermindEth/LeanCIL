@@ -1462,12 +1462,8 @@ theorem step_appendLocals_ldelema (element : CIL.Extraction.TypeExpr) (readOnly 
 /-- `ldtoken` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldtoken (operand : CIL.TokenOperand) :
     StepAppendLocals (.ldtoken operand) := by
-  cases operand
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
+  cases operand <;> intro body pc args frame extra stack memory outcome stepped kept <;>
+    subst stepped <;> clear kept <;> unfold step <;> frame_natural
 
 #print axioms step_appendLocals_ldtoken
 

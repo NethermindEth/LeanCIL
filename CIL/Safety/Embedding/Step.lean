@@ -538,10 +538,11 @@ theorem step_relabel_ldelema (element : Extraction.TypeExpr) (readOnly : Bool) :
 #print axioms step_relabel_ldelema
 
 theorem step_relabel_ldtoken (operand : TokenOperand) : StepRelabel (.ldtoken operand) := by
-  cases operand
-  plain_cases
-  rw [staticAddress_congr context.statics]
-  lockstep
+  cases operand <;> plain_cases
+  case type =>
+    cases h
+    simp only [FrameAction.relabel, context.next rfl]
+  case field => rw [staticAddress_congr context.statics]; lockstep
 
 #print axioms step_relabel_ldtoken
 
@@ -1500,10 +1501,9 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
     first | cases h | raise_lockstep
   case ldtoken operand =>
-    cases operand
-    plain_cases
-    rw [staticAddress_congr context.statics]
-    raise_lockstep
+    cases operand <;> plain_cases
+    case type => raise_lockstep
+    case field => rw [staticAddress_congr context.statics]; raise_lockstep
   case stsfld =>
     plain_cases
     cases h

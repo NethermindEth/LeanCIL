@@ -114,10 +114,11 @@ theorem stepTransport : StepTransport := by
         targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
         observable
     case ldtoken.refl operand =>
-      cases operand
-      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
-        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
-        observable
+      cases operand with
+      | type type => exact ⟨mapping, .refl mapping, .ok (.next memories frames)⟩
+      | field field =>
+        exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+          targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds observable
     case stsfld.refl field =>
       refine ⟨mapping, .refl mapping, ?_⟩
       dsimp only [LocalIndexMap.operation]

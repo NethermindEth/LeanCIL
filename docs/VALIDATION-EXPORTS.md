@@ -378,8 +378,8 @@ These regressions cover joint replay:
   certificate, because they test agreement between records and no single validator.
 - Closed typeof comparisons cover value-producing calls, operandless `ceq` and short/long
   reference-equality branches. The branch cases check both identity outcomes in shared
-  feature/scalar certificates; forged targets, wrong opcodes, forwarded scopes and branches into
-  erased operands fail independently. Runtime comparisons exercise three closed generic
+  feature and scalar certificates. Forged targets, wrong opcodes, forwarded scopes and branches
+  into the middle of a type comparison fail independently. Runtime comparisons exercise three closed generic
   instantiations in one generated proof batch.
 
 ### Full verification and publication

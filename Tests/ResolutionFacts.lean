@@ -1078,4 +1078,30 @@ example :
       .call unmodelledMethod = none := by
   simp only [CIL.Safety.reduceRuntimeModel]
 
+/-- A decided comparison, an unresolved forwarding scope, and an unmodelled getter. -/
+def comparedTypes : CIL.Method :=
+  let word := TypeExpr.atom runtimeScope "System.UInt64"
+  let token := CIL.Instruction.ldtoken (.type word)
+  let getter := CIL.Instruction.call getTypeFromHandle.method {}
+  let test := CIL.Instruction.call (runtimeTypeComparison true).method {}
+  { locals := [], returnsValue := false, code := [
+      token, getter, token, getter, test,
+      .ldtoken (.type (.atom "Forwarder" "System.UInt64")), getter, token, getter, test,
+      token, .call unmodelledMethod {}, token, getter, test] }
+
+cil_instruction_equations comparedTypes
+cil_runtime_models comparedTypes
+
+/-- The two equal operands give one checked identity for consumers of the comparison. -/
+theorem wordComparison :
+    sameRuntimeType (.atom runtimeScope "System.UInt64") (.atom runtimeScope "System.UInt64") =
+      some true := comparedTypes_typeIdentity4
+
+#print axioms wordComparison
+
+/-- error: Unknown identifier `comparedTypes_typeIdentity9` -/
+#guard_msgs in #check comparedTypes_typeIdentity9
+/-- error: Unknown identifier `comparedTypes_typeIdentity14` -/
+#guard_msgs in #check comparedTypes_typeIdentity14
+
 end Tests.ResolutionFacts

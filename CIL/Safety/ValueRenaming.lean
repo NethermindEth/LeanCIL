@@ -20,7 +20,7 @@ def ManagedReference.Below (limit : Nat) : ManagedReference → Prop
 /-- Every reference carried by a checked value belongs to the allocated identity prefix. -/
 def Value.Below (limit : Nat) : Value → Prop
   -- A home names a slot of the frame whose stack holds it, not an allocation.
-  | .scalar _ | .methodPointer _ | .methodTable _ | .spanHome _ => True
+  | .typeHandle _ | .runtimeType _ | .scalar _ | .methodPointer _ | .methodTable _ | .spanHome _ => True
   | .reference address | .readOnlyReference address | .span address _ | .object address =>
     address.Below limit
   | .bufferSpan view => view.reference.Below limit
@@ -38,6 +38,8 @@ def arrayView (mapping : AllocationRenaming) (view : ArrayView) : ArrayView :=
 
 /-- Rename every allocation-backed part of a checked value, leaving scalar bits unchanged. -/
 def value (mapping : AllocationRenaming) : Value → Value
+  | .typeHandle type => .typeHandle type
+  | .runtimeType type => .runtimeType type
   | .methodPointer pointer => .methodPointer pointer
   | .methodTable table => .methodTable table
   | .scalar scalar => .scalar scalar
@@ -84,7 +86,7 @@ theorem value_below (mapping : AllocationRenaming) (value : Value)
     (bound : value.Below mapping.sourceLimit) :
     (mapping.value value).Below mapping.targetLimit := by
   cases value with
-  | scalar _ | methodPointer _ | methodTable _ | spanHome _ => trivial
+  | typeHandle _ | runtimeType _ | scalar _ | methodPointer _ | methodTable _ | spanHome _ => trivial
   | reference reference | readOnlyReference reference | span reference _ | object reference =>
     exact mapping.managedReference_below reference bound
   | bufferSpan view => exact mapping.managedReference_below view.reference bound
@@ -124,6 +126,8 @@ theorem AllocationRenaming.Extends.values {earlier later : AllocationRenaming}
     and every other value is renamed as `mapping.value` renames it. -/
 def LocalIndexMap.value (indices : LocalIndexMap) (mapping : AllocationRenaming) : Value → Value
   | .spanHome slot => .spanHome (indices.index slot)
+  | .typeHandle type => .typeHandle type
+  | .runtimeType type => .runtimeType type
   | .methodPointer pointer => .methodPointer pointer
   | .methodTable table => .methodTable table
   | .scalar scalar => .scalar scalar

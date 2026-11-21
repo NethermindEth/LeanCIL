@@ -811,8 +811,13 @@ internal static class MetadataValidation
                     continue;
                 }
                 if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt or Code.Newobj or Code.Ldftn or Code.Ldvirtftn) || instruction.Operand is not MethodReference reference ||
-                    typeTests!.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction) || throws!.Operands.Contains(instruction))
+                    throws!.Operands.Contains(instruction))
                     continue;
+                if (typeTests!.Operands.Contains(instruction) || typeTests.Results.ContainsKey(instruction))
+                {
+                    callSites?.AddModel(instruction);
+                    continue;
+                }
                 if (!Check(method, instruction, () =>
                     {
                         // Fold recognition scans the whole body, but only reachable unsupported throws are rejected.

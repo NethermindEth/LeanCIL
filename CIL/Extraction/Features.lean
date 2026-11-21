@@ -457,17 +457,8 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
-/-- A decided typeof branch preserves its raw target or falls through without a stack effect. -/
-def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Instruction) :
-    Bool :=
-  match instruction.operand, emitted with
-  | .target target, .br actual => taken && actual == target
-  | .target _, .nop => !taken
-  | _, _ => false
-
-/-- A null operand pushes its object reference, a type comparison emits its decided word or branch and a folded
-    `throw` raises its constructed type. Outside a decided test, type handles and
-    `System.Type` calls have no admitted translation. -/
+/-- A closed type comparison retains its decoded loads, calls and comparison. A null operand in a
+    folded exception sequence pushes its object reference, and the throw raises the constructed type. -/
 def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     (role : Option FoldRole)
     (instruction : RawInstruction) (emitted : Instruction)
@@ -476,8 +467,8 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some .head, .nop | some .interior, .nop => instruction.opcode != 20
   | some .head, .ldnull | some .interior, .ldnull =>
     instruction.opcode == 20 && instruction.operand == .none
-  | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
-  | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
+  | some .typeHead, _ | some .typeOperand, _ | some (.result _), _ | some (.typeBranch _), _ =>
+    valueEncodingMatches previous instruction emitted
   | some (.raise raised), .throw exception => raised == exception
   | some .tailCall, .call method prefixes => match instruction.operand with
     | .call site => prefixes.tail && site.returnType == raw.returnType &&
@@ -499,17 +490,12 @@ theorem fixedRole_matches (layouts : Array RawLayout) (method : RawMethod)
     (role : FoldRole) (previous : Option RawInstruction) (raw : RawInstruction)
     (emitted : Instruction)
     (fixed : match role with
-      | .head | .interior | .result _ | .typeBranch _ | .raise _ => True | _ => False) :
+      | .head | .interior | .typeHead | .typeOperand | .result _ | .typeBranch _ | .raise _ => True | _ => False) :
     featureOpMatchesAt layouts method (some role) raw emitted previous = true ↔
       Instruction.ofRole? role previous raw = some emitted := by
   cases role with
-  | typeBranch taken =>
-    change typeBranchMatches raw taken emitted = true ↔ _
-    cases operand : raw.operand <;> try simp [typeBranchMatches, operand, Instruction.ofRole?]
-    cases taken <;> cases emitted <;> simp_all <;> exact eq_comm
-  | result value =>
-    cases emitted <;> first | exact Iff.rfl | simp [featureOpMatchesAt, Instruction.ofRole?]
-    exact eq_comm
+  | typeHead | typeOperand | result | typeBranch =>
+    exact valueEncodingMatches_iff
   | argument | tailCall | blocked => exact fixed.elim
   | head | interior =>
     by_cases null : raw.opcode = 20 <;> by_cases valid : raw.operand = .none <;>

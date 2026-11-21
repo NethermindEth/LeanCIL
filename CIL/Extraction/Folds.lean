@@ -1,6 +1,7 @@
 import CIL.ExceptionType
 import CIL.Extraction.ValueDecoding
 import CIL.Extraction.SpanCalls
+import CIL.Extraction.RuntimeTypeModels
 
 /-!
 # Folded instruction sequences
@@ -14,59 +15,10 @@ role, which the feature and scalar checks then enforce.
 
 namespace CIL.Extraction
 
-/-- Pointer, byref and generic instance types, which are never equal to a named type. -/
-private def constructed : TypeExpr → Bool
-  | .pointer _ | .byref _ | .array _ | .apply .. => true
-  | _ => false
-
-/-- Conjunction of two three-valued answers: false wins over unknown. -/
-private def both : Option Bool → Option Bool → Option Bool
-  | some false, _ | _, some false => some false
-  | some true, some true => some true
-  | _, _ => none
-
-/-- Runtime identity of two closed metadata types, or `none` when metadata cannot decide it.
-    Full names are never forwarded, but one name in two scopes may denote one type. -/
-def sameRuntimeType : TypeExpr → TypeExpr → Option Bool
-  | .pointer x, .pointer y | .byref x, .byref y | .array x, .array y => sameRuntimeType x y
-  | .apply f x, .apply g y => both (sameRuntimeType f g) (sameRuntimeType x y)
-  | a, b =>
-    -- `void` is serialized without its scope, so equal spellings do not establish identity.
-    if a == b then (if a == .void then none else some true) else
-    match namedType a, namedType b with
-    | some (scope, name), some (scope', name') =>
-      if name != name' then some false else if scope == scope' then some true else none
-    | _, _ =>
-      if (constructed a || (namedType a).isSome) && (constructed b || (namedType b).isSome) then
-        some false
-      else none
-
 /-- The type operand of `ldtoken` (208). -/
 private def typeHandle : RawInstruction → Option TypeExpr
   | ⟨_, 208, .type type⟩ => some type
   | _ => none
-
-/-- The exact call site of a static `System.Type` method with `parameters` parameters;
-    `methodName` is the metadata name spelling `name`. -/
-private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
-    (parameters : Nat) : CallSite :=
-  let type := TypeExpr.atom runtimeScope (metadata_text% "System.Type")
-  let fromHandle := methodName == name!"GetTypeFromHandle"
-  let method : MethodRef := {
-    owner := type, name := methodName, hasThis := false,
-    genericArity := 0,
-    returnType := if fromHandle then type else
-      .atom runtimeScope (metadata_text% "System.Boolean"),
-    parameters := if fromHandle then
-        [.atom runtimeScope (metadata_text% "System.RuntimeTypeHandle")]
-      else [type, type] }
-  { method, declared := method.signature 0, name,
-    target := .external (runtimeScope ++ "::" ++ signature), typeArguments := [],
-    parameterCount := parameters, returnsValue := true }
-
-private def getTypeFromHandle : CallSite :=
-  typeMethod (metadata_text% "GetTypeFromHandle") name!"GetTypeFromHandle"
-    (metadata_text% "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)") 1
 
 /-- Exactly `call Type.GetTypeFromHandle`. -/
 private def typeFromHandle (instruction : RawInstruction) : Bool :=
@@ -81,13 +33,9 @@ private def typeComparison (instruction : RawInstruction) : Option Bool :=
     | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
     | _ => none
   else if instruction.opcode != 40 then none
-  else if instruction.operand == .call (typeMethod
-      (metadata_text% "op_Equality") name!"op_Equality"
-      (metadata_text% "System.Boolean System.Type::op_Equality(System.Type,System.Type)") 2) then
+  else if instruction.operand == .call (runtimeTypeComparison true) then
     some true
-  else if instruction.operand == .call (typeMethod
-      (metadata_text% "op_Inequality") name!"op_Inequality"
-      (metadata_text% "System.Boolean System.Type::op_Inequality(System.Type,System.Type)") 2) then
+  else if instruction.operand == .call (runtimeTypeComparison false) then
     some false
   else none
 
@@ -255,7 +203,11 @@ inductive FoldRole where
   | head
   /-- A later operand entered only from the preceding instruction. -/
   | interior
-  /-- A type comparison: pushes the decided Boolean. -/
+  /-- An initial type token whose identity is known at a closed comparison. -/
+  | typeHead
+  /-- A type token or conversion inside a closed type comparison. -/
+  | typeOperand
+  /-- The comparison produces this known Boolean. -/
   | result (value : Bool)
   /-- A reference-equality branch over two closed typeof values takes this decided edge. -/
   | typeBranch (taken : Bool)
@@ -277,10 +229,7 @@ def Instruction.ofRole? (role : FoldRole) (previous : Option RawInstruction)
     if raw.opcode == 20 then
       if raw.operand == .none then some .ldnull else none
     else some .nop
-  | .result value => some (.ldc_i4 (if value then 1 else 0))
-  | .typeBranch taken => match raw.operand with
-    | .target target => some (if taken then .br target else .nop)
-    | _ => none
+  | .typeHead | .typeOperand | .result _ | .typeBranch _ => Instruction.ofRaw? previous raw
   | .raise exception => some (.throw exception)
   | .argument => Instruction.ofRaw? previous raw
   | .tailCall => if raw.opcode == 40 || raw.opcode == 41 then Instruction.ofRaw? previous raw
@@ -294,7 +243,7 @@ def boundSite (raw : RawInstruction) : Bool :=
 
 /-- These roles determine the entire instruction, including a call inside a fold. -/
 def foldOwnsSite : Option FoldRole → Bool
-  | some .head | some .interior | some (.result _) => true
+  | some .head | some .interior => true
   | _ => false
 
 /-- Bound operands outside a recognized fold use their site decoder. -/
@@ -338,14 +287,14 @@ private def foldAt (a : RawInstruction) (tail : List RawInstruction) :
     | _, _ => none
   | some .typeHandle => match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
-      [some .head, some .interior, some .interior, some .interior,
+      [some .typeHead, some .typeOperand, some .typeOperand, some .typeOperand,
         some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
     | _ => none
   | _ => none
 
 /-- A non-fallthrough edge may enter ordinary code or the head of a fold. -/
 def foldEntry : Option (Option FoldRole) → Bool
-  | some none | some (some .head) => true
+  | some none | some (some .head) | some (some .typeHead) => true
   | _ => false
 
 /-- Assign all roles of a candidate together, using every encoded target in the body. -/

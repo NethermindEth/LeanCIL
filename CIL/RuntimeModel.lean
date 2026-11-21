@@ -44,6 +44,10 @@ inductive RuntimeModel where
   | skipInit
   /-- The `System.Object` constructor, which only consumes its receiver. -/
   | objectConstructor
+  /-- `System.Type.GetTypeFromHandle` on a closed metadata type. -/
+  | typeFromHandle
+  /-- `System.Type.op_Equality` or `op_Inequality` on two runtime types. -/
+  | typeEquality (equal : Bool)
   /-- A span constructor called on the home of a span local or homed parameter: `constructor`
       builds the span from the explicit arguments and the slot the home names then holds it. -/
   | spanInPlace (constructor : SpanConstructor)
@@ -57,7 +61,8 @@ def RuntimeModel.observerCount : RuntimeModel → Nat
   | .spanInPlace constructor => constructor.operation.argumentCount
   | .referenceCompare _ | .referenceSubtract => 2
   | .typedTransfer _ store => if store then 2 else 1
-  | .skipInit => 1
+  | .skipInit | .typeFromHandle => 1
+  | .typeEquality _ => 2
 
 /-- Whether `profile` may run `model`: an intrinsic must be available in it, and every other
     model runs under any profile. -/

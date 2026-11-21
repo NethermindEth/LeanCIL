@@ -593,7 +593,7 @@ theorem modelStep_contract {body : CIL.Method} {model : Option CIL.RuntimeModel}
         | exact (checkedValue_valid _ _ _ (by assumption)).2
         | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1
         | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
-      · first | exact retained | exact retained.tail.tail | exact retained.drop _
+      · first | exact retained | exact retained.tail | exact retained.tail.tail | exact retained.drop _
 
 #print axioms modelStep_contract
 

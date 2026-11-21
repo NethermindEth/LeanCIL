@@ -178,6 +178,7 @@ private theorem Memory.Renamed.stepTypeTest {indices : LocalIndexMap}
       | [], _ => exact .error _
       | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
       | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+      | .typeHandle _ :: _, _ | .runtimeType _ :: _, _
       | .bufferSpan _ :: _, _ | .array _ :: _, _ | .spanHome _ :: _, _ =>
         dsimp only [pureArity, CIL.Safety.instruction]
         simp only [indices.unspecifiedOperands mapping]
@@ -243,7 +244,7 @@ private theorem Memory.Renamed.stepCallvirt {indices : LocalIndexMap}
           | .object .null :: _ => exact .error _
           | .scalar _ :: _ | .methodPointer _ :: _ | .methodTable _ :: _ | .reference _ :: _
           | .readOnlyReference _ :: _ | .span .. :: _ | .bufferSpan _ :: _ | .array _ :: _
-          | .spanHome _ :: _ =>
+          | .typeHandle _ :: _ | .runtimeType _ :: _ | .spanHome _ :: _ =>
             exact .error _
     case virtual targets =>
       try dsimp only
@@ -283,6 +284,7 @@ private theorem Memory.Renamed.stepCallvirt {indices : LocalIndexMap}
           | .object .null :: _, _ => exact .error _
           | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
           | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+          | .typeHandle _ :: _, _ | .runtimeType _ :: _, _
           | .bufferSpan _ :: _, _ | .array _ :: _, _ | .spanHome _ :: _, _ =>
             exact .error _
 #print axioms Memory.Renamed.stepCallvirt
@@ -395,6 +397,37 @@ theorem constant_stepRenamed (value : CIL.W32) :
   exact .ok (.next related frames)
 
 #print axioms constant_stepRenamed
+
+/-- GetTypeFromHandle preserves the handle's type across allocation renaming. -/
+theorem typeFromHandle_stepRenamed : CIL.RuntimeModel.typeFromHandle.StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc stack _ _
+  simp only [modelStep, observedCall, indices.unspecifiedOperands mapping, runModel]
+  split
+  · exact .error _
+  cases stack with
+  | nil => exact .error _
+  | cons head rest => cases head <;> first | exact .error _ | exact .ok (.next related frames)
+
+#print axioms typeFromHandle_stepRenamed
+
+/-- Runtime type equality reads only the scoped type identities, which are invariant under renaming. -/
+theorem typeEquality_stepRenamed (equal : Bool) : (CIL.RuntimeModel.typeEquality equal).StepRenamed := by
+  intro indices mapping scopes source target sourceFrame targetFrame related frames _ _ _ _ pc stack _ _
+  simp only [modelStep, observedCall, indices.unspecifiedOperands mapping, runModel]
+  split
+  · exact .error _
+  rcases stack with _ | ⟨right, _ | ⟨left, rest⟩⟩
+  · exact .error _
+  · cases right <;> exact .error _
+  cases right <;> try exact .error _
+  cases left <;> try exact .error _
+  simp only [List.map_cons, LocalIndexMap.value]
+  apply (mapping.runtimeTypeEqual _ _).bind
+  intro first second same
+  subst second
+  exact .ok (.next related frames)
+
+#print axioms typeEquality_stepRenamed
 
 /-- A feature getter reads the common profile and preserves both frames and memories. -/
 theorem feature_stepRenamed (feature : CIL.Feature) :
@@ -569,6 +602,8 @@ theorem runtimeModel_stepRenamed {environment : CIL.LayoutEnvironment}
       exact ModelEntry.exact_yields.mpr objectConstructor_stepRenamed
     | obtain rfl := List.mem_singleton.mp member
       exact staticSpanEntry_yields memory_stepRenamed
+    | exact runtimeTypeEntries_yields (property := CIL.RuntimeModel.StepRenamed)
+        typeFromHandle_stepRenamed typeEquality_stepRenamed entry member
     | exact platformEntries_yields feature_stepRenamed constant_stepRenamed entry member
     | exact referenceContentEntries_yields constant_stepRenamed entry member
     | exact guardEntries_yields memory_stepRenamed entry member
