@@ -332,9 +332,10 @@ internal static partial class ProofOutline
         Parameter SpanSource(int local, LocalKind kind, string name)
         {
             var ops = body.Operations;
-            var stores = Enumerable.Range(1, ops.Length - 1).Where(pc =>
-                ops[pc] is SetLocal store && store.Index == local &&
-                ops[pc - 1] is not SpanSlice { Counted: false }).ToArray();
+            var stores = Enumerable.Range(1, ops.Length - 1)
+                .Where(pc => ops[pc] is SetLocal store && store.Index == local)
+                .Where(pc => ops[pc - 1] is not Unoutlined || Spans.MemberWidth(method.Body.Instructions[pc - 1],
+                    "Slice", 1, extraction.Architecture) is null).ToArray();
             var refused = Unsupported($"span local `{name}` is not assigned once from a span argument or from the " +
                 "whole of an array argument");
             if (stores.Length != 1 || stores[0] >= loops[0].Head) throw refused;
@@ -1585,13 +1586,13 @@ internal static partial class ProofOutline
                 state.State[components.IndexOf(field)] = value is Number { Literal: false } number && field.Width < 4
                     ? number with { Narrow = true } : value;
             }
-            else if (op is SpanLength)
+            else if (op is Unoutlined && Spans.MemberWidth(site, "get_Length", 0, extraction.Architecture) is not null)
             {
                 if (Pop() is not LocalValue value || slots[value.Slot].Components[0].Part != Part.Span)
                     return Stop("the length of a span the outline does not follow");
                 stack.Add(new SpanLengthValue(components.IndexOf(slots[value.Slot].Components[0])));
             }
-            else if (op is SpanSlice { Counted: false })
+            else if (op is Unoutlined && Spans.MemberWidth(site, "Slice", 1, extraction.Architecture) is not null)
             {
                 var count = Pop();
                 var source = Pop();
@@ -1602,7 +1603,7 @@ internal static partial class ProofOutline
                 PendingTail(state, component, span);
                 stack.Add(new Sliced(component));
             }
-            else if (op is SpanItem)
+            else if (op is Unoutlined && Spans.MemberWidth(site, "get_Item", 1, extraction.Architecture) is not null)
             {
                 var index = Pop();
                 var source = Pop();

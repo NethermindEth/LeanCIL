@@ -114,6 +114,15 @@ internal static class Spans
         return type is ByReferenceType reference && OwnerElement(reference.ElementType);
     }
 
+    /// <summary>The element width of the specified overload at an original, modelled span call.</summary>
+    internal static int? MemberWidth(Instruction site, string name, int parameterCount, string architecture)
+    {
+        if (site.OpCode.Code != Code.Call || site.Operand is not MethodReference { DeclaringType: GenericInstanceType owner } method ||
+            method.Name != name || method.Parameters.Count != parameterCount ||
+            Member(method, architecture) is null) return null;
+        return ElementWidth(owner.GenericArguments[0], architecture);
+    }
+
     /// <summary>A retained span member uses the element of its closed receiver.</summary>
     internal static Operation? Member(MethodReference method, string architecture)
     {
@@ -132,7 +141,7 @@ internal static class Spans
         if (method.Name is not ("get_Item" or "get_Length" or "Slice" or "get_IsEmpty" or
             "GetPinnableReference" or "op_Implicit" or "get_Empty" or "Clear" or "Fill" or "CopyTo" or "TryCopyTo"))
             return null;
-        if (ElementWidth(element, architecture) is not int width) return null;
+        if (ElementWidth(element, architecture) is null) return null;
         Operation? operation = method.Name switch
         {
             "Clear" when writable && parameters.Count == 0 && result.MetadataType == MetadataType.Void =>
@@ -144,11 +153,11 @@ internal static class Spans
                 result.MetadataType == (method.Name == "CopyTo" ? MetadataType.Void : MetadataType.Boolean) =>
                 Unoutlined.Site,
             "get_Item" when parameters is [{ ParameterType.MetadataType: MetadataType.Int32 }] &&
-                ElementReference(result, writable) => new SpanItem(width),
-            "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => new SpanLength(),
+                ElementReference(result, writable) => Unoutlined.Site,
+            "get_Length" when parameters.Count == 0 && result.MetadataType == MetadataType.Int32 => Unoutlined.Site,
             "Slice" when parameters.Count is 1 or 2 && DeclaredSpan(result, name) &&
                 parameters.All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) =>
-                new SpanSlice(parameters.Count == 2),
+                Unoutlined.Site,
             "get_IsEmpty" when parameters.Count == 0 && result.MetadataType == MetadataType.Boolean =>
                 Unoutlined.Site,
             "GetPinnableReference" when parameters.Count == 0 && ElementReference(result, writable) =>

@@ -136,7 +136,8 @@ internal static partial class ExceptionLint
         {
             ScalarIntrinsic { Function: ScalarFunction.Abs } => FaultKind.Overflow,
             X86BaseDivRem64 => FaultKind.DivideByZeroAndOverflow,
-            SpanItem => FaultKind.IndexOutOfRange,
+            Unoutlined when Spans.MemberWidth(instruction, "get_Item", 1, profile.Architecture) is not null =>
+                FaultKind.IndexOutOfRange,
             _ => null
         };
     }

@@ -24,8 +24,8 @@ internal static partial class ProofOutline
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
         if (ops is not [(LocalAddress { Index: 0 }, _), (Constant { Width: 32, Value: 0, Numeral: true }, _),
-                (SpanItem item, _), (Arg { Index: 1 }, _), var store, (_, { OpCode.Code: Code.Ret })] ||
-            item.Width != width || !MethodArguments.Plain(method, 1))
+                (Unoutlined, var item), (Arg { Index: 1 }, _), var store, (_, { OpCode.Code: Code.Ret })] ||
+            Spans.MemberWidth(item, "get_Item", 1, extraction.Architecture) != width || !MethodArguments.Plain(method, 1))
             return null;
         var write = ScalarStore(store.Op, store.Site, extraction.Architecture);
         return width is 4 or 8 && write?.Width == width ? write : null;
