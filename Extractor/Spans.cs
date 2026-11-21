@@ -68,12 +68,8 @@ internal static class Spans
     static bool OwnerElement(TypeReference type) =>
         type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 
-    /// <summary>
-    /// The constructor consumes only its explicit arguments and produces a span value. With
-    /// <paramref name="staticData"/> a read-only byte span over a pointer must lie in extracted static data.
-    /// </summary>
-    internal static SpanSource? ConstructorOperation(MethodReference method, string architecture,
-        bool staticData = true)
+    /// <summary>A supported span constructor, with its array range when a proof outline needs it.</summary>
+    internal static Operation? ConstructorOperation(MethodReference method, string architecture)
     {
         if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
             method is GenericInstanceMethod || method.CallingConvention != MethodCallingConvention.Default ||
@@ -82,17 +78,16 @@ internal static class Spans
             owner.ElementType.FullName is not ("System.Span`1" or "System.ReadOnlySpan`1") ||
             !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return null;
         var element = owner.GenericArguments[0];
-        if (ElementWidth(element, architecture) is not int width) return null;
+        if (ElementWidth(element, architecture) is null) return null;
         var writable = Writable(owner);
         var parameters = method.Parameters;
-        SpanSource? operation = parameters switch
+        Operation? operation = parameters switch
         {
             [{ ParameterType: ByReferenceType byref }] when OwnerElement(byref.ElementType) =>
-                new SpanSingleReference(width, writable),
+                Unoutlined.Site,
             [{ ParameterType: PointerType { ElementType.MetadataType: MetadataType.Void } },
                 { ParameterType.MetadataType: MetadataType.Int32 }] =>
-                staticData && !writable && element.MetadataType == MetadataType.Byte
-                    ? new SpanCreate() : new SpanFromReference(width, writable),
+                Unoutlined.Site,
             _ when parameters.Count is 1 or 3 && parameters[0].ParameterType is ArrayType { IsVector: true } array &&
                 OwnerElement(array.ElementType) &&
                 parameters.Skip(1).All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) &&

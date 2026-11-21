@@ -13,14 +13,5 @@ internal sealed record SpanSlice(bool Counted) : Operation;
 
 internal sealed record SpanItem(int Width) : Operation;
 
-/// <summary>The source a span constructor uses in a proof outline.</summary>
-internal abstract record SpanSource : Operation;
-
-/// <summary>The span over a native pointer and a length, which has byte elements.</summary>
-internal sealed record SpanCreate : SpanSource;
-
-internal sealed record ArraySpan(Arrays.Element Element, bool Writable, ArrayRange Range) : SpanSource;
-
-internal sealed record SpanFromReference(int Width, bool Writable) : SpanSource;
-
-internal sealed record SpanSingleReference(int Width, bool Writable) : SpanSource;
+/// <summary>The array element storage, mutability and range used by a span proof outline.</summary>
+internal sealed record ArraySpan(Arrays.Element Element, bool Writable, ArrayRange Range) : Operation;

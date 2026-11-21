@@ -44,14 +44,14 @@ internal static class MarshalModels
         if (!matches) return null;
         RuntimeModels.ValidateSignature(reference, architecture);
         var element = method.GenericArguments[0];
-        if (Spans.ElementWidth(element, architecture) is not { } width) return null;
+        if (Spans.ElementWidth(element, architecture) is null) return null;
         switch (method.Name)
         {
             case "GetReference":
-            case "GetArrayDataReference": return Unoutlined.Site;
+            case "GetArrayDataReference":
             case "CreateSpan":
             case "CreateReadOnlySpan":
-                return new SpanFromReference(width, method.Name == "CreateSpan");
+                return Unoutlined.Site;
             case "AsBytes":
             case "Cast":
                 var target = arity == 1 ? 1 : Spans.ElementWidth(method.GenericArguments[1], architecture);

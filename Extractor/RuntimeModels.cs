@@ -149,7 +149,7 @@ internal static class RuntimeModels
         if (ArgumentGuards.CallModel(reference, profile.Architecture) is { } guard) return guard;
         if (Spans.ArrayExtension(reference, profile.Architecture) is { } arrayView) return arrayView;
         if (Spans.Member(reference, profile.Architecture) is { } span) return span;
-        if (Spans.ConstructorOperation(reference, profile.Architecture, staticData: false) is not null)
+        if (Spans.ConstructorOperation(reference, profile.Architecture) is not null)
             return Unoutlined.Site;
         if (Arrays.Fill(reference, profile.Architecture) is { } fill) return fill;
         if (StaticSpanModel(reference, profile.Architecture) is { } staticSpan) return staticSpan;
