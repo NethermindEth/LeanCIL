@@ -62,7 +62,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .sizeof _ | .ldc_i4 _ | .ldc_i8 _ | .ldnull | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
-  | .ldobj _ | .loadScalar .. | .ldind _ | .fieldAt ..
+  | .ldobj _ | .ldind _ | .fieldAt ..
   | .castclass _ | .isinst _ | .ldfld _ | .ldflda _ | .ldlen => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un

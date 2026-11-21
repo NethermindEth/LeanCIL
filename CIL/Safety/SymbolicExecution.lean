@@ -1316,6 +1316,9 @@ elab_rules : tactic
           try
             evalTactic (← `(tactic| (
               first
+              | (refine Eq.trans (step_ldobj_primitive _ _ _ _ _ (by first | assumption | rfl) _) ?_
+                 simp [transfer_scalar_reference_eq, transfer_scalar_readOnlyReference_eq,
+                   cil_guard, cil_checked, $[$facts:term],*] <;> rfl)
               | exact step_ldobj_aggregate_of_snapshot _ _ _ _ _ false _
                   (by first | assumption | rfl) (by solve_by_elim only [$[$facts:term],*])
               | exact step_ldobj_aggregate_of_snapshot _ _ _ _ _ true _

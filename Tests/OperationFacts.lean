@@ -51,10 +51,12 @@ theorem word_store {memory after : Memory} {destination : Reference} {bits : CIL
 /-- An initialized byte load zero-extends the checked byte encoding. -/
 theorem byte_load {memory : Memory} {source : Reference} {bits : BitVec 8}
     (loaded : read memory source 1 1 = .ok (numberBytes bits.toNat 1))
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadScalar 1 false) pc args frame (.reference (.address source) :: rest) memory =
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .primitive 1 false) (pc : Nat) (args : List Value)
+    (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (bits.setWidth 32)) :: rest) frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms byte_load
 
 /-- A byte store consumes write authority without requiring old initialized contents. -/

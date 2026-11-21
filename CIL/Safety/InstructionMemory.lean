@@ -103,7 +103,7 @@ def observerCount : CIL.Instruction → Nat
   | .ldfld _ | .ldflda _ => 1
   | .stfld _ => 2
   -- Memory and fields
-  | .loadScalar .. | .fieldAt ..
+  | .fieldAt ..
   | .ldind _ | .initobj _ => 1
   | .ldobj type => if Extraction.spanLocal type then 0 else 1
   | .setFieldAt ..
@@ -1411,7 +1411,6 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     .error (.unsupported "Instruction observes unspecified vector bits") else
   match op, stack with
   -- Typed copies and scalar and aggregate memory
-  | .loadScalar width signed, _ => transferValues (.scalar width signed) false stack m
   -- Fields
   | .fieldAt offset width signed, .scalar (.aggregate bytes) :: rest =>
     if offset + width > bytes.length then .error .invalidState else

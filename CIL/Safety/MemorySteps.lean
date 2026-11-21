@@ -33,35 +33,35 @@ section MemoryEquations
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
 /-- Loading through a writable reference uses the existing width check and checked scalar read. -/
-@[cil_step high] theorem step_loadScalar_reference_eq (width : Nat) (signed : Bool)
+@[cil_step high] theorem transfer_scalar_reference_eq (width : Nat) (signed : Bool)
     (reference : ManagedReference) (rest : List Value) :
-    step body (.loadScalar width signed) pc args frame (.reference reference :: rest) memory =
+    typedTransferCall (.scalar width signed) false pc frame (.reference reference :: rest) memory =
       if width = 1 || width = 2 || width = 4 || width = 8 then do
         let value ← loadValue memory reference width signed
         return .next (pc + 1) (.scalar value :: rest) frame memory
       else .error (.unsupported "Scalar memory width") := by
-  rw [step_loadScalar_eq]
-  simp only [instructionStep, instruction, transferValues, cil_guard, unspecifiedOperands, List.take, List.any,
+  simp only [typedTransferCall, observedTransfer, transferValues, cil_guard, unspecifiedOperands,
+    List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_ite,
     bind_assoc, pure_bind]
   rfl
-#print axioms step_loadScalar_reference_eq
+#print axioms transfer_scalar_reference_eq
 
 /-- A readonly reference permits the same checked read without acquiring write authority. -/
-@[cil_step high] theorem step_loadScalar_readOnlyReference_eq (width : Nat) (signed : Bool)
+@[cil_step high] theorem transfer_scalar_readOnlyReference_eq (width : Nat) (signed : Bool)
     (reference : ManagedReference) (rest : List Value) :
-    step body (.loadScalar width signed) pc args frame
+    typedTransferCall (.scalar width signed) false pc frame
       (.readOnlyReference reference :: rest) memory =
       if width = 1 || width = 2 || width = 4 || width = 8 then do
         let value ← loadValue memory reference width signed
         return .next (pc + 1) (.scalar value :: rest) frame memory
       else .error (.unsupported "Scalar memory width") := by
-  rw [step_loadScalar_eq]
-  simp only [instructionStep, instruction, transferValues, cil_guard, unspecifiedOperands, List.take, List.any,
+  simp only [typedTransferCall, observedTransfer, transferValues, cil_guard, unspecifiedOperands,
+    List.take, List.any,
     Value.hasUnspecified, Bool.or_false, Bool.false_eq_true, ite_false, bind_ite,
     bind_assoc, pure_bind]
   rfl
-#print axioms step_loadScalar_readOnlyReference_eq
+#print axioms transfer_scalar_readOnlyReference_eq
 
 /-- `bigMul64` stores the low 64 bits of the product through `low` and pushes the high 64. -/
 @[cil_step high] theorem step_memory_bigMul64_eq (low : ManagedReference) (right left : CIL.W64)

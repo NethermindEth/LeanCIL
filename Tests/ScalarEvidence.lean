@@ -860,7 +860,7 @@ private def unaryHoleCode (emitted : Instruction) : List Instruction :=
   [.ldarg 0, emitted, .pop, .ldarg 0, .ret]
 -- An access form is reserved for the opcodes that decide its width, so no conversion emits one.
 example : ¬ ScalarFlowValid (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode (.loadScalar 8)) := by decide
+    (unaryHoleCode (.ldind .i8)) := by decide
 example : ¬ ScalarFlowValid (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .conv_i8) := by decide
 -- `conv.r4` is uncovered: the site admits no access form, conversion or faulting arithmetic.
@@ -871,7 +871,7 @@ example : ¬ ScalarFlowValid (unaryHoleRaw 107) unaryHoleFeatures unaryHoleState
 example : ¬ ScalarFlowValid (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.conv_ovf_un .u)) := by decide +kernel
 example : ¬ ScalarFlowValid (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode (.loadScalar 8)) := by decide +kernel
+    (unaryHoleCode (.ldind .i8)) := by decide +kernel
 example : ¬ ScalarFlowValid (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .rem_un) := by decide +kernel
 example : ([Instruction.div, .div_un, .rem, .add_ovf, .add_ovf_un, .sub_ovf, .sub_ovf_un, .mul_ovf,
@@ -1022,8 +1022,8 @@ private def indirectForged : List IndirectCase := [
   store 85 (.stind .i4), store 223 (.stind .i2),
   -- Sign.
   load 70 (.ldind .u1), load 71 (.ldind .i1), load 72 (.ldind .u2), load 73 (.ldind .i2),
-  -- Runtime-model transfers of the right width, which no raw `ldind` or `stind` decodes to.
-  load 74 (.loadScalar 4 false), load 70 (.loadScalar 1 true), store 84 (.stobj intType),
+  -- Typed object accesses of the right width, which no raw `ldind` or `stind` decodes to.
+  load 74 (.ldobj intType), load 70 (.ldobj sbyteType), store 84 (.stobj intType),
   -- Alignment and operation.
   block 65047 (.memory (.copyBlock 1)), block 65048 (.memory (.initBlock 4)),
   block 65047 (.memory (.copyBlock 8)) [unaligned 1],
@@ -1031,26 +1031,28 @@ private def indirectForged : List IndirectCase := [
   block 65047 (.memory (.initBlock 8)), block 65048 (.memory (.copyBlock 8)),
   -- Kinds and prefixes extraction refuses.
   block 65047 (.memory (.copyBlock 3)) [unaligned 3],
+  block 65047 (.memory (.copyBlock 8)) [i 0xFE1E],
+  block 65048 (.memory (.initBlock 8)) [i 0xFE14],
   load 74 (.ldind .i4) (prefixes := [i 65043]),
   load 78 (.ldind .i4) .other, load 79 (.ldind .i8) .other,
   load 80 (.ldind .i) .other, store 81 (.stind .i8), store 86 (.stind .i4),
   store 87 (.stind .i8),
   -- Access forms at other opcodes.
-  load 108 (.loadScalar 8 false) .other, load 108 (.ldind .i8) .other,
+  load 108 (.ldobj word) .other, load 108 (.ldind .i8) .other,
   load 107 (.ldind .i4) .other]
 
 /-- Forged emissions at operands the test encoder cannot write: wrong widths and signs of `ldobj`
     and `stobj`, field accesses at operand types extraction refuses, and calls emitting an
     `ldind` or `stind`. -/
 private def objectForged : List IndirectCase := [
-  load 113 (.loadScalar 2 false) (operand := .type intType),
-  load 113 (.loadScalar 4 true) (operand := .type intType),
-  load 113 (.loadScalar 1 false) (operand := .type sbyteType),
+  load 113 (.ldobj (.atom runtime "System.UInt16")) (operand := .type intType),
+  load 113 (.ldobj (.atom runtime "System.UInt32")) (operand := .type intType),
+  load 113 (.ldobj (.atom runtime "System.Byte")) (operand := .type sbyteType),
   load 113 (.ldind .i8) .word64 (operand := .type word),
   store 129 (.stind .i1) (operand := .type intType),
   store 129 (.stind .i8) (operand := .type sbyteType),
-  typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.ldobj aggregateType),
-  typed 113 enumType (.loadScalar 2 false), typed 113 vectorType (.memory .load256),
+  typed 113 aggregateType (.ldind .u4), typed 129 aggregateType (.ldobj aggregateType),
+  typed 113 enumType (.ldind .u2), typed 113 vectorType (.memory .load256),
   -- Floating-point and pointer operands, which extraction refuses.
   typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),
   typed 129 (.atom runtime "System.Single") (.setFieldAt 0 8),

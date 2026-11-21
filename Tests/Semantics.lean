@@ -187,14 +187,14 @@ theorem stind_value_width_mismatch :
 #print axioms stind_value_width_mismatch
 
 theorem scalar_load_rejects_snapshot :
-    (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Tests.caller).isOk = false := rfl
+    (instruction (.ldind .u2) [.scalar (.aggregate [1, 2])] Tests.caller).isOk = false := rfl
 
 theorem scalar_width_rejected :
-    instruction (.loadScalar 16) [Tests.reference] Tests.caller =
+    observedTransfer (.scalar 16 false) false [Tests.reference] Tests.caller =
       .error (.unsupported "Scalar memory width") := rfl
 
 theorem scalar_load_null :
-    instruction (.loadScalar 4) [.reference .null] Tests.caller =
+    instruction (.ldind .u4) [.reference .null] Tests.caller =
       .error (.memory .nullDereference .null 4) := rfl
 
 theorem scalar_store_null :
@@ -218,7 +218,7 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
     ∃ result,
       instruction (.stind .i4) [.scalar (.i32 bits), .reference (.address reference)] memory =
         .ok (result, []) ∧
-      instruction (.loadScalar 4) [.reference (.address reference)] result =
+      instruction (.ldind .u4) [.reference (.address reference)] result =
         .ok (result, [.scalar (.i32 bits)]) := by
   obtain ⟨result, stored, loaded⟩ := store_load_numeric_local .word32 (.i32 bits) bits.toNat rfl ready
   change (do
@@ -231,7 +231,7 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
         observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
-      simp_all [instruction, transferValues, loadValue, localResult, dereference, ordinaryAccessAlignment,
+      simp_all [instruction, CIL.NumericKind.width, CIL.NumericKind.signed, loadValue, localResult, dereference, ordinaryAccessAlignment,
         observerCount, unspecifiedOperands, Value.hasUnspecified, Bind.bind, Except.bind,
         Pure.pure, Except.pure]
 
@@ -466,7 +466,7 @@ theorem null_test_requires_reference :
 theorem null_reference_accesses_fault :
     instructions [.memory .nullRef, .ldind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 8) ∧
-    instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
+    instructions [.memory .nullRef, .ldind .i4] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
     instructions [.memory .nullRef, .ldc_i8 7, .stind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧

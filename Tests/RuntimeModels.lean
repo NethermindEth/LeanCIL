@@ -72,7 +72,7 @@ example : runModel body (.referenceCompare .greater) 3 frame [fourth, start] sta
 example : runModel body .referenceSubtract 3 frame [.scalar (.i32 4), fourth] staticMemory =
     step body .sub 3 [] frame [.scalar (.i32 4), fourth] staticMemory := rfl
 example : runModel body (.typedTransfer (.scalar 4 false) false) 3 frame [start] staticMemory =
-    step body (.loadScalar 4 false) 3 [] frame [start] staticMemory := rfl
+    step body (.ldind .u4) 3 [] frame [start] staticMemory := rfl
 example : runModel body .skipInit 3 frame [start] staticMemory =
     .ok (.next 4 [] frame staticMemory) := rfl
 example : runModel body .objectConstructor 3 frame [.object .null] staticMemory =

@@ -37,7 +37,7 @@ theorem restricted_store_rejected :
 
 /-- Restricted references still permit initialized scalar reads. -/
 theorem restricted_load :
-    instruction (.loadScalar 4 false) [.readOnlyReference (.address ⟨0, 4⟩)] memory =
+    instruction (.ldind .u4) [.readOnlyReference (.address ⟨0, 4⟩)] memory =
       .ok (memory, [.scalar (.i32 0)]) := rfl
 #print axioms restricted_load
 
@@ -45,7 +45,7 @@ theorem restricted_load :
 theorem alias_update_visible :
     (do let stored ← checkedAt (.address ⟨0, 4⟩) 4
           (write memory ⟨0, 4⟩ (numberBytes 7 4) 1)
-        let (_, values) ← instruction (.loadScalar 4 false)
+        let (_, values) ← instruction (.ldind .u4)
           [.readOnlyReference (.address ⟨0, 4⟩)] stored
         pure values) = (Except.ok [.scalar (.i32 7)] : ExecutionResult (List Value)) := rfl
 #print axioms alias_update_visible

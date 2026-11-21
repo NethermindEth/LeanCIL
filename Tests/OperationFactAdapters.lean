@@ -28,18 +28,20 @@ theorem local_address {memory other : Memory} {reference : Reference} {kind : CI
 theorem signed_byte {memory : Memory} {source : Reference} {bits : BitVec 8}
     (loaded : read memory source 1 1 = .ok (numberBytes bits.toNat 1))
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadScalar 1 true) pc args frame (.reference (.address source) :: rest) memory =
+    step body (.ldind .i1) pc args frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (bits.signExtend 32)) :: rest) frame memory) := by
   cil_checked_step [loaded]
 #print axioms signed_byte
 
-/-- A signed two-byte load extends both initialized bytes to the CIL stack width. -/
+/-- A signed two-byte ldobj through a readonly reference extends both initialized bytes. -/
 theorem signed_short {memory : Memory} {source : Reference} {bits : BitVec 16}
     (loaded : read memory source 2 1 = .ok (numberBytes bits.toNat 2))
-    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadScalar 2 true) pc args frame (.reference (.address source) :: rest) memory =
+    (body : CIL.Method) {type : CIL.Extraction.TypeExpr}
+    (shape : body.valueShape type = .primitive 2 true) (pc : Nat) (args : List Value)
+    (frame : Frame) (rest : List Value) :
+    step body (.ldobj type) pc args frame (.readOnlyReference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (bits.signExtend 32)) :: rest) frame memory) := by
-  cil_checked_step [loaded]
+  cil_checked_step [shape, loaded]
 #print axioms signed_short
 
 /-- The read adapter selects equations inside nested conjunctions. -/
@@ -68,7 +70,7 @@ theorem quantified_signed_read {memory : Memory} (source : Nat → Reference)
       .ok (numberBytes (bits index).toNat 2))
     (index : Nat) (body : CIL.Method) (pc : Nat) (args : List Value)
     (frame : Frame) (rest : List Value) :
-    step body (.loadScalar 2 true) pc args frame
+    step body (.ldind .i2) pc args frame
         (.reference (.address (source index)) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 ((bits index).signExtend 32)) :: rest)
         frame memory) := by
@@ -123,7 +125,7 @@ theorem read_requires_matching_evidence {memory other after : Memory}
     (_onlySnapshot : True ∧ readSnapshot memory source 2 1 = .ok bytes)
     (loaded : read memory source 2 1 = .ok (numberBytes bits.toNat 2))
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body (.loadScalar 2 true) pc args frame (.reference (.address source) :: rest) memory =
+    step body (.ldind .i2) pc args frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i32 (bits.signExtend 32)) :: rest) frame memory) := by
   fail_if_success cil_checked_step [_wrongMemory]
   fail_if_success cil_checked_step [_wrongSource]

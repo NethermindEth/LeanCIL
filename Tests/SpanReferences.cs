@@ -200,11 +200,11 @@ var forged = Path.Combine(root, "Forged-argument.lean");
 File.WriteAllText(forged, source.Replace(argumentEvidence, "arguments := [.span 1 false]", StringComparison.Ordinal));
 rejected.Add(forged, "PASS span reference argument evidence rejection",
     ClosedArgumentsMismatch);
-// Replacing the decoded span load by a byte load must fail feature validation.
+// Replacing the decoded span load by an eight-byte indirect load must fail feature validation.
 var copy = File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean"));
 var forgedCopy = IsDecodedMethod(copy, 0)
-    ? ForgeDecodedMethod(copy, 0, "code := method.code.set 1 (.loadScalar 8 false)")
-    : copy.Replace("  .ldobj (valueType0),", "  .loadScalar 8 false,", StringComparison.Ordinal);
+    ? ForgeDecodedMethod(copy, 0, "code := method.code.set 1 (.ldind .i8)")
+    : copy.Replace("  .ldobj (valueType0),", "  .ldind .i8,", StringComparison.Ordinal);
 if (copy == forgedCopy) throw new InvalidOperationException("Missing span copy");
 var loaded = Path.Combine(root, "Forged-copy.lean");
 File.WriteAllText(loaded, NarrowEvidence(forgedCopy, "method0_features_validated"));

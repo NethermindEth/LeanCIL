@@ -21,25 +21,10 @@ def accessAlignment : Option RawInstruction → Option (Option Nat)
   | some ⟨_, 65043, _⟩ => none
   | _ => some none
 
-/-- The one instruction extraction emits for a `cpblk` or `initblk` whose prefix gives
-    `alignment`; `none` for any other opcode. -/
-def indirectEmission? (alignment : Option Nat) : Nat → Option Instruction
-  | 65047 => some (.memory (.copyBlock (alignment.getD defaultBlockAlignment)))
-  | 65048 => some (.memory (.initBlock (alignment.getD defaultBlockAlignment)))
-  | _ => none
-
-/-- Whether two emitted loads, stores or block operations are the same instruction. -/
-def sameIndirectEmission : Instruction → Instruction → Bool
-  | .loadScalar width signed, .loadScalar otherWidth otherSigned =>
-    width == otherWidth && signed == otherSigned
-  | .memory (.copyBlock alignment), .memory (.copyBlock other)
-  | .memory (.initBlock alignment), .memory (.initBlock other) => alignment == other
-  | _, _ => false
-
 /-- Emitted loads, stores and block operations whose width, sign extension or alignment a raw
     instruction decides; only the opcodes `indirectOpcode` names and calls may emit one. -/
 def indirectEmission : Instruction → Bool
-  | .loadScalar .. | .ldind _ | .stind _
+  | .ldind _ | .stind _
   | .memory (.copyBlock _) | .memory (.initBlock _)
   | .memory .load128 | .memory .load256 | .memory .load512
   | .memory .store128 | .memory .store256 | .memory .store512 => true
@@ -62,12 +47,9 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
     if instruction.opcode == 40 then
       !(emitted matches .ldind _ | .stind _ | .memory (.copyBlock _) | .memory (.initBlock _))
     else !indirectEmission emitted
-  else match accessAlignment previous, instruction.opcode, instruction.operand with
-    | none, _, _ => false
-    | some alignment, opcode, .none =>
-      skipEncoding || valueEncodingMatches previous instruction emitted ||
-        (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)
-    | _, _, _ => false
+  else match accessAlignment previous, instruction.operand with
+    | some _, .none => skipEncoding || valueEncodingMatches previous instruction emitted
+    | _, _ => false
 
 /-- The indirect access rule at `pc`, reading the raw instructions next to it through `rawAt`:
     `unaligned.` has an admitted alignment, precedes an instruction that takes it and emits

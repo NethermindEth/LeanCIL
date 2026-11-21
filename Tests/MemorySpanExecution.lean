@@ -20,7 +20,7 @@ private def memory : Safety.Memory := {
 private def view : SpanView := ⟨.address ⟨0, 0⟩, 3, 4, false⟩
 
 private def reader : Method := {
-  code := [.ldarg 0, .ldarg 1, .memory (.spanItem 4), .loadScalar 4, .ret]
+  code := [.ldarg 0, .ldarg 1, .memory (.spanItem 4), .ldind .u4, .ret]
   locals := [], returnsValue := true }
 
 private def caller : Method := {

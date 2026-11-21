@@ -919,8 +919,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
-  case loadScalar
-    | fieldAt | setFieldAt | ldc_i4
+  case fieldAt | setFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
     | pop =>
     step_relabel_fallback (fun absent => absurd rfl absent)
@@ -932,8 +931,6 @@ theorem step_relabel_neg : StepRelabel .neg := step_relabel _
 theorem step_relabel_cgt : StepRelabel .cgt := step_relabel _
 theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := step_relabel _
 theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := step_relabel _
-theorem step_relabel_loadScalar (width : Nat) (signed : Bool) :
-    StepRelabel (.loadScalar width signed) := step_relabel _
 theorem step_relabel_fieldAt (offset : Nat) (width : Nat) (signed : Bool) :
     StepRelabel (.fieldAt offset width signed) := step_relabel _
 theorem step_relabel_setFieldAt (offset : Nat) (width : Nat) :
@@ -1570,8 +1567,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
-  case loadScalar
-    | fieldAt | setFieldAt | ldc_i4
+  case fieldAt | setFieldAt | ldc_i4
     | ldc_i8 | ldnull | ldind | stind | ldlen | ldelem | ldelem_ref | stelem | stelem_ref | dup
     | pop =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)

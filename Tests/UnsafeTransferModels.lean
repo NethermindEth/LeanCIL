@@ -228,7 +228,7 @@ theorem crossedOverloads :
 theorem reservedEmissions :
     let control := site name!"Read" false (.atom runtimeScope "System.UInt64") false 0x10
     let other := site name!"Unknown" false (.atom runtimeScope "System.UInt64") false 0x10
-    let operations := [Instruction.loadScalar 8, .stind .i8,
+    let operations := [Instruction.ldind .i8, .stind .i8,
        .ldobj (.aggregate "Fixture::Packet" 0),
        .stobj (.aggregate "Fixture::Packet" 0), .memory .load128, .memory .load256, .memory .load512,
       .memory .store128, .memory .store256, .memory .store512,

@@ -528,18 +528,6 @@ theorem step_appendLocals_ble_un (target : Nat) :
 #print axioms step_appendLocals_ble_un
 
 
-/-- `loadScalar` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_loadScalar (width : Nat) (signed : Bool) :
-    StepAppendLocals (.loadScalar width signed) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.loadScalar width signed) pc stack frame extra memory
-
-#print axioms step_appendLocals_loadScalar
-
 /-- `fieldAt` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_fieldAt (offset width : Nat) (signed : Bool) :
     StepAppendLocals (.fieldAt offset width signed) := by
@@ -1632,8 +1620,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ble target
     case ble_un target =>
       exact step_appendLocals_ble_un target
-    case loadScalar width signed =>
-      exact step_appendLocals_loadScalar width signed
     case fieldAt offset width signed =>
       exact step_appendLocals_fieldAt offset width signed
     case setFieldAt offset width =>

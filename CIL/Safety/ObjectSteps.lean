@@ -815,11 +815,6 @@ def storageLowering? (body op : Expr) (stack : Option Expr := none) :
     let some proof := shared.proof? | return none
     let load := name == ``CIL.Instruction.ldobj
     match shared.expr.getAppFnArgs with
-    | (``CIL.ValueShape.primitive, #[width, signed]) =>
-      if load then
-        return ← lowering ``step_ldobj_primitive
-          (mkApp2 (mkConst ``CIL.Instruction.loadScalar) width signed) #[width, signed, proof]
-      return none
     | (``CIL.ValueShape.vector, #[width]) =>
       let some (equation, operation) := (match ← getNatValue? width, load with
         | some 16, true => some (``step_ldobj_vector16, ``CIL.MemoryOp.load128)
