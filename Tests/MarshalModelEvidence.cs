@@ -38,7 +38,7 @@ partial class Program
                          let changed := { raw with operand := .call forged }
                          runtimeModel environment .call method == some (.memory ({{model}})) &&
                            agrees raw (.call method {}) && !agrees changed (.call method {}) &&
-                           !agrees raw (.memory ({{model}})) &&
+                           !agrees raw (.newobj method) &&
                            ({{alternate}} : Option MemoryOp).all (changedElement raw site)
                        | _ => false
                      | _, _ => false) = true := by decide +kernel

@@ -65,9 +65,9 @@ partial class Program
                     "case invariant => simp [invariant]", StringComparison.Ordinal);
                 source = source.Replace("case invariant => sorry -- invariant again at the loop head", """
                     case invariant =>
-                      have next : (local1 + 1).toNat = local1.toNat + 1 := by
-                        simp [BitVec.toNat_add]
-                        omega
+                      have small : values1Elements.length < 2 ^ 32 := by omega
+                      have next := toNat_succ (count := BitVec.ofNat 32 values1Elements.length)
+                        (by simpa only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt small] using values1Bound)
                       dsimp only [invariant] at holds ⊢
                       refine ⟨by omega, ?_⟩
                       rw [next, List.take_add_one, List.getElem?_eq_getElem values1Bound, List.foldl_append,
@@ -76,9 +76,9 @@ partial class Program
                     """.Replace("\n", "\n    ", StringComparison.Ordinal), StringComparison.Ordinal);
                 source = source.Replace("case measure => sorry -- measure decreases over this iteration", """
                     case measure =>
-                      have next : (local1 + 1).toNat = local1.toNat + 1 := by
-                        simp [BitVec.toNat_add]
-                        omega
+                      have small : values1Elements.length < 2 ^ 32 := by omega
+                      have next := toNat_succ (count := BitVec.ofNat 32 values1Elements.length)
+                        (by simpa only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt small] using values1Bound)
                       simp only [measure]
                       omega
                     """.Replace("\n", "\n    ", StringComparison.Ordinal), StringComparison.Ordinal);
