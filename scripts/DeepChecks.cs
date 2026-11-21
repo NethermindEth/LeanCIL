@@ -459,13 +459,13 @@ partial class Program
         return publication;
     }
 
-    /// <summary>Read the completeness constructor in the jointly audited enum theorem's type.</summary>
-    static bool EnumStorageComplete(AuditedTheorem theorem)
+    /// <summary>Read the completeness constructor in the jointly audited theorem's type.</summary>
+    static bool CoverageComplete(AuditedTheorem theorem)
     {
         // The structural audit binds the proposition and every extraction and image constant.
         // Read only its final argument from the replayed statement.
         if (theorem.term is not { } term || theorem.termError is not null)
-            throw new InvalidDataException("Missing audited enum coverage argument");
+            throw new InvalidDataException("Missing audited coverage argument");
         var nodes = term.GetProperty("nodes");
         var application = nodes[term.GetProperty("root").GetInt32()];
         if (application[0].GetString() == "app")
@@ -477,10 +477,10 @@ partial class Program
                 {
                     "true" => true,
                     "false" => false,
-                    _ => throw new InvalidDataException("Invalid enum coverage constructor")
+                    _ => throw new InvalidDataException("Invalid coverage constructor")
                 };
         }
-        throw new InvalidDataException("Expected a literal enum coverage argument");
+        throw new InvalidDataException("Expected a literal coverage argument");
     }
 
     /// <summary>Report each fact and image from the requests that passed the joint audit.</summary>
@@ -491,8 +491,8 @@ partial class Program
         Dictionary<Sha256Digest, string> imageTheorems = [];
         foreach (var request in audited)
         {
-            if (request.Audit.name == EnumStorageTheorem &&
-                !EnumStorageComplete(oleanAudit.theorems.Single(result => result.name == EnumStorageTheorem)))
+            if (request.Audit.name is EnumStorageTheorem or PlatformKindsTheorem &&
+                !CoverageComplete(oleanAudit.theorems.Single(result => result.name == request.Audit.name)))
                 continue;
             var distinct = request.Subject switch
             {
@@ -532,7 +532,7 @@ partial class Program
         BindingFact.BodyBytes => "no checked theorem binds the method bodies to the pinned images",
         BindingFact.MetadataRows =>
             "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
-        BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
+        BindingFact.PlatformTypeKinds => "the extraction selects no platform type or a defining or forwarding image is missing",
         BindingFact.EnumUnderlyingTypes => "the extraction selects no enum or a defining or forwarding image is missing",
         BindingFact.ValueTupleFieldOrder => "the supplied images do not cover a selected System.ValueTuple pair",
         BindingFact.ObjectFields => "the supplied images do not cover the extraction's platform definition of System.Object",
@@ -546,6 +546,8 @@ partial class Program
     };
 
     const string ImagesModule = "BindingAudit.Images";
+    const string PlatformKindsModule = "BindingAudit.PlatformKinds";
+    const string PlatformKindsTheorem = "BindingAudit.platformKinds";
     const string EnumStorageModule = "BindingAudit.EnumStorage";
     const string EnumStorageTheorem = "BindingAudit.enumStorage";
     const string PublicKeysModule = "BindingAudit.PublicKeys";
@@ -716,33 +718,39 @@ partial class Program
         }
     }
 
+    /// <summary>Derives a coverage bit from the physical checks and proves its value for the selected methods.</summary>
+    static string CoverageSource(string check, string proposition, string theorem, string macro, string module) => $$"""
+            import BindingAudit.Images
+            import Extracted
+            import StrictBinding.{{module}}
+            import Lean
+
+            namespace BindingAudit
+
+            open Lean Elab Term in
+            elab "{{macro}}%" : term => do
+              return toExpr ((StrictBinding.{{check}} images Extracted.platformDefinitions
+                Extracted.methodEvidence).toOption == some true)
+
+            set_option debug.skipKernelTC true in
+            /-- Supplied definitions pass the physical check. The last argument records completeness. -/
+            theorem {{theorem}} : StrictBinding.{{proposition}} images Extracted.platformDefinitions
+                Extracted.methodEvidence {{macro}}% := by decide +kernel
+
+            end BindingAudit
+
+            """;
+
     /// <summary>Writes one image module per digest and retains every pinned identity association.</summary>
     static void WriteBindingSources(BindingPlan plan)
     {
         foreach (var image in plan.Images.DistinctBy(image => image.Digest))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
-        File.WriteAllText(ModuleSource(plan.Output, EnumStorageModule), """
-            import BindingAudit.Images
-            import Extracted
-            import StrictBinding.EnumStorage
-            import Lean
-
-            namespace BindingAudit
-
-            open Lean Elab Term in
-            elab "enumCoverage%" : term => do
-              return toExpr ((StrictBinding.checkEnumStorage images Extracted.platformDefinitions
-                Extracted.methodEvidence).toOption == some true)
-
-            set_option debug.skipKernelTC true in
-            /-- Every supplied enum is checked; the last argument records completeness. -/
-            theorem enumStorage : StrictBinding.EnumStorageChecked images Extracted.platformDefinitions
-                Extracted.methodEvidence enumCoverage% := by decide +kernel
-
-            end BindingAudit
-
-            """);
+        File.WriteAllText(ModuleSource(plan.Output, EnumStorageModule), CoverageSource(
+            "checkEnumStorage", "EnumStorageChecked", "enumStorage", "enumCoverage", "EnumStorage"));
+        File.WriteAllText(ModuleSource(plan.Output, PlatformKindsModule), CoverageSource(
+            "checkPlatformKinds", "PlatformKindsChecked", "platformKinds", "kindCoverage", "PlatformKinds"));
         File.WriteAllText(ModuleSource(plan.Output, StaticDataModule), """
             import BindingAudit.Images
             import Extracted
@@ -1006,6 +1014,10 @@ partial class Program
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
+            new(PlatformKindsModule, new(PlatformKindsTheorem, App(Const("StrictBinding.PlatformKindsChecked"),
+                Const("BindingAudit.images"), Const("Extracted.platformDefinitions"),
+                Const("Extracted.methodEvidence"), "_"), ApprovedAxioms, term: true),
+                new BindingSubject.Fact(BindingFact.PlatformTypeKinds)),
             new(EnumStorageModule, new(EnumStorageTheorem, App(Const("StrictBinding.EnumStorageChecked"),
                 Const("BindingAudit.images"), Const("Extracted.platformDefinitions"),
                 Const("Extracted.methodEvidence"), "_"), ApprovedAxioms, term: true),
@@ -1045,7 +1057,8 @@ partial class Program
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
         else if (Build(ImagesModule) is { } imagesError) failures[ImagesModule] = "build: " + imagesError;
-        var facts = PagedFacts.Select(fact => PagedFact(fact).Module).Append(StaticDataModule).Append(EnumStorageModule);
+        var facts = PagedFacts.Select(fact => PagedFact(fact).Module)
+            .Append(StaticDataModule).Append(EnumStorageModule).Append(PlatformKindsModule);
         if (plan.ObjectFields.HasValue) facts = facts.Append(ObjectFieldsModule);
         if (plan.TupleFields.HasValue) facts = facts.Append(TupleFieldsModule);
         if (plan.PublicKeys.HasValue) facts = facts.Append(PublicKeysModule);

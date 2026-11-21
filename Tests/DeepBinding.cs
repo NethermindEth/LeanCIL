@@ -105,6 +105,12 @@ partial class Program
         Mutation("body theorem about other evidence", BodiesModule, source => ReplaceBodies(source,
             "theorem bodies : StrictBinding.BodiesBound images [] := by decide +kernel"),
             "Theorem statement mismatch", BindingFact.BodyBytes);
+        Mutation("platform kind theorem about other evidence", PlatformKindsModule, source => source.Replace(
+            "Extracted.methodEvidence kindCoverage% :=", "[] false :=", StringComparison.Ordinal),
+            "Theorem statement mismatch", BindingFact.PlatformTypeKinds);
+        Mutation("platform kind coverage claimed for an empty selection", PlatformKindsModule, source => source.Replace(
+            "Extracted.methodEvidence kindCoverage% :=", "Extracted.methodEvidence true :=", StringComparison.Ordinal),
+            "replay", BindingFact.PlatformTypeKinds);
         Mutation("enum theorem about other evidence", EnumStorageModule, source => source.Replace(
             "Extracted.methodEvidence enumCoverage% :=", "[] false :=", StringComparison.Ordinal),
             "Theorem statement mismatch", BindingFact.EnumUnderlyingTypes);

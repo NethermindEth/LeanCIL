@@ -6,25 +6,6 @@ namespace StrictBinding
 
 open CIL CIL.Extraction
 
-/-- A successful traversal contains the result of every selected input. -/
-private theorem read_member {α β : Type} {read : α → Except AuditError β}
-    {inputs : List α} {outputs : List β} {item : α} (member : item ∈ inputs)
-    (checked : inputs.mapM read = .ok outputs) :
-    ∃ result ∈ outputs, read item = .ok result := by
-  induction inputs generalizing outputs with
-  | nil => cases member
-  | cons first rest ih =>
-    rw [List.mapM_cons] at checked
-    obtain ⟨head, firstRead, checked⟩ := CIL.Safety.except_bind_ok checked
-    obtain ⟨tail, restRead, joined⟩ := CIL.Safety.except_bind_ok checked
-    have same : head :: tail = outputs := Except.ok.inj joined
-    subst outputs
-    rcases List.mem_cons.mp member with rfl | later
-    · exact ⟨head, by simp, firstRead⟩
-    · obtain ⟨result, found, read⟩ := ih later restRead
-      exact ⟨result, List.mem_cons_of_mem _ found, read⟩
-#print axioms read_member
-
 /-- A complete receipt checked every carried enum claim and the same external table as the proof. -/
 theorem EnumStorageChecked.complete {images : List PinnedImage} {platform : PlatformTable}
     {methods : List MethodEvidence} (checked : EnumStorageChecked images platform methods true) :

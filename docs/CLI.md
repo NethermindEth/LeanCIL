@@ -353,6 +353,12 @@ and reads the instance fields in declaration order: `Item1` has type `T1` and `I
 type `T2`. The object and pair can have different forwarding destinations. A missing pair
 destination leaves this fact uncovered. Runtime byte offsets remain a layout assumption.
 
+For `platform-type-kinds`, supply the defining assembly and any intervening facades for every
+external type in the extraction's platform table. Lean checks each scoped type's flags, base
+and generic arity against its TypeDef and GenericParam rows. A missing assembly leaves the
+fact uncovered. A conflicting supplied definition fails verification even when another assembly
+is missing.
+
 For `enum-underlying-types`, supply the assemblies that define the selected enums and any
 facades that forward them. Lean follows the scoped name, including the enclosing type for a
 nested enum, and reads the integer signature of the defining row's instance field `value__`.

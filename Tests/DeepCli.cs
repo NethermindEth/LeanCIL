@@ -46,7 +46,7 @@ File.WriteAllText(digestFile, digests);
 // ExportedType and an AssemblyRef. A defined object has one physical Field row.
 static void WritePlatformImage(string path, AssemblyName name, FieldAttributes field, AssemblyName? forward = null,
     AssemblyName? pairForward = null, bool definePair = false, bool reverseSlots = false,
-    bool definitionKeyFlag = true)
+    bool definitionKeyFlag = true, bool mathInterface = false)
 {
     var rows = new MetadataBuilder();
     rows.AddModule(0, rows.GetOrAddString(name.Name + ".dll"), rows.GetOrAddGuid(Guid.Empty), default, default);
@@ -74,6 +74,11 @@ static void WritePlatformImage(string path, AssemblyName name, FieldAttributes f
     }
     if (pairForward is not null)
     {
+        var mathFlags = mathInterface ? TypeAttributes.Interface | TypeAttributes.Abstract :
+            TypeAttributes.Abstract | TypeAttributes.Sealed;
+        var mathBase = mathInterface ? default : MetadataTokens.TypeDefinitionHandle(2);
+        rows.AddTypeDefinition(TypeAttributes.Public | mathFlags, system, rows.GetOrAddString("Math"), mathBase,
+            MetadataTokens.FieldDefinitionHandle(rows.GetRowCount(TableIndex.Field) + 1), firstMethod);
         var target = rows.AddAssemblyReference(rows.GetOrAddString(pairForward.Name!), pairForward.Version!, default,
             rows.GetOrAddBlob(pairForward.GetPublicKeyToken()!), default, default);
         rows.AddExportedType((TypeAttributes)0x00200000, system, rows.GetOrAddString("ValueTuple`2"), target, 0);
@@ -188,7 +193,7 @@ void CheckPlatformPair()
     var pairPins = Path.Combine(fixture.Root, "pair.sha256");
     var pairProof = At("Examples/Proofs/MathDivRemQuotient.lean");
 
-    void Check(string expected, params string[] images)
+    void Check(string expected, string[] images, bool wrongMathKind = false)
     {
         File.WriteAllLines(pairPins, images.Prepend(pairApp).Select(path => Sha(path) + "  " + path));
         var result = Execute([.. cli, "verify", pairOutput, "--proof", pairProof, "--deep-checks", pairPins,
@@ -200,6 +205,16 @@ void CheckPlatformPair()
             ? JsonSerializer.Deserialize<JsonElement>(result.Stdout)
             : JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(certificate));
         var facts = report.GetProperty("binding").GetProperty("facts").EnumerateArray().ToArray();
+        var kind = facts.Single(f => f.GetProperty("id").GetString() == "platform-type-kinds");
+        if (wrongMathKind)
+        {
+            if (kind.GetProperty("status").GetString() != "failed")
+                throw new InvalidOperationException("Expected the physical System.Math kind rejection: " + kind);
+            return;
+        }
+        if (expected != "failed" && (kind.GetProperty("status").GetString() != expected ||
+            kind.GetProperty("theorem").GetString() != (expected == "reconfirmed" ? "BindingAudit.platformKinds" : null)))
+            throw new InvalidOperationException("Wrong platform kind coverage: " + kind);
         var pair = facts.Single(f => f.GetProperty("id").GetString() == "value-tuple-field-order");
         if (pair.GetProperty("status").GetString() != expected ||
             expected == "reconfirmed" && pair.GetProperty("theorem").GetString() != "BindingAudit.tupleFields")
@@ -209,7 +224,7 @@ void CheckPlatformPair()
         if (expected != "failed" && (publicKeys.GetProperty("status").GetString() != "reconfirmed" ||
             publicKeys.GetProperty("theorem").GetString() != "BindingAudit.publicKeyTokens"))
             throw new InvalidOperationException("Missing publisher token proof for the pair assembly: " + publicKeys);
-        if (expected == "reconfirmed" && count != 6 || expected == "not covered" && count != 5)
+        if (expected == "reconfirmed" && count != 7 || expected == "not covered" && count != 5)
             throw new InvalidOperationException($"Unexpected number of reconfirmed facts: {count} ({expected}).");
         if (expected == "failed" &&
             !pair.GetProperty("reason").GetString()!.Contains("Item1, signature 061301", StringComparison.Ordinal))
@@ -227,11 +242,15 @@ void CheckPlatformPair()
     var previousCore = typeof(object).Assembly.GetName();
     previousCore.Version = new Version(core.Version!.Major - 1, 0, 0, 0);
     WritePlatformImage(destination, previousCore, FieldAttributes.Static, definePair: true);
-    Check("not covered", facade, destination);
+    Check("not covered", [facade, destination]);
     WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true, definitionKeyFlag: false);
-    Check("reconfirmed", facade, destination);
+    Check("reconfirmed", [facade, destination]);
     WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true, reverseSlots: true);
-    Check("failed", facade, destination);
+    Check("failed", [facade, destination]);
+    WritePlatformImage(destination, core, FieldAttributes.Static, definePair: true);
+    WritePlatformImage(facade, runtime, FieldAttributes.Static, pairForward: core, mathInterface: true);
+    Check("failed", [facade, destination], wrongMathKind: true);
+    Console.WriteLine("PASS a rehashed System.Math interface fails the platform kind check");
     Console.WriteLine("PASS tuple forwarding, missing destination and swapped physical generic field signatures");
 }
 

@@ -17,6 +17,7 @@ import StrictBinding.ObjectFields
 import StrictBinding.TupleFields
 import StrictBinding.PublicKeys
 import StrictBinding.EnumStorageEvidence
+import StrictBinding.PlatformKinds
 
 /-!
 # Deep verification

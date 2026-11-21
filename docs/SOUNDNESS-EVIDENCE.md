@@ -369,6 +369,9 @@ against each platform image's public key, and checks that every field the root c
 static. For the selected `System.ValueTuple<T1,T2>` layout, the audit follows its own scoped
 TypeRef and forwarding chain. It checks the defining TypeDef's two generic parameters and
 the names and signatures of its two instance fields in physical declaration order.
+For each external type selected in a method's platform table, Lean follows the scoped
+definition and checks its flags, base and the ordinals of its generic parameters. The
+platform-kind theorem binds these checks to each certified method's metadata environment.
 For enums, Lean checks the physical TypeDef and its instance field `value__` against the
 storage code from the certified method environment. A nested enum is identified by its
 enclosing TypeDefs. An external enum may reach its definition through several forwarding
