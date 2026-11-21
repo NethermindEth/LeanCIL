@@ -120,7 +120,7 @@ var rejected = new RejectedEvidence(Path.Combine(root, "RejectedEvidence"));
     var path = Path.Combine(root, "DefaultResetRejected.lean");
     File.WriteAllText(path, changed);
     rejected.Add(path, "PASS span home width rejection",
-        "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments");
+        ClosedArgumentsMismatch);
 }
 {
     // The checked layouts give an in-place constructor its width, so the site admits only the modelled call.

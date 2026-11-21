@@ -392,8 +392,7 @@ foreach (var (name, before, after) in new[]
     // Keep both raw methods intact: rejection must bind argument evidence to the closed signature.
     File.WriteAllText(proof, original[..argumentStart] +
         argumentDefinition.Replace(before, after, StringComparison.Ordinal) + original[argumentEnd..]);
-    var rejectedGoal = "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments";
-    rejected.Add(proof, "PASS independent span evidence rejection: " + name, rejectedGoal);
+    rejected.Add(proof, "PASS independent span evidence rejection: " + name, ClosedArgumentsMismatch);
 }
 rejected.Check();
 

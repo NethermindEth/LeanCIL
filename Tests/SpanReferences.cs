@@ -199,7 +199,7 @@ if (!source.Contains(argumentEvidence, StringComparison.Ordinal))
 var forged = Path.Combine(root, "Forged-argument.lean");
 File.WriteAllText(forged, source.Replace(argumentEvidence, "arguments := [.span 1 false]", StringComparison.Ordinal));
 rejected.Add(forged, "PASS span reference argument evidence rejection",
-    "⊢ Extraction.closedArguments rawLayouts method0Closed = some method0RawArguments");
+    ClosedArgumentsMismatch);
 // Replacing the decoded span load by a byte load must fail feature validation.
 var copy = File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean"));
 var forgedCopy = IsDecodedMethod(copy, 0)

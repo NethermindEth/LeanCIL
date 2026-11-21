@@ -116,7 +116,7 @@ if (report.binding.mode != BindingMode.Deep ||
     CertificateProblem(File.ReadAllText(Path.Combine(output, "verified.json")), BindingMode.Deep) is not null)
     throw new InvalidOperationException("Deep verification reported facts beyond its joint audit");
 Console.WriteLine("PASS standalone verification reports exactly the deep facts it audited");
-CheckFailureDiagnostics();
+if (args is not ["--support-restore"]) CheckFailureDiagnostics();
 if (focusedDiagnostics) return;
 using (Program restoredSupport = new())
 {

@@ -301,6 +301,12 @@ partial class Program
     static string ForgeModelFact(string source, int pc, string model) =>
         $"{NarrowEvidence(source, "method0_models_validated")}{StatedModelFact(pc, model)}";
 
+    /// <summary>The kernel rejected the emitted argument evidence at the closed method's signature.</summary>
+    static bool ClosedArgumentsMismatch(string output) => output.ReplaceLineEndings("\n").Contains(
+        "cil_kernel_rfl: the kernel does not accept the two sides as equal\n" +
+        "left:\n  Extraction.closedArguments rawLayouts method0Closed\nright:\n  some method0RawArguments",
+        StringComparison.Ordinal);
+
     /// <summary>The rejection of a stated model fact: a type mismatch at the fact of the site at `pc`.</summary>
     static Func<string, bool> ModelFactMismatch(int pc) => output =>
         output.Contains("Type mismatch", StringComparison.Ordinal) &&
