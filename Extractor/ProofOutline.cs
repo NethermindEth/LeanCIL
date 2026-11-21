@@ -19,25 +19,6 @@ internal static partial class ProofOutline
         ClassViews.View[] Views, string Architecture,
         ComputedLayout[] Layouts);
 
-    /// <summary>The outline reads homed arguments through their frame slots. Each entry retains its
-    /// instruction's program counter.</summary>
-    internal static Operation[] SlotOperations(Method emitted)
-    {
-        var frame = emitted.Frame;
-        var slots = new Dictionary<int, int>();
-        for (var position = 0; position < frame.ParameterHomes.Count; position++)
-            slots.TryAdd(frame.ParameterHomes[position].Argument, frame.Locals.Count + position);
-        int Home(int argument) => slots.TryGetValue(argument, out var slot) ? slot
-            : throw new InvalidDataException($"Argument {argument} is stored or addressed without a home");
-        return [.. emitted.Operations.Select(operation => operation switch
-        {
-            Arg load when slots.ContainsKey(load.Index) => new Local(Home(load.Index)),
-            Starg store => new SetLocal(Home(store.Index)),
-            Ldarga address => new LocalAddress(Home(address.Index)),
-            _ => operation
-        })];
-    }
-
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ComputedLayout[],
         Dictionary<string, int>> LayoutIndices = new();
 

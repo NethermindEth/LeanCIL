@@ -83,7 +83,7 @@ internal sealed class InstructionAdmission(MethodDefinition method, FeatureProfi
                 InstructionOperands.ValidateLiteral((string)site.Operand);
                 return;
             case Code.Starg or Code.Starg_S or Code.Ldarga or Code.Ldarga_S:
-                InstructionOperands.HomedArgument(method, site, homes);
+                InstructionOperands.ArgumentHomeSlot(method, site, homes);
                 return;
             case Code.Ldarg or Code.Ldarg_S:
                 MethodArguments.Index(method, (ParameterDefinition)site.Operand);

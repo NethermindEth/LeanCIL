@@ -108,7 +108,7 @@ internal static partial class ProofOutline
         var names = new Names();
         var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
-        var body = new Body(SlotOperations(emitted));
+        var body = new Body(emitted.Operations);
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
             Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Operations,
             body.Loops().Count);

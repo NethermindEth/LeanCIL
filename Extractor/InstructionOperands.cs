@@ -29,7 +29,7 @@ internal static class InstructionOperands
         return local.Index;
     }
 
-    internal static int HomedArgument(MethodDefinition method, Instruction site, IReadOnlyDictionary<int, int> homes)
+    internal static int ArgumentHomeSlot(MethodDefinition method, Instruction site, IReadOnlyDictionary<int, int> homes)
     {
         var parameter = (ParameterDefinition)site.Operand;
         if (site.OpCode.Code is Code.Ldarga or Code.Ldarga_S)
@@ -41,8 +41,8 @@ internal static class InstructionOperands
                 throw new InvalidDataException($"Unsupported address of a class instance argument: {method.FullName}");
         }
         var argument = MethodArguments.Index(method, parameter);
-        if (!homes.ContainsKey(argument)) throw new InvalidDataException("Missing parameter storage");
-        return argument;
+        if (!homes.TryGetValue(argument, out var slot)) throw new InvalidDataException("Missing parameter storage");
+        return slot;
     }
 
     /// <summary>Whether this integer conversion throws on overflow.</summary>

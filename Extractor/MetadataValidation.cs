@@ -878,7 +878,7 @@ internal static class MetadataValidation
                 {
                     reachable = Reachability.Analyze(method, profile);
                     nativeOperands = NativeOperands.Certify(method, reachable, profile);
-                    parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable));
+                    parameterHomes = ParameterStorage.IndexHomes(ParameterStorage.Analyze(method, reachable), method.Body.Variables.Count);
                 }), named: true))
                 continue;
             var admission = new InstructionAdmission(method, profile, methodIndices, constrainedTargets,

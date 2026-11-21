@@ -86,12 +86,6 @@ internal static class NarrowingText
 /// <summary>An argument pushed from its slot; the method's declared parameter type gives any narrowing.</summary>
 internal sealed record Arg(int Index) : Operation;
 
-/// <summary>An argument assigned from the stack into its home, whose kind gives any narrowing.</summary>
-internal sealed record Starg(int Index) : Operation;
-
-/// <summary>The address of an argument's home.</summary>
-internal sealed record Ldarga(int Index) : Operation;
-
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation;
 

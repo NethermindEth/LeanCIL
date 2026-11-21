@@ -335,7 +335,7 @@ internal static class LeanEmitter
             if (collectOutlines)
             {
                 var instructions = new InstructionIndex(m);
-                var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
+                var parameterHomes = ParameterStorage.IndexHomes(parameterIndices, frame.Locals.Count);
                 var outlineOperations = new List<Operation>(m.Body.Instructions.Count);
                 foreach (var site in m.Body.Instructions)
                 {

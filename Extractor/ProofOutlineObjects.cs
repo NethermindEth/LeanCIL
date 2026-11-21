@@ -1148,7 +1148,7 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
-            var walk = new ObjectWalk(spec, SlotOperations(extraction.Emitted[index]), views, _ => null,
+            var walk = new ObjectWalk(spec, extraction.Emitted[index].Operations, views, _ => null,
                 numericHomes: HasNumericObjectHomes(method), throws: splits, methodIndex: index);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.

@@ -26,7 +26,7 @@ internal static class InstructionTranslation
         InstructionOperands.ValidateTailStack(i, nativeOperands);
         if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;
-        parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
+        parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!), m.Body.Variables.Count);
         return TranslateCore(i, m, methods, instructions, profile, parameterHomes,
             layouts, callSites);
     }
@@ -65,6 +65,8 @@ internal static class InstructionTranslation
             i.OpCode.Code is not (Code.Leave or Code.Leave_S))
             return new Jump(i.OpCode.Value, instructions.Position(destination));
         int LocalIndex() => ((VariableDefinition)i.Operand).Index;
+        Operation LoadArgument(int index) => parameterHomes.TryGetValue(index, out var slot)
+            ? new Local(slot) : new Arg(index);
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
@@ -126,18 +128,18 @@ internal static class InstructionTranslation
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
             Code.Localloc or Code.Switch => Unoutlined.Site,
-            Code.Starg or Code.Starg_S => new Starg(InstructionOperands.HomedArgument(m, i, parameterHomes)),
-            Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
+            Code.Starg or Code.Starg_S => StoreLocal(InstructionOperands.ArgumentHomeSlot(m, i, parameterHomes)),
+            Code.Ldarga or Code.Ldarga_S => AddressLocal(InstructionOperands.ArgumentHomeSlot(m, i, parameterHomes)),
             Code.Ldsfld when FeatureProfile.PlatformField((FieldReference)i.Operand) is int constant =>
                 new Constant(32, constant, true),
             Code.Ldsfld or Code.Ldsflda or Code.Ldtoken when i.Operand is FieldReference =>
                 Unoutlined.Site,
             Code.Stsfld => throw new InvalidDataException($"Unsupported static field store: {i}\n  Static fields are written only by their static constructor, which is never extracted."),
-            Code.Ldarg_0 => new Arg(0),
-            Code.Ldarg_1 => new Arg(1),
-            Code.Ldarg_2 => new Arg(2),
-            Code.Ldarg_3 => new Arg(3),
-            Code.Ldarg or Code.Ldarg_S => new Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
+            Code.Ldarg_0 => LoadArgument(0),
+            Code.Ldarg_1 => LoadArgument(1),
+            Code.Ldarg_2 => LoadArgument(2),
+            Code.Ldarg_3 => LoadArgument(3),
+            Code.Ldarg or Code.Ldarg_S => LoadArgument(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LoadLocal(0),
             Code.Ldloc_1 => LoadLocal(1),
             Code.Ldloc_2 => LoadLocal(2),

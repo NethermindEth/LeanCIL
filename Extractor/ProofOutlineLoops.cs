@@ -549,7 +549,7 @@ internal static partial class ProofOutline
                     : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
                     : !extraction.Emitted[index].Frame.HasNoLocals ? "it has locals"
-                    : Unstepped(callee, SlotOperations(extraction.Emitted[index]), []);
+                    : Unstepped(callee, extraction.Emitted[index].Operations, []);
                 lean.Noted("  ", "sorry", $"{NotOutlined}{callee.Name}'s body against the contract, since " +
                     reason);
             }
@@ -579,7 +579,7 @@ internal static partial class ProofOutline
         {
             var plainReturn = LeanEmitter.Narrow(extraction.Methods[index].ReturnType) is null;
             return extraction.Emitted[index].Frame.HasNoLocals &&
-                SlotOperations(extraction.Emitted[index])
+                extraction.Emitted[index].Operations
                     .All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
         }
 
@@ -607,7 +607,7 @@ internal static partial class ProofOutline
         internal static bool Branches(Extraction extraction, int index)
         {
             var callee = extraction.Methods[index];
-            var ops = SlotOperations(extraction.Emitted[index]);
+            var ops = extraction.Emitted[index].Operations;
             var plainReturn = LeanEmitter.Narrow(callee.ReturnType) is null;
             return !callee.HasThis &&
                 callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
@@ -670,7 +670,7 @@ internal static partial class ProofOutline
             string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
-            var ops = SlotOperations(extraction.Emitted[index]);
+            var ops = extraction.Emitted[index].Operations;
             string Where() => facts.Count == 0 ? "" : " where " + string.Join(" and ", facts.Select(fact => fact.Text));
             while (true)
             {

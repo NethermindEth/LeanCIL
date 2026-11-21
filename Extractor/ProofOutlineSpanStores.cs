@@ -9,7 +9,7 @@ internal static partial class ProofOutline
 {
     /// <summary>Non-nop outline operations paired with their original CIL instructions.</summary>
     static (Operation Op, Instruction Site)[] StoreBodySites(Extraction extraction, int index) =>
-        SlotOperations(extraction.Emitted[index])
+        extraction.Emitted[index].Operations
             .Select((op, pc) => (Op: op, Site: extraction.Methods[index].Body.Instructions[pc]))
             .Where(pair => !pair.Op.IsNop).ToArray();
 

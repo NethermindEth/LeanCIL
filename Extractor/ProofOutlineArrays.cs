@@ -50,7 +50,7 @@ internal static partial class ProofOutline
     static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var slots = SlotOperations(extraction.Emitted[index]);
+        var slots = extraction.Emitted[index].Operations;
         var instructions = method.Body.Instructions;
         if (slots.Length != instructions.Count) return null;
         var sites = slots.Zip(instructions).Where(site => !site.First.IsNop).ToArray();
