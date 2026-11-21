@@ -95,10 +95,11 @@ internal static class Arrays
 
     internal static Operation? Translate(Instruction instruction, string architecture)
     {
-        if (instruction.OpCode.Code == Code.Ldelema)
+        if (instruction.OpCode.Code is Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any)
         {
             ElementStorage(instruction, architecture);
-            return Unoutlined.Site;
+            return instruction.OpCode.Code == Code.Ldelema
+                ? Unoutlined.Site : new StackOperation(instruction.OpCode.Code);
         }
         return instruction.OpCode.Code switch
         {
@@ -106,8 +107,6 @@ internal static class Arrays
                 { Width: > 0 and <= ushort.MaxValue } => Unoutlined.Site,
             Code.Ldlen => new StackOperation(instruction.OpCode.Code),
             _ when NumericElement(instruction.OpCode.Code).HasValue => new StackOperation(instruction.OpCode.Code),
-            Code.Ldelem_Any => Typed(instruction, false, architecture),
-            Code.Stelem_Any => Typed(instruction, true, architecture),
             _ => null
         };
     }
@@ -155,18 +154,18 @@ internal static class Arrays
     };
 
     /// <summary>A numeric access uses the method's checked shape for its closed element type.</summary>
-    internal static NumericAccess? Numeric(Operation op, int pc, int method = 0) => op switch
-    {
-        StackOperation raw when NumericElement(raw.Kind) is { } access =>
-            new(access.Kind.Width(), access.Kind.Signed(), access.Store, access.Kind),
-        TypedElementAccess { Storage: { Kind: not NativeOperands.Kind.ArrayComposite } storage } typed =>
-            new(storage.Width, storage.Signed, typed.Store, null,
-                $"(cil_element_shape% Extracted.method{method} {pc})"),
-        _ => null
-    };
-
-    static TypedElementAccess Typed(Instruction instruction, bool store, string architecture) =>
-        new(store, ElementStorage(instruction, architecture));
+    internal static NumericAccess? Numeric(Operation op, MethodDefinition method, int pc, int methodIndex = 0) =>
+        op switch
+        {
+            StackOperation raw when NumericElement(raw.Kind) is { } access =>
+                new(access.Kind.Width(), access.Kind.Signed(), access.Store, access.Kind),
+            StackOperation { Kind: Code.Ldelem_Any or Code.Stelem_Any } when
+                method.Body.Instructions[pc] is { Operand: TypeReference element } site &&
+                Storage(element) is { Kind: not NativeOperands.Kind.ArrayComposite } storage =>
+                new(storage.Width, storage.Signed, site.OpCode.Code == Code.Stelem_Any, null,
+                    $"(cil_element_shape% Extracted.method{methodIndex} {pc})"),
+            _ => null
+        };
 
     internal static Element ElementStorage(Instruction instruction, string architecture)
     {

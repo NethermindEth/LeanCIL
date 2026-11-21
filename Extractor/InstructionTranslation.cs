@@ -20,9 +20,9 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
         if (i.OpCode.Code is Code.Calli or Code.Ldftn) return Unoutlined.Site;
-        // Element loads of a handler table emit their decoded instructions with every other array.
+        // Handler tables carry method pointers and cannot supply numeric array outline steps.
         if (i.OpCode.Code == Code.Ldelem_Any && InstructionOperands.MethodTableLoad(i, nativeOperands))
-            return new TypedElementAccess(false, null);
+            return Unoutlined.Site;
         InstructionOperands.ValidateTailStack(i, nativeOperands);
         if (ReferenceArrays.Translate(i) is { } referenceOperation) return referenceOperation;
         if (Arrays.Translate(i, profile.Architecture) is { } arrayOperation) return arrayOperation;

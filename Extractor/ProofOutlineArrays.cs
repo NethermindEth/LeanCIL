@@ -30,7 +30,7 @@ internal static partial class ProofOutline
             spec.Result.Lean != WordType(array.Width) || ops[^1] is not StackOperation { Kind: Code.Ret })
             return null;
         if (ops.Length == 4 &&
-            Arrays.Numeric(ops[2], Array.IndexOf(all, ops[2])) is { Store: false, Signed: false } load &&
+            Arrays.Numeric(ops[2], spec.Method, Array.IndexOf(all, ops[2])) is { Store: false, Signed: false } load &&
             load.Width == array.Width)
             return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.

@@ -177,11 +177,6 @@ internal static class NumericKinds
     internal static string Term(this NumericKind kind) => "." + kind.ToString().ToLowerInvariant();
 }
 
-/// <summary>
-/// A typed element load or store. A handler table holds method pointers and has no inline element storage.
-/// </summary>
-internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage) : Operation;
-
 /// <summary>An intrinsic of the scalar, vector or hardware families over the given number of operands.</summary>
 internal abstract record Intrinsic(int Arguments) : Operation;
 

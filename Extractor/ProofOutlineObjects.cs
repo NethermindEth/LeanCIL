@@ -594,7 +594,7 @@ internal static partial class ProofOutline
                     Steps.Add(new Access(instance.Object, field, AccessKind.Store, false, stores++,
                         $"(.address {values.Array.Name})", Array: values.Array));
                 }
-                else if (LeanCIL.Arrays.Numeric(op, pc, methodIndex) is
+                else if (LeanCIL.Arrays.Numeric(op, spec.Method, pc, methodIndex) is
                     { Store: false, Width: 4 or 8, Signed: false } elementLoad)
                 {
                     var index = Pop();
@@ -1177,10 +1177,6 @@ internal static partial class ProofOutline
         }
     }
 
-    /// <summary>A tactic's fact list as parts the writer may wrap after any comma.</summary>
-    static IEnumerable<string> FactList(List<string> facts) =>
-        facts.Select((fact, index) => (index == 0 ? "[" : "") + fact + (index + 1 < facts.Count ? "," : "]"));
-
     /// <summary>Binds the actual numeric local homes and caller-relative frame facts of an object method.</summary>
     static void ObjectEntry(Writer lean, Specification spec, string name, string method)
     {
@@ -1491,6 +1487,18 @@ internal static partial class ProofOutline
             return name;
         }
 
+        /// <summary>Wrap between tactic facts, or between the arguments of a fact wider than a line.</summary>
+        void WriteFacts(string head, List<string> steps, string tail)
+        {
+            var width = Writer.Limit - Writer.ContinuationIndent(head);
+            var parts = steps.SelectMany((step, index) =>
+            {
+                var fact = (index == 0 ? "[" : "") + step + (index + 1 < steps.Count ? "," : "]");
+                return fact.Length > width ? fact.Terms() : [fact];
+            });
+            lean.Wrapped(head, parts, tail);
+        }
+
         void Add(string fact)
         {
             if (!facts.Contains(fact)) facts.Add(fact);
@@ -1599,7 +1607,7 @@ internal static partial class ProofOutline
             Add(frame.Entry + ".frame");
             if (returns is null) lean.Line($"{indent}apply WP.exists_execution");
             lean.Line($"{indent}refine WP.enter (by cil_lookup [])");
-            lean.Wrapped($"{indent}  (by cil_checked_side", FactList([.. frame.Formed, .. facts]), ") setup ?_");
+            WriteFacts($"{indent}  (by cil_checked_side", [.. frame.Formed, .. facts], ") setup ?_");
             stored.Add(entered);
         }
 
@@ -1825,7 +1833,7 @@ internal static partial class ProofOutline
             // The memory after the call is named for the specification: a store's, or the caller's own.
             var after = call.Writes is { } written ? $"stored{written.Stores + 1}"
                 : call.Callee.Walk.NumericHomes ? $"stored{call.Stores + 1}" : $"called{number}";
-            lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
+            WriteFacts($"{indent}cil_contract_steps", facts, "");
             lean.Line($"{indent}  with {after} output{number} call{number}");
             if (frame is null) facts.Clear();
             Add(call.Callee.Name + "Contract");
@@ -1910,7 +1918,7 @@ internal static partial class ProofOutline
             Add($"{name}Contract");
             if (frame is null) Add("leaveFrame");
             else Add($"frameFacts{call.Stores}.wellFormed");
-            lean.Wrapped($"{indent}cil_contract_steps", FactList(facts), "");
+            WriteFacts($"{indent}cil_contract_steps", facts, "");
             lean.Line($"{indent}  with called{number} output{number} call{number}");
             // A frame's entry and homes are stepped again from the start, so its facts stay.
             if (frame is null) facts.Clear();
@@ -1928,7 +1936,7 @@ internal static partial class ProofOutline
             var terms = call.Callee.Walk.Returned + " " + call.Callee.Store?.Value;
             var equalities = fieldEqualities.Where(pair => terms.Contains(pair.Value.Lean + ".of ",
                 StringComparison.Ordinal)).Select(pair => pair.Key).ToList();
-            if (equalities.Count > 0) lean.Wrapped($"{indent}simp only", FactList(equalities), $"at {post}");
+            if (equalities.Count > 0) WriteFacts($"{indent}simp only", equalities, $"at {post}");
         }
 
         /// <summary>A call preserves local homes when its footprint lies in the caller's older storage.</summary>
@@ -2068,8 +2076,8 @@ internal static partial class ProofOutline
             // The return leaves the method's frame, which owns no caller memory.
             // After a call the steps may already have reached the return.
             if (frame is null) Add("leaveFrame");
-            lean.Wrapped(walk.Steps.LastOrDefault() is CallStep or StubCall
-                ? $"{indent}try cil_contract_steps" : $"{indent}cil_contract_steps", FactList(facts), "");
+            WriteFacts(walk.Steps.LastOrDefault() is CallStep or StubCall
+                ? $"{indent}try cil_contract_steps" : $"{indent}cil_contract_steps", facts, "");
             var where = branches.Count == 0 ? "" : " where " + string.Join(" and ", branches);
             if (returns is not null)
             {

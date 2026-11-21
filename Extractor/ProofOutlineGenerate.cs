@@ -175,7 +175,7 @@ internal static partial class ProofOutline
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
         if (loops == 0 || arrays.Length == 0 || !Enumerable.Range(0, ops.Length).Any(pc =>
-            Arrays.Numeric(ops[pc], pc) is { Store: true } ||
+            Arrays.Numeric(ops[pc], method, pc) is { Store: true } ||
             Body.ArrayView(ops[pc]) is { Element.Compound: false, Writable: true })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
@@ -1004,11 +1004,14 @@ internal static partial class ProofOutline
             Line(current);
         }
 
+        /// <summary>The indentation of wrapped proof terms following a head.</summary>
+        internal static int ContinuationIndent(string head) => head.Length - head.TrimStart().Length + 4;
+
         /// <summary>A head followed by binders and a tail, wrapped at binder boundaries.</summary>
         internal void Wrapped(string head, IEnumerable<string> binders, string tail)
         {
             var current = head;
-            var continuation = new string(' ', head.Length - head.TrimStart().Length + 4);
+            var continuation = new string(' ', ContinuationIndent(head));
             foreach (var part in binders.Append(tail).Where(part => part.Length > 0))
             {
                 if (current.Length + 1 + part.Length > Limit)
