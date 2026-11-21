@@ -131,7 +131,7 @@ theorem arithmetic_result_signedness :
       owner := .atom runtimeScope "System.Math", name := name!"BigMul", hasThis := false,
       genericArity := 0, parameters := [unsigned, unsigned],
       returnType := .atom runtimeScope "System.Int64" }
-    let pair := fun element => s!"{runtimeScope}::System.ValueTuple`2<{element},{element}>"
+    let pair := integerPairIdentity
     let divide := { multiply with
       name := name!"DivRem", parameters := [int32Type, int32Type],
       returnType := .aggregate (pair "System.UInt32") 0 }
@@ -147,7 +147,7 @@ theorem arithmetic_result_signedness :
 /-- DivRem binds the tuple's indexed declaration, both field types, packing and alignment. -/
 theorem divRemTupleLayout :
     let pair := "System.ValueTuple`2<System.UInt64,System.UInt64>"
-    let identity := s!"{runtimeScope}::{pair}"
+    let identity := integerPairIdentity "System.UInt64"
     let word := TypeExpr.atom runtimeScope "System.UInt64"
     let method : MethodRef := {
       owner := .atom runtimeScope "System.Math", name := name!"DivRem",
@@ -155,7 +155,7 @@ theorem divRemTupleLayout :
       parameters := [word, word] }
     let site : CallSite := {
       method, declared := method.signature 0, name := "DivRem",
-      target := .external s!"{identity} System.Math::DivRem(System.UInt64,System.UInt64)",
+      target := .external s!"{runtimeScope}::{pair} System.Math::DivRem(System.UInt64,System.UInt64)",
       typeArguments := [], parameterCount := 2, returnsValue := true }
     let row : RawLayout := {
       identity, auto := true, explicit := false, declaredSize := 0,
@@ -170,7 +170,7 @@ theorem divRemTupleLayout :
     let result := "System.ValueTuple`2<System.Boolean,System.Boolean>"
     let invalid := { method with
       parameters := [boolean, boolean]
-      returnType := .aggregate (runtimeScope ++ "::" ++ result) 1 }
+      returnType := .aggregate (integerPairIdentity "System.Boolean") 1 }
     let target := s!"{result} System.Math::DivRem(System.Boolean,System.Boolean)"
     let unsupported := { site with
       method := invalid, declared := invalid.signature 0,

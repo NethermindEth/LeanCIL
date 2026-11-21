@@ -333,7 +333,7 @@ private def pairSlice : MetadataSlice × Nat × Nat × Nat :=
   build pairWorld (bytesOf "T") pin.identity
 
 private def pair : TypeExpr :=
-  .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32>") 0
+  .aggregate (s!"{runtimeScope}::System.ValueTuple`2<{runtimeScope}::System.Int32,{runtimeScope}::System.Int32>") 0
 
 /-- The platform definition of the pair. -/
 private def pairPlatform : PlatformTable := platform_table% [runtimeType "ValueTuple`2" .valuePair]
@@ -356,6 +356,16 @@ theorem pair_items_bound_and_other_members_refused :
       some (.instantiatedStaticField pairSlice.2.2.2) := by decide +kernel
 #print axioms pair_items_bound_and_other_members_refused
 
+/-- Each primitive argument of Item1's owner must carry the signature's primitive scope. -/
+theorem pair_argument_scopes_checked :
+    let rejects := fun first second =>
+      let owner := s!"{runtimeScope}::System.ValueTuple`2<{first}System.Int32,{second}System.Int32>"
+      (checkPair pairSlice.2.1 (.field (.aggregate owner 0) 0 int32 name!"Item1" false)).isSome
+    let scope := runtimeScope ++ "::"
+    rejects "" scope && rejects scope "" && rejects "Other::" scope && rejects scope "Other::" :=
+  by decide +kernel
+#print axioms pair_argument_scopes_checked
+
 /-- The error checking `operand` against the `Item2` reference of `pairWorldWith arguments
     second` gives, if any. -/
 private def checkSecond (arguments second : List Nat) (operand : RawOperand) :
@@ -365,7 +375,7 @@ private def checkSecond (arguments second : List Nat) (operand : RawOperand) :
 
 /-- `ValueTuple<int, uint>` as the extractor names it. -/
 private def mixedPair : TypeExpr :=
-  .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.UInt32>") 0
+  .aggregate (s!"{runtimeScope}::System.ValueTuple`2<{runtimeScope}::System.Int32,{runtimeScope}::System.UInt32>") 0
 
 /-- `Item2` declared `!0` is refused even where both arguments are `int`, and on
     `ValueTuple<int, uint>` a valid `Item2 : !1` holds the second argument, `uint`, not the
@@ -396,7 +406,7 @@ theorem refuses_int64_first_item :
 
 /-- The extractor's aggregate operand for two tuple arguments in the given assembly. -/
 private def tupleOwner (first second : String) (scope := runtimeScope) (layout := 0) : TypeExpr :=
-  .aggregate (scope ++ "::System.ValueTuple`2<" ++ first ++ "," ++ second ++ ">") layout
+  .aggregate (s!"{scope}::System.ValueTuple`2<{scope}::{first},{scope}::{second}>") layout
 
 /-- The inner pair uses the same head as the outer pair (TypeRef row 1, coded index 5). -/
 private def nestedWorld := pairWorldWith [0x15, 0x11, 5, 2, 0x08, 0x08, 0x08]

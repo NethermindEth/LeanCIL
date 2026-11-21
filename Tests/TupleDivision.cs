@@ -250,7 +250,7 @@ string BoundaryProof(IReadOnlyList<string> claims) => $$"""
     namespace ExampleProof
     def memory : CIL.Safety.Memory := { Tests.caller with cells := fun _ _ => .mk 93 false }
     {{string.Join("\n", claims.Select((claim, index) => $"""
-        theorem case{index} : {claim} := by rfl
+        theorem case{index} : {claim} := by cil_kernel_rfl
         #print axioms case{index}
         """))}}
     theorem correctness :

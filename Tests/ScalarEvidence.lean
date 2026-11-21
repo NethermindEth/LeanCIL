@@ -692,7 +692,7 @@ private theorem span_constructor_cases :
 #print axioms span_constructor_cases
 
 private def tupleType : TypeExpr := .aggregate
-  (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
+  (s!"{runtime}::System.ValueTuple`2<{runtime}::System.UInt64,{runtime}::System.UInt64>") 0
 private def tupleSite : CallSite := {
   declared := { convention := 0, returnType := tupleType, parameters := [word, word, word] },
   method := {

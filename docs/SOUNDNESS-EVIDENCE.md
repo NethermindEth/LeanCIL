@@ -326,7 +326,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   Each named component of a closed type argument resolves from an exactly pinned definition
   or a scoped platform entry with the required generic arity. An instance receiver or inherited field
   still requires a class chain with a supported layout. Constructed aggregate identities include
-  the scope of each argument. Runtime scalars and strings retain their fixed storage.
+  the scope of each argument. A platform `ValueTuple` pair records the primitive assembly of
+  both arguments, including when the pair is nested inside another layout. Runtime scalars and
+  strings retain their fixed storage.
   The `RVA` and `ParamList` columns are not read.
 - Generic parameter counts come from `GenericParam` rows. An owner's carried rows must form its
   whole zero-based run. An owner with none carried must be shown to have none by its neighbours in

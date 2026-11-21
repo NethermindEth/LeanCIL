@@ -4,18 +4,22 @@ import CIL.Extraction.IntegerMath
 
 namespace CIL.Extraction
 
+/-- The layout identity of a pair of runtime integers, including both argument scopes. -/
+def integerPairIdentity (element : String) : String :=
+  let argument := s!"{runtimeScope}::{element}"
+  s!"{runtimeScope}::System.ValueTuple`2<{argument},{argument}>"
+
 /-- The closed tuple resulting from DivRem, with its fields at offsets zero and one word. -/
 def integerPairResult (environment : CallLayouts) (type : TypeExpr)
     (name : String) (width : Nat) : Bool :=
   match type with
   | .aggregate identity index =>
-    let expected := s!"{runtimeScope}::System.ValueTuple`2<{name},{name}>"
     let validRaw := (layoutAt? environment.indexedRaw index).any fun raw =>
       match raw.fields with
       | [first, second] => raw.identity == identity && raw.packing <= 0 &&
         (primitiveField name).any fun kind => first.type == kind && second.type == kind
       | _ => false
-    identity == expected && validRaw &&
+    identity == integerPairIdentity name && validRaw &&
       (layoutAt? environment.layouts index).any fun entry =>
         entry.alignment == width && entry.layout.size == 2 * width &&
           match entry.layout.fields with
@@ -51,7 +55,7 @@ private def arithmeticRow (name : String) (form : Form) (element : String) (widt
   let argumentNames := if out then s!"{element},{element},{element}&" else s!"{element},{element}"
   let target := s!"{runtimeScope}::{result} System.Math::{name}({argumentNames})"
   let returns := fun (type : TypeExpr) => match form, type with
-    | .tuple, .aggregate identity _ => identity == s!"{runtimeScope}::{result}"
+    | .tuple, .aggregate identity _ => identity == integerPairIdentity element
     | .tuple, _ => false
     | _, _ => type == .atom runtimeScope result
   -- These declarations are non-generic, so their raw types equal the selected closed types.

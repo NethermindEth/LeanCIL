@@ -433,8 +433,8 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
     littleEndianField
   let (expected, held, isStaticFact) ← env.expectedField token site classOwner isStatic platform
   if isStaticFact.any (· != isStatic) then throw (.operandMismatch token)
-  if !(frame.admits site.owner owner) then throw (.operandMismatch token)
   if index != expected then throw (.fieldIndexMismatch token index expected)
+  if !(frame.admits site.owner owner) then throw (.operandMismatch token)
   let heldAdmitted := if classOwner && !isStatic then frame.admitsHeld held fieldType
     else frame.admits held fieldType
   if !heldAdmitted then throw (.operandMismatch token)

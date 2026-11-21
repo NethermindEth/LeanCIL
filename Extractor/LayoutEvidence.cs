@@ -54,7 +54,8 @@ internal sealed class LayoutEvidence
 
     internal static string Identity(TypeReference type)
     {
-        if (type is GenericInstanceType generic && GenericStructs.Is(type)) return ScopedArguments(generic);
+        if (type is GenericInstanceType generic && (ValueTuples.Is(type) || GenericStructs.Is(type)))
+            return ScopedArguments(generic);
         return Scope(type) + "::" + type.FullName;
     }
 

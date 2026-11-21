@@ -1458,7 +1458,7 @@ private def tupleSlice (corlib : Nat) : MetadataSlice × Nat × Nat :=
 
 /-- The pair as the extractor names it. -/
 private def pairTuple : TypeExpr :=
-  .aggregate (runtimeScope ++ "::System.ValueTuple`2<System.Int32,System.Int32>") 0
+  .aggregate (s!"{runtimeScope}::System.ValueTuple`2<{runtimeScope}::System.Int32,{runtimeScope}::System.Int32>") 0
 
 /-- The pair's instance field at `index` with `name`. -/
 private def pairField (index : Nat) (name : MetadataName) : RawOperand :=

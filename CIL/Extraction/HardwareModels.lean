@@ -94,7 +94,7 @@ private def HardwareRow.accepts (row : HardwareRow) (slot : HardwareSlot) (metho
     method.parameters == row.parameters.map (fun type => (operand type).1) &&
       method.returnType == (operand row.result).1 &&
       (row.result != .pair || (match method.returnType with
-        | .aggregate identity _ => identity == s!"{runtimeScope}::{(operand .pair).2}"
+        | .aggregate identity _ => identity == integerPairIdentity "System.UInt64"
         | _ => false))
 
 /-- The open signature and external identity distinguish owner and method binders. -/

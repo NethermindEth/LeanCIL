@@ -2323,7 +2323,7 @@ void ModelTableCosts()
             previous := elapsed
         /-- Repeated DivRem queries against two identical oversized rows. -/
         def timeOversizedTuple (count : Nat) : Nat → IO Nat :=
-          let identity := s!"{runtimeScope}::System.ValueTuple`2<System.UInt64,System.UInt64>"
+          let identity := integerPairIdentity "System.UInt64"
           let row : RawLayout := {
             identity, explicit := false, packing := 0, declaredSize := 0,
             fields := List.replicate count ⟨.unsigned64, none⟩ }
