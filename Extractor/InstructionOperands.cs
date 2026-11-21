@@ -45,30 +45,13 @@ internal static class InstructionOperands
         return argument;
     }
 
-    internal static (ConvTarget Target, bool Unsigned)? CheckedConversion(Code code) => code switch
-    {
-        Code.Conv_Ovf_I1 => (ConvTarget.I1, false),
-        Code.Conv_Ovf_I1_Un => (ConvTarget.I1, true),
-        Code.Conv_Ovf_U1 => (ConvTarget.U1, false),
-        Code.Conv_Ovf_U1_Un => (ConvTarget.U1, true),
-        Code.Conv_Ovf_I2 => (ConvTarget.I2, false),
-        Code.Conv_Ovf_I2_Un => (ConvTarget.I2, true),
-        Code.Conv_Ovf_U2 => (ConvTarget.U2, false),
-        Code.Conv_Ovf_U2_Un => (ConvTarget.U2, true),
-        Code.Conv_Ovf_I4 => (ConvTarget.I4, false),
-        Code.Conv_Ovf_I4_Un => (ConvTarget.I4, true),
-        Code.Conv_Ovf_U4 => (ConvTarget.U4, false),
-        Code.Conv_Ovf_U4_Un => (ConvTarget.U4, true),
-        Code.Conv_Ovf_I8 => (ConvTarget.I8, false),
-        Code.Conv_Ovf_I8_Un => (ConvTarget.I8, true),
-        Code.Conv_Ovf_U8 => (ConvTarget.U8, false),
-        Code.Conv_Ovf_U8_Un => (ConvTarget.U8, true),
-        Code.Conv_Ovf_I => (ConvTarget.I, false),
-        Code.Conv_Ovf_I_Un => (ConvTarget.I, true),
-        Code.Conv_Ovf_U => (ConvTarget.U, false),
-        Code.Conv_Ovf_U_Un => (ConvTarget.U, true),
-        _ => null
-    };
+    /// <summary>Whether this integer conversion throws on overflow.</summary>
+    internal static bool IsCheckedConversion(Code code) => code is
+        Code.Conv_Ovf_I1 or Code.Conv_Ovf_I1_Un or Code.Conv_Ovf_U1 or Code.Conv_Ovf_U1_Un or
+        Code.Conv_Ovf_I2 or Code.Conv_Ovf_I2_Un or Code.Conv_Ovf_U2 or Code.Conv_Ovf_U2_Un or
+        Code.Conv_Ovf_I4 or Code.Conv_Ovf_I4_Un or Code.Conv_Ovf_U4 or Code.Conv_Ovf_U4_Un or
+        Code.Conv_Ovf_I8 or Code.Conv_Ovf_I8_Un or Code.Conv_Ovf_U8 or Code.Conv_Ovf_U8_Un or
+        Code.Conv_Ovf_I or Code.Conv_Ovf_I_Un or Code.Conv_Ovf_U or Code.Conv_Ovf_U_Un;
 
     internal static (int? Bytes, int? ScalarWidth, bool Signed) ObjectStorage(MethodDefinition method,
         Instruction site, TypeReference operand, InstructionIndex instructions,

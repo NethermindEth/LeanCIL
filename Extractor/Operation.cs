@@ -283,23 +283,6 @@ internal sealed record ReferenceElementAccess(bool Store) : Operation;
 /// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
 internal sealed record Localloc : Operation;
 
-/// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>
-internal enum ConvTarget { I1, U1, I2, U2, I4, U4, I8, U8, I, U }
-
-/// <summary>
-/// A conversion to <paramref name="Target"/> that faults on overflow, reading the operand as unsigned when
-/// <paramref name="UnsignedSource"/> is set.
-/// </summary>
-internal sealed record CheckedConvert(ConvTarget Target, bool UnsignedSource) : Operation;
-
-internal enum CheckedOperator { Add, Sub, Mul }
-
-/// <summary>An overflow-checked <c>add</c>, <c>sub</c> or <c>mul</c>, rendered as its opcode's constructor.</summary>
-internal sealed record CheckedArithmetic(CheckedOperator Operator, bool Signed) : Operation;
-
-/// <summary>A division or, when <paramref name="Remainder"/> is set, a remainder.</summary>
-internal sealed record Divide(bool Signed, bool Remainder) : Operation;
-
 /// <summary>
 /// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,
 /// which the extraction check compares with the token. <paramref name="Class"/> names a class element.

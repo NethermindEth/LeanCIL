@@ -95,15 +95,16 @@ internal static class InstructionTranslation
             var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
             return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
-        if (InstructionOperands.CheckedConversion(i.OpCode.Code) is { } conversion)
-            return new CheckedConvert(conversion.Target, conversion.Unsigned);
+        if (InstructionOperands.IsCheckedConversion(i.OpCode.Code)) return new StackOperation(i.OpCode.Code);
         return i.OpCode.Code switch
         {
             Code.Add or Code.Sub or Code.Mul or Code.And or Code.Or or Code.Xor or Code.Not or Code.Neg or
             Code.Shl or Code.Shr or Code.Shr_Un or Code.Ceq or Code.Clt or Code.Clt_Un or Code.Cgt or Code.Cgt_Un or
             Code.Conv_I1 or Code.Conv_I2 or Code.Conv_I4 or Code.Conv_I8 or Code.Conv_I or
             Code.Conv_U1 or Code.Conv_U2 or Code.Conv_U4 or Code.Conv_U8 or Code.Conv_U or
-            Code.Dup or Code.Pop => new StackOperation(i.OpCode.Code),
+            Code.Add_Ovf or Code.Add_Ovf_Un or Code.Sub_Ovf or Code.Sub_Ovf_Un or Code.Mul_Ovf or Code.Mul_Ovf_Un or
+            Code.Div or Code.Div_Un or Code.Rem or Code.Rem_Un or Code.Dup or Code.Pop =>
+                new StackOperation(i.OpCode.Code),
             Code.Nop or Code.Readonly => StackOperation.Nop,
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
@@ -115,16 +116,6 @@ internal static class InstructionTranslation
             Code.Ldarga or Code.Ldarga_S => new Ldarga(InstructionOperands.HomedArgument(m, i, parameterHomes)),
             Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
             Code.Stind_I => new IndirectAccess(NumericKind.I, true),
-            Code.Add_Ovf => new CheckedArithmetic(CheckedOperator.Add, true),
-            Code.Add_Ovf_Un => new CheckedArithmetic(CheckedOperator.Add, false),
-            Code.Sub_Ovf => new CheckedArithmetic(CheckedOperator.Sub, true),
-            Code.Sub_Ovf_Un => new CheckedArithmetic(CheckedOperator.Sub, false),
-            Code.Mul_Ovf => new CheckedArithmetic(CheckedOperator.Mul, true),
-            Code.Mul_Ovf_Un => new CheckedArithmetic(CheckedOperator.Mul, false),
-            Code.Div => new Divide(true, false),
-            Code.Div_Un => new Divide(false, false),
-            Code.Rem => new Divide(true, true),
-            Code.Rem_Un => new Divide(false, true),
             Code.Switch => new Switch(((Instruction[])i.Operand).Select(instructions.Position).ToArray()),
             Code.Ldind_I1 => new IndirectAccess(NumericKind.I1, false),
             Code.Ldind_U1 => new IndirectAccess(NumericKind.U1, false),

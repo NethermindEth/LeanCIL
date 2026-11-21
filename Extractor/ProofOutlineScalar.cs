@@ -10,6 +10,18 @@ internal static partial class ProofOutline
     /// <summary>The most return paths a scalar outline splits a body into.</summary>
     const int MaxScalarPaths = 8;
 
+    /// <summary>The arithmetic lemma, expression and signedness for a checked CIL opcode.</summary>
+    static (string Name, string Symbol, bool Signed)? CheckedWord(Code opcode) => opcode switch
+    {
+        Code.Add_Ovf => ("add", "+", true),
+        Code.Add_Ovf_Un => ("add", "+", false),
+        Code.Sub_Ovf => ("sub", "-", true),
+        Code.Sub_Ovf_Un => ("sub", "-", false),
+        Code.Mul_Ovf => ("mul", "*", true),
+        Code.Mul_Ovf_Un => ("mul", "*", false),
+        _ => null
+    };
+
     /// <summary>What a scalar body does from one pc to a return along every path.</summary>
     abstract record ScalarStep;
 
@@ -56,14 +68,12 @@ internal static partial class ProofOutline
                     stack = stack.Push(new(left.Term is null || right.Term is null ? null
                         : $"{Operand(left.Term)} {symbol} {Operand(right.Term)}", right.Bits));
                 }
-                else if (op is CheckedArithmetic checkedOperation)
+                else if (op is StackOperation stackOp && CheckedWord(stackOp.Kind) is { } checkedWord)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
                     if (left.Term is null || right.Term is null || left.Bits != right.Bits) return null;
-                    var operation = checkedOperation.Operator.ToString().ToLowerInvariant();
-                    var signed = checkedOperation.Signed;
-                    var symbol = operation switch { "add" => "+", "sub" => "-", _ => "*" };
+                    var (operation, symbol, signed) = checkedWord;
                     var fits = Fits(operation, signed, Operand(left.Term), Operand(right.Term), symbol, left.Bits);
                     stack = stack.Push(new($"{Operand(left.Term)} {symbol} {Operand(right.Term)}", left.Bits));
                     decided = true;

@@ -118,7 +118,7 @@ internal static partial class ExceptionLint
     static FaultKind? Faults(MethodDefinition method, Instruction instruction, FeatureProfile profile)
     {
         var code = instruction.OpCode.Code;
-        if (InstructionOperands.CheckedConversion(code) is not null) return FaultKind.Overflow;
+        if (InstructionOperands.IsCheckedConversion(code)) return FaultKind.Overflow;
         FaultKind? kind = code switch
         {
             Code.Div or Code.Rem => FaultKind.DivideByZeroAndOverflow,
