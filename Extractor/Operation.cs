@@ -214,6 +214,3 @@ internal sealed record ScalarIntrinsic(ScalarFunction Function, int Width, bool 
 
 /// <summary>The x86 64-bit division with remainder.</summary>
 internal sealed record X86BaseDivRem64() : Intrinsic(3);
-
-/// <summary>Which elements of an array a span covers.</summary>
-internal enum ArrayRange { Whole, FromStart, Counted }

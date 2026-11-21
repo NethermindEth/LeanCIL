@@ -111,7 +111,7 @@ internal static partial class ProofOutline
         var body = new Body(emitted.Operations);
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
             Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Operations,
-            body.Loops().Count);
+            body.Loops().Count, extraction.Architecture);
         var result = DescribeResult(method, extraction.Architecture);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
             ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
@@ -171,12 +171,14 @@ internal static partial class ProofOutline
     /// <summary>`parameters` with the array a loop stores into, by index or through a writable span over it,
     /// marked written; a loop's store is followed only into a method's one array argument. A straight-line store
     /// stays a hole over the array's contents.</summary>
-    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Operation[] ops, int loops)
+    static Parameter[] WrittenArrays(MethodDefinition method, Parameter[] parameters, Operation[] ops, int loops,
+        string architecture)
     {
         var arrays = parameters.Where(parameter => parameter.Shape == ParameterShape.WordArray).ToArray();
         if (loops == 0 || arrays.Length == 0 || !Enumerable.Range(0, ops.Length).Any(pc =>
             Arrays.Numeric(ops[pc], method, pc) is { Store: true } ||
-            Body.ArrayView(ops[pc]) is { Element.Compound: false, Writable: true })) return parameters;
+            ops[pc] is Unoutlined &&
+            Spans.ArrayView(method.Body.Instructions[pc], architecture) is { Element.Compound: false, Writable: true })) return parameters;
         if (arrays.Length > 1)
             throw Unsupported($"{method.FullName} stores into one of {arrays.Length} array arguments in a loop; " +
                 "new-proof follows a loop's stores into a method's one array argument");

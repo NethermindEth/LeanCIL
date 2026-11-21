@@ -5,6 +5,3 @@ namespace Nethermind.LeanCIL;
 /// its two's complement.
 /// </summary>
 internal sealed record AddOffset(ulong Stride, bool Signed) : Operation;
-
-/// <summary>The array element storage, mutability and range used by a span proof outline.</summary>
-internal sealed record ArraySpan(Arrays.Element Element, bool Writable, ArrayRange Range) : Operation;

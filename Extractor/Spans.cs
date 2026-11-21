@@ -58,17 +58,15 @@ internal static class Spans
                 !RuntimeModels.ExactScope(parameter.ParameterType, PlatformAssemblies.SystemRuntime)))
             return null;
 
-        if (Arrays.Storage(method.GenericArguments[0], architecture) is not { } element) return null;
+        if (Arrays.Storage(method.GenericArguments[0], architecture) is null) return null;
         RuntimeModels.ValidateSignature(reference, architecture);
-        var range = method.Parameters.Count switch { 1 => ArrayRange.Whole, 2 => ArrayRange.FromStart,
-            _ => ArrayRange.Counted };
-        return new ArraySpan(element, true, range);
+        return Unoutlined.Site;
     }
 
     static bool OwnerElement(TypeReference type) =>
         type is GenericParameter { Type: GenericParameterType.Type, Position: 0 };
 
-    /// <summary>A supported span constructor, with its array range when a proof outline needs it.</summary>
+    /// <summary>A supported span constructor at its original call site.</summary>
     internal static Operation? ConstructorOperation(MethodReference method, string architecture)
     {
         if (method.Name != ".ctor" || !method.HasThis || method.ExplicitThis || method.HasGenericParameters ||
@@ -79,7 +77,6 @@ internal static class Spans
             !RuntimeModels.ExactScope(owner.ElementType, PlatformAssemblies.SystemRuntime)) return null;
         var element = owner.GenericArguments[0];
         if (ElementWidth(element, architecture) is null) return null;
-        var writable = Writable(owner);
         var parameters = method.Parameters;
         Operation? operation = parameters switch
         {
@@ -91,8 +88,7 @@ internal static class Spans
             _ when parameters.Count is 1 or 3 && parameters[0].ParameterType is ArrayType { IsVector: true } array &&
                 OwnerElement(array.ElementType) &&
                 parameters.Skip(1).All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) &&
-                Arrays.Storage(element, architecture) is { } storage =>
-                new ArraySpan(storage, writable, parameters.Count == 1 ? ArrayRange.Whole : ArrayRange.Counted),
+                Arrays.Storage(element, architecture) is not null => Unoutlined.Site,
             _ => null
         };
         if (operation is not null) RuntimeModels.ValidateSignature(method, architecture);
@@ -112,6 +108,22 @@ internal static class Spans
             type = modifier.ElementType;
         }
         return type is ByReferenceType reference && OwnerElement(reference.ElementType);
+    }
+
+    /// <summary>The element and access mode of a span created from a vector array at this site.</summary>
+    internal static (Arrays.Element Element, bool Writable)? ArrayView(Instruction site, string architecture, bool wholeOnly = false)
+    {
+        if (site.Operand is not MethodReference method ||
+            method.Parameters.Count == 0 || wholeOnly && method.Parameters.Count != 1 ||
+            method.Parameters[0].ParameterType is not ArrayType { IsVector: true }) return null;
+        if (site.OpCode.Code == Code.Call && method is GenericInstanceMethod extension &&
+            ArrayExtension(extension, architecture) is not null)
+            return (Arrays.Storage(extension.GenericArguments[0], architecture)!, true);
+        if (method.DeclaringType is not GenericInstanceType owner) return null;
+        if (site.OpCode.Code == Code.Newobj && ConstructorOperation(method, architecture) is not null ||
+            site.OpCode.Code == Code.Call && method.Name == "op_Implicit" && Member(method, architecture) is not null)
+            return (Arrays.Storage(owner.GenericArguments[0], architecture)!, Writable(owner));
+        return null;
     }
 
     /// <summary>The element width of the specified overload at an original, modelled span call.</summary>
@@ -165,8 +177,7 @@ internal static class Spans
             "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => Unoutlined.Site,
             "op_Implicit" when parameters is [{ ParameterType: ArrayType { IsVector: true } array }] &&
                 OwnerElement(array.ElementType) && DeclaredSpan(result, name) &&
-                Arrays.Storage(element, architecture) is { } storage =>
-                new ArraySpan(storage, writable, ArrayRange.Whole),
+                Arrays.Storage(element, architecture) is not null => Unoutlined.Site,
             _ => null
         };
         if (operation is null && !(method.Name == "op_Implicit" && writable && parameters.Count == 1 &&

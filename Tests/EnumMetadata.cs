@@ -11,6 +11,7 @@
 
 using System.Reflection;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 var extractor = Assembly.LoadFrom(ExtractorPath);
 const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
@@ -19,26 +20,22 @@ var begin = enumTypes.GetMethod("BeginScope", flags)!;
 var arrays = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!;
 var descriptor = arrays.GetMethod("Storage", flags)!;
 var runtime = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
-var span = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("Member", flags)!;
+var spans = extractor.GetType("Nethermind.LeanCIL.Spans", true)!;
+var memberWidth = spans.GetMethod("MemberWidth", flags)!;
+var arrayView = spans.GetMethod("ArrayView", flags)!;
 var staticSpan = runtime.GetMethod("StaticSpanModel", flags)!;
-var constructor = extractor.GetType("Nethermind.LeanCIL.Spans", true)!.GetMethod("ConstructorOperation", flags)!;
 using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
 var module = pinned.Module;
 var owner = module.GetType("Examples.EnumBuffers");
 var element = owner.NestedTypes.Single(type => type.Name == "Small");
 var field = element.Fields.Single(field => !field.IsStatic);
-var getter = (MethodReference)owner.Methods.Single(method => method.Name == "Read")
-    .Body.Instructions.Single(instruction => instruction.Operand is MethodReference { Name: "get_Item" }).Operand;
+var getter = owner.Methods.Single(method => method.Name == "Read")
+    .Body.Instructions.Single(instruction => instruction.Operand is MethodReference { Name: "get_Item" });
 
 IDisposable Scope() => (IDisposable)begin.Invoke(null, null)!;
 object Describe() => descriptor.Invoke(null, [element, null])!;
-// The width of the span item the getter models, read from the operation and not from its rendering.
-int ItemWidth()
-{
-    var item = span.Invoke(null, [getter, "scalar"]);
-    return item?.GetType().Name == "SpanItem" ? Width(item)
-        : throw new InvalidOperationException("The getter is not a span item");
-}
+int ItemWidth() => (int?)memberWidth.Invoke(null, [getter, "get_Item", 1, "scalar"])
+    ?? throw new InvalidOperationException("Missing span item at the getter call");
 int Width(object value) => (int)value.GetType().GetProperty("Width")!.GetValue(value)!;
 void Reject(string reason)
 {
@@ -82,7 +79,7 @@ using (Scope())
         var call = new GenericInstanceMethod(create.ElementMethod);
         call.GenericArguments.Add(type);
         var createsStaticSpan = staticSpan.Invoke(null, [call, "scalar"]) is not null;
-        var createsArraySpan = constructor.Invoke(null, [arrayCall, "scalar"])?.GetType().Name == "ArraySpan";
+        var createsArraySpan = arrayView.Invoke(null, [Instruction.Create(OpCodes.Newobj, arrayCall), "scalar", true]) is not null;
         if (createsStaticSpan != admitted || !createsArraySpan)
             throw new InvalidOperationException("Static and supplied array span admission were conflated: " + type.FullName);
     }

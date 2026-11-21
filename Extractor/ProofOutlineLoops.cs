@@ -35,13 +35,6 @@ internal static partial class ProofOutline
             _ => null
         };
 
-        /// <summary>The array view supplied by a constructor, factory or conversion call.</summary>
-        internal static ArraySpan? ArrayView(Operation operation) => operation switch
-        {
-            ArraySpan view => view,
-            _ => null
-        };
-
         internal static int? Target(Operation operation) => JumpOf(operation)?.Target;
 
         internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
@@ -346,7 +339,8 @@ internal static partial class ProofOutline
             if (ops[store - 1] is Arg)
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
-                Body.ArrayView(ops[store - 1]) is { Range: ArrayRange.Whole } whole &&
+                ops[store - 1] is Unoutlined &&
+                Spans.ArrayView(method.Body.Instructions[store - 1], extraction.Architecture, wholeOnly: true) is { } whole &&
                 whole.Writable == array.Writable && whole.Element == array.Element)
                 source = array;
             else throw refused;
@@ -1507,8 +1501,10 @@ internal static partial class ProofOutline
             }
             // The span a local takes over a whole array argument before the loop, on the entry path, where the
             // entry frame carries the array's validity past the frame's allocations.
-            else if (Body.ArrayView(op) is not null && stack.Count > 0 &&
-                stack[^1] is WordArrayArgument { Array: var whole } && spanned.Contains(whole))
+            else if (op is Unoutlined && stack.Count > 0 &&
+                stack[^1] is WordArrayArgument { Array: var whole } && spanned.Contains(whole) &&
+                Spans.ArrayView(site, extraction.Architecture, wholeOnly: true) is { } view &&
+                view.Writable == whole.Writable && view.Element == whole.Element)
             {
                 stack.RemoveAt(stack.Count - 1);
                 stack.Add(new SpannedArray(whole));
