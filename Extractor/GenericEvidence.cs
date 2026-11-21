@@ -384,7 +384,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
-        : LayoutEvidence.Identity(type);
+        : LayoutEvidence.InterfaceIdentity(type);
 
     static readonly string ValueTypeConstraint = TypeTests.RuntimeScope + "::System.ValueType";
     static readonly string UnmanagedTypeConstraint = TypeTests.RuntimeScope +
