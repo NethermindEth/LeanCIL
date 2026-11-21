@@ -21,8 +21,9 @@ internal static class MemoryTransfers
     }
 
     // The analyses use this transfer for the kept call of the validated generic Unsafe owner.
-    internal static Operation? CallModel(GenericInstanceMethod reference, string architecture)
+    internal static Operation? CallModel(GenericInstanceMethod reference, string architecture, out TypeReference? storage)
     {
+        storage = null;
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 &&
             parameter.Owner == reference.ElementMethod;
@@ -53,10 +54,8 @@ internal static class MemoryTransfers
         if (MetadataValidation.IntegerVectorWidth(type) is not null) return Unoutlined.Site;
         if (type is TypeSpecification)
             throw new InvalidDataException($"Unsupported unaligned value type: {type.FullName}");
-        var storage = EnumTypes.Storage(type);
-        var scalarWidth = MetadataValidation.PrimitiveWidth(storage);
-        var signed = storage.FullName is "System.SByte" or "System.Int16";
-        if (!read) return new StoreScalar(scalarWidth);
-        return new LoadScalar(scalarWidth, signed ? LoadSign.Signed : LoadSign.UnsignedSpelled);
+        storage = EnumTypes.Storage(type);
+        MetadataValidation.PrimitiveWidth(storage);
+        return Unoutlined.Site;
     }
 }

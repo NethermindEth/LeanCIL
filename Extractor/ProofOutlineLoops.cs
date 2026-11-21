@@ -536,10 +536,10 @@ internal static partial class ProofOutline
                 lean.Line($"  dsimp only [{name}Contract] at writable");
                 lean.Line($"  obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one {value}");
                 lean.Line("  refine MethodContract.Holds.intro after () ?_ confined filled");
-                lean.Line($"  cil_checked_steps [{StoreLemma(body.Op)} wrote, formed]");
+                lean.Line($"  cil_checked_steps [{body.Lemma} wrote, formed]");
             }
             else if (spanStore is { } spanBody)
-                SpanStoreContract(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Op);
+                SpanStoreContract(lean, index, name, pattern, Variable(declared[1].Name), spanBody.Lemma);
             else
             {
                 var reason = inputs.Any(input => input.Reference) ? "it writes through a reference"
@@ -556,18 +556,20 @@ internal static partial class ProofOutline
 
         /// <summary>The reference and value parameters, width and store of a static callee whose body only
         /// stores one word argument through one reference argument of that word's width.</summary>
-        (int Slot, int Value, int Width, Operation Op)? Stores(int index)
+        (int Slot, int Value, int Width, string Lemma)? Stores(int index)
         {
             var callee = extraction.Methods[index];
-            var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
+            var ops = StoreBodySites(extraction, index);
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
-                !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return) return null;
-            if (ops[0] is not Arg { Index: var reference } || ops[1] is not Arg { Index: var word } ||
+                !extraction.Emitted[index].Frame.HasNoLocals || ops[3].Op is not Return) return null;
+            if (ops[0].Op is not Arg { Index: var reference } || ops[1].Op is not Arg { Index: var word } ||
                 !MethodArguments.Plain(callee, reference) || !MethodArguments.Plain(callee, word)) return null;
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
-            return width is 4 or 8 && StoredWidth(ops[2]) == width ? (reference, word, width, ops[2]) : null;
+            var write = ScalarStore(ops[2].Op, ops[2].Site, extraction.Architecture);
+            return width is 4 or 8 && write is { } store && store.Width == width
+                ? (reference, word, width, store.Lemma) : null;
         }
 
         /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
@@ -632,10 +634,12 @@ internal static partial class ProofOutline
                 : operation is StackOperation { Kind: Code.Add } ? 1 : null;
 
         /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
-        static bool ReadsWidth(Operation operation, int width) => operation switch
+        static bool ReadsWidth(Operation operation, Instruction site, string architecture, int width) => operation switch
         {
             ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Ldobj, Signed: false } load => load.ScalarWidth == width,
-            LoadScalar { Signed: false } load => load.Width == width,
+            Unoutlined when UnsafeModels.UnalignedStorage(site, "ReadUnaligned", architecture) is { } storage =>
+                storage.FullName is not ("System.SByte" or "System.Int16") &&
+                MetadataValidation.PrimitiveWidth(storage) == width,
             StackOperation { Kind: Code.Ldind_U1 } => width == 1,
             StackOperation { Kind: Code.Ldind_U2 } => width == 2,
             StackOperation { Kind: Code.Ldind_I4 or Code.Ldind_U4 } => width == 4,
@@ -1434,6 +1438,8 @@ internal static partial class ProofOutline
         Event Step(PathState state)
         {
             var op = body.Operations[state.Pc];
+            var site = method.Body.Instructions[state.Pc];
+            var scalarStore = ScalarStore(op, site, extraction.Architecture);
             var stack = state.Stack;
             Value Pop()
             {
@@ -1596,7 +1602,7 @@ internal static partial class ProofOutline
                 stack.Add(new Element(components.IndexOf(slots[value.Slot].Components[0])));
             }
             else if (stack.Count > 0 && stack[^1] is Element reading &&
-                ReadsWidth(op, components[reading.Component].Width))
+                ReadsWidth(op, site, extraction.Architecture, components[reading.Component].Width))
             {
                 var element = (Element)Pop();
                 var span = (SpanTerm)state.State[element.Component];
@@ -1659,10 +1665,10 @@ internal static partial class ProofOutline
             else if (op is Jump) return Event.Branch;
             else if (op is Call { ReturnsToCaller: true }) return Event.Call;
             else if (op is Return) return Event.Return;
-            else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
+            else if (scalarStore is { Width: 4 or 8 } spanWrite && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
             {
-                var width = StoredWidth(op)!.Value;
+                var width = spanWrite.Width;
                 if (state.Moved || state.Called)
                     return Stop("a span store after another store or a call of the iteration, whose memory the " +
                         "span's checks are not carried to");
@@ -1670,18 +1676,18 @@ internal static partial class ProofOutline
                     components[written.Component].Width != width)
                     return Stop("a span store of a value the outline cannot name at the element's width");
                 stack.RemoveRange(stack.Count - 2, 2);
-                state.Facts.AddRange(SpanWrite(state, written.Component, stored.Term, StoreLemma(op)));
+                state.Facts.AddRange(SpanWrite(state, written.Component, stored.Term, spanWrite.Lemma));
                 state.Moved = true;
             }
-            else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
+            else if (scalarStore is { Width: 4 or 8 } elementWrite && stack.Count >= 2 &&
                 stack[^2] is AddedReference added && !state.Moved)
             {
-                var width = StoredWidth(op)!.Value;
+                var width = elementWrite.Width;
                 if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width || added.Width != width)
                     return Stop("a store through `Unsafe.Add` of a value the outline cannot name at the " +
                         "element's width");
                 stack.RemoveRange(stack.Count - 2, 2);
-                state.Facts.AddRange(ElementWrite(added, stored.Term, StoreLemma(op)));
+                state.Facts.AddRange(ElementWrite(added, stored.Term, elementWrite.Lemma));
                 state.Moved = true;
             }
             else if (Body.OffsetOf(op) is not null)

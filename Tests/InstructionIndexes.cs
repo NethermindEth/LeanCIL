@@ -311,9 +311,33 @@ if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
-if (Equals(Make("LoadScalar", 4, false), Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) ||
-    !Equals(Make("LoadScalar", 1, true), Make("LoadScalar", 1, Named("LoadSign", "Signed"))))
-    throw new Exception("Scalar load signedness or alignment changed");
+var unaligned = Model("UnsafeModels").GetMethod("UnalignedStorage", Declared)!;
+Instruction TransferSite(string name) => module.GetType("Examples.UnalignedMemory").Methods
+    .Single(method => method.Name == name).Body.Instructions.Single(site => site.OpCode.Code == Code.Call);
+TypeReference? Storage(Instruction site, string name) =>
+    (TypeReference?)unaligned.Invoke(null, [site, name, "x64"]);
+foreach (var (name, expected) in new[] { ("ReadSigned", MetadataType.SByte), ("ReadHalf", MetadataType.Int16),
+    ("ReadWord", MetadataType.UInt64), ("ReadPointerWord", MetadataType.UInt64) })
+    if (Storage(TransferSite(name), "ReadUnaligned")?.MetadataType != expected)
+        throw new Exception("Incorrect closed Unsafe.ReadUnaligned storage type for " + name);
+var writeSite = TransferSite("WritePointerWord");
+if (Storage(writeSite, "WriteUnaligned")?.MetadataType != MetadataType.UInt64 ||
+    Storage(writeSite, "ReadUnaligned") is not null ||
+    Storage(Instruction.Create(OpCodes.Callvirt, (MethodReference)writeSite.Operand), "WriteUnaligned") is not null ||
+    Storage(TransferSite("ReadAlignedWord"), "Read") is not null ||
+    Storage(TransferSite("ReadPointerAggregate"), "ReadUnaligned") is not null)
+    throw new Exception("A transfer outline lost its opcode, direction, alignment or scalar type");
+var outlineType = Model("ProofOutline");
+var unoutlined = Model("Unoutlined").GetField("Site", Declared)!.GetValue(null)!;
+var readsWidth = outlineType.GetNestedType("LoopOutline", BindingFlags.NonPublic)!.GetMethod("ReadsWidth", Declared)!;
+bool Reads(string name, int width) => (bool)readsWidth.Invoke(null, [unoutlined, TransferSite(name), "x64", width])!;
+var scalarStore = outlineType.GetMethod("ScalarStore", Declared)!;
+(int Width, string Lemma)? Store(string name) =>
+    ((int, string)?)scalarStore.Invoke(null, [unoutlined, TransferSite(name), "x64"]);
+if (!Reads("ReadWord", 8) || Reads("ReadWord", 4) || Reads("ReadSigned", 1) || Reads("ReadHalf", 2) ||
+    Store("WritePointerWord") != (8, "transfer_i64_of_write") || Store("WriteHalf") != (2, "transfer_i32_of_write") ||
+    Store("ReadWord") is not null || Store("WritePointerAggregate") is not null)
+    throw new Exception("The loop outline selected an incorrect scalar read width or store theorem");
 var negativeOffset = Make("AddOffset", ulong.MaxValue - 7, true);
 if (!Equals(Property(negativeOffset, "Stride"), ulong.MaxValue - 7) ||
     !Equals(Property(negativeOffset, "Signed"), true))

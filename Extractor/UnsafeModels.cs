@@ -10,8 +10,21 @@ internal static class UnsafeModels
         MetadataName.OfText("Unsafe"));
 
     // A modelled helper keeps its call. Extractor analyses read the operation selected for that call.
-    internal static Operation? CallModel(MethodReference reference, string architecture)
+    internal static Operation? CallModel(MethodReference reference, string architecture) =>
+        ClassifyCall(reference, architecture, out _);
+
+    // Proof outlines read the closed storage type from the validated unaligned call at this site.
+    internal static TypeReference? UnalignedStorage(Instruction site, string name, string architecture)
     {
+        if (site.OpCode.Code != Code.Call || site.Operand is not GenericInstanceMethod call || call.Name != name)
+            return null;
+        ClassifyCall(call, architecture, out var storage);
+        return storage;
+    }
+
+    static Operation? ClassifyCall(MethodReference reference, string architecture, out TypeReference? storage)
+    {
+        storage = null;
         if (reference.Name is "As" or "AsRef" or "BitCast")
         {
             if (reference.DeclaringType is TypeSpecification ||
@@ -32,7 +45,7 @@ internal static class UnsafeModels
             return generic.ElementMethod.CallingConvention == MethodCallingConvention.Generic &&
                 reference.DeclaringType is not TypeSpecification &&
                 IdentityRows.TopLevelMatches(reference.DeclaringType, Owner, PlatformAssemblies.SystemRuntime)
-                ? MemoryTransfers.CallModel(generic, architecture) : null;
+                ? MemoryTransfers.CallModel(generic, architecture, out storage) : null;
         var definition = generic.ElementMethod;
         bool Parameter(TypeReference type) => type is GenericParameter parameter &&
             parameter.Type == GenericParameterType.Method && parameter.Position == 0 && parameter.Owner == definition;

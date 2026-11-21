@@ -143,7 +143,7 @@ internal static partial class ProofOutline
                 (parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Narrow) is { } narrow
                     ? $", of a word argument where `{narrow.Name}` is a narrow integer" : ""));
         if (spanStore is { } store)
-            source = SpanStoreLine(spec, store.Op, lean);
+            source = SpanStoreLine(spec, store.Lemma, lean);
         else if (structReceiver && loops.Count > 0)
             source = new ReceiverLoop(spec, body, lean).Generate();
         else if (structReceiver)

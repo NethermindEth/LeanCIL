@@ -13,7 +13,7 @@ internal abstract record Operation
     internal bool IsNop => this is StackOperation { Kind: Code.Nop };
 }
 
-/// <summary>A site with no proof-outline rule. Diagnostics use the original instruction at its PC.</summary>
+/// <summary>A site without a separate outline descriptor. Outlines and diagnostics can inspect its CIL instruction.</summary>
 internal sealed record Unoutlined : Operation
 {
     internal static readonly Unoutlined Site = new();
@@ -180,25 +180,6 @@ internal sealed record ClassField(ClassViews.FieldOperation Field) : Operation;
 /// <summary>An object instruction names the closed type whose shape determines its memory access.</summary>
 internal sealed record ObjectInstruction(Code Opcode, string? Operand = null, int? ScalarWidth = null,
     bool Signed = false, int? ByteSize = null) : Operation;
-
-/// <summary>
-/// How a scalar load extends its value, and how the Lean term spells an unsigned extension: left out, as an
-/// indirect load writes it, or as an explicit <c>false</c>, as a memory transfer writes it.
-/// </summary>
-internal enum LoadSign { Unsigned, UnsignedSpelled, Signed }
-
-/// <summary>A scalar load of <paramref name="Width"/> bytes extended as <paramref name="Sign"/> says.</summary>
-internal sealed record LoadScalar(int Width, LoadSign Sign) : Operation
-{
-    public LoadScalar(int width, bool signed) : this(width, signed ? LoadSign.Signed : LoadSign.Unsigned)
-    {
-    }
-
-    /// <summary>The load sign-extends.</summary>
-    internal bool Signed => Sign == LoadSign.Signed;
-}
-
-internal sealed record StoreScalar(int Width) : Operation;
 
 /// <summary>
 /// The integer element an <c>ldind</c>, <c>stind</c>, <c>ldelem</c> or <c>stelem</c> opcode names; <c>I</c> is

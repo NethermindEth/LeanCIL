@@ -7,56 +7,56 @@ namespace Nethermind.LeanCIL;
 // `WritableSpan.write_head` makes, whether it is the outlined method or a callee of an outlined loop.
 internal static partial class ProofOutline
 {
+    /// <summary>Non-nop outline operations paired with their original CIL instructions.</summary>
+    static (Operation Op, Instruction Site)[] StoreBodySites(Extraction extraction, int index) =>
+        SlotOperations(extraction.Emitted[index])
+            .Select((op, pc) => (Op: op, Site: extraction.Methods[index].Body.Instructions[pc]))
+            .Where(pair => !pair.Op.IsNop).ToArray();
+
     /// <summary>The element width and store of a static method `(Span&lt;T&gt; target, T value)` whose body only
     /// stores `value` into `target[0]`.</summary>
-    static (int Width, Operation Op)? SpanStores(Extraction extraction, int index)
+    static (int Width, string Lemma)? SpanStores(Extraction extraction, int index)
     {
         var method = extraction.Methods[index];
-        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
+        var ops = StoreBodySites(extraction, index);
         if (method.HasThis || method.ReturnType.FullName != "System.Void" || method.Parameters.Count != 2 ||
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [LocalAddress { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
-                SpanItem item, Arg { Index: 1 }, var store,
-                Return] || item.Width != width || !MethodArguments.Plain(method, 1))
+        if (ops is not [(LocalAddress { Index: 0 }, _), (Constant { Width: 32, Value: 0, Numeral: true }, _),
+                (SpanItem item, _), (Arg { Index: 1 }, _), var store, (Return, _)] || item.Width != width || !MethodArguments.Plain(method, 1))
             return null;
-        return width is 4 or 8 && StoredWidth(store) == width ? (width, store) : null;
+        var write = ScalarStore(store.Op, store.Site, extraction.Architecture);
+        return width is 4 or 8 && write?.Width == width ? write : null;
     }
 
-    /// <summary>The bytes a scalar store through a reference writes, or null for any other operation.</summary>
-    static int? StoredWidth(Operation op) => op switch
+    /// <summary>The number of bytes stored and the successful-write theorem for this CIL site.</summary>
+    static (int Width, string Lemma)? ScalarStore(Operation op, Instruction site, string architecture)
     {
-        ObjectInstruction { Opcode: Code.Stobj } store => store.ScalarWidth,
-        StoreScalar store => store.Width,
-        StackOperation { Kind: Code.Stind_I1 } => 1,
-        StackOperation { Kind: Code.Stind_I2 } => 2,
-        StackOperation { Kind: Code.Stind_I4 } => 4,
-        StackOperation { Kind: Code.Stind_I8 or Code.Stind_I } => 8,
-        _ => null
-    };
+        static (int, string) Transfer(int width) =>
+            (width, width == 8 ? "transfer_i64_of_write" : "transfer_i32_of_write");
+        return op switch
+        {
+            StackOperation { Kind: Code.Stind_I1 } => (1, "step_stind_narrow_of_write .i1"),
+            StackOperation { Kind: Code.Stind_I2 } => (2, "step_stind_narrow_of_write .i2"),
+            StackOperation { Kind: Code.Stind_I4 } => (4, "step_stind_narrow_of_write .i4"),
+            StackOperation { Kind: Code.Stind_I8 } => (8, "step_stind_i8_of_write"),
+            StackOperation { Kind: Code.Stind_I } => (8, "step_stind_i_of_write"),
+            ObjectInstruction { Opcode: Code.Stobj, ScalarWidth: { } width } => Transfer(width),
+            Unoutlined when UnsafeModels.UnalignedStorage(site, "WriteUnaligned", architecture) is { } storage =>
+                Transfer(MetadataValidation.PrimitiveWidth(storage)),
+            _ => null
+        };
+    }
 
     /// <summary>The element width of a writable span of words, or null for any other type.</summary>
     static int? WrittenSpanWidth(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.Span`1" } span
             ? ElementWidth(span.GenericArguments[0]) : null;
 
-    /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
-    static string StoreLemma(Operation op) => op switch
-    {
-        StackOperation { Kind: Code.Stind_I8 } => "step_stind_i8_of_write",
-        StackOperation { Kind: Code.Stind_I } => "step_stind_i_of_write",
-        StackOperation { Kind: Code.Stind_I1 } => "step_stind_narrow_of_write .i1",
-        StackOperation { Kind: Code.Stind_I2 } => "step_stind_narrow_of_write .i2",
-        StackOperation { Kind: Code.Stind_I4 } => "step_stind_narrow_of_write .i4",
-        ObjectInstruction { Opcode: Code.Stobj, ScalarWidth: 8 } or
-            StoreScalar { Width: 8 } => "transfer_i64_of_write",
-        _ => "transfer_i32_of_write"
-    };
-
     /// <summary>The contract proof of a callee that stores its value into the first element of its span.</summary>
     static void SpanStoreContract(Writer lean, int index, string name, string pattern, string value,
-        Operation op)
+        string lemma)
     {
         lean.Line($"  rintro {pattern} memory ⟨rest, span⟩");
         lean.Line($"  dsimp only [{name}Contract] at span");
@@ -65,14 +65,14 @@ internal static partial class ProofOutline
         lean.Line($"    ⟨CIL.executionBound Extracted.program {name}, ?_⟩ confined filled");
         // Frame entry below is proved by hand, so the goal names the contract's arguments outright.
         lean.Line($"  dsimp only [{name}Contract]");
-        SpanStoreRun(lean, "  ", index, "span", "found", "wrote", "address", op);
+        SpanStoreRun(lean, "  ", index, "span", "found", "wrote", "address", lemma);
     }
 
     /// <summary>The run of method `index` storing into the first element of the nonempty `WritableSpan` named
     /// `span`, given the facts `WritableSpan.write_head` names: entering the frame that homes the span, then
     /// stepping the body.</summary>
     static void SpanStoreRun(Writer lean, string indent, int index, string span, string found, string wrote,
-        string address, Operation op)
+        string address, string lemma)
     {
         lean.Line($"{indent}have valid := {span}.valid");
         lean.Line($"{indent}have width := {span}.elementWidth");
@@ -88,13 +88,13 @@ internal static partial class ProofOutline
             "checkedAt,");
         lean.Line($"{indent}    Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]");
         lean.Line($"{indent}  exact ⟨rfl, rfl⟩");
-        lean.Line($"{indent}cil_checked_steps [{found}, {StoreLemma(op)} {wrote}, valid, width, mode, nonempty, " +
+        lean.Line($"{indent}cil_checked_steps [{found}, {lemma} {wrote}, valid, width, mode, nonempty, " +
             $"{address}]");
     }
 
     /// <summary>The outline of a method that stores its value into the first element of its span: an empty span
     /// throws, which the precondition must rule out, and a nonempty one is stepped through the write.</summary>
-    static string SpanStoreLine(Specification spec, Operation op, Writer lean)
+    static string SpanStoreLine(Specification spec, string lemma, Writer lean)
     {
         var target = spec.Parameters[0];
         var value = spec.Parameters[1].Name;
@@ -117,7 +117,7 @@ internal static partial class ProofOutline
         lean.Line($"    obtain ⟨{name}Item, {name}After, {name}Address, {name}Found, {name}Wrote, {name}Confined,");
         lean.Line($"      {name}Filled⟩ := {name}Checked.write_head {value}");
         lean.Line($"    refine ⟨CIL.executionBound Extracted.program 0, {name}After, [], ?_, rfl, ?postcondition⟩");
-        SpanStoreRun(lean, "    ", 0, name + "Checked", name + "Found", name + "Wrote", name + "Address", op);
+        SpanStoreRun(lean, "    ", 0, name + "Checked", name + "Found", name + "Wrote", name + "Address", lemma);
         lean.Noted("    ", "case postcondition => sorry",
             $"Postcondition, with `{name}Filled` the stored element and `{name}Confined` the rest kept");
         Footer(lean);
