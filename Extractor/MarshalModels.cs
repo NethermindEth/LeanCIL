@@ -47,8 +47,8 @@ internal static class MarshalModels
         if (Spans.ElementWidth(element, architecture) is not { } width) return null;
         switch (method.Name)
         {
-            case "GetReference": return Unoutlined.Site;
-            case "GetArrayDataReference": return new ObserveView(ViewQuery.ArrayData);
+            case "GetReference":
+            case "GetArrayDataReference": return Unoutlined.Site;
             case "CreateSpan":
             case "CreateReadOnlySpan":
                 return new SpanFromReference(width, method.Name == "CreateSpan");

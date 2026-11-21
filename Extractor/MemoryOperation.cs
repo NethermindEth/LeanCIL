@@ -24,11 +24,3 @@ internal sealed record ArraySpan(Arrays.Element Element, bool Writable, ArrayRan
 internal sealed record SpanFromReference(int Width, bool Writable) : SpanSource;
 
 internal sealed record SpanSingleReference(int Width, bool Writable) : SpanSource;
-
-/// <summary>The empty span of elements of the given width.</summary>
-internal sealed record SpanEmpty(int Width, bool Writable) : Operation;
-
-/// <summary>The view queries a span answers without reading memory.</summary>
-internal enum ViewQuery { SpanEmpty, SpanPinnable, ArrayData }
-
-internal sealed record ObserveView(ViewQuery Query) : Operation;

@@ -155,10 +155,10 @@ internal static class Spans
                 parameters.All(parameter => parameter.ParameterType.MetadataType == MetadataType.Int32) =>
                 new SpanSlice(parameters.Count == 2),
             "get_IsEmpty" when parameters.Count == 0 && result.MetadataType == MetadataType.Boolean =>
-                new ObserveView(ViewQuery.SpanEmpty),
+                Unoutlined.Site,
             "GetPinnableReference" when parameters.Count == 0 && ElementReference(result, writable) =>
-                new ObserveView(ViewQuery.SpanPinnable),
-            "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => new SpanEmpty(width, writable),
+                Unoutlined.Site,
+            "get_Empty" when parameters.Count == 0 && DeclaredSpan(result, name) => Unoutlined.Site,
             "op_Implicit" when parameters is [{ ParameterType: ArrayType { IsVector: true } array }] &&
                 OwnerElement(array.ElementType) && DeclaredSpan(result, name) &&
                 Arrays.Storage(element, architecture) is { } storage =>
