@@ -27,8 +27,7 @@ internal static class ReferenceArrays
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
             new NewArray(new(LayoutEvidence.Scope(element), element.FullName)),
-        Code.Ldelem_Ref => new ReferenceElementAccess(false),
-        Code.Stelem_Ref => new ReferenceElementAccess(true),
+        Code.Ldelem_Ref or Code.Stelem_Ref => new StackOperation(instruction.OpCode.Code),
         _ => null
     };
 }

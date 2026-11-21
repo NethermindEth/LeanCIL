@@ -621,7 +621,7 @@ internal static partial class ProofOutline
                         elementLoad));
                     stack.Add(new Word($"{array.ElementsName}[({term} : W32).toNat]", array.Width));
                 }
-                else if (op is ArrayLength)
+                else if (op is StackOperation { Kind: Code.Ldlen })
                 {
                     switch (Pop())
                     {
@@ -712,7 +712,7 @@ internal static partial class ProofOutline
                     stores++;
                     stack.Add(new ArrayArgument(Fresh.Array));
                 }
-                else if (op is ReferenceElementAccess { Store: false })
+                else if (op is StackOperation { Kind: Code.Ldelem_Ref })
                 {
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)
                         return Stop("`ldelem.ref` of an array or index the outline cannot name");
@@ -748,7 +748,7 @@ internal static partial class ProofOutline
                         Formed: held.Formed, Slot: slot, LiteralIndex: at.Literal is not null));
                     stack.Add(held);
                 }
-                else if (op is ReferenceElementAccess { Store: true })
+                else if (op is StackOperation { Kind: Code.Stelem_Ref })
                 {
                     var value = Pop();
                     if (Pop() is not Word index || Pop() is not ArrayArgument array || Index(index) is not { } at)

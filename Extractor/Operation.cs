@@ -230,35 +230,6 @@ internal static class NumericKinds
     internal static string Term(this NumericKind kind) => "." + kind.ToString().ToLowerInvariant();
 }
 
-/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its constructor.</summary>
-internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
-{
-    /// <summary>Bytes the access moves.</summary>
-    internal int Width => Kind.Width();
-
-    /// <summary>Whether a load sign-extends.</summary>
-    internal bool Signed => Kind.Signed();
-
-    /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
-    internal string KindTerm => Kind.Term();
-}
-
-/// <summary>An <c>ldlen</c> of a value array, an array of class references or a managed handler table.</summary>
-internal sealed record ArrayLength : Operation;
-
-/// <summary>
-/// An <c>ldelem</c> or <c>stelem</c> of <paramref name="Kind"/> on a value array, or the <c>ldelem.i</c> of a managed
-/// handler table, rendered as its constructor.
-/// </summary>
-internal sealed record ArrayElementAccess(NumericKind Kind, bool Store) : Operation
-{
-    /// <summary>Bytes the access moves.</summary>
-    internal int Width => Kind.Width();
-
-    /// <summary>Whether a load sign-extends.</summary>
-    internal bool Signed => Kind.Signed();
-}
-
 /// <summary>
 /// A typed <c>ldelem</c> or <c>stelem</c> of the element type <paramref name="Element"/>, the raw operand's type
 /// expression. <paramref name="Storage"/> is the element's inline storage, or null for a handler table's method
@@ -271,9 +242,6 @@ internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage, s
 /// storage is <paramref name="Storage"/>; <paramref name="ReadOnly"/> records a <c>readonly.</c> prefix.
 /// </summary>
 internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly, string? Element = null) : Operation;
-
-/// <summary>An <c>ldelem.ref</c> or <c>stelem.ref</c> on an array of class references.</summary>
-internal sealed record ReferenceElementAccess(bool Store) : Operation;
 
 /// <summary>
 /// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,

@@ -1,4 +1,5 @@
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -26,9 +27,12 @@ internal static partial class ProofOutline
     /// <summary>The bytes a scalar store through a reference writes, or null for any other operation.</summary>
     static int? StoredWidth(Operation op) => op switch
     {
-        ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Stobj } store => store.ScalarWidth,
+        ObjectInstruction { Opcode: Code.Stobj } store => store.ScalarWidth,
         StoreScalar store => store.Width,
-        IndirectAccess { Store: true } access => access.Width,
+        StackOperation { Kind: Code.Stind_I1 } => 1,
+        StackOperation { Kind: Code.Stind_I2 } => 2,
+        StackOperation { Kind: Code.Stind_I4 } => 4,
+        StackOperation { Kind: Code.Stind_I8 or Code.Stind_I } => 8,
         _ => null
     };
 
@@ -40,10 +44,12 @@ internal static partial class ProofOutline
     /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
     static string StoreLemma(Operation op) => op switch
     {
-        IndirectAccess { Kind: NumericKind.I8 } => "step_stind_i8_of_write",
-        IndirectAccess { Kind: NumericKind.I } => "step_stind_i_of_write",
-        IndirectAccess access => $"step_stind_narrow_of_write {access.KindTerm}",
-        ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Stobj, ScalarWidth: 8 } or
+        StackOperation { Kind: Code.Stind_I8 } => "step_stind_i8_of_write",
+        StackOperation { Kind: Code.Stind_I } => "step_stind_i_of_write",
+        StackOperation { Kind: Code.Stind_I1 } => "step_stind_narrow_of_write .i1",
+        StackOperation { Kind: Code.Stind_I2 } => "step_stind_narrow_of_write .i2",
+        StackOperation { Kind: Code.Stind_I4 } => "step_stind_narrow_of_write .i4",
+        ObjectInstruction { Opcode: Code.Stobj, ScalarWidth: 8 } or
             StoreScalar { Width: 8 } => "step_storeScalar_i64_of_write",
         _ => "step_storeScalar_of_write"
     };

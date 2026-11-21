@@ -1,5 +1,6 @@
 using System.Globalization;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
@@ -34,7 +35,7 @@ internal static partial class ProofOutline
             return new(array, index, null, load);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
-            ops[3] is not IndirectAccess { Kind: NumericKind.I4, Store: false } ||
+            ops[3] is not StackOperation { Kind: Code.Ldind_I4 } ||
             ops[2] is not Call { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
         return ElementAddress(extraction, call.Method, array.Element!) is { } method

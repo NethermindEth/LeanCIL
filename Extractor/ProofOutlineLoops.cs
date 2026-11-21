@@ -636,7 +636,10 @@ internal static partial class ProofOutline
         {
             ObjectInstruction { Opcode: Mono.Cecil.Cil.Code.Ldobj, Signed: false } load => load.ScalarWidth == width,
             LoadScalar { Signed: false } load => load.Width == width,
-            IndirectAccess { Store: false, Signed: false } load => load.Width == width,
+            StackOperation { Kind: Code.Ldind_U1 } => width == 1,
+            StackOperation { Kind: Code.Ldind_U2 } => width == 2,
+            StackOperation { Kind: Code.Ldind_I4 or Code.Ldind_U4 } => width == 4,
+            StackOperation { Kind: Code.Ldind_I8 or Code.Ldind_I } => width == 8,
             _ => false
         };
 
@@ -1603,7 +1606,7 @@ internal static partial class ProofOutline
                 PendingHead(state, element.Component, span);
                 stack.Add(new Number(span.Head!, components[element.Component].Width));
             }
-            else if (op is ArrayLength)
+            else if (op is StackOperation { Kind: Code.Ldlen })
             {
                 if (Pop() is not WordArrayArgument array)
                     return Stop("the length of an array the outline does not follow");

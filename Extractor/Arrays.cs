@@ -98,22 +98,10 @@ internal static class Arrays
     {
         Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
             { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
-        Code.Ldlen => new ArrayLength(),
+        Code.Ldlen => new StackOperation(instruction.OpCode.Code),
         Code.Ldelema => new ElementAddress(ElementStorage(instruction, architecture),
             instruction.Previous?.OpCode.Code == Code.Readonly),
-        Code.Ldelem_I1 => new ArrayElementAccess(NumericKind.I1, false),
-        Code.Ldelem_U1 => new ArrayElementAccess(NumericKind.U1, false),
-        Code.Ldelem_I2 => new ArrayElementAccess(NumericKind.I2, false),
-        Code.Ldelem_U2 => new ArrayElementAccess(NumericKind.U2, false),
-        Code.Ldelem_I4 => new ArrayElementAccess(NumericKind.I4, false),
-        Code.Ldelem_U4 => new ArrayElementAccess(NumericKind.U4, false),
-        Code.Ldelem_I8 => new ArrayElementAccess(NumericKind.I8, false),
-        Code.Ldelem_I => new ArrayElementAccess(NumericKind.I, false),
-        Code.Stelem_I1 => new ArrayElementAccess(NumericKind.I1, true),
-        Code.Stelem_I2 => new ArrayElementAccess(NumericKind.I2, true),
-        Code.Stelem_I4 => new ArrayElementAccess(NumericKind.I4, true),
-        Code.Stelem_I8 => new ArrayElementAccess(NumericKind.I8, true),
-        Code.Stelem_I => new ArrayElementAccess(NumericKind.I, true),
+        _ when NumericElement(instruction.OpCode.Code).HasValue => new StackOperation(instruction.OpCode.Code),
         Code.Ldelem_Any => Typed(instruction, false, architecture),
         Code.Stelem_Any => Typed(instruction, true, architecture),
         _ => null
@@ -142,10 +130,30 @@ internal static class Arrays
         string Typed => Shape ?? throw new InvalidOperationException("A typed element access has no shape fact");
     }
 
+    /// <summary>The integer kind and access direction encoded by a numeric array opcode.</summary>
+    static (NumericKind Kind, bool Store)? NumericElement(Code code) => code switch
+    {
+        Code.Ldelem_I1 => (NumericKind.I1, false),
+        Code.Ldelem_U1 => (NumericKind.U1, false),
+        Code.Ldelem_I2 => (NumericKind.I2, false),
+        Code.Ldelem_U2 => (NumericKind.U2, false),
+        Code.Ldelem_I4 => (NumericKind.I4, false),
+        Code.Ldelem_U4 => (NumericKind.U4, false),
+        Code.Ldelem_I8 => (NumericKind.I8, false),
+        Code.Ldelem_I => (NumericKind.I, false),
+        Code.Stelem_I1 => (NumericKind.I1, true),
+        Code.Stelem_I2 => (NumericKind.I2, true),
+        Code.Stelem_I4 => (NumericKind.I4, true),
+        Code.Stelem_I8 => (NumericKind.I8, true),
+        Code.Stelem_I => (NumericKind.I, true),
+        _ => null
+    };
+
     /// <summary>A numeric access uses the method's checked shape for its closed element type.</summary>
     internal static NumericAccess? Numeric(Operation op, int pc, int method = 0) => op switch
     {
-        ArrayElementAccess access => new(access.Width, access.Signed, access.Store, access.Kind),
+        StackOperation raw when NumericElement(raw.Kind) is { } access =>
+            new(access.Kind.Width(), access.Kind.Signed(), access.Store, access.Kind),
         TypedElementAccess { Storage: { Kind: not NativeOperands.Kind.ArrayComposite } storage } typed =>
             new(storage.Width, storage.Signed, typed.Store, null,
                 $"(cil_element_shape% Extracted.method{method} {pc})"),
