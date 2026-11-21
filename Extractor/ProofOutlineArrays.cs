@@ -50,15 +50,18 @@ internal static partial class ProofOutline
     static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
+        var slots = SlotOperations(extraction.Emitted[index]);
+        var instructions = method.Body.Instructions;
+        if (slots.Length != instructions.Count) return null;
+        var sites = slots.Zip(instructions).Where(site => !site.First.IsNop).ToArray();
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
-            extraction.Emitted[index].Frame.HasNoLocals && ops is
-                [Arg { Index: 0 }, Arg { Index: 1 },
-                    ElementAddress { ReadOnly: false } address, StackOperation { Kind: Code.Ret }] &&
-            address.Storage == element
+            extraction.Emitted[index].Frame.HasNoLocals && sites is
+                [(Arg { Index: 0 }, _), (Arg { Index: 1 }, _),
+                    (Unoutlined, { OpCode.Code: Code.Ldelema } address), (StackOperation { Kind: Code.Ret }, _)] &&
+            address.Previous?.OpCode.Code != Code.Readonly && Arrays.ElementStorage(address, extraction.Architecture) == element
             ? method : null;
     }
 

@@ -93,19 +93,24 @@ internal static class Arrays
         elements.Values.FirstOrDefault(element => element.Kind == kind) is { } element
             ? new LocalKind.Array(element) : null;
 
-    internal static Operation? Translate(Instruction instruction, string architecture) =>
-        instruction.OpCode.Code switch
+    internal static Operation? Translate(Instruction instruction, string architecture)
     {
-        Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
-            { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
-        Code.Ldlen => new StackOperation(instruction.OpCode.Code),
-        Code.Ldelema => new ElementAddress(ElementStorage(instruction, architecture),
-            instruction.Previous?.OpCode.Code == Code.Readonly),
-        _ when NumericElement(instruction.OpCode.Code).HasValue => new StackOperation(instruction.OpCode.Code),
-        Code.Ldelem_Any => Typed(instruction, false, architecture),
-        Code.Stelem_Any => Typed(instruction, true, architecture),
-        _ => null
-    };
+        if (instruction.OpCode.Code == Code.Ldelema)
+        {
+            ElementStorage(instruction, architecture);
+            return Unoutlined.Site;
+        }
+        return instruction.OpCode.Code switch
+        {
+            Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
+                { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
+            Code.Ldlen => new StackOperation(instruction.OpCode.Code),
+            _ when NumericElement(instruction.OpCode.Code).HasValue => new StackOperation(instruction.OpCode.Code),
+            Code.Ldelem_Any => Typed(instruction, false, architecture),
+            Code.Stelem_Any => Typed(instruction, true, architecture),
+            _ => null
+        };
+    }
 
     /// <summary>
     /// A numeric element load or store: its width, whether a load sign-extends, and the step lemma a proof outline

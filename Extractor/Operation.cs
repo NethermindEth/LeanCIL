@@ -189,11 +189,6 @@ internal static class NumericKinds
 internal sealed record TypedElementAccess(bool Store, Arrays.Element? Storage) : Operation;
 
 /// <summary>
-/// The inline element storage and <c>readonly.</c> prefix of an <c>ldelema</c> site.
-/// </summary>
-internal sealed record ElementAddress(Arrays.Element Storage, bool ReadOnly) : Operation;
-
-/// <summary>
 /// A <c>newarr</c> site. The object proof outline uses the scope and name of a class element.
 /// </summary>
 internal sealed record NewArray(NewArray.ClassElement? Class) : Operation
