@@ -47,8 +47,8 @@ internal static class MemoryTransfers
         MetadataValidation.Type(type, reference.Module, architecture: architecture);
         if (MetadataValidation.IsAggregate(type, reference.Module))
         {
-            var width = MetadataValidation.Layout(type, reference.Module, architecture);
-            return new AggregateTransfer(read ? AggregateAccess.Load : AggregateAccess.Store, width);
+            MetadataValidation.Layout(type, reference.Module, architecture);
+            return Unoutlined.Site;
         }
         if (MetadataValidation.IntegerVectorWidth(type) is not null) return Unoutlined.Site;
         if (type is TypeSpecification)

@@ -181,11 +181,6 @@ internal sealed record ClassField(ClassViews.FieldOperation Field) : Operation;
 internal sealed record ObjectInstruction(Code Opcode, string? Operand = null, int? ScalarWidth = null,
     bool Signed = false, int? ByteSize = null) : Operation;
 
-internal enum AggregateAccess { Load, Store }
-
-/// <summary>A load or store of an aggregate of <paramref name="Size"/> bytes.</summary>
-internal sealed record AggregateTransfer(AggregateAccess Access, int Size) : Operation;
-
 /// <summary>
 /// How a scalar load extends its value, and how the Lean term spells an unsigned extension: left out, as an
 /// indirect load writes it, or as an explicit <c>false</c>, as a memory transfer writes it.
