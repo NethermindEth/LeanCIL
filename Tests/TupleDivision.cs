@@ -74,7 +74,41 @@ string Balanced(IReadOnlyList<string> entries, bool proof)
     }
     return Build(0, entries.Count);
 }
-var requests = new List<GeneratedVerification>();
+// A failed attempt to prove the quotient contract also needs a checked counterexample for the compiled method.
+GeneratedVerification WrongQuotientRefutation(string method, string selector, int bits, int[] inputs, string expected)
+{
+    var output = Path.Combine(root, method + "Refutation");
+    Directory.CreateDirectory(output);
+    var path = Path.Combine(output, "Refutation.lean");
+    var stack = string.Join(", ", inputs.Select(value => $".scalar (.i{bits} {value})"));
+    File.WriteAllText(path, $$"""
+        import Extracted
+        import Tests.Support
+        namespace ExampleProof
+        open CIL CIL.Safety
+        private def arguments : List CIL.Safety.Value := [{{stack}}]
+        /-- Seven divided by three returns the remainder one, contradicting the quotient postcondition. -/
+        theorem correctness : ¬ ∃ q : W{{bits}},
+            (invoke Extracted.program 8 0 arguments Memory.empty).map Prod.snd = .ok [.scalar (.i{{bits}} q)] ∧
+            {{expected}} := by
+          have ran : (invoke Extracted.program 8 0 arguments Memory.empty).map Prod.snd =
+              .ok [.scalar (.i{{bits}} 1)] := by cil_kernel_rfl
+          rintro ⟨q, returned, quotient⟩
+          rw [ran] at returned
+          simp at returned
+          subst q
+          revert quotient
+          decide
+        #print axioms correctness
+        end ExampleProof
+        """);
+    return new GeneratedVerification(selector, path, output);
+}
+
+var requests = new List<GeneratedVerification>
+{
+    WrongQuotientRefutation("WrongQuotient", Selector("WrongQuotient"), 64, [7, 0, 3], "q.toNat = 7 / 3")
+};
 var cases = 0;
 foreach (var (name, result) in methods)
 {
@@ -259,7 +293,11 @@ string BoundaryProof(IReadOnlyList<string> claims) => $$"""
     #print axioms correctness
     end ExampleProof
     """;
-var mathRequests = new List<GeneratedVerification>();
+var mathRequests = new List<GeneratedVerification>
+{
+    WrongQuotientRefutation("MathWrongQuotient", "TupleDivision::MathWrongQuotient(int,int)", 32,
+        [7, 3], "q.toInt = (7 : Int).tdiv 3")
+};
 var mathCases = 0;
 var faultKinds = new SortedSet<string>(StringComparer.Ordinal);
 void AddBoundary(string name, string selector, List<string> claims)
